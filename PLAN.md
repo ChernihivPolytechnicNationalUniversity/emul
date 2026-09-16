@@ -43,7 +43,10 @@ the NVIC. Reported by name in the inspector until then.
   FLASH controller so EEPROM-emulation code works, option bytes. Test: `pnpm mcu-flash`.
 - [x] **1.10 Core details** (2026-09-16) — FPv5 extra instructions for the M7 profile (and its double-precision unit; tests built
   for the M7 too); flash wait states in the cycle count (ACR latency, prefetch, ART/data caches; `pnpm mcu-flash`).
-- [ ] **1.11 Long tail** — CAN, USB OTG, Ethernet, SDIO, SAI, LTDC, FMC, QSPI, CRC, RNG. Only when a lab needs one.
+- [x] **1.11a Display path** (2026-09-17) — FMC SDRAM controller (init sequence gates the board's SDRAM), LTDC (two layers,
+  formats, blending, timing from PLLSAI, line interrupt), DMA2D (fill, copy, PFC, blending, CLUT). Test: `pnpm lcd` runs
+  Waveshare's own LCD and GT911 demos (`firmware/lcd`) on the Open746I-C with the 7" panel docked on P15.
+- [ ] **1.11 Long tail** — CAN, USB OTG, Ethernet, SDIO, SAI, QSPI, CRC, RNG. Only when a lab needs one.
 
 ## Phase 2 — Components and instruments (the circuit side)
 
@@ -63,6 +66,9 @@ the NVIC. Reported by name in the inspector until then.
 - [ ] **2.6 7-segment indicators** — single digit and 4-digit multiplexed, common anode/cathode.
 - [ ] **2.7 HD44780 character LCD** — 16×2 / 20×4 in 4- and 8-bit mode, drawn on the field. Parallel bus only.
 - [ ] **2.8 SSD1306 OLED** — I²C and SPI variants, 128×64 framebuffer drawn on the field. Needs 1.3/1.4.
+- [x] **2.8a Boards and the RGB panel** (2026-09-17) — Waveshare Open746I-C (the lab stand: `pnpm open746`) and its
+  7inch Capacitive Touch LCD (F) with the GT911 (`pnpm lcd`): `display` parts draw a panel fed by an MCU's LTDC as wired
+  (`src/sim/display.ts`), touches go to the digital part behind it. Backlight PWM dimming left out.
 - [ ] **2.9 Op-amp, comparator, 555** — ideal op-amp with rails, LM393-style comparator, NE555 as a macro model.
 - [ ] **2.10 Relay, buzzer, DC motor, servo** — relay coil + contacts, buzzer as a load with sound indication,
   motor as R+L+back-EMF with an RPM readout, servo decoding 50 Hz PWM to an angle. Needs 1.1 for PWM.

@@ -26,7 +26,12 @@ export type FromWorker =
   | { t: "started" }
 
 const loop = new SimLoop()
-const post = (msg: FromWorker) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(msg)
+const post = (msg: FromWorker) => {
+  // Display frames are megabytes each: hand them over instead of copying.
+  const transfer: Transferable[] = []
+  if (msg.t === "snapshot" && msg.snapshot) for (const d of Object.values(msg.snapshot.displays)) if (d.frame) transfer.push(d.frame)
+  ;(self as unknown as DedicatedWorkerGlobalScope).postMessage(msg, transfer)
+}
 
 loop.onFailure = (failure) => post({ t: "failure", failure })
 

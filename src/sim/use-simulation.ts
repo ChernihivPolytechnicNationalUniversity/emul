@@ -4,6 +4,9 @@ import type { Failure, ProbeReading, Reading, TraceChunk } from "./engine"
 import type { LogicChunk, McuStatus, Probe, Snapshot } from "./loop"
 import type { FromWorker, ToWorker } from "./worker"
 
+/** A display panel's picture: the last frame received, its size, and what the panel makes of the signal. */
+export type DisplayFrame = { width: number; height: number; frame: Uint8ClampedArray | null; seq: number; status: string }
+
 export type SimReadout = {
   /** Solver advancing. `live` also covers a paused simulation still showing its last state. */
   running: boolean
@@ -39,6 +42,8 @@ export type SimReadout = {
   terminal: (object: string) => { text: string; framingErrors: number } | undefined
   /** A digital part's own state (an EEPROM's bytes). */
   digital: (object: string) => unknown
+  /** What a display panel object shows. */
+  display: (object: string) => DisplayFrame | undefined
 }
 
 const idle: SimReadout = {
@@ -61,10 +66,11 @@ const idle: SimReadout = {
   mcu: () => undefined,
   terminal: () => undefined,
   digital: () => undefined,
+  display: () => undefined,
 }
 
 /** Turn the worker's plain data into the lookup shape the components expect. */
-function toReadout(s: Snapshot): SimReadout {
+function toReadout(s: Snapshot, displays: Map<string, DisplayFrame>): SimReadout {
   const byObject = new Map<string, Reading[]>()
   for (const r of s.readings) {
     const list = byObject.get(r.object)
@@ -92,6 +98,7 @@ function toReadout(s: Snapshot): SimReadout {
     mcu: (object) => s.mcus[object],
     terminal: (object) => s.terminals[object],
     digital: (object) => s.digital[object],
+    display: (object) => displays.get(object),
   }
 }
 
@@ -126,6 +133,8 @@ export function useSimulation(
   /** True once the worker has taken a step: there is then state a restart would throw away. */
   const [started, setStarted] = React.useState(false)
   const workerRef = React.useRef<Worker | null>(null)
+  /** Last frame per display object: the worker sends a frame only when it changed. */
+  const displaysRef = React.useRef(new Map<string, DisplayFrame>())
   const onFailureRef = React.useRef(onFailure)
   const onTraceRef = React.useRef(onTrace)
   const onLogicRef = React.useRef(onLogic)
@@ -143,7 +152,16 @@ export function useSimulation(
       if (msg.t === "snapshot") {
         if (msg.snapshot && msg.snapshot.trace.count > 0) onTraceRef.current?.(msg.snapshot.trace, msg.snapshot.traceProbes)
         if (msg.snapshot?.logic) onLogicRef.current?.(msg.snapshot.logic, msg.snapshot.traceProbes)
-        setReadout(msg.snapshot ? toReadout(msg.snapshot) : idle)
+        if (msg.snapshot) {
+          const displays = displaysRef.current
+          for (const [id, d] of Object.entries(msg.snapshot.displays)) {
+            const prev = displays.get(id)
+            const frame = d.frame ? new Uint8ClampedArray(d.frame) : (prev?.frame ?? null)
+            displays.set(id, { width: d.width, height: d.height, frame, seq: d.frame ? (prev?.seq ?? 0) + 1 : (prev?.seq ?? 0), status: d.status })
+          }
+          for (const id of [...displays.keys()]) if (!(id in msg.snapshot.displays)) displays.delete(id)
+        } else displaysRef.current = new Map()
+        setReadout(msg.snapshot ? toReadout(msg.snapshot, new Map(displaysRef.current)) : idle)
         // A null snapshot is the worker acknowledging a restart: nothing left to start over from.
         if (!msg.snapshot) setStarted(false)
       } else if (msg.t === "started") setStarted(true)

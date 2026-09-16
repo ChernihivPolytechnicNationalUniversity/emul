@@ -18,6 +18,9 @@ import { Rtc } from "./periph/rtc"
 import { Iwdg, Wwdg } from "./periph/wdg"
 import { AdcBlock, adcPad, Dac, DAC_PADS, type Adc } from "./periph/adc"
 import { Dma, DMA_SPECS, DMA1_REQUESTS, DMA2_REQUESTS } from "./periph/dma"
+import { Dma2d } from "./periph/dma2d"
+import { Fmc } from "./periph/fmc"
+import { Ltdc } from "./periph/ltdc"
 import { I2c, I2C_SPECS, i2cPads, type I2cLine, type I2cPad } from "./periph/i2c"
 import { Spi, SPI_SPECS, spiPads, type SpiLine, type SpiPad } from "./periph/spi"
 import { Tim, TIM_SPECS, timPads, type TimPad } from "./periph/tim"
@@ -117,6 +120,9 @@ export class Stm32 {
   readonly adc: Adc[]
   readonly dac = new Dac()
   readonly rtc = new Rtc()
+  readonly fmc = new Fmc()
+  readonly ltdc = new Ltdc()
+  readonly dma2d = new Dma2d()
   readonly iwdg = new Iwdg()
   readonly wwdg = new Wwdg()
   /** Why the core last reset, for RCC's CSR flags. */
@@ -423,6 +429,21 @@ export class Stm32 {
       if (this.padQueue.length) this.drainPadQueue()
       this.schedule()
     }
+    // External memory controller, display controller and the 2D accelerator.
+    this.fmc.bus = bus
+    this.fmc.onUnsupported = (what) => this.unmodelled.feature(what)
+    bus.attach(this.fmc)
+    bus.onUnreadyAccess = (mem, _addr, write) => this.unmodelled.feature(`${mem} ${write ? "written" : "read"} before the FMC initialised it`)
+    this.ltdc.bus = bus
+    this.ltdc.pixelClock = () => this.rcc.ltdcHz()
+    this.ltdc.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
+    this.ltdc.onActive = (on) => this.setActive(this.ltdc, on)
+    this.ltdc.onUnsupported = (what) => this.unmodelled.feature(what)
+    bus.attach(this.ltdc)
+    this.dma2d.bus = bus
+    this.dma2d.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
+    this.dma2d.onUnsupported = (what) => this.unmodelled.feature(what)
+    bus.attach(this.dma2d)
     this.dwt = new Dwt(() => this.cpu.cycles)
     bus.attach(this.dwt)
     bus.attach(this.dbgmcu)
@@ -635,6 +656,7 @@ export class Stm32 {
       this.wwdg.setClock(c.pclk1, c.hclk)
       this.rtc.setClock(c.hclk)
       this.rtc.refreshClock()
+      this.ltdc.setClock(c.hclk)
     }
     return this.clocksCache
   }
@@ -790,6 +812,12 @@ export class Stm32 {
   private padHasAf(port: number, pin: number, af: number) {
     const g = this.gpio[port]
     return g.mode(pin) === 2 && g.af(pin) === af
+  }
+
+  /** The alternate function a pad is switched to, or null while it is a plain GPIO/analog pin. */
+  padAf(p: PadRef): number | null {
+    const g = this.gpio[p.port]
+    return g.mode(p.pin) === 2 ? g.af(p.pin) : null
   }
 
   /** Simulated time right now, inside a run slice. */

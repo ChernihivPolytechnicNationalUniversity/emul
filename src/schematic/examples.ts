@@ -249,6 +249,70 @@ export const lab1Board: Example = {
   },
 }
 
+/**
+ * The stand with its 7" screen: Waveshare's own LCD demo (29.LCD-Display/3.display 1024x600,
+ * built with GCC in firmware/lcd) brings the SDRAM up over the FMC, clears the panel red
+ * through the DMA2D and writes its greeting with the BSP font, all through the LTDC at 32 MHz.
+ * The module docks straight onto P15: the FFC pins touch, no wires.
+ */
+export const lcdDemo: Example = {
+  id: "open746-lcd",
+  name: "Open746I-C: 7\" LCD demo",
+  description: "Waveshare's LCD demo on the stand: the 1024×600 panel on the LTDC with the framebuffer in the SDRAM, text drawn through the DMA2D.",
+  icon: CpuIcon,
+  firmware: [{ ref: "U1", url: "firmware/open746-lcd.elf" }],
+  build(grid) {
+    const { doc, place } = builder(grid)
+    place("open746i-c", 0, 0)
+    // P15's first pin is at (26, 48) on the board, the module's at (12, 0) on itself.
+    place("lcd7-f", 14, 48)
+    return doc
+  },
+}
+
+/**
+ * The GT911 touch test from the LCD's own code pack: reset sequence on RST/INT, product id
+ * and firmware version over bit-banged I²C on PD12/PD13 (printed on USART1), then crosshairs
+ * that follow the finger. Press the panel.
+ */
+export const touchDemo: Example = {
+  id: "open746-touch",
+  name: "Open746I-C: touch test",
+  description: "Waveshare's GT911 test on the stand: press the panel and crosshairs follow; the controller's id goes out on USART1.",
+  icon: CpuIcon,
+  firmware: [{ ref: "U1", url: "firmware/open746-touch.elf" }],
+  build(grid) {
+    const { doc, place, wire } = builder(grid)
+    const u = place("open746i-c", 0, 0)
+    place("lcd7-f", 14, 48)
+    // The CP2102's side of USART1: TX at (31, 1), RX at (33, 1), stubs 2 cells up.
+    const term = place("serial-terminal", 22, -8, { baud: "115200" })
+    wire(u, "VCP-TX", term, "RX", [[31, -3], [20, -3], [20, -7]])
+    wire(u, "VCP-RX", term, "TX", [[33, -2], [19, -2], [19, -5]])
+    return doc
+  },
+}
+
+/**
+ * Our own demo on the stand: a cube with a photo on every face, spinning in perspective,
+ * rendered in software into two framebuffers in the SDRAM and flipped through the LTDC
+ * (firmware/lcd/cube, C++). The emulated core runs at a fraction of real time, so the cube
+ * turns slowly here; on the board it spins at 0.87 rad/s.
+ */
+export const cubeDemo: Example = {
+  id: "open746-cube",
+  name: "Open746I-C: spinning cube",
+  description: "A textured cube rotating on the 7\" panel: software rasteriser in C++ into double-buffered SDRAM framebuffers, scanned out by the LTDC.",
+  icon: CpuIcon,
+  firmware: [{ ref: "U1", url: "firmware/open746-cube.elf" }],
+  build(grid) {
+    const { doc, place } = builder(grid)
+    place("open746i-c", 0, 0)
+    place("lcd7-f", 14, 48)
+    return doc
+  },
+}
+
 export const lab1Stand: Example = {
   id: "lab1-f746",
   name: "Lab 1: STM32F746 stand",
@@ -481,4 +545,4 @@ export const nucleoAdc: Example = {
   },
 }
 
-export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoAdc, lab1Board, lab1Stand, powerSupply, batteryLife, systemExam, transistorLogic, lissajous, bridge]
+export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoAdc, lab1Board, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, systemExam, transistorLogic, lissajous, bridge]

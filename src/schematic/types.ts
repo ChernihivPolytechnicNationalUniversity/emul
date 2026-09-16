@@ -107,6 +107,23 @@ export type PartDef =
       y: number
     }
   | {
+      /**
+       * A display panel: a canvas of `width × height` pixels drawn over the cells at (x, y)
+       * of size w × h, fed by the simulation; pressing it is a touch with coordinates.
+       * `backlight` names an LED part whose level scales the picture.
+       */
+      type: "display"
+      id: string
+      label: string
+      x: number
+      y: number
+      w: number
+      h: number
+      width: number
+      height: number
+      backlight?: string
+    }
+  | {
       /** A USB cable into a connector: plugged while `on`. Click to plug/unplug. */
       type: "usb"
       id: string
@@ -288,8 +305,26 @@ export type ComponentDef = {
   mcuMemory?: MemoryRegion[]
   /** A live meter readout drawn on the component (a voltmeter, ammeter): what to show and where. */
   meter?: MeterSpec
+  /** An RGB panel fed by an MCU's LCD controller: which pins carry which signal, and what it accepts. */
+  panel?: PanelSpec
   /** Free-form reference data shown in the inspector later. */
   info?: Record<string, string>
+}
+
+/** LTDC output lines a parallel RGB panel takes. */
+export type PanelSignal = `R${0 | 1 | 2 | 3 | 4 | 5 | 6 | 7}` | `G${0 | 1 | 2 | 3 | 4 | 5 | 6 | 7}` | `B${0 | 1 | 2 | 3 | 4 | 5 | 6 | 7}` | "CLK" | "HS" | "VS" | "DE"
+
+export type PanelSpec = {
+  /** The display part that shows the picture. */
+  part: string
+  width: number
+  height: number
+  /** Pin id → the signal the panel expects on it. */
+  signals: Record<string, PanelSignal>
+  /** Pixel clock the panel locks to, Hz. */
+  pixelHz: [number, number]
+  /** The logic supply pin: below ~2.7 V the panel is dark and mute. */
+  power?: string
 }
 
 /**
@@ -339,7 +374,8 @@ export type Wire = {
   points?: Point[]
 }
 
-export type PartState = { on?: boolean; pressed?: boolean }
+/** `x`/`y`: where a panel was pressed, in its own pixels. */
+export type PartState = { on?: boolean; pressed?: boolean; x?: number; y?: number }
 
 /** A component destroyed by the simulation. Lives in the simulation, not the document. */
 /** One broken model element: what it became and why. */

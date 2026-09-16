@@ -11,6 +11,7 @@ import { wireCurrents } from "./flow"
 import { buildNetlist, GROUND, type GpioState } from "./netlist"
 import { UartDecoder, uartFrameEdges, uartFrameSeconds, type Edge } from "./serial"
 import { createDigitalPart, type DigitalPart } from "./digital"
+import { PanelInstance } from "./display"
 
 /**
  * Shortest press a button registers, in simulated seconds. A mouse click can come and go
@@ -68,7 +69,13 @@ class TerminalInstance {
  */
 class DigitalNet {
   readonly node: number
-  readonly drivers = new Map<string, boolean | null>()
+  /**
+   * What each driver puts on the net. An MCU pad drives push-pull (`strong`); a digital part's
+   * outputs are open-drain I²C-class drivers (rated to sink a few milliamps), so a pad driving
+   * high wins over a part pulling low — as a bit-banged master's STOP does against a slave still
+   * holding a data bit, which the touch demo relies on.
+   */
+  readonly drivers = new Map<string, { level: boolean | null; strong: boolean }>()
   level = true
   /** Level when nobody drives: a pull-up (true), a pull-down (false), or nothing — the line keeps its charge (null). */
   released: boolean | null = null
@@ -85,12 +92,20 @@ class DigitalNet {
     this.node = node
   }
   resolve(): boolean {
-    let high = false
-    for (const v of this.drivers.values()) {
-      if (v === false) return false
-      if (v === true) high = true
+    let strongHigh = false
+    let weakLow = false
+    let weakHigh = false
+    for (const d of this.drivers.values()) {
+      if (d.level === null) continue
+      if (d.strong) {
+        if (!d.level) return false
+        strongHigh = true
+      } else if (d.level) weakHigh = true
+      else weakLow = true
     }
-    if (high) return true
+    if (strongHigh) return true
+    if (weakLow) return false
+    if (weakHigh) return true
     return this.released ?? this.level
   }
 }
@@ -295,6 +310,8 @@ export type Snapshot = {
   terminals: Record<string, { text: string; framingErrors: number }>
   /** Digital parts' own state (an EEPROM's contents), by object id. */
   digital: Record<string, unknown>
+  /** Display panels by object id: a new RGBA frame when the picture changed (null: as before), and the panel's verdict on the signal. */
+  displays: Record<string, { width: number; height: number; frame: ArrayBuffer | null; status: string }>
 }
 
 /**
@@ -315,6 +332,8 @@ export class SimLoop {
   private mcus = new Map<string, McuInstance>()
   private terminals = new Map<string, TerminalInstance>()
   private digitalParts = new Map<string, DigitalPart>()
+  /** RGB panels, by object id. */
+  private panels = new Map<string, PanelInstance>()
   /** Nets on the exact-time path, by net index. */
   private digitalNets = new Map<number, DigitalNet>()
   /**
@@ -359,6 +378,28 @@ export class SimLoop {
     this.syncFirmware()
     this.syncTerminals()
     this.syncDigitalParts()
+    this.syncPanels()
+  }
+
+  /** Whether a panel's logic supply pin is up, as the last solve left it. */
+  private panelPowered(p: PanelInstance): boolean {
+    const engine = this.engine
+    if (!engine || !p.spec.power) return true
+    const node = engine.net.pinNet.get(pinKey(p.object, p.spec.power))
+    if (node === undefined || node === GROUND) return false
+    return engine.v[node] > 2.7
+  }
+
+  /** Panel instances follow the document. */
+  private syncPanels() {
+    const seen = new Set<string>()
+    for (const obj of this.doc.objects) {
+      const def = getDef(obj.def)
+      if (!def?.panel) continue
+      seen.add(obj.id)
+      if (!this.panels.has(obj.id)) this.panels.set(obj.id, new PanelInstance(obj.id, def.panel))
+    }
+    for (const id of [...this.panels.keys()]) if (!seen.has(id)) this.panels.delete(id)
   }
 
   /** Digital parts follow the document: created for known definitions, reconfigured on prop edits. */
@@ -529,6 +570,16 @@ export class SimLoop {
         if (node === undefined || node === GROUND) return
         netFor(node).logic.push(i)
       })
+    // Panels: which MCU pad sits on each signal pin's net.
+    for (const panel of this.panels.values()) {
+      panel.wired.clear()
+      for (const [pin, signal] of Object.entries(panel.spec.signals)) {
+        const node = engine?.net.pinNet.get(pinKey(panel.object, pin))
+        if (node === undefined) continue
+        const pad = padsByNet.get(node)?.[0]
+        if (pad) panel.wired.set(signal, { mcu: pad.inst.mcu, pad: pad.pad })
+      }
+    }
     const partNets = new Set<number>()
     for (const part of this.digitalParts.values())
       for (const pin of part.pins) {
@@ -611,8 +662,8 @@ export class SimLoop {
   }
 
   /** One driver on a net changed: re-resolve, and tell everyone if the level moved. */
-  private setDriver(net: DigitalNet, driver: string, level: boolean | null, time: number) {
-    net.drivers.set(driver, level)
+  private setDriver(net: DigitalNet, driver: string, level: boolean | null, time: number, strong: boolean) {
+    net.drivers.set(driver, { level, strong })
     const resolved = net.resolve()
     if (resolved === net.level) return
     net.level = resolved
@@ -639,7 +690,7 @@ export class SimLoop {
       for (const e of edges) {
         const node = engine.net.pinNet.get(pinKey(part.object, e.pin))
         const net = node === undefined ? undefined : this.digitalNets.get(node)
-        if (net) this.setDriver(net, `${part.object}/${e.pin}`, e.level, e.time)
+        if (net) this.setDriver(net, `${part.object}/${e.pin}`, e.level, e.time, false)
       }
     }
   }
@@ -652,7 +703,7 @@ export class SimLoop {
       const key = e.pad.port * 16 + e.pad.pin
       const node = inst.padNode.get(key)
       const net = node === undefined ? undefined : this.digitalNets.get(node)
-      if (net) this.setDriver(net, `${inst.object}/${key}`, e.level, e.time + inst.offset)
+      if (net) this.setDriver(net, `${inst.object}/${key}`, e.level, e.time + inst.offset, true)
     }
     out.length = 0
   }
@@ -780,6 +831,14 @@ export class SimLoop {
       }
     }
     this.parts = next
+    // Touch panels and the like: the part's state goes to the digital part behind it.
+    for (const [key, state] of Object.entries(parts)) {
+      const i = key.indexOf(":")
+      const part = this.digitalParts.get(key.slice(0, i))
+      if (!part?.interact) continue
+      part.interact(key.slice(i + 1), state, now)
+      this.drainPart(part)
+    }
   }
 
   /** Apply releases whose press has now lasted long enough. */
@@ -789,6 +848,12 @@ export class SimLoop {
       if (now - (this.pressedAt.get(key) ?? 0) < MIN_PRESS) continue
       this.parts = { ...this.parts, [key]: state }
       this.heldReleases.delete(key)
+      const i = key.indexOf(":")
+      const part = this.digitalParts.get(key.slice(0, i))
+      if (part?.interact) {
+        part.interact(key.slice(i + 1), state, now)
+        this.drainPart(part)
+      }
     }
   }
 
@@ -1054,6 +1119,11 @@ export class SimLoop {
         }
       }
       this.serviceTerminals(engine.time + DT)
+      for (const part of this.digitalParts.values())
+        if (part.tick) {
+          part.tick(engine.time + DT)
+          if (part.out.length) this.drainPart(part)
+        }
       engine.step(DT, read, this.pinState)
       this.accumulateFlow(engine, DT)
       if (mcus.length) this.sampleInputs(engine)
@@ -1154,6 +1224,7 @@ export class SimLoop {
       mcus: Object.fromEntries([...this.mcus].map(([id, inst]) => [id, inst.status()])),
       terminals: Object.fromEntries([...this.terminals].map(([id, t]) => [id, { text: t.text, framingErrors: t.decoder.framingErrors }])),
       digital: Object.fromEntries([...this.digitalParts].map(([id, p]) => [id, p.snapshot()])),
+      displays: Object.fromEntries([...this.panels].map(([id, p]) => [id, { width: p.spec.width, height: p.spec.height, ...p.capture(performance.now(), this.panelPowered(p)) }])),
     }
   }
 }

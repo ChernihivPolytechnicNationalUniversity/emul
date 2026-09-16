@@ -107,7 +107,7 @@ const LCD7: Row[] = [
   [28, "B7", "PI7", "LTDC_B7"],
   [29, "GND"],
   [30, "CLK", "PG7", "LTDC_CLK"],
-  [31, "DISP", undefined, "LCD_DISP", undefined, "Not connected on the board; the LCD ties it to 3.3 V"],
+  [31, "3V3", undefined, "LCD_DISP", undefined, "DISP: the board ties it to 3.3 V, so the backlight is on whenever the board is"],
   [32, "HS", "PI10", "LTDC_HSYNC"],
   [33, "VS", "PI9", "LTDC_VSYNC"],
   [34, "DE", "PF10", "LTDC_DE"],
@@ -240,7 +240,8 @@ const pins: PinDef[] = [
   ...right("P5", I2S2, 30),
   ...bottom("P12", FMC_ODD, 8),
   ...bottom("P12", FMC_EVEN, 8, true),
-  ...bottom("P15", LCD7, 26),
+  // P15 sits on the board's edge: the 7" LCD component's FFC pins land on it when the module is docked below.
+  ...strip("P15", LCD7, { x: 26, y: HEIGHT, dir: "right", side: "bottom", labelAt: "bottom", stub: 1 }),
   // Arduino: power/analog column left of the shield area, digital column on its right.
   ...strip("CN2", CN2, { x: 35, y: 8, dir: "down", side: "left", labelAt: "right", stub: 1 }),
   ...strip("CN3", CN3, { x: 35, y: 17, dir: "down", side: "left", labelAt: "right", stub: 1 }),

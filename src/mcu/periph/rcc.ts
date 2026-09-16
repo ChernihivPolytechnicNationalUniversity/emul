@@ -291,6 +291,24 @@ export class Rcc extends RegBlock {
     return { p: vco / p, q: vco / q }
   }
 
+  /**
+   * LCD-TFT pixel clock: PLLSAI's R output through DCKCFGR's PLLSAIDIVR (RM0090 §6.3.24,
+   * RM0385 §5.3.25). Zero while PLLSAI is off or the LTDC has no clock (APB2ENR.LTDCEN).
+   */
+  ltdcHz(): number {
+    if (!(this.regs[0] & CR_PLLSAION)) return 0
+    if (!(this.get("APB2ENR") & (1 << 26))) return 0
+    const cfg = this.get("PLLCFGR")
+    const m = cfg & 0x3f
+    const src = cfg & (1 << 22) ? this.hseHz() : HSI_HZ
+    const sai = this.get("PLLSAICFGR")
+    const n = (sai >>> 6) & 0x1ff
+    const r = (sai >>> 28) & 7
+    const divr = 2 ** (((this.get("DCKCFGR") >>> 16) & 3) + 1)
+    if (m === 0 || r === 0) return 0
+    return ((src / m) * n) / r / divr
+  }
+
   clocks(): ClockTree {
     const cfgr = this.get("CFGR")
     const sws = (cfgr >>> 2) & 3

@@ -211,6 +211,14 @@ export const TerminalIcon = make(
   </>,
 )
 
+export const DisplayIcon = make(
+  "DisplayIcon",
+  <>
+    <rect x={3} y={4} width={18} height={13} rx={1.5} />
+    <path d="M7 20h10M8 8h4" />
+  </>,
+)
+
 export const CrystalIcon = make(
   "CrystalIcon",
   <>

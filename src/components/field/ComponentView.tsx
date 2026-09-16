@@ -5,7 +5,7 @@ import { objectSize } from "@/schematic/geometry"
 import { getDef, partInitial } from "@/schematic/registry"
 import { partKey, type BodyShape, type Damage, type Fill, type PartDef, type PartState, type PlacedObject, type Rotation } from "@/schematic/types"
 import { LED_COLORS } from "@/schematic/components/basic"
-import type { SimReadout } from "@/sim/use-simulation"
+import type { DisplayFrame, SimReadout } from "@/sim/use-simulation"
 import { formatSI } from "@/sim/units"
 
 const FILL: Record<Fill, string> = {
@@ -121,7 +121,8 @@ export function ComponentView({
               part={p.type === "led" ? { ...p, color: resolveColor(template(p.color, props)) } : p}
               g={g}
               state={simulated ?? parts[key] ?? partInitial(def, p.id)}
-              level={simulated?.level}
+              level={p.type === "display" ? (sim.live ? (p.backlight ? (sim.parts[partKey(object.id, p.backlight)]?.level ?? 0) : 1) : 0) : simulated?.level}
+              display={p.type === "display" ? sim.display(object.id) : undefined}
               hairline={hairline}
               onChange={simulated ? undefined : (patch) => onPartChange(object.id, p.id, patch)}
             />
@@ -243,11 +244,73 @@ function Shape({
   }
 }
 
+/**
+ * A display panel: the frame the simulation composed, drawn on a canvas inside the SVG,
+ * scaled by the backlight; the pointer on it is a touch with panel coordinates.
+ */
+function DisplayPanel({ part, g, level, display, onChange }: { part: Extract<PartDef, { type: "display" }>; g: (v: number) => number; level: number; display: DisplayFrame | undefined; onChange?: (patch: PartState) => void }) {
+  const canvas = React.useRef<HTMLCanvasElement>(null)
+  const drawn = React.useRef(-1)
+  React.useEffect(() => {
+    const c = canvas.current
+    if (!c) return
+    const ctx = c.getContext("2d")
+    if (!ctx) return
+    if (!display || !display.frame) {
+      if (drawn.current !== -1) ctx.clearRect(0, 0, c.width, c.height)
+      drawn.current = -1
+      return
+    }
+    if (display.seq === drawn.current) return
+    drawn.current = display.seq
+    ctx.putImageData(new ImageData(display.frame as unknown as Uint8ClampedArray<ArrayBuffer>, display.width, display.height), 0, 0)
+  }, [display])
+  // Panel pixel under the pointer. Measured through the component's SVG: Chrome reports a
+  // canvas inside a scaled foreignObject at its unscaled size, so its own rect is useless.
+  const at = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const svg = e.currentTarget.closest("svg")
+    const r = (svg ?? e.currentTarget).getBoundingClientRect()
+    const vw = svg?.viewBox.baseVal.width || r.width
+    const vh = svg?.viewBox.baseVal.height || r.height
+    const wx = ((e.clientX - r.left) / r.width) * vw
+    const wy = ((e.clientY - r.top) / r.height) * vh
+    return { x: ((wx - g(part.x)) / g(part.w)) * part.width, y: ((wy - g(part.y)) / g(part.h)) * part.height }
+  }
+  return (
+    <foreignObject x={g(part.x)} y={g(part.y)} width={g(part.w)} height={g(part.h)}>
+      <div className="relative h-full w-full bg-black" style={{ cursor: onChange ? "crosshair" : undefined }}>
+        <canvas
+          ref={canvas}
+          width={part.width}
+          height={part.height}
+          className="block h-full w-full"
+          style={{ opacity: level, imageRendering: "auto" }}
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId)
+            } catch {
+              // A synthetic pointer cannot be captured; the press still counts.
+            }
+            onChange?.({ pressed: true, ...at(e) })
+          }}
+          onPointerMove={(e) => {
+            if (e.buttons & 1) onChange?.({ pressed: true, ...at(e) })
+          }}
+          onPointerUp={(e) => onChange?.({ pressed: false, ...at(e) })}
+          onPointerCancel={() => onChange?.({ pressed: false })}
+        />
+      </div>
+    </foreignObject>
+  )
+}
+
 function Part({
   part,
   g,
   state,
   level,
+  display,
   hairline,
   onChange,
 }: {
@@ -256,6 +319,8 @@ function Part({
   state: PartState
   /** 0..1 brightness from the simulation; undefined when not simulated. */
   level?: number
+  /** The frame a display shows. */
+  display?: DisplayFrame
   hairline: number
   /** Undefined while the simulation owns this part. */
   onChange?: (patch: PartState) => void
@@ -264,6 +329,8 @@ function Part({
   const cy = g(part.y)
   const stop = (e: React.PointerEvent | React.MouseEvent) => e.stopPropagation()
   const title = `${part.label}${"mcu" in part && part.mcu ? ` · ${part.mcu}` : ""}`
+
+  if (part.type === "display") return <DisplayPanel part={part} g={g} level={level ?? 0} display={display} onChange={onChange} />
 
   if (part.type === "led") {
     const glow = level ?? (state.on ? 1 : 0)

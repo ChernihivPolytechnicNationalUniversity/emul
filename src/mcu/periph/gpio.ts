@@ -112,6 +112,9 @@ export class Gpio extends RegBlock {
       case "AFRL":
       case "AFRH":
         if (next !== old) {
+          // Store first: the listener reads the pads' new drive (a pin switched from input to
+          // output must go out as an edge now, not at the next ODR write).
+          this.regs[d.offset >>> 2] = next >>> 0
           this.version++
           this.onOutput?.(this.index)
         }

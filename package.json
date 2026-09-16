@@ -20,6 +20,7 @@
     "lab1": "tsx --tsconfig tsconfig.app.json scripts/lab1.ts",
     "lab1-sim": "tsx --tsconfig tsconfig.app.json scripts/lab1-sim.ts",
     "open746": "tsx --tsconfig tsconfig.app.json scripts/open746.ts",
+    "lcd": "tsx --tsconfig tsconfig.app.json scripts/lcd.ts",
     "mcu-tim": "tsx --tsconfig tsconfig.app.json scripts/mcu-tim.ts",
     "nucleo-pwm": "tsx --tsconfig tsconfig.app.json scripts/nucleo-pwm.ts",
     "mcu-uart": "tsx --tsconfig tsconfig.app.json scripts/mcu-uart.ts",
