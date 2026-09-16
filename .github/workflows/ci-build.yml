@@ -1,0 +1,17 @@
+name: CI Build
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  ci:
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    uses: ChernihivPolytechnicNationalUniversity/shared-actions/.github/workflows/ci-build.yml@main
+    with:
+      context: .
+    secrets: inherit

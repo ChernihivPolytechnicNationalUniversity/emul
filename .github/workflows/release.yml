@@ -1,0 +1,20 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  release:
+    permissions:
+      contents: write
+      packages: write
+      issues: write
+      pull-requests: write
+    uses: ChernihivPolytechnicNationalUniversity/shared-actions/.github/workflows/gitops-release.yml@main
+    with:
+      context: .
+      on-missing-candidate: build
+    secrets: inherit
