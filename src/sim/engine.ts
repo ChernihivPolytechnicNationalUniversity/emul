@@ -69,9 +69,15 @@ const LED_EYE_TAU = 0.01
 /**
  * Window for a battery's average load, which its time-to-empty estimate divides into the charge
  * left: long enough to cover a sleeping MCU's wake-ups, short enough to follow a changed load.
- * Until the run is that old the average is over the whole run.
+ * A sliding window of `BAT_AVG_BUCKETS` buckets rather than an exponential average, so a
+ * changed load is fully in the figure after the window and the estimate does not creep towards
+ * the answer for a minute. Until the run is that old the average is over the whole run.
  */
-const BAT_AVG_TAU = 10
+const BAT_AVG_WINDOW = 10
+const BAT_AVG_BUCKETS = 100
+const BAT_AVG_BUCKET = BAT_AVG_WINDOW / BAT_AVG_BUCKETS
+/** Below this a battery's current is the solver's node leak, not a load. */
+const BAT_LEAK = 1e-8
 /** A battery's resistance is stepped in 1 % increments as it drains, so a linear circuit keeps its factorization between steps. */
 const BAT_R_STEP = Math.log(1.01)
 /** Charge forced into a primary cell before it vents, as a fraction of its capacity. */
@@ -229,12 +235,18 @@ export class Engine {
   private readonly batV2: Float64Array
   private readonly batT: Float64Array
   private readonly batThru: Float64Array
-  /** Battery: average load, average drain rate of the weakest cell, charge forced into a primary cell (A·s). */
-  private readonly batAvgI: Float64Array
-  private readonly batAvgRate: Float64Array
-  private readonly batCharged: Float64Array
-  /** Seconds a battery element has been solved for: its average is over the whole of that until it exceeds the window. */
+  /**
+   * Battery: the sliding window of load — per element, `BAT_AVG_BUCKETS` buckets of charge (A·s)
+   * and of drain (soc) for the weakest cell, the bucket being filled and how much of it, and the
+   * seconds the element has been solved for (the average covers the whole run until the window fills).
+   */
+  private readonly batWinI: Float64Array
+  private readonly batWinRate: Float64Array
+  private readonly batWinAt: Int32Array
+  private readonly batWinFill: Float64Array
   private readonly batAge: Float64Array
+  /** Battery: charge forced into a primary cell (A·s). */
+  private readonly batCharged: Float64Array
   /** Probe node pairs, two entries each; either side may be GROUND. */
   private probeNodes = new Int32Array(0)
   /** Per probe, for the window being filled: sum, sum of squares, trough, peak. */
@@ -351,8 +363,10 @@ export class Engine {
     this.batV2 = new Float64Array(m)
     this.batT = new Float64Array(m)
     this.batThru = new Float64Array(m)
-    this.batAvgI = new Float64Array(m)
-    this.batAvgRate = new Float64Array(m)
+    this.batWinI = new Float64Array(m * BAT_AVG_BUCKETS)
+    this.batWinRate = new Float64Array(m * BAT_AVG_BUCKETS)
+    this.batWinAt = new Int32Array(m)
+    this.batWinFill = new Float64Array(m)
     this.batCharged = new Float64Array(m)
     this.batAge = new Float64Array(m)
     for (let i = 0; i < m; i++) {
@@ -412,8 +426,12 @@ export class Engine {
         this.batV2[to] = prev.batV2[from]
         this.batT[to] = prev.batT[from]
         this.batThru[to] = prev.batThru[from]
-        this.batAvgI[to] = prev.batAvgI[from]
-        this.batAvgRate[to] = prev.batAvgRate[from]
+        for (let k = 0; k < BAT_AVG_BUCKETS; k++) {
+          this.batWinI[to * BAT_AVG_BUCKETS + k] = prev.batWinI[from * BAT_AVG_BUCKETS + k]
+          this.batWinRate[to * BAT_AVG_BUCKETS + k] = prev.batWinRate[from * BAT_AVG_BUCKETS + k]
+        }
+        this.batWinAt[to] = prev.batWinAt[from]
+        this.batWinFill[to] = prev.batWinFill[from]
         this.batCharged[to] = prev.batCharged[from]
         this.batAge[to] = prev.batAge[from]
         this.batteryState(to)
@@ -469,6 +487,54 @@ export class Engine {
     if (step === this.batStep[i] && this.batR[i] > 0) return
     this.batStep[i] = step
     this.batR[i] = el.rFull * Math.exp(step * BAT_R_STEP)
+  }
+
+  /**
+   * A battery's load (A) and the weakest cell's drain rate (per second) averaged over the
+   * sliding window — or over just the newest part of it when the load has been steady there
+   * for at least a second and different before: a switch closed two seconds ago reads the new
+   * load now, not a fading mix of before and after. A pulsed load (an MCU waking every second)
+   * is never steady bucket to bucket, so it keeps the whole window.
+   */
+  private batteryAverage(i: number): [amps: number, rate: number] {
+    const base = i * BAT_AVG_BUCKETS
+    const complete = Math.min(BAT_AVG_BUCKETS - 1, Math.floor(this.batAge[i] / BAT_AVG_BUCKET))
+    const fill = this.batWinFill[i]
+    // Newest first: the partial bucket (when it has enough in it to mean something), then the complete ones.
+    let q = 0
+    let d = 0
+    let span = 0
+    let steady = true
+    let steadySpan = 0
+    let steadyQ = 0
+    let steadyD = 0
+    let ref = NaN
+    let n = 0
+    const take = (charge: number, drain: number, seconds: number) => {
+      q += charge
+      d += drain
+      span += seconds
+      if (steady) {
+        const level = charge / seconds
+        if (Number.isNaN(ref)) ref = level
+        else if (Math.abs(level - ref) > 0.2 * Math.max(Math.abs(ref), Math.abs(level), BAT_LEAK)) steady = false
+        if (steady) {
+          steadySpan += seconds
+          steadyQ += charge
+          steadyD += drain
+          n++
+        }
+      }
+    }
+    const at = this.batWinAt[i]
+    if (fill >= 0.2 * BAT_AVG_BUCKET) take(this.batWinI[base + at], this.batWinRate[base + at], fill)
+    for (let k = 1; k <= complete; k++) {
+      const slot = base + ((at - k + BAT_AVG_BUCKETS) % BAT_AVG_BUCKETS)
+      take(this.batWinI[slot], this.batWinRate[slot], BAT_AVG_BUCKET)
+    }
+    if (span <= 0) return [0, 0]
+    if (!steady && steadySpan >= 1 && n > 1) return [steadyQ / steadySpan, steadyD / steadySpan]
+    return [q / span, d / span]
   }
 
   /** State of charge of a pack's weakest and strongest cell. */
@@ -1161,7 +1227,8 @@ export class Engine {
           break
         }
         case "BAT": {
-          const cur = x[n + el.index]
+          // The node leak (GMIN) through an open circuit is not a load.
+          const cur = Math.abs(x[n + el.index]) < BAT_LEAK ? 0 : x[n + el.index]
           const vt = this.vol(el.plus, this.v) - this.vol(el.minus, this.v)
           tc[this.termOf[base]] += cur
           tc[this.termOf[base + 1]] -= cur
@@ -1190,9 +1257,18 @@ export class Engine {
           const heat = drain * drain * r0 + drain * (this.batV1[i] + this.batV2[i])
           this.batT[i] += ((heat - (temp - el.temp) / thermalResistance(chem, el.capacity)) * dt) / thermalMass(chem, el.capacity)
           this.batAge[i] += dt
-          const a = Math.min(1, dt / Math.min(BAT_AVG_TAU, this.batAge[i]))
-          this.batAvgI[i] += (drain - this.batAvgI[i]) * a
-          this.batAvgRate[i] += (worst - this.batAvgRate[i]) * a
+          // Sliding window: the charge of this step goes into the bucket being filled.
+          const slot = i * BAT_AVG_BUCKETS + this.batWinAt[i]
+          this.batWinI[slot] += drain * dt
+          this.batWinRate[slot] += worst * dt
+          this.batWinFill[i] += dt
+          if (this.batWinFill[i] >= BAT_AVG_BUCKET) {
+            this.batWinFill[i] -= BAT_AVG_BUCKET
+            this.batWinAt[i] = (this.batWinAt[i] + 1) % BAT_AVG_BUCKETS
+            const next = i * BAT_AVG_BUCKETS + this.batWinAt[i]
+            this.batWinI[next] = 0
+            this.batWinRate[next] = 0
+          }
           this.batteryState(i)
           const [lo, hi] = this.batteryCells(el, i)
           if (this.batT[i] > chem.thermal.tVent) {
@@ -1477,8 +1553,7 @@ export class Engine {
       } else if (el.kind === "BAT") {
         // The pack is as empty as its weakest cell and as full as its strongest.
         const [lo, hi] = this.batteryCells(el, i)
-        const avg = this.batAvgI[i]
-        const rate = this.batAvgRate[i]
+        const [avg, rate] = this.batteryAverage(i)
         let weakest = 0
         let capNow = Infinity
         for (let k = 0; k < el.cells; k++) {
