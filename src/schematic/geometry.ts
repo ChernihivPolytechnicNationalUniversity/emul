@@ -1,5 +1,5 @@
 import { getDef, getPin } from "./registry"
-import type { ComponentDef, PinDef, PinRef, PlacedObject, Point, Rotation, Side } from "./types"
+import type { ComponentDef, PinDef, PinRef, PlacedObject, Point, Rotation, Side, Wire } from "./types"
 
 export type { Point }
 
@@ -95,7 +95,7 @@ export function objectPins(obj: PlacedObject, grid: number): { key: string; pin:
  * wire. Only an exact coincidence counts: a wire or a symbol merely passing over a pin is not
  * a connection. Returns every such pin keyed to its group's representative.
  */
-export function pinContacts(objects: PlacedObject[], grid: number): Map<string, string> {
+export function pinContacts(objects: readonly PlacedObject[], grid: number): Map<string, string> {
   // Bucket by whole pixel, then compare against the neighbouring buckets, so the sweep stays
   // linear however many pins a board has.
   const buckets = new Map<string, { key: string; point: Point }[]>()
@@ -159,7 +159,7 @@ export function pinPoint(obj: PlacedObject, pinId: string, grid: number): Point 
 }
 
 /** Object, definition and the pin as seen on the field (rotation applied). */
-export function resolvePin(objects: PlacedObject[], ref: PinRef, grid: number) {
+export function resolvePin(objects: readonly PlacedObject[], ref: PinRef, grid: number) {
   const obj = objects.find((o) => o.id === ref.object)
   if (!obj) return null
   const def = getDef(obj.def)
@@ -351,7 +351,7 @@ function crossings(a1: Point, mid: Point[], b1: Point, avoid: Rect[]) {
 }
 
 /** Body rectangles a wire between two objects must stay out of: everyone else's. */
-export function routeObstacles(objects: PlacedObject[], grid: number, from: string, to: string): Rect[] {
+export function routeObstacles(objects: readonly PlacedObject[], grid: number, from: string, to: string): Rect[] {
   const out: Rect[] = []
   for (const o of objects) if (o.id !== from && o.id !== to) out.push(objectRect(o, grid))
   return out
@@ -379,8 +379,30 @@ export function routeToPoint(a: Point, aSide: Direction, aStub: number, p: Point
   return dedupe(pts)
 }
 
-export const toPath = (pts: Point[]) =>
-  pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x} ${p.y}`).join(" ")
+export function toPath(pts: Point[], radius = 0): string {
+  if (pts.length === 0) return ""
+  if (radius <= 0 || pts.length < 3) return pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x} ${p.y}`).join(" ")
+  const out: string[] = [`M${pts[0].x} ${pts[0].y}`]
+  for (let i = 1; i < pts.length - 1; i++) {
+    const p = pts[i - 1]
+    const c = pts[i]
+    const n = pts[i + 1]
+    const inLen = Math.hypot(c.x - p.x, c.y - p.y)
+    const outLen = Math.hypot(n.x - c.x, n.y - c.y)
+    const cross = (c.x - p.x) * (n.y - c.y) - (c.y - p.y) * (n.x - c.x)
+    if (!inLen || !outLen || Math.abs(cross) < 1e-9) {
+      out.push(`L${c.x} ${c.y}`)
+      continue
+    }
+    const r = Math.min(radius, inLen / 2, outLen / 2)
+    const a = { x: c.x - ((c.x - p.x) / inLen) * r, y: c.y - ((c.y - p.y) / inLen) * r }
+    const b = { x: c.x + ((n.x - c.x) / outLen) * r, y: c.y + ((n.y - c.y) / outLen) * r }
+    out.push(`L${a.x} ${a.y}`, `Q${c.x} ${c.y} ${b.x} ${b.y}`)
+  }
+  const last = pts[pts.length - 1]
+  out.push(`L${last.x} ${last.y}`)
+  return out.join(" ")
+}
 
 function dedupe(pts: Point[]): Point[] {
   return pts.filter((p, i) => i === 0 || p.x !== pts[i - 1].x || p.y !== pts[i - 1].y)
@@ -396,6 +418,177 @@ function dedupeRoute(pts: Point[], owner: number[]): Route {
     if (i > 0) outOwner.push(owner[i - 1])
   }
   return { pts: outPts, owner: outOwner }
+}
+
+export type RoutedWire = {
+  id: string
+  pts: Point[]
+  owner: number[]
+}
+
+export function routeAll(objects: readonly PlacedObject[], wires: readonly Wire[], grid: number): RoutedWire[] {
+  const index = new Map<string, PlacedObject>()
+  for (const o of objects) index.set(o.id, o)
+  const rects = objects.map((o) => ({ id: o.id, rect: objectRect(o, grid) }))
+
+  const out: RoutedWire[] = []
+  for (const w of wires) {
+    const a = resolvePinIn(index, w.from, grid)
+    const b = resolvePinIn(index, w.to, grid)
+    if (!a || !b) continue
+    const avoid: Rect[] = []
+    for (const r of rects) if (r.id !== w.from.object && r.id !== w.to.object) avoid.push(r.rect)
+    const route = routeWire(a.point, a.pin.side, a.pin.stub ?? 1, b.point, b.pin.side, b.pin.stub ?? 1, grid, w.points ?? [], avoid)
+    out.push({ id: w.id, pts: route.pts, owner: route.owner })
+  }
+  return out
+}
+
+export function resolvePinIn(index: ReadonlyMap<string, PlacedObject>, ref: PinRef, grid: number) {
+  const obj = index.get(ref.object)
+  if (!obj) return null
+  const def = getDef(obj.def)
+  const raw = def && getPin(def, ref.pin)
+  if (!def || !raw) return null
+  const pin = rotatePin(raw, def, obj.rotation)
+  return { obj, def, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }
+}
+
+const NUDGE_STEP = 1 / 3
+const NUDGE_MAX = 1 / 2
+
+type Axis = "h" | "v"
+
+const axisOf = (p: Point, q: Point): Axis | null => (p.y === q.y ? "h" : p.x === q.x ? "v" : null)
+
+type Seg = {
+  wire: number
+  at: number
+  net: string
+  axis: Axis
+  lo: number
+  hi: number
+  lean: number
+}
+
+/**
+ * Separate collinear runs of different nets that share a corridor, libavoid's stage 3 in its
+ * cheap form. Each nudged segment is offset sideways on a centred ladder; where a run changes
+ * offset along its length, or meets a stub that must stay put, a short jog keeps the route
+ * orthogonal. Pins and the direction a wire leaves them are never touched.
+ */
+export function nudgeRoutes(routes: RoutedWire[], netOf: (wireId: string) => string | undefined, grid: number): RoutedWire[] {
+  const segs: Seg[] = []
+  routes.forEach((r, wire) => {
+    const net = netOf(r.id) ?? r.id
+    for (let at = 1; at < r.pts.length - 2; at++) {
+      const p = r.pts[at]
+      const q = r.pts[at + 1]
+      const axis = axisOf(p, q)
+      if (!axis) continue
+      const before = r.pts[at - 1]
+      const after = r.pts[at + 2]
+      const lean = axis === "h" ? (before.y + after.y) / 2 - p.y : (before.x + after.x) / 2 - p.x
+      const [lo, hi] = axis === "h" ? [Math.min(p.x, q.x), Math.max(p.x, q.x)] : [Math.min(p.y, q.y), Math.max(p.y, q.y)]
+      segs.push({ wire, at, net, axis, lo, hi, lean })
+    }
+  })
+
+  const lanes = new Map<string, Seg[]>()
+  for (const s of segs) {
+    const p = routes[s.wire].pts[s.at]
+    const key = `${s.axis}${Math.round(s.axis === "h" ? p.y : p.x)}`
+    const list = lanes.get(key)
+    if (list) list.push(s)
+    else lanes.set(key, [s])
+  }
+
+  const offset = new Map<string, number>()
+  const separate = (cluster: Seg[]) => {
+    const nets = [...new Set(cluster.map((s) => s.net))]
+    if (nets.length < 2) return
+    nets.sort((a, b) => meanLean(cluster, a) - meanLean(cluster, b))
+    const step = Math.min(NUDGE_STEP * grid, (2 * NUDGE_MAX * grid) / (nets.length - 1))
+    const span = (nets.length - 1) / 2
+    const deltaOf = new Map(nets.map((net, i) => [net, (i - span) * step]))
+    for (const s of cluster) {
+      const delta = deltaOf.get(s.net) ?? 0
+      if (delta) offset.set(`${s.wire}:${s.at}`, delta)
+    }
+  }
+  for (const list of lanes.values()) {
+    if (list.length < 2) continue
+    list.sort((a, b) => a.lo - b.lo)
+    let cluster: Seg[] = []
+    let end = -Infinity
+    for (const s of list) {
+      if (cluster.length && s.lo >= end) {
+        separate(cluster)
+        cluster = []
+      }
+      cluster.push(s)
+      end = Math.max(end, s.hi)
+    }
+    separate(cluster)
+  }
+
+  if (offset.size === 0) return routes
+  return routes.map((r, wire) => applyOffsets(r, (at) => offset.get(`${wire}:${at}`) ?? 0))
+}
+
+function meanLean(cluster: Seg[], net: string): number {
+  let sum = 0
+  let n = 0
+  for (const s of cluster) {
+    if (s.net !== net) continue
+    sum += s.lean
+    n++
+  }
+  return n ? sum / n : 0
+}
+
+/**
+ * Rebuild a route with each segment moved sideways by its offset. A corner takes both of its
+ * segments' offsets, one per axis; two collinear segments with different offsets, or a run
+ * next to a stub that is not allowed to move, are joined by a jog.
+ */
+function applyOffsets(r: RoutedWire, offsetOf: (segment: number) => number): RoutedWire {
+  const { pts, owner } = r
+  const last = pts.length - 1
+  let touched = false
+  for (let i = 0; i < last; i++) if (offsetOf(i)) touched = true
+  if (!touched) return r
+
+  const moved = (segment: number, p: Point): Point => {
+    const d = offsetOf(segment)
+    if (!d) return p
+    const axis = axisOf(pts[segment], pts[segment + 1])
+    if (axis === "h") return { x: p.x, y: p.y + d }
+    if (axis === "v") return { x: p.x + d, y: p.y }
+    return p
+  }
+
+  const outPts: Point[] = [pts[0]]
+  const outOwner: number[] = []
+  for (let i = 1; i < last; i++) {
+    const inAxis = axisOf(pts[i - 1], pts[i])
+    const outAxis = axisOf(pts[i], pts[i + 1])
+    const turns = inAxis !== null && outAxis !== null && inAxis !== outAxis
+    if (turns) {
+      outPts.push(moved(i, moved(i - 1, pts[i])))
+      outOwner.push(owner[i - 1])
+      continue
+    }
+    outPts.push(moved(i - 1, pts[i]))
+    outOwner.push(owner[i - 1])
+    if (offsetOf(i - 1) !== offsetOf(i)) {
+      outPts.push(moved(i, pts[i]))
+      outOwner.push(owner[i])
+    }
+  }
+  outPts.push(pts[last])
+  outOwner.push(owner[last - 1])
+  return { ...r, pts: outPts, owner: outOwner }
 }
 
 /** Index of the polyline segment closest to a point. */

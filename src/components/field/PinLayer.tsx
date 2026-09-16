@@ -1,3 +1,4 @@
+import * as React from "react"
 import { cn } from "@/lib/utils"
 import { DIR, objectPins, type Direction } from "@/schematic/geometry"
 import type { PinKind, PlacedObject } from "@/schematic/types"
@@ -32,6 +33,7 @@ type PinLayerProps = {
   connectedPins: ReadonlySet<string>
   /** Pins that touch another pin; they are drawn as a junction dot, without a label. */
   contactPins: ReadonlySet<string>
+  netColor?: (pinKey: string) => string | undefined
   onPinPointerDown: PinPointerHandler
   onPinPointerMove: PinPointerHandler
   onPinPointerUp: PinPointerHandler
@@ -44,12 +46,13 @@ type PinLayerProps = {
  * both visible and clickable: the wire layer paints on top of the components and claims a hit
  * area five times its own width, which would otherwise swallow the pin underneath it.
  */
-export function PinLayer({
+export const PinLayer = React.memo(function PinLayer({
   objects,
   grid,
   hairline,
   connectedPins,
   contactPins,
+  netColor,
   onPinPointerDown,
   onPinPointerMove,
   onPinPointerUp,
@@ -61,6 +64,7 @@ export function PinLayer({
         objectPins(object, grid).map(({ key, pin, point }) => {
           const connected = connectedPins.has(key)
           const contact = contactPins.has(key)
+          const color = connected ? netColor?.(key) : undefined
           const dir = DIR[pin.labelAt as Direction]
           const label = { x: point.x + dir.x * g(LABEL_OFFSET), y: point.y + dir.y * g(LABEL_OFFSET) }
 
@@ -81,10 +85,13 @@ export function PinLayer({
                 cx={point.x}
                 cy={point.y}
                 r={g(contact ? 0.26 : pin.kind === "nc" ? 0.14 : 0.2)}
+                fill={color && (contact || pin.kind === "node") ? color : undefined}
+                stroke={color}
                 className={cn(
-                  "stroke-foreground/60 transition-[r] group-hover/pin:stroke-primary",
-                  contact ? "fill-foreground" : PIN_FILL[pin.kind],
-                  connected && !contact && "stroke-primary",
+                  "transition-[r] group-hover/pin:stroke-primary",
+                  !color && "stroke-foreground/60",
+                  !color && connected && !contact && "stroke-primary",
+                  !(color && (contact || pin.kind === "node")) && (contact ? "fill-foreground" : PIN_FILL[pin.kind]),
                 )}
                 strokeWidth={connected ? hairline * 2 : hairline}
               />
@@ -111,4 +118,4 @@ export function PinLayer({
       )}
     </svg>
   )
-}
+})

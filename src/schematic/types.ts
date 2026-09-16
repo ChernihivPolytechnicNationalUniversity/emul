@@ -1,6 +1,7 @@
 import type { MemoryRegion } from "@/mcu/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import type { Icon } from "./icons"
+import type { WireColorKey } from "./wire-colors"
 
 /** Direction pointing outward from the component; wires leave the pin this way. */
 export type Side = "left" | "right" | "top" | "bottom"
@@ -372,6 +373,7 @@ export type Wire = {
   to: PinRef
   /** User-placed bend points in world px (snapped); the router connects them orthogonally. */
   points?: Point[]
+  color?: WireColorKey
 }
 
 /** `x`/`y`: where a panel was pressed, in its own pixels. */
