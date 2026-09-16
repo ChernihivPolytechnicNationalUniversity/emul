@@ -63,7 +63,7 @@ expect("NRST idles high on the pull-up", snap.pinVoltage[pinKey(dd.id, "NRST")],
 for (const p of ["PG2", "PG3", "PD4", "PD5", "PI11"]) expect(`joystick ${p} pulled up`, snap.pinVoltage[pinKey(dd.id, p)], 3.3, 0.05)
 expect("LEDs after boot (L1 on)", ledStr(snap), "●○○○")
 const i1 = snap.pinCurrent[pinKey(byRef("R2").id, "1")]
-expect("L1 current through 510 Ω (mA)", Math.abs(i1) * 1e3, (3.3 - 1.9) / 510e-3, 0.5)
+expect("L1 current through 1 kΩ (mA)", Math.abs(i1) * 1e3, (3.3 - 1.9) / 1e3 * 1e3, 0.3)
 
 console.log("\nStaircase: L2 at 1 s, L3 at 3 s, L4 at 6 s, then off from 10 s")
 const onAt: Record<string, number> = {}

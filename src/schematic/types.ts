@@ -1,3 +1,4 @@
+import type { MemoryRegion } from "@/mcu/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import type { Icon } from "./icons"
 
@@ -280,6 +281,11 @@ export type ComponentDef = {
    * and gets its HSE/LSE from crystals or oscillators wired to its OSC pins on the field.
    */
   mcuClocks?: { hse: ClockSource | null; lse: ClockSource | null }
+  /**
+   * Memory a board hangs on the MCU's external bus (an SDRAM on the FMC): mapped into the
+   * core's address space, reachable once the firmware has set the controller up.
+   */
+  mcuMemory?: MemoryRegion[]
   /** A live meter readout drawn on the component (a voltmeter, ammeter): what to show and where. */
   meter?: MeterSpec
   /** Free-form reference data shown in the inspector later. */

@@ -6,7 +6,7 @@
 import { blockName } from "./blocks"
 import { Bus, type Peripheral } from "./bus"
 import type { Clocked } from "./periph/clocked"
-import { STM32F429ZI, type ChipProfile } from "./chip"
+import { STM32F429ZI, type ChipProfile, type MemoryRegion } from "./chip"
 import { Cpu } from "./cpu"
 import { parseFirmware, type Firmware } from "./elf"
 import { CpuHalt } from "./faults"
@@ -190,9 +190,10 @@ export class Stm32 {
   /** Set by an RCC write: the run slice ends so the new clock applies from that instruction on. */
   private clockDirty = false
 
-  constructor(chip: ChipProfile = STM32F429ZI) {
+  /** `external`: memory the board hangs on the FMC (an SDRAM), on top of the chip's own map. */
+  constructor(chip: ChipProfile = STM32F429ZI, external: MemoryRegion[] = []) {
     this.chip = chip
-    this.bus = new Bus(chip.memory, chip.core.bitBand)
+    this.bus = new Bus([...chip.memory, ...external], chip.core.bitBand)
     this.cpu = new Cpu(this.bus, chip.core)
     this.dbgmcu = new Dbgmcu(chip.idcode)
     this.pwr = new Pwr(chip.pwr)

@@ -14,6 +14,11 @@ export type MemoryRegion = {
   kind: "flash" | "ram" | "rom"
   /** Other base addresses the same bytes appear at (boot alias, ITCM alias). */
   aliases?: number[]
+  /**
+   * Behind an external memory controller: "sdram1"/"sdram2" hang on the FMC's SDRAM banks
+   * and answer only once the controller has initialised them.
+   */
+  external?: "sdram1" | "sdram2"
 }
 
 export type CoreProfile = {

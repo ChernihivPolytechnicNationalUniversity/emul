@@ -225,12 +225,30 @@ export const nucleoSquare: Example = {
 
 /**
  * The university teaching stand for lab 1: a bare STM32F746IGT6 with four LEDs (L1..L4 on
- * PB6, PB7, PH4, PI8 through 510 Ω) and a five-way joystick (A/B on PG2/PG3, C/D on PD4/PD5,
+ * PB6, PB7, PH4, PI8 through 1 kΩ, as on the Open746I-C) and a five-way joystick (A/B on PG2/PG3, C/D on PD4/PD5,
  * centre on PI11) that pulls the pins to ground against the internal pull-ups. The firmware
  * is the STM32CubeIDE project as handed out: it steps the LEDs on and off 1/2/3/4 s apart.
  * The 8 MHz crystal on PH0/PH1 (with its load capacitors) is what lets its HSE start: take
  * it off and the firmware stops in Error_Handler waiting for HSERDY, as the real stand would.
  */
+/**
+ * The same lab on the stand itself: the Waveshare Open746I-C with the Core746I module, whose
+ * USER LEDs and joystick are exactly the pins the firmware drives. Nothing to wire — the board
+ * is the circuit; the USART1 USB powers it.
+ */
+export const lab1Board: Example = {
+  id: "lab1-open746i-c",
+  name: "Lab 1: Open746I-C board",
+  description: "The Waveshare Open746I-C stand running the lab's LED staircase firmware on its own LEDs and joystick.",
+  icon: CpuIcon,
+  firmware: [{ ref: "U1", url: "firmware/lab1-f746.elf" }],
+  build(grid) {
+    const { doc, place } = builder(grid)
+    place("open746i-c", 0, 0)
+    return doc
+  },
+}
+
 export const lab1Stand: Example = {
   id: "lab1-f746",
   name: "Lab 1: STM32F746 stand",
@@ -255,9 +273,9 @@ export const lab1Stand: Example = {
     wire(dd, "NRST", sa1, "2", [[-9, y("NRST")], [-9, y("NRST") + 2]])
     wire(sa1, "1", gnd, "GND", [[-17, y("NRST") + 2], [-17, y("VSS") + 1]])
 
-    // LEDs: pin → 510 Ω → LED → ground. L1/L2 leave port B on the left, L3/L4 ports H/I on the right.
+    // LEDs: pin → 1 kΩ → LED → ground. L1/L2 leave port B on the left, L3/L4 ports H/I on the right.
     const leftLed = (pin: string, py: number, n: number) => {
-      const r = place("resistor", -10, py - 1, { ref: `R${n + 1}`, value: "510 Ω", power: "0.25" })
+      const r = place("resistor", -10, py - 1, { ref: `R${n + 1}`, value: "1 kΩ", power: "0.25" })
       const led = place("led", -16, py - 1, { ref: `VD${n}`, value: "red", imax: "20 mA" }, 180)
       const g = place("ground", -21, py)
       wire(dd, pin, r, "2")
@@ -265,7 +283,7 @@ export const lab1Stand: Example = {
       wire(led, "2", g, "GND")
     }
     const rightLed = (pin: string, py: number, n: number) => {
-      const r = place("resistor", R + 6, py - 1, { ref: `R${n + 1}`, value: "510 Ω", power: "0.25" })
+      const r = place("resistor", R + 6, py - 1, { ref: `R${n + 1}`, value: "1 kΩ", power: "0.25" })
       const led = place("led", R + 12, py - 1, { ref: `VD${n}`, value: "red", imax: "20 mA" })
       const g = place("ground", R + 17, py)
       wire(dd, pin, r, "1")
@@ -463,4 +481,4 @@ export const nucleoAdc: Example = {
   },
 }
 
-export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoAdc, lab1Stand, powerSupply, batteryLife, systemExam, transistorLogic, lissajous, bridge]
+export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoAdc, lab1Board, lab1Stand, powerSupply, batteryLife, systemExam, transistorLogic, lissajous, bridge]

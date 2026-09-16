@@ -1,13 +1,14 @@
 import type { ComponentDef, PartState, PinRef, PlacedObject } from "./types"
 import { basicComponents } from "./components/basic"
 import { nucleoF429zi } from "./components/nucleo-f429zi"
+import { open746ic } from "./components/open746i-c"
 import { stm32f429zi, stm32f746ig } from "./components/stm32-chip"
 import { eeprom24c } from "./components/eeprom"
 import { crystal, oscillator } from "./components/clock"
 import { meterComponents } from "./components/meters"
 
 /** Every component the palette can place. Add a definition file and list it here. */
-export const registry: ComponentDef[] = [nucleoF429zi, stm32f746ig, stm32f429zi, crystal, oscillator, eeprom24c, ...meterComponents, ...basicComponents]
+export const registry: ComponentDef[] = [open746ic, nucleoF429zi, stm32f746ig, stm32f429zi, crystal, oscillator, eeprom24c, ...meterComponents, ...basicComponents]
 
 const byId = new Map(registry.map((d) => [d.id, d]))
 

@@ -195,7 +195,7 @@ class McuInstance {
   constructor(object: string, defId: string) {
     this.object = object
     const def = getDef(defId)
-    this.mcu = new Stm32((def?.chip && chipById(def.chip)) || STM32F429ZI)
+    this.mcu = new Stm32((def?.chip && chipById(def.chip)) || STM32F429ZI, def?.mcuMemory)
     if (!def?.model) return
     for (const el of def.model) {
       if (el.kind !== "GPIO") continue
