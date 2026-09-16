@@ -19,7 +19,7 @@ RUN pnpm build
 
 # Alpine's own nginx rather than the nginx.org image: the brotli module is a package here
 # (nginx-mod-http-brotli), built against the same binary, so nothing is compiled from source.
-FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 ARG APP_VERSION=unknown
 
 RUN apk add --no-cache nginx nginx-mod-http-brotli
