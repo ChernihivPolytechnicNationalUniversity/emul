@@ -142,6 +142,15 @@ export const BatteryIcon = make(
   <path d="M2 12h6M16 12h6M8 5v14M11 9v6M13 5v14M16 9v6M3 5h3M4.5 3.5v3" />,
 )
 
+export const DcSourceIcon = make(
+  "DcSourceIcon",
+  <>
+    <path d="M2 12h2M20 12h2" />
+    <circle cx={12} cy={12} r={8} />
+    <path d="M8 9.5h3M9.5 8v3M13 14.5h3" />
+  </>,
+)
+
 export const AcSourceIcon = make(
   "AcSourceIcon",
   <>

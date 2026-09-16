@@ -2,6 +2,7 @@ import {
   AcSourceIcon,
   BatteryIcon,
   CapacitorIcon,
+  DcSourceIcon,
   DiodeIcon,
   ElectrolyticCapacitorIcon,
   GroundIcon,
@@ -23,7 +24,8 @@ import {
   TransformerIcon,
   ZenerDiodeIcon,
 } from "../icons"
-import { parseValue } from "@/sim/units"
+import { CHEMISTRIES, chemistryById, DEFAULT_CHEMISTRY } from "@/sim/battery"
+import { formatSI, parseValue } from "@/sim/units"
 import type { BodyShape, ComponentDef, PinDef, PinKind, PropField } from "../types"
 
 const POWER_RATINGS = ["0.125", "0.25", "0.5", "1", "2", "5"].map((w) => ({ value: w, label: `${w} W` }))
@@ -412,13 +414,76 @@ export const toggleSwitch = base({
   model: [{ kind: "SW", a: "1", b: "2", part: "SW", closed: "on", ron: "{rcontact}", limits: { current: "{imax}", fail: "short" } }],
 })
 
+/** A battery's nameplate: "3.7 V Li-ion", "9 V alkaline". */
+const batteryLabel = (p: Record<string, string>) => {
+  const chem = chemistryById(p.chem)
+  const cells = Math.max(1, Math.round(Number(p.cells) || 1))
+  return `${formatSI(cells * chem.nominal, "V", cells * chem.nominal >= 10 ? 0 : 1)} ${chem.name}`
+}
+
 export const battery: ComponentDef = {
   id: "battery",
   name: "Battery",
+  description:
+    "Real cells: the chemistry's discharge curve, an internal resistance that climbs towards empty, capacity lost at high drain and in the cold, diffusion (the voltage rests back up after a load), self-heating, wear and cell mismatch. The inspector shows the charge and the time left at the present load.",
   category: "Power",
   icon: BatteryIcon,
   prefix: "BT",
-  defaults: { value: "3 V", rint: "0.5 Ω", imax: "3 A" },
+  defaults: { chem: DEFAULT_CHEMISTRY.id, cells: "1", capacity: "2 Ah", soc: "100", temp: "25", cycles: "0", years: "0", spread: "0", rint: "", imax: "" },
+  fields: [
+    { key: "chem", label: "Chemistry", type: "select", options: CHEMISTRIES.map((c) => ({ value: c.id, label: `${c.name} (${formatSI(c.nominal, "V", 1)} per cell)` })) },
+    { key: "cells", label: "Cells in series", type: "range", min: 1, max: 20, step: 1 },
+    { key: "capacity", label: "Capacity", type: "quantity", unit: "Ah" },
+    { key: "soc", label: "Charge", type: "range", min: 0, max: 100, step: 1, unit: "%" },
+    { key: "temp", label: "Temperature", type: "range", min: -30, max: 70, step: 1, unit: "°C" },
+    { key: "cycles", label: "Cycles", type: "range", min: 0, max: 2000, step: 10 },
+    { key: "years", label: "Age", type: "range", min: 0, max: 10, step: 0.5, unit: "years" },
+    { key: "spread", label: "Cell mismatch", type: "range", min: 0, max: 30, step: 1, unit: "%" },
+    { key: "rint", label: "Internal resistance", type: "quantity", unit: "Ω", placeholder: "from chemistry" },
+    { key: "imax", label: "Max current", type: "quantity", unit: "A", placeholder: "none: it heats instead" },
+  ],
+  derive: (p) => ({ label: batteryLabel(p) }),
+  width: 2,
+  height: 4,
+  parts: [],
+  pins: [
+    { id: "+", label: "+", x: 1, y: 0, side: "top", labelAt: "right", kind: "power" },
+    { id: "-", label: "−", x: 1, y: 4, side: "bottom", labelAt: "right", kind: "gnd" },
+  ],
+  body: [
+    { type: "path", d: "M1 0 V1.4 M1 2.6 V4 M0.3 1.4 H1.7 M0.6 1.8 H1.4 M0.3 2.2 H1.7 M0.6 2.6 H1.4" },
+    { type: "text", x: 1.9, y: 1.5, text: "{ref}", size: 0.35, anchor: "start" },
+    { type: "text", x: 1.9, y: 2.5, text: "{label}", size: 0.3, anchor: "start", muted: true },
+  ],
+  // Overload is thermal: the losses heat the cell until it vents (or, lithium, runs away). A
+  // stated max current is a plain rating on top of that, for a pack with its own fuse.
+  model: [
+    {
+      kind: "BAT",
+      plus: "+",
+      minus: "-",
+      chemistry: "{chem}",
+      cells: "{cells}",
+      capacity: "{capacity}",
+      soc: "{soc}",
+      rint: (p) => parseValue(p.rint),
+      temp: "{temp}",
+      cycles: "{cycles}",
+      years: "{years}",
+      spread: "{spread}",
+      limits: { current: (p) => parseValue(p.imax) },
+    },
+  ],
+}
+
+export const dcSource: ComponentDef = {
+  id: "dc-source",
+  name: "DC source",
+  description: "Ideal DC voltage source with an internal resistance: a bench supply. For real cells use the battery.",
+  category: "Power",
+  icon: DcSourceIcon,
+  prefix: "G",
+  defaults: { value: "5 V", rint: "0.5 Ω", imax: "3 A" },
   fields: [
     VALUE_FIELD("Voltage", "V"),
     { key: "rint", label: "Internal resistance", type: "quantity", unit: "Ω" },
@@ -432,11 +497,13 @@ export const battery: ComponentDef = {
     { id: "-", label: "−", x: 1, y: 4, side: "bottom", labelAt: "right", kind: "gnd" },
   ],
   body: [
-    { type: "path", d: "M1 0 V1.4 M1 2.6 V4 M0.3 1.4 H1.7 M0.6 1.8 H1.4 M0.3 2.2 H1.7 M0.6 2.6 H1.4" },
+    { type: "path", d: "M1 0 V1.2 M1 2.8 V4" },
+    { type: "circle", cx: 1, cy: 2, r: 0.8 },
+    { type: "path", d: "M0.75 1.6 H1.25 M1 1.35 V1.85 M0.75 2.45 H1.25" },
     { type: "text", x: 1.9, y: 1.5, text: "{ref}", size: 0.35, anchor: "start" },
     { type: "text", x: 1.9, y: 2.5, text: "{value}", size: 0.3, anchor: "start", muted: true },
   ],
-  // Internal resistance keeps a short from being infinite; the cell overheats past imax.
+  // Internal resistance keeps a short from being infinite; the supply overheats past imax.
   model: [
     { kind: "V", plus: "$cell", minus: "-", value: "{value}", limits: { current: "{imax}" } },
     { kind: "R", a: "$cell", b: "+", value: "{rint}" },
@@ -735,6 +802,7 @@ export const basicComponents: ComponentDef[] = [
   pushbutton,
   toggleSwitch,
   battery,
+  dcSource,
   acSource,
   pulseSource,
   transformer,

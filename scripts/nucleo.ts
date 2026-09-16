@@ -126,7 +126,7 @@ setLevel(ls, true)
   doc.wires.splice(doc.wires.indexOf(w), 1)
 }
 
-// 5. Power tree: unplug USB → rails collapse; a 9 V battery on VIN brings them back through
+// 5. Power tree: unplug USB → rails collapse; a 9 V alkaline on VIN brings them back through
 //    the regulators; a short on +5V folds the USB port back to 500 mA instead of burning.
 {
   setLevel(ls, false)
@@ -134,7 +134,7 @@ setLevel(ls, true)
   let snap = settle()
   expect({ block: "Power", what: "+3V3 with USB unplugged", got: pinV(snap, u, "CN8-7")!, want: 0, tol: 1e-3, unit: "V" })
   expect({ block: "Power", what: "+5V with USB unplugged", got: pinV(snap, u, "CN8-9")!, want: 0, tol: 1e-3, unit: "V" })
-  const bat = place("battery", 20, 60, { value: "9 V", rint: "0.5 Ω", imax: "1 A" })
+  const bat = place("battery", 20, 60, { chem: "alkaline", cells: "6", capacity: "500 mAh", soc: "100" })
   doc.objects.push(bat)
   const w1 = wire(bat, "+", u, "CN8-15")
   const w2 = wire(bat, "-", u, "CN8-11")

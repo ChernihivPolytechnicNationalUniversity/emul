@@ -18,6 +18,7 @@ const KIND_LABEL: Record<Reading["kind"], string> = {
   C: "Capacitor",
   L: "Inductor",
   V: "Source",
+  BAT: "Battery",
   XFMR: "Transformer",
   D: "Diode",
   Q: "Transistor",
@@ -91,6 +92,7 @@ function ElementReading({ reading: r, title }: { reading: Reading; title: string
       ]
   if (r.kind !== "C" && r.kind !== "L") rows.push([rms ? "Power (avg)" : "Power", formatSI(rms ? rms.power : r.power, "W")])
   for (const [k, v] of Object.entries(r.extra ?? {})) rows.push([k, v])
+  const charge = r.charge
 
   const load = r.load
   const tone = load === undefined ? "" : load >= 1 ? "text-destructive" : load >= 0.7 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
@@ -109,6 +111,12 @@ function ElementReading({ reading: r, title }: { reading: Reading; title: string
         >
           <ProgressLabel className="text-xs">{title}</ProgressLabel>
           <ProgressValue className={cn("text-xs", tone)}>{() => `${Math.round(load * 100)}% of rating`}</ProgressValue>
+        </Progress>
+      )}
+      {charge !== undefined && (
+        <Progress value={Math.min(100, charge * 100)} className={cn("gap-1", charge <= 0.1 && "[&_[data-slot=progress-indicator]]:bg-destructive")}>
+          <ProgressLabel className="text-xs">Charge</ProgressLabel>
+          <ProgressValue className="text-xs text-muted-foreground">{() => `${Math.round(charge * 100)} %`}</ProgressValue>
         </Progress>
       )}
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">

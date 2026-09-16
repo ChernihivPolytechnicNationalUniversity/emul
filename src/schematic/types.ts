@@ -164,6 +164,32 @@ export type Element =
       duty?: Value
       limits?: Limits
     }
+  /**
+   * Electrochemical cell(s): open-circuit voltage from the chemistry's discharge curve at the
+   * state of charge, which the solver integrates from the current; internal resistance
+   * (default from the chemistry and capacity) that climbs towards empty; Peukert rate loss,
+   * self-discharge, overcharge and deep-discharge failure; diffusion (the voltage rests back
+   * up after a load), self-heating with the chemistry's vent temperature, ambient `temp` in °C
+   * (capacity and resistance follow it), wear from `cycles` and `years`, and a capacity
+   * `spread` in per cent between the cells of a pack (the weakest empties first). `chemistry`
+   * is a `Chemistry.id` (may reference a prop), `capacity` in Ah, `soc` the starting state of
+   * charge in per cent.
+   */
+  | {
+      kind: "BAT"
+      plus: NodeRef
+      minus: NodeRef
+      chemistry: string
+      cells: Value
+      capacity: Value
+      soc: Value
+      rint?: Value
+      temp?: Value
+      cycles?: Value
+      years?: Value
+      spread?: Value
+      limits?: Limits
+    }
   /** Ideal transformer: V(s1, s2) = ratio · V(p1, p2), no losses or magnetising current. */
   | { kind: "XFMR"; p1: NodeRef; p2: NodeRef; s1: NodeRef; s2: NodeRef; ratio: Value; limits?: Limits }
   /** Shockley diode. `vf` is the forward drop at 10 mA; `zener` the reverse breakdown voltage. */
@@ -211,8 +237,8 @@ export type Element =
 /** An editable per-instance property shown in the inspector. */
 export type PropField =
   | { key: string; label: string; type: "text"; placeholder?: string }
-  /** A number with an SI prefix in a fixed unit, stored as "4.7 kΩ". */
-  | { key: string; label: string; type: "quantity"; unit: string }
+  /** A number with an SI prefix in a fixed unit, stored as "4.7 kΩ". `placeholder` is shown when empty (a value the model derives). */
+  | { key: string; label: string; type: "quantity"; unit: string; placeholder?: string }
   | { key: string; label: string; type: "select"; options: { value: string; label: string }[] }
   | { key: string; label: string; type: "range"; min: number; max: number; step: number; /** Shown after the value. */ unit?: string }
 
@@ -230,6 +256,8 @@ export type ComponentDef = {
   prefix?: string
   /** Default props (value, color…); overridable per placed object. */
   defaults?: Record<string, string>
+  /** Extra "{key}" substitutions for the body text computed from the props (a label that combines several). */
+  derive?: (props: Record<string, string>) => Record<string, string>
   /** Editable props. `ref` is added automatically for components with a prefix. */
   fields?: PropField[]
   body: BodyShape[]

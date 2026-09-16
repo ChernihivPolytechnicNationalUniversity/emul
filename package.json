@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "typecheck": "tsc -b",
-    "test": "pnpm exam && pnpm physics",
+    "test": "pnpm exam && pnpm physics && pnpm battery",
     "preview": "vite preview",
     "exam": "tsx --tsconfig tsconfig.app.json scripts/exam.ts",
     "logic": "tsx --tsconfig tsconfig.app.json scripts/logic.ts",
@@ -38,7 +38,8 @@
     "analyser": "tsx --tsconfig tsconfig.app.json scripts/analyser.ts",
     "meters": "tsx --tsconfig tsconfig.app.json scripts/meters.ts",
     "nucleo-serial": "tsx --tsconfig tsconfig.app.json scripts/nucleo-serial.ts",
-    "physics": "tsx --tsconfig tsconfig.app.json scripts/physics.ts"
+    "physics": "tsx --tsconfig tsconfig.app.json scripts/physics.ts",
+    "battery": "tsx --tsconfig tsconfig.app.json scripts/battery.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

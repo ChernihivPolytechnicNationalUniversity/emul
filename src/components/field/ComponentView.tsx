@@ -66,6 +66,7 @@ export function ComponentView({
   const h = def.height * grid
   const g = (v: number) => v * grid
   const props = { ...def.defaults, ...object.props }
+  if (def.derive) Object.assign(props, def.derive(props))
   const rotation: Rotation = object.rotation ?? 0
   const damage: Damage | undefined = sim.damage[object.id]
   // The SVG keeps the unrotated size and is rotated around its center; offset it so the

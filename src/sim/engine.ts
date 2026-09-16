@@ -1,4 +1,17 @@
 import type { Damage, PartState } from "@/schematic/types"
+import {
+  capacityAfterAge,
+  capacityAtTemp,
+  cellOcv,
+  DEAD_SOC,
+  drainRate,
+  formatDuration,
+  packResistance,
+  resistanceAfterAge,
+  resistanceAtTemp,
+  thermalMass,
+  thermalResistance,
+} from "./battery"
 import { GROUND, type GpioState, type Netlist, type Resolved } from "./netlist"
 import { formatSI } from "./units"
 
@@ -53,6 +66,18 @@ export type Failure = { object: string; damage: Damage; ref: string }
 
 /** Persistence of vision for LED brightness: PWM above ~100 Hz reads as a steady level. */
 const LED_EYE_TAU = 0.01
+/**
+ * Window for a battery's average load, which its time-to-empty estimate divides into the charge
+ * left: long enough to cover a sleeping MCU's wake-ups, short enough to follow a changed load.
+ * Until the run is that old the average is over the whole run.
+ */
+const BAT_AVG_TAU = 10
+/** A battery's resistance is stepped in 1 % increments as it drains, so a linear circuit keeps its factorization between steps. */
+const BAT_R_STEP = Math.log(1.01)
+/** Charge forced into a primary cell before it vents, as a fraction of its capacity. */
+const PRIMARY_CHARGE_LIMIT = 0.03
+/** Cells a pack can have in series (the inspector's slider range); per-cell state is laid out in blocks of this. */
+const MAX_CELLS = 20
 
 /** Operating point of one element after a step. */
 export type Reading = {
@@ -74,6 +99,8 @@ export type Reading = {
   hidden?: boolean
   /** RMS current and voltage and average power over the last few cycles; only in AC circuits. */
   rms?: { current: number; voltage: number; power: number }
+  /** A battery's state of charge, 0..1 (over 1 when overcharged). */
+  charge?: number
 }
 
 const Q_IS = 1e-14
@@ -116,6 +143,16 @@ export type ProbeReading = {
  * Peak detection per bucket rather than plain decimation, so a narrow spike is never missed.
  */
 export type TraceChunk = { start: number; bucket: number; count: number; data: Float32Array }
+
+/** What a battery's charge and drain rate (per second, negative when charging) amount to in the inspector. */
+function batteryTimeLeft(lo: number, hi: number, rate: number, amps: number, rechargeable: boolean): string {
+  // A primary cell being force-charged is not going anywhere; its self-discharge life is beside the point.
+  if (amps < 0 && !rechargeable) return "—"
+  if (lo <= 0) return rate < 0 && rechargeable ? `empty, full in ${formatDuration((1 - hi) / -rate)}` : "empty"
+  if (rate > 0) return formatDuration(lo / rate)
+  if (rate < 0) return rechargeable ? (hi >= 1 ? "full" : `full in ${formatDuration((1 - hi) / -rate)}`) : "—"
+  return "—"
+}
 
 /** SPICE pn-junction voltage limiting: keeps Newton steps from overflowing the exponential. */
 function pnjlim(vnew: number, vold: number, vt: number, vcrit: number) {
@@ -182,6 +219,22 @@ export class Engine {
   /** Diode currents, instantaneous and averaged (for steady LED brightness on AC). */
   readonly diodeI: Float64Array
   readonly diodeAvg: Float64Array
+  /** Battery: per cell (blocks of MAX_CELLS) the state of charge (0..1; below 0 exhausted, above 1 overcharged). */
+  private readonly batSoc: Float64Array
+  /** Battery: ohmic resistance in force and its 1 % step, pack open-circuit voltage, the two diffusion voltages, cell temperature (°C), charge throughput (A·s, for live cycle wear). */
+  private readonly batR: Float64Array
+  private readonly batStep: Int32Array
+  private readonly batOcv: Float64Array
+  private readonly batV1: Float64Array
+  private readonly batV2: Float64Array
+  private readonly batT: Float64Array
+  private readonly batThru: Float64Array
+  /** Battery: average load, average drain rate of the weakest cell, charge forced into a primary cell (A·s). */
+  private readonly batAvgI: Float64Array
+  private readonly batAvgRate: Float64Array
+  private readonly batCharged: Float64Array
+  /** Seconds a battery element has been solved for: its average is over the whole of that until it exceeds the window. */
+  private readonly batAge: Float64Array
   /** Probe node pairs, two entries each; either side may be GROUND. */
   private probeNodes = new Int32Array(0)
   /** Per probe, for the window being filled: sum, sum of squares, trough, peak. */
@@ -290,9 +343,26 @@ export class Engine {
     this.strikeV = new Float64Array(n)
     this.gpioVolts = new Float64Array(m)
     this.ohms = new Float64Array(m)
+    this.batSoc = new Float64Array(m * MAX_CELLS)
+    this.batR = new Float64Array(m)
+    this.batStep = new Int32Array(m)
+    this.batOcv = new Float64Array(m)
+    this.batV1 = new Float64Array(m)
+    this.batV2 = new Float64Array(m)
+    this.batT = new Float64Array(m)
+    this.batThru = new Float64Array(m)
+    this.batAvgI = new Float64Array(m)
+    this.batAvgRate = new Float64Array(m)
+    this.batCharged = new Float64Array(m)
+    this.batAge = new Float64Array(m)
     for (let i = 0; i < m; i++) {
       const el = net.elements[i]
       if (el.kind === "R") this.ohms[i] = el.value
+      else if (el.kind === "BAT") {
+        for (let k = 0; k < el.cells; k++) this.batSoc[i * MAX_CELLS + k] = el.soc0
+        this.batT[i] = el.temp
+        this.batteryState(i)
+      }
     }
 
     this.indexOf = new Map(net.elements.map((el, i) => [el.id, i]))
@@ -331,6 +401,23 @@ export class Engine {
       this.msP[to] = prev.msP[from]
       this.diodeAvg[to] = prev.diodeAvg[from]
       this.arc[to] = prev.arc[from]
+      // A battery keeps draining across an edit — unless the edit was to the battery itself.
+      // Its temperature, wear and mismatch may change under it: the charge stays, the cell
+      // temperature relaxes to the new air from where it was.
+      const el = this.net.elements[to]
+      const was = prev.net.elements[from]
+      if (el.kind === "BAT" && was.kind === "BAT" && el.chem === was.chem && el.capacity === was.capacity && el.soc0 === was.soc0 && el.cells === was.cells) {
+        for (let k = 0; k < MAX_CELLS; k++) this.batSoc[to * MAX_CELLS + k] = prev.batSoc[from * MAX_CELLS + k]
+        this.batV1[to] = prev.batV1[from]
+        this.batV2[to] = prev.batV2[from]
+        this.batT[to] = prev.batT[from]
+        this.batThru[to] = prev.batThru[from]
+        this.batAvgI[to] = prev.batAvgI[from]
+        this.batAvgRate[to] = prev.batAvgRate[from]
+        this.batCharged[to] = prev.batCharged[from]
+        this.batAge[to] = prev.batAge[from]
+        this.batteryState(to)
+      }
     }
     this.msPrimed = prev.msPrimed
     // Node voltages carry over by pin (nets get renumbered): the next step starts from the
@@ -342,6 +429,58 @@ export class Engine {
     }
     this.time = prev.time
     this.setTrace(prev.traceBucket)
+  }
+
+  /** Relative size of cell `k` in a pack with a capacity spread: evenly from 1 − spread to 1 + spread. */
+  private cellSize(el: Extract<Resolved, { kind: "BAT" }>, k: number) {
+    return el.cells > 1 ? 1 + el.spread * ((2 * k) / (el.cells - 1) - 1) : 1
+  }
+
+  /** Full cycles a battery has seen: the ones it was placed with plus what has flowed through it since. */
+  private cellCycles(el: Extract<Resolved, { kind: "BAT" }>, i: number) {
+    return el.cycles + this.batThru[i] / (2 * el.capacity * 3600)
+  }
+
+  /** Usable capacity of cell `k` right now, Ah: nameplate × size × temperature × wear. */
+  private cellCapacity(el: Extract<Resolved, { kind: "BAT" }>, i: number, k: number) {
+    return el.capacity * this.cellSize(el, k) * capacityAtTemp(el.chem, this.batT[i]) * capacityAfterAge(el.chem, this.cellCycles(el, i), el.years)
+  }
+
+  /**
+   * The pack's open-circuit voltage and ohmic resistance at its cells' states of charge,
+   * temperature and wear. The resistance is stepped in 1 % increments so a linear circuit
+   * keeps its factorization between steps.
+   */
+  private batteryState(i: number) {
+    const el = this.net.elements[i]
+    if (el.kind !== "BAT") return
+    const chem = el.chem
+    const rScale = (resistanceAtTemp(chem, this.batT[i]) * resistanceAfterAge(chem, this.cellCycles(el, i), el.years)) / el.cells
+    let ocv = 0
+    let r = 0
+    for (let k = 0; k < el.cells; k++) {
+      const soc = this.batSoc[i * MAX_CELLS + k]
+      ocv += cellOcv(chem, soc)
+      // A smaller cell has proportionally more resistance.
+      r += packResistance(chem, (el.rFull * rScale) / this.cellSize(el, k), soc)
+    }
+    this.batOcv[i] = ocv
+    const step = Math.round(Math.log(r / el.rFull) / BAT_R_STEP)
+    if (step === this.batStep[i] && this.batR[i] > 0) return
+    this.batStep[i] = step
+    this.batR[i] = el.rFull * Math.exp(step * BAT_R_STEP)
+  }
+
+  /** State of charge of a pack's weakest and strongest cell. */
+  private batteryCells(el: Extract<Resolved, { kind: "BAT" }>, i: number): [min: number, max: number] {
+    let lo = Infinity
+    let hi = -Infinity
+    for (let k = 0; k < el.cells; k++) {
+      const soc = this.batSoc[i * MAX_CELLS + k]
+      if (soc < lo) lo = soc
+      if (soc > hi) hi = soc
+    }
+    return [lo, hi]
   }
 
   /** Terminal voltage of a source at time `t`. */
@@ -449,6 +588,25 @@ export class Engine {
           if (withZ) z[r] = this.sourceVoltage(el, this.time + dt)
           break
         }
+        case "BAT": {
+          // Thevenin cell: V(plus) − V(minus) = OCV + R·x[r], x[r] being the current entering
+          // at plus (negative while the battery delivers). Row r carries −R on its own unknown.
+          const r = n + el.index
+          if (withA) {
+            if (el.plus !== GROUND) {
+              A[el.plus * size + r] += 1
+              A[r * size + el.plus] += 1
+            }
+            if (el.minus !== GROUND) {
+              A[el.minus * size + r] -= 1
+              A[r * size + el.minus] -= 1
+            }
+            A[r * size + r] -= this.batR[i]
+          }
+          // The diffusion voltages sit in series with the open-circuit voltage.
+          if (withZ) z[r] = this.batOcv[i] - this.batV1[i] - this.batV2[i]
+          break
+        }
         case "XFMR": {
           // Unknown x[r] is the current entering the secondary at s1. Row r: V(s1) − V(s2) − n·(V(p1) − V(p2)) = 0;
           // the primary draws −n·x[r] at p1 so the power balances.
@@ -509,6 +667,7 @@ export class Engine {
       if (el.kind === "SW") mask = (mask * 31 + (switchClosed(el.closed, parts(el.object, el.part)) ? 1 : this.arc[i] ? 2 : 0)) | 0
       else if (el.kind === "GPIO") mask = (mask * 31 + this.gpioState[i]) | 0
       else if (el.kind === "R" && el.live) mask = (mask * 31 + (this.ohms[i] | 0)) | 0
+      else if (el.kind === "BAT") mask = (mask * 31 + this.batStep[i]) | 0
     }
     return mask
   }
@@ -1001,6 +1160,55 @@ export class Engine {
           this.record(el, i, dt, cur, vs, Math.abs(cur * vs))
           break
         }
+        case "BAT": {
+          const cur = x[n + el.index]
+          const vt = this.vol(el.plus, this.v) - this.vol(el.minus, this.v)
+          tc[this.termOf[base]] += cur
+          tc[this.termOf[base + 1]] -= cur
+          this.record(el, i, dt, cur, vt, Math.abs(cur * vt))
+          if (!this.converged) break
+          const chem = el.chem
+          const drain = -cur
+          const temp = this.batT[i]
+          // Coulomb counting per cell with the chemistry's rate loss — the same current through
+          // every cell, so a smaller one drains faster; an exhausted cell stops at the floor.
+          // The cell that matters is the one that empties first on discharge, fills first on charge.
+          let worst = drain >= 0 ? -Infinity : Infinity
+          for (let k = 0; k < el.cells; k++) {
+            const rate = drainRate(chem, this.cellCapacity(el, i, k), drain, temp)
+            if (drain >= 0 ? rate > worst : rate < worst) worst = rate
+            const at = i * MAX_CELLS + k
+            this.batSoc[at] = Math.max(-DEAD_SOC, this.batSoc[at] - rate * dt)
+          }
+          this.batThru[i] += Math.abs(drain) * dt
+          // Diffusion: each RC pair charges towards drain × R with its own time constant.
+          const r0 = this.batR[i]
+          const pol = chem.polarization
+          this.batV1[i] += ((drain * pol.r1 * r0 - this.batV1[i]) * dt) / pol.tau1
+          this.batV2[i] += ((drain * pol.r2 * r0 - this.batV2[i]) * dt) / pol.tau2
+          // Self-heating: the ohmic and diffusion losses warm the cell; it cools to the air through its surface.
+          const heat = drain * drain * r0 + drain * (this.batV1[i] + this.batV2[i])
+          this.batT[i] += ((heat - (temp - el.temp) / thermalResistance(chem, el.capacity)) * dt) / thermalMass(chem, el.capacity)
+          this.batAge[i] += dt
+          const a = Math.min(1, dt / Math.min(BAT_AVG_TAU, this.batAge[i]))
+          this.batAvgI[i] += (drain - this.batAvgI[i]) * a
+          this.batAvgRate[i] += (worst - this.batAvgRate[i]) * a
+          this.batteryState(i)
+          const [lo, hi] = this.batteryCells(el, i)
+          if (this.batT[i] > chem.thermal.tVent) {
+            this.failWith(el, chem.thermal.fail, `reached ${this.batT[i].toFixed(0)} °C: ${chem.thermal.what}`)
+          } else if (chem.chargeEfficiency === 0) {
+            // A primary cell cannot take a charge: the current forced in makes gas until the seal gives.
+            if (drain < 0) this.batCharged[i] -= drain * dt
+            if (this.batCharged[i] > PRIMARY_CHARGE_LIMIT * el.capacity * 3600)
+              this.failWith(el, "open", `charged with ${formatSI(-drain, "A")}: a primary cell, it vented`)
+          } else if (chem.overcharge && hi > 1 + chem.overcharge.soc) {
+            this.failWith(el, chem.overcharge.fail, `${el.cells > 1 ? "a cell " : ""}overcharged to ${formatSI(cellOcv(chem, hi), "V")}: ${chem.overcharge.what}`)
+          } else if (chem.deepDischarge && lo < -chem.deepDischarge.soc) {
+            this.failWith(el, "open", `${el.cells > 1 ? "a cell " : ""}discharged below ${formatSI(cellOcv(chem, 0), "V")}: ${chem.deepDischarge.what}`)
+          }
+          break
+        }
         case "XFMR": {
           const is = x[n + el.index]
           const vs = this.vol(el.s1, this.v) - this.vol(el.s2, this.v)
@@ -1182,16 +1390,15 @@ export class Engine {
   }
 
   private fail(el: Resolved, how: "open" | "short", what: string, actual: number, rated: number, unit: string) {
+    this.failWith(el, how, `${what} ${formatSI(actual, unit)} exceeds the ${formatSI(rated, unit)} rating`)
+  }
+
+  private failWith(el: Resolved, how: "open" | "short", reason: string) {
     for (const f of this.failures) if (f.object === el.object && f.damage.element === el.element) return
     this.failures.push({
       object: el.object,
       ref: el.ref,
-      damage: {
-        element: el.element,
-        fail: how,
-        fatal: el.limits?.fatal ?? true,
-        reason: `${what} ${formatSI(actual, unit)} exceeds the ${formatSI(rated, unit)} rating`,
-      },
+      damage: { element: el.element, fail: how, fatal: el.limits?.fatal ?? true, reason },
     })
   }
 
@@ -1267,6 +1474,33 @@ export class Engine {
         if (el.shape === "pulse") reading.extra.Duty = `${Math.round(el.duty * 100)} %`
       } else if (el.kind === "XFMR") {
         reading.extra = { Ratio: `1 : ${formatSI(el.ratio, "")}` }
+      } else if (el.kind === "BAT") {
+        // The pack is as empty as its weakest cell and as full as its strongest.
+        const [lo, hi] = this.batteryCells(el, i)
+        const avg = this.batAvgI[i]
+        const rate = this.batAvgRate[i]
+        let weakest = 0
+        let capNow = Infinity
+        for (let k = 0; k < el.cells; k++) {
+          const c = this.cellCapacity(el, i, k)
+          if (c < capNow) {
+            capNow = c
+            weakest = k
+          }
+        }
+        const nominal = el.capacity * this.cellSize(el, weakest)
+        reading.charge = Math.max(0, lo)
+        reading.extra = {
+          Chemistry: `${el.chem.name}, ${el.cells} × ${formatSI(el.chem.nominal, "V")}`,
+          "Open-circuit": formatSI(this.batOcv[i], "V"),
+          "Internal R": formatSI(this.batR[i], "Ω"),
+          Polarization: formatSI(this.batV1[i] + this.batV2[i], "V"),
+          Temperature: `${this.batT[i].toFixed(1)} °C`,
+          Capacity: `${formatSI(capNow, "Ah")} (${Math.round((capNow / nominal) * 100)} %)`,
+          ...(el.cells > 1 && el.spread > 0 ? { Cells: `${Math.round(Math.max(0, lo) * 100)} – ${Math.round(Math.max(0, hi) * 100)} %` } : {}),
+          [avg < 0 ? "Charging (avg)" : "Load (avg)"]: formatSI(Math.abs(avg), "A"),
+          "Time left": batteryTimeLeft(lo, hi, rate, avg, el.chem.chargeEfficiency > 0),
+        }
       }
       if (this.ac) {
         reading.rms = { current: Math.sqrt(this.msI[i]), voltage: Math.sqrt(this.msV[i]), power: this.msP[i] }

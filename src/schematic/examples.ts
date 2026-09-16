@@ -1,4 +1,4 @@
-import { CircleDashedIcon, CpuIcon, NetworkIcon, ZapIcon } from "lucide-react"
+import { BatteryMediumIcon, CircleDashedIcon, CpuIcon, NetworkIcon, ZapIcon } from "lucide-react"
 import { builder } from "./builder"
 import { getDef } from "./registry"
 import { systemExam } from "./exam"
@@ -140,6 +140,28 @@ const bridge: Example = {
     wire(r6, "1", r7, "1")
     wire(r6, "1", r5, "2", [[17, 12]])
     wire(r5, "1", g, "GND", [[8, 12], [5, 12]])
+    return doc
+  },
+}
+
+/** Two AA cells through a switch into an LED: select the battery while it runs to watch the charge and the time left. */
+const batteryLife: Example = {
+  id: "battery-life",
+  name: "Battery life",
+  description: "Two AA alkalines lighting a red LED through 100 Ω. The inspector shows the charge and how long the cells will last; try a CR2032 or a flat pack.",
+  icon: BatteryMediumIcon,
+  build(grid) {
+    const { doc, place, wire } = builder(grid)
+    const bat = place("battery", 2, 4, { chem: "alkaline", cells: "2", capacity: "2.5 Ah", soc: "100" })
+    const sw = place("switch", 6, 2)
+    const r = place("resistor", 12, 2, { value: "100 Ω", power: "0.25" })
+    const led = place("led", 18, 2, { value: "red" })
+    const gnd = place("ground", 23, 10)
+    wire(bat, "+", sw, "1", [[3, 3]])
+    wire(sw, "2", r, "1")
+    wire(r, "2", led, "1")
+    wire(led, "2", gnd, "GND", [[24, 3]])
+    wire(bat, "-", gnd, "GND", [[3, 10], [24, 10]])
     return doc
   },
 }
@@ -441,4 +463,4 @@ export const nucleoAdc: Example = {
   },
 }
 
-export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoAdc, lab1Stand, powerSupply, systemExam, transistorLogic, lissajous, bridge]
+export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoAdc, lab1Stand, powerSupply, batteryLife, systemExam, transistorLogic, lissajous, bridge]

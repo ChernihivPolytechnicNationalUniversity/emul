@@ -1,6 +1,7 @@
 import { GRID, pinContacts } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import { pinKey, type Damage, type Element, type Limits, type NodeRef, type PlacedObject, type Schematic, type Value } from "@/schematic/types"
+import { chemistryById, defaultResistance, type Chemistry } from "./battery"
 import { parseValue } from "./units"
 
 /** Net index; GROUND is the reference node and has no matrix row. */
@@ -17,6 +18,28 @@ export type Resolved =
   | (Base & { kind: "R" | "C" | "L"; a: number; b: number; value: number; live?: string; keys: [string, string] })
   /** `amplitude` is 0 for a DC source. */
   | (Base & { kind: "V"; plus: number; minus: number; value: number; amplitude: number; frequency: number; phase: number; shape: "sine" | "pulse"; duty: number; index: number; keys: [string, string] })
+  /**
+   * Battery pack: `chem` the chemistry, `capacity` the nameplate in Ah, `soc0` the starting
+   * state of charge (0..1), `rFull` the pack's internal resistance when full, fresh and at
+   * 25 °C, `temp` the air around it in °C, `cycles`/`years` its wear, `spread` the relative
+   * capacity mismatch between its cells (0..1). `index` is the source row.
+   */
+  | (Base & {
+      kind: "BAT"
+      plus: number
+      minus: number
+      chem: Chemistry
+      cells: number
+      capacity: number
+      soc0: number
+      rFull: number
+      temp: number
+      cycles: number
+      years: number
+      spread: number
+      index: number
+      keys: [string, string]
+    })
   /** `index` is the extra unknown (secondary current) like a source's. */
   | (Base & { kind: "XFMR"; p1: number; p2: number; s1: number; s2: number; ratio: number; index: number; keys: [string, string, string, string] })
   | (Base & { kind: "D"; anode: number; cathode: number; is: number; n: number; zener?: number; part?: string; keys: [string, string] })
@@ -118,7 +141,10 @@ function resolveLimits(l: Limits | undefined, props: Record<string, string>): Re
     const n = resolveValue(v, props)
     return Number.isFinite(n) && n > 0 ? n : undefined
   }
-  return { power: num(l.power), current: num(l.current), voltage: num(l.voltage), reverse: num(l.reverse), fail: l.fail ?? "open", fatal: l.fatal ?? true }
+  const out = { power: num(l.power), current: num(l.current), voltage: num(l.voltage), reverse: num(l.reverse), fail: l.fail ?? "open", fatal: l.fatal ?? true }
+  // Every rating left blank (a battery without a stated max current): the element is unrated.
+  if (out.power === undefined && out.current === undefined && out.voltage === undefined && out.reverse === undefined) return undefined
+  return out
 }
 
 /** The two nodes a shorted element bridges: a fried junction, welded contacts, a punched-through dielectric. */
@@ -130,6 +156,7 @@ function shortPair(el: Element): [NodeRef, NodeRef] | null {
     case "SW":
       return [el.a, el.b]
     case "V":
+    case "BAT":
       return [el.plus, el.minus]
     case "D":
       return [el.anode, el.cathode]
@@ -219,6 +246,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         touch(obj, el.b)
         break
       case "V":
+      case "BAT":
         touch(obj, el.plus)
         touch(obj, el.minus)
         firstMinus ??= uf.find(node(obj, el.minus))
@@ -309,6 +337,36 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
           phase: num(el.phase),
           shape: el.shape ?? "sine",
           duty: el.duty === undefined ? 0.5 : Math.min(0.99, Math.max(0.01, num(el.duty))),
+          index: sources++,
+          keys: [node(obj, el.plus), node(obj, el.minus)],
+        })
+        break
+      }
+      case "BAT": {
+        const chem = chemistryById(el.chemistry.replace(/\{(\w+)\}/g, (_, k: string) => props[k] ?? ""))
+        const cells = Math.max(1, Math.round(resolveValue(el.cells, props) || 1))
+        const capacity = resolveValue(el.capacity, props)
+        const soc = resolveValue(el.soc, props)
+        const rint = el.rint === undefined ? NaN : resolveValue(el.rint, props)
+        const opt = (v: Value | undefined, fallback: number) => {
+          const n = v === undefined ? NaN : resolveValue(v, props)
+          return Number.isFinite(n) ? n : fallback
+        }
+        if (!Number.isFinite(capacity) || capacity <= 0) break
+        elements.push({
+          ...base,
+          kind: "BAT",
+          plus: netOf(obj, el.plus),
+          minus: netOf(obj, el.minus),
+          chem,
+          cells,
+          capacity,
+          soc0: Number.isFinite(soc) ? Math.min(1, Math.max(0, soc / 100)) : 1,
+          rFull: Number.isFinite(rint) && rint > 0 ? rint : defaultResistance(chem, cells, capacity),
+          temp: opt(el.temp, 25),
+          cycles: Math.max(0, opt(el.cycles, 0)),
+          years: Math.max(0, opt(el.years, 0)),
+          spread: Math.min(0.9, Math.max(0, opt(el.spread, 0) / 100)),
           index: sources++,
           keys: [node(obj, el.plus), node(obj, el.minus)],
         })

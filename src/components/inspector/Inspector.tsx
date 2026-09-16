@@ -147,6 +147,7 @@ function PropEditor({ field, value, onChange }: { field: PropField; value: strin
               id={id}
               inputMode="decimal"
               value={number}
+              placeholder={field.placeholder}
               aria-invalid={invalid || undefined}
               onChange={(e) => onChange(joinValue(e.target.value, prefix, field.unit))}
             />
