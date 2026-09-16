@@ -1,7 +1,18 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { nearestSegment, resolvePin, routeObstacles, routeToPoint, routeWire, toPath, type Point } from "@/schematic/geometry"
-import type { PinRef, PlacedObject, Wire } from "@/schematic/types"
+import {
+  nearestSegment,
+  resolvePin,
+  routeObstacles,
+  routeToPoint,
+  routeWire,
+  toPath,
+  type Point,
+  type RoutedWire,
+} from "@/schematic/geometry"
+import type { PinRef, PlacedObject } from "@/schematic/types"
+import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
+import type { WireFlow } from "./wire-flow"
 
 export type PendingWire = {
   from: PinRef
@@ -11,230 +22,262 @@ export type PendingWire = {
   points: Point[]
   /** "drag": mouse still held from the first pin; "click": placing bends click by click. */
   mode: "drag" | "click"
+  color: WireColorKey
+  chosen: boolean
 }
 
+const WIRE_PX = 2
+const CASING_PX = 3
+const SELECTED_EXTRA_PX = 1
+const HALO_PX = 7
+const HIT_PX = 14
+const CORNER = 0.3
+
+const HANDLE_CELLS = 0.15
+const HANDLE_MIN_PX = 2.5
+const HANDLE_MAX_PX = 4
+const HANDLE_HIT_PX = 11
+
 type WireLayerProps = {
-  objects: PlacedObject[]
-  wires: Wire[]
+  routes: readonly RoutedWire[]
+  objects: readonly PlacedObject[]
   grid: number
-  hairline: number
+  scale: number
   selected: ReadonlySet<string>
+  hoveredNet: string | null
+  colorOf: (wireId: string) => WireColorKey
+  netOfWire: (wireId: string) => string | undefined
+  bendsOf: (wireId: string) => readonly Point[] | undefined
   pending: PendingWire | null
-  /** Mean amps per wire, positive from `from` to `to`; empty when the simulation is off. */
-  currents: Map<string, number>
-  /** Mean |amps| per wire: sets the weight of the wire. */
-  currentsAbs: Map<string, number>
-  /**
-   * Flow marker position per wire (world px), integrated by the solver from the instantaneous
-   * current. The dashes are placed at it, interpolating between snapshots, so they move
-   * exactly as the charge does: back and forth at 1 Hz, a blur or a standstill at 60 Hz.
-   */
-  phases: Map<string, number>
-  /** Paused: keep the picture, stop the dashes. */
-  paused: boolean
+  flow: WireFlow
   onWirePointerDown: (e: React.PointerEvent<SVGPathElement>, id: string) => void
+  onWirePointerEnter: (id: string) => void
+  onWirePointerLeave: (id: string) => void
   /** Double-click on a segment: insert a bend at `index` of the wire's points. */
   onInsertBend: (wireId: string, index: number, clientX: number, clientY: number) => void
   onRemoveBend: (wireId: string, index: number) => void
-  onBendPointerDown: (e: React.PointerEvent<SVGCircleElement>, wireId: string, index: number) => void
-  onBendPointerMove: (e: React.PointerEvent<SVGCircleElement>) => void
-  onBendPointerUp: (e: React.PointerEvent<SVGCircleElement>) => void
+  onBendPointerDown: (e: React.PointerEvent<SVGGElement>, wireId: string, index: number) => void
+  onBendPointerMove: (e: React.PointerEvent<SVGGElement>) => void
+  onBendPointerUp: (e: React.PointerEvent<SVGGElement>) => void
 }
 
-/** Below this the wire is drawn as idle. */
-const FLOW_MIN = 1e-5
-/** Real-time smoothing of the displayed current weight, ms. */
-const FLOW_TAU = 300
+type NetGroup = { net: string; wires: RoutedWire[] }
 
-/** Visual weight of a current on a log scale: 0 at 10 µA, 1 at 100 mA. */
-function weight(i: number) {
-  const a = Math.abs(i)
-  if (a < FLOW_MIN) return 0
-  return Math.min(1, Math.log10(a / FLOW_MIN) / 4)
-}
-
-/** All wires in world coordinates, drawn in one SVG over the content layer. */
-export function WireLayer({
+/**
+ * All wires in world coordinates, drawn in one SVG over the content layer. Wires are painted a
+ * net at a time — every casing of the net first, then every coloured body — so the wires of one
+ * net meet cleanly at junctions and shared corridors, while a wire of another net still breaks
+ * the one it crosses.
+ */
+export const WireLayer = React.memo(function WireLayer({
+  routes,
   objects,
-  wires,
   grid,
-  hairline,
+  scale,
   selected,
+  hoveredNet,
+  colorOf,
+  netOfWire,
+  bendsOf,
   pending,
-  currents,
-  currentsAbs,
-  phases,
-  paused,
+  flow,
   onWirePointerDown,
+  onWirePointerEnter,
+  onWirePointerLeave,
   onInsertBend,
   onRemoveBend,
   onBendPointerDown,
   onBendPointerMove,
   onBendPointerUp,
 }: WireLayerProps) {
-  const stroke = Math.max(2, hairline * 1.5)
-  const pendingPath = pending && pendingRoute(objects, pending, grid)
+  React.useEffect(() => {
+    flow.setScale(scale)
+  }, [flow, scale])
+  const radius = CORNER * grid
+  const px = 1 / scale
+  const handleR = handleRadius(grid, scale)
 
-  // The snapshot's |i| are means over the last report interval, so a square wave or a sine
-  // reads as steady weight rather than whatever phase a sample landed on; a little smoothing
-  // over real time keeps the width from jumping between reports. A wire that stopped carrying
-  // current — a switch opened, a part burnt — goes idle at once: a fading tail would read as
-  // current still flowing.
-  const [flow, setFlow] = React.useState<Map<string, number>>(() => new Map())
-  const flowAt = React.useRef(0)
-  React.useEffect(() => {
-    const now = performance.now()
-    const k = flowAt.current ? 1 - Math.exp(-(now - flowAt.current) / FLOW_TAU) : 1
-    flowAt.current = now
-    setFlow((prev) => {
-      const next = new Map<string, number>()
-      for (const [id, i] of currents) {
-        const abs = currentsAbs.get(id) ?? Math.abs(i)
-        const p = prev.get(id) ?? abs
-        next.set(id, abs < FLOW_MIN ? 0 : p + (abs - p) * k)
-      }
-      return next
-    })
-  }, [currents, currentsAbs])
-
-  // Dash positions: each snapshot brings the solver's marker positions; frames slide the
-  // dashes from where they were to where they are over one report interval, so the motion is
-  // the real one, delayed by that interval rather than invented.
-  const flowRefs = React.useRef(new Map<string, SVGPathElement>())
-  const target = React.useRef<{ from: Map<string, number>; to: Map<string, number>; at: number; span: number }>({ from: new Map(), to: new Map(), at: 0, span: 50 })
-  const shown = React.useRef(new Map<string, number>())
-  React.useEffect(() => {
-    const now = performance.now()
-    const t = target.current
-    const span = t.at ? Math.min(250, Math.max(16, now - t.at)) : 50
-    target.current = { from: new Map(shown.current), to: phases, at: now, span }
-  }, [phases])
-  const live = currents.size > 0
-  const animate = live && !paused
-  React.useEffect(() => {
-    if (!animate) return
-    let raf = 0
-    const frame = (now: number) => {
-      const t = target.current
-      const k = Math.min(1, (now - t.at) / t.span)
-      for (const [id, el] of flowRefs.current) {
-        const to = t.to.get(id)
-        if (to === undefined) continue
-        const from = t.from.get(id) ?? to
-        const pos = from + (to - from) * k
-        shown.current.set(id, pos)
-        el.style.strokeDashoffset = `${-pos}`
-      }
-      raf = requestAnimationFrame(frame)
-    }
-    raf = requestAnimationFrame(frame)
-    return () => cancelAnimationFrame(raf)
-  }, [animate])
+  const groups = React.useMemo(() => groupByNet(routes, netOfWire), [routes, netOfWire])
+  const paths = React.useMemo(() => new Map(routes.map((r) => [r.id, toPath(r.pts, radius)])), [routes, radius])
+  const pathOf = (id: string) => paths.get(id) ?? ""
+  const widthOf = (id: string) => WIRE_PX + (selected.has(id) ? SELECTED_EXTRA_PX : 0)
 
   return (
     <svg data-slot="wires" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
-      {wires.map((w) => {
-        const a = resolvePin(objects, w.from, grid)
-        const b = resolvePin(objects, w.to, grid)
-        if (!a || !b) return null
-        const route = routeWire(a.point, a.pin.side, a.pin.stub ?? 1, b.point, b.pin.side, b.pin.stub ?? 1, grid, w.points, routeObstacles(objects, grid, w.from.object, w.to.object))
-        const d = toPath(route.pts)
-        const isSel = selected.has(w.id)
-        const wgt = weight(flow.get(w.id) ?? 0)
-        const width = (isSel ? stroke * 1.6 : stroke) * (1 + wgt)
-        return (
-          <g key={w.id} data-wire={w.id} className="group/wire pointer-events-auto cursor-pointer">
-            {/* wide invisible hit path */}
+      {groups.map(({ net, wires }) => (
+        <g
+          key={net}
+          data-net={net}
+          className={cn(hoveredNet !== null && net !== hoveredNet && "opacity-25")}
+          style={{ transition: "opacity 120ms" }}
+        >
+          {wires.map(
+            (route) =>
+              selected.has(route.id) && (
+                <path
+                  key={route.id}
+                  d={pathOf(route.id)}
+                  fill="none"
+                  stroke="var(--primary)"
+                  strokeOpacity={0.22}
+                  strokeWidth={HALO_PX}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ),
+          )}
+          {wires.map((route) => (
             <path
-              d={d}
+              key={route.id}
+              d={pathOf(route.id)}
               fill="none"
-              stroke="transparent"
-              strokeWidth={stroke * 5}
-              onPointerDown={(e) => onWirePointerDown(e, w.id)}
-              onDoubleClick={(e) => {
-                const svg = e.currentTarget.ownerSVGElement!
-                const m = svg.getScreenCTM()!.inverse()
-                const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m)
-                const seg = nearestSegment(route.pts, { x: p.x, y: p.y })
-                onInsertBend(w.id, route.owner[seg], e.clientX, e.clientY)
-              }}
-            />
-            <path
-              d={d}
-              fill="none"
-              className={cn(
-                "stroke-emerald-600 group-hover/wire:stroke-primary dark:stroke-emerald-400",
-                live && wgt === 0 && "stroke-emerald-600/40 dark:stroke-emerald-400/40",
-                isSel && "stroke-primary",
-              )}
-              strokeWidth={width}
+              stroke="var(--background)"
+              strokeWidth={widthOf(route.id) + CASING_PX}
               strokeLinejoin="round"
               strokeLinecap="round"
-              pointerEvents="none"
+              vectorEffect="non-scaling-stroke"
             />
-            {live && wgt > 0 && (
-              <path
-                ref={(el) => {
-                  if (el) flowRefs.current.set(w.id, el)
-                  else flowRefs.current.delete(w.id)
-                }}
-                d={d}
-                fill="none"
-                className="stroke-amber-400"
-                strokeWidth={width * 0.7}
-                strokeDasharray={`${stroke * 1.5} ${stroke * 4}`}
-                strokeLinecap="round"
-                pointerEvents="none"
-              />
-            )}
-            {isSel &&
-              w.points?.map((p, idx) => (
-                <circle
-                  key={idx}
-                  cx={p.x}
-                  cy={p.y}
-                  r={stroke * 2.2}
-                  className="cursor-move fill-background stroke-primary hover:fill-primary/20"
-                  strokeWidth={hairline * 1.5}
-                  onPointerDown={(e) => onBendPointerDown(e, w.id, idx)}
-                  onPointerMove={onBendPointerMove}
-                  onPointerUp={onBendPointerUp}
-                  onPointerCancel={onBendPointerUp}
+          ))}
+          {wires.map((route) => {
+            const d = pathOf(route.id)
+            const width = widthOf(route.id)
+            const colorKey = colorOf(route.id)
+            const color = wireColorVar(colorKey)
+            return (
+              <g key={route.id} data-wire={route.id} className="group/wire">
+                <path
+                  ref={flow.bodyRef(route.id)}
+                  data-base={width}
+                  d={d}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={width}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+                <path
+                  ref={flow.dashRef(route.id)}
+                  d={d}
+                  fill="none"
+                  stroke={wireFlowVar(colorKey)}
+                  strokeWidth={width}
+                  strokeDasharray={`${width * 2} ${width * 5.5}`}
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                  style={{ opacity: 0 }}
+                />
+                <path
+                  d={d}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={HIT_PX}
+                  vectorEffect="non-scaling-stroke"
+                  className="pointer-events-auto cursor-pointer"
+                  onPointerDown={(e) => onWirePointerDown(e, route.id)}
+                  onPointerEnter={() => onWirePointerEnter(route.id)}
+                  onPointerLeave={() => onWirePointerLeave(route.id)}
                   onDoubleClick={(e) => {
-                    e.stopPropagation()
-                    onRemoveBend(w.id, idx)
+                    const seg = nearestSegment(route.pts, clientToLocal(e))
+                    onInsertBend(route.id, route.owner[seg], e.clientX, e.clientY)
                   }}
                 />
-              ))}
-          </g>
-        )
-      })}
-      {pendingPath && (
-        <g pointerEvents="none">
-          <path
-            d={pendingPath}
-            fill="none"
-            className={cn("stroke-primary", !pending?.target && "opacity-60")}
-            strokeWidth={stroke}
-            strokeDasharray={pending?.target ? undefined : `${stroke * 2} ${stroke * 2}`}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-          {pending?.points.map((p, idx) => (
-            <circle key={idx} cx={p.x} cy={p.y} r={stroke * 1.6} className="fill-primary stroke-none" />
-          ))}
+                {selected.has(route.id) &&
+                  bendsOf(route.id)?.map((p, idx) => (
+                    <g
+                      key={idx}
+                      className="group/bend pointer-events-auto cursor-move"
+                      onPointerDown={(e) => onBendPointerDown(e, route.id, idx)}
+                      onPointerMove={onBendPointerMove}
+                      onPointerUp={onBendPointerUp}
+                      onPointerCancel={onBendPointerUp}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation()
+                        onRemoveBend(route.id, idx)
+                      }}
+                    >
+                      <circle cx={p.x} cy={p.y} r={HANDLE_HIT_PX * px} fill="transparent" stroke="none" />
+                      <circle
+                        cx={p.x}
+                        cy={p.y}
+                        r={handleR}
+                        fill={color}
+                        stroke="var(--background)"
+                        strokeWidth={1.5}
+                        vectorEffect="non-scaling-stroke"
+                        className="transition-[r] group-hover/bend:fill-primary"
+                        pointerEvents="none"
+                      />
+                    </g>
+                  ))}
+              </g>
+            )
+          })}
         </g>
-      )}
+      ))}
+      {pending && <Pending objects={objects} pending={pending} grid={grid} radius={radius} handleR={handleR} />}
     </svg>
+  )
+})
+
+function groupByNet(routes: readonly RoutedWire[], netOfWire: (wireId: string) => string | undefined): NetGroup[] {
+  const byNet = new Map<string, RoutedWire[]>()
+  for (const r of routes) {
+    const net = netOfWire(r.id) ?? r.id
+    const list = byNet.get(net)
+    if (list) list.push(r)
+    else byNet.set(net, [r])
+  }
+  return [...byNet].map(([net, wires]) => ({ net, wires }))
+}
+
+function handleRadius(grid: number, scale: number) {
+  return Math.min(Math.max(HANDLE_CELLS * grid, HANDLE_MIN_PX / scale), HANDLE_MAX_PX / scale)
+}
+
+function Pending({ objects, pending, grid, radius, handleR }: { objects: readonly PlacedObject[]; pending: PendingWire; grid: number; radius: number; handleR: number }) {
+  const pts = pendingPoints(objects, pending, grid)
+  if (!pts) return null
+  const d = toPath(pts, radius)
+  const color = wireColorVar(pending.color)
+  const end = pts[pts.length - 1]
+  return (
+    <g pointerEvents="none">
+      <path d={d} fill="none" stroke="var(--background)" strokeWidth={WIRE_PX + CASING_PX} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      <path
+        d={d}
+        fill="none"
+        stroke={color}
+        strokeWidth={WIRE_PX}
+        strokeDasharray={pending.target ? undefined : `${WIRE_PX * 3} ${WIRE_PX * 2.5}`}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+      {pending.points.map((p, idx) => (
+        <circle key={idx} cx={p.x} cy={p.y} r={handleR} fill={color} stroke="var(--background)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      ))}
+      <circle cx={end.x} cy={end.y} r={pending.target ? handleR * 1.4 : handleR} fill={pending.target ? color : "var(--background)"} stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+    </g>
   )
 }
 
-function pendingRoute(objects: PlacedObject[], p: PendingWire, grid: number) {
+function pendingPoints(objects: readonly PlacedObject[], p: PendingWire, grid: number): Point[] | null {
   const a = resolvePin(objects, p.from, grid)
   if (!a) return null
-  const b = p.target && resolvePin(objects, p.target, grid)
-  if (b) {
-    return toPath(routeWire(a.point, a.pin.side, a.pin.stub ?? 1, b.point, b.pin.side, b.pin.stub ?? 1, grid, p.points, routeObstacles(objects, grid, p.from.object, p.target!.object)).pts)
+  const target = p.target && resolvePin(objects, p.target, grid)
+  if (target && p.target) {
+    const avoid = routeObstacles(objects, grid, p.from.object, p.target.object)
+    return routeWire(a.point, a.pin.side, a.pin.stub ?? 1, target.point, target.pin.side, target.pin.stub ?? 1, grid, p.points, avoid).pts
   }
-  return toPath(routeToPoint(a.point, a.pin.side, a.pin.stub ?? 1, p.cursor, grid, p.points))
+  return routeToPoint(a.point, a.pin.side, a.pin.stub ?? 1, p.cursor, grid, p.points)
+}
+
+function clientToLocal(e: React.MouseEvent<SVGPathElement>): Point {
+  const svg = e.currentTarget.ownerSVGElement
+  const m = svg?.getScreenCTM()?.inverse()
+  if (!m) return { x: e.clientX, y: e.clientY }
+  const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m)
+  return { x: p.x, y: p.y }
 }

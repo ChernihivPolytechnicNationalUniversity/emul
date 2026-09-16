@@ -12,10 +12,14 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { Inspector } from "@/components/inspector/Inspector"
+import { WirePalette } from "@/components/inspector/WirePalette"
 import { PALETTE_DRAG_TYPE, paletteGroups } from "@/components/palette/items"
-import { GRID as FIELD_GRID, objectRect, resolvePin, snap, type Point } from "@/schematic/geometry"
-import type { PinRef, Schematic } from "@/schematic/types"
+import { GRID as FIELD_GRID, nudgeRoutes, objectRect, resolvePin, routeAll, snap, type Point } from "@/schematic/geometry"
+import { buildNets } from "@/schematic/nets"
+import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, WIRE_COLOR_BY_CODE, type WireColorKey } from "@/schematic/wire-colors"
+import { pinKey, type PinRef, type Schematic } from "@/schematic/types"
 import { pinName } from "@/schematic/registry"
+import { useEvent } from "@/hooks/use-event"
 import { useSchematic, type Clip } from "@/schematic/use-schematic"
 import { toast } from "sonner"
 import { DT } from "@/sim/loop"
@@ -31,6 +35,7 @@ import { FieldReadout, ProbeReadout, type HoverTarget } from "./Readout"
 import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
 import { WireLayer, type PendingWire } from "./WireLayer"
+import { WireFlow } from "./wire-flow"
 import { ZoomControls } from "./ZoomControls"
 import { useMeasure, MAX_HELD, PROBE_ID, type ProbePoint } from "./use-measure"
 import { useSelection, type Rect } from "./use-selection"
@@ -179,6 +184,44 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const dotR = Math.max(1, Math.min(2, step / 24))
   const dot = (alpha: number) =>
     `radial-gradient(color-mix(in oklch, var(--muted-foreground) ${Math.round(35 * alpha)}%, transparent) ${dotR}px, transparent ${dotR}px)`
+
+  const { objects: docObjects, wires: docWires } = sch.doc
+  const nets = React.useMemo(() => buildNets(docObjects, docWires, grid), [docObjects, docWires, grid])
+  const routes = React.useMemo(
+    () => nudgeRoutes(routeAll(docObjects, docWires, grid), nets.netOfWire, grid),
+    [docObjects, docWires, grid, nets],
+  )
+  const wireById = React.useMemo(() => new Map(docWires.map((w) => [w.id, w])), [docWires])
+  const autoColor = React.useMemo(() => {
+    const m = new Map<string, WireColorKey>()
+    for (const net of nets.nets) m.set(net, autoNetColor(nets.kindsOf(net)))
+    return m
+  }, [nets])
+  const colorOf = React.useCallback(
+    (wireId: string): WireColorKey => {
+      const chosen = wireById.get(wireId)?.color
+      if (chosen) return chosen
+      const net = nets.netOfWire(wireId)
+      return (net === undefined ? undefined : autoColor.get(net)) ?? DEFAULT_SIGNAL_COLOR
+    },
+    [wireById, nets, autoColor],
+  )
+  const bendsOf = React.useCallback((wireId: string) => wireById.get(wireId)?.points, [wireById])
+  const pinNetColor = React.useCallback(
+    (key: string) => {
+      const net = nets.netOfPin(key)
+      const wire = net && nets.wiresOf(net)[0]
+      return wire ? wireColorVar(colorOf(wire)) : undefined
+    },
+    [nets, colorOf],
+  )
+  const [hoveredWire, setHoveredWire] = React.useState<string | null>(null)
+  const hoveredNet = hoveredWire === null ? null : (nets.netOfWire(hoveredWire) ?? null)
+  const [flow] = React.useState(() => new WireFlow())
+  React.useEffect(() => () => flow.dispose(), [flow])
+  React.useEffect(() => {
+    flow.push(sim.wireCurrentAbs, sim.wirePhase, sim.live, sim.paused)
+  }, [flow, sim])
 
   const hasSelection = sch.selectedObjects.size > 0 || sch.selectedWires.size > 0
   const hasObjects = sch.selectedObjects.size > 0
@@ -393,15 +436,24 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     y: snap(p.y, grid),
   })
 
+  const kindsAt = (ref: PinRef) => {
+    const net = nets.netOfPin(pinKey(ref.object, ref.pin))
+    if (net) return [...nets.kindsOf(net)]
+    const found = resolvePin(docObjects, ref, grid)
+    return found ? [found.pin.kind] : []
+  }
+  const autoColorFor = (from: PinRef, to?: PinRef | null): WireColorKey =>
+    autoNetColor([...kindsAt(from), ...(to ? kindsAt(to) : [])])
+
   const finishWire = (target: PinRef) => {
-    if (pending) sch.addWire(pending.from, target, pending.points)
+    if (pending) sch.addWire(pending.from, target, pending.points, pending.chosen ? pending.color : undefined)
     setPending(null)
   }
 
   /** Land the pending wire on an existing one: a junction goes in at that point. */
   const tapInto = (wireId: string, clientX: number, clientY: number) => {
     if (!pending) return false
-    sch.tapWire(wireId, snapPoint(toWorld(clientX, clientY)), pending.from, pending.points)
+    sch.tapWire(wireId, toWorld(clientX, clientY), pending.from, pending.points, pending.chosen ? pending.color : undefined)
     setPending(null)
     return true
   }
@@ -417,7 +469,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return wire ? tapInto(wire, clientX, clientY) : false
   }
 
-  const onPinPointerDown = (e: React.PointerEvent<SVGElement>, object: string, pin: string) => {
+  const onPinPointerDown = useEvent((e: React.PointerEvent<SVGElement>, object: string, pin: string) => {
     if (e.button !== 0) return
     e.stopPropagation()
     if (measure.active) {
@@ -430,23 +482,28 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       return
     }
     e.currentTarget.setPointerCapture(e.pointerId)
+    const from = { object, pin }
     setPending({
-      from: { object, pin },
+      from,
       cursor: toWorld(e.clientX, e.clientY),
       target: null,
       points: [],
       mode: "drag",
+      color: autoColorFor(from),
+      chosen: false,
     })
-  }
-  const onPinPointerMove = (e: React.PointerEvent<SVGElement>) => {
+  })
+  const onPinPointerMove = useEvent((e: React.PointerEvent<SVGElement>) => {
     if (pending?.mode !== "drag") return
+    const target = pinAt(e.clientX, e.clientY)
     setPending({
       ...pending,
       cursor: toWorld(e.clientX, e.clientY),
-      target: pinAt(e.clientX, e.clientY),
+      target,
+      color: pending.chosen ? pending.color : autoColorFor(pending.from, target),
     })
-  }
-  const onPinPointerUp = (e: React.PointerEvent<SVGElement>) => {
+  })
+  const onPinPointerUp = useEvent((e: React.PointerEvent<SVGElement>) => {
     if (pending?.mode !== "drag") return
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
     if (finishAt(e.clientX, e.clientY)) return
@@ -460,47 +517,47 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       mode: "click",
       points: moved ? [snapPoint(cursor)] : [],
     })
-  }
+  })
 
   /** Bend handles of a selected wire. */
   const bend = React.useRef<{ wire: string; index: number } | null>(null)
-  const onBendPointerDown = (e: React.PointerEvent<SVGCircleElement>, wire: string, index: number) => {
+  const onBendPointerDown = useEvent((e: React.PointerEvent<SVGGElement>, wire: string, index: number) => {
     if (e.button !== 0) return
     e.stopPropagation()
     e.currentTarget.setPointerCapture(e.pointerId)
     bend.current = { wire, index }
-  }
-  const onBendPointerMove = (e: React.PointerEvent<SVGCircleElement>) => {
+  })
+  const onBendPointerMove = useEvent((e: React.PointerEvent<SVGGElement>) => {
     if (!bend.current) return
-    const w = sch.doc.wires.find((x) => x.id === bend.current!.wire)
+    const w = wireById.get(bend.current.wire)
     if (!w?.points) return
     const points = w.points.slice()
     points[bend.current.index] = snapPoint(toWorld(e.clientX, e.clientY))
     sch.setWirePoints(w.id, points, true)
-  }
-  const onBendPointerUp = (e: React.PointerEvent<SVGCircleElement>) => {
+  })
+  const onBendPointerUp = useEvent((e: React.PointerEvent<SVGGElement>) => {
     bend.current = null
     sch.endDrag()
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
-  }
-  const onInsertBend = (wireId: string, index: number, clientX: number, clientY: number) => {
-    const w = sch.doc.wires.find((x) => x.id === wireId)
+  })
+  const onInsertBend = useEvent((wireId: string, index: number, clientX: number, clientY: number) => {
+    const w = wireById.get(wireId)
     if (!w) return
     const points = (w.points ?? []).slice()
     points.splice(index, 0, snapPoint(toWorld(clientX, clientY)))
     sch.setWirePoints(wireId, points)
     sch.selectWire(wireId)
-  }
-  const onRemoveBend = (wireId: string, index: number) => {
-    const w = sch.doc.wires.find((x) => x.id === wireId)
+  })
+  const onRemoveBend = useEvent((wireId: string, index: number) => {
+    const w = wireById.get(wireId)
     if (!w?.points) return
     sch.setWirePoints(
       wireId,
       w.points.filter((_, i) => i !== index),
     )
-  }
+  })
 
-  const onWirePointerDown = (e: React.PointerEvent<SVGPathElement>, id: string) => {
+  const onWirePointerDown = useEvent((e: React.PointerEvent<SVGPathElement>, id: string) => {
     if (e.button !== 0) return
     e.stopPropagation()
     if (measure.active) {
@@ -511,7 +568,34 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (pending?.mode === "click" && tapInto(id, e.clientX, e.clientY)) return
     sch.selectWire(id, e.shiftKey || e.ctrlKey || e.metaKey)
     sel.clear()
-  }
+  })
+  const onWirePointerEnter = useEvent((id: string) => {
+    if (pending || move.current || sel.dragging) return
+    setHoveredWire(id)
+  })
+  const onWirePointerLeave = useEvent(() => setHoveredWire(null))
+
+  const paintSelected = useEvent((color: WireColorKey | undefined, segmentOnly = false) => {
+    const ids = new Set<string>()
+    for (const id of sch.selectedWires) {
+      const net = segmentOnly ? undefined : nets.netOfWire(id)
+      if (net) for (const w of nets.wiresOf(net)) ids.add(w)
+      else ids.add(id)
+    }
+    sch.setWireColors([...ids].map((id) => [id, color] as const))
+  })
+
+  const autoColorAllNets = useEvent(() => {
+    const entries: [string, WireColorKey | undefined][] = []
+    let next = 0
+    for (const net of nets.nets) {
+      const color = semanticNetColor(nets.kindsOf(net)) ?? AUTO_COLOR_ORDER[next++ % AUTO_COLOR_ORDER.length]
+      for (const id of nets.wiresOf(net)) entries.push([id, color])
+    }
+    sch.setWireColors(entries)
+  })
+
+  const clearWireColors = useEvent(() => sch.setWireColors(sch.doc.wires.map((w) => [w.id, undefined] as const)))
 
   // --- field pointer handling: pan or marquee --------------------------------
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -567,64 +651,71 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const t = e.target as HTMLElement | null
     return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
   }
+  const onKey = useEvent((e: KeyboardEvent) => {
+    if (inTextField(e)) return
+    const mod = e.ctrlKey || e.metaKey
+    const key = e.key.toLowerCase()
+    if (e.key === "Delete" || e.key === "Backspace") {
+      sch.removeSelected()
+    } else if (e.key === "Escape") {
+      if (measure.active) measure.stop()
+      sch.deselectAll()
+      setPending(null)
+      setHoveredWire(null)
+    } else if (!mod && !e.altKey && WIRE_COLOR_BY_CODE.has(e.code) && (pending || sch.selectedWires.size > 0)) {
+      const color = WIRE_COLOR_BY_CODE.get(e.code)
+      e.preventDefault()
+      if (!color) return
+      if (pending) setPending({ ...pending, color, chosen: true })
+      else paintSelected(color, e.shiftKey)
+    } else if (mod && key === "z") {
+      e.preventDefault()
+      if (e.shiftKey) sch.redo()
+      else sch.undo()
+    } else if (mod && key === "y") {
+      e.preventDefault()
+      sch.redo()
+    } else if (mod && key === "a") {
+      e.preventDefault()
+      sch.selectAll()
+    } else if (mod && key === "d") {
+      e.preventDefault()
+      duplicate()
+    } else if (!mod && !e.altKey && key === "m") {
+      measure.toggle()
+    } else if (!mod && !e.altKey && key === "o") {
+      setScopeOpen((o) => !o)
+    } else if (!mod && !e.altKey && key === "l") {
+      setLogicOpen((o) => !o)
+    } else if (!mod && !e.altKey && key === "r") {
+      if (sch.selectedObjects.size) sch.rotate(sch.selectedObjects, e.shiftKey ? -45 : 45)
+    }
+  })
+  // Cut/copy/paste ride the native events so the system clipboard sees them too.
+  const onCopy = useEvent((e: ClipboardEvent) => {
+    if (inTextField(e) || !sch.selectedObjects.size) return
+    e.preventDefault()
+    copy()
+  })
+  const onCut = useEvent((e: ClipboardEvent) => {
+    if (inTextField(e) || !sch.selectedObjects.size) return
+    e.preventDefault()
+    cut()
+  })
+  const onPaste = useEvent((e: ClipboardEvent) => {
+    if (inTextField(e)) return
+    e.preventDefault()
+    const text = e.clipboardData?.getData("text/plain")
+    let external: Clip | null = null
+    try {
+      const parsed = text ? (JSON.parse(text) as { emul?: Clip }) : null
+      if (parsed?.emul && Array.isArray(parsed.emul.objects)) external = parsed.emul
+    } catch {
+      // Not ours; fall back to the local clip.
+    }
+    paste(external ?? undefined)
+  })
   React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (inTextField(e)) return
-      const mod = e.ctrlKey || e.metaKey
-      const key = e.key.toLowerCase()
-      if (e.key === "Delete" || e.key === "Backspace") {
-        sch.removeSelected()
-      } else if (e.key === "Escape") {
-        if (measure.active) measure.stop()
-        sch.deselectAll()
-        setPending(null)
-      } else if (mod && key === "z") {
-        e.preventDefault()
-        if (e.shiftKey) sch.redo()
-        else sch.undo()
-      } else if (mod && key === "y") {
-        e.preventDefault()
-        sch.redo()
-      } else if (mod && key === "a") {
-        e.preventDefault()
-        sch.selectAll()
-      } else if (mod && key === "d") {
-        e.preventDefault()
-        duplicate()
-      } else if (!mod && !e.altKey && key === "m") {
-        measure.toggle()
-      } else if (!mod && !e.altKey && key === "o") {
-        setScopeOpen((o) => !o)
-      } else if (!mod && !e.altKey && key === "l") {
-        setLogicOpen((o) => !o)
-      } else if (!mod && !e.altKey && key === "r") {
-        if (sch.selectedObjects.size) sch.rotate(sch.selectedObjects, e.shiftKey ? -45 : 45)
-      }
-    }
-    // Cut/copy/paste ride the native events so the system clipboard sees them too.
-    const onCopy = (e: ClipboardEvent) => {
-      if (inTextField(e) || !sch.selectedObjects.size) return
-      e.preventDefault()
-      copy()
-    }
-    const onCut = (e: ClipboardEvent) => {
-      if (inTextField(e) || !sch.selectedObjects.size) return
-      e.preventDefault()
-      cut()
-    }
-    const onPaste = (e: ClipboardEvent) => {
-      if (inTextField(e)) return
-      e.preventDefault()
-      const text = e.clipboardData?.getData("text/plain")
-      let external: Clip | null = null
-      try {
-        const parsed = text ? (JSON.parse(text) as { emul?: Clip }) : null
-        if (parsed?.emul && Array.isArray(parsed.emul.objects)) external = parsed.emul
-      } catch {
-        // Not ours; fall back to the local clip.
-      }
-      paste(external ?? undefined)
-    }
     window.addEventListener("keydown", onKey)
     window.addEventListener("copy", onCopy)
     window.addEventListener("cut", onCut)
@@ -635,11 +726,15 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       window.removeEventListener("cut", onCut)
       window.removeEventListener("paste", onPaste)
     }
-  }, [sch, measure, copy, cut, paste, duplicate])
+  }, [onKey, onCopy, onCut, onPaste])
 
   const cursor = panning ? "cursor-grabbing" : spaceHeld ? "cursor-grab" : "cursor-crosshair"
   const probeReading = sim.probe(PROBE_ID)
   const selectedObjectList = sch.doc.objects.filter((o) => sch.selectedObjects.has(o.id))
+  const selectedWireList = [...sch.selectedWires].map((id) => wireById.get(id)).filter((w) => w !== undefined)
+  const activeColors = new Set(selectedWireList.flatMap((w) => (w.color ? [w.color] : [])))
+  const anyOverridden = selectedWireList.some((w) => w.color !== undefined)
+  const anyWireColored = sch.doc.wires.some((w) => w.color !== undefined)
   const across = (a: ProbePoint, b: ProbePoint | null) => `${a.label} → ${b ? b.label : "ground"}`
   const scopeChannels = [
     ...measure.held.map((c) => ({
@@ -715,17 +810,20 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 </div>
               ))}
               <WireLayer
+                routes={routes}
                 objects={sch.doc.objects}
-                wires={sch.doc.wires}
                 grid={grid}
-                hairline={hairline}
+                scale={viewport.scale}
                 selected={sch.selectedWires}
+                hoveredNet={hoveredNet}
+                colorOf={colorOf}
+                netOfWire={nets.netOfWire}
+                bendsOf={bendsOf}
                 pending={pending}
-                currents={sim.wireCurrent}
-                currentsAbs={sim.wireCurrentAbs}
-                phases={sim.wirePhase}
-                paused={sim.paused}
+                flow={flow}
                 onWirePointerDown={onWirePointerDown}
+                onWirePointerEnter={onWirePointerEnter}
+                onWirePointerLeave={onWirePointerLeave}
                 onInsertBend={onInsertBend}
                 onRemoveBend={onRemoveBend}
                 onBendPointerDown={onBendPointerDown}
@@ -739,6 +837,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 hairline={hairline}
                 connectedPins={sch.connectedPins}
                 contactPins={sch.contactPins}
+                netColor={pinNetColor}
                 onPinPointerDown={onPinPointerDown}
                 onPinPointerMove={onPinPointerMove}
                 onPinPointerUp={onPinPointerUp}
@@ -783,6 +882,15 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onSpeedChange={setSpeed}
             onPointerDown={(e) => e.stopPropagation()}
           />
+          {selectedWireList.length > 0 && selectedObjectList.length === 0 && (
+            <WirePalette
+              className="absolute top-3 right-3"
+              active={activeColors}
+              overridden={anyOverridden}
+              onPick={paintSelected}
+              onPointerDown={(e) => e.stopPropagation()}
+            />
+          )}
           <Inspector
             className="absolute top-3 right-3"
             selected={selectedObjectList}
@@ -905,6 +1013,13 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         <ContextMenuItem onClick={reset}>
           Reset view
           <ContextMenuShortcut>⌘0</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled={sch.doc.wires.length === 0} onClick={autoColorAllNets}>
+          Colour every net
+        </ContextMenuItem>
+        <ContextMenuItem disabled={!anyWireColored} onClick={clearWireColors}>
+          Reset wire colours
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={isEmpty} onClick={sch.selectAll}>

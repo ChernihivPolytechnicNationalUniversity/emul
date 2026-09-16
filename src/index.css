@@ -81,6 +81,32 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+
+    --wire-black: oklch(0.28 0.012 260);
+    --wire-brown: oklch(0.47 0.085 55);
+    --wire-red: oklch(0.57 0.212 27);
+    --wire-orange: oklch(0.68 0.168 55);
+    --wire-yellow: oklch(0.72 0.155 88);
+    --wire-green: oklch(0.60 0.155 150);
+    --wire-blue: oklch(0.55 0.185 255);
+    --wire-violet: oklch(0.52 0.215 300);
+    --wire-grey: oklch(0.64 0 0);
+    --wire-white: oklch(0.86 0 0);
+    --wire-cyan: oklch(0.68 0.125 210);
+    --wire-magenta: oklch(0.62 0.225 340);
+
+    --wire-black-flow: oklch(0.99 0 0);
+    --wire-brown-flow: oklch(0.95 0.055 70);
+    --wire-red-flow: oklch(0.96 0.060 30);
+    --wire-orange-flow: oklch(0.33 0.085 55);
+    --wire-yellow-flow: oklch(0.31 0.080 90);
+    --wire-green-flow: oklch(0.96 0.070 150);
+    --wire-blue-flow: oklch(0.95 0.050 255);
+    --wire-violet-flow: oklch(0.95 0.060 305);
+    --wire-grey-flow: oklch(0.99 0 0);
+    --wire-white-flow: oklch(0.42 0 0);
+    --wire-cyan-flow: oklch(0.34 0.075 215);
+    --wire-magenta-flow: oklch(0.96 0.065 345);
 }
 
 .dark {
@@ -115,6 +141,32 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+
+    --wire-black: oklch(0.52 0.012 260);
+    --wire-brown: oklch(0.60 0.085 55);
+    --wire-red: oklch(0.68 0.190 27);
+    --wire-orange: oklch(0.78 0.150 60);
+    --wire-yellow: oklch(0.88 0.145 95);
+    --wire-green: oklch(0.74 0.155 152);
+    --wire-blue: oklch(0.70 0.150 255);
+    --wire-violet: oklch(0.68 0.180 300);
+    --wire-grey: oklch(0.72 0 0);
+    --wire-white: oklch(0.98 0 0);
+    --wire-cyan: oklch(0.80 0.120 205);
+    --wire-magenta: oklch(0.74 0.180 340);
+
+    --wire-black-flow: oklch(0.99 0 0);
+    --wire-brown-flow: oklch(0.99 0.040 70);
+    --wire-red-flow: oklch(0.99 0.045 30);
+    --wire-orange-flow: oklch(0.34 0.085 55);
+    --wire-yellow-flow: oklch(0.32 0.080 90);
+    --wire-green-flow: oklch(0.99 0.050 150);
+    --wire-blue-flow: oklch(0.99 0.035 255);
+    --wire-violet-flow: oklch(0.99 0.045 305);
+    --wire-grey-flow: oklch(0.99 0 0);
+    --wire-white-flow: oklch(0.38 0 0);
+    --wire-cyan-flow: oklch(0.33 0.075 215);
+    --wire-magenta-flow: oklch(0.99 0.050 345);
 }
 
 @layer base {

@@ -1,17 +1,5 @@
 import * as React from "react"
-import {
-  intersects,
-  nearestSegment,
-  objectRect,
-  objectSize,
-  pinContacts,
-  resolvePin,
-  routeObstacles,
-  routeWire,
-  snap,
-  type Point,
-  type Rect,
-} from "./geometry"
+import { intersects, objectRect, objectSize, pinContacts, snap, type Point, type Rect } from "./geometry"
 import { getDef } from "./registry"
 import {
   emptySchematic,
@@ -23,8 +11,13 @@ import {
   type Schematic,
   type Wire,
 } from "./types"
+import type { WireColorKey } from "./wire-colors"
+import { connectPins, tapWireAt } from "./wiring"
 
-const samePin = (a: PinRef, b: PinRef) => a.object === b.object && a.pin === b.pin
+function recolor(w: Wire, color: WireColorKey | undefined): Wire {
+  const { color: _previous, ...rest } = w
+  return color ? { ...rest, color } : rest
+}
 
 /** Next free designator with this prefix among `objects`. */
 function nextRef(objects: readonly PlacedObject[], prefix: string): string {
@@ -273,50 +266,33 @@ export function useSchematic(grid: number) {
   )
 
   /** Connect two pins, optionally through bend points. Duplicate and self connections are ignored. */
-  const addWire = React.useCallback((from: PinRef, to: PinRef, points: Point[] = []) => {
-    if (samePin(from, to)) return
-    setDoc((d) => {
-      const exists = d.wires.some(
-        (w) => (samePin(w.from, from) && samePin(w.to, to)) || (samePin(w.from, to) && samePin(w.to, from)),
-      )
-      if (exists) return d
-      const wire: Wire = { id: crypto.randomUUID(), from, to, points: points.length ? points : undefined }
-      return { ...d, wires: [...d.wires, wire] }
-    })
-  }, [setDoc])
+  const addWire = React.useCallback(
+    (from: PinRef, to: PinRef, points: Point[] = [], color?: WireColorKey) => {
+      setDoc((d) => connectPins(d, from, to, points, color))
+    },
+    [setDoc],
+  )
+
+  const setWireColors = React.useCallback(
+    (entries: Iterable<readonly [string, WireColorKey | undefined]>) => {
+      const next = new Map(entries)
+      if (next.size === 0) return
+      setDoc((d) => ({
+        ...d,
+        wires: d.wires.map((w) => (next.has(w.id) ? recolor(w, next.get(w.id)) : w)),
+      }))
+    },
+    [setDoc],
+  )
 
   /**
-   * Tap an existing wire at `at`: drops a junction there, splits the wire through it and runs a
-   * new wire from `from` to the junction. Wires join pins, so a branch off the middle of one
-   * needs a node to branch at; this is what puts it there.
+   * Tap an existing wire at `at` (any world point near it): a junction goes in where the point
+   * projects onto the wire, the wire is split through it and a new wire runs from `from` to
+   * the junction. Wires join pins, so a branch off the middle of one needs a node to branch at.
    */
   const tapWire = React.useCallback(
-    (wireId: string, at: Point, from: PinRef, points: Point[] = []) => {
-      setDoc((d) => {
-        const w = d.wires.find((x) => x.id === wireId)
-        if (!w || w.from.object === from.object) return d
-        const a = resolvePin(d.objects, w.from, grid)
-        const b = resolvePin(d.objects, w.to, grid)
-        if (!a || !b) return d
-        const bends = w.points ?? []
-        const route = routeWire(a.point, a.pin.side, a.pin.stub ?? 1, b.point, b.pin.side, b.pin.stub ?? 1, grid, bends, routeObstacles(d.objects, grid, w.from.object, w.to.object))
-        // Which of the wire's own bends fall before the tap, so each half keeps its shape.
-        const split = route.owner[nearestSegment(route.pts, at)] ?? bends.length
-        const node: PlacedObject = { id: crypto.randomUUID(), def: "junction", x: at.x - grid, y: at.y - grid }
-        const pin: PinRef = { object: node.id, pin: "J" }
-        const keep = (pts: Point[]) => (pts.length ? pts : undefined)
-        return {
-          ...d,
-          objects: [...d.objects, node],
-          wires: [
-            ...d.wires.map((x) =>
-              x.id !== wireId ? x : { ...x, to: pin, points: keep(bends.slice(0, split)) },
-            ),
-            { id: crypto.randomUUID(), from: pin, to: w.to, points: keep(bends.slice(split)) },
-            { id: crypto.randomUUID(), from, to: pin, points: keep(points) },
-          ],
-        }
-      })
+    (wireId: string, at: Point, from: PinRef, points: Point[] = [], color?: WireColorKey) => {
+      setDoc((d) => tapWireAt(d, wireId, at, from, grid, points, color))
       setSelectedWires(new Set())
     },
     [grid, setDoc],
@@ -436,6 +412,7 @@ export function useSchematic(grid: number) {
     addWire,
     tapWire,
     setWirePoints,
+    setWireColors,
     setPart,
     undo,
     redo,
