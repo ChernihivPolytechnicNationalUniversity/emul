@@ -67,4 +67,18 @@ export class TraceStore {
   has(id: string) {
     return this.series.has(id)
   }
+
+  /** Channel ids held, in arrival order. */
+  get ids() {
+    return [...this.series.keys()]
+  }
+
+  /** A frozen copy: what the screen holds while the live store keeps filling. */
+  clone() {
+    const c = new TraceStore()
+    c.bucket = this.bucket
+    c.end = this.end
+    for (const [id, s] of this.series) c.series.set(id, { min: s.min.slice(), max: s.max.slice(), head: s.head, len: s.len })
+    return c
+  }
 }

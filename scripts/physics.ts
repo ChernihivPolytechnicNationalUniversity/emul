@@ -23,22 +23,25 @@ const expect = (what: string, got: number | string, want: number | string, tol =
   console.log(`  ${ok ? "✓" : "✗"} ${what.padEnd(58)} ${fmt(got).padStart(12)}  expected ${fmt(want)}${tol ? ` ±${tol}` : ""}${note ? `  — ${note}` : ""}`)
 }
 
-type Run = { loop: SimLoop; snap: Snapshot; clock: number; run: (seconds: number) => Snapshot; parts: (p: Record<string, PartState>) => void }
+type Run = { loop: SimLoop; snap: Snapshot; clock: number; run: (seconds: number, each?: (snap: Snapshot) => void) => Snapshot; parts: (p: Record<string, PartState>) => void }
 /** Start a document running and hand back a way to advance it in simulated seconds. */
-function start(doc: Schematic, probes: Probe[] = []): Run {
+function start(doc: Schematic, probes: Probe[] = [], traceBucket = 0): Run {
   const loop = new SimLoop()
   loop.setDoc(doc)
   loop.setParts(doc.parts)
   loop.setProbes(probes)
+  loop.setTraceBucket(traceBucket)
   loop.setRunning(true)
   let clock = 0
   loop.advance(clock)
   let parts: Record<string, PartState> = { ...doc.parts }
-  const run = (seconds: number) => {
+  // `each` sees every snapshot along the way, for what a snapshot hands over only once (the trace).
+  const run = (seconds: number, each?: (snap: Snapshot) => void) => {
     const end = clock + seconds * 1000
     while (clock < end) {
       clock = Math.min(end, clock + 10)
       loop.advance(clock)
+      if (each) each(loop.snapshot()!)
     }
     return loop.snapshot()!
   }
@@ -343,6 +346,39 @@ console.log("\n12 V on a Nucleo pin: the chip dies and its supply shorts")
   expect("the pin's failure is fatal", snap.damage[u.id]?.fatal ? "yes" : "no", "yes")
   // The blown pin clamps to the 3.3 V rail and the dead die shorts that rail: 12 V into ~0.5 Ω.
   expect("the battery then feeds the short through the dead die and burns", snap.damage[bat.id] ? "burnt" : "fine", "burnt", 0, snap.damage[bat.id]?.reason)
+}
+
+console.log("\nThe oscilloscope keeps the spike that killed the part, across the rebuild the failure causes")
+{
+  const { doc, place, wire } = builder(GRID)
+  const rail = place("supply", 12, -6, { value: "+12V", voltage: "12 V", imax: "2 A" })
+  const coil = place("inductor", 12, 0, { value: "50 mH", imax: "1 A" }, 90)
+  const rcoil = place("resistor", 12, 6, { value: "60 Ω", power: "5" }, 90)
+  const q = place("nmos", 12, 12, { value: "IRLZ44N", vth: "2 V", rdson: "22 mΩ", idmax: "47 A", vdsmax: "55 V", pmax: "110 W" })
+  const drive = place("logic-state", 4, 14, { vdd: "5 V" })
+  const gnd = place("ground", 15, 20)
+  wire(rail, "V", coil, "1")
+  wire(coil, "2", rcoil, "1")
+  wire(rcoil, "2", q, "D")
+  wire(q, "S", gnd, "GND")
+  wire(drive, "OUT", q, "G")
+  doc.parts[partKey(drive.id, "S")] = { on: true }
+  const drain: Probe = { id: "drain", a: pinKey(q.id, "D"), b: null }
+  // Buckets of 2 ms, as on the slowest timebase a user might have left the scope on.
+  const t = start(doc, [drain], 2e-3)
+  let peak = -Infinity
+  let buckets = 0
+  const collect = (snap: Snapshot) => {
+    const ch = snap.trace
+    for (let i = 0; i < ch.count; i++) peak = Math.max(peak, ch.data[i * 2 + 1])
+    buckets += ch.count
+  }
+  t.run(0.02, collect)
+  t.parts({ [partKey(drive.id, "S")]: { on: false } })
+  const snap = t.run(0.03, collect)
+  expect("the MOSFET died of the spike", snap.damage[q.id] ? "burnt" : "fine", "burnt", 0, snap.damage[q.id]?.reason)
+  expect("the scope's trace holds the spike (V)", peak > 55 ? "yes" : "no", "yes", 0, `trace peak ${peak.toFixed(0)} V`)
+  expect("and no buckets were lost to the rebuild", buckets, Math.floor(snap.time / 2e-3))
 }
 
 const wall = (performance.now() - wall0) / 1000

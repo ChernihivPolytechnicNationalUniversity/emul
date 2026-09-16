@@ -53,7 +53,8 @@ export function parseValue(text: string): number {
 /** Format a voltage/current for display: 3.30 V, 12.5 mA, 3.3 MA. */
 export function formatSI(v: number, unit: string, digits = 2): string {
   const a = Math.abs(v)
-  if (a === 0 || !Number.isFinite(v)) return `0 ${unit}`
+  // Below a hundredth of a nanounit is solver noise, not a reading: show it as the zero it is.
+  if (a < 1e-11 || !Number.isFinite(v)) return `0 ${unit}`
   if (a >= 1e12) return `${v.toExponential(1)} ${unit}`
   if (a >= 1e9) return `${(v / 1e9).toFixed(digits)} G${unit}`
   if (a >= 1e6) return `${(v / 1e6).toFixed(digits)} M${unit}`

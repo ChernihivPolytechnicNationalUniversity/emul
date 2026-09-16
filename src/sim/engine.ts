@@ -449,6 +449,26 @@ export class Engine {
     this.setTrace(prev.traceBucket)
   }
 
+  /**
+   * Carry the probe statistics and the oscilloscope buckets over from a previous engine,
+   * once the probes are pointed at the new nets. A rebuild happens on every edit and on every
+   * failure, and the bucket being filled at that moment is the one with the spike that did
+   * the damage: dropping it would leave the scope showing nothing where the part died.
+   */
+  adoptProbes(prev: Engine) {
+    if (prev.probeNodes.length !== this.probeNodes.length) return
+    this.probeAcc.set(prev.probeAcc)
+    this.probeLast.set(prev.probeLast)
+    this.probeSeconds = prev.probeSeconds
+    this.probeSamples = prev.probeSamples
+    this.probeLastSamples = prev.probeLastSamples
+    if (prev.traceBucket !== this.traceBucket || this.traceBucket === 0) return
+    this.traceAcc.set(prev.traceAcc)
+    this.traceSeconds = prev.traceSeconds
+    this.traceOut = prev.traceOut
+    this.traceStart = prev.traceStart
+  }
+
   /** Relative size of cell `k` in a pack with a capacity spread: evenly from 1 − spread to 1 + spread. */
   private cellSize(el: Extract<Resolved, { kind: "BAT" }>, k: number) {
     return el.cells > 1 ? 1 + el.spread * ((2 * k) / (el.cells - 1) - 1) : 1

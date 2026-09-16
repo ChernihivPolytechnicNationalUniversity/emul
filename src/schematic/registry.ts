@@ -26,7 +26,10 @@ export function pinName(objects: PlacedObject[], ref: PinRef): string {
   if (!obj || !def) return "?"
   const owner = obj.props?.ref || def.name
   const pin = getPin(def, ref.pin)
-  return pin?.label ? `${owner}.${pin.label}` : owner
+  // A pin drawn without a label still needs telling apart in a readout when the part has
+  // several (a transformer's windings); a part with one pin is named by the part alone.
+  const label = pin?.label || (def.pins.length > 1 ? ref.pin : "")
+  return label ? `${owner}.${label}` : owner
 }
 
 /** State a part has before anyone touches it: a USB cable starts plugged in, everything else off. */

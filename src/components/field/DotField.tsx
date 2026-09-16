@@ -801,7 +801,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         </div>
         {scopeOpen && (
           <Scope
-            className="h-56 shrink-0 border-t"
+            className="shrink-0 border-t"
             store={trace}
             version={traceVersion}
             channels={scopeChannels}

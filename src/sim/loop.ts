@@ -910,14 +910,16 @@ export class SimLoop {
   }
 
   private rebuild(adopt: boolean) {
+    const prev = this.engine
     const next = new Engine(buildNetlist({ ...this.doc, parts: {} }, this.damage, undefined, this.probeKeys()))
-    if (adopt && this.engine) next.adopt(this.engine)
+    if (adopt && prev) next.adopt(prev)
     this.engine = next
     this.stale = false
     this.applyProbes()
     this.mapInputs()
     this.buildFlow(next)
     next.setTrace(this.traceBucket)
+    if (adopt && prev) next.adoptProbes(prev)
   }
 
   /** Solve the wire graph once per terminal to get each wire's current as a linear form. */
