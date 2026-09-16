@@ -15,7 +15,8 @@ const LEADS = "M0 1 H1.1 M2.9 1 H4"
 const face = (letter: string): ComponentDef["body"] => [
   { type: "path", d: LEADS },
   { type: "circle", cx: 2, cy: 1, r: 0.9 },
-  { type: "text", x: 2, y: 1.15, text: letter, size: 0.6 },
+  // A capital sits low on a "middle" baseline (which centres the x-height); a hair up puts it in the circle.
+  { type: "text", x: 2, y: 1.04, text: letter, size: 0.6 },
   { type: "text", x: 2, y: -0.15, text: "{ref}", size: 0.3, muted: true },
 ]
 
