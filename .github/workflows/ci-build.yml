@@ -1,0 +1,121 @@
+name: CI Build
+
+on:
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+  packages: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.x'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+
+  typecheck:
+    name: Type-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.x'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  test:
+    # The bench suites (exam, physics) are pure TypeScript. The MCU suites need the ARM
+    # toolchain and the ELFs it builds, so they stay a local `make -C firmware && pnpm mcu-test`.
+    name: Bench tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.x'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.x'
+          cache: 'pnpm'
+      - run: pnpm audit --prod --audit-level=high
+
+  build:
+    name: Build
+    needs: [lint, typecheck, test, audit]
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    uses: ChernihivPolytechnicNationalUniversity/shared-actions/.github/workflows/ci-build.yml@main
+    with:
+      context: .
+      dockerfile: ./Dockerfile
+    secrets: inherit
+
+  # The one status check the "Require CI" ruleset waits for; it fails unless every job above
+  # passed, and refuses to pass if a job is added without being listed here.
+  ci-build:
+    if: always()
+    needs: [lint, typecheck, test, audit, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Verify every job in this workflow is gated
+        env:
+          WORKFLOW: .github/workflows/ci-build.yml
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          declared="$(sed -n '/^jobs:/,$p' "$WORKFLOW" | grep -oE '^  [A-Za-z0-9_-]+:' | tr -d ' :' | grep -vx 'ci-build')"
+          watched="$(printf '%s' "$NEEDS" | jq -r 'keys[]')"
+          missing="$(comm -23 <(printf '%s\n' "$declared" | sort) <(printf '%s\n' "$watched" | sort))"
+          if [ -n "$missing" ]; then
+            echo "::error::these jobs are not in the ci-build gate's needs, so they do not block merging: $(printf '%s' "$missing" | tr '\n' ' ')"
+            exit 1
+          fi
+
+      - name: Require every upstream job to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          failed="$(printf '%s' "$NEEDS" | jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"')"
+          printf '%s' "$NEEDS" | jq -r 'to_entries[] | "- \(.key): \(.value.result)"' >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$failed" ]; then
+            echo "::error::upstream jobs did not succeed: $(printf '%s' "$failed" | tr '\n' ' ')"
+            exit 1
+          fi
