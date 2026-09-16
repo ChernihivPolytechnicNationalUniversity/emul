@@ -7,7 +7,7 @@ dist-ssr
 # Firmware sources and their compiled tests; the example ELFs in public/firmware are copied
 firmware
 
-# Deploy-time settings are written by the Dockerfile (APP_VERSION) or mounted at run time
+# Deploy-time settings are mounted at /etc/config/config.json at run time
 public/config.json
 
 # Repo metadata, logs, editor files

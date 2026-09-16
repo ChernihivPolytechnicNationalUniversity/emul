@@ -43,8 +43,6 @@ jobs:
       - run: pnpm typecheck
 
   test:
-    # The bench suites (exam, physics) are pure TypeScript. The MCU suites need the ARM
-    # toolchain and the ELFs it builds, so they stay a local `make -C firmware && pnpm mcu-test`.
     name: Bench tests
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -84,8 +82,6 @@ jobs:
       dockerfile: ./Dockerfile
     secrets: inherit
 
-  # The one status check the "Require CI" ruleset waits for; it fails unless every job above
-  # passed, and refuses to pass if a job is added without being listed here.
   ci-build:
     if: always()
     needs: [lint, typecheck, test, audit, build]
