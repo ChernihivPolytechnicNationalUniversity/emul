@@ -1,0 +1,1358 @@
+import type { Damage, PartState } from "@/schematic/types"
+import { GROUND, type GpioState, type Netlist, type Resolved } from "./netlist"
+import { formatSI } from "./units"
+
+const VT = 0.025852
+/** Leak from every node to ground; keeps floating nodes solvable. */
+const GMIN = 1e-9
+/**
+ * An arc across open contacts: struck when the gap voltage reaches the switch's strike voltage
+ * (an inductive load whose current has nowhere else to go), it then drops V_ARC — the minimum
+ * an arc between metal contacts sustains at — plus R_ARC, until the current falls below the
+ * holding value and it goes out. A 12 V circuit cannot keep an arc alive on its own; a coil
+ * can, until its energy is spent. The drop and resistance are fixed, so the circuit stays
+ * linear while it burns; the polarity is the one the gap struck with.
+ */
+const R_ARC = 20
+const V_ARC = 15
+const ARC_HOLD = 0.02
+/** Re-solves of one step after a gap strikes: the arc changes the circuit the step is solved in. */
+const MAX_STRIKES = 3
+/**
+ * Integration weight for capacitors and inductors: 1 is backward Euler, 0.5 trapezoidal.
+ * Backward Euler damps every resonance it meets (a Q of 10 read as 3 at 30 steps a period);
+ * pure trapezoidal rings at switching edges. Just past the middle keeps the ringing decaying
+ * while a resonance loses only a couple of percent of its Q.
+ */
+const THETA = 0.52
+/** STM32 output driver and weak pull resistances (DS9405: ~40 kΩ pulls). */
+const R_GPIO = 25
+/** Output resistance of a pad sourcing a voltage (the DAC's buffered output). */
+const R_DAC = 100
+const R_PULL = 40e3
+/** Output resistance of an ideal regulator: keeps two in parallel solvable and sharing. */
+const R_REG = 0.01
+const REG_MODES = ["regulating", "dropout", "current limit", "off"] as const
+const REG_REGULATE = 0
+const REG_DROPOUT = 1
+const REG_LIMIT = 2
+const REG_OPEN = 3
+const MAX_ITER = 60
+const ABS_TOL = 1e-6
+const REL_TOL = 1e-3
+/**
+ * Overload before a current/power rating breaks the part: the excess ratio integrates over
+ * simulated time and the part fails once it exceeds this (10 ms at 2× the rating, 1 ms at 11×).
+ */
+const STRESS_LIMIT = 0.01
+/** Averaging window for RMS readings in AC circuits: at least this long, and a few periods of the slowest source. */
+const RMS_MIN_TAU = 0.05
+const RMS_PERIODS = 3
+
+export type Failure = { object: string; damage: Damage; ref: string }
+
+/** Persistence of vision for LED brightness: PWM above ~100 Hz reads as a steady level. */
+const LED_EYE_TAU = 0.01
+
+/** Operating point of one element after a step. */
+export type Reading = {
+  object: string
+  element: number
+  kind: Resolved["kind"]
+  /** Through-current (collector current for a BJT), amps. */
+  current: number
+  /** Voltage across (Vce for a BJT), volts. */
+  voltage: number
+  /** Dissipated power, watts. */
+  power: number
+  /** Worst load relative to a rating, 0..∞; undefined when unrated. */
+  load?: number
+  /** Extra values: Vbe, Ib, region for BJTs; wiper etc. */
+  extra?: Record<string, string>
+  limits?: Resolved["limits"]
+  /** An internal element (a transistor's collector resistance): solved, not shown. */
+  hidden?: boolean
+  /** RMS current and voltage and average power over the last few cycles; only in AC circuits. */
+  rms?: { current: number; voltage: number; power: number }
+}
+
+const Q_IS = 1e-14
+const Q_BR = 3
+const BJT_REGIONS = ["cut-off", "saturation", "reverse", "active"] as const
+const MOS_REGIONS = ["off", "ohmic", "reverse", "saturation"] as const
+
+export type PartReader = (object: string, part: string) => PartState
+
+/** Whether a switch element conducts given its part's state. */
+function switchClosed(closed: "on" | "pressed" | "off", st: PartState): boolean {
+  return closed === "on" ? !!st.on : closed === "off" ? !st.on : !!st.pressed
+}
+/** What an MCU pad (object, model node) drives right now. */
+export type PinReader = (object: string, node: string) => GpioState
+const NO_PINS: PinReader = () => null
+/** GpioState encoded for the per-step array: 0 floating, 1 high, 2 low, 3 pull-up, 4 pull-down. */
+const GPIO_CODE: Record<string, number> = { high: 1, low: 2, pullup: 3, pulldown: 4 }
+const GPIO_VOLTS = 5
+
+/**
+ * What a probe across two nodes reads. Everything but `v` covers the last measuring window —
+ * a few cycles — and every solver step in it counts, so an RMS is a real RMS and a peak is
+ * the peak rather than whatever the display happened to sample.
+ */
+export type ProbeReading = {
+  /** Instantaneous difference, volts. */
+  v: number
+  rms: number
+  /** Mean over the window, i.e. the DC component. */
+  avg: number
+  /** Extremes over the window. */
+  min: number
+  max: number
+}
+
+/**
+ * A run of oscilloscope samples: `count` buckets of `bucket` seconds starting at `start`,
+ * each holding the trough and peak every probe saw in it, laid out [bucket][probe][min, max].
+ * Peak detection per bucket rather than plain decimation, so a narrow spike is never missed.
+ */
+export type TraceChunk = { start: number; bucket: number; count: number; data: Float32Array }
+
+/** SPICE pn-junction voltage limiting: keeps Newton steps from overflowing the exponential. */
+function pnjlim(vnew: number, vold: number, vt: number, vcrit: number) {
+  if (vnew > vcrit && Math.abs(vnew - vold) > 2 * vt) {
+    if (vold > 0) {
+      const arg = 1 + (vnew - vold) / vt
+      return arg > 0 ? vold + vt * Math.log(arg) : vcrit
+    }
+    return vt * Math.log(vnew / vt)
+  }
+  return vnew
+}
+
+/**
+ * Transient MNA solver with backward-Euler companions and Newton-Raphson for
+ * diodes and BJTs. Small dense matrices, solved by LU with partial pivoting.
+ *
+ * The step runs thousands of times per second, so it allocates nothing: every per-element
+ * quantity lives in a flat array indexed by the element's position in the netlist, and the
+ * matrix is factorized in place. Readings are kept as numbers and only turned into objects
+ * when something asks for them.
+ */
+export class Engine {
+  readonly size: number
+  time = 0
+  converged = true
+  /** Node voltages (size = nodes), persists between steps. */
+  readonly v: Float64Array
+  readonly net: Netlist
+  /** Parts that broke during the last step; the caller drains this. */
+  readonly failures: Failure[] = []
+  /** True when any source has an AC component; RMS readings are then kept. */
+  readonly ac: boolean
+  /** Running mean of the squared node voltages (AC only). */
+  readonly v2: Float64Array
+
+  private readonly A: Float64Array
+  private readonly z: Float64Array
+  private readonly x: Float64Array
+  /** LU factors of `A` with the pivot order that produced them. */
+  private readonly lu: Float64Array
+  private readonly pivot: Int32Array
+  /** Newton iterate, reused between steps. */
+  private readonly guess: Float64Array
+  /** Closest solution seen while iterating, kept in case the iteration runs out of steps. */
+  private readonly best: Float64Array
+
+  // --- per-element state, indexed by position in net.elements ---
+  /** Capacitor voltage and current, inductor current and voltage after the last step. */
+  private readonly capV: Float64Array
+  private readonly capI: Float64Array
+  private readonly indI: Float64Array
+  private readonly indV: Float64Array
+  /** Accumulated overload (seconds × excess ratio). */
+  private readonly stress: Float64Array
+  /** Last junction voltages used for limiting: [vd | vbe] and [vbc]. */
+  private readonly jA: Float64Array
+  private readonly jB: Float64Array
+  /** Running means of i², v² and p (AC only). */
+  private readonly msI: Float64Array
+  private readonly msV: Float64Array
+  private readonly msP: Float64Array
+  private msPrimed = false
+  /** Diode currents, instantaneous and averaged (for steady LED brightness on AC). */
+  readonly diodeI: Float64Array
+  readonly diodeAvg: Float64Array
+  /** Probe node pairs, two entries each; either side may be GROUND. */
+  private probeNodes = new Int32Array(0)
+  /** Per probe, for the window being filled: sum, sum of squares, trough, peak. */
+  private probeAcc = new Float64Array(0)
+  /** The same, for the last window that finished; that is what a reading reports. */
+  private probeLast = new Float64Array(0)
+  private probeSeconds = 0
+  private probeSamples = 0
+  private probeLastSamples = 0
+  /** Oscilloscope bucket length in seconds; 0 when nobody is watching. */
+  private traceBucket = 0
+  /** Per probe, the trough and peak of the bucket being filled. */
+  private traceAcc = new Float64Array(0)
+  private traceSeconds = 0
+  /** Finished buckets since the last drain, and the time the first of them started. */
+  private traceOut: number[] = []
+  private traceStart = 0
+  // Operating point of every element after the last step.
+  private readonly rCurrent: Float64Array
+  private readonly rVoltage: Float64Array
+  private readonly rPower: Float64Array
+  private readonly rLoad: Float64Array
+  /** Vbe and Ib of a BJT, and its region as an index into BJT_REGIONS. */
+  private readonly rVbe: Float64Array
+  private readonly rIb: Float64Array
+  private readonly rRegion: Uint8Array
+  /** Pad state of every GPIO element for the step in progress, and the volts when it sources a voltage. */
+  private readonly gpioState: Uint8Array
+  /** While the open gap of a switch element carries an arc: 1 struck with a positive voltage a→b, 2 negative. */
+  private readonly arc: Uint8Array
+  /** Node voltages before the step, and at the instant a gap struck during it (for the probes and the ratings). */
+  private readonly prevV: Float64Array
+  private readonly strikeV: Float64Array
+  private struck = false
+  /** Resistance in force for each element: the model's value, or what the pin reader said for a live R. */
+  private readonly ohms: Float64Array
+  private readonly gpioVolts: Float64Array
+
+  /** Current leaving the net into an element, per terminal node key. */
+  private readonly termCurrent: Float64Array
+  private readonly termIndex: Map<string, number>
+  private readonly termKeys: string[]
+  /** Terminal slots of each element, in the order of its `keys`. */
+  private readonly termOf: Int32Array
+  private readonly termAt: Int32Array
+
+  /** Element index by id, for carrying state over to a rebuilt engine. */
+  private readonly indexOf: Map<string, number>
+  /** No diodes or transistors: one solve per step, and the matrix never changes. */
+  private readonly linear: boolean
+  /** RMS averaging time constant, seconds. */
+  private readonly tau: number
+  /** The `dt` and switch states `lu` was factorized for; a change invalidates it. */
+  private luDt = 0
+  private luSwitches = 0
+  private luValid = false
+
+  constructor(net: Netlist) {
+    this.net = net
+    const n = net.nodes
+    const m = net.elements.length
+    this.size = n + net.sources
+    this.v = new Float64Array(n)
+    this.v2 = new Float64Array(n)
+    this.guess = new Float64Array(n)
+    this.best = new Float64Array(this.size)
+    this.A = new Float64Array(this.size * this.size)
+    this.z = new Float64Array(this.size)
+    this.x = new Float64Array(this.size)
+    this.lu = new Float64Array(this.size * this.size)
+    this.pivot = new Int32Array(this.size)
+
+    let minFreq = Infinity
+    let linear = true
+    for (const el of net.elements) {
+      if (el.kind === "V" && el.amplitude > 0 && el.frequency < minFreq) minFreq = el.frequency
+      if (el.kind === "D" || el.kind === "Q" || el.kind === "M" || el.kind === "REG") linear = false
+    }
+    this.ac = minFreq < Infinity
+    this.tau = this.ac ? Math.max(RMS_MIN_TAU, RMS_PERIODS / minFreq) : 0
+    this.linear = linear
+
+    this.capV = new Float64Array(m)
+    this.capI = new Float64Array(m)
+    this.indI = new Float64Array(m)
+    this.indV = new Float64Array(m)
+    this.stress = new Float64Array(m)
+    this.jA = new Float64Array(m)
+    this.jB = new Float64Array(m)
+    this.msI = new Float64Array(m)
+    this.msV = new Float64Array(m)
+    this.msP = new Float64Array(m)
+    this.diodeI = new Float64Array(m)
+    this.diodeAvg = new Float64Array(m)
+    this.rCurrent = new Float64Array(m)
+    this.rVoltage = new Float64Array(m)
+    this.rPower = new Float64Array(m)
+    // −1 is "unrated"; a step that never settled leaves the previous load in place.
+    this.rLoad = new Float64Array(m).fill(-1)
+    this.rVbe = new Float64Array(m)
+    this.rIb = new Float64Array(m)
+    this.rRegion = new Uint8Array(m)
+    this.gpioState = new Uint8Array(m)
+    this.arc = new Uint8Array(m)
+    this.prevV = new Float64Array(n)
+    this.strikeV = new Float64Array(n)
+    this.gpioVolts = new Float64Array(m)
+    this.ohms = new Float64Array(m)
+    for (let i = 0; i < m; i++) {
+      const el = net.elements[i]
+      if (el.kind === "R") this.ohms[i] = el.value
+    }
+
+    this.indexOf = new Map(net.elements.map((el, i) => [el.id, i]))
+    // Terminal keys are interned once; the step then accumulates into dense slots.
+    this.termIndex = new Map()
+    this.termKeys = []
+    this.termOf = new Int32Array(m * 4).fill(-1)
+    this.termAt = new Int32Array(m)
+    net.elements.forEach((el, i) => {
+      this.termAt[i] = el.keys.length
+      el.keys.forEach((key, k) => {
+        let slot = this.termIndex.get(key)
+        if (slot === undefined) {
+          slot = this.termKeys.length
+          this.termIndex.set(key, slot)
+          this.termKeys.push(key)
+        }
+        this.termOf[i * 4 + k] = slot
+      })
+    })
+    this.termCurrent = new Float64Array(this.termKeys.length)
+  }
+
+  /** Carry capacitor voltages, inductor currents and wear over from a previous engine. */
+  adopt(prev: Engine) {
+    for (const [id, from] of prev.indexOf) {
+      const to = this.indexOf.get(id)
+      if (to === undefined) continue
+      this.capV[to] = prev.capV[from]
+      this.capI[to] = prev.capI[from]
+      this.indI[to] = prev.indI[from]
+      this.indV[to] = prev.indV[from]
+      this.stress[to] = prev.stress[from]
+      this.msI[to] = prev.msI[from]
+      this.msV[to] = prev.msV[from]
+      this.msP[to] = prev.msP[from]
+      this.diodeAvg[to] = prev.diodeAvg[from]
+      this.arc[to] = prev.arc[from]
+    }
+    this.msPrimed = prev.msPrimed
+    // Node voltages carry over by pin (nets get renumbered): the next step starts from the
+    // old solution, and an MCU does not see its supply at zero for a step after an edit.
+    // Node averages are not carried; they re-prime from the next solution.
+    for (const [key, to] of this.net.pinNet) {
+      const from = prev.net.pinNet.get(key)
+      if (from !== undefined && to !== GROUND && from !== GROUND) this.v[to] = prev.v[from]
+    }
+    this.time = prev.time
+    this.setTrace(prev.traceBucket)
+  }
+
+  /** Terminal voltage of a source at time `t`. */
+  private sourceVoltage(el: Extract<Resolved, { kind: "V" }>, t: number) {
+    if (el.amplitude <= 0) return el.value
+    if (el.shape === "pulse") {
+      const phase = ((t * el.frequency) % 1 + 1) % 1
+      return phase < el.duty ? el.value + el.amplitude : el.value
+    }
+    return el.value + el.amplitude * Math.sin(2 * Math.PI * el.frequency * t + el.phase)
+  }
+
+  /**
+   * Shichman–Hodges drain current and its derivatives at (vgs, vds), both already mirrored
+   * for a PMOS and with vds ≥ 0: the channel is symmetric, so a negative vds is handled by
+   * the caller swapping drain and source.
+   */
+  private mosfet(el: Extract<Resolved, { kind: "M" }>, vgs: number, vds: number): [id: number, gm: number, gds: number, region: number] {
+    const vov = vgs - el.vth
+    if (vov <= 0) return [0, 0, 0, 0]
+    const clm = 1 + el.lambda * vds
+    if (vds < vov) {
+      const shape = 2 * vov * vds - vds * vds
+      return [el.k * shape * clm, 2 * el.k * vds * clm, 2 * el.k * (vov - vds) * clm + el.k * shape * el.lambda, 1]
+    }
+    return [el.k * vov * vov * clm, 2 * el.k * vov * clm, el.k * vov * vov * el.lambda, 3]
+  }
+
+  /** Exponential moving average step with the RMS time constant. */
+  private ema(prev: number, value: number, dt: number) {
+    return prev + (value - prev) * Math.min(1, dt / this.tau)
+  }
+
+  // --- matrix helpers; methods rather than closures, so a step allocates nothing ---
+
+  /** Conductance between two nodes. */
+  private addG(a: number, b: number, val: number) {
+    const { A, size } = this
+    if (a !== GROUND) A[a * size + a] += val
+    if (b !== GROUND) A[b * size + b] += val
+    if (a !== GROUND && b !== GROUND) {
+      A[a * size + b] -= val
+      A[b * size + a] -= val
+    }
+  }
+
+  /** Current source of `i` amps flowing from a to b. */
+  private addI(a: number, b: number, i: number) {
+    const { z } = this
+    if (a !== GROUND) z[a] -= i
+    if (b !== GROUND) z[b] += i
+  }
+
+  /** One term of a linearized terminal current: g·(V[p] − V[q]) leaving node `at`. */
+  private addTerm(at: number, p: number, q: number, gk: number) {
+    const { A, size } = this
+    if (at === GROUND) return
+    if (p !== GROUND) A[at * size + p] += gk
+    if (q !== GROUND) A[at * size + q] -= gk
+  }
+
+  private vol(i: number, from: Float64Array) {
+    return i === GROUND ? 0 : from[i]
+  }
+
+  /**
+   * Stamp everything whose contribution to `A` does not depend on the solution. `withZ` also
+   * fills the right-hand side; a reused factorization needs the right-hand side alone.
+   */
+  private stampLinear(dt: number, parts: PartReader, withA: boolean, withZ: boolean) {
+    const { A, z, size } = this
+    const n = this.net.nodes
+    if (withA) for (let i = 0; i < n; i++) A[i * size + i] += GMIN
+    const elements = this.net.elements
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i]
+      switch (el.kind) {
+        case "R":
+          if (withA) this.addG(el.a, el.b, 1 / this.ohms[i])
+          break
+        // θ-method companions: i = C/(θ dt) · (v − v₀) − (1−θ)/θ · i₀ for a capacitor,
+        // i = i₀ + dt/L · (θ v + (1−θ) v₀) for an inductor.
+        case "C": {
+          const geq = el.value / (THETA * dt)
+          if (withA) this.addG(el.a, el.b, geq)
+          if (withZ) this.addI(el.a, el.b, -geq * this.capV[i] - ((1 - THETA) / THETA) * this.capI[i])
+          break
+        }
+        case "L":
+          if (withA) this.addG(el.a, el.b, (THETA * dt) / el.value)
+          if (withZ) this.addI(el.a, el.b, this.indI[i] + (((1 - THETA) * dt) / el.value) * this.indV[i])
+          break
+        case "V": {
+          const r = n + el.index
+          if (withA) {
+            if (el.plus !== GROUND) {
+              A[el.plus * size + r] += 1
+              A[r * size + el.plus] += 1
+            }
+            if (el.minus !== GROUND) {
+              A[el.minus * size + r] -= 1
+              A[r * size + el.minus] -= 1
+            }
+          }
+          if (withZ) z[r] = this.sourceVoltage(el, this.time + dt)
+          break
+        }
+        case "XFMR": {
+          // Unknown x[r] is the current entering the secondary at s1. Row r: V(s1) − V(s2) − n·(V(p1) − V(p2)) = 0;
+          // the primary draws −n·x[r] at p1 so the power balances.
+          if (!withA) break
+          const r = n + el.index
+          const couple = (node: number, val: number) => {
+            if (node === GROUND) return
+            A[node * size + r] += val
+            A[r * size + node] += val
+          }
+          couple(el.s1, 1)
+          couple(el.s2, -1)
+          couple(el.p1, -el.ratio)
+          couple(el.p2, el.ratio)
+          break
+        }
+        case "SW": {
+          if (switchClosed(el.closed, parts(el.object, el.part))) {
+            if (withA) this.addG(el.a, el.b, 1 / el.ron)
+          } else if (this.arc[i]) {
+            // i = (v − pol·V_ARC) / R_ARC: a conductance and the Norton current of the arc drop.
+            if (withA) this.addG(el.a, el.b, 1 / R_ARC)
+            if (withZ) this.addI(el.b, el.a, ((this.arc[i] === 1 ? 1 : -1) * V_ARC) / R_ARC)
+          }
+          break
+        }
+        case "GPIO": {
+          // Driver: 25 Ω to VDD or ground. Pull: 40 kΩ to VDD or ground. Floating: nothing.
+          // With a rail node the high side is a conductance to that rail, so the pad follows it.
+          const st = this.gpioState[i]
+          if (st === 0) break
+          if (st === GPIO_VOLTS) {
+            // A sourced voltage: R_DAC to ground plus the current that sets the level.
+            if (withA) this.addG(el.node, GROUND, 1 / R_DAC)
+            if (withZ) this.addI(GROUND, el.node, this.gpioVolts[i] / R_DAC)
+            break
+          }
+          const r = st <= 2 ? R_GPIO : R_PULL
+          const high = st === 1 || st === 3
+          if (high && el.vddNet !== undefined) {
+            if (withA) this.addG(el.node, el.vddNet, 1 / r)
+            break
+          }
+          if (withA) this.addG(el.node, GROUND, 1 / r)
+          if (withZ && high) this.addI(GROUND, el.node, el.vdd / r)
+          break
+        }
+      }
+    }
+  }
+
+  /** Hash of every switch and pad state, so a toggle invalidates the cached factorization. */
+  private switchMask(parts: PartReader) {
+    let mask = 0
+    const elements = this.net.elements
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i]
+      if (el.kind === "SW") mask = (mask * 31 + (switchClosed(el.closed, parts(el.object, el.part)) ? 1 : this.arc[i] ? 2 : 0)) | 0
+      else if (el.kind === "GPIO") mask = (mask * 31 + this.gpioState[i]) | 0
+      else if (el.kind === "R" && el.live) mask = (mask * 31 + (this.ohms[i] | 0)) | 0
+    }
+    return mask
+  }
+
+  step(dt: number, parts: PartReader, pins: PinReader = NO_PINS) {
+    const n = this.net.nodes
+    const elements = this.net.elements
+
+    // Pad states are read once per step: the MCU may change them between steps, not within.
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i]
+      if (el.kind === "GPIO") {
+        const st = pins(el.object, el.nodeKey)
+        if (typeof st === "number") {
+          this.gpioState[i] = GPIO_VOLTS
+          this.gpioVolts[i] = st
+        } else this.gpioState[i] = st ? GPIO_CODE[st] : 0
+      } else if (el.kind === "R" && el.live) {
+        const r = pins(el.object, el.live)
+        this.ohms[i] = typeof r === "number" && r > 0 ? r : el.value
+      }
+    }
+
+    this.struck = false
+    this.prevV.set(this.v)
+    // A gap that strikes changes the circuit within the step: solve the step again, from the
+    // same start, with the arc in.
+    for (let strike = 0; strike <= MAX_STRIKES; strike++) {
+      if (strike > 0) this.v.set(this.prevV)
+      this.converged = this.solve(dt, parts)
+      if (strike === MAX_STRIKES || !this.checkStrikes(parts)) break
+    }
+
+    this.updateState(dt, parts)
+    this.updateProbes(dt)
+
+    if (this.ac) {
+      for (let i = 0; i < n; i++) this.v2[i] = this.msPrimed ? this.ema(this.v2[i], this.v[i] * this.v[i], dt) : this.v[i] * this.v[i]
+    }
+    this.msPrimed = true
+    this.time += dt
+  }
+
+  /**
+   * An open switch whose gap voltage reached its strike voltage arcs over. The solution the
+   * gap reached is kept at the instant of the strike — the circuit did pass through it — so
+   * the probes see the spike and anything rated below it breaks; then the step is re-solved
+   * with the arc conducting. Returns whether anything struck.
+   */
+  private checkStrikes(parts: PartReader): boolean {
+    const elements = this.net.elements
+    let struck = false
+    let worst = 1
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i]
+      if (el.kind !== "SW" || this.arc[i] || el.strike === Infinity) continue
+      if (switchClosed(el.closed, parts(el.object, el.part))) continue
+      const vd = Math.abs(this.vol(el.a, this.v) - this.vol(el.b, this.v))
+      if (vd < el.strike) continue
+      this.arc[i] = this.vol(el.a, this.v) - this.vol(el.b, this.v) > 0 ? 1 : 2
+      struck = true
+      // The gap breaks down on the way up: the state at the strike is the previous solution
+      // carried this fraction of the way to the unclamped one.
+      if (el.strike / vd < worst) worst = el.strike / vd
+    }
+    if (!struck) return false
+    const n = this.net.nodes
+    for (let k = 0; k < n; k++) this.strikeV[k] = this.prevV[k] + (this.v[k] - this.prevV[k]) * worst
+    this.struck = true
+    return true
+  }
+
+  /** One solve of the step from the current state; returns whether Newton settled. */
+  private solve(dt: number, parts: PartReader): boolean {
+    const { A, z, x, guess, size } = this
+    const n = this.net.nodes
+    const elements = this.net.elements
+    // Junction voltages start from the previous solution.
+    if (!this.linear) {
+      for (let i = 0; i < elements.length; i++) {
+        const el = elements[i]
+        if (el.kind === "D") {
+          this.jA[i] = this.vol(el.anode, this.v) - this.vol(el.cathode, this.v)
+          this.jB[i] = 0
+        } else if (el.kind === "Q") {
+          const s = el.polarity
+          this.jA[i] = s * (this.vol(el.b, this.v) - this.vol(el.e, this.v))
+          this.jB[i] = s * (this.vol(el.b, this.v) - this.vol(el.c, this.v))
+        }
+      }
+    }
+    guess.set(this.v)
+    let converged = false
+    /** Smallest error any iterate reached, and with it the `best` solution vector. */
+    let bestErr = Infinity
+
+    // A linear circuit has a constant matrix: factorize once and only rebuild the
+    // right-hand side, which turns the per-step cost from O(n³) into O(n²).
+    const mask = this.switchMask(parts)
+    if (this.linear && this.luValid && this.luDt === dt && this.luSwitches === mask) {
+      z.fill(0)
+      this.stampLinear(dt, parts, false, true)
+      converged = this.substitute()
+    } else {
+      for (let iter = 0; iter < MAX_ITER; iter++) {
+        A.fill(0)
+        z.fill(0)
+        // Set when junction limiting changed a voltage: the node solution can look stable while
+        // the diode operating point is still creeping up, so that iteration is never "converged".
+        let clamped = false
+        const limit = (vnew: number, vold: number, vt: number, vcrit: number) => {
+          const v = pnjlim(vnew, vold, vt, vcrit)
+          if (Math.abs(v - vnew) > ABS_TOL) clamped = true
+          return v
+        }
+        const g = (i: number) => (i === GROUND ? 0 : guess[i])
+
+        this.stampLinear(dt, parts, true, true)
+
+        for (let i = 0; i < elements.length; i++) {
+          const el = elements[i]
+          if (el.kind === "D") {
+            const nvt = el.n * VT
+            const vcrit = nvt * Math.log(nvt / (Math.SQRT2 * el.is))
+            let vd = limit(g(el.anode) - g(el.cathode), this.jA[i], nvt, vcrit)
+            if (el.zener) vd = Math.max(vd, -el.zener - 1)
+            this.jA[i] = vd
+            const ef = Math.exp(Math.min(vd / nvt, 80))
+            let id = el.is * (ef - 1)
+            let gd = (el.is / nvt) * ef
+            if (el.zener) {
+              // Reverse breakdown as a mirrored junction offset by Vz.
+              const er = Math.exp(Math.min(-(vd + el.zener) / nvt, 80))
+              id -= el.is * (er - 1)
+              gd += (el.is / nvt) * er
+            }
+            this.addG(el.anode, el.cathode, gd)
+            this.addI(el.anode, el.cathode, id - gd * vd)
+          } else if (el.kind === "Q") {
+            // Ebers-Moll transport model; PNP handled by mirroring voltages and currents.
+            const s = el.polarity
+            const vcrit = VT * Math.log(VT / (Math.SQRT2 * Q_IS))
+            const vbe = limit(s * (g(el.b) - g(el.e)), this.jA[i], VT, vcrit)
+            const vbc = limit(s * (g(el.b) - g(el.c)), this.jB[i], VT, vcrit)
+            this.jA[i] = vbe
+            this.jB[i] = vbc
+            const ef = Math.exp(Math.min(vbe / VT, 80))
+            const er = Math.exp(Math.min(vbc / VT, 80))
+            const iF = Q_IS * (ef - 1)
+            const iR = Q_IS * (er - 1)
+            const ic = iF - iR - iR / Q_BR
+            const ib = iF / el.beta + iR / Q_BR
+            const gf = (Q_IS / VT) * ef
+            const gr = (Q_IS / VT) * er
+            // dIc/dVbe, dIc/dVbc, dIb/dVbe, dIb/dVbc
+            const g1 = gf
+            const g2 = -gr * (1 + 1 / Q_BR)
+            const g3 = gf / el.beta
+            const g4 = gr / Q_BR
+            const ic0 = s * (ic - g1 * vbe - g2 * vbc)
+            const ib0 = s * (ib - g3 * vbe - g4 * vbc)
+            this.addTerm(el.c, el.b, el.e, g1)
+            this.addTerm(el.c, el.b, el.c, g2)
+            if (el.c !== GROUND) z[el.c] -= ic0
+            this.addTerm(el.b, el.b, el.e, g3)
+            this.addTerm(el.b, el.b, el.c, g4)
+            if (el.b !== GROUND) z[el.b] -= ib0
+            this.addTerm(el.e, el.b, el.e, -(g1 + g3))
+            this.addTerm(el.e, el.b, el.c, -(g2 + g4))
+            if (el.e !== GROUND) z[el.e] += ic0 + ib0
+          } else if (el.kind === "REG") {
+            // Piecewise-linear regulator: the row for its through current x[r] depends on the
+            // operating mode, chosen from the previous iterate. A mode change is not convergence.
+            const r = n + el.index
+            const vin = g(el.in) - g(el.gnd)
+            const vout = g(el.out) - g(el.gnd)
+            const iPrev = x[r]
+            const avail = vin - el.dropout
+            const target = Math.min(el.value, avail)
+            const prev = this.rRegion[i]
+            const regOrDrop = avail >= el.value - 1e-9 ? REG_REGULATE : REG_DROPOUT
+            let mode: number
+            // Limiting is left only once the output recovers: its saturating law already gives
+            // nothing when the input collapses, and it must not flip to "off" on the way there.
+            if (prev === REG_LIMIT) mode = vout >= el.value - 1e-3 ? regOrDrop : REG_LIMIT
+            else if (avail <= 0.02) mode = REG_OPEN
+            else if (prev === REG_OPEN) mode = vout < target - 2e-3 ? regOrDrop : REG_OPEN
+            else if (iPrev > el.imax) mode = REG_LIMIT
+            // Sourcing: stay on, picking regulate/dropout by what the input can give. Only a
+            // regulator asked to sink, or one idle under an output held higher, switches off.
+            else if (iPrev > 1e-6) mode = regOrDrop
+            else if (iPrev < -1e-6 || vout > target + 2e-3) mode = REG_OPEN
+            else mode = regOrDrop
+            if (mode !== prev) clamped = true
+            this.rRegion[i] = mode
+            // Through current x[r] leaves `in` and arrives at `out`.
+            if (el.in !== GROUND) A[el.in * size + r] += 1
+            if (el.out !== GROUND) A[el.out * size + r] -= 1
+            switch (mode) {
+              // vout = Vset − R·x (regulating) or vout = vin − dropout − R·x (dropout): a little
+              // sag with load, so two regulators on one rail share instead of fighting.
+              case REG_REGULATE:
+                if (el.out !== GROUND) A[r * size + el.out] += 1
+                if (el.gnd !== GROUND) A[r * size + el.gnd] -= 1
+                A[r * size + r] += R_REG
+                z[r] = el.value
+                break
+              case REG_DROPOUT:
+                if (el.out !== GROUND) A[r * size + el.out] += 1
+                if (el.in !== GROUND) A[r * size + el.in] -= 1
+                A[r * size + r] += R_REG
+                z[r] = -el.dropout
+                break
+              case REG_LIMIT: {
+                // The pass element saturating: x = imax·(1 − e^(−d/vsat)) of the headroom
+                // d = vin − vout, linearized at the previous headroom and stepped at most vsat at
+                // a time, the way junctions are limited. Smooth, so a limiter fed by an upstream
+                // limiter settles on passing what it gets instead of demanding the impossible.
+                const vsat = Math.max(el.dropout, 0.2)
+                let d = vin - vout
+                const dPrev = prev === REG_LIMIT ? this.jA[i] : d
+                if (d > dPrev + vsat) {
+                  d = dPrev + vsat
+                  clamped = true
+                } else if (d < dPrev - vsat) {
+                  d = dPrev - vsat
+                  clamped = true
+                }
+                this.jA[i] = d
+                let f: number
+                let gk: number
+                if (d <= 0) {
+                  f = 0
+                  gk = (el.imax / vsat) * 0.01
+                } else {
+                  const e = Math.exp(-d / vsat)
+                  f = el.imax * (1 - e)
+                  gk = Math.max(1e-6, (el.imax / vsat) * e)
+                }
+                A[r * size + r] = 1
+                if (el.in !== GROUND) A[r * size + el.in] -= gk
+                if (el.out !== GROUND) A[r * size + el.out] += gk
+                z[r] = f - gk * d
+                break
+              }
+              default:
+                A[r * size + r] = 1
+                z[r] = 0
+            }
+          } else if (el.kind === "M") {
+            const s = el.polarity
+            // Below zero Vds the roles of drain and source swap; nothing else changes.
+            const swap = s * (g(el.d) - g(el.s)) < 0
+            const dn = swap ? el.s : el.d
+            const sn = swap ? el.d : el.s
+            const vgs = s * (g(el.g) - g(sn))
+            const vds = s * (g(dn) - g(sn))
+            const [id, gm, gds] = this.mosfet(el, vgs, vds)
+            // Drain current linearized: i = gm·(Vg − Vs) + gds·(Vd − Vs) + i0, leaving dn into sn.
+            const i0 = s * (id - gm * vgs - gds * vds)
+            this.addTerm(dn, el.g, sn, gm)
+            this.addTerm(dn, dn, sn, gds)
+            if (dn !== GROUND) z[dn] -= i0
+            this.addTerm(sn, el.g, sn, -gm)
+            this.addTerm(sn, dn, sn, -gds)
+            if (sn !== GROUND) z[sn] += i0
+          }
+        }
+
+        if (!this.factorize()) break
+        this.substitute()
+
+        let maxErr = 0
+        for (let i = 0; i < n; i++) {
+          const err = Math.abs(x[i] - guess[i]) - (ABS_TOL + REL_TOL * Math.abs(x[i]))
+          if (err > maxErr) maxErr = err
+          guess[i] = x[i]
+        }
+        if ((maxErr <= 0 && !clamped) || this.linear) {
+          converged = true
+          break
+        }
+        // A circuit switching regeneratively — a latch tipping over — passes through an
+        // operating point where the Jacobian is singular, and there the iteration can chatter
+        // instead of settling. Whatever it lands on when the iterations run out is arbitrary
+        // and may be far off; the closest point it saw is not.
+        if (maxErr < bestErr) {
+          bestErr = maxErr
+          this.best.set(x)
+        }
+      }
+      if (!converged && bestErr < Infinity) {
+        x.set(this.best)
+        guess.set(this.best.subarray(0, n))
+      }
+      this.luDt = dt
+      this.luSwitches = mask
+    }
+
+    this.v.set(guess.subarray(0, n))
+    if (this.linear) for (let i = 0; i < n; i++) this.v[i] = x[i]
+    return converged
+  }
+
+  /**
+   * Nodes to measure between, two entries per probe. Setting them is cheap and may happen
+   * mid-run; the statistics start over whenever the pairs change.
+   */
+  setProbes(nodes: ArrayLike<number>) {
+    let same = this.probeNodes.length === nodes.length
+    for (let i = 0; same && i < nodes.length; i++) same = this.probeNodes[i] === nodes[i]
+    if (same) return
+    this.probeNodes = Int32Array.from(nodes as ArrayLike<number>)
+    this.probeAcc = new Float64Array((nodes.length >> 1) * 4)
+    this.probeLast = new Float64Array((nodes.length >> 1) * 4)
+    this.resetProbeWindow()
+    this.probeLastSamples = 0
+    this.resetTrace()
+  }
+
+  /** Start (or stop, with 0) collecting oscilloscope buckets of `bucket` seconds. */
+  setTrace(bucket: number) {
+    if (bucket === this.traceBucket) return
+    this.traceBucket = bucket
+    this.resetTrace()
+  }
+
+  private resetTrace() {
+    const probes = this.probeNodes.length >> 1
+    this.traceAcc = new Float64Array(probes * 2)
+    for (let p = 0; p < probes; p++) {
+      this.traceAcc[p * 2] = Infinity
+      this.traceAcc[p * 2 + 1] = -Infinity
+    }
+    this.traceSeconds = 0
+    this.traceOut = []
+    this.traceStart = this.time
+  }
+
+  /** Hand over the buckets finished since the last call. */
+  drainTrace(): TraceChunk {
+    const probes = this.probeNodes.length >> 1
+    const stride = probes * 2
+    const count = stride ? this.traceOut.length / stride : 0
+    const chunk = { start: this.traceStart, bucket: this.traceBucket, count, data: Float32Array.from(this.traceOut) }
+    this.traceOut = []
+    this.traceStart += count * this.traceBucket
+    return chunk
+  }
+
+  private resetProbeWindow() {
+    for (let p = 0; p < this.probeAcc.length; p += 4) {
+      this.probeAcc[p] = 0
+      this.probeAcc[p + 1] = 0
+      this.probeAcc[p + 2] = Infinity
+      this.probeAcc[p + 3] = -Infinity
+    }
+    this.probeSeconds = 0
+    this.probeSamples = 0
+  }
+
+  /**
+   * Accumulate what every probe sees this step.
+   *
+   * Over a window rather than through a running mean: a mean that is quick enough to follow
+   * the circuit still ripples at the signal's own frequency, and a decaying peak sags between
+   * one cycle's crest and the next. Summing a whole window and reporting the last finished one
+   * gives an exact RMS, mean and pair of extremes, refreshed a few times a second.
+   */
+  private updateProbes(dt: number) {
+    const nodes = this.probeNodes
+    if (nodes.length === 0) return
+    const acc = this.probeAcc
+    const tracing = this.traceBucket > 0
+    const trace = this.traceAcc
+    // The instant a gap struck is a real point of the waveform, if not a whole sample of it:
+    // it sets the extremes so the spike shows, and nothing else.
+    if (this.struck) {
+      const sv = this.strikeV
+      for (let p = 0; p < nodes.length >> 1; p++) {
+        const d = this.vol(nodes[p * 2], sv) - this.vol(nodes[p * 2 + 1], sv)
+        const s = p * 4
+        if (d < acc[s + 2]) acc[s + 2] = d
+        if (d > acc[s + 3]) acc[s + 3] = d
+        if (tracing) {
+          if (d < trace[p * 2]) trace[p * 2] = d
+          if (d > trace[p * 2 + 1]) trace[p * 2 + 1] = d
+        }
+      }
+    }
+    for (let p = 0; p < nodes.length >> 1; p++) {
+      const d = this.vol(nodes[p * 2], this.v) - this.vol(nodes[p * 2 + 1], this.v)
+      const s = p * 4
+      acc[s] += d
+      acc[s + 1] += d * d
+      if (d < acc[s + 2]) acc[s + 2] = d
+      if (d > acc[s + 3]) acc[s + 3] = d
+      if (tracing) {
+        if (d < trace[p * 2]) trace[p * 2] = d
+        if (d > trace[p * 2 + 1]) trace[p * 2 + 1] = d
+      }
+    }
+    if (tracing) {
+      this.traceSeconds += dt
+      if (this.traceSeconds >= this.traceBucket - 1e-12) {
+        for (let p = 0; p < trace.length; p += 2) {
+          this.traceOut.push(trace[p], trace[p + 1])
+          trace[p] = Infinity
+          trace[p + 1] = -Infinity
+        }
+        this.traceSeconds -= this.traceBucket
+      }
+    }
+    this.probeSeconds += dt
+    this.probeSamples++
+    // A window is a few cycles of the slowest source, and at least RMS_MIN_TAU on DC.
+    if (this.probeSeconds >= Math.max(RMS_MIN_TAU, this.tau)) {
+      this.probeLast.set(acc)
+      this.probeLastSamples = this.probeSamples
+      this.resetProbeWindow()
+    }
+  }
+
+  /** What each probe reads now, in the order the pairs were given. */
+  probeReadings(): ProbeReading[] {
+    // Before the first window closes the partial one still beats showing nothing.
+    const done = this.probeLastSamples > 0
+    const src = done ? this.probeLast : this.probeAcc
+    const count = done ? this.probeLastSamples : this.probeSamples
+    const out: ProbeReading[] = []
+    for (let p = 0; p < this.probeNodes.length >> 1; p++) {
+      const s = p * 4
+      const v = this.vol(this.probeNodes[p * 2], this.v) - this.vol(this.probeNodes[p * 2 + 1], this.v)
+      out.push(
+        count > 0
+          ? { v, rms: Math.sqrt(src[s + 1] / count), avg: src[s] / count, min: src[s + 2], max: src[s + 3] }
+          : { v, rms: Math.abs(v), avg: v, min: v, max: v },
+      )
+    }
+    return out
+  }
+
+  /** Energy-storage state, terminal currents and the operating point of every element. */
+  private updateState(dt: number, parts: PartReader) {
+    const { x } = this
+    const n = this.net.nodes
+    const elements = this.net.elements
+    const tc = this.termCurrent
+    tc.fill(0)
+    this.failures.length = 0
+    if (this.struck) this.strikeRatings()
+
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i]
+      const base = i * 4
+      switch (el.kind) {
+        case "R": {
+          const vd = this.vol(el.a, this.v) - this.vol(el.b, this.v)
+          const cur = vd / this.ohms[i]
+          tc[this.termOf[base]] += cur
+          tc[this.termOf[base + 1]] -= cur
+          this.record(el, i, dt, cur, vd, vd * cur)
+          break
+        }
+        case "C": {
+          const vNow = this.vol(el.a, this.v) - this.vol(el.b, this.v)
+          const cur = (el.value / (THETA * dt)) * (vNow - this.capV[i]) - ((1 - THETA) / THETA) * this.capI[i]
+          tc[this.termOf[base]] += cur
+          tc[this.termOf[base + 1]] -= cur
+          this.capV[i] = vNow
+          this.capI[i] = cur
+          this.record(el, i, dt, cur, vNow, 0)
+          break
+        }
+        case "L": {
+          const vd = this.vol(el.a, this.v) - this.vol(el.b, this.v)
+          const cur = this.indI[i] + (dt / el.value) * (THETA * vd + (1 - THETA) * this.indV[i])
+          this.indI[i] = cur
+          this.indV[i] = vd
+          tc[this.termOf[base]] += cur
+          tc[this.termOf[base + 1]] -= cur
+          this.record(el, i, dt, cur, vd, 0)
+          break
+        }
+        case "V": {
+          const cur = x[n + el.index]
+          const vs = this.sourceVoltage(el, this.time + dt)
+          tc[this.termOf[base]] += cur
+          tc[this.termOf[base + 1]] -= cur
+          this.record(el, i, dt, cur, vs, Math.abs(cur * vs))
+          break
+        }
+        case "XFMR": {
+          const is = x[n + el.index]
+          const vs = this.vol(el.s1, this.v) - this.vol(el.s2, this.v)
+          tc[this.termOf[base]] += -el.ratio * is
+          tc[this.termOf[base + 1]] += el.ratio * is
+          tc[this.termOf[base + 2]] += is
+          tc[this.termOf[base + 3]] -= is
+          // Readings are the secondary side; the power is what passes through.
+          this.record(el, i, dt, is, vs, Math.abs(vs * is))
+          break
+        }
+        case "SW": {
+          const closed = switchClosed(el.closed, parts(el.object, el.part))
+          const arcing = !closed && this.arc[i] !== 0
+          const vd = this.vol(el.a, this.v) - this.vol(el.b, this.v)
+          const pol = this.arc[i] === 2 ? -1 : 1
+          const cur = closed ? vd / el.ron : arcing ? (vd - pol * V_ARC) / R_ARC : 0
+          tc[this.termOf[base]] += cur
+          tc[this.termOf[base + 1]] -= cur
+          // The arc goes out once the load can no longer feed it.
+          if (arcing && pol * cur < ARC_HOLD) this.arc[i] = 0
+          this.rRegion[i] = closed ? 1 : arcing ? 2 : 0
+          this.record(el, i, dt, cur, vd, Math.abs(vd * cur))
+          break
+        }
+        case "GPIO": {
+          const st = this.gpioState[i]
+          const vn = this.vol(el.node, this.v)
+          if (st === 0) {
+            this.record(el, i, dt, 0, vn, 0)
+            break
+          }
+          if (st === GPIO_VOLTS) {
+            const cur = (vn - this.gpioVolts[i]) / R_DAC
+            tc[this.termOf[base]] += cur
+            this.record(el, i, dt, cur, vn, Math.abs(cur * cur * R_DAC))
+            break
+          }
+          const r = st <= 2 ? R_GPIO : R_PULL
+          const high = st === 1 || st === 3
+          const vdd = high ? (el.vddNet !== undefined ? this.vol(el.vddNet, this.v) : el.vdd) : 0
+          const cur = (vn - vdd) / r
+          tc[this.termOf[base]] += cur
+          if (high && el.vddNet !== undefined) tc[this.termOf[base + 1]] -= cur
+          this.record(el, i, dt, cur, vn, Math.abs(cur * cur * r))
+          break
+        }
+        case "REG": {
+          const cur = x[n + el.index]
+          const vin = this.vol(el.in, this.v) - this.vol(el.gnd, this.v)
+          const vout = this.vol(el.out, this.v) - this.vol(el.gnd, this.v)
+          tc[this.termOf[base]] += cur
+          tc[this.termOf[base + 1]] -= cur
+          this.record(el, i, dt, cur, vout, Math.max(0, (vin - vout) * cur))
+          break
+        }
+        case "D": {
+          const vd = this.vol(el.anode, this.v) - this.vol(el.cathode, this.v)
+          const nvt = el.n * VT
+          let cur = el.is * (Math.exp(Math.min(vd / nvt, 80)) - 1)
+          if (el.zener) cur -= el.is * (Math.exp(Math.min(-(vd + el.zener) / nvt, 80)) - 1)
+          this.diodeI[i] = cur
+          // What the eye sees: the current averaged over ~10 ms, so a PWM-dimmed LED reads as
+          // dim rather than strobing with the snapshot phase. On AC the RMS window applies.
+          this.diodeAvg[i] = !this.msPrimed ? cur : this.ac ? this.ema(this.diodeAvg[i], cur, dt) : this.diodeAvg[i] + (cur - this.diodeAvg[i]) * Math.min(1, dt / LED_EYE_TAU)
+          tc[this.termOf[base]] += cur
+          tc[this.termOf[base + 1]] -= cur
+          // Reverse voltage counts against the rating only for plain diodes; zeners are meant to break down.
+          this.record(el, i, dt, cur, vd, Math.abs(vd * cur), el.zener ? 0 : Math.min(0, vd))
+          break
+        }
+        case "Q": {
+          const s = el.polarity
+          const vbe = this.vol(el.b, this.v) - this.vol(el.e, this.v)
+          const vce = this.vol(el.c, this.v) - this.vol(el.e, this.v)
+          const ef = Math.exp(Math.min((s * vbe) / VT, 80))
+          const er = Math.exp(Math.min((s * (vbe - vce)) / VT, 80))
+          const iF = Q_IS * (ef - 1)
+          const iR = Q_IS * (er - 1)
+          const ic = iF - iR - iR / Q_BR
+          const ib = iF / el.beta + iR / Q_BR
+          tc[this.termOf[base]] += s * ib
+          tc[this.termOf[base + 1]] += s * ic
+          tc[this.termOf[base + 2]] += -s * (ic + ib)
+          this.rVbe[i] = vbe
+          this.rIb[i] = ib
+          this.rRegion[i] =
+            s * vbe < 0.5 ? 0 : Math.abs(vce) < 0.3 ? 1 : s * (vbe - vce) > 0.5 ? 2 : 3
+          // Pin to pin: the drop across the collector resistance is the part's, and so is its heat.
+          const vcePin = this.vol(el.cPin, this.v) - this.vol(el.e, this.v)
+          this.record(el, i, dt, ic, vcePin, Math.abs(vcePin * ic) + Math.abs(vbe * ib))
+          break
+        }
+        case "M": {
+          const s = el.polarity
+          const vdsRaw = s * (this.vol(el.d, this.v) - this.vol(el.s, this.v))
+          const swap = vdsRaw < 0
+          const sn = swap ? el.d : el.s
+          const vgs = s * (this.vol(el.g, this.v) - this.vol(sn, this.v))
+          const [id, , , region] = this.mosfet(el, vgs, Math.abs(vdsRaw))
+          // Current into the drain terminal; it comes out of the source. Gate draws nothing.
+          const into = (swap ? -1 : 1) * s * id
+          tc[this.termOf[base + 1]] += into
+          tc[this.termOf[base + 2]] -= into
+          this.rVbe[i] = s * (this.vol(el.g, this.v) - this.vol(el.s, this.v))
+          this.rRegion[i] = swap && id > 0 ? 2 : region
+          this.record(el, i, dt, into, vdsRaw, Math.abs(vdsRaw * id))
+          break
+        }
+      }
+    }
+  }
+
+  /** Record the operating point and check it against the ratings; records a failure when it breaks. */
+  private record(el: Resolved, i: number, dt: number, cur: number, v: number, p: number, ratedV = v) {
+    this.rCurrent[i] = cur
+    this.rVoltage[i] = v
+    this.rPower[i] = p
+    // A step the solver could not settle is not evidence of anything: an exponential evaluated
+    // at a stray iterate reads megawatts. Such a step still shows its (flagged) numbers, but it
+    // must not heat a part, break one, or poison the running averages.
+    if (!this.converged) return
+    let iLoad = Math.abs(cur)
+    let pLoad = p
+    if (this.ac) {
+      if (this.msPrimed) {
+        this.msI[i] = this.ema(this.msI[i], cur * cur, dt)
+        this.msV[i] = this.ema(this.msV[i], v * v, dt)
+        this.msP[i] = this.ema(this.msP[i], p, dt)
+      } else {
+        this.msI[i] = cur * cur
+        this.msV[i] = v * v
+        this.msP[i] = p
+      }
+      // Heating ratings compare against RMS values on AC, which also rides out the inrush into a
+      // filter capacitor; voltage breakdown is always instantaneous.
+      iLoad = Math.sqrt(this.msI[i])
+      pLoad = this.msP[i]
+    }
+    const lim = el.limits
+    if (!lim) {
+      this.rLoad[i] = -1
+      return
+    }
+    let load = lim.current !== undefined ? iLoad / lim.current : 0
+    if (lim.power !== undefined && pLoad / lim.power > load) load = pLoad / lim.power
+    if (lim.voltage !== undefined && Math.abs(ratedV) / lim.voltage > load) load = Math.abs(ratedV) / lim.voltage
+    if (lim.reverse !== undefined && -ratedV / lim.reverse > load) load = -ratedV / lim.reverse
+    this.rLoad[i] = load
+
+    if (lim.voltage !== undefined && Math.abs(ratedV) > lim.voltage)
+      return this.fail(el, lim.fail, "voltage", Math.abs(ratedV), lim.voltage, "V")
+    // Polarity: an electrolytic the wrong way round breaks down long before its rating.
+    if (lim.reverse !== undefined && -ratedV > lim.reverse)
+      return this.fail(el, lim.fail, "reverse voltage", -ratedV, lim.reverse, "V")
+    let ratio = 0
+    let what = "current"
+    let actual = 0
+    let rated = 0
+    let unit = "A"
+    if (lim.current !== undefined) {
+      ratio = iLoad / lim.current
+      actual = iLoad
+      rated = lim.current
+    }
+    if (lim.power !== undefined && pLoad / lim.power > ratio) {
+      ratio = pLoad / lim.power
+      what = "power"
+      actual = pLoad
+      rated = lim.power
+      unit = "W"
+    }
+    // Below the rating the part cools at the same pace it heats above it, so the peaks of an
+    // AC cycle only add up when the average load is over the limit.
+    // Far beyond the rating there is no thermal grace period.
+    const stress = ratio > 20 ? Infinity : Math.max(0, this.stress[i] + dt * (ratio - 1))
+    this.stress[i] = stress
+    if (stress > STRESS_LIMIT) this.fail(el, lim.fail, what, actual, rated, unit)
+  }
+
+  private fail(el: Resolved, how: "open" | "short", what: string, actual: number, rated: number, unit: string) {
+    for (const f of this.failures) if (f.object === el.object && f.damage.element === el.element) return
+    this.failures.push({
+      object: el.object,
+      ref: el.ref,
+      damage: {
+        element: el.element,
+        fail: how,
+        fatal: el.limits?.fatal ?? true,
+        reason: `${what} ${formatSI(actual, unit)} exceeds the ${formatSI(rated, unit)} rating`,
+      },
+    })
+  }
+
+  /**
+   * Voltage ratings against the state at the instant a gap struck: the circuit was there,
+   * however briefly, and a junction rated below the spike breaks down on the way up.
+   */
+  private strikeRatings() {
+    const v = this.strikeV
+    const elements = this.net.elements
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i]
+      const lim = el.limits
+      if (!lim?.voltage) continue
+      let mag: number
+      switch (el.kind) {
+        case "R":
+        case "C":
+        case "L":
+          mag = Math.abs(this.vol(el.a, v) - this.vol(el.b, v))
+          break
+        case "D":
+          if (el.zener) continue
+          mag = Math.max(0, this.vol(el.cathode, v) - this.vol(el.anode, v))
+          break
+        case "Q":
+          mag = Math.abs(this.vol(el.cPin, v) - this.vol(el.e, v))
+          break
+        case "M":
+          mag = Math.abs(this.vol(el.d, v) - this.vol(el.s, v))
+          break
+        case "GPIO":
+          mag = Math.abs(this.vol(el.node, v))
+          break
+        default:
+          continue
+      }
+      if (mag > lim.voltage) this.fail(el, lim.fail, "voltage", mag, lim.voltage, "V")
+    }
+  }
+
+  // --- readouts; built on demand, not on every step ---
+
+  /** Operating point of every element, in netlist order. */
+  readings(): Reading[] {
+    return this.net.elements.map((el, i) => {
+      const load = this.rLoad[i]
+      const reading: Reading = {
+        object: el.object,
+        element: el.element,
+        kind: el.kind,
+        current: this.rCurrent[i],
+        voltage: this.rVoltage[i],
+        power: this.rPower[i],
+        load: load < 0 ? undefined : load,
+        limits: el.limits,
+        hidden: el.hidden,
+      }
+      if (el.kind === "Q") {
+        reading.extra = {
+          Vbe: formatSI(this.rVbe[i], "V"),
+          Ib: formatSI(this.rIb[i], "A"),
+          region: BJT_REGIONS[this.rRegion[i]],
+        }
+      } else if (el.kind === "M") {
+        reading.extra = { Vgs: formatSI(this.rVbe[i], "V"), region: MOS_REGIONS[this.rRegion[i]] }
+      } else if (el.kind === "SW") {
+        reading.extra = { state: this.rRegion[i] === 1 ? "closed" : this.rRegion[i] === 2 ? "arcing" : "open" }
+      } else if (el.kind === "REG") {
+        reading.extra = { mode: REG_MODES[this.rRegion[i]] ?? "off" }
+      } else if (el.kind === "V" && el.amplitude > 0) {
+        reading.extra = { Frequency: formatSI(el.frequency, "Hz") }
+        if (el.shape === "pulse") reading.extra.Duty = `${Math.round(el.duty * 100)} %`
+      } else if (el.kind === "XFMR") {
+        reading.extra = { Ratio: `1 : ${formatSI(el.ratio, "")}` }
+      }
+      if (this.ac) {
+        reading.rms = { current: Math.sqrt(this.msI[i]), voltage: Math.sqrt(this.msV[i]), power: this.msP[i] }
+      }
+      return reading
+    })
+  }
+
+  /** Current leaving the net into an element, per terminal node key. */
+  terminalCurrents(): Map<string, number> {
+    const out = new Map<string, number>()
+    for (let i = 0; i < this.termKeys.length; i++) out.set(this.termKeys[i], this.termCurrent[i])
+    return out
+  }
+
+  /** Terminal current slots after the last step, and the slot of a terminal key. */
+  get terminalSlots(): { current: Float64Array; index: Map<string, number>; keys: string[] } {
+    return { current: this.termCurrent, index: this.termIndex, keys: this.termKeys }
+  }
+
+  // --- dense linear algebra ---
+
+  /** LU factorization of `A` with partial pivoting, into `lu`. False if singular. */
+  private factorize(): boolean {
+    const { A, lu, pivot, size: N } = this
+    lu.set(A)
+    for (let col = 0; col < N; col++) {
+      let piv = col
+      let best = Math.abs(lu[col * N + col])
+      for (let r = col + 1; r < N; r++) {
+        const val = Math.abs(lu[r * N + col])
+        if (val > best) {
+          best = val
+          piv = r
+        }
+      }
+      if (best < 1e-18) {
+        this.luValid = false
+        return false
+      }
+      pivot[col] = piv
+      if (piv !== col) {
+        for (let c = 0; c < N; c++) {
+          const t = lu[col * N + c]
+          lu[col * N + c] = lu[piv * N + c]
+          lu[piv * N + c] = t
+        }
+      }
+      const d = lu[col * N + col]
+      for (let r = col + 1; r < N; r++) {
+        const f = lu[r * N + col] / d
+        // Stored in the eliminated slot: the multiplier the right-hand side needs later.
+        lu[r * N + col] = f
+        if (f === 0) continue
+        for (let c = col + 1; c < N; c++) lu[r * N + c] -= f * lu[col * N + c]
+      }
+    }
+    this.luValid = true
+    return true
+  }
+
+  /** Forward and back substitution of `z` through the stored factors, into `x`. */
+  private substitute(): boolean {
+    const { lu, pivot, z, x, size: N } = this
+    if (!this.luValid) return false
+    // Every interchange first: the stored multipliers sit in their final, permuted rows,
+    // so eliminating before the later swaps would mix rows that no longer belong together.
+    for (let col = 0; col < N; col++) {
+      const piv = pivot[col]
+      if (piv !== col) {
+        const t = z[col]
+        z[col] = z[piv]
+        z[piv] = t
+      }
+    }
+    for (let col = 0; col < N; col++) {
+      const b = z[col]
+      for (let r = col + 1; r < N; r++) z[r] -= lu[r * N + col] * b
+    }
+    for (let r = N - 1; r >= 0; r--) {
+      let s = z[r]
+      for (let c = r + 1; c < N; c++) s -= lu[r * N + c] * x[c]
+      x[r] = s / lu[r * N + r]
+    }
+    return true
+  }
+}
+
+export type { Resolved }

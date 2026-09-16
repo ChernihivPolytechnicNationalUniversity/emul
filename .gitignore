@@ -1,0 +1,33 @@
+# Dependencies and build output
+node_modules
+dist
+dist-ssr
+*.tsbuildinfo
+
+# Compiled test firmware (`make -C firmware`); the example ELFs in public/firmware are kept
+firmware/build
+firmware/*/build
+
+# Deploy-time settings; copy config.example.json here for local dev, the image writes its own
+public/config.json
+
+# Logs
+logs
+*.log
+
+# Local overrides
+*.local
+.env
+.env.*
+!.env.example
+
+# Editor and OS files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

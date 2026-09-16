@@ -1,0 +1,26 @@
+# Only sources needed for `pnpm build` go to the daemon; everything else is rebuilt or mounted
+node_modules
+dist
+dist-ssr
+*.tsbuildinfo
+
+# Firmware sources and their compiled tests; the example ELFs in public/firmware are copied
+firmware
+
+# Deploy-time settings are written by the Dockerfile (APP_VERSION) or mounted at run time
+public/config.json
+
+# Repo metadata, logs, editor files
+.git
+.gitignore
+.dockerignore
+Dockerfile
+logs
+*.log
+*.local
+.env
+.env.*
+.vscode
+.idea
+.DS_Store
+*.md
