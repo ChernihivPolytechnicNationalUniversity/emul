@@ -381,6 +381,29 @@ console.log("\nThe oscilloscope keeps the spike that killed the part, across the
   expect("and no buckets were lost to the rebuild", buckets, Math.floor(snap.time / 2e-3))
 }
 
+console.log("\nThe speed gauge: what the solver manages, not the setting")
+{
+  const { doc, place, wire } = builder(GRID)
+  const bat = place("dc-source", 0, 0, { value: "5 V" })
+  const r = place("resistor", 6, 0, { value: "1 kΩ" })
+  const gnd = place("ground", 3, 6)
+  wire(bat, "+", r, "1")
+  wire(r, "2", gnd, "GND")
+  wire(bat, "-", gnd, "GND")
+  const t = start(doc)
+  expect("no rate before the first step", t.loop.snapshot()!.rate === null ? "null" : "set", "null")
+  let snap = t.run(2)
+  expect("ticks that keep up report the set speed", snap.rate!, 1, 0.01)
+  // A tick that arrives late (the previous one took too long) is capped by the step budget.
+  t.loop.advance(t.clock + 1000)
+  t.loop.advance(t.clock + 2000)
+  snap = t.loop.snapshot()!
+  expect("a second-long tick delivers 1500 steps × 20 µs: the rate drops", snap.rate! < 0.2 ? "yes" : "no", "yes", 0, `${snap.rate!.toPrecision(2)}×`)
+  t.loop.setRunning(false)
+  t.loop.setRunning(true)
+  expect("a pause forgets the old rate", t.loop.snapshot()!.rate === null ? "null" : "set", "null")
+}
+
 const wall = (performance.now() - wall0) / 1000
 console.log(`\n${wall.toFixed(2)} s wall`)
 console.log(`${total - failed}/${total}`)

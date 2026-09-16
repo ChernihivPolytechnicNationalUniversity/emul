@@ -13,6 +13,8 @@ export type SimReadout = {
   live: boolean
   paused: boolean
   time: number
+  /** Simulated seconds per real second actually achieved; null before the first step. */
+  rate: number | null
   converged: boolean
   /** True when a source in the circuit has an AC component; RMS values are then available. */
   ac: boolean
@@ -51,6 +53,7 @@ const idle: SimReadout = {
   live: false,
   paused: false,
   time: 0,
+  rate: null,
   converged: true,
   ac: false,
   pinVoltage: () => undefined,
@@ -83,6 +86,7 @@ function toReadout(s: Snapshot, displays: Map<string, DisplayFrame>): SimReadout
     live: true,
     paused: false,
     time: s.time,
+    rate: s.rate,
     converged: s.converged,
     ac: s.ac,
     parts: s.parts,

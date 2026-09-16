@@ -21,6 +21,8 @@ const MIN_SPEED = 0.01
 const MAX_SPEED = 4
 /** Slider steps per decade: ~1.5% per step near 1×. */
 const STEPS_PER_DECADE = 160
+/** Below this share of the requested speed the gauge shows what the solver actually manages. */
+const LAGGING = 0.9
 
 const toSlider = (speed: number) => Math.round(Math.log10(speed / MIN_SPEED) * STEPS_PER_DECADE)
 const fromSlider = (pos: number) => MIN_SPEED * 10 ** (pos / STEPS_PER_DECADE)
@@ -46,6 +48,9 @@ type SimControlsProps = React.ComponentProps<"div"> & {
 }
 
 export function SimControls({ sim, speed, started, probing, onProbeToggle, onToggle, onRestart, onSpeedChange, className, ...props }: SimControlsProps) {
+  // A heavy circuit (an MCU rendering a display) can't keep up with the setting: the gauge then
+  // reads the achieved speed, not the wish, and says so.
+  const lagging = sim.running && sim.rate !== null && sim.rate < speed * LAGGING
   return (
     <div data-slot="sim-controls" className={cn("flex items-center gap-2", className)} {...props}>
       <ButtonGroup>
@@ -67,13 +72,15 @@ export function SimControls({ sim, speed, started, probing, onProbeToggle, onTog
           <Tooltip>
             <TooltipTrigger
               render={
-                <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="tabular-nums" />}>
+                <DropdownMenuTrigger render={<Button variant="outline" size="sm" className={cn("tabular-nums", lagging && "text-amber-600 dark:text-amber-400")} />}>
                   <GaugeIcon />
-                  {format(speed)}
+                  {format(lagging ? sim.rate! : speed)}
                 </DropdownMenuTrigger>
               }
             />
-            <TooltipContent>Simulation speed</TooltipContent>
+            <TooltipContent>
+              {lagging ? `Running at ${format(sim.rate!)}: the circuit is too heavy for the ${format(speed)} setting` : "Simulation speed"}
+            </TooltipContent>
           </Tooltip>
           <DropdownMenuContent side="top" align="start" className="w-48">
             <div className="flex items-center gap-2 px-1.5 py-1.5">

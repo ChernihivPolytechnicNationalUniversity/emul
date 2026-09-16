@@ -255,6 +255,8 @@ export const DT = 20e-6
  * The budget scales with the requested speed, which stays a ceiling rather than a promise.
  */
 const STEPS_PER_TICK = 1500
+/** Time constant of the achieved-speed average, wall-clock seconds. */
+const RATE_TAU = 0.5
 /** Diode current that counts as fully lit, and the current below which an LED is dark. */
 const LED_FULL = 8e-3
 const LED_DARK = 2e-4
@@ -304,6 +306,11 @@ export type Snapshot = {
   /** Logic-analyser edges since the last snapshot (probe ids in `traceProbes` order); null while the analyser is off. */
   logic: LogicChunk | null
   damage: Record<string, Damage>
+  /**
+   * Simulated seconds per real second actually achieved, smoothed over the last ~second;
+   * null before the first step. Falls below `speed` when the step budget is the limit.
+   */
+  rate: number | null
   /** Emulated MCUs by object id. */
   mcus: Record<string, McuStatus>
   /** Serial terminals: what each has received so far. */
@@ -361,6 +368,8 @@ export class SimLoop {
   private stale = true
   /** Wall-clock ms of the last advance; null until the run starts or resumes. */
   private last: number | null = null
+  /** Achieved speed, an exponential average over the last RATE_TAU seconds of wall clock. */
+  private rate: number | null = null
   speed = 1
   running = false
   /** Called for every part that burns out, once. */
@@ -938,6 +947,7 @@ export class SimLoop {
     this.running = running
     // A pause must not bank wall-clock time, or resuming would fast-forward.
     this.last = null
+    this.rate = null
     // Every run starts with intact parts.
     if (running && Object.keys(this.damage).length) {
       this.damage = {}
@@ -957,6 +967,7 @@ export class SimLoop {
     this.damage = {}
     this.stale = true
     this.last = null
+    this.rate = null
     for (const inst of this.mcus.values()) {
       inst.burnt = false
       inst.mcu.reset()
@@ -1057,9 +1068,13 @@ export class SimLoop {
       return 0
     }
     const budget = STEPS_PER_TICK * Math.max(1, this.speed)
-    const steps = Math.min(budget, Math.floor((((now - this.last) / 1000) * this.speed) / DT))
+    const wall = (now - this.last) / 1000
+    const steps = Math.min(budget, Math.floor((wall * this.speed) / DT))
     if (steps <= 0) return 0
     this.last = now
+    // What this tick actually delivered against the wall clock, blended in by how long it took.
+    const achieved = (steps * DT) / wall
+    this.rate = this.rate === null ? achieved : this.rate + (achieved - this.rate) * (1 - Math.exp(-wall / RATE_TAU))
     const read = (object: string, part: string) => this.parts[partKey(object, part)] ?? this.partDefaults[partKey(object, part)] ?? {}
     const mcus = [...this.mcus.values()].filter((m) => m.mcu.firmware)
     for (let i = 0; i < steps; i++) {
@@ -1221,6 +1236,7 @@ export class SimLoop {
       traceProbes: this.probes.map((p) => p.id),
       logic: this.drainLogic(),
       damage: this.damage,
+      rate: this.rate,
       mcus: Object.fromEntries([...this.mcus].map(([id, inst]) => [id, inst.status()])),
       terminals: Object.fromEntries([...this.terminals].map(([id, t]) => [id, { text: t.text, framingErrors: t.decoder.framingErrors }])),
       digital: Object.fromEntries([...this.digitalParts].map(([id, p]) => [id, p.snapshot()])),
