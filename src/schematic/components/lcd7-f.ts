@@ -3,17 +3,18 @@ import type { BodyShape, ComponentDef, Element, PanelSignal, PinDef } from "../t
 
 /**
  * Waveshare 7inch Capacitive Touch LCD (F): a 1024 × 600 panel on a 24-bit parallel RGB
- * interface with a GT911 touch controller on I²C, on a 40-pin 0.5 mm FFC. The pins mirror the
- * Open746I-C's P15 one for one, so the module docks onto the board's FFC (pins touching
- * conduct) or is wired line by line. The picture comes from the LTDC of whichever MCU drives
+ * interface with a GT911 touch controller on I²C, on a 40-pin 0.5 mm FFC. The FFC is drawn as
+ * a tail of two rows of twenty (1–20 above 21–40) sticking four cells out of the top edge, the
+ * same two rows as the Open746I-C's P15, so the module docks onto the board's FFC (pins
+ * touching conduct) or is wired line by line. The picture comes from the LTDC of whichever MCU drives
  * the pixel clock (`src/sim/display.ts`); the GT911 lives in `src/sim/digital.ts`.
  * Scale: 1 cell = 2.54 mm; the module is 165 × 100 mm ≈ 65 × 40 cells, the glass 154 × 86 mm.
  */
 
 const W = 65
 const H = 40
-/** First FFC pin's column: the same offset from the board's P15 as the module hangs below it. */
-const FFC_X = 12
+/** First FFC pin's column: the module hangs centred under the board when its P15 is at 35. */
+const FFC_X = 32
 
 /** [pin, label, signal on the panel, note] */
 type Row = [number, string, PanelSignal | "5V" | "GND" | "3V3" | "DISP" | "BL" | "SDA" | "SCL" | "RST" | "INT", string?]
@@ -40,12 +41,12 @@ const FFC: Row[] = [
 const pins: PinDef[] = FFC.map(([pin, label, , note]) => ({
   id: String(pin),
   label,
-  x: FFC_X + pin - 1,
-  y: 0,
+  x: FFC_X + ((pin - 1) % 20),
+  y: pin <= 20 ? -4 : -3,
   side: "top",
-  labelAt: "bottom",
+  labelAt: pin <= 20 ? "top" : "bottom",
   kind: label === "GND" ? "gnd" : label === "5V" || label === "3V3" ? "power" : "digital",
-  stub: 1,
+  stub: pin <= 20 ? 3 : 4,
   connector: "FFC",
   connectorPin: pin,
   note,
@@ -55,9 +56,9 @@ const signals: Record<string, PanelSignal> = {}
 for (const [pin, , sig] of FFC) if (/^[RGB]\d$|^(CLK|HS|VS|DE)$/.test(sig)) signals[String(pin)] = sig as PanelSignal
 
 const body: BodyShape[] = [
-  // The module: glass with its bezel, the FFC along the top edge, the name along the bottom.
+  // The module: glass with its bezel, the FFC tail out of the top edge, the name along the bottom.
   { type: "rect", x: 0, y: 0, w: W, h: H, rx: 0.5, fill: "chip" },
-  { type: "rect", x: FFC_X - 0.5, y: 0, w: 40, h: 1.2, rx: 0.1, fill: "connector" },
+  { type: "rect", x: FFC_X - 0.5, y: -5.1, w: 20, h: 5.6, rx: 0.3, fill: "connector" },
   { type: "text", x: W / 2, y: 38.6, text: "7inch Capacitive Touch LCD (F) · 1024 × 600 · 24-bit RGB · GT911", size: 0.42, inverse: true },
   { type: "text", x: W - 2, y: 1.9, text: "{ref}", size: 0.36, inverse: true, anchor: "end" },
 ]
@@ -119,7 +120,7 @@ export const lcd7f: ComponentDef = {
     Panel: "1024 × 600, 24-bit parallel RGB (DE mode; HS/VS/DE polarity not checked), pixel clock 25–75 MHz",
     Touch: "GT911, I²C address 0x5D (0x14 with INT high at reset), 16-bit registers: 0x8140 product ID, 0x814E status, 0x814F… points",
     Backlight: "PT4103 boost from the 3.3 V pin (~0.25 A), enabled by DISP; PWM trims the current on the real module, full here",
-    Connector: "40-pin 0.5 mm FFC, same pinout as the Open746I-C's P15: dock the module under the board or wire the lines",
+    Connector: "40-pin 0.5 mm FFC as two rows of twenty (1–20 above 21–40), the same rows as the Open746I-C's P15: dock the module under the board or wire the lines",
     Source: "Waveshare 7inch-Capacitive-Touch-LCD-F schematic (GT911 version)",
   },
 }

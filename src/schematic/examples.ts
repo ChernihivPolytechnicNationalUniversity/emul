@@ -264,8 +264,8 @@ export const lcdDemo: Example = {
   build(grid) {
     const { doc, place } = builder(grid)
     place("open746i-c", 0, 0)
-    // P15's first pin is at (26, 48) on the board, the module's at (12, 0) on itself.
-    place("lcd7-f", 14, 48)
+    // P15's first pin is at (35, 52) on the board, the module's at (32, -4) on itself.
+    place("lcd7-f", 3, 56)
     return doc
   },
 }
@@ -284,11 +284,11 @@ export const touchDemo: Example = {
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("open746i-c", 0, 0)
-    place("lcd7-f", 14, 48)
-    // The CP2102's side of USART1: TX at (31, 1), RX at (33, 1), stubs 2 cells up.
-    const term = place("serial-terminal", 22, -8, { baud: "115200" })
-    wire(u, "VCP-TX", term, "RX", [[31, -3], [20, -3], [20, -7]])
-    wire(u, "VCP-RX", term, "TX", [[33, -2], [19, -2], [19, -5]])
+    place("lcd7-f", 3, 56)
+    // The CP2102's side of USART1: TX at (46, 3), RX at (52, 3) either side of the micro-USB.
+    const term = place("serial-terminal", 34, -9, { baud: "115200" })
+    wire(u, "VCP-TX", term, "RX")
+    wire(u, "VCP-RX", term, "TX")
     return doc
   },
 }
@@ -308,7 +308,7 @@ export const cubeDemo: Example = {
   build(grid) {
     const { doc, place } = builder(grid)
     place("open746i-c", 0, 0)
-    place("lcd7-f", 14, 48)
+    place("lcd7-f", 3, 56)
     return doc
   },
 }

@@ -58,8 +58,8 @@ expect("MCU loaded", st?.firmware ?? "none", "lab1-f746.elf")
 expect("core running", st?.running ? "yes" : `no: ${st?.halted}`, "yes")
 expect("SYSCLK", st?.sysclk ?? 0, 50e6)
 expect("HSE is the 8 MHz crystal", st?.clock.hse ? `${st.clock.hse.kind} ${st.clock.hse.hz / 1e6} MHz` : "none", "crystal 8 MHz")
-expect("3V3 rail (P23)", v(snap, "P23"), 3.3, 0.02)
-expect("5V rail (P22)", v(snap, "P22"), 5, 0.05)
+expect("3V3 rail (P23)", v(snap, "P23-1"), 3.3, 0.02)
+expect("5V rail (P22)", v(snap, "P22-1"), 5, 0.05)
 expect("Arduino IOREF on 3.3 V", v(snap, "CN2-2"), 3.3, 0.02)
 expect("NRST idles high", v(snap, "P13-17"), 3.3, 0.02)
 expect("PWR LED on", snap.parts[partKey(u.id, "PWR")]?.on ? "yes" : "no", "yes")
@@ -114,8 +114,8 @@ console.log("\nUnplugging the USART1 USB: no 5 V, no 3.3 V, the core stops")
 loop.setParts({ [partKey(u.id, "USB")]: { on: false } })
 run(0.1)
 snap = loop.snapshot()!
-expect("5V rail", v(snap, "P22"), 0, 0.05)
-expect("3V3 rail", v(snap, "P23"), 0, 0.05)
+expect("5V rail", v(snap, "P22-1"), 0, 0.05)
+expect("3V3 rail", v(snap, "P23-1"), 0, 0.05)
 expect("core unpowered", snap.mcus[u.id].powered ? "powered" : "off", "off")
 expect("LEDs dark", ledStr(snap), "○○○○")
 
@@ -127,7 +127,7 @@ console.log("\nS2 to the jack, 5 V on 5VDC: the board comes back")
   const sup = { id: "sup", def: "supply", x: 5 * GRID, y: -6 * GRID, props: { value: "+5V", voltage: "5 V" } }
   const gnd = { id: "g", def: "ground", x: -6 * GRID, y: 3 * GRID, props: {} }
   doc2.objects.push(sup, gnd)
-  doc2.wires.push({ id: "w1", from: { object: sup.id, pin: "V" }, to: { object: u2.id, pin: "5VDC" } }, { id: "w2", from: { object: gnd.id, pin: "GND" }, to: { object: u2.id, pin: "P24" } })
+  doc2.wires.push({ id: "w1", from: { object: sup.id, pin: "V" }, to: { object: u2.id, pin: "5VDC" } }, { id: "w2", from: { object: gnd.id, pin: "GND" }, to: { object: u2.id, pin: "P24-1" } })
   doc2.parts[partKey(u2.id, "USB")] = { on: false }
   doc2.parts[partKey(u2.id, "S2")] = { on: true }
   const loop2 = new SimLoop()
@@ -138,7 +138,7 @@ console.log("\nS2 to the jack, 5 V on 5VDC: the board comes back")
   loop2.advance(t)
   for (let i = 0; i < 5; i++) loop2.advance((t += 30))
   const s2 = loop2.snapshot()!
-  expect("3V3 rail from the jack", s2.pinVoltage[pinKey(u2.id, "P23")], 3.3, 0.02)
+  expect("3V3 rail from the jack", s2.pinVoltage[pinKey(u2.id, "P23-1")], 3.3, 0.02)
   expect("core running", s2.mcus[u2.id].running ? "yes" : `no: ${s2.mcus[u2.id].halted}`, "yes")
   expect("LED1 on", s2.parts[partKey(u2.id, "LED1")]?.on ? "yes" : "no", "yes")
 }

@@ -7,16 +7,20 @@ import { LED_COLORS } from "./basic"
 /**
  * Waveshare Open746I-C: the mother board with the Core746I module (STM32F746IGT6, 8 MB SDRAM)
  * on it — the university's lab stand. Pin data from the board and module schematics; the
- * layout follows the photo: the module on the left, Arduino headers to its right, peripheral
- * headers around the edge, LEDs top right, joystick and WAKEUP bottom right, RESET bottom left.
- * Scale: 1 cell = 2.54 mm; the board is about 178 × 122 mm ≈ 70 × 48 cells.
+ * layout is traced from Waveshare's dimension drawing (185 × 135 mm), every header, LED and
+ * button where it is on the board: the module on the left, Arduino headers to its right,
+ * USART3/CAN/I2C/DCMI down the left edge, SDMMC/QUADSPI/power/USART1/I2S along the top,
+ * ETH/SPI/SAI down the right edge, FMC/ULPI/the 7" LCD's FFC along the bottom, the LEDs in a
+ * column top right, joystick and WAKEUP bottom right, RESET bottom left.
+ * Scale: 1 cell = 2.54 mm; 185 × 135 mm ≈ 73 × 53 cells, drawn 76 × 56 so every header keeps
+ * its names inside its body and a margin from the edge.
  */
 
 /** [header pin, label, MCU pin, signal, function, note] */
 type Row = [number, string, string?, string?, string?, string?]
 
-const WIDTH = 70
-const HEIGHT = 48
+const WIDTH = 76
+const HEIGHT = 56
 
 // --- peripheral headers (schematic page 2) ------------------------------------------------------
 
@@ -152,35 +156,53 @@ const CN4: Row[] = [
   [7, "D6", "PB7", "PWM", "TIM4_CH2", "Shared with USER LED2 (JMP3)"],
   [8, "D7", "PI3", "I/O"],
 ]
+/** CN5, the Arduino ICSP header: SPI2 again plus reset. */
+const ICSP_ODD: Row[] = [[1, "MISO", "PB14", "SPI2_MISO"], [3, "SCK", "PB13", "SPI2_SCK"], [5, "RST", "NRST", "RESET"]]
+const ICSP_EVEN: Row[] = [[2, "3V3"], [4, "MOSI", "PB15", "SPI2_MOSI"], [6, "GND"]]
 
 function kindOf(label: string, mcu?: string): PinKind {
   if (label === "GND") return "gnd"
   if (/^(3V3|5V|VIN|IOREF|AVDD|5VDC)$/.test(label)) return "power"
   if (/^A\d$/.test(label)) return "analog"
   if (label === "NC") return "nc"
-  if (!mcu && !/^(NRST|DISP)$/.test(label)) return "nc"
+  if (!mcu && !/^(NRST|RST|DISP)$/.test(label)) return "nc"
   return "digital"
 }
 
-/** Shrouded connector bodies drawn behind the header pins, one per strip (merged for 2-row headers). */
+/**
+ * Connector bodies drawn behind the header pins, one per connector: the rows of a 2-row header
+ * share one. The body takes the pin names in — a label sits 0.45 cells off its pin and runs
+ * about 0.19 cells a character — so nothing crosses its outline.
+ */
 const connectors: BodyShape[] = []
-function shroud(x: number, y: number, w: number, h: number) {
-  // A second row of the same header widens the first shroud instead of adding one.
-  const prev = connectors.find((c) => c.type === "rect" && ((c.x === x && c.y === y + h) || (c.x === x && c.y + c.h === y) || (c.y === y && c.x === x + w) || (c.y === y && c.x + c.w === x)))
-  if (prev && prev.type === "rect") {
-    prev.x = Math.min(prev.x, x)
-    prev.y = Math.min(prev.y, y)
-    prev.w = Math.max(prev.x + prev.w, x + w) - prev.x
-    prev.h = Math.max(prev.y + prev.h, y + h) - prev.y
+const shrouds = new Map<string, Extract<BodyShape, { type: "rect" }>>()
+function shroud(connector: string, x0: number, y0: number, x1: number, y1: number) {
+  const prev = shrouds.get(connector)
+  if (prev) {
+    const nx = Math.min(prev.x, x0)
+    const ny = Math.min(prev.y, y0)
+    prev.w = Math.max(prev.x + prev.w, x1) - nx
+    prev.h = Math.max(prev.y + prev.h, y1) - ny
+    prev.x = nx
+    prev.y = ny
     return
   }
-  connectors.push({ type: "rect", x, y, w, h, rx: 0.15, fill: "connector" })
+  const rect: Extract<BodyShape, { type: "rect" }> = { type: "rect", x: x0, y: y0, w: x1 - x0, h: y1 - y0, rx: 0.3, fill: "connector" }
+  shrouds.set(connector, rect)
+  connectors.push(rect)
 }
 
 /** A row of header pins from (x, y), one cell apart along `dir`, wires leaving toward `side`. */
 function strip(connector: string, rows: Row[], at: { x: number; y: number; dir: "down" | "right"; side: Side; labelAt: Side; stub: number }): PinDef[] {
-  if (at.dir === "down") shroud(at.x - 0.5, at.y - 0.5, 1, rows.length)
-  else shroud(at.x - 0.5, at.y - 0.5, rows.length, 1)
+  const n = rows.length
+  // A name beside its pin takes its length; above or below it takes one line.
+  const beside = 0.45 + 0.19 * Math.max(...rows.map(([, label]) => label.length)) + 0.35
+  const above = 0.45 + 0.3 + 0.35
+  const x0 = at.x - 0.5 - (at.labelAt === "left" ? beside : 0)
+  const x1 = at.x + (at.dir === "right" ? n - 0.5 : 0.5) + (at.labelAt === "right" ? beside : 0)
+  const y0 = at.y - 0.5 - (at.labelAt === "top" ? above : 0)
+  const y1 = at.y + (at.dir === "down" ? n - 0.5 : 0.5) + (at.labelAt === "bottom" ? above : 0)
+  shroud(connector, x0, y0, x1, y1)
   return rows.map(([pin, label, mcu, signal, fn, note], i) => ({
     id: `${connector}-${pin}`,
     label,
@@ -199,133 +221,170 @@ function strip(connector: string, rows: Row[], at: { x: number; y: number; dir: 
   }))
 }
 
-const L = { outer: 2, inner: 3 }
-const R = { outer: WIDTH - 2, inner: WIDTH - 3 }
+// Edge headers sit 4 cells in from the edge so their outward names stay on the board.
+const L = { outer: 4, inner: 5 }
+const R = { outer: WIDTH - 4, inner: WIDTH - 5 }
+const T = { outer: 3, inner: 4 }
+const B = { outer: HEIGHT - 3, inner: HEIGHT - 4 }
 const left = (connector: string, rows: Row[], y: number, inner = false): PinDef[] =>
-  strip(connector, rows, { x: inner ? L.inner : L.outer, y, dir: "down", side: "left", labelAt: inner ? "right" : "left", stub: inner ? 4 : 3 })
+  strip(connector, rows, { x: inner ? L.inner : L.outer, y, dir: "down", side: "left", labelAt: inner ? "right" : "left", stub: inner ? L.inner : L.outer })
 const right = (connector: string, rows: Row[], y: number, inner = false): PinDef[] =>
-  strip(connector, rows, { x: inner ? R.inner : R.outer, y, dir: "down", side: "right", labelAt: inner ? "left" : "right", stub: inner ? 4 : 3 })
+  strip(connector, rows, { x: inner ? R.inner : R.outer, y, dir: "down", side: "right", labelAt: inner ? "left" : "right", stub: inner ? L.inner : L.outer })
 const top = (connector: string, rows: Row[], x: number, inner = false): PinDef[] =>
-  strip(connector, rows, { x, y: inner ? 2 : 1, dir: "right", side: "top", labelAt: inner ? "bottom" : "top", stub: inner ? 3 : 2 })
+  strip(connector, rows, { x, y: inner ? T.inner : T.outer, dir: "right", side: "top", labelAt: inner ? "bottom" : "top", stub: inner ? T.inner : T.outer })
 const bottom = (connector: string, rows: Row[], x: number, inner = false): PinDef[] =>
-  strip(connector, rows, { x, y: inner ? HEIGHT - 2 : HEIGHT - 1, dir: "right", side: "bottom", labelAt: inner ? "top" : "bottom", stub: inner ? 3 : 2 })
+  strip(connector, rows, { x, y: inner ? B.inner : B.outer, dir: "right", side: "bottom", labelAt: inner ? "top" : "bottom", stub: inner ? T.inner : T.outer })
+
+/** P22–P24: the three 4-pin power rows on the top edge (5 V, GND, 3.3 V), one name per row. */
+function rail(connector: string, label: string, kind: PinKind, y: number): PinDef[] {
+  shroud("P22-P24", 38.5 - (0.45 + 0.19 * 3 + 0.35), y - 0.5, 42.5, y + 0.5)
+  return [1, 2, 3, 4].map((pin) => ({ id: `${connector}-${pin}`, label: pin === 1 ? label : "", x: 38 + pin, y, side: "top", labelAt: "left", kind, stub: y, connector, connectorPin: pin, note: `${label} rail` }))
+}
+
+/** P15 pins in two rows of twenty on the bottom edge like the other 2-row headers: 1–20 above 21–40. */
+const LCD7_A = LCD7.slice(0, 20)
+const LCD7_B = LCD7.slice(20)
+/** First FFC pin's column; the LCD component's tail has the same two rows at its own offset. */
+const FFC_X = 35
 
 const pins: PinDef[] = [
-  // Power: the 5 V jack (P22–P24 rails on the left edge; the jack itself is a pin on the top edge).
-  { id: "5VDC", label: "5VDC", x: 5, y: 1, side: "top", labelAt: "bottom", kind: "power", stub: 2, connector: "DC jack", note: "5 V in; S2 picks this or the USART1 USB" },
-  { id: "P22", label: "5V", x: L.outer, y: 1, side: "left", labelAt: "right", kind: "power", stub: 3, connector: "P22", note: "5 V rail out" },
-  { id: "P23", label: "3V3", x: L.outer, y: 2, side: "left", labelAt: "right", kind: "power", stub: 3, connector: "P23", note: "3.3 V rail out (AMS1117 on the Core746I)" },
-  { id: "P24", label: "GND", x: L.outer, y: 3, side: "left", labelAt: "right", kind: "gnd", stub: 3, connector: "P24" },
-  // USART1 through the CP2102: the USB-to-serial bridge, as two pins for a serial terminal.
-  { id: "VCP-TX", label: "TX", x: 31, y: 1, side: "top", labelAt: "bottom", kind: "digital", stub: 2, mcu: "PA9", signal: "USART1_TX", fn: "USART1_TX", connector: "JMP2", connectorPin: 1, note: "MCU → CP2102 → host; connect to a terminal's RX" },
-  { id: "VCP-RX", label: "RX", x: 33, y: 1, side: "top", labelAt: "bottom", kind: "digital", stub: 2, mcu: "PA10", signal: "USART1_RX", fn: "USART1_RX", connector: "JMP2", connectorPin: 3, note: "Host → CP2102 → MCU; connect to a terminal's TX" },
-  ...top("P6", SDMMC, 10),
-  ...top("P3", QSPI, 21),
-  ...top("P10", ULPI_ODD, 42),
-  ...top("P10", ULPI_EVEN, 42, true),
+  // Power: the 5 V jack on the top edge (S2 picks it or the USART1 USB) and the P22–P24 rails.
+  { id: "5VDC", label: "5VDC", x: 13, y: T.outer, side: "top", labelAt: "bottom", kind: "power", stub: T.outer, connector: "DC jack", note: "5 V in; S2 picks this or the USART1 USB" },
+  ...rail("P22", "5V", "power", 3),
+  ...rail("P24", "GND", "gnd", 4),
+  ...rail("P23", "3V3", "power", 5),
+  // USART1 through the CP2102: the USB-to-serial bridge, as two pins either side of its micro-USB.
+  { id: "VCP-TX", label: "TX", x: 46, y: T.outer, side: "top", labelAt: "bottom", kind: "digital", stub: T.outer, mcu: "PA9", signal: "USART1_TX", fn: "USART1_TX", connector: "JMP2", connectorPin: 1, note: "MCU → CP2102 → host; connect to a terminal's RX" },
+  { id: "VCP-RX", label: "RX", x: 52, y: T.outer, side: "top", labelAt: "bottom", kind: "digital", stub: T.outer, mcu: "PA10", signal: "USART1_RX", fn: "USART1_RX", connector: "JMP2", connectorPin: 3, note: "Host → CP2102 → MCU; connect to a terminal's TX" },
+  ...top("P6", SDMMC, 17),
+  ...top("P3", QSPI, 28),
+  // I2S sits inside the top edge, right of USART1; its wires leave upward.
+  ...strip("P5", I2S3, { x: 55, y: 6, dir: "right", side: "top", labelAt: "top", stub: 6 }),
+  ...strip("P5", I2S2, { x: 55, y: 7, dir: "right", side: "top", labelAt: "bottom", stub: 7 }),
   ...left("P2", USART3, 6),
-  ...left("P7", CAN1, 14),
-  ...left("P8", CAN2, 19),
-  ...left("P4", I2C_ODD, 24),
-  ...left("P4", I2C_EVEN, 24, true),
-  ...left("P13", DCMI_ODD, 31),
-  ...left("P13", DCMI_EVEN, 31, true),
-  ...right("P11", ETH_ODD, 6, true),
-  ...right("P11", ETH_EVEN, 6),
-  ...right("P1", SPI2, 14, true),
-  ...right("P1", SPI1, 14),
-  ...right("P9", SAI_A, 21, true),
-  ...right("P9", SAI_B, 21),
-  ...right("P5", I2S3, 30, true),
-  ...right("P5", I2S2, 30),
-  ...bottom("P12", FMC_ODD, 8),
-  ...bottom("P12", FMC_EVEN, 8, true),
-  // P15 sits on the board's edge: the 7" LCD component's FFC pins land on it when the module is docked below.
-  ...strip("P15", LCD7, { x: 26, y: HEIGHT, dir: "right", side: "bottom", labelAt: "bottom", stub: 1 }),
-  // Arduino: power/analog column left of the shield area, digital column on its right.
-  ...strip("CN2", CN2, { x: 35, y: 8, dir: "down", side: "left", labelAt: "right", stub: 1 }),
-  ...strip("CN3", CN3, { x: 35, y: 17, dir: "down", side: "left", labelAt: "right", stub: 1 }),
-  ...strip("CN1", CN1, { x: 44, y: 8, dir: "down", side: "right", labelAt: "left", stub: 1 }),
-  ...strip("CN4", CN4, { x: 44, y: 19, dir: "down", side: "right", labelAt: "left", stub: 1 }),
+  ...left("P8", CAN2, 16),
+  ...left("P7", CAN1, 23),
+  ...left("P4", I2C_ODD, 30),
+  ...left("P4", I2C_EVEN, 30, true),
+  ...left("P13", DCMI_ODD, 38),
+  ...left("P13", DCMI_EVEN, 38, true),
+  ...right("P11", ETH_ODD, 18, true),
+  ...right("P11", ETH_EVEN, 18),
+  ...right("P1", SPI2, 28, true),
+  ...right("P1", SPI1, 28),
+  ...right("P9", SAI_A, 37, true),
+  ...right("P9", SAI_B, 37),
+  ...bottom("P12", FMC_ODD, 11),
+  ...bottom("P12", FMC_EVEN, 11, true),
+  ...bottom("P10", ULPI_ODD, 23),
+  ...bottom("P10", ULPI_EVEN, 23, true),
+  // P15 on the bottom edge as 2 × 20: the 7" LCD's FFC tail (the same two rows on itself)
+  // lands on it when the module is docked below, or the lines are wired one by one.
+  ...bottom("P15", LCD7_A, FFC_X, true),
+  ...bottom("P15", LCD7_B, FFC_X),
+  // Arduino: power/analog column left of the shield area, digital column on its right, ICSP below.
+  ...strip("CN2", CN2, { x: 44, y: 18, dir: "down", side: "left", labelAt: "right", stub: 1 }),
+  ...strip("CN3", CN3, { x: 44, y: 28, dir: "down", side: "left", labelAt: "right", stub: 1 }),
+  ...strip("CN1", CN1, { x: 63, y: 14, dir: "down", side: "right", labelAt: "left", stub: 1 }),
+  ...strip("CN4", CN4, { x: 63, y: 26, dir: "down", side: "right", labelAt: "left", stub: 1 }),
+  ...strip("CN5", ICSP_ODD, { x: 53, y: 36, dir: "right", side: "bottom", labelAt: "top", stub: 2 }),
+  ...strip("CN5", ICSP_EVEN, { x: 53, y: 37, dir: "right", side: "bottom", labelAt: "bottom", stub: 1 }),
 ]
 
 const label = (x: number, y: number, text: string, size = 0.32): BodyShape => ({ type: "text", x, y, text, size, muted: true })
+/** A connector or part that is drawn but not a pin (not modelled). */
+const block = (x: number, y: number, w: number, h: number, text: string, at: [number, number], size = 0.26): BodyShape[] => [
+  { type: "rect", x, y, w, h, rx: 0.3, fill: "connector" },
+  label(at[0], at[1], text, size),
+]
+
+// The Core746I: 83 × 57.5 mm standing upright on its two 2 × 40 pin ports, JTAG at the top,
+// USB OTG at the bottom, the LQFP176 turned 45° in the middle.
+const CHIP = { cx: 22, cy: 22, d: 6.5 }
 
 const body: BodyShape[] = [
-  { type: "rect", x: 0, y: 0, w: WIDTH, h: HEIGHT, rx: 0.6, fill: "board" },
+  { type: "rect", x: 0, y: 0, w: WIDTH, h: HEIGHT, rx: 3, fill: "board" },
   ...connectors,
-  // Core746I module, standing upright as on the photo, with its two 2×40 pin ports as strips.
-  { type: "rect", x: 8, y: 5, w: 22, h: 36, rx: 0.4, fill: "zone" },
-  { type: "rect", x: 8.4, y: 6, w: 1, h: 34, rx: 0.1, fill: "connector" },
-  { type: "rect", x: 28.6, y: 6, w: 1, h: 34, rx: 0.1, fill: "connector" },
-  { type: "text", x: 19, y: 6.3, text: "Core746I", size: 0.5 },
-  { type: "rect", x: 10.5, y: 7.5, w: 6, h: 3, rx: 0.2, fill: "connector" },
-  label(13.5, 9, "JTAG/SWD"),
-  { type: "rect", x: 14, y: 16, w: 10, h: 10, rx: 0.3, fill: "chip" },
-  { type: "text", x: 19, y: 20.6, text: "STM32F746IG", size: 0.55, inverse: true },
-  { type: "text", x: 19, y: 21.9, text: "LQFP176 · 216 MHz", size: 0.35, inverse: true },
-  { type: "rect", x: 10.5, y: 29, w: 4, h: 7, rx: 0.2, fill: "chip" },
-  { type: "text", x: 12.5, y: 32.5, text: "SDRAM", size: 0.32, inverse: true, rotate: -90 },
-  label(12.5, 36.6, "8 MB", 0.28),
-  { type: "rect", x: 16, y: 38, w: 4, h: 2, rx: 0.2, fill: "connector" },
-  label(18, 39, "USB OTG", 0.26),
-  label(24, 38, "BOOT0", 0.26),
-  label(24, 30, "8 MHz · 32k", 0.26),
-  // Arduino shield area.
-  label(39.5, 7, "Arduino"),
-  label(35, 7, "CN2", 0.28),
-  label(35, 16, "CN3", 0.28),
-  label(44, 7, "CN1", 0.28),
-  label(44, 18, "CN4", 0.28),
-  // LCD 4.3" header (P14): the same RGB lines as P15 plus a resistive touch on SPI; drawn only.
-  { type: "rect", x: 33, y: 29, w: 20, h: 2, rx: 0.2, fill: "connector" },
-  label(43, 30, "P14 LCD 4.3inch (RGB as P15, XPT2046 on PF7/PF8/PF9, CS PF6, IRQ PD7)", 0.26),
-  // Header names.
-  label(5, 5.3, "P2 USART3", 0.28),
-  label(5, 13.3, "P7 CAN1", 0.28),
-  label(5, 18.3, "P8 CAN2", 0.28),
-  label(5, 23.3, "P4 I2C2/I2C1", 0.28),
-  label(5, 30.3, "P13 DCMI", 0.28),
-  label(WIDTH - 5, 5.3, "P11 ETH", 0.28),
-  label(WIDTH - 5, 13.3, "P1 SPI2/SPI1", 0.28),
-  label(WIDTH - 5, 20.3, "P9 SAI A/B", 0.28),
-  label(WIDTH - 5, 29.3, "P5 I2S3/I2S2", 0.28),
-  label(14, 3.3, "P6 SDMMC", 0.28),
-  label(24.5, 3.3, "P3 QUADSPI", 0.28),
-  label(46.5, 3.6, "P10 USB HS ULPI", 0.28),
-  label(12.5, HEIGHT - 3.4, "P12 8-bit FMC", 0.28),
-  label(45.5, HEIGHT - 3.4, "P15 LCD 7inch (40-pin FFC)", 0.28),
-  // USART1 / CP2102 zone with the micro-USB.
-  { type: "rect", x: 30, y: 0.5, w: 10, h: 4, rx: 0.3, fill: "zone" },
-  label(37.5, 3.6, "USART1 · CP2102", 0.26),
-  // Power corner: the jack and the switch.
-  label(5, 3.6, "5VDC", 0.26),
-  label(7.6, 3.6, "S2", 0.26),
-  // Board name.
-  { type: "text", x: 19, y: 43.5, text: "Open746I-C", size: 0.8 },
-  label(19, 45, "WaveShare", 0.36),
-  label(60, 3.7, "USER LEDs", 0.28),
-  label(55, 35.2, "Joystick", 0.28),
-  label(64, 35.2, "WAKEUP", 0.28),
+  // --- the module
+  { type: "rect", x: 10, y: 7, w: 24, h: 34, rx: 0.4, fill: "zone" },
+  { type: "rect", x: 11, y: 7.5, w: 1.5, h: 33, rx: 0.1, fill: "connector" },
+  { type: "rect", x: 31.5, y: 7.5, w: 1.5, h: 33, rx: 0.1, fill: "connector" },
+  label(22, 42, "P16–P21: two 2×40 pin ports, every I/O (use the peripheral headers)", 0.24),
+  ...block(16, 8, 12, 3.5, "JTAG/SWD", [22, 12.2]),
+  { type: "path", d: `M ${CHIP.cx} ${CHIP.cy - CHIP.d} L ${CHIP.cx + CHIP.d} ${CHIP.cy} L ${CHIP.cx} ${CHIP.cy + CHIP.d} L ${CHIP.cx - CHIP.d} ${CHIP.cy} Z`, fill: "chip" },
+  { type: "text", x: CHIP.cx, y: CHIP.cy - 0.2, text: "STM32F746IG", size: 0.55, inverse: true },
+  { type: "text", x: CHIP.cx, y: CHIP.cy + 1.1, text: "LQFP176 · 216 MHz", size: 0.35, inverse: true },
+  { type: "text", x: 14.5, y: 30, text: "Core7XXI", size: 0.8, rotate: -90 },
+  ...block(19, 31, 2.5, 4, "BOOT0", [20.25, 35.7]),
+  ...block(25.5, 31, 2, 4, "RESET", [26.5, 35.7]),
+  ...block(14.5, 36, 3, 3.5, "USB OTG", [16, 40.2]),
+  label(22, 38.6, "IS42S16400J", 0.26),
+  label(22, 39.3, "8 MB SDRAM (back)", 0.26),
+  label(28.5, 39.5, "PWR", 0.22),
+  // --- top edge
+  label(8, 1.2, "S2: 5VDC ↔ USB", 0.26),
+  { type: "rect", x: 12, y: 1.5, w: 2, h: 4, rx: 0.3, fill: "connector" },
+  label(13, 6.2, "5V DC", 0.26),
+  label(21, 5.2, "P6 SDMMC", 0.28),
+  label(31.5, 5.2, "P3 QUADSPI", 0.28),
+  label(40, 7, "P22–P24 rails", 0.26),
+  { type: "rect", x: 47.75, y: 5.5, w: 2.5, h: 2, rx: 0.2, fill: "chip" },
+  { type: "text", x: 49, y: 6.6, text: "CP2102", size: 0.26, inverse: true },
+  label(49, 9, "USART1", 0.28),
+  label(58.5, 10.5, "P5 I2S3 · I2S2", 0.28),
+  label(71, 1.2, "LEDs", 0.28),
+  // --- Arduino shield area
+  label(54, 15, "Arduino", 0.32),
+  label(45, 16.5, "CN2", 0.28),
+  label(45, 26.5, "CN3", 0.28),
+  label(62, 12.5, "CN1", 0.28),
+  label(62, 24.5, "CN4", 0.28),
+  label(54, 33.8, "CN5 ICSP", 0.28),
+  label(54, 19, "WaveShare", 0.6),
+  // --- left edge
+  label(3, 14, "P2 USART3", 0.28),
+  label(3, 21, "P8 CAN2", 0.28),
+  label(3, 28, "P7 CAN1", 0.28),
+  label(4.5, 36, "P4 I2C2 · I2C1", 0.28),
+  label(4.5, 51, "P13 DCMI", 0.28),
+  // --- right edge
+  label(71.5, 26, "P11 ETH", 0.28),
+  label(71.5, 35, "P1 SPI2 · SPI1", 0.28),
+  label(71.5, 46, "P9 SAI1 A · B", 0.28),
+  // --- bottom edge
+  label(15.5, 48.5, "P12 8-bit FMC", 0.28),
+  label(27.5, 48.5, "P10 USB HS ULPI", 0.28),
+  ...block(43, 41.5, 20, 2, "P14 LCD 4.3inch (drawn only)", [53, 40.8]),
+  label(44.5, 48.5, "P15 LCD 7inch · 40-pin FFC", 0.28),
+  // --- names
+  { type: "text", x: 22, y: 45.5, text: "Open7XXI-C", size: 0.8 },
+  { type: "text", x: 44.5, y: 45.5, text: "Cortex-M7", size: 0.5 },
+  label(65, 47.5, "Joystick", 0.28),
+  label(58, 49.5, "WAKEUP", 0.28),
+  label(8, 50.5, "RESET", 0.28),
 ]
 
 const parts: PartDef[] = [
-  { type: "usb", id: "USB", label: "USART1 USB", x: 35, y: 1.3, side: "top", initial: { on: true } },
-  { type: "switch", id: "S2", label: "S2: on = 5VDC jack, off = USB", x: 7, y: 2.2, span: 1.4 },
-  { type: "led", id: "PWR", label: "PWR", x: 5, y: 2.4, color: "#ef4444" },
-  { type: "led", id: "LED1", label: "LED1", x: 58, y: 2, color: "#ef4444", pin: "P3-6", mcu: "PB6" },
-  { type: "led", id: "LED2", label: "LED2", x: 60, y: 2, color: "#ef4444", pin: "CN4-7", mcu: "PB7" },
-  { type: "led", id: "LED3", label: "LED3", x: 62, y: 2, color: "#ef4444", pin: "CN4-3", mcu: "PH4" },
-  { type: "led", id: "LED4", label: "LED4", x: 64, y: 2, color: "#ef4444", pin: "CN1-1", mcu: "PI8" },
-  { type: "led", id: "TXLED", label: "TX", x: 32, y: 3, color: "#ef4444" },
-  { type: "led", id: "RXLED", label: "RX", x: 33.5, y: 3, color: "#ef4444" },
-  { type: "button", id: "JOY_A", label: "A", x: 55, y: 38, size: 1.2, mcu: "PG2" },
-  { type: "button", id: "JOY_B", label: "B", x: 55, y: 42, size: 1.2, mcu: "PG3" },
-  { type: "button", id: "JOY_C", label: "C", x: 53, y: 40, size: 1.2, mcu: "PD4", pin: "P12-8" },
-  { type: "button", id: "JOY_D", label: "D", x: 57, y: 40, size: 1.2, mcu: "PD5", pin: "P12-10" },
-  { type: "button", id: "JOY_CTR", label: "", x: 55, y: 40, size: 1.2, mcu: "PI11" },
-  { type: "button", id: "WAKEUP", label: "K1", x: 64, y: 38, mcu: "PA0", pin: "CN3-1" },
-  { type: "button", id: "RESET", label: "RESET", x: 4, y: 43, mcu: "NRST", pin: "P13-17" },
+  { type: "usb", id: "USB", label: "USART1 USB", x: 49, y: 1.6, side: "top", initial: { on: true } },
+  { type: "switch", id: "S2", label: "S2: on = 5VDC jack, off = USB", x: 7, y: 3, span: 2 },
+  // The LED column top right: PWR, the CP2102's RX/TX, the four USER LEDs.
+  { type: "led", id: "PWR", label: "PWR", x: 71, y: 3, color: "#ef4444" },
+  { type: "led", id: "RXLED", label: "RX", x: 71, y: 5, color: "#ef4444" },
+  { type: "led", id: "TXLED", label: "TX", x: 71, y: 7, color: "#ef4444" },
+  { type: "led", id: "LED1", label: "LED1", x: 71, y: 9, color: "#ef4444", pin: "P3-6", mcu: "PB6" },
+  { type: "led", id: "LED2", label: "LED2", x: 71, y: 11, color: "#ef4444", pin: "CN4-7", mcu: "PB7" },
+  { type: "led", id: "LED3", label: "LED3", x: 71, y: 13, color: "#ef4444", pin: "CN4-3", mcu: "PH4" },
+  { type: "led", id: "LED4", label: "LED4", x: 71, y: 15, color: "#ef4444", pin: "CN1-1", mcu: "PI8" },
+  // The module's own power LED.
+  { type: "led", id: "MPWR", label: "", x: 28.5, y: 38.5, color: "#ef4444" },
+  // Five-way joystick: A up, B right, C left, D down, the centre pressed straight in.
+  { type: "button", id: "JOY_A", label: "A", x: 65, y: 49, size: 1.2, mcu: "PG2" },
+  { type: "button", id: "JOY_B", label: "B", x: 67, y: 51, size: 1.2, mcu: "PG3" },
+  { type: "button", id: "JOY_C", label: "C", x: 63, y: 51, size: 1.2, mcu: "PD4", pin: "P12-8" },
+  { type: "button", id: "JOY_D", label: "D", x: 65, y: 53, size: 1.2, mcu: "PD5", pin: "P12-10" },
+  { type: "button", id: "JOY_CTR", label: "", x: 65, y: 51, size: 1.2, mcu: "PI11" },
+  { type: "button", id: "WAKEUP", label: "K1", x: 58, y: 52, mcu: "PA0", pin: "CN3-1" },
+  { type: "button", id: "RESET", label: "", x: 8, y: 53, mcu: "NRST", pin: "P13-17" },
 ]
 
 // --- electrical model ---------------------------------------------------------
@@ -338,10 +397,10 @@ const nodeOf = (mcu: string) => byMcu.get(mcu)?.[0] ?? `$${mcu}`
 
 const gndPins = pins.filter((p) => p.kind === "gnd").map((p) => p.id)
 const GND = gndPins[0]
-const v5Pins = pins.filter((p) => p.label === "5V" || p.label === "VIN").map((p) => p.id)
-const v33Pins = pins.filter((p) => p.label === "3V3" || p.label === "IOREF" || p.label === "AVDD").map((p) => p.id)
-const V5 = "P22"
-const V3V3 = "P23"
+const v5Pins = pins.filter((p) => p.label === "5V" || p.label === "VIN" || p.connector === "P22").map((p) => p.id)
+const v33Pins = pins.filter((p) => p.label === "3V3" || p.label === "IOREF" || p.label === "AVDD" || p.connector === "P23").map((p) => p.id)
+const V5 = "P22-1"
+const V3V3 = "P23-1"
 const NRST = "P13-17"
 
 const led = (mcu: string, part: string): Element[] => [
@@ -355,7 +414,7 @@ const model: Element[] = [
   { kind: "GND", node: GND },
   { kind: "SHORT", nodes: v5Pins },
   { kind: "SHORT", nodes: v33Pins },
-  { kind: "SHORT", nodes: [NRST, "CN2-3"] },
+  { kind: "SHORT", nodes: [NRST, "CN2-3", "CN5-5"] },
   // Power tree: the USART1 micro-USB's VBUS (U5V) or the 5 V jack, chosen by S2, is 5Vin; the
   // Core746I's AMS1117-3.3 makes 3.3 V from it. The CP2102 lives on U5V alone.
   { kind: "V", plus: "$usb", minus: GND, value: 5 },
@@ -369,6 +428,8 @@ const model: Element[] = [
   { kind: "R", a: "$3v3", b: V3V3, value: 0.02 },
   { kind: "R", a: "$3v3", b: "$pwrk", value: 330 },
   { kind: "D", anode: "$pwrk", cathode: GND, vf: LED_COLORS.red.vf, part: "PWR" },
+  { kind: "R", a: "$3v3", b: "$mpwrk", value: 330 },
+  { kind: "D", anode: "$mpwrk", cathode: GND, vf: LED_COLORS.red.vf, part: "MPWR" },
   // CP2102 TX/RX activity LEDs: 1 kΩ from 3.3 V, lit by the bridge while a line is low.
   { kind: "R", a: "$3v3", b: "$txk", value: 1e3 },
   { kind: "D", anode: "$txk", cathode: "VCP-TX", vf: LED_COLORS.red.vf, part: "TXLED" },
@@ -427,7 +488,7 @@ export const open746ic: ComponentDef = {
     WAKEUP: "PA0, active high: 10 kΩ pull-down, K1 to 3.3 V through 10 kΩ (JMP6)",
     "LCD 7inch (P15)": "24-bit RGB on the LTDC, backlight PA3, GT911 touch on PD13/PD12 (I2C4), RST PD11, INT PD7",
     "USB OTG FS (Core746I)": "DM PA11, DP PA12, ID PA10, VBUS PA9 — not modelled",
-    "Not fitted here": "BOOT0 switch (always boots from flash), JTAG/SWD (no debugger), the 2×40 pin ports P16–P21 (every I/O; use the peripheral headers)",
+    "Not fitted here": "BOOT0 switch (always boots from flash), JTAG/SWD (no debugger), the 2×40 pin ports P16–P21 (every I/O; use the peripheral headers), the 4.3\" LCD header P14 (RGB as P15 + XPT2046 touch on PF7/PF8/PF9, CS PF6, IRQ PD7), the USB OTG connector and its VBUS LED, the jumpers JMP1–JMP6, JMP5, OTG and VREF (always closed)",
     Source: "Waveshare Open746I-C and Core746I schematics",
   },
 }
