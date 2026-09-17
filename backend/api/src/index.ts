@@ -1,5 +1,5 @@
 /**
- * API: the second container next to the static site, the ingress routes /api here.
+ * API: the second container next to the static site, the ingress routes /api/* here.
  * It only enqueues work and serves results; the worker container does the work.
  *
  *   pnpm api        (listens on PORT, 8787 by default)

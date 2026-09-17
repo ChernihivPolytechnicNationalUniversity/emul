@@ -178,8 +178,8 @@ cores; only cores that share a net pay it.
 The site is static. Work that needs a machine — building firmware — goes through two more containers,
 each from its own Dockerfile and built in parallel by CI:
 
-- `api/` — Fastify. `POST /jobs` enqueues, `GET /jobs/:id` reports the state, `GET /jobs/:id/artifact`
-  streams the result out of S3 (the bucket stays private to the cluster). `/healthz` is 503 while Redis is down.
+- `api/` — Fastify, on the site's host under `/api`. `POST /api/jobs` enqueues, `GET /api/jobs/:id` reports the state,
+  `GET /api/jobs/:id/artifact` streams the result out of S3 (the bucket stays private to the cluster). `/healthz` is 503 while Redis is down.
 - `worker/` — BullMQ consumer; one handler per job kind in `worker/src/handlers.ts`, artifacts under `jobs/<id>/` in S3.
 - `shared/` — the contract between them: job types, the queue, Redis and S3 clients, env config.
 

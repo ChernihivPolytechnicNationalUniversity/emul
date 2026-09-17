@@ -16,5 +16,9 @@ jobs:
     uses: ChernihivPolytechnicNationalUniversity/shared-actions/.github/workflows/gitops-release.yml@main
     with:
       context: .
+      images: |
+        Dockerfile
+        api=backend/api/Dockerfile
+        worker=backend/worker/Dockerfile
       on-missing-candidate: build
     secrets: inherit

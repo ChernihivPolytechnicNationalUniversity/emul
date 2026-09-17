@@ -22,7 +22,8 @@ export function build() {
     await app.redis.quit()
   })
   app.register(health)
-  app.register(jobs)
+  // Same host as the site: the ingress sends /api/* here without stripping the prefix.
+  app.register(jobs, { prefix: "/api" })
   app.setNotFoundHandler((_req, reply) => reply.code(404).send({ ok: false, error: "not found" }))
   return app
 }
