@@ -21,6 +21,8 @@ export default defineConfig({
   ],
   // Cross-origin isolation for SharedArrayBuffer: the simulation runs each MCU core in a worker of its own.
   server: { headers: ISOLATION },
+  // The core worker awaits its message port at top level, which the default iife worker bundle cannot express.
+  worker: { format: 'es' },
   preview: { headers: ISOLATION },
   resolve: {
     alias: {
