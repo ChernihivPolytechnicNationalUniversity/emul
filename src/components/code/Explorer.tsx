@@ -137,8 +137,17 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
     if (!trimmed) return
     const dir = edit.kind === "rename" ? parentOf(edit.path) : edit.dir
     const full = dir ? `${dir}/${trimmed}` : trimmed
-    if (edit.kind === "rename") attempt("Could not rename", () => onRename(edit.path, full, edit.folder))
-    else if (edit.kind === "new-file") attempt("Could not create the file", () => onCreate(full))
+    if (edit.kind === "rename") {
+      attempt("Could not rename", () => {
+        onRename(edit.path, full, edit.folder)
+        setFocused(full)
+      })
+    } else if (edit.kind === "new-file") {
+      attempt("Could not create the file", () => {
+        onCreate(full)
+        setFocused(full)
+      })
+    }
     else {
       if (!FOLDER_NAME.test(trimmed)) {
         toast.error("Could not create the folder", { description: `"${trimmed}" is not a folder name (letters, digits, . _ -)` })
@@ -150,6 +159,10 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
     }
   }
   const remove = (node: Node) => {
+    // The cursor moves to the next row, as it would in VS Code, so Delete twice removes two.
+    const i = rows.findIndex((n) => n.path === node.path)
+    const next = rows.slice(i + 1).find((n) => !n.path.startsWith(node.path + "/")) ?? rows[i - 1]
+    setFocused(next?.path ?? null)
     if (node.children && !files.some((f) => f.path.startsWith(node.path + "/"))) {
       setEmptyFolders((s) => {
         const next = new Set(s)
@@ -164,7 +177,10 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
   const move = (dragged: Dragged, dir: string) => {
     if (parentOf(dragged.path) === dir || (dragged.folder && within(dir, dragged.path))) return
     const to = dir ? `${dir}/${nameOf(dragged.path)}` : nameOf(dragged.path)
-    attempt("Could not move", () => onRename(dragged.path, to, dragged.folder))
+    attempt("Could not move", () => {
+      onRename(dragged.path, to, dragged.folder)
+      setFocused(to)
+    })
     expand(dir)
   }
   const dragged = (e: React.DragEvent): Dragged | null => {

@@ -681,9 +681,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   // --- keyboard --------------------------------------------------------------
   /** Keys typed into a text field are the field's; buttons (a just-clicked palette entry) are fine. */
+  // Monaco types through an EditContext on a plain div, so the code panel counts as a text field too.
   const inTextField = (e: Event) => {
     const t = e.target as HTMLElement | null
-    return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
+    return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable || !!t.closest?.('[data-slot="code-panel"]'))
   }
   const onKey = useEvent((e: KeyboardEvent) => {
     if (inTextField(e)) return

@@ -175,6 +175,9 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onC
       style={{ ...style, width }}
       onKeyDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
+      onCopy={(e) => e.stopPropagation()}
+      onCut={(e) => e.stopPropagation()}
+      onPaste={(e) => e.stopPropagation()}
       {...props}
     >
       <div className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-primary/40" onPointerDown={onResizeStart} aria-label="Resize code panel" />

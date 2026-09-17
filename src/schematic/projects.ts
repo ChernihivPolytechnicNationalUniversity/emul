@@ -8,15 +8,23 @@ import type { SourceFile } from "emul-shared/source"
 export type ProjectLoader = () => Promise<SourceFile[]>
 
 // Vite reads these options at build time, so they are spelled out at each glob. Outside Vite
-// (the test scripts under tsx import the examples too) there is no glob and no code to load.
+// (the test scripts under tsx import the examples too) the call throws: then there is no code
+// to load, which those scripts never ask for. (`typeof import.meta.glob` is no test: a built
+// bundle has the calls replaced and the property gone.)
 type Raw = Record<string, () => Promise<string>>
-const VITE = typeof import.meta.glob === "function"
+const glob = (load: () => Raw): Raw => {
+  try {
+    return load()
+  } catch {
+    return {}
+  }
+}
 
-const halApps = (VITE ? import.meta.glob("../../firmware/hal/Src/{main,square,pwm,uart,i2c,adc,spi,spi-slave}.c", { query: "?raw", import: "default" }) : {}) as Raw
-const lab1 = (VITE ? import.meta.glob("../../firmware/lab1/Core/{Inc,Src}/*.{c,h}", { query: "?raw", import: "default" }) : {}) as Raw
-const lcd = (VITE ? import.meta.glob("../../firmware/lcd/{display,touch,cube}/{Src,Inc,BSP,Fonts}/*.{c,cpp,h}", { query: "?raw", import: "default" }) : {}) as Raw
-const cubeTexture = (VITE ? import.meta.glob("../../firmware/lcd/cube/texture.c", { query: "?raw", import: "default" }) : {}) as Raw
-const retarget = (VITE ? import.meta.glob("../../firmware/lcd/retarget.c", { query: "?raw", import: "default" }) : {}) as Raw
+const halApps = glob(() => import.meta.glob("../../firmware/hal/Src/{main,square,pwm,uart,i2c,adc,spi,spi-slave}.c", { query: "?raw", import: "default" }) as Raw)
+const lab1 = glob(() => import.meta.glob("../../firmware/lab1/Core/{Inc,Src}/*.{c,h}", { query: "?raw", import: "default" }) as Raw)
+const lcd = glob(() => import.meta.glob("../../firmware/lcd/{display,touch,cube}/{Src,Inc,BSP,Fonts}/*.{c,cpp,h}", { query: "?raw", import: "default" }) as Raw)
+const cubeTexture = glob(() => import.meta.glob("../../firmware/lcd/cube/texture.c", { query: "?raw", import: "default" }) as Raw)
+const retarget = glob(() => import.meta.glob("../../firmware/lcd/retarget.c", { query: "?raw", import: "default" }) as Raw)
 
 const MAIN_H = '#ifndef MAIN_H\n#define MAIN_H\n\n#include "stm32f4xx_hal.h"\n\n#endif /* MAIN_H */\n'
 
