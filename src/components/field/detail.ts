@@ -18,6 +18,15 @@ export type FieldDetail = {
    * per kind per object, so a 148-pin chip costs three nodes.
    */
   pinMarks: boolean
+  /**
+   * Nothing on the field is individually interactive any more, so the whole static picture goes
+   * on one canvas instead of into the DOM. Two conditions, and the second is why: below the
+   * `pins` zoom there is no label to read, no dot to aim at and no part to click, so the canvas
+   * gives up nothing that was still on offer — but crossing between the two ways of drawing
+   * costs a frame, so it is only worth crossing when there is enough on screen for the canvas to
+   * pay it back. A small schematic stays in the DOM at every zoom. FIELD.md §11.
+   */
+  canvas: boolean
 }
 
 const LABEL_CELLS = 0.3
@@ -26,12 +35,15 @@ const PIN_DOT_CELLS = 0.4
 const VISIBLE_DOT_PX = 2
 const MARK_CELLS = 0.32
 const VISIBLE_MARK_PX = 0.5
+/** Below this many objects on screen the DOM is comfortable and the switch is not worth a frame. */
+const CANVAS_WORTH_IT = 600
 
-export function fieldDetail(grid: number, scale: number): FieldDetail {
+export function fieldDetail(grid: number, scale: number, onScreen: number): FieldDetail {
   const cellPx = grid * scale
   return {
     labels: cellPx * LABEL_CELLS >= LEGIBLE_LABEL_PX,
     pins: cellPx * PIN_DOT_CELLS >= VISIBLE_DOT_PX,
     pinMarks: cellPx * MARK_CELLS >= VISIBLE_MARK_PX,
+    canvas: cellPx * PIN_DOT_CELLS < VISIBLE_DOT_PX && onScreen >= CANVAS_WORTH_IT,
   }
 }

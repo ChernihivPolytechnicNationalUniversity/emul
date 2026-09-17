@@ -49,6 +49,11 @@ export function planMove(
   origin: Point,
   grid: number,
   cornerRadius: number,
+  /**
+   * In the canvas band there is no per-object DOM: everything that moves is already on one
+   * layer, so the whole drag is a single transform on it.
+   */
+  layer?: HTMLElement | null,
 ): MovePlan {
   const index = new Map(objects.map((o) => [o.id, o]))
   const startPositions = new Map<string, Point>()
@@ -57,11 +62,13 @@ export function planMove(
   for (const o of objects) {
     if (!moving.has(o.id)) continue
     startPositions.set(o.id, { x: o.x, y: o.y })
+    if (layer) continue
     const body = root.querySelector<HTMLElement>(`[data-body="${CSS.escape(o.id)}"]`)
     if (body) bodies.push(body)
     const pins = root.querySelector<SVGGElement>(`[data-pins="${CSS.escape(o.id)}"]`)
     if (pins) pinGroups.push(pins)
   }
+  if (layer) return { origin, grid, cornerRadius, startPositions, bodies: [layer], pinGroups: [], rigidWires: [], elasticWires: [] }
 
   const rigidWires: RigidWire[] = []
   const elasticWires: ElasticWire[] = []

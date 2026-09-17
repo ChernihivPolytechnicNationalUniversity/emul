@@ -41,6 +41,7 @@ import { PinLayer } from "./PinLayer"
 import { FieldReadout, ProbeReadout, type HoverTarget } from "./Readout"
 import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
+import { FieldCanvas } from "./FieldCanvas"
 import { PendingWireLayer, WireLayer, type PendingWire } from "./WireLayer"
 import { wireCornerRadius } from "./wire-style"
 import { BendDrag, MoveDrag, planBend, planMove } from "./move-drag"
@@ -114,6 +115,8 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
   /** Called whenever something the menu shows changes. */
   onStateChange?: (state: FieldState) => void
 }
+
+const EMPTY_IDS: ReadonlySet<string> = new Set()
 
 /** Locate the pin under a client point, using DOM data attributes set by PinLayer. */
 function pinAt(clientX: number, clientY: number): PinRef | null {
@@ -211,8 +214,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   )
   const wireById = React.useMemo(() => new Map(docWires.map((w) => [w.id, w])), [docWires])
 
+
   // --- what is worth drawing: only what the view can show, at the detail it can resolve ------
-  const detail = React.useMemo(() => fieldDetail(grid, scale), [grid, scale])
   const visibleObjects = React.useMemo(() => (view.w > 0 ? index.query(view) : docObjects), [index, view, docObjects])
   const visibleRoutes = React.useMemo(() => {
     if (view.w <= 0) return routes
@@ -232,6 +235,21 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       return minX <= right && maxX >= view.x && minY <= bottom && maxY >= view.y
     })
   }, [routes, view])
+  const detail = React.useMemo(() => fieldDetail(grid, scale, visibleObjects.length), [grid, scale, visibleObjects])
+
+  // --- the canvas band: one picture, and a layer the drag transforms ------------------------
+  const dragLayerRef = React.useRef<HTMLDivElement>(null)
+  const [lifted, setLifted] = React.useState<ReadonlySet<string>>(() => new Set())
+  const liftedObjects = React.useMemo(() => (lifted.size ? visibleObjects.filter((o) => lifted.has(o.id)) : []), [visibleObjects, lifted])
+  const staticObjects = React.useMemo(() => (lifted.size ? visibleObjects.filter((o) => !lifted.has(o.id)) : visibleObjects), [visibleObjects, lifted])
+  const liftedWires = React.useMemo(() => {
+    if (!lifted.size) return new Set<string>()
+    const ids = new Set<string>()
+    for (const w of docWires) if (lifted.has(w.from.object) && lifted.has(w.to.object)) ids.add(w.id)
+    return ids
+  }, [docWires, lifted])
+  const liftedRoutes = React.useMemo(() => (liftedWires.size ? visibleRoutes.filter((r) => liftedWires.has(r.id)) : []), [visibleRoutes, liftedWires])
+  const staticRoutes = React.useMemo(() => (liftedWires.size ? visibleRoutes.filter((r) => !liftedWires.has(r.id)) : visibleRoutes), [visibleRoutes, liftedWires])
   /** Pins sitting on another pin: drawn as a solid junction dot instead of a terminal. */
   const contactPins = React.useMemo(() => new Set(nets.contacts.keys()), [nets])
   /** Pins a wire lands on, plus pins that touch another pin — both are live connections. */
@@ -410,28 +428,52 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const [drag] = React.useState(() => new MoveDrag())
   React.useEffect(() => () => void drag.clearAndFinish(), [drag])
 
-  const onBodyPointerDown = useEvent((e: React.PointerEvent<SVGSVGElement>, id: string) => {
-    if (e.button !== 0 || spaceHeld) return
-    e.stopPropagation()
-    const toggle = e.shiftKey || e.ctrlKey || e.metaKey
+  /** Start moving `id` and whatever is selected with it. Shared by the DOM body and the canvas. */
+  const beginMove = useEvent((e: React.PointerEvent, id: string, toggle: boolean) => {
     sch.selectObject(id, toggle)
     marquee.clear()
     if (toggle) return
     const content = contentRef.current
     if (!content) return
     const moving = sch.selectedObjects.has(id) ? sch.selectedObjects : new Set([id])
+    if (detail.canvas) setLifted(moving)
     drag.begin(
-      planMove(content, docObjects, docWires, moving, toWorld(e.clientX, e.clientY), grid, wireCornerRadius(grid)),
+      planMove(content, docObjects, docWires, moving, toWorld(e.clientX, e.clientY), grid, wireCornerRadius(grid), detail.canvas ? dragLayerRef.current : null),
     )
+  })
+
+  const endMove = useEvent(() => {
+    if (lifted.size) setLifted(EMPTY_IDS)
+    const done = drag.clearAndFinish()
+    if (done && (done.dx || done.dy)) sch.moveTo(done.plan.startPositions, done.dx, done.dy)
+  })
+
+  const onBodyPointerDown = useEvent((e: React.PointerEvent<SVGSVGElement>, id: string) => {
+    if (e.button !== 0 || spaceHeld) return
+    e.stopPropagation()
+    beginMove(e, id, e.shiftKey || e.ctrlKey || e.metaKey)
     e.currentTarget.setPointerCapture(e.pointerId)
   })
   const onBodyPointerMove = useEvent((e: React.PointerEvent<SVGSVGElement>) => {
     if (drag.active) drag.track(toWorld(e.clientX, e.clientY))
   })
   const onBodyPointerUp = useEvent((e: React.PointerEvent<SVGSVGElement>) => {
-    const done = drag.clearAndFinish()
-    if (done && (done.dx || done.dy)) sch.moveTo(done.plan.startPositions, done.dx, done.dy)
+    endMove()
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+  })
+
+  /**
+   * Topmost object under a client point, from the spatial index. `elementFromPoint` finds nothing
+   * on a canvas, so the band that draws the field as one picture hit-tests on geometry instead.
+   */
+  const objectAt = useEvent((clientX: number, clientY: number): string | null => {
+    const at = toWorld(clientX, clientY)
+    let found: string | null = null
+    for (const o of index.query({ x: at.x, y: at.y, w: 0, h: 0 })) {
+      const r = objectRect(o, grid)
+      if (at.x >= r.x && at.x <= r.x + r.w && at.y >= r.y && at.y <= r.y + r.h) found = o.id
+    }
+    return found
   })
   const onBodyContextMenu = useEvent((id: string) => sch.selectObject(id))
 
@@ -667,12 +709,22 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           points: [...pending.points, snapPoint(toWorld(e.clientX, e.clientY))],
         })
     } else if (e.button === 0) {
+      const onCanvas = detail.canvas ? objectAt(e.clientX, e.clientY) : null
+      if (onCanvas) {
+        e.currentTarget.setPointerCapture(e.pointerId)
+        beginMove(e, onCanvas, e.shiftKey || e.ctrlKey || e.metaKey)
+        return
+      }
       sch.deselectAll()
       marquee.start(e)
     }
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (movePan(e)) return
+    if (drag.active) {
+      drag.track(toWorld(e.clientX, e.clientY))
+      return
+    }
     if (pending?.mode === "click") {
       setPending({
         ...pending,
@@ -686,6 +738,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   }
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (endPan(e)) return
+    if (drag.active) {
+      endMove()
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+      return
+    }
     const rect = marquee.end(e)
     onSelectionChange?.(rect)
     if (rect) sch.selectInRect(rect)
@@ -877,7 +934,17 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               className="absolute top-0 left-0 origin-top-left"
             >
               {children}
-              {objectViews}
+              {detail.canvas ? (
+                <>
+                  <FieldCanvas objects={staticObjects} routes={staticRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} />
+                  <div ref={dragLayerRef} data-slot="field-drag-layer" className="pointer-events-none absolute top-0 left-0">
+                    {lifted.size > 0 && <FieldCanvas objects={liftedObjects} routes={liftedRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} />}
+                  </div>
+                </>
+              ) : (
+                objectViews
+              )}
+              {!detail.canvas && (
               <WireLayer
                 routes={visibleRoutes}
                 grid={grid}
@@ -897,6 +964,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 onBendPointerMove={onBendPointerMove}
                 onBendPointerUp={onBendPointerUp}
               />
+              )}
               {/* Above the wires: a pin on a wire has to stay visible and clickable. */}
               <PinLayer
                 objects={visibleObjects}

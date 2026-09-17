@@ -4,7 +4,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { chromium, type Browser, type Page } from "playwright-core"
 import { lab1Stand } from "@/schematic/examples"
-import { GRID, objectPins } from "@/schematic/geometry"
+import { GRID, objectPins, objectRect } from "@/schematic/geometry"
 import { partKey, type PartState, type PlacedObject, type Schematic, type Wire } from "@/schematic/types"
 
 /**
@@ -29,6 +29,10 @@ const TILE_PITCH = { x: 100 * GRID, y: 80 * GRID }
 const LOAD_TIMEOUT_MS = 120_000
 const SETTLE_MS = 2500
 const WORKING_ZOOM = 0.48
+/** Well inside the band where the field is one canvas. */
+const CANVAS_BAND_ZOOM = 0.14
+/** The band only engages when enough is on screen to pay for the switch, so check it on a big one. */
+const CANVAS_BAND_OBJECTS = 1200
 const ZOOM_PRESSES = 24
 const ZOOM_STEP_TIMEOUT_MS = 8000
 const ZOOM_SETTLE_MS = 600
@@ -98,7 +102,17 @@ function tiled(base: Schematic, tiles: number): Schematic {
 
 const pinCount = (doc: Schematic) => doc.objects.reduce((sum, object) => sum + objectPins(object, GRID).length, 0)
 
-const drawnComponents = (page: Page) => page.evaluate(() => document.querySelectorAll("[data-slot=component]").length)
+/**
+ * What the field is showing, whichever way it is drawing it. A document large enough to open
+ * zoomed into the canvas band has no component elements at all, so counting those alone would
+ * wait forever.
+ */
+const drawnSignature = (page: Page) =>
+  page.evaluate(() => {
+    const components = document.querySelectorAll("[data-slot=component]").length
+    const canvas = document.querySelector("[data-slot=field-canvas]") as HTMLCanvasElement | null
+    return components > 0 ? `dom:${components}` : canvas ? `canvas:${canvas.width}x${canvas.height}` : "none"
+  })
 
 /**
  * Culling means the field never holds the whole document, so readiness is "the picture stopped
@@ -106,10 +120,10 @@ const drawnComponents = (page: Page) => page.evaluate(() => document.querySelect
  */
 async function waitUntilDrawn(page: Page) {
   const deadline = Date.now() + LOAD_TIMEOUT_MS
-  let previous = -1
+  let previous = ""
   while (Date.now() < deadline) {
-    const drawn = await drawnComponents(page)
-    if (drawn > 0 && drawn === previous) return
+    const drawn = await drawnSignature(page)
+    if (drawn !== "none" && drawn === previous) return
     previous = drawn
     await page.waitForTimeout(300)
   }
@@ -363,7 +377,112 @@ async function checkRepeatedDrag(page: Page) {
   check("one undo takes the second drag back", back.off.length === 0 && back.dx === 0 && back.dy === 0, back.off.length === 0 && !back.dx && !back.dy ? "restored" : "the document did not come back")
 }
 
-async function measureDocument(browser: Browser, doc: Schematic, alsoCheckDragging: boolean): Promise<Measured> {
+const fieldCounts = (page: Page) =>
+  page.evaluate(() => ({
+    canvases: document.querySelectorAll("[data-slot=field-canvas]").length,
+    components: document.querySelectorAll("[data-slot=component]").length,
+    wirePaths: document.querySelectorAll("[data-slot=wires] path").length,
+    pinNodes: document.querySelectorAll("[data-slot=pins] *").length,
+    nodes: document.querySelectorAll("[data-slot=dot-field-content] *").length,
+  }))
+
+async function zoomTo(page: Page, want: number) {
+  for (let step = 0; step < ZOOM_PRESSES * 2; step++) {
+    const shown = (await readZoom(page)) ?? 1
+    if (Math.abs(Math.log(shown / want)) < 0.1) break
+    await page.keyboard.press(shown < want ? "Control+Equal" : "Control+Minus")
+    const caughtUp = await page
+      .waitForFunction(
+        (previous) => {
+          const badge = document.querySelector("[data-slot=zoom-controls]")?.textContent?.match(/(\d+)%/)
+          return badge ? Number(badge[1]) / 100 !== previous : false
+        },
+        shown,
+        { timeout: ZOOM_STEP_TIMEOUT_MS },
+      )
+      .then(() => true, () => false)
+    if (!caughtUp) break
+  }
+  await page.waitForTimeout(ZOOM_SETTLE_MS * 2)
+  return (await readZoom(page)) ?? 0
+}
+
+/**
+ * Below the zoom where a pin can be aimed at, the field is one canvas and the DOM holds only
+ * overlays. What has to keep working there: the picture, selecting and moving a symbol by
+ * geometry rather than by `elementFromPoint`, and coming back to the DOM on the way up.
+ */
+/** A screen point over some object, worked out from the document — the canvas has no elements. */
+async function pointOverObject(page: Page, doc: Schematic) {
+  const placed = doc.objects.map((object) => {
+    const rect = objectRect(object, GRID)
+    return { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }
+  })
+  return page.evaluate(
+    ([centres, margin]) => {
+      const content = document.querySelector("[data-slot=dot-field-content]") as HTMLElement | null
+      const field = document.querySelector("[data-slot=dot-field-viewport]")?.getBoundingClientRect()
+      if (!content || !field) return null
+      const m = new DOMMatrix(getComputedStyle(content).transform)
+      // Against the field's own box, not the window: the sidebar owns the first 256 px.
+      for (const centre of centres) {
+        const x = field.left + m.e + centre.x * m.a
+        const y = field.top + m.f + centre.y * m.d
+        const inside =
+          x > field.left + margin.left &&
+          x < field.right - margin.right &&
+          y > field.top + margin.top &&
+          y < field.bottom - margin.bottom
+        if (inside) return { x, y }
+      }
+      return null
+    },
+    [placed, GRAB_MARGIN] as const,
+  )
+}
+
+async function checkCanvasBand(page: Page, doc: Schematic) {
+  const at = await zoomTo(page, CANVAS_BAND_ZOOM)
+  const band = await fieldCounts(page)
+  check(`the canvas band is reached`, at <= CANVAS_BAND_ZOOM * 1.25, `zoomed to ${Math.round(at * 100)}%`)
+  check("the band draws the field on a canvas", band.canvases >= 1, `${band.canvases} canvas`)
+  check(
+    "the band leaves no component, wire or pin nodes",
+    band.components === 0 && band.wirePaths === 0 && band.pinNodes === 0,
+    `${band.nodes} nodes in the field`,
+  )
+
+  const before = await page.evaluate(() => (document.querySelector("[data-slot=field-canvas]") as HTMLCanvasElement | null)?.toDataURL().length ?? 0)
+  const grab = await pointOverObject(page, doc)
+  if (!grab) {
+    check("a symbol is in view to drag in the band", false, "nothing in reach")
+    await zoomTo(page, WORKING_ZOOM + 0.05)
+    return
+  }
+  await page.mouse.move(grab.x, grab.y)
+  await page.mouse.down()
+  let carried = ""
+  for (let step = 1; step <= 10; step++) {
+    await page.mouse.move(grab.x + step * 10, grab.y + step * 5)
+    await page.waitForTimeout(25)
+    if (step === 6) carried = await page.evaluate(() => (document.querySelector("[data-slot=field-drag-layer]") as HTMLElement | null)?.style.transform ?? "")
+  }
+  await page.mouse.up()
+  await page.waitForTimeout(700)
+  const cleared = await page.evaluate(() => (document.querySelector("[data-slot=field-drag-layer]") as HTMLElement | null)?.style.transform ?? "")
+  const after = await page.evaluate(() => (document.querySelector("[data-slot=field-canvas]") as HTMLCanvasElement | null)?.toDataURL().length ?? 0)
+  check("a drag in the band moves the drag layer", /translate\(/.test(carried), carried || "(nothing)")
+  check("the drag layer is cleared on release", cleared === "" || cleared === "none", cleared || "(empty)")
+  check("the committed move repaints the static canvas", after !== before, `${before} → ${after} bytes`)
+
+  await zoomTo(page, WORKING_ZOOM + 0.05)
+  const back = await fieldCounts(page)
+  check("leaving the band brings the DOM layers back", back.canvases === 0 && back.components > 0, `${back.components} components, ${back.canvases} canvas`)
+}
+
+type ExtraChecks = { repeatedDrag?: boolean; canvasBand?: boolean }
+
+async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChecks): Promise<Measured> {
   const pins = pinCount(doc)
   console.log(`\n${doc.objects.length} objects / ${doc.wires.length} wires / ${pins} pins`)
   const { page, mountMs } = await openField(browser, doc)
@@ -372,8 +491,9 @@ async function measureDocument(browser: Browser, doc: Schematic, alsoCheckDraggi
     const nodes = await fieldNodes(page)
     console.log(`  loaded in ${mountMs} ms, zoom ${Math.round(zoom * 100)}%, ${nodes.total} nodes in the field (path ${nodes.path}, circle ${nodes.circle}, text ${nodes.text})`)
 
-    if (alsoCheckDragging) {
-      await checkRepeatedDrag(page)
+    if (extra.canvasBand) await checkCanvasBand(page, doc)
+    if (extra.repeatedDrag) await checkRepeatedDrag(page)
+    if (extra.canvasBand || extra.repeatedDrag) {
       await page.keyboard.press("Escape")
       await page.waitForTimeout(300)
     }
@@ -470,7 +590,12 @@ const browser = await chromium.launch({
 const results: Measured[] = []
 for (const doc of documents) {
   try {
-    results.push(await measureDocument(browser, doc, doc === documents[0]))
+    results.push(
+      await measureDocument(browser, doc, {
+        repeatedDrag: doc === documents[0],
+        canvasBand: doc === documents[documents.length - 1] && doc.objects.length >= CANVAS_BAND_OBJECTS,
+      }),
+    )
   } catch (error) {
     const reason = error instanceof Error ? error.message.split("\n")[0] : String(error)
     check(`${doc.objects.length} objects: measured`, false, `${reason}\n    the page must not reload mid-run — do not edit src/ while benchmarking`)

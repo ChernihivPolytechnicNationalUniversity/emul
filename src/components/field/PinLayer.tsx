@@ -93,7 +93,8 @@ export const PinLayer = React.memo(function PinLayer({
   const g = (v: number) => v * grid
   const labelled = detail.labels
   if (!detail.pins) {
-    if (!detail.pinMarks) return null
+    // The canvas band draws the marks into the symbol raster instead.
+    if (!detail.pinMarks || detail.canvas) return null
     return (
       <svg data-slot="pins" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
         {objects.map((object) => (
