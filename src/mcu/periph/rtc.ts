@@ -387,6 +387,12 @@ export class Rtc extends RegBlock implements Clocked {
   private wutClocks = 0
   private calClocks = 0
 
+  /** Advance by a stretch of wall time with no core cycles behind it (VDD off, VBAT on). */
+  tickSeconds(seconds: number) {
+    if (this.rtcHz <= 0 || this.hclkHz <= 0) return
+    this.tick(seconds * this.hclkHz)
+  }
+
   cyclesUntilEvent(): number {
     if (this.rtcHz <= 0) return Infinity
     // Next subsecond tick (ck_apre) is the finest event; a second is PREDIV_S of them.

@@ -130,6 +130,8 @@ export class Stm32 {
   /** Resets since the firmware was loaded, other than power-on, and the last one's cause. */
   resets = 0
   lastReset: Exclude<ResetCause, "por"> | null = null
+  /** The last power-on kept the backup domain: VBAT held it through the cut. */
+  backupKept = false
   /**
    * Deep sleep in progress (SLEEPDEEP + WFI/WFE): Stop, or Standby with PDDS. The 1.2 V
    * domain's clocks are frozen; only the LSI/LSE-clocked RTC and IWDG keep running.
@@ -594,15 +596,28 @@ export class Stm32 {
 
   /**
    * Reset. A power-on ("por", the default: firmware load, the board's VDD coming up) clears
-   * everything; a system reset keeps the backup domain (RTC, backup registers, BDCR) and
-   * leaves the cause in RCC's CSR reset flags. A Standby exit is a reset too, flagged in PWR
-   * rather than RCC.
+   * everything — unless `backup` says VBAT held the backup domain (RTC, backup registers,
+   * BDCR) through the outage; a system reset keeps it too and leaves the cause in RCC's CSR
+   * reset flags. A Standby exit is a reset too, flagged in PWR rather than RCC.
    */
-  reset(cause: ResetCause = "por") {
-    this.rcc.powerOn = this.rtc.powerOn = this.pwr.powerOn = cause === "por"
+  /**
+   * Time passed with VDD off and VBAT on: the RTC counts on if its clock is the LSE (the LSI
+   * and HSE die with VDD). Called once when VDD returns, with the length of the outage.
+   */
+  runOnBattery(seconds: number) {
+    if (seconds <= 0 || ((this.rcc.get("BDCR") >>> 8) & 3) !== 1) return
+    this.rtc.refreshClock()
+    this.rtc.tickSeconds(seconds)
+  }
+
+  reset(cause: ResetCause = "por", opts: { backup?: boolean } = {}) {
+    // VDD back with VBAT still up: everything restarts but the backup domain stays as it was.
+    this.rcc.powerOn = this.rtc.powerOn = cause === "por" && !opts.backup
+    this.pwr.powerOn = cause === "por"
     if (cause === "por") {
       this.resets = 0
       this.lastReset = null
+      this.backupKept = !!opts.backup
     } else {
       this.resets++
       this.lastReset = cause

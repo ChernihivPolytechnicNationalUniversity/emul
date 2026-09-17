@@ -161,6 +161,21 @@ expect("LD1 on afterwards", mcu.padDrive(parsePad("PB0")!) === "high" ? "on" : "
 expect("core idles in Sleep", mcu.powerMode, "sleep")
 expect("no unmodelled features", mcu.unmodelled.summary().length, 0)
 
+console.log("\nVDD off for an hour with VBAT up: the backup domain survives, the RTC counts the hour on the LSE")
+const before = word("rtcTime")
+mcu.runOnBattery(3600)
+origReset("por", { backup: true })
+run(0.03)
+expect("life counter kept in BKP0R (life 3)", word("life"), 3)
+expect("RTC an hour on (hhmmss)", word("rtcTime"), before + 10000, 2)
+expect("POR flagged in RCC CSR", (mcu.rcc.get("CSR") >>> 27) & 1, 1)
+
+console.log("\nVDD and VBAT both off: a plain power-on clears it")
+origReset("por")
+run(0.03)
+expect("life 0 again", word("life"), 0)
+expect("RTC set afresh by life 0 (TR = 0x123456)", mcu.bus.read32(0x40002800).toString(16), "123456")
+
 const wall = (performance.now() - wall0) / 1000
 console.log(`\n${mcu.time.toFixed(3)} s simulated in ${wall.toFixed(2)} s wall, ${(mcu.cpu.instructions / wall / 1e6).toFixed(1)} MIPS`)
 if (mcu.unmodelled.hits.size) console.log("unmodelled:", mcu.unmodelled.summary())

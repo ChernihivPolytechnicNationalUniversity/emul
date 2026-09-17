@@ -297,6 +297,12 @@ export type ComponentDef = {
   /** Pin whose level at reset selects the boot memory (BOOT0); absent: always boots from flash. */
   mcuBoot0?: string
   /**
+   * Pin of the backup-domain supply (VBAT). Above 1.65 V while VDD is down, the RTC keeps its
+   * calendar and backup registers and counts on through the outage on the LSE; absent or low,
+   * losing VDD is a power-on reset that clears them.
+   */
+  mcuVbat?: string
+  /**
    * Clock sources a board carries for its MCU (null: the pins are free). A bare chip omits this
    * and gets its HSE/LSE from crystals or oscillators wired to its OSC pins on the field.
    */

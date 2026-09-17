@@ -14,7 +14,7 @@ import { chipById, STM32F429ZI } from "./chip"
 import { CpuHalt } from "./faults"
 import { Stm32, type PadRef } from "./stm32f429"
 import { PanelInstance } from "@/sim/display"
-import { CMD, CMD_BOOT0, CMD_RESET, CMD_YIELD, CTL, IN_RING, OUT, OUT_HALTED, OUT_LOADED, OUT_RING, OUT_RUNNING, PAD_KEYS, SHM, decodeClock, encodeDrive, statusOf, type FromCore, type ToCore } from "@/sim/core-host"
+import { CMD, CMD_BACKUP, CMD_BOOT0, CMD_RESET, CMD_YIELD, CTL, IN_RING, OUT, OUT_HALTED, OUT_LOADED, OUT_RING, OUT_RUNNING, PAD_KEYS, SHM, decodeClock, encodeDrive, statusOf, type FromCore, type ToCore } from "@/sim/core-host"
 
 type Port = { post(msg: FromCore, transfer?: ArrayBuffer[]): void; onMessage(cb: (msg: ToCore) => void): void }
 
@@ -183,7 +183,8 @@ function run(seq: number) {
   const flags = cmd[CMD.FLAGS]
   m.boot0 = (flags & CMD_BOOT0) !== 0
   if (flags & CMD_RESET) {
-    m.reset()
+    if (cmd[CMD.BATTERY] > 0) m.runOnBattery(cmd[CMD.BATTERY])
+    m.reset("por", { backup: (flags & CMD_BACKUP) !== 0 })
     dutyAcc.fill(-1)
   }
   m.setClockSources(decodeClock(cmd, CMD.HSE_HZ), decodeClock(cmd, CMD.LSE_HZ))

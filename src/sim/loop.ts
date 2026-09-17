@@ -23,6 +23,8 @@ const VDD_POR = 1.7
 /** How far one lockstepped core may run ahead of another (seconds). */
 const LOCKSTEP_LEAD = 1e-6
 const NRST_LOW = 0.3 * 3.3
+/** VBAT keeps the backup domain above this (the datasheet's 1.65 V minimum). */
+const VBAT_MIN = 1.65
 /** BOOT0 counts as high above this (a TTL-ish threshold on the 3.3 V part). */
 const BOOT_HIGH = 0.5 * 3.3
 /** Below this on its VCC an oscillator module puts out nothing. */
@@ -206,6 +208,10 @@ class McuInstance {
   resetNet: number | undefined = undefined
   /** Net of BOOT0 (undefined: unsolved or absent, treated as low: boot from flash). */
   boot0Net: number | undefined = undefined
+  /** Net of VBAT (undefined: unsolved or absent, treated as VDD: nothing survives an outage). */
+  vbatNet: number | undefined = undefined
+  /** Engine time VDD went down, while the backup domain is living on VBAT. */
+  offAt: number | null = null
   /** What the circuit puts on OSC_IN/OSC_OUT and OSC32_IN/OSC32_OUT (a board's own parts, or crystals wired to a bare chip). */
   hse: ClockFeed = { source: null }
   lse: ClockFeed = { source: null }
@@ -532,6 +538,7 @@ export class SimLoop {
       inst.powerNet = def?.mcuPower ? engine.net.pinNet.get(pinKey(inst.object, def.mcuPower)) : undefined
       inst.resetNet = def?.mcuReset ? engine.net.pinNet.get(pinKey(inst.object, def.mcuReset)) : undefined
       inst.boot0Net = def?.mcuBoot0 ? engine.net.pinNet.get(pinKey(inst.object, def.mcuBoot0)) : undefined
+      inst.vbatNet = def?.mcuVbat ? engine.net.pinNet.get(pinKey(inst.object, def.mcuVbat)) : undefined
       if (def) {
         inst.hse = def.mcuClocks ? { source: def.mcuClocks.hse } : this.oscillatorFeed(inst.object, def, "PH0", "PH1")
         inst.lse = def.mcuClocks ? { source: def.mcuClocks.lse } : this.oscillatorFeed(inst.object, def, "PC14", "PC15")
@@ -1153,11 +1160,19 @@ export class SimLoop {
         // starts from the vector table when both are released.
         const vdd = inst.powerNet === undefined ? Infinity : inst.powerNet === GROUND ? 0 : engine.v[inst.powerNet]
         const nrst = inst.resetNet === undefined ? Infinity : inst.resetNet === GROUND ? 0 : engine.v[inst.resetNet]
+        // The backup domain lives on VBAT: with it up through an outage the RTC keeps counting.
+        const vbatUp = inst.vbatNet !== undefined && inst.vbatNet !== GROUND && engine.v[inst.vbatNet] > VBAT_MIN
         if (vdd < Math.max(VDD_POR, inst.mcu.porThreshold) || nrst < NRST_LOW) {
           if (inst.powered) {
             inst.powered = false
-            inst.mcu.reset()
+            const outage = vdd < Math.max(VDD_POR, inst.mcu.porThreshold)
+            inst.mcu.reset({ backup: outage && vbatUp })
+            inst.offAt = outage && vbatUp ? engine.time : null
             inst.digitalPads.clear()
+          } else if (inst.offAt !== null && !vbatUp) {
+            // The battery went too while VDD was down: the backup domain is gone.
+            inst.mcu.reset()
+            inst.offAt = null
           }
           continue
         }
@@ -1165,7 +1180,9 @@ export class SimLoop {
           inst.powered = true
           // The boot pins are sampled as reset is released.
           inst.mcu.boot0 = inst.boot0Net !== undefined && inst.boot0Net !== GROUND && engine.v[inst.boot0Net] > BOOT_HIGH
-          inst.mcu.reset()
+          if (inst.offAt !== null) inst.mcu.runOnBattery(engine.time - inst.offAt)
+          inst.mcu.reset({ backup: inst.offAt !== null })
+          inst.offAt = null
           inst.base = engine.time
         }
         // An oscillator module clocks only while its own supply is up.

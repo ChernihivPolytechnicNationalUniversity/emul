@@ -69,6 +69,20 @@ the NVIC. Reported by name in the inspector until then.
 - [x] **2.8a Boards and the RGB panel** (2026-09-17) — Waveshare Open746I-C (the lab stand: `pnpm open746`) and its
   7inch Capacitive Touch LCD (F) with the GT911 (`pnpm lcd`): `display` parts draw a panel fed by an MCU's LTDC as wired
   (`src/sim/display.ts`), touches go to the digital part behind it. Backlight PWM dimming left out.
+- [x] **2.8b Open746I-C as the lab has it** (2026-09-17) — layout from Waveshare's dimension drawing; power in on the
+  module's USB through SW1 (or the USART1 USB / jack through S2); BOOT switch (SYSTEM parks the core in system memory);
+  jumpers JMP1/3/4/6 and VBAT as switches; VBAT keeps the backup domain and counts the RTC through a power cut
+  (`ComponentDef.mcuVbat`, `pnpm mcu-lp`). `pnpm open746` covers it all.
+- [ ] **2.8c Open746I-C tech debt** — what the stand still cannot do, in order of how soon a lab will need it:
+  - the accessory boards from the box as components: DP83848 Ethernet, USB3300 ULPI, WM8960 audio, Micro SD, OV2640
+    camera, W25QXX flash (2.13), 10 DOF IMU, SN65HVD230 CAN, Analog Test Board — each with its firmware and a scenario;
+  - the F7 peripherals behind them in the core: CAN, USB OTG, Ethernet, SDMMC, SAI, QUADSPI (README's "missing" row);
+  - the 2×40 pin ports P16–P21 as pins (an I/O that is only there cannot be wired today);
+  - JMP2 (USART1 ↔ CP2102) and JMP5 (A4/A5 ↔ PB9/PB8) as switches: a switch joins nets only in the analog solver, the
+    digital edge path does not cross it, so a serial or I²C line through an open-able jumper needs the netlist to merge
+    nets through closed switches first;
+  - USB OTG data lines (device/host, MIC2075 VBUS switch on PE2/PE3, VBUS LED); CP2102 CTS/RTS and flow control;
+  - the 4.3" LCD with XPT2046 touch on P14; VREF+ jumper (external ADC reference); JTAG/SWD (a debugger is 3.1).
 - [ ] **2.9 Op-amp, comparator, 555** — ideal op-amp with rails, LM393-style comparator, NE555 as a macro model.
 - [ ] **2.10 Relay, buzzer, DC motor, servo** — relay coil + contacts, buzzer as a load with sound indication,
   motor as R+L+back-EMF with an RPM readout, servo decoding 50 Hz PWM to an angle. Needs 1.1 for PWM.

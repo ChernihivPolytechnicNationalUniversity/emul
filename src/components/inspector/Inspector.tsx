@@ -387,6 +387,12 @@ function FirmwarePanel({ object, chip, sim, onChange }: { object: PlacedObject; 
                   </dd>
                 </>
               )}
+              {status.backupKept && (
+                <>
+                  <dt className="text-muted-foreground">Backup domain</dt>
+                  <dd className="text-right">kept on VBAT through the last power cut</dd>
+                </>
+              )}
               {status.halted && (
                 <>
                   <dt className="text-muted-foreground">Reason</dt>

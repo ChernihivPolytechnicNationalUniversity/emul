@@ -42,6 +42,8 @@ export type CoreStatus = {
   /** System resets since power-on (watchdogs, SYSRESETREQ, Standby exit) and the cause of the last one. */
   resets: number
   lastReset: string | null
+  /** VBAT held the RTC and backup registers through the last power cut. */
+  backupKept: boolean
   /** Power mode, share of the time asleep since the last status, and the supply-current estimate. */
   power: PowerStatus
   /** System clock source and rate, what feeds HSE/LSE, and why an oscillator the firmware waits on is not coming. */
@@ -75,7 +77,10 @@ export interface CoreHost {
   /** Runs in step with the loop rather than pipelined (a remote core with digital traffic to answer). */
   readonly sync: boolean
   load(data: ArrayBuffer, name: string): void
-  reset(): void
+  /** Restart the core; `backup` keeps the RTC and backup registers (VBAT held them). */
+  reset(opts?: { backup?: boolean }): void
+  /** Time VDD was off with VBAT on, to count the RTC through before the next reset. */
+  runOnBattery(seconds: number): void
   /** Dead silicon: the core stops with this reason until the next run. */
   halt(reason: string): void
   setClockSources(hse: ClockSource | null, lse: ClockSource | null): void
@@ -170,8 +175,11 @@ export class LocalCore implements CoreHost {
       this.mcu.cpu.halted = new CpuHalt("fault", `cannot load firmware: ${(e as Error).message}`, 0)
     }
   }
-  reset() {
-    this.mcu.reset()
+  reset(opts: { backup?: boolean } = {}) {
+    this.mcu.reset("por", opts)
+  }
+  runOnBattery(seconds: number) {
+    this.mcu.runOnBattery(seconds)
   }
   halt(reason: string) {
     this.mcu.cpu.halted = new CpuHalt("fault", reason, this.mcu.cpu.pc)
@@ -266,6 +274,7 @@ export function statusOf(mcu: Stm32, host: CoreStatus["host"]): CoreStatus {
     unmodelled: mcu.unmodelled.summary(),
     resets: mcu.resets,
     lastReset: mcu.lastReset,
+    backupKept: mcu.backupKept,
     power: mcu.powerStatus(),
     clock: mcu.clockStatus(),
     host,
@@ -302,13 +311,15 @@ export const CTL = {
 export const CMD_RESET = 1
 export const CMD_BOOT0 = 2
 export const CMD_YIELD = 4
+/** The reset keeps the backup domain (VBAT held it through the outage). */
+export const CMD_BACKUP = 8
 /** Output flags (per run, in the output bank). */
 export const OUT_LOADED = 1
 export const OUT_RUNNING = 2
 export const OUT_HALTED = 4
 
 /** Command bank layout (Float64 offsets within the bank). */
-export const CMD = { TARGET: 0, FLAGS: 1, HSE_HZ: 2, HSE_KIND: 3, HSE_START: 4, LSE_HZ: 5, LSE_KIND: 6, LSE_START: 7, LEVELS: 8, ANALOG: 8 + PAD_KEYS, SIZE: 8 + 2 * PAD_KEYS } as const
+export const CMD = { TARGET: 0, FLAGS: 1, HSE_HZ: 2, HSE_KIND: 3, HSE_START: 4, LSE_HZ: 5, LSE_KIND: 6, LSE_START: 7, LEVELS: 8, ANALOG: 8 + PAD_KEYS, BATTERY: 8 + 2 * PAD_KEYS, SIZE: 9 + 2 * PAD_KEYS } as const
 /** Output bank layout. */
 export const OUT = { TIME: 0, FLAGS: 1, IDD: 2, POR: 3, DRIVE: 4, DUTY: 4 + PAD_KEYS, SIZE: 4 + 2 * PAD_KEYS } as const
 /** Edge rings: [time, code] pairs; code = key·4 + level (0 low, 1 high, 2 released). */
@@ -400,6 +411,8 @@ export class RemoteCore implements CoreHost {
   private hse: ClockSource | null = null
   private lse: ClockSource | null = null
   private resetPending = true
+  private resetBackup = false
+  private battery = 0
   private watch: number[] = []
   boot0 = false
   yieldOnOutput = false
@@ -480,9 +493,10 @@ export class RemoteCore implements CoreHost {
     this.haltedFlag = false
     this.post({ t: "load", data, name }, [data])
   }
-  reset() {
+  reset(opts: { backup?: boolean } = {}) {
     this.finish()
     this.resetPending = true
+    this.resetBackup = !!opts.backup
     this.haltedFlag = false
     this.haltReason = null
     this.runningFlag = this.loadedFlag
@@ -490,7 +504,10 @@ export class RemoteCore implements CoreHost {
     // Pads come up floating at reset; the core confirms after its next run.
     this.outBank.fill(0, OUT.DRIVE, OUT.DRIVE + PAD_KEYS)
     this.version++
+  }  runOnBattery(seconds: number) {
+    this.battery = seconds
   }
+
   private haltReason: string | null = null
   /** The loop stops driving a halted core; the core itself is told at its next reset. */
   halt(reason: string) {
@@ -569,10 +586,12 @@ export class RemoteCore implements CoreHost {
     const bank = this.next
     bank[CMD.TARGET] = end
     // Yielding per edge only makes sense in step: pipelined, a run that stopped early would fall behind.
-    bank[CMD.FLAGS] = (this.resetPending ? CMD_RESET : 0) | (this.boot0 ? CMD_BOOT0 : 0) | (this.sync ? CMD_YIELD : 0)
+    bank[CMD.FLAGS] = (this.resetPending ? CMD_RESET : 0) | (this.resetPending && this.resetBackup ? CMD_BACKUP : 0) | (this.boot0 ? CMD_BOOT0 : 0) | (this.sync ? CMD_YIELD : 0)
+    bank[CMD.BATTERY] = this.resetPending ? this.battery : 0
     encodeClock(bank, CMD.HSE_HZ, this.hse)
     encodeClock(bank, CMD.LSE_HZ, this.lse)
     this.resetPending = false
+    this.battery = 0
     this.seq++
     this.runs++
     this.targetTime = end
@@ -646,6 +665,7 @@ export class RemoteCore implements CoreHost {
         unmodelled: [],
         resets: 0,
         lastReset: null,
+        backupKept: false,
         power: { mode: "run", asleep: 0, current: 0, regulator: "main" },
         clock: { source: "HSI", pllSource: "HSI", sysclk: 0, hse: null, lse: null, problems: [] },
         host,

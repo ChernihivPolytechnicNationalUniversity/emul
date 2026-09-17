@@ -98,6 +98,17 @@ press("WAKEUP", false)
 run(0.05)
 expect("PA0 back down", v(loop.snapshot()!, "CN3-1"), 0, 0.02)
 
+console.log("\nJumpers: JMP3_3 open frees PH4 from LED3, JMP4_3 open takes the joystick off PD4, JMP6 open takes K1 off PA0")
+loop.setParts({ [partKey(u.id, "JMP3_3")]: { on: false }, [partKey(u.id, "JMP4_3")]: { on: false }, [partKey(u.id, "JMP6")]: { on: false }, [partKey(u.id, "JOY_C")]: { pressed: true }, [partKey(u.id, "WAKEUP")]: { pressed: true } })
+run(0.1)
+snap = loop.snapshot()!
+expect("LED3 dark with PH4 driven high", `${ledOn(snap, "LED3") ? "●" : "○"} ${v(snap, "CN4-3").toFixed(1)} V on Arduino D2`, "○ 3.3 V on Arduino D2")
+expect("PD4 stays high with C pressed", v(snap, "P12-8"), 3.3, 0.05)
+expect("PA0 stays down with K1 pressed (pad pull-down only)", v(snap, "CN3-1"), 0, 0.05)
+loop.setParts({})
+run(0.1)
+expect("LED3 back", ledOn(loop.snapshot()!, "LED3") ? "●" : "○", "●")
+
 console.log("\nRESET holds the core, releasing restarts it")
 press("RESET", true)
 run(0.1)
@@ -153,6 +164,38 @@ run(0.3)
 snap = loop.snapshot()!
 expect("3V3 rail", v(snap, "P23-1"), 3.3, 0.02)
 expect("core running", snap.mcus[u.id].running ? "yes" : "no", "yes")
+expect("backup domain cleared (VBAT on the jumper died with the rail)", snap.mcus[u.id].backupKept ? "kept" : "cleared", "cleared")
+
+console.log("\nVBAT: a CR2032 on the VBAT pin (jumper open) holds the backup domain through a power cut")
+{
+  const doc3 = lab1Board.build(GRID)
+  const u3 = doc3.objects.find((o) => o.def === "open746i-c")!
+  u3.props = { ...u3.props, firmware: "lab1-f746.elf", firmwareData: elf.toString("base64") }
+  const cell = { id: "cell", def: "battery", x: 30 * GRID, y: 60 * GRID, props: { chem: "li-mno2", cells: "1", capacity: "220 mAh" } }
+  const gnd = { id: "g3", def: "ground", x: 34 * GRID, y: 66 * GRID, props: {} }
+  doc3.objects.push(cell, gnd)
+  doc3.wires.push({ id: "w3", from: { object: cell.id, pin: "+" }, to: { object: u3.id, pin: "VBAT" } }, { id: "w4", from: { object: gnd.id, pin: "GND" }, to: { object: u3.id, pin: "P24-1" } }, { id: "w5", from: { object: cell.id, pin: "-" }, to: { object: gnd.id, pin: "GND" } })
+  const loop3 = new SimLoop()
+  loop3.setDoc(doc3)
+  const off = { [partKey(u3.id, "VBATJ")]: { on: false } }
+  loop3.setParts(off)
+  loop3.setRunning(true)
+  let t = 0
+  loop3.advance(t)
+  for (let i = 0; i < 5; i++) loop3.advance((t += 30))
+  let s3 = loop3.snapshot()!
+  expect("VBAT from the cell (V)", s3.pinVoltage[pinKey(u3.id, "VBAT")], 3.2, 0.2)
+  loop3.setParts({ ...off, [partKey(u3.id, "MUSB")]: { on: false } })
+  for (let i = 0; i < 5; i++) loop3.advance((t += 30))
+  s3 = loop3.snapshot()!
+  expect("core off", s3.mcus[u3.id].powered ? "powered" : "off", "off")
+  expect("VBAT still from the cell (V)", s3.pinVoltage[pinKey(u3.id, "VBAT")], 3.2, 0.2)
+  loop3.setParts(off)
+  for (let i = 0; i < 8; i++) loop3.advance((t += 30))
+  s3 = loop3.snapshot()!
+  expect("core back", s3.mcus[u3.id].running ? "yes" : "no", "yes")
+  expect("backup domain kept", s3.mcus[u3.id].backupKept ? "kept" : "cleared", "kept")
+}
 
 console.log("\nSW1 at 5Vin, S2 to the jack, 5 V on 5VDC, both USBs out: the board comes back")
 {

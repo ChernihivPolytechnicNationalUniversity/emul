@@ -73,7 +73,7 @@ const SAI_A: Row[] = [[1, "3V3"], [3, "GND"], [5, "NC"], [7, "NC"], [9, "SCK_A",
 const SAI_B: Row[] = [[2, "3V3"], [4, "GND"], [6, "SDA", "PB9", "I2C1_SDA"], [8, "SCL", "PB8", "I2C1_SCL"], [10, "SCK_B", "PF8", "SAI1_SCK_B"], [12, "FS_B", "PF9", "SAI1_FS_B"], [14, "SD_B", "PF6", "SAI1_SD_B"], [16, "MCLK_B", "PF7", "SAI1_MCLK_B"]]
 const I2S3: Row[] = [[1, "3V3"], [3, "GND"], [5, "NC"], [7, "NC"], [9, "CK", "PC10", "I2S3_CK"], [11, "WS", "PA4", "I2S3_WS"], [13, "SD", "PC12", "I2S3_SD"], [15, "MCK", "PC7", "I2S3_MCK"]]
 const I2S2: Row[] = [[2, "3V3"], [4, "GND"], [6, "SDA", "PB9", "I2C1_SDA"], [8, "SCL", "PB8", "I2C1_SCL"], [10, "CK", "PB13", "I2S2_CK"], [12, "WS", "PB12", "I2S2_WS"], [14, "SD", "PI3", "I2S2_SD"], [16, "MCK", "PC6", "I2S2_MCK"]]
-const SDMMC: Row[] = [[1, "3V3"], [2, "GND"], [3, "D0", "PC8", "SDMMC1_D0"], [4, "CMD", "PD2", "SDMMC1_CMD"], [5, "CLK", "PC12", "SDMMC1_CK"], [6, "D3", "PC11", "SDMMC1_D3"], [7, "D2", "PC10", "SDMMC1_D2"], [8, "D1", "PC9", "SDMMC1_D1"], [9, "CD", "PC13", "I/O", undefined, "Card detect through JMP1"]]
+const SDMMC: Row[] = [[1, "3V3"], [2, "GND"], [3, "D0", "PC8", "SDMMC1_D0"], [4, "CMD", "PD2", "SDMMC1_CMD"], [5, "CLK", "PC12", "SDMMC1_CK"], [6, "D3", "PC11", "SDMMC1_D3"], [7, "D2", "PC10", "SDMMC1_D2"], [8, "D1", "PC9", "SDMMC1_D1"], [9, "CD", undefined, "SDIO_CD", undefined, "Card detect: PC13 through JMP1"]]
 const QSPI: Row[] = [[1, "3V3"], [2, "GND"], [3, "IO1", "PF9", "QUADSPI_BK1_IO1"], [4, "IO0", "PF8", "QUADSPI_BK1_IO0"], [5, "CLK", "PB2", "QUADSPI_CLK"], [6, "NCS", "PB6", "QUADSPI_BK1_NCS", undefined, "Shared with USER LED1 (JMP3)"], [7, "IO2", "PF7", "QUADSPI_BK1_IO2"], [8, "IO3", "PF6", "QUADSPI_BK1_IO3"]]
 const ULPI_ODD: Row[] = [[1, "GND"], [3, "D7", "PB5", "ULPI_D7"], [5, "D6", "PB13", "ULPI_D6"], [7, "D5", "PB12", "ULPI_D5"], [9, "D4", "PB11", "ULPI_D4"], [11, "D3", "PB10", "ULPI_D3"], [13, "D2", "PB1", "ULPI_D2"], [15, "D1", "PB0", "ULPI_D1"], [17, "D0", "PA3", "ULPI_D0", undefined, "Shared with the LCD backlight PWM"], [19, "NC"]]
 const ULPI_EVEN: Row[] = [[2, "3V3"], [4, "STP", "PC0", "ULPI_STP"], [6, "NXT", "PC3", "ULPI_NXT"], [8, "DIR", "PC2", "ULPI_DIR"], [10, "CK", "PA5", "ULPI_CK"], [12, "NC"], [14, "NC"], [16, "NC"], [18, "5V"], [20, "NC"]]
@@ -290,6 +290,8 @@ const pins: PinDef[] = [
   ...strip("CN5", ICSP_ODD, { x: 53, y: 36, dir: "right", side: "bottom", labelAt: "top", stub: 2 }),
   ...strip("CN5", ICSP_EVEN, { x: 53, y: 37, dir: "right", side: "bottom", labelAt: "bottom", stub: 1 }),
   // BOOT0 as the pin ports carry it, next to the module's BOOT switch that drives it.
+  // VBAT as the pin ports carry it: the module's jumper ties it to 3.3 V, or a battery goes here.
+  { id: "VBAT", label: "VBAT", x: 21, y: 13.6, side: "top", labelAt: "right", kind: "power", stub: 0, signal: "VBAT", connector: "P16", connectorPin: 9, note: "Backup-domain supply (1.65–3.6 V): with the jumper open, a battery here keeps the RTC and backup registers through a power cut" },
   { id: "BOOT0", label: "BOOT0", x: 21, y: 35, side: "bottom", labelAt: "right", kind: "digital", stub: 0, signal: "BOOT0", connector: "P16", connectorPin: 65, note: "Boot switch: FLASH ties it to ground, SYSTEM to 3.3 V through 10 kΩ (the ST bootloader is not modelled: the core idles in system memory)" },
 ]
 
@@ -313,6 +315,8 @@ const body: BodyShape[] = [
   { type: "rect", x: 31.5, y: 7.5, w: 1.5, h: 33, rx: 0.1, fill: "connector" },
   label(24, 42, "P16–P21: two 2×40 pin ports, every I/O (use the peripheral headers)", 0.24),
   ...block(16, 8, 12, 3.5, "JTAG/SWD", [22, 12.2]),
+  label(17.7, 12.6, "VBAT JMP", 0.24),
+  label(16.4, 13.65, "3.3V", 0.22),
   { type: "path", d: `M ${CHIP.cx} ${CHIP.cy - CHIP.d} L ${CHIP.cx + CHIP.d} ${CHIP.cy} L ${CHIP.cx} ${CHIP.cy + CHIP.d} L ${CHIP.cx - CHIP.d} ${CHIP.cy} Z`, fill: "chip" },
   { type: "text", x: CHIP.cx, y: CHIP.cy - 0.2, text: "STM32F746IG", size: 0.55, inverse: true },
   { type: "text", x: CHIP.cx, y: CHIP.cy + 1.1, text: "LQFP176 · 216 MHz", size: 0.35, inverse: true },
@@ -338,6 +342,8 @@ const body: BodyShape[] = [
   label(49, 9, "USART1", 0.28),
   label(58.5, 10.5, "P5 I2S3 · I2S2", 0.28),
   label(71, 1.2, "LEDs", 0.28),
+  label(66.5, 7.6, "JMP3", 0.24),
+  label(25.3, 5.2, "JMP1 CD", 0.24),
   // --- Arduino shield area
   label(54, 15, "Arduino", 0.32),
   label(45, 16.5, "CN2", 0.28),
@@ -365,7 +371,10 @@ const body: BodyShape[] = [
   { type: "text", x: 22, y: 45.5, text: "Open7XXI-C", size: 0.8 },
   { type: "text", x: 44.5, y: 45.5, text: "Cortex-M7", size: 0.5 },
   label(65, 47.5, "Joystick", 0.28),
-  label(58, 49.5, "WAKEUP", 0.28),
+  label(70.5, 45.7, "JMP4", 0.24),
+  ...(["A", "B", "C", "D", "·"] as const).map((t, i) => label(69.4, 47 + i * 1.5 + 0.05, t, 0.22)),
+  label(58, 48.5, "WAKEUP", 0.28),
+  label(60.3, 50.2, "JMP6", 0.22),
   label(8, 50.5, "RESET", 0.28),
 ]
 
@@ -376,6 +385,12 @@ const parts: PartDef[] = [
   { type: "switch", id: "S2", label: "S2: on = 5VDC jack, off = USART1 USB", x: 7, y: 3, span: 2 },
   { type: "usb", id: "MUSB", label: "Core746I USB OTG", x: 15, y: 38.5, side: "bottom", initial: { on: true } },
   { type: "switch", id: "SW1", label: "SW1: on = the module's USB, off = 5Vin from the board (S2)", x: 18.8, y: 38.6, span: 1.6, initial: { on: true } },
+  { type: "switch", id: "VBATJ", label: "VBAT jumper: on = VBAT from the 3.3 V rail (as shipped), off = a battery on the VBAT pin", x: 17.4, y: 13.6, span: 1.6, initial: { on: true } },
+  // The board's jumpers, closed as shipped: opening one frees the MCU pin for the header that shares it.
+  { type: "switch", id: "JMP1", label: "JMP1: SDMMC card detect ↔ PC13", x: 24.5, y: 6.3, span: 1, initial: { on: true } },
+  ...(["PB6", "PB7", "PH4", "PI8"] as const).map((mcu, i): PartDef => ({ type: "switch", id: `JMP3_${i + 1}`, label: `JMP3: LED${i + 1} ↔ ${mcu}`, x: 66, y: 9 + i * 2, span: 1, initial: { on: true } })),
+  ...(["A PG2", "B PG3", "C PD4", "D PD5", "centre PI11"] as const).map((what, i): PartDef => ({ type: "switch", id: `JMP4_${i + 1}`, label: `JMP4: joystick ${what}`, x: 70, y: 47 + i * 1.5, span: 1, initial: { on: true } })),
+  { type: "switch", id: "JMP6", label: "JMP6: WAKEUP button ↔ PA0", x: 57.5, y: 49.8, span: 1, initial: { on: true } },
   { type: "switch", id: "BOOT", label: "BOOT: off = FLASH (user firmware), on = SYSTEM (ST bootloader, not modelled)", x: 20.2, y: 33.5, span: 1.6, pin: "BOOT0" },
   // The LED column top right: PWR, the CP2102's RX/TX, the four USER LEDs.
   { type: "led", id: "PWR", label: "PWR", x: 71, y: 3, color: "#ef4444" },
@@ -415,11 +430,16 @@ const V5 = "P22-1"
 const V3V3 = "P23-1"
 const NRST = "P13-17"
 
-const led = (mcu: string, part: string): Element[] => [
-  { kind: "R", a: nodeOf(mcu), b: `$${part}k`, value: 1e3 },
+const led = (mcu: string, part: string, jumper: string): Element[] => [
+  { kind: "SW", a: nodeOf(mcu), b: `$${part}j`, part: jumper, closed: "on" },
+  { kind: "R", a: `$${part}j`, b: `$${part}k`, value: 1e3 },
   { kind: "D", anode: `$${part}k`, cathode: GND, vf: LED_COLORS.red.vf, part },
 ]
-const joystick = (mcu: string, part: string): Element => ({ kind: "SW", a: nodeOf(mcu), b: GND, part, closed: "pressed" })
+const joystick = (mcu: string, part: string, jumper: string): Element[] => [
+  { kind: "SW", a: nodeOf(mcu), b: `$${part}j`, part: jumper, closed: "on" },
+  { kind: "R", a: `$${part}j`, b: GND, value: 10e6, hidden: true },
+  { kind: "SW", a: `$${part}j`, b: GND, part, closed: "pressed" },
+]
 
 const model: Element[] = [
   { kind: "SHORT", nodes: gndPins },
@@ -463,21 +483,28 @@ const model: Element[] = [
   { kind: "SW", a: NRST, b: GND, part: "RESET", closed: "pressed" },
   { kind: "SW", a: NRST, b: GND, part: "MRESET", closed: "pressed" },
   // USER LEDs: pin → 1 kΩ → LED → GND (JMP3 closed).
-  ...led("PB6", "LED1"),
-  ...led("PB7", "LED2"),
-  ...led("PH4", "LED3"),
-  ...led("PI8", "LED4"),
+  ...led("PB6", "LED1", "JMP3_1"),
+  ...led("PB7", "LED2", "JMP3_2"),
+  ...led("PH4", "LED3", "JMP3_3"),
+  ...led("PI8", "LED4", "JMP3_4"),
   // Joystick: five contacts to ground, the firmware's pull-ups hold the pins high (JMP4 closed).
-  joystick("PG2", "JOY_A"),
-  joystick("PG3", "JOY_B"),
-  joystick("PD4", "JOY_C"),
-  joystick("PD5", "JOY_D"),
-  joystick("PI11", "JOY_CTR"),
-  // WAKEUP: PA0 held down by 10 kΩ (and 100 nF), K1 pulls it up through 10 kΩ (JMP6 closed).
-  { kind: "R", a: nodeOf("PA0"), b: GND, value: 10e3 },
-  { kind: "C", a: nodeOf("PA0"), b: GND, value: 100e-9 },
+  ...joystick("PG2", "JOY_A", "JMP4_1"),
+  ...joystick("PG3", "JOY_B", "JMP4_2"),
+  ...joystick("PD4", "JOY_C", "JMP4_3"),
+  ...joystick("PD5", "JOY_D", "JMP4_4"),
+  ...joystick("PI11", "JOY_CTR", "JMP4_5"),
+  // WAKEUP: behind JMP6, the line is held down by 10 kΩ (and 100 nF) and K1 pulls it up through 10 kΩ.
+  { kind: "SW", a: nodeOf("PA0"), b: "$wk", part: "JMP6", closed: "on" },
+  { kind: "R", a: "$wk", b: GND, value: 10e3 },
+  { kind: "C", a: "$wk", b: GND, value: 100e-9 },
   { kind: "R", a: "$k1", b: "$3v3", value: 10e3 },
-  { kind: "SW", a: nodeOf("PA0"), b: "$k1", part: "WAKEUP", closed: "pressed" },
+  { kind: "SW", a: "$wk", b: "$k1", part: "WAKEUP", closed: "pressed" },
+  // SDMMC card detect: the header pin reaches PC13 through JMP1.
+  { kind: "SW", a: "P6-9", b: nodeOf("PC13"), part: "JMP1", closed: "on" },
+  { kind: "R", a: "P6-9", b: GND, value: 10e6, hidden: true },
+  // VBAT: the jumper ties it to the 3.3 V rail; open, whatever is wired to the pin holds the backup domain.
+  { kind: "SW", a: "VBAT", b: "$3v3", part: "VBATJ", closed: "on" },
+  { kind: "R", a: "VBAT", b: GND, value: 10e6, hidden: true },
   // Several header pins on one MCU pin share one driver.
   ...[...byMcu.values()].filter((ids) => ids.length > 1).map((ids): Element => ({ kind: "SHORT", nodes: ids })),
   // The MCU: supply load, NRST pull-up, a GPIO driver behind every header pin and every internal pin.
@@ -502,6 +529,7 @@ export const open746ic: ComponentDef = {
   mcuPower: V3V3,
   mcuReset: NRST,
   mcuBoot0: "BOOT0",
+  mcuVbat: "VBAT",
   // Core746I: 8 MHz crystal on PH0/PH1, 32.768 kHz on PC14/PC15.
   mcuClocks: { hse: { hz: 8e6, kind: "crystal", startup: 2e-3 }, lse: { hz: 32768, kind: "crystal", startup: 2 } },
   // IS42S16400J on FMC SDRAM bank 2: 8 MB at 0xD000_0000, usable once the FMC has set it up.
@@ -509,13 +537,15 @@ export const open746ic: ComponentDef = {
   info: {
     MCU: "STM32F746IGT6 on the Core746I, Cortex-M7 216 MHz, 1 MB Flash, 320 KB SRAM, 8 MB SDRAM (IS42S16400J, FMC bank 2 at 0xD0000000)",
     "USART1": "PA9 TX, PA10 RX through the CP2102 USB-UART bridge (JMP2)",
-    "USER LEDs": "PB6, PB7, PH4, PI8 → 1 kΩ → LED → GND (JMP3)",
-    Joystick: "A PG2, B PG3, C PD4, D PD5, centre PI11, to GND (JMP4)",
-    WAKEUP: "PA0, active high: 10 kΩ pull-down, K1 to 3.3 V through 10 kΩ (JMP6)",
+    "USER LEDs": "PB6, PB7, PH4, PI8 → 1 kΩ → LED → GND, each behind its JMP3 jumper",
+    Joystick: "A PG2, B PG3, C PD4, D PD5, centre PI11, to GND, each behind its JMP4 jumper",
+    WAKEUP: "PA0 through JMP6, active high: 10 kΩ pull-down, K1 to 3.3 V through 10 kΩ",
+    Jumpers: "JMP1 (card detect), JMP3 (LEDs), JMP4 (joystick), JMP6 (WAKEUP) and the VBAT jumper are switches on the board; JMP2 (USART1 ↔ CP2102), JMP5 (A4/A5 ↔ PB9/PB8) and VREF+ stay as shipped",
+    VBAT: "Jumper closed: from the 3.3 V rail, so a power cut clears the RTC and backup registers; open it and wire a battery to the VBAT pin to keep them counting through the cut",
     "LCD 7inch (P15)": "24-bit RGB on the LTDC, backlight PA3, GT911 touch on PD13/PD12 (I2C4), RST PD11, INT PD7",
     "USB OTG (Core746I)": "Its VBUS powers the module with SW1 at USB (5Vin from the board's S2 otherwise); the data lines DM PA11, DP PA12, ID PA10, VBUS PA9 are not modelled",
     "BOOT switch": "FLASH grounds BOOT0, SYSTEM lifts it to 3.3 V: the core then starts in system memory, where ST's bootloader is not modelled (it idles; the firmware does not run)",
-    "Not fitted here": "JTAG/SWD (no debugger), the 2×40 pin ports P16–P21 (every I/O; use the peripheral headers), the 4.3\" LCD header P14 (RGB as P15 + XPT2046 touch on PF7/PF8/PF9, CS PF6, IRQ PD7), the USB OTG data lines and VBUS LED, the jumpers JMP1–JMP6, JMP5, OTG and VREF (always closed)",
+    "Not fitted here": "JTAG/SWD (no debugger), the 2×40 pin ports P16–P21 (every I/O; use the peripheral headers), the 4.3\" LCD header P14 (RGB as P15 + XPT2046 touch on PF7/PF8/PF9, CS PF6, IRQ PD7), the USB OTG data lines and VBUS LED, JMP2 (USART1 always on the CP2102), JMP5 (A4/A5 always PF7/PF6), the OTG and VREF+ jumpers (always closed)",
     Source: "Waveshare Open746I-C and Core746I schematics",
   },
 }
