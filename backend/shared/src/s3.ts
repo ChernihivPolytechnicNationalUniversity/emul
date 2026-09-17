@@ -16,6 +16,14 @@ export async function putObject(key: string, body: Buffer | string, contentType:
   await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }))
 }
 
+export async function getObject(key: string): Promise<Buffer> {
+  const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+  return Buffer.from(await res.Body!.transformToByteArray())
+}
+
+export const getJson = async <T>(key: string) => JSON.parse((await getObject(key)).toString("utf8")) as T
+export const putJson = (key: string, value: unknown) => putObject(key, JSON.stringify(value, null, 2), "application/json")
+
 /** A URL the browser fetches straight from the store; the bucket itself stays private. */
 export function presignGet(key: string, filename: string, ttlSeconds = 15 * 60) {
   return getSignedUrl(

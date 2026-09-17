@@ -178,10 +178,20 @@ cores; only cores that share a net pay it.
 The site is static. Work that needs a machine — building firmware — goes through two more containers,
 each from its own Dockerfile and built in parallel by CI:
 
-- `api/` — Fastify, on the site's host under `/api`. `POST /api/jobs` enqueues, `GET /api/jobs/:id` reports the state and,
-  once done, the job's files as presigned S3 URLs (15 min) — the browser fetches them from the store directly, the bucket stays private. `/healthz` is 503 while Redis is down.
-- `worker/` — BullMQ consumer; one handler per job kind in `worker/src/handlers.ts`, artifacts under `jobs/<id>/` in S3.
-- `shared/` — the contract between them: job types, the queue, Redis and S3 clients, env config.
+- `api/` — Fastify, on the site's host under `/api`. `POST /api/jobs` takes `{kind, target, files: [{path, content}]}`, stores the
+  project in S3 and enqueues; `GET /api/jobs/:id` reports the state and, once done, the job's files as presigned S3 URLs (15 min) —
+  the browser fetches them from the store directly, the bucket stays private. `/healthz` is 503 while Redis is down.
+- `worker/` — BullMQ consumer; one handler per job kind in `worker/src/handlers.ts`, each leaving files in `out/`.
+- `shared/` — the contract between them: job types, the S3 layout, the queue, Redis and S3 clients, env config.
+
+One prefix per job in the bucket, expired by a lifecycle rule after 7 days (ids are ULIDs, so they sort by time and never repeat):
+
+```
+jobs/<id>/input/project.json   target, createdAt, files with size and sha256
+jobs/<id>/input/src/<path>     sources as sent; paths relative, plain characters, source extensions only
+jobs/<id>/out/<name>           firmware.elf, firmware.map, build.log, …
+jobs/<id>/result.json          ok, artifacts, finishedAt, durationMs — kept after Redis forgets the job
+```
 
 Both read `REDIS_URL` and `S3_BUCKET`, `S3_ENDPOINT` (MinIO; unset for AWS), `S3_PUBLIC_ENDPOINT` (the host browsers reach, presigned URLs are signed for it), `S3_REGION`, `S3_FORCE_PATH_STYLE`,
 `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` (unset: the SDK's default chain); the worker also `WORKER_CONCURRENCY`.
