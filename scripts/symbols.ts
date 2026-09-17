@@ -194,7 +194,22 @@ function build(target: string) {
     const prev = best.get(key)
     if (!prev || (!prev.doc && s.doc)) best.set(key, s)
   }
-  const index: Index = { target, symbols: [...best.values()], headers: headers.filter((h) => !/^stm32f\dxx_hal_conf\.h$/.test(h) || true) }
+  const index: Index = { target, symbols: [...best.values()], headers }
+  // ST's header style is what the regexes know; should it change, fail the build here rather
+  // than ship an editor that has quietly forgotten the HAL.
+  const expect = (name: string, kind: Sym["kind"], withDoc: boolean) => {
+    const s = best.get(`${kind}:${name}`)
+    if (!s || (withDoc && !s.doc)) throw new Error(`${target}: ${kind} ${name} not found${withDoc ? " with its documentation" : ""} — the ST headers changed shape?`)
+  }
+  expect("HAL_GPIO_Init", "function", true)
+  expect("HAL_Delay", "function", true)
+  expect("__HAL_RCC_GPIOA_CLK_ENABLE", "macro", false)
+  expect("GPIO_PIN_0", "macro", true)
+  expect("GPIO_TypeDef", "type", false)
+  expect("GPIO_InitTypeDef", "type", false)
+  expect("EXTI15_10_IRQn", "enumerator", true)
+  expect("HAL_OK", "enumerator", false)
+  if ((best.get("type:GPIO_InitTypeDef") as Extract<Sym, { kind: "type" }>).members?.[0]?.doc === undefined) throw new Error(`${target}: struct member docs missing`)
   mkdirSync(out, { recursive: true })
   const json = JSON.stringify(index)
   writeFileSync(join(out, `${target}.json`), json)
