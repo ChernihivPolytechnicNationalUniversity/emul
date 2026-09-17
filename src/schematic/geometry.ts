@@ -1,4 +1,5 @@
 import { getDef, getPin } from "./registry"
+import { SpatialIndex } from "./spatial"
 import type { ComponentDef, PinDef, PinRef, PlacedObject, Point, Rotation, Side, Wire } from "./types"
 
 export type { Point }
@@ -77,18 +78,35 @@ export function objectRect(obj: PlacedObject, grid: number): Rect {
   return { x: obj.x, y: obj.y, w: w * grid, h: h * grid }
 }
 
+export type ObjectPin = { key: string; pin: PlacedPin; point: Point }
+
+const placementOf = (obj: PlacedObject, grid: number) => `${obj.id}|${obj.def}|${obj.x}|${obj.y}|${obj.rotation ?? 0}|${grid}`
+
+const placedPins = new WeakMap<PlacedObject, { placement: string; pins: readonly ObjectPin[] }>()
+
 /**
  * Every pin of a placed object, in world coordinates. Used wherever pins have to be found by
  * position rather than by name: touching pins, hit-testing, contact dots.
  */
-export function objectPins(obj: PlacedObject, grid: number): { key: string; pin: PlacedPin; point: Point }[] {
+export function objectPins(obj: PlacedObject, grid: number): readonly ObjectPin[] {
+  const placement = placementOf(obj, grid)
+  const cached = placedPins.get(obj)
+  if (cached && cached.placement === placement) return cached.pins
   const def = getDef(obj.def)
-  if (!def) return []
-  return def.pins.map((raw) => {
-    const pin = rotatePin(raw, def, obj.rotation)
-    return { key: `${obj.id}:${pin.id}`, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }
-  })
+  const pins: readonly ObjectPin[] = def
+    ? def.pins.map((raw) => {
+        const pin = rotatePin(raw, def, obj.rotation)
+        return { key: `${obj.id}:${pin.id}`, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }
+      })
+    : []
+  placedPins.set(obj, { placement, pins })
+  return pins
 }
+
+const PIXEL_KEY_SPAN = 1 << 25
+const PIXEL_KEY_BIAS = 1 << 24
+
+const pixelKey = (x: number, y: number) => (x + PIXEL_KEY_BIAS) * PIXEL_KEY_SPAN + (y + PIXEL_KEY_BIAS)
 
 /**
  * Group pins that sit on the same point, so components placed pin-to-pin conduct without a
@@ -98,14 +116,14 @@ export function objectPins(obj: PlacedObject, grid: number): { key: string; pin:
 export function pinContacts(objects: readonly PlacedObject[], grid: number): Map<string, string> {
   // Bucket by whole pixel, then compare against the neighbouring buckets, so the sweep stays
   // linear however many pins a board has.
-  const buckets = new Map<string, { key: string; point: Point }[]>()
+  const buckets = new Map<number, ObjectPin[]>()
   for (const obj of objects) {
-    for (const { key, pin, point } of objectPins(obj, grid)) {
-      if (pin.kind === "nc") continue
-      const at = `${Math.round(point.x)},${Math.round(point.y)}`
-      const list = buckets.get(at)
-      if (list) list.push({ key, point })
-      else buckets.set(at, [{ key, point }])
+    for (const placed of objectPins(obj, grid)) {
+      if (placed.pin.kind === "nc") continue
+      const at = pixelKey(Math.round(placed.point.x), Math.round(placed.point.y))
+      const bucket = buckets.get(at)
+      if (bucket) bucket.push(placed)
+      else buckets.set(at, [placed])
     }
   }
   const EPS = 0.01
@@ -127,21 +145,21 @@ export function pinContacts(objects: readonly PlacedObject[], grid: number): Map
     const rb = find(b)
     if (ra !== rb) parent.set(ra, rb)
   }
-  for (const [at, list] of buckets) {
-    const [bx, by] = at.split(",").map(Number)
-    const near: { key: string; point: Point }[] = []
+  const touching = (a: ObjectPin, b: ObjectPin) =>
+    a.key !== b.key && Math.abs(a.point.x - b.point.x) < EPS && Math.abs(a.point.y - b.point.y) < EPS
+  const near: ObjectPin[] = []
+  for (const [at, bucket] of buckets) {
+    near.length = 0
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
-        const other = buckets.get(`${bx + dx},${by + dy}`)
-        if (other && (dx !== 0 || dy !== 0)) near.push(...other)
+        if (dx === 0 && dy === 0) continue
+        const other = buckets.get(at + dx * PIXEL_KEY_SPAN + dy)
+        if (other) for (const placed of other) near.push(placed)
       }
     }
-    const all = [...list, ...near]
-    for (const a of list) {
-      for (const b of all) {
-        if (a.key === b.key) continue
-        if (Math.abs(a.point.x - b.point.x) < EPS && Math.abs(a.point.y - b.point.y) < EPS) union(a.key, b.key)
-      }
+    for (const a of bucket) {
+      for (const b of bucket) if (touching(a, b)) union(a.key, b.key)
+      for (const b of near) if (touching(a, b)) union(a.key, b.key)
     }
   }
   const contacts = new Map<string, string>()
@@ -158,15 +176,20 @@ export function pinPoint(obj: PlacedObject, pinId: string, grid: number): Point 
   return { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid }
 }
 
+const objectIndexes = new WeakMap<readonly PlacedObject[], { size: number; byId: Map<string, PlacedObject> }>()
+
+export function objectIndex(objects: readonly PlacedObject[]): ReadonlyMap<string, PlacedObject> {
+  const cached = objectIndexes.get(objects)
+  if (cached && cached.size === objects.length) return cached.byId
+  const byId = new Map<string, PlacedObject>()
+  for (const o of objects) if (!byId.has(o.id)) byId.set(o.id, o)
+  objectIndexes.set(objects, { size: objects.length, byId })
+  return byId
+}
+
 /** Object, definition and the pin as seen on the field (rotation applied). */
 export function resolvePin(objects: readonly PlacedObject[], ref: PinRef, grid: number) {
-  const obj = objects.find((o) => o.id === ref.object)
-  if (!obj) return null
-  const def = getDef(obj.def)
-  const raw = def && getPin(def, ref.pin)
-  if (!def || !raw) return null
-  const pin = rotatePin(raw, def, obj.rotation)
-  return { obj, def, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }
+  return resolvePinIn(objectIndex(objects), ref, grid)
 }
 
 /** Unit vector pointing away from the component, per pin direction. */
@@ -274,6 +297,9 @@ export function routeWire(
   return dedupeRoute(pts, owner)
 }
 
+const MID_LINE_STEPS_FROM_CENTRE = 6
+const MID_LINE_STEPS_PAST_END = 4
+
 /**
  * Interior points of the automatic route between two stub ends: a centred Z when both stubs
  * point the same way, an L otherwise. When that path runs over another component's body, the
@@ -299,8 +325,8 @@ function autoRoute(a1: Point, aSide: Direction, b1: Point, bSide: Direction, gri
   const lines = (lo: number, hi: number) => {
     const c = snap((lo + hi) / 2, grid)
     const out = [c]
-    for (let k = 1; k <= 6; k++) out.push(c + k * grid, c - k * grid)
-    for (let k = 1; k <= 4; k++) out.push(Math.max(lo, hi) + k * grid, Math.min(lo, hi) - k * grid)
+    for (let k = 1; k <= MID_LINE_STEPS_FROM_CENTRE; k++) out.push(c + k * grid, c - k * grid)
+    for (let k = 1; k <= MID_LINE_STEPS_PAST_END; k++) out.push(Math.max(lo, hi) + k * grid, Math.min(lo, hi) - k * grid)
     return out
   }
   const candidates: Point[][] = [{ x: b1.x, y: a1.y }, { x: a1.x, y: b1.y }].map((p) => [p])
@@ -426,22 +452,70 @@ export type RoutedWire = {
   owner: number[]
 }
 
-export function routeAll(objects: readonly PlacedObject[], wires: readonly Wire[], grid: number): RoutedWire[] {
-  const index = new Map<string, PlacedObject>()
-  for (const o of objects) index.set(o.id, o)
-  const rects = objects.map((o) => ({ id: o.id, rect: objectRect(o, grid) }))
+const SNAP_ERROR_CELLS = 0.5
+const ROUTE_SLACK_CELLS = 1
+const ROUTE_REACH_CELLS = Math.max(MID_LINE_STEPS_FROM_CENTRE + SNAP_ERROR_CELLS, MID_LINE_STEPS_PAST_END) + ROUTE_SLACK_CELLS
 
-  const out: RoutedWire[] = []
-  for (const w of wires) {
-    const a = resolvePinIn(index, w.from, grid)
-    const b = resolvePinIn(index, w.to, grid)
-    if (!a || !b) continue
-    const avoid: Rect[] = []
-    for (const r of rects) if (r.id !== w.from.object && r.id !== w.to.object) avoid.push(r.rect)
-    const route = routeWire(a.point, a.pin.side, a.pin.stub ?? 1, b.point, b.pin.side, b.pin.stub ?? 1, grid, w.points ?? [], avoid)
-    out.push({ id: w.id, pts: route.pts, owner: route.owner })
+export function routeArea(a: Point, aStub: number, b: Point, bStub: number, bends: readonly Point[], grid: number): Rect {
+  let minX = Math.min(a.x, b.x)
+  let maxX = Math.max(a.x, b.x)
+  let minY = Math.min(a.y, b.y)
+  let maxY = Math.max(a.y, b.y)
+  for (const p of bends) {
+    minX = Math.min(minX, p.x)
+    maxX = Math.max(maxX, p.x)
+    minY = Math.min(minY, p.y)
+    maxY = Math.max(maxY, p.y)
   }
-  return out
+  const reach = (Math.max(aStub, bStub) + ROUTE_REACH_CELLS) * grid
+  return { x: minX - reach, y: minY - reach, w: maxX - minX + 2 * reach, h: maxY - minY + 2 * reach }
+}
+
+type CachedRoute = { signature: string; route: RoutedWire }
+
+export class Router {
+  private routes = new Map<string, CachedRoute>()
+
+  routeAll(objects: readonly PlacedObject[], wires: readonly Wire[], grid: number): RoutedWire[] {
+    const byId = objectIndex(objects)
+    const bodies = new SpatialIndex(objects, grid)
+    const kept = new Map<string, CachedRoute>()
+    const out: RoutedWire[] = []
+    for (const w of wires) {
+      const a = resolvePinIn(byId, w.from, grid)
+      const b = resolvePinIn(byId, w.to, grid)
+      if (!a || !b) continue
+      const aStub = a.pin.stub ?? 1
+      const bStub = b.pin.stub ?? 1
+      const bends = w.points ?? []
+      const avoid: Rect[] = []
+      let signature = `${grid}:${a.point.x},${a.point.y},${a.pin.side},${aStub}/${b.point.x},${b.point.y},${b.pin.side},${bStub}`
+      for (const p of bends) signature += `/${p.x},${p.y}`
+      for (const o of bodies.query(routeArea(a.point, aStub, b.point, bStub, bends, grid))) {
+        if (o.id === w.from.object || o.id === w.to.object) continue
+        avoid.push(objectRect(o, grid))
+        signature += `|${o.id}@${o.def},${o.x},${o.y},${o.rotation ?? 0}`
+      }
+      const cached = this.routes.get(w.id)
+      if (cached && cached.signature === signature) {
+        kept.set(w.id, cached)
+        out.push(cached.route)
+        continue
+      }
+      const { pts, owner } = routeWire(a.point, a.pin.side, aStub, b.point, b.pin.side, bStub, grid, bends, avoid)
+      const route: RoutedWire = { id: w.id, pts, owner }
+      kept.set(w.id, { signature, route })
+      out.push(route)
+    }
+    this.routes = kept
+    return out
+  }
+}
+
+const defaultRouter = new Router()
+
+export function routeAll(objects: readonly PlacedObject[], wires: readonly Wire[], grid: number): RoutedWire[] {
+  return defaultRouter.routeAll(objects, wires, grid)
 }
 
 export function resolvePinIn(index: ReadonlyMap<string, PlacedObject>, ref: PinRef, grid: number) {

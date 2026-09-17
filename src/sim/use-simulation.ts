@@ -1,4 +1,5 @@
 import * as React from "react"
+import { SimStore } from "./sim-store"
 import { pinKey, type Damage, type PartState, type Schematic } from "@/schematic/types"
 import type { Failure, ProbeReading, Reading, TraceChunk } from "./engine"
 import type { LogicChunk, McuStatus, Probe, Snapshot } from "./loop"
@@ -123,6 +124,43 @@ export type SimOptions = {
 
 const NO_PROBES: Probe[] = []
 
+type Topology = Pick<Schematic, "objects" | "wires">
+
+/**
+ * Whether two documents describe the same circuit. Positions count — coincident pins conduct
+ * without a wire — but a colour, a bend point or anything else cosmetic must not restart the
+ * solver.
+ */
+function sameTopology(a: Topology, b: Topology) {
+  if (a.objects.length !== b.objects.length || a.wires.length !== b.wires.length) return false
+  for (let i = 0; i < a.objects.length; i++) {
+    const x = a.objects[i]
+    const y = b.objects[i]
+    if (x === y) continue
+    if (x.id !== y.id || x.def !== y.def || x.x !== y.x || x.y !== y.y) return false
+    if ((x.rotation ?? 0) !== (y.rotation ?? 0) || x.props !== y.props) return false
+  }
+  for (let i = 0; i < a.wires.length; i++) {
+    const x = a.wires[i]
+    const y = b.wires[i]
+    if (x === y) continue
+    if (x.id !== y.id) return false
+    if (x.from.object !== y.from.object || x.from.pin !== y.from.pin) return false
+    if (x.to.object !== y.to.object || x.to.pin !== y.to.pin) return false
+  }
+  return true
+}
+
+class TopologyGate {
+  private sent: Topology | null = null
+
+  latest(next: Topology): Topology {
+    if (this.sent && sameTopology(this.sent, next)) return this.sent
+    this.sent = next
+    return next
+  }
+}
+
 /**
  * Runs the electrical simulation on a worker thread, at `speed` × real time.
  * The solver never touches the main thread, so panning, zooming and typing stay smooth
@@ -180,9 +218,10 @@ export function useSimulation(
   const send = React.useCallback((msg: ToWorker) => workerRef.current?.postMessage(msg), [])
 
   // Topology and values: anything that changes the netlist.
+  const [topologyGate] = React.useState(() => new TopologyGate())
   const topology = React.useMemo(
-    () => ({ objects: doc.objects, wires: doc.wires }),
-    [doc.objects, doc.wires],
+    () => topologyGate.latest({ objects: doc.objects, wires: doc.wires }),
+    [doc.objects, doc.wires, topologyGate],
   )
   React.useEffect(() => {
     send({ t: "doc", doc: { ...topology, parts: {} } })
@@ -228,5 +267,9 @@ export function useSimulation(
     if (!readout.live) return { ...idle, damage: readout.damage }
     return { ...readout, running: false, paused: true }
   }, [running, readout])
-  return { sim, restart, started, sendSerial }
+
+  const [simStore] = React.useState(() => new SimStore())
+  React.useLayoutEffect(() => simStore.push(sim), [simStore, sim])
+
+  return { sim, simStore, restart, started, sendSerial }
 }

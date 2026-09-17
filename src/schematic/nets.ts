@@ -8,10 +8,12 @@ export type NetMap = {
   pinsOf: (net: string) => readonly string[]
   kindsOf: (net: string) => ReadonlySet<PinKind>
   nets: readonly string[]
+  contacts: ReadonlyMap<string, string>
 }
 
 const EMPTY_KINDS: ReadonlySet<PinKind> = new Set()
 const EMPTY_LIST: readonly string[] = []
+const EMPTY_CONTACTS: ReadonlyMap<string, string> = new Map()
 
 export const emptyNets = (): NetMap => ({
   netOfPin: () => undefined,
@@ -20,14 +22,10 @@ export const emptyNets = (): NetMap => ({
   pinsOf: () => EMPTY_LIST,
   kindsOf: () => EMPTY_KINDS,
   nets: EMPTY_LIST,
+  contacts: EMPTY_CONTACTS,
 })
 
 export function buildNets(objects: readonly PlacedObject[], wires: readonly Wire[], grid: number): NetMap {
-  const kindOfPin = new Map<string, PinKind>()
-  for (const obj of objects) {
-    for (const { key, pin } of objectPins(obj, grid)) kindOfPin.set(key, pin.kind)
-  }
-
   const parent = new Map<string, string>()
   const find = (k: string): string => {
     let p = parent.get(k)
@@ -47,8 +45,14 @@ export function buildNets(objects: readonly PlacedObject[], wires: readonly Wire
     if (ra !== rb) parent.set(ra, rb)
   }
 
-  for (const [key, root] of pinContacts(objects, grid)) union(key, root)
+  const contacts = pinContacts(objects, grid)
+  for (const [key, root] of contacts) union(key, root)
   for (const w of wires) union(pinKey(w.from.object, w.from.pin), pinKey(w.to.object, w.to.pin))
+
+  const kindOfPin = new Map<string, PinKind>()
+  for (const obj of objects) {
+    for (const { key, pin } of objectPins(obj, grid)) if (parent.has(key)) kindOfPin.set(key, pin.kind)
+  }
 
   const wiresOf = new Map<string, string[]>()
   const pinsOf = new Map<string, string[]>()
@@ -86,5 +90,6 @@ export function buildNets(objects: readonly PlacedObject[], wires: readonly Wire
     pinsOf: (net) => pinsOf.get(net) ?? EMPTY_LIST,
     kindsOf: (net) => kindsOf.get(net) ?? EMPTY_KINDS,
     nets,
+    contacts,
   }
 }

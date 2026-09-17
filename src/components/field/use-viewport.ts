@@ -1,4 +1,6 @@
 import * as React from "react"
+import type { Rect } from "@/schematic/geometry"
+import { dotGridStyle } from "./dot-grid"
 
 export type Viewport = { x: number; y: number; scale: number }
 export type Point = { x: number; y: number }
@@ -8,6 +10,16 @@ export const MAX_SCALE = 8
 const ZOOM_STEP = 1.2
 /** Time constant of the zoom follow animation: the view closes ~63% of the gap per TAU_MS. */
 const TAU_MS = 70
+/**
+ * The world rectangle React renders is the screen grown by this many screens on each side, and
+ * it is republished once the view has travelled a quarter of a screen or changed scale by a
+ * noticeable step. The padding is what lets a pan run for a while without remounting anything.
+ */
+const VIEW_PADDING_SCREENS = 1
+const VIEW_TRAVEL_FRACTION = 0.25
+const VIEW_SCALE_STEP = 0.14
+
+const EMPTY_VIEW: Rect = { x: 0, y: 0, w: 0, h: 0 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
@@ -17,9 +29,19 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
  * - middle button or space + left button: drag to pan
  * - ctrl/meta + / - / 0: zoom in / out / reset
  */
-export function useViewport(initial: Viewport = { x: 0, y: 0, scale: 0.5 }) {
-  const [viewport, setViewport] = React.useState<Viewport>(initial)
+export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scale: 0.5 }) {
   const containerRef = React.useRef<HTMLDivElement>(null)
+  const contentRef = React.useRef<HTMLDivElement>(null)
+  /**
+   * The scale React is allowed to see. A pan publishes nothing at all, and a zoom publishes when
+   * it has moved a noticeable step or come to rest — the picture itself follows every frame
+   * through `paint`, which touches the DOM and not React.
+   */
+  const [publishedScale, setPublishedScale] = React.useState(initial.scale)
+  /** The padded world rectangle worth rendering. Everything outside it stays out of the DOM. */
+  const [view, setView] = React.useState<Rect>(EMPTY_VIEW)
+  const viewPublishedAt = React.useRef<Viewport | null>(null)
+  const publish = React.useCallback((scale: number) => setPublishedScale(scale), [])
 
   /**
    * Zoom is animated by following a target: every frame the viewport closes part of the
@@ -30,7 +52,60 @@ export function useViewport(initial: Viewport = { x: 0, y: 0, scale: 0.5 }) {
   const current = React.useRef<Viewport>(initial)
   const raf = React.useRef(0)
   const lastFrame = React.useRef(0)
+  const paintedScale = React.useRef(NaN)
   React.useEffect(() => () => cancelAnimationFrame(raf.current), [])
+
+  const publishView = React.useCallback((v: Viewport, container: HTMLDivElement, animating: boolean) => {
+    const width = container.clientWidth
+    const height = container.clientHeight
+    const shown = viewPublishedAt.current
+    if (shown && animating) return
+    const travelled =
+      !shown ||
+      Math.abs(Math.log(v.scale / shown.scale)) > VIEW_SCALE_STEP ||
+      Math.abs(v.x - shown.x) > width * VIEW_TRAVEL_FRACTION ||
+      Math.abs(v.y - shown.y) > height * VIEW_TRAVEL_FRACTION
+    if (!travelled) return
+    viewPublishedAt.current = v
+    const padX = (width * VIEW_PADDING_SCREENS) / v.scale
+    const padY = (height * VIEW_PADDING_SCREENS) / v.scale
+    setView({
+      x: -v.x / v.scale - padX,
+      y: -v.y / v.scale - padY,
+      w: width / v.scale + padX * 2,
+      h: height / v.scale + padY * 2,
+    })
+  }, [])
+
+  const paint = React.useCallback(
+    (v: Viewport, animating = false) => {
+      const content = contentRef.current
+      if (content) content.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`
+      const container = containerRef.current
+      if (!container) return
+      publishView(v, container, animating)
+      container.style.backgroundPosition = `${v.x}px ${v.y}px`
+      if (v.scale === paintedScale.current) return
+      paintedScale.current = v.scale
+      const dots = dotGridStyle(grid, v.scale)
+      container.style.backgroundImage = dots.backgroundImage
+      container.style.backgroundSize = dots.backgroundSize
+    },
+    [grid, publishView],
+  )
+
+  React.useEffect(() => paint(current.current), [paint])
+
+  React.useEffect(() => {
+    const container = containerRef.current
+    if (!container || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(() => {
+      viewPublishedAt.current = null
+      publishView(current.current, container, false)
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [publishView])
 
   const follow = React.useCallback(() => {
     if (raf.current) return
@@ -48,11 +123,12 @@ export function useViewport(initial: Viewport = { x: 0, y: 0, scale: 0.5 }) {
       }
       const done = Math.abs(t.scale - next.scale) < 1e-4 && Math.abs(t.x - next.x) < 0.1 && Math.abs(t.y - next.y) < 0.1
       current.current = done ? t : next
-      setViewport(current.current)
+      paint(current.current, !done)
+      if (done) publish(current.current.scale)
       raf.current = done ? 0 : requestAnimationFrame(frame)
     }
     raf.current = requestAnimationFrame(frame)
-  }, [])
+  }, [paint, publish])
 
   /** Set the viewport immediately (drag, wheel pan). */
   const setNow = React.useCallback((next: Viewport | ((v: Viewport) => Viewport)) => {
@@ -63,8 +139,9 @@ export function useViewport(initial: Viewport = { x: 0, y: 0, scale: 0.5 }) {
     const sameScale = n.scale === current.current.scale
     target.current = sameScale ? { ...target.current, x: target.current.x + dx, y: target.current.y + dy } : n
     current.current = n
-    setViewport(n)
-  }, [])
+    paint(n)
+    if (!sameScale) publish(n.scale)
+  }, [paint, publish])
 
   /** Ease the viewport towards `to`. */
   const animateTo = React.useCallback(
@@ -114,15 +191,16 @@ export function useViewport(initial: Viewport = { x: 0, y: 0, scale: 0.5 }) {
   )
 
   /** Screen (client) coordinates -> world coordinates. */
-  const toWorld = React.useCallback(
-    (clientX: number, clientY: number): Point => {
-      const r = containerRef.current?.getBoundingClientRect()
-      const sx = clientX - (r?.left ?? 0)
-      const sy = clientY - (r?.top ?? 0)
-      return { x: (sx - viewport.x) / viewport.scale, y: (sy - viewport.y) / viewport.scale }
-    },
-    [viewport],
-  )
+  /** World px per screen px, for the few things that must size themselves against the zoom. */
+  const worldPerPixel = React.useCallback(() => 1 / current.current.scale, [])
+
+  const toWorld = React.useCallback((clientX: number, clientY: number): Point => {
+    const r = containerRef.current?.getBoundingClientRect()
+    const sx = clientX - (r?.left ?? 0)
+    const sy = clientY - (r?.top ?? 0)
+    const v = current.current
+    return { x: (sx - v.x) / v.scale, y: (sy - v.y) / v.scale }
+  }, [])
 
   // Wheel must be non-passive to call preventDefault, so bind it manually.
   React.useEffect(() => {
@@ -223,7 +301,10 @@ export function useViewport(initial: Viewport = { x: 0, y: 0, scale: 0.5 }) {
 
   return {
     containerRef,
-    viewport,
+    contentRef,
+    scale: publishedScale,
+    view,
+    worldPerPixel,
     panning,
     spaceHeld,
     zoomIn,

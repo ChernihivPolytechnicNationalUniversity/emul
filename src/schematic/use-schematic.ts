@@ -1,7 +1,7 @@
 import * as React from "react"
 import type { SourceFile } from "emul-shared/source"
 import { normalizeFiles } from "@/project/files"
-import { intersects, objectRect, objectSize, pinContacts, snap, type Point, type Rect } from "./geometry"
+import { intersects, objectRect, objectSize, snap, type Point, type Rect } from "./geometry"
 import { getDef } from "./registry"
 import {
   emptySchematic,
@@ -55,27 +55,16 @@ export function useSchematic(grid: number) {
   const [selectedWires, setSelectedWires] = React.useState<ReadonlySet<string>>(() => new Set())
 
   /**
-   * A drag (move, bend) updates the document on every pointer move; only its first frame
-   * takes a history snapshot, the rest replace the present. `endDrag` closes the run.
-   */
-  const dragging = React.useRef(false)
-  const endDrag = React.useCallback(() => {
-    dragging.current = false
-  }, [])
-
-  /**
-   * Every document change goes through here. `transient` marks a drag frame; `silent` marks
-   * a change not worth an undo step (a button pressed while simulating).
+   * Every document change goes through here. An interaction reaches it once, when it is over —
+   * a drag is applied to the DOM while it runs and committed on release — so every call is one
+   * undo step. `silent` marks a change not worth one at all (a button pressed while simulating).
    */
   const setDoc = React.useCallback(
-    (fn: (d: Schematic) => Schematic, opts: { transient?: boolean; silent?: boolean } = {}) => {
-      // Decided outside the updater, which React may run more than once.
-      const snapshot = !opts.silent && !(opts.transient && dragging.current)
-      if (!opts.silent) dragging.current = !!opts.transient
+    (fn: (d: Schematic) => Schematic, opts: { silent?: boolean } = {}) => {
       setHistory((h) => {
         const present = fn(h.present)
         if (present === h.present) return h
-        if (!snapshot) return { ...h, present }
+        if (opts.silent) return { ...h, present }
         return { past: [...h.past.slice(1 - HISTORY_LIMIT), h.present], present, future: [] }
       })
     },
@@ -93,7 +82,6 @@ export function useSchematic(grid: number) {
   // Part state and firmware projects are live rather than edits: they are not undone, so
   // stepping through history keeps whatever the switches are set to and the code as typed.
   const undo = React.useCallback(() => {
-    dragging.current = false
     setHistory((h) => {
       const prev = h.past.at(-1)
       if (!prev) return h
@@ -104,7 +92,6 @@ export function useSchematic(grid: number) {
   }, [pruneSelection])
 
   const redo = React.useCallback(() => {
-    dragging.current = false
     setHistory((h) => {
       const next = h.future[0]
       if (!next) return h
@@ -218,14 +205,11 @@ export function useSchematic(grid: number) {
     [doc.objects, grid],
   )
 
-  /** Original bend positions during a move, so repeated calls do not accumulate. */
-  const moveBase = React.useRef(new Map<string, Point[]>())
-  const endMove = React.useCallback(() => {
-    moveBase.current.clear()
-    endDrag()
-  }, [endDrag])
-
-  /** Move objects to `from` positions offset by (dx, dy), snapped to the grid. */
+  /**
+   * Move objects from their pre-drag positions by (dx, dy), snapped to the grid. Called once,
+   * when the drag is released, against the document as it stood when it started — so the bend
+   * points on file are still the ones to offset.
+   */
   const moveTo = React.useCallback(
     (from: ReadonlyMap<string, Point>, dx: number, dy: number) => {
       const sdx = snap(dx, grid)
@@ -237,13 +221,12 @@ export function useSchematic(grid: number) {
           return p ? { ...o, x: p.x + sdx, y: p.y + sdy } : o
         }),
         // Bends of wires whose both ends move travel along.
-        wires: d.wires.map((w) => {
-          if (!w.points || !from.has(w.from.object) || !from.has(w.to.object)) return w
-          const base = moveBase.current.get(w.id) ?? w.points
-          moveBase.current.set(w.id, base)
-          return { ...w, points: base.map((p) => ({ x: p.x + sdx, y: p.y + sdy })) }
-        }),
-      }), { transient: true })
+        wires: d.wires.map((w) =>
+          w.points && from.has(w.from.object) && from.has(w.to.object)
+            ? { ...w, points: w.points.map((p) => ({ x: p.x + sdx, y: p.y + sdy })) }
+            : w,
+        ),
+      }))
     },
     [grid, setDoc],
   )
@@ -315,16 +298,13 @@ export function useSchematic(grid: number) {
     [grid, setDoc],
   )
 
-  /** Replace the bend points of a wire (empty = auto route). Dragging a bend calls this per frame. */
+  /** Replace the bend points of a wire (empty = auto route). */
   const setWirePoints = React.useCallback(
-    (id: string, points: Point[], transient = false) => {
-      setDoc(
-        (d) => ({
-          ...d,
-          wires: d.wires.map((w) => (w.id === id ? { ...w, points: points.length ? points : undefined } : w)),
-        }),
-        { transient },
-      )
+    (id: string, points: Point[]) => {
+      setDoc((d) => ({
+        ...d,
+        wires: d.wires.map((w) => (w.id === id ? { ...w, points: points.length ? points : undefined } : w)),
+      }))
     },
     [setDoc],
   )
@@ -389,28 +369,10 @@ export function useSchematic(grid: number) {
     [grid, setDoc],
   )
 
-  /** Pins sitting on another pin: drawn as a solid junction dot instead of a terminal. */
-  const contactPins = React.useMemo(
-    () => new Set(pinContacts(doc.objects, grid).keys()),
-    [doc.objects, grid],
-  )
-
-  /** Pins a wire lands on, plus pins that touch another pin — both are live connections. */
-  const connectedPins = React.useMemo(() => {
-    const s = new Set<string>(contactPins)
-    for (const w of doc.wires) {
-      s.add(`${w.from.object}:${w.from.pin}`)
-      s.add(`${w.to.object}:${w.to.pin}`)
-    }
-    return s
-  }, [doc.wires, contactPins])
-
   return {
     doc,
     selectedObjects,
     selectedWires,
-    connectedPins,
-    contactPins,
     add,
     remove,
     removeSelected,
@@ -422,8 +384,6 @@ export function useSchematic(grid: number) {
     deselectAll,
     selectInRect,
     moveTo,
-    endMove,
-    endDrag,
     rotate,
     setProps,
     setProject,

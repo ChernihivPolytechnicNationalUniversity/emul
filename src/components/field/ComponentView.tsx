@@ -5,7 +5,9 @@ import { objectSize } from "@/schematic/geometry"
 import { getDef, partInitial } from "@/schematic/registry"
 import { partKey, type BodyShape, type Damage, type Fill, type PartDef, type PartState, type PlacedObject, type Rotation } from "@/schematic/types"
 import { LED_COLORS } from "@/schematic/components/basic"
-import type { DisplayFrame, SimReadout } from "@/sim/use-simulation"
+import type { DisplayFrame } from "@/sim/use-simulation"
+import { useObjectSim, type ObjectSim, type SimStore } from "@/sim/sim-store"
+import type { FieldDetail } from "./detail"
 import { formatSI } from "@/sim/units"
 
 const FILL: Record<Fill, string> = {
@@ -31,27 +33,28 @@ function template(text: string, props: Record<string, string>) {
 
 export type PinPointerHandler = (e: React.PointerEvent<SVGElement>, objectId: string, pinId: string) => void
 
+export type BodyPointerHandler = (e: React.PointerEvent<SVGSVGElement>, objectId: string) => void
+
 type ComponentViewProps = {
   object: PlacedObject
   grid: number
+  detail: FieldDetail
   selected: boolean
-  /** Inverse scale so 1px strokes stay 1px on screen. */
-  hairline: number
   parts: Record<string, PartState>
-  sim: SimReadout
-  onBodyPointerDown: (e: React.PointerEvent<SVGSVGElement>) => void
-  onBodyPointerMove: (e: React.PointerEvent<SVGSVGElement>) => void
-  onBodyPointerUp: (e: React.PointerEvent<SVGSVGElement>) => void
-  onBodyContextMenu: () => void
+  sim: SimStore
+  onBodyPointerDown: BodyPointerHandler
+  onBodyPointerMove: BodyPointerHandler
+  onBodyPointerUp: BodyPointerHandler
+  onBodyContextMenu: (objectId: string) => void
   onPartChange: (objectId: string, partId: string, patch: PartState) => void
 }
 
 /** Generic renderer: draws any ComponentDef from its body shapes, pins and parts. */
-export function ComponentView({
+export const ComponentView = React.memo(function ComponentView({
   object,
   grid,
+  detail,
   selected,
-  hairline,
   parts,
   sim,
   onBodyPointerDown,
@@ -60,6 +63,7 @@ export function ComponentView({
   onBodyContextMenu,
   onPartChange,
 }: ComponentViewProps) {
+  const live = useObjectSim(sim, object.id)
   const def = getDef(object.def)
   if (!def) return null
   const w = def.width * grid
@@ -68,7 +72,7 @@ export function ComponentView({
   const props = { ...def.defaults, ...object.props }
   if (def.derive) Object.assign(props, def.derive(props))
   const rotation: Rotation = object.rotation ?? 0
-  const damage: Damage | undefined = sim.damage[object.id]
+  const damage: Damage | undefined = live.damage
   // The SVG keeps the unrotated size and is rotated around its center; offset it so the
   // rotated box lands exactly on the object's (rotated) bounds.
   const box = objectSize(def, rotation)
@@ -85,18 +89,18 @@ export function ComponentView({
         "[&>.body]:data-selected:drop-shadow-[0_0_0_2px_var(--primary)]",
       )}
       style={{ left, top, width: w, height: h, transform: rotation ? `rotate(${rotation}deg)` : undefined }}
+      strokeWidth={1}
       viewBox={`0 0 ${w} ${h}`}
-      strokeWidth={hairline}
-      onPointerDown={onBodyPointerDown}
-      onPointerMove={onBodyPointerMove}
-      onPointerUp={onBodyPointerUp}
-      onPointerCancel={onBodyPointerUp}
-      onContextMenu={onBodyContextMenu}
+      onPointerDown={(e) => onBodyPointerDown(e, object.id)}
+      onPointerMove={(e) => onBodyPointerMove(e, object.id)}
+      onPointerUp={(e) => onBodyPointerUp(e, object.id)}
+      onPointerCancel={(e) => onBodyPointerUp(e, object.id)}
+      onContextMenu={() => onBodyContextMenu(object.id)}
     >
       {damage && <title>{`${props.ref ?? def.name} burnt: ${damage.reason}`}</title>}
       <g className={cn("body", damage && "opacity-50 saturate-0")}>
         {def.body.map((s, i) => (
-          <Shape key={i} shape={s} g={g} grid={grid} props={props} rotation={rotation} />
+          <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} props={props} rotation={rotation} />
         ))}
       </g>
       {selected && (
@@ -107,32 +111,32 @@ export function ComponentView({
           height={h}
           rx={g(0.6)}
           className="fill-primary/5 stroke-primary"
-          strokeWidth={hairline * 2}
+          strokeWidth={2}
+          vectorEffect="non-scaling-stroke"
           pointerEvents="none"
         />
       )}
       <g className="parts">
-        {def.parts.map((p) => {
+        {detail.pins && def.parts.map((p) => {
           const key = partKey(object.id, p.id)
-          const simulated = sim.live ? sim.parts[key] : undefined
+          const simulated = live.parts[key]
           return (
             <Part
               key={p.id}
               part={p.type === "led" ? { ...p, color: resolveColor(template(p.color, props)) } : p}
               g={g}
               state={simulated ?? parts[key] ?? partInitial(def, p.id)}
-              level={p.type === "display" ? (sim.live ? (p.backlight ? (sim.parts[partKey(object.id, p.backlight)]?.level ?? 0) : 1) : 0) : simulated?.level}
-              display={p.type === "display" ? sim.display(object.id) : undefined}
-              hairline={hairline}
+              level={p.type === "display" ? (live.live ? (p.backlight ? (live.parts[partKey(object.id, p.backlight)]?.level ?? 0) : 1) : 0) : simulated?.level}
+              display={p.type === "display" ? live.display : undefined}
               onChange={simulated ? undefined : (patch) => onPartChange(object.id, p.id, patch)}
             />
           )
         })}
       </g>
-      {def.meter && <Meter def={def} object={object} sim={sim} g={g} rotation={rotation} />}
+      {def.meter && detail.labels && <Meter def={def} live={live} g={g} rotation={rotation} />}
       {damage && (
         <g pointerEvents="none">
-          <rect x={0} y={0} width={w} height={h} rx={g(0.6)} className="fill-destructive/15 stroke-destructive" strokeWidth={hairline * 1.5} strokeDasharray={`${g(0.25)} ${g(0.25)}`} />
+          <rect x={0} y={0} width={w} height={h} rx={g(0.6)} className="fill-destructive/15 stroke-destructive" strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeDasharray={`${g(0.25)} ${g(0.25)}`} />
           <FlameIcon
             x={w / 2 - g(0.6)}
             y={h / 2 - g(0.6)}
@@ -146,7 +150,7 @@ export function ComponentView({
       )}
     </svg>
   )
-}
+})
 
 
 /**
@@ -154,13 +158,13 @@ export function ComponentView({
  * current through, power), formatted with an SI prefix, RMS in an AC circuit. The text is
  * counter-rotated so it stays upright whichever way the meter is turned. "—" before the run.
  */
-function Meter({ def, object, sim, g, rotation }: { def: NonNullable<ReturnType<typeof getDef>>; object: PlacedObject; sim: SimReadout; g: (v: number) => number; rotation: Rotation }) {
+function Meter({ def, live, g, rotation }: { def: NonNullable<ReturnType<typeof getDef>>; live: ObjectSim; g: (v: number) => number; rotation: Rotation }) {
   const m = def.meter!
   const x = g(m.x)
   const y = g(m.y)
   let text = "—"
-  if (sim.live) {
-    const r = sim.readings(object.id).find((v) => v.element === (m.element ?? 0))
+  if (live.live) {
+    const r = live.readings.find((v) => v.element === (m.element ?? 0))
     if (r) {
       const val = m.read === "voltage" ? (r.rms ? r.rms.voltage : r.voltage) : m.read === "current" ? (r.rms ? r.rms.current : r.current) : r.rms ? r.rms.power : r.power
       text = formatSI(val, m.unit, 3)
@@ -185,15 +189,18 @@ function Shape({
   shape,
   g,
   grid,
+  labels,
   props,
   rotation,
 }: {
   shape: BodyShape
   g: (v: number) => number
   grid: number
+  labels: boolean
   props: Record<string, string>
   rotation: Rotation
 }) {
+  if (shape.type === "text" && !labels) return null
   switch (shape.type) {
     case "path":
       return (
@@ -218,11 +225,12 @@ function Shape({
           width={g(shape.w)}
           height={g(shape.h)}
           rx={g(shape.rx ?? 0)}
+          vectorEffect="non-scaling-stroke"
           className={FILL[shape.fill ?? "none"]}
         />
       )
     case "circle":
-      return <circle cx={g(shape.cx)} cy={g(shape.cy)} r={g(shape.r)} className={FILL[shape.fill ?? "none"]} />
+      return <circle cx={g(shape.cx)} cy={g(shape.cy)} r={g(shape.r)} vectorEffect="non-scaling-stroke" className={FILL[shape.fill ?? "none"]} />
     case "text":
       return (
         <text
@@ -311,7 +319,6 @@ function Part({
   state,
   level,
   display,
-  hairline,
   onChange,
 }: {
   part: PartDef
@@ -321,7 +328,6 @@ function Part({
   level?: number
   /** The frame a display shows. */
   display?: DisplayFrame
-  hairline: number
   /** Undefined while the simulation owns this part. */
   onChange?: (patch: PartState) => void
 }) {
@@ -359,7 +365,8 @@ function Part({
           fill={part.color}
           opacity={0.35 + 0.65 * glow}
           className="stroke-foreground/50"
-          strokeWidth={hairline}
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
         />
         <text x={cx} y={cy + g(0.65)} fontSize={g(0.28)} textAnchor="middle" className="fill-muted-foreground stroke-none font-mono">
           {part.label}
@@ -417,7 +424,7 @@ function Part({
         }}
       >
         <title>{`${title}: click to ${plugged ? "unplug" : "plug in"}`}</title>
-        <rect x={cx - w / 2} y={cy - h / 2} width={w} height={h} rx={g(0.15)} className="fill-neutral-300 stroke-foreground/50 dark:fill-neutral-600" strokeWidth={hairline} />
+        <rect x={cx - w / 2} y={cy - h / 2} width={w} height={h} rx={g(0.15)} className="fill-neutral-300 stroke-foreground/50 dark:fill-neutral-600" strokeWidth={1} vectorEffect="non-scaling-stroke" />
         <rect x={cx - w / 2 + g(0.3)} y={cy - h / 2 + g(0.3)} width={w - g(0.6)} height={h - g(0.6)} className="fill-neutral-500 stroke-none dark:fill-neutral-800" />
         {plugged && (
           <>
@@ -507,14 +514,16 @@ function Part({
         height={half * 2}
         rx={g(0.15)}
         className="fill-secondary stroke-border"
-        strokeWidth={hairline}
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
       />
       <circle
         cx={cx}
         cy={cy}
         r={half * (state.pressed ? 0.52 : 0.62)}
         className={cn("stroke-foreground/40", part.id === "RESET" ? "fill-neutral-800" : "fill-blue-500")}
-        strokeWidth={hairline}
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
       />
       {part.label && (
         <text x={cx} y={cy + half + g(0.4)} fontSize={g(0.28)} textAnchor="middle" className="fill-muted-foreground stroke-none font-mono">

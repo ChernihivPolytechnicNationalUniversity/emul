@@ -2,6 +2,7 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 import { DIR, objectPins, type Direction } from "@/schematic/geometry"
 import type { PinKind, PlacedObject } from "@/schematic/types"
+import type { FieldDetail } from "./detail"
 import type { PinPointerHandler } from "./ComponentView"
 
 const PIN_FILL: Record<PinKind, string> = {
@@ -24,12 +25,27 @@ const ANCHOR: Record<Direction, "start" | "middle" | "end"> = {
   "bottom-right": "start",
 }
 
+/**
+ * Fills for the far-zoom marks. A digital pin is drawn hollow up close, which at one pixel would
+ * be nothing at all, so out here it takes a muted fill instead.
+ */
+const PIN_MARK: Record<PinKind, string> = {
+  power: "fill-red-500",
+  gnd: "fill-neutral-700 dark:fill-neutral-300",
+  analog: "fill-amber-500",
+  digital: "fill-foreground/70",
+  node: "fill-foreground",
+  nc: "fill-muted-foreground/40",
+}
+
+const MARK_CELLS = 0.16
+
 const LABEL_OFFSET = 0.45
 
 type PinLayerProps = {
-  objects: PlacedObject[]
+  objects: readonly PlacedObject[]
   grid: number
-  hairline: number
+  detail: FieldDetail
   connectedPins: ReadonlySet<string>
   /** Pins that touch another pin; they are drawn as a junction dot, without a label. */
   contactPins: ReadonlySet<string>
@@ -37,6 +53,23 @@ type PinLayerProps = {
   onPinPointerDown: PinPointerHandler
   onPinPointerMove: PinPointerHandler
   onPinPointerUp: PinPointerHandler
+}
+
+/**
+ * Every pin of one object as a single filled path per kind, for zooms where a pin is a mark
+ * rather than a terminal. A 148-pin chip costs three nodes here instead of nearly six hundred,
+ * which is what lets the symbol keep its pins all the way out instead of emptying into a box.
+ */
+function PinMarks({ object, grid }: { object: PlacedObject; grid: number }) {
+  const r = grid * MARK_CELLS
+  const byKind = new Map<PinKind, string[]>()
+  for (const { pin, point } of objectPins(object, grid)) {
+    const marks = byKind.get(pin.kind)
+    const mark = `M${point.x - r} ${point.y - r}h${r * 2}v${r * 2}h${-r * 2}z`
+    if (marks) marks.push(mark)
+    else byKind.set(pin.kind, [mark])
+  }
+  return [...byKind].map(([kind, marks]) => <path key={kind} d={marks.join("")} stroke="none" className={PIN_MARK[kind]} />)
 }
 
 /**
@@ -49,7 +82,7 @@ type PinLayerProps = {
 export const PinLayer = React.memo(function PinLayer({
   objects,
   grid,
-  hairline,
+  detail,
   connectedPins,
   contactPins,
   netColor,
@@ -58,64 +91,80 @@ export const PinLayer = React.memo(function PinLayer({
   onPinPointerUp,
 }: PinLayerProps) {
   const g = (v: number) => v * grid
+  const labelled = detail.labels
+  if (!detail.pins) {
+    if (!detail.pinMarks) return null
+    return (
+      <svg data-slot="pins" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
+        {objects.map((object) => (
+          <g key={object.id} data-pins={object.id}>
+            <PinMarks object={object} grid={grid} />
+          </g>
+        ))}
+      </svg>
+    )
+  }
   return (
     <svg data-slot="pins" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
-      {objects.map((object) =>
-        objectPins(object, grid).map(({ key, pin, point }) => {
-          const connected = connectedPins.has(key)
-          const contact = contactPins.has(key)
-          const color = connected ? netColor?.(key) : undefined
-          const dir = DIR[pin.labelAt as Direction]
-          const label = { x: point.x + dir.x * g(LABEL_OFFSET), y: point.y + dir.y * g(LABEL_OFFSET) }
+      {objects.map((object) => (
+        <g key={object.id} data-pins={object.id}>
+          {objectPins(object, grid).map(({ key, pin, point }) => {
+            const connected = connectedPins.has(key)
+            const contact = contactPins.has(key)
+            const color = connected ? netColor?.(key) : undefined
+            const dir = DIR[pin.labelAt as Direction]
+            const label = { x: point.x + dir.x * g(LABEL_OFFSET), y: point.y + dir.y * g(LABEL_OFFSET) }
 
-          return (
-            <g
-              key={key}
-              data-object={object.id}
-              data-pin={pin.id}
-              className="group/pin pointer-events-auto cursor-crosshair"
-              onPointerDown={(e) => onPinPointerDown(e, object.id, pin.id)}
-              onPointerMove={(e) => onPinPointerMove(e, object.id, pin.id)}
-              onPointerUp={(e) => onPinPointerUp(e, object.id, pin.id)}
-            >
-              {/* generous hit area; a bare node's pin sits in the middle of its body, so it keeps
-                  to its own dot and the body around it stays there to drag the node by */}
-              <circle cx={point.x} cy={point.y} r={g(pin.stub === 0 ? 0.22 : 0.45)} className="fill-transparent stroke-none" />
-              <circle
-                cx={point.x}
-                cy={point.y}
-                r={g(contact ? 0.26 : pin.kind === "nc" ? 0.14 : 0.2)}
-                fill={color && (contact || pin.kind === "node") ? color : undefined}
-                stroke={color}
-                className={cn(
-                  "transition-[r] group-hover/pin:stroke-primary",
-                  !color && "stroke-foreground/60",
-                  !color && connected && !contact && "stroke-primary",
-                  !(color && (contact || pin.kind === "node")) && (contact ? "fill-foreground" : PIN_FILL[pin.kind]),
-                )}
-                strokeWidth={connected ? hairline * 2 : hairline}
-              />
-              {/* Two pins on one point draw one dot between them; their labels would overlap, and
-                  the joint is the node, not either terminal. The names stay in the readout. */}
-              {!contact && (
-                <text
-                  x={label.x}
-                  y={label.y}
-                  fontSize={g(0.3)}
-                  textAnchor={ANCHOR[pin.labelAt as Direction]}
-                  dominantBaseline="middle"
+            return (
+              <g
+                key={key}
+                data-object={object.id}
+                data-pin={pin.id}
+                className="group/pin pointer-events-auto cursor-crosshair"
+                onPointerDown={(e) => onPinPointerDown(e, object.id, pin.id)}
+                onPointerMove={(e) => onPinPointerMove(e, object.id, pin.id)}
+                onPointerUp={(e) => onPinPointerUp(e, object.id, pin.id)}
+              >
+                {/* generous hit area; a bare node's pin sits in the middle of its body, so it keeps
+                    to its own dot and the body around it stays there to drag the node by */}
+                <circle cx={point.x} cy={point.y} r={g(pin.stub === 0 ? 0.22 : 0.45)} className="fill-transparent stroke-none" />
+                <circle
+                  cx={point.x}
+                  cy={point.y}
+                  r={g(contact ? 0.26 : pin.kind === "nc" ? 0.14 : 0.2)}
+                  fill={color && (contact || pin.kind === "node") ? color : undefined}
+                  stroke={color}
                   className={cn(
-                    "pointer-events-none stroke-none font-mono",
-                    pin.kind === "nc" ? "fill-muted-foreground" : "fill-foreground",
+                    "transition-[r] group-hover/pin:stroke-primary",
+                    !color && "stroke-foreground/60",
+                    !color && connected && !contact && "stroke-primary",
+                    !(color && (contact || pin.kind === "node")) && (contact ? "fill-foreground" : PIN_FILL[pin.kind]),
                   )}
-                >
-                  {pin.label}
-                </text>
-              )}
-            </g>
-          )
-        }),
-      )}
+                  strokeWidth={connected ? 2 : 1}
+                  vectorEffect="non-scaling-stroke"
+                />
+                {/* Two pins on one point draw one dot between them; their labels would overlap, and
+                    the joint is the node, not either terminal. The names stay in the readout. */}
+                {!contact && labelled && (
+                  <text
+                    x={label.x}
+                    y={label.y}
+                    fontSize={g(0.3)}
+                    textAnchor={ANCHOR[pin.labelAt as Direction]}
+                    dominantBaseline="middle"
+                    className={cn(
+                      "pointer-events-none stroke-none font-mono",
+                      pin.kind === "nc" ? "fill-muted-foreground" : "fill-foreground",
+                    )}
+                  >
+                    {pin.label}
+                  </text>
+                )}
+              </g>
+            )
+          })}
+        </g>
+      ))}
     </svg>
   )
 })
