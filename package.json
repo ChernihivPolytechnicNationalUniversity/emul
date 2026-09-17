@@ -46,7 +46,8 @@
     "battery": "tsx --tsconfig tsconfig.app.json scripts/battery.ts",
     "wires": "tsx --tsconfig tsconfig.app.json scripts/wires.ts",
     "bench": "tsx --tsconfig tsconfig.app.json scripts/bench.ts",
-    "mcu-jit": "tsx --tsconfig tsconfig.app.json scripts/mcu-jit.ts"
+    "mcu-jit": "tsx --tsconfig tsconfig.app.json scripts/mcu-jit.ts",
+    "symbols": "tsx --tsconfig tsconfig.app.json scripts/symbols.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

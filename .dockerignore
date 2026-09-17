@@ -28,3 +28,6 @@ logs
 .idea
 .DS_Store
 *.md
+
+# Generated in the image build from the staged ST sources
+public/symbols

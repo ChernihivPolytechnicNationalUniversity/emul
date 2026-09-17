@@ -4,6 +4,7 @@ import { CpuIcon, HammerIcon, LoaderCircleIcon, XIcon } from "lucide-react"
 import { SOURCE_LIMITS, type SourceFile, type Target } from "emul-shared/source"
 import { Button } from "@/components/ui/button"
 import { fetchArtifact, fetchText, submitBuild, waitForJob } from "@/project/api"
+import { parseDiagnostic, parseDiagnostics, type Diagnostic } from "@/project/diagnostics"
 import { createFile, removeFile, renameFile, renameFolder, writeFile } from "@/project/files"
 import { TEMPLATE_MAIN, template } from "@/project/template"
 import { getDef } from "@/schematic/registry"
@@ -39,7 +40,7 @@ type TabState = { open: string[]; active: string | null }
 
 type Build =
   | { phase: "running"; startedAt: number }
-  | { phase: "done"; ok: boolean; log: string; error: string | null; durationMs: number }
+  | { phase: "done"; ok: boolean; log: string; error: string | null; durationMs: number; diagnostics: Diagnostic[] }
 
 /** What a board is called in the panel: its designator, else the component's name. */
 const boardName = (o: PlacedObject) => o.props?.ref || getDef(o.def)?.name || o.def
@@ -52,6 +53,14 @@ const boardName = (o: PlacedObject) => o.props?.ref || getDef(o.def)?.name || o.
  */
 export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onClose, className, style, ...props }: CodePanelProps) {
   const [width, setWidth] = React.useState(DEFAULT_WIDTH)
+  const editor = React.useRef<EditorHandle | null>(null)
+  // The field's Undo/Redo reach the editor through this panel; the editor may not be mounted (no board).
+  React.useImperativeHandle(ref, () => ({
+    focused: () => !!editor.current?.focused(),
+    undo: () => editor.current?.undo(),
+    redo: () => editor.current?.redo(),
+    goTo: (path, line, col) => editor.current?.goTo(path, line, col),
+  }))
   const [tabs, setTabs] = React.useState<Record<string, TabState>>({})
   const [builds, setBuilds] = React.useState<Record<string, Build>>({})
 
@@ -129,15 +138,17 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onC
       const elf = job.artifacts.find((a) => a.name === "firmware.elf")
       const ok = !!job.result?.ok && !!elf
       if (elf && ok) onFirmware(id, "firmware.elf", await fetchArtifact(elf))
+      const text = log ? await fetchText(log) : ""
       done = {
         phase: "done",
         ok,
-        log: log ? await fetchText(log) : "",
+        log: text,
         error: job.result?.error ?? job.error ?? (job.result?.ok && !elf ? "the build left no firmware.elf" : null),
         durationMs: job.result?.durationMs ?? Date.now() - startedAt,
+        diagnostics: parseDiagnostics(text),
       }
     } catch (e) {
-      done = { phase: "done", ok: false, log: "", error: (e as Error).message, durationMs: Date.now() - startedAt }
+      done = { phase: "done", ok: false, log: "", error: (e as Error).message, durationMs: Date.now() - startedAt, diagnostics: [] }
     }
     setBuilds((b) => ({ ...b, [id]: done }))
     if (done.ok) toast.success(`${boardName(board)} programmed`, { description: `Built in ${formatSI(done.durationMs / 1000, "s", 2)}.` })
@@ -181,13 +192,28 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onC
                   {build?.phase === "running" ? <LoaderCircleIcon className="animate-spin" /> : <HammerIcon />}
                   Compile
                 </Button>
+                {build?.phase === "done" && !build.ok && (
+                  <span className="rounded-sm bg-destructive/10 px-1.5 font-mono text-[0.6875rem] text-destructive" title="Errors in the last build">
+                    {build.diagnostics.filter((d) => d.severity === "error").length || "!"}
+                  </span>
+                )}
                 <Button variant="ghost" size="icon-xs" onClick={onClose} aria-label="Close code panel">
                   <XIcon />
                 </Button>
               </div>
             </div>
-            <Editor ref={ref} objectId={id} files={files} active={active} onWrite={write} onToggle={onClose} />
-            {build && <Output build={build} onClose={() => setBuilds((b) => Object.fromEntries(Object.entries(b).filter(([k]) => k !== id)))} />}
+            <Editor ref={editor} objectId={id} files={files} active={active} target={chip ?? "stm32f429zi"} diagnostics={build?.phase === "done" ? build.diagnostics : []} onWrite={write} onToggle={onClose} />
+            {build && (
+              <Output
+                build={build}
+                onGoTo={(d) => {
+                  if (!d.path || !files.some((f) => f.path === d.path)) return
+                  openFile(d.path)
+                  editor.current?.goTo(d.path, d.line, d.col)
+                }}
+                onClose={() => setBuilds((b) => Object.fromEntries(Object.entries(b).filter(([k]) => k !== id)))}
+              />
+            )}
           </div>
         </>
       ) : (
@@ -197,15 +223,19 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onC
   )
 }
 
-/** The build's log under the editor, as an IDE's output pane. */
-function Output({ build, onClose }: { build: Build; onClose: () => void }) {
+/** The build's log under the editor, as an IDE's output pane; a diagnostic's line opens the place. */
+function Output({ build, onGoTo, onClose }: { build: Build; onGoTo: (d: Diagnostic) => void; onClose: () => void }) {
   const pre = React.useRef<HTMLPreElement>(null)
   React.useEffect(() => {
-    pre.current?.scrollTo(0, pre.current.scrollHeight)
+    // Errors are what the student came for: start at the first one, else at the end.
+    const first = pre.current?.querySelector<HTMLElement>("[data-severity=error]")
+    if (first) first.scrollIntoView({ block: "start" })
+    else pre.current?.scrollTo(0, pre.current.scrollHeight)
   }, [build])
   const text = build.phase === "done" ? build.log : ""
   // The log usually carries the error already; say it once more only when it does not.
   const error = build.phase === "done" && build.error && !text.includes(build.error) ? build.error : null
+  const lines = React.useMemo(() => text.split("\n").map((line) => ({ line, d: parseDiagnostic(line) })), [text])
   return (
     <div className="flex h-40 shrink-0 flex-col border-t">
       <div className="flex h-7 shrink-0 items-center gap-2 bg-sidebar px-2 text-xs">
@@ -222,7 +252,26 @@ function Output({ build, onClose }: { build: Build; onClose: () => void }) {
         </Button>
       </div>
       <pre ref={pre} className="min-h-0 flex-1 overflow-auto px-3 py-2 font-mono text-[11px] leading-snug whitespace-pre-wrap">
-        {text}
+        {lines.map(({ line, d }, i) =>
+          d ? (
+            <button
+              key={i}
+              type="button"
+              data-severity={d.severity}
+              className={cn(
+                "block w-full cursor-pointer text-left hover:bg-accent/60",
+                d.severity === "error" ? "text-destructive" : d.severity === "warning" ? "text-amber-700" : "text-muted-foreground",
+              )}
+              onClick={() => onGoTo(d)}
+            >
+              {line}
+            </button>
+          ) : (
+            <span key={i} className="block">
+              {line}
+            </span>
+          ),
+        )}
         {error && <span className="text-destructive">{`error: ${error}\n`}</span>}
       </pre>
     </div>

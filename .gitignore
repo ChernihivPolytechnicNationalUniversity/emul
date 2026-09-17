@@ -31,3 +31,6 @@ logs
 *.njsproj
 *.sln
 *.sw?
+
+# The editor's HAL/CMSIS symbol index, generated at build time (`pnpm symbols`)
+public/symbols

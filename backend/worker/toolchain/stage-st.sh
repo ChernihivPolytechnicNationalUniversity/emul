@@ -17,5 +17,5 @@ clone stm32f7xx-hal-driver v1.3.3 "$ST/f7/hal"
 clone cmsis-device-f7 v1.2.10 "$ST/f7/cmsis"
 # Only headers and sources are needed at run time.
 for dir in "$ST"/f*/hal "$ST"/f*/cmsis; do
-  find "$dir" -mindepth 1 -maxdepth 1 ! -name Include ! -name Inc ! -name Src -exec rm -rf {} +
+  find "$dir" -mindepth 1 -maxdepth 1 ! -name Include ! -name Inc ! -name Src -exec rm -rf {} \;
 done

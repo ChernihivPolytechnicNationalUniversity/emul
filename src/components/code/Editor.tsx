@@ -1,6 +1,8 @@
 import * as React from "react"
-import type { SourceFile } from "emul-shared/source"
+import type { SourceFile, Target } from "emul-shared/source"
 import { monaco, type Editor as CodeEditor } from "./monaco"
+import { registerIntellisense, setContext } from "./intellisense"
+import type { Diagnostic } from "@/project/diagnostics"
 import { useEvent } from "@/hooks/use-event"
 import { cn } from "@/lib/utils"
 
@@ -9,6 +11,8 @@ export type EditorHandle = {
   focused: () => boolean
   undo: () => void
   redo: () => void
+  /** Put the cursor on a place in a file the panel has just made active (or is about to). */
+  goTo: (path: string, line: number, col: number) => void
 }
 
 type EditorProps = Omit<React.ComponentProps<"div">, "ref"> & {
@@ -18,6 +22,10 @@ type EditorProps = Omit<React.ComponentProps<"div">, "ref"> & {
   files: SourceFile[]
   /** The file in the editor; null shows nothing, the tabs are all closed. */
   active: string | null
+  /** The chip the code is for: which symbol index answers completions. */
+  target: Target
+  /** The last build's diagnostics, shown as markers in the files they name. */
+  diagnostics: Diagnostic[]
   onWrite: (path: string, content: string) => void
   /** ⌘J inside the editor, where the field's shortcuts do not reach. */
   onToggle: () => void
@@ -45,14 +53,34 @@ const uriOf = (objectId: string, path: string) => monaco.Uri.file(`/${objectId}/
  * cursor survive switching tabs, as in VS Code) and the schematic as the single source of the
  * text. Typing flows editor → document; a load or an undo flows document → editor.
  */
-export function Editor({ ref, objectId, files, active, onWrite, onToggle, className, ...props }: EditorProps) {
+export function Editor({ ref, objectId, files, active, target, diagnostics, onWrite, onToggle, className, ...props }: EditorProps) {
   const host = React.useRef<HTMLDivElement>(null)
   const editor = React.useRef<CodeEditor | null>(null)
+  /** A goTo for a file that is not the editor's model yet; the active effect takes it. */
+  const pending = React.useRef<{ path: string; line: number; col: number } | null>(null)
+  const reveal = (ed: CodeEditor, line: number, col: number) => {
+    ed.setPosition({ lineNumber: line, column: col })
+    ed.revealPositionInCenterIfOutsideViewport({ lineNumber: line, column: col })
+    ed.focus()
+  }
   React.useImperativeHandle(ref, () => ({
     focused: () => !!editor.current?.hasTextFocus(),
     undo: () => editor.current?.trigger("menu", "undo", null),
     redo: () => editor.current?.trigger("menu", "redo", null),
+    goTo: (path, line, col) => {
+      const ed = editor.current
+      const model = ed?.getModel()
+      if (ed && model && pathOf(model.uri) === path) reveal(ed, line, col)
+      else pending.current = { path, line, col }
+    },
   }))
+
+  React.useEffect(() => {
+    registerIntellisense()
+  }, [])
+  React.useEffect(() => {
+    setContext({ target, files })
+  }, [target, files])
   const views = React.useRef(new Map<string, monaco.editor.ICodeEditorViewState>())
   const write = useEvent(onWrite)
   const toggle = useEvent(onToggle)
@@ -102,6 +130,32 @@ export function Editor({ ref, objectId, files, active, onWrite, onToggle, classN
     }
   }, [objectId, files])
 
+  // Markers follow the last build: on the files it named, cleared for the rest.
+  React.useEffect(() => {
+    const byPath = new Map<string, Diagnostic[]>()
+    for (const d of diagnostics) if (d.path) byPath.set(d.path, [...(byPath.get(d.path) ?? []), d])
+    for (const m of monaco.editor.getModels()) {
+      if (!m.uri.path.startsWith(`/${objectId}/`)) continue
+      const ds = byPath.get(pathOf(m.uri)) ?? []
+      monaco.editor.setModelMarkers(
+        m,
+        "gcc",
+        ds.map((d) => {
+          const word = m.getWordAtPosition({ lineNumber: d.line, column: d.col })
+          return {
+            severity: d.severity === "error" ? monaco.MarkerSeverity.Error : d.severity === "warning" ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Hint,
+            message: d.message,
+            startLineNumber: d.line,
+            startColumn: d.col,
+            endLineNumber: d.line,
+            endColumn: word && word.startColumn <= d.col ? word.endColumn : d.col + 1,
+            source: "gcc",
+          }
+        }),
+      )
+    }
+  }, [objectId, files, diagnostics])
+
   React.useEffect(() => {
     const ed = editor.current
     if (!ed) return
@@ -116,6 +170,11 @@ export function Editor({ ref, objectId, files, active, onWrite, onToggle, classN
       const state = views.current.get(model.uri.toString())
       if (state) ed.restoreViewState(state)
       ed.focus()
+      const go = pending.current
+      if (go && go.path === active) {
+        pending.current = null
+        reveal(ed, go.line, go.col)
+      }
     }
   }, [objectId, active])
 
