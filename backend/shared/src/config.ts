@@ -11,6 +11,9 @@ export const config = {
     bucket: required("S3_BUCKET"),
     // Endpoint and path style are for MinIO and the like; left unset, the SDK targets AWS.
     endpoint: process.env.S3_ENDPOINT,
+    // Where browsers reach the store: presigned URLs are signed against this host (the cluster-internal
+    // endpoint is unreachable from outside). Unset: the same endpoint.
+    publicEndpoint: process.env.S3_PUBLIC_ENDPOINT ?? process.env.S3_ENDPOINT,
     region: process.env.S3_REGION ?? "us-east-1",
     forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== "false",
     // Without keys the SDK falls back to its default chain (IAM role, IRSA, ~/.aws).

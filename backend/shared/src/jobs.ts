@@ -9,9 +9,9 @@ export type JobData = { kind: "echo"; payload: unknown }
 export type JobKind = JobData["kind"]
 export const JOB_KINDS: JobKind[] = ["echo"]
 
-/** What a finished job leaves behind: the artifact lives in S3, only its key travels through Redis. */
-export type Artifact = { key: string; size: number; contentType: string }
-export type JobResult = { artifact?: Artifact }
+/** What a finished job leaves behind: the files live in S3, only their keys travel through Redis. */
+export type Artifact = { name: string; key: string; size: number; contentType: string }
+export type JobResult = { artifacts: Artifact[] }
 
 /** S3 key of a job's artifact; every job's files live under its own prefix. */
 export const artifactKey = (jobId: string, name: string) => `jobs/${jobId}/${name}`

@@ -9,8 +9,9 @@ export const handlers: { [K in JobData["kind"]]: Handler<K> } = {
   // Placeholder until the build job lands: the payload comes back as a JSON artifact.
   async echo(job) {
     const body = JSON.stringify(job.data.payload)
-    const key = artifactKey(job.id!, "result.json")
+    const name = "result.json"
+    const key = artifactKey(job.id!, name)
     await putObject(key, body, "application/json")
-    return { artifact: { key, size: Buffer.byteLength(body), contentType: "application/json" } }
+    return { artifacts: [{ name, key, size: Buffer.byteLength(body), contentType: "application/json" }] }
   },
 }

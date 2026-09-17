@@ -1,8 +1,8 @@
 import { JOB_KINDS, type JobData } from "emul-shared/jobs"
-import { getObject } from "emul-shared/s3"
+import { presignGet } from "emul-shared/s3"
 import type { FastifyInstance } from "fastify"
 
-/** Enqueue a job, poll its state, fetch its artifact; the worker does the work. */
+/** Enqueue a job and poll its state; the worker does the work. */
 export async function jobs(app: FastifyInstance) {
   app.post<{ Body: JobData }>(
     "/jobs",
@@ -13,21 +13,14 @@ export async function jobs(app: FastifyInstance) {
     },
   )
 
+  // A finished job lists its files with presigned URLs: the browser downloads from the store directly
+  // (the bucket stays private, the URL expires), nothing streams through the API.
   app.get<{ Params: { id: string } }>("/jobs/:id", async (req, reply) => {
     const job = await app.queue.getJob(req.params.id)
     if (!job) return reply.code(404).send({ ok: false, error: "not found" })
-    return { ok: true, id: job.id, state: await job.getState(), result: job.returnvalue ?? null, error: job.failedReason || null }
-  })
-
-  // Streamed through the API rather than a presigned URL, so the bucket can stay private to the cluster.
-  app.get<{ Params: { id: string } }>("/jobs/:id/artifact", async (req, reply) => {
-    const job = await app.queue.getJob(req.params.id)
-    const artifact = job?.returnvalue?.artifact
-    if (!artifact) return reply.code(404).send({ ok: false, error: "no artifact" })
-    const obj = await getObject(artifact.key)
-    reply.header("content-type", obj.contentType ?? artifact.contentType)
-    if (obj.size) reply.header("content-length", obj.size)
-    reply.header("content-disposition", `attachment; filename="${artifact.key.split("/").pop()}"`)
-    return reply.send(obj.body)
+    const artifacts = await Promise.all(
+      (job.returnvalue?.artifacts ?? []).map(async (a) => ({ ...a, key: undefined, url: await presignGet(a.key, a.name) })),
+    )
+    return { ok: true, id: job.id, state: await job.getState(), artifacts, error: job.failedReason || null }
   })
 }
