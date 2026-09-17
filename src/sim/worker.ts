@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import type { PartState, Schematic } from "@/schematic/types"
 import type { Failure } from "./engine"
+import type { CoreTransport, FromCore } from "./core-host"
 import { SimLoop, type Probe, type Snapshot } from "./loop"
 
 /** How often the worker reports back to the UI. */
@@ -26,6 +27,17 @@ export type FromWorker =
   | { t: "started" }
 
 const loop = new SimLoop()
+// Each core in a worker of its own, when the page is cross-origin isolated (SharedArrayBuffer);
+// otherwise every core runs in this thread.
+if (typeof SharedArrayBuffer !== "undefined" && (self as { crossOriginIsolated?: boolean }).crossOriginIsolated)
+  loop.spawnCore = (): CoreTransport => {
+    const w = new Worker(new URL("../mcu/core-worker.ts", import.meta.url), { type: "module" })
+    return {
+      post: (msg, transfer) => w.postMessage(msg, transfer ?? []),
+      onMessage: (cb) => (w.onmessage = (e) => cb(e.data as FromCore)),
+      terminate: () => w.terminate(),
+    }
+  }
 const post = (msg: FromWorker) => {
   // Display frames are megabytes each: hand them over instead of copying.
   const transfer: Transferable[] = []

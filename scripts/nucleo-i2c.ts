@@ -41,7 +41,7 @@ const expect = (what: string, got: number | string, want: number | string, tol =
   console.log(`  ${ok ? "✓" : "✗"} ${what.padEnd(44)} ${JSON.stringify(got).padStart(14)}  expected ${JSON.stringify(want)}${tol ? ` ±${tol}` : ""}`)
 }
 type Core = { mcu: { bus: { read32: (a: number) => number }; firmware: { symbols: { name: string; value: number }[] } } }
-const core = (loop as unknown as { mcus: Map<string, Core> }).mcus.get(u.id)!.mcu
+const core = (loop as unknown as { mcus: Map<string, { mcu: Core }> }).mcus.get(u.id)!.mcu.mcu
 const word = (name: string) => core.bus.read32(core.firmware.symbols.find((x) => x.name === name)!.value)
 const eeprom = () => loop.snapshot()!.digital[mem.id] as EepromSnapshot
 

@@ -117,7 +117,7 @@ console.log("\nTouch test: GT911 reset and id, a press drawn as crosshairs")
   expect("GT911 address after the reset sequence", `0x${gt.address.toString(16)}`, "0x5d")
   const text = snap.terminals[term.id]?.text ?? ""
   expect("id read over I²C, printed on USART1", /TouchPad_ID:9,1,1/.test(text) ? "yes" : `no: ${JSON.stringify(text.slice(0, 80))}`, "yes")
-  expect("firmware version printed", /FirmwareVersion:1060/.test(text) ? "yes" : "no", "yes")
+  expect("firmware version printed", /FirmwareVersion:1060/.test(text) ? "yes" : `no: ${JSON.stringify(text.slice(0, 120))}`, "yes")
   expect("panel locked", snap.displays[s.lcd.id].status, "ok")
   expect("white after the clear", colours(s.frame()!, 1024, 600)[0][0], "255,255,255")
 

@@ -106,19 +106,19 @@ export class Dma2d extends RegBlock {
     const bus = this.bus!
     let argb: number
     if (cm === CM_L4) {
-      const byte = bus.read(addr, 1)
+      const byte = bus.read8(addr)
       const idx = sub ? byte & 0xf : byte >>> 4
       argb = clut[idx]
     } else if (cm === CM_A8) {
-      argb = ((bus.read(addr, 1) << 24) | (colr & 0xffffff)) >>> 0
+      argb = ((bus.read8(addr) << 24) | (colr & 0xffffff)) >>> 0
     } else if (cm === CM_A4) {
-      const byte = bus.read(addr, 1)
+      const byte = bus.read8(addr)
       const a = (sub ? byte & 0xf : byte >>> 4) * 17
       argb = ((a << 24) | (colr & 0xffffff)) >>> 0
     } else {
       const bpp = PIXEL_BYTES[cm]
       const b = new Uint8Array(4)
-      for (let i = 0; i < bpp; i++) b[i] = bus.read(addr + i, 1)
+      for (let i = 0; i < bpp; i++) b[i] = bus.read8(addr + i)
       argb = pixelToArgb(b, 0, cm as PixelFormat, cm >= 5 ? clut : null)
     }
     // Alpha mode: 0 keep, 1 replace with ALPHA, 2 multiply by ALPHA.
@@ -138,21 +138,21 @@ export class Dma2d extends RegBlock {
     const b = argb & 0xff
     switch (cm) {
       case 0:
-        bus.write(addr, argb, 4)
+        bus.write32(addr, argb)
         return
       case 1:
-        bus.write(addr, b, 1)
-        bus.write(addr + 1, g, 1)
-        bus.write(addr + 2, r, 1)
+        bus.write8(addr, b)
+        bus.write8(addr + 1, g)
+        bus.write8(addr + 2, r)
         return
       case 2:
-        bus.write(addr, ((r >>> 3) << 11) | ((g >>> 2) << 5) | (b >>> 3), 2)
+        bus.write16(addr, ((r >>> 3) << 11) | ((g >>> 2) << 5) | (b >>> 3))
         return
       case 3:
-        bus.write(addr, ((a >>> 7) << 15) | ((r >>> 3) << 10) | ((g >>> 3) << 5) | (b >>> 3), 2)
+        bus.write16(addr, ((a >>> 7) << 15) | ((r >>> 3) << 10) | ((g >>> 3) << 5) | (b >>> 3))
         return
       case 4:
-        bus.write(addr, ((a >>> 4) << 12) | ((r >>> 4) << 8) | ((g >>> 4) << 4) | (b >>> 4), 2)
+        bus.write16(addr, ((a >>> 4) << 12) | ((r >>> 4) << 8) | ((g >>> 4) << 4) | (b >>> 4))
         return
     }
   }
@@ -191,14 +191,52 @@ export class Dma2d extends RegBlock {
     const ocolr = this.get("OCOLR") >>> 0
     // Register-to-memory: the colour is already in the output format.
     const fill = mode === 3 ? (ocm === 0 ? ocolr : ocm === 1 ? (0xff000000 | (ocolr & 0xffffff)) >>> 0 : 0) : 0
+    // The two bulk cases straight through memory: a fill in a 32/24-bit format, and a copy
+    // between identical formats with the alpha untouched. Anything else goes pixel by pixel.
+    const bulkFill = mode === 3 && ocm <= 1
+    const bulkCopy = mode === 0 && fcm === ocm && ((fgpfccr >>> 16) & 3) === 0 && obpp === fbpp
     for (let y = 0; y < lines; y++) {
+      const rowBytes = pixels * obpp
+      if (bulkFill) {
+        const out = this.bus.span(oaddr, rowBytes, true)
+        if (out) {
+          const { bytes, offset } = out
+          if (obpp === 4) {
+            const view = new DataView(bytes.buffer, bytes.byteOffset)
+            for (let x = 0; x < pixels; x++) view.setUint32(offset + x * 4, fill, true)
+          } else {
+            const b = fill & 0xff
+            const g = (fill >>> 8) & 0xff
+            const r = (fill >>> 16) & 0xff
+            for (let x = 0, o = offset; x < pixels; x++, o += 3) {
+              bytes[o] = b
+              bytes[o + 1] = g
+              bytes[o + 2] = r
+            }
+          }
+          oaddr += (pixels + oor) * obpp
+          faddr += Math.ceil((pixels + fgor) * fbpp)
+          baddr += Math.ceil((pixels + bgor) * bbpp)
+          continue
+        }
+      } else if (bulkCopy) {
+        const out = this.bus.span(oaddr, rowBytes, true)
+        const src = this.bus.span(faddr, rowBytes, false)
+        if (out && src) {
+          out.bytes.set(src.bytes.subarray(src.offset, src.offset + rowBytes), out.offset)
+          oaddr += (pixels + oor) * obpp
+          faddr += Math.ceil((pixels + fgor) * fbpp)
+          baddr += Math.ceil((pixels + bgor) * bbpp)
+          continue
+        }
+      }
       for (let x = 0; x < pixels; x++) {
         let argb: number
         if (mode === 3) {
           if (ocm <= 1) argb = fill
           else {
             // 16-bit formats take the colour as packed bits: write it straight.
-            this.bus.write(oaddr + x * obpp, ocolr & 0xffff, 2)
+            this.bus.write16(oaddr + x * obpp, ocolr & 0xffff)
             continue
           }
         } else {

@@ -8,7 +8,8 @@
  */
 import { Bus, BusFault } from "./bus"
 import { CORTEX_M4F, type CoreProfile } from "./chip"
-import { decode, type Instr } from "./decode"
+import { decode, jitHelpers, type Instr } from "./decode"
+import { compileBlock, type Compiled } from "./jit"
 import { CpuHalt, EXC, ExceptionRequest } from "./faults"
 import { Scs } from "./scs"
 
@@ -18,6 +19,43 @@ export { CpuHalt, EXC, ExceptionRequest, NUM_EXC, NUM_IRQ } from "./faults"
 
 /** Thumb condition codes. */
 export const COND = ["eq", "ne", "cs", "cc", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al", "nv"]
+
+/** Lines in the flash accelerator's instruction cache. */
+const ART_LINES = 64
+/** Slots in the hash over those lines: a quarter full, so probes stay short. */
+const ART_HASH = 256
+/** Home slot of a line: a Fibonacci hash in 32-bit integer arithmetic, its top bits. */
+const artSlot = (line: number) => Math.imul(line, 0x9e3779b1) >>> 24
+/** Longest straight-line block the run loop executes without returning to `step`. */
+const BLOCK_MAX = 64
+/** Instructions that (may) leave the straight line: a block ends after one of these. */
+const FLOW = /^(?:b(?:l|lx|x)?(?:\.w|\.n)?(?:eq|ne|cs|cc|mi|pl|vs|vc|hi|ls|ge|lt|gt|le)?\s|cb(?:n)?z\s|tb[bh]\s|it\w*\s|svc\s|bkpt\s|udf|wf[ie]|msr\s|cps|isb|dsb|dmb|(?:pop|ldm\w*)\b.*\bpc\b|(?:ldr|mov|add|sub)\w*\s+pc\b)/
+
+/**
+ * A straight run of decoded instructions from one address to the next branch, executed by
+ * the run loop with only the checks that matter between instructions; anything that leaves
+ * the line (a taken branch, an exception, an IT block, sleep) ends it early.
+ */
+type Block = {
+  addrs: Float64Array
+  instrs: Instr[]
+  n: number
+  fn: Compiled | null
+  lineShift: number
+  /** The block this one last went on to, by the address it left for: chained without a lookup. */
+  link: Block | null
+  linkPc: number
+}
+/**
+ * Decoded instructions and blocks of one 4 KB page, indexed by halfword. `inside` names a
+ * block that runs through an address that is not a block start, and `heat` counts entries
+ * there: an interrupt returns into the middle of blocks, and only an address entered often
+ * enough gets a block (and a compilation) of its own.
+ */
+type CachePage = { instrs: (Instr | undefined)[]; blocks: (Block | undefined)[]; inside: ({ block: Block; index: number } | undefined)[]; heat: Uint16Array }
+const emptyPage = (): CachePage => ({ instrs: [], blocks: [], inside: [], heat: new Uint16Array(0) })
+/** Entries at an address inside another block before it becomes a block start of its own. */
+const HOT = 32
 
 export class Cpu {
   readonly bus: Bus
@@ -80,7 +118,13 @@ export class Cpu {
   halted: CpuHalt | null = null
 
   /** Decoded instructions by address; flushed when flash is written. */
-  private cache = new Map<number, Instr>()
+  /**
+   * Decoded instructions by address, in 4 KB pages: a page is an array indexed by halfword,
+   * and the page of the last fetch is kept at hand since most fetches stay on it.
+   */
+  private cache = new Map<number, CachePage>()
+  private cachePageNo = -1
+  private cachePage: CachePage = emptyPage()
 
   /** Addresses the run loop stops at before executing. */
   breakpoints = new Set<number>()
@@ -123,6 +167,7 @@ export class Cpu {
     this.eventRegister = false
     this.halted = null
     this.cache.clear()
+    this.cachePageNo = -1
     this.scs.reset()
     this.scs.vtor = vectorBase >>> 0
     this.msp = this.bus.read32(vectorBase) & ~3
@@ -298,6 +343,8 @@ export class Cpu {
     this.sleepKind = kind
     this.sleeping = true
     if (this.scs.scr & 4) {
+      // SysTick stops with the clocks: bring it up to now, and let it resume from the wake-up.
+      this.scs.sync(this.cycles)
       this.deep = true
       this.onDeepSleep()
     }
@@ -308,6 +355,7 @@ export class Cpu {
     if (this.deep) {
       this.deep = false
       this.onDeepWake()
+      this.scs.resume(this.cycles)
     }
   }
 
@@ -428,6 +476,14 @@ export class Cpu {
     if (toThread && this.scs.scr & 2 && this.scs.pendingToTake(this.executionPriority()) === 0) this.enterSleep("wfi")
   }
 
+  /** CPACR grants CP10/CP11 (kept by the SCS), so compiled FP snippets test one flag. */
+  fpOn = false
+  /** An FP instruction with CP10/CP11 access off in CPACR (compiled blocks call this). */
+  fpDenied(pc: number): never {
+    this.pc = pc
+    this.fault(EXC.USAGE_FAULT, "coprocessor access denied (CPACR)")
+  }
+
   /** Raise a synchronous fault from within an instruction. */
   fault(exc: number, detail: string): never {
     this.scs.recordFault(exc, detail, this.pc)
@@ -441,46 +497,110 @@ export class Cpu {
    * prefetch buffer / accelerator cache that hide them. Lines are 128-bit on the F4's ART,
    * 256-bit on the F7's. `dataLines` is the data cache depth (DCEN: 8 lines).
    */
-  flashTiming = { latency: 0, prefetch: false, cache: false, lineBytes: 16, dataLines: 0 }
+  private timing = { latency: 0, prefetch: false, cache: false, lineBytes: 16, dataLines: 0 }
+  /** Whether fetches pay wait states at all, kept as one flag for the compiled blocks. */
+  timed = false
+  get flashTiming() {
+    return this.timing
+  }
+  set flashTiming(t) {
+    this.timing = t
+    this.timed = t.latency !== 0
+  }
+  /** Compile blocks to JavaScript (jit.ts); off runs them through the instruction closures. */
+  jit = true
   /** log2 of the line size, kept apart so the per-fetch check is one shift and one compare. */
   lineShift = 4
-  /** Address ranges that are flash (with its aliases), for the timing above. */
-  flashRanges: [number, number][] = []
+  /** Address ranges that are flash (with its aliases), for the timing above; kept as a 64 KB page map for the check. */
+  private flashPages = new Uint8Array(1 << 16)
+  set flashRanges(ranges: [number, number][]) {
+    this.flashPages.fill(0)
+    for (const [lo, hi] of ranges) for (let p = lo >>> 16; p <= (hi - 1) >>> 16; p++) this.flashPages[p] = 1
+  }
   private lastLine = -1
-  private readonly artLines = new Map<number, true>()
-  private readonly dataCacheLines = new Map<number, true>()
+  /**
+   * The accelerator's 64 lines: a FIFO ring of line numbers for eviction and an open-addressed
+   * hash of the same (-1 empty) for the lookup on every line change.
+   */
+  private readonly artRing = new Int32Array(ART_LINES).fill(-1)
+  private artNext = 0
+  private readonly artHash = new Int32Array(ART_HASH).fill(-1)
+  /** The data cache's lines (DCEN), a FIFO of at most `dataLines` line numbers. */
+  private readonly dataRing = new Int32Array(64).fill(-1)
+  private dataNext = 0
   /** ICRST / ARTRST: forget the cached lines. */
   resetFlashCaches() {
-    this.artLines.clear()
-    this.dataCacheLines.clear()
+    this.artRing.fill(-1)
+    this.artHash.fill(-1)
+    this.artNext = 0
+    this.dataRing.fill(-1)
+    this.dataNext = 0
     this.lastLine = -1
   }
+  private artHas(line: number) {
+    const h = this.artHash
+    for (let i = artSlot(line); ; i = (i + 1) & (ART_HASH - 1)) {
+      const v = h[i]
+      if (v === line) return true
+      if (v === -1) return false
+    }
+  }
+  private artAdd(line: number) {
+    const h = this.artHash
+    const old = this.artRing[this.artNext]
+    if (old !== -1) {
+      // Backward-shift deletion keeps every probe chain intact without tombstones.
+      let i = artSlot(old)
+      while (h[i] !== old) i = (i + 1) & (ART_HASH - 1)
+      let j = i
+      for (;;) {
+        j = (j + 1) & (ART_HASH - 1)
+        const v = h[j]
+        if (v === -1) break
+        const home = artSlot(v)
+        // v may move down to i if its home is not in (i, j].
+        if (i <= j ? home <= i || home > j : home <= i && home > j) {
+          h[i] = v
+          i = j
+        }
+      }
+      h[i] = -1
+    }
+    this.artRing[this.artNext] = line
+    this.artNext = (this.artNext + 1) & (ART_LINES - 1)
+    let i = artSlot(line)
+    while (h[i] !== -1) i = (i + 1) & (ART_HASH - 1)
+    h[i] = line
+  }
   private inFlash(addr: number) {
-    for (const [lo, hi] of this.flashRanges) if (addr >= lo && addr < hi) return true
-    return false
+    return this.flashPages[addr >>> 16] === 1
   }
   /** A fetch from a new flash line: pay the wait states unless prefetched or cached. */
   private fetchPenalty(addr: number, line: number) {
-    const t = this.flashTiming
+    this.cycles += this.fetchCost(addr, line)
+  }
+  /** The wait states a fetch from a new flash line costs, and the caches' bookkeeping. */
+  fetchCost(addr: number, line: number): number {
+    const t = this.timing
     const sequential = line === this.lastLine + 1
     this.lastLine = line
-    if (!this.inFlash(addr)) return
-    if (t.cache && this.artLines.has(line)) return
-    if (!(t.prefetch && sequential)) this.cycles += t.latency
-    if (t.cache) {
-      this.artLines.set(line, true)
-      if (this.artLines.size > 64) this.artLines.delete(this.artLines.keys().next().value!)
-    }
+    if (!this.inFlash(addr)) return 0
+    if (t.cache && this.artHas(line)) return 0
+    if (t.cache) this.artAdd(line)
+    return t.prefetch && sequential ? 0 : t.latency
   }
   /** A data read from flash (literal pools, tables): the wait states unless the data cache has the line. */
   dataPenalty(addr: number) {
-    const t = this.flashTiming
+    const t = this.timing
     if (!t.latency) return
+    this.bus.slow = true
     const line = addr >>> this.lineShift
-    if (t.dataLines) {
-      if (this.dataCacheLines.has(line)) return
-      this.dataCacheLines.set(line, true)
-      if (this.dataCacheLines.size > t.dataLines) this.dataCacheLines.delete(this.dataCacheLines.keys().next().value!)
+    const lines = t.dataLines
+    if (lines) {
+      const ring = this.dataRing
+      for (let i = 0; i < lines; i++) if (ring[i] === line) return
+      ring[this.dataNext] = line
+      this.dataNext = (this.dataNext + 1) % lines
     }
     this.cycles += t.latency
   }
@@ -489,27 +609,224 @@ export class Cpu {
   fetch(addr: number): Instr {
     if (this.bus.flashDirty) {
       this.cache.clear()
+    this.cachePageNo = -1
       this.bus.flashDirty = false
     }
     if (this.flashTiming.latency) {
       const line = addr >>> this.lineShift
       if (line !== this.lastLine) this.fetchPenalty(addr, line)
     }
-    let instr = this.cache.get(addr)
-    if (instr) return instr
+    return this.decodeAt(addr)
+  }
+
+  /** The cache page holding `addr`, made on first use. */
+  private pageOf(addr: number): CachePage {
+    const pageNo = addr >>> 12
+    if (pageNo === this.cachePageNo) return this.cachePage
+    let page = this.cache.get(pageNo)
+    if (page === undefined) {
+      page = { instrs: new Array(2048).fill(undefined), blocks: new Array(2048).fill(undefined), inside: new Array(2048).fill(undefined), heat: new Uint16Array(2048) }
+      this.cache.set(pageNo, page)
+    }
+    this.cachePageNo = pageNo
+    this.cachePage = page
+    return page
+  }
+
+  /** The decoded instruction at `addr`, without the fetch timing. */
+  private decodeAt(addr: number): Instr {
+    const page = this.pageOf(addr)
+    let instr = page.instrs[(addr & 0xfff) >>> 1]
+    if (instr !== undefined) return instr
     const hw1 = this.bus.fetch16(addr)
     const wide = (hw1 & 0xf800) >= 0xe800
     const hw2 = wide ? this.bus.fetch16(addr + 2) : 0
     instr = decode(hw1, hw2, addr, this.inITBlock)
-    if (addr < 0x20000000) this.cache.set(addr, instr)
+    if (addr < 0x20000000) page.instrs[(addr & 0xfff) >>> 1] = instr
     return instr
+  }
+
+  /**
+   * The block starting at `addr` (flash only), built on first use up to the next branch.
+   * An address inside another block is run from there through the interpreter (`runBlock`
+   * from that index) until it has been entered HOT times; then it gets its own block.
+   */
+  private blockAt(addr: number): Block | null {
+    if (addr >= 0x20000000) return null
+    const page = this.pageOf(addr)
+    const slot = (addr & 0xfff) >>> 1
+    let block = page.blocks[slot]
+    if (block !== undefined) return block
+    const holder = page.inside[slot]
+    if (holder !== undefined && page.heat[slot] < HOT) {
+      page.heat[slot]++
+      this.coldEntry = holder
+      return null
+    }
+    const addrs: number[] = []
+    const instrs: Instr[] = []
+    let at = addr
+    for (let i = 0; i < BLOCK_MAX && at < 0x20000000; i++) {
+      let instr: Instr
+      try {
+        instr = this.decodeAt(at)
+      } catch (e) {
+        // Off the end of memory: the line ends where the instructions do.
+        if (e instanceof BusFault && i > 0) break
+        throw e
+      }
+      addrs.push(at)
+      instrs.push(instr)
+      at = (at + instr.size) >>> 0
+      const br = instr.jsBranch
+      if (br !== undefined) {
+        // The block follows a static branch: a jump or call goes on at its target, a
+        // conditional one at the target when it points back (a loop) and at the
+        // fall-through otherwise. Never round into itself: a loop closes through the link.
+        const follow = br.cond === null || br.target < addrs[0] ? br.target : at
+        // Closing on its own start is a loop the compiled code keeps inside the block.
+        if (br.target === addrs[0] || addrs.includes(follow) || follow >= 0x20000000) break
+        at = follow
+        continue
+      }
+      if (FLOW.test(instr.text)) break
+    }
+    block = { addrs: Float64Array.from(addrs), instrs, n: instrs.length, fn: null, lineShift: this.lineShift, link: null, linkPc: -1 }
+    if (this.jit) block.fn = compileBlock(addrs, instrs, this.lineShift)
+    page.blocks[slot] = block
+    for (let i = 1; i < addrs.length; i++) {
+      const p = this.pageOf(addrs[i])
+      const k = (addrs[i] & 0xfff) >>> 1
+      if (p.inside[k] === undefined) p.inside[k] = { block, index: i }
+    }
+    this.cachePageNo = -1
+    return block
+  }
+  /** Set by `blockAt` for an address it declined to start a block at: where to interpret from. */
+  private coldEntry: { block: Block; index: number } | null = null
+
+  /** Whatever came due by the current cycle count: the SysTick, a peripheral event. */
+  service() {
+    if (this.cycles >= this.scs.systDue) this.scs.sync(this.cycles)
+    if (this.cycles >= this.nextEventCycle) this.onEvent()
+  }
+  /** Cycles the interpreter/compiled code compare against before the next instruction. */
+  deadline(target: number): number {
+    const a = this.scs.systDue
+    const b = this.nextEventCycle
+    return a < b ? (a < target ? a : target) : b < target ? b : target
+  }
+
+  /**
+   * Run the compiled form of a block; faults raised inside it are taken as `step` would,
+   * with the state the code flushed before the instruction that raised them.
+   */
+  private runCompiled(block: Block, target: number) {
+    const chain = this.breakpoints.size === 0
+    try {
+      for (;;) {
+        block.fn!(this, this.r, this.bus, this.s, block.instrs, jitHelpers, target)
+        // A block leaving on a taken branch has not looked at the deadline since its last
+        // instruction: what came due is taken now, as the run loop would. Then straight on to
+        // the next block while nothing needs the run loop's attention.
+        this.service()
+        if (!chain || this.cycles >= target || this.stop || this.sleeping || this.itstate !== 0 || this.scs.pendingCount !== 0 || this.bus.flashDirty) return
+        const pc = this.pc
+        let next: Block | null
+        if (block.linkPc === pc) next = block.link
+        else {
+          next = this.blockAt(pc)
+          if (next === null) {
+            this.coldEntry = null
+            return
+          }
+          block.link = next
+          block.linkPc = pc
+        }
+        if (next === null || next.fn === null || next.lineShift !== this.lineShift) return
+        block = next
+      }
+    } catch (e) {
+      // The instruction that raised it is the one at the PC the code left; the frame's return
+      // address is the instruction after it, as `step` would have set up.
+      let i = 0
+      while (i < block.n - 1 && block.addrs[i] !== this.pc) i++
+      const instr = block.instrs[i]
+      if (instr.js !== undefined) this.nextPc = (this.pc + instr.size) >>> 0
+      if (e instanceof ExceptionRequest) {
+        this.exceptionEntry(e.exc)
+      } else if (e instanceof BusFault) {
+        this.scs.recordFault(EXC.BUS_FAULT, e.message, this.pc)
+        this.exceptionEntry(this.scs.escalate(EXC.BUS_FAULT))
+      } else if (e instanceof CpuHalt) {
+        this.halted = e
+        throw e
+      } else throw e
+      // The instruction that faulted counts as executed; the handler runs from the next block.
+      this.pc = this.nextPc
+      this.cycles += instr.cycles
+      this.instructions += i + 1
+      this.bus.slow = false
+    }
+  }
+
+  /**
+   * Execute the block at the current PC until the line is left, the slice ends at `target`
+   * cycles, or something between instructions needs the full `step` path (a pending
+   * exception, an IT block, sleep, a stop request).
+   */
+  private runBlock(block: Block, target: number, from = 0) {
+    const { addrs, instrs, n } = block
+    const scs = this.scs
+    let pc = this.pc
+    let i = from
+    try {
+      for (; i < n; i++) {
+        if (this.timed) {
+          const line = pc >>> this.lineShift
+          if (line !== this.lastLine) this.fetchPenalty(pc, line)
+        }
+        const instr = instrs[i]
+        this.pc = pc
+        this.nextPc = (pc + instr.size) >>> 0
+        instr.exec(this)
+        pc = this.pc = this.nextPc
+        const cycles = (this.cycles += instr.cycles)
+        if (cycles >= scs.systDue) scs.sync(cycles)
+        if (cycles >= this.nextEventCycle) this.onEvent()
+        // Left the line, or something the plain step path must look at first.
+        if (i + 1 < n && pc !== addrs[i + 1]) {
+          this.instructions += i + 1 - from
+          return
+        }
+        if (cycles >= target || this.stop || this.sleeping || this.itstate !== 0 || scs.pendingCount !== 0) {
+          this.instructions += i + 1 - from
+          return
+        }
+      }
+      this.instructions += n - from
+    } catch (e) {
+      if (e instanceof ExceptionRequest) {
+        this.exceptionEntry(e.exc)
+      } else if (e instanceof BusFault) {
+        this.scs.recordFault(EXC.BUS_FAULT, e.message, this.pc)
+        this.exceptionEntry(this.scs.escalate(EXC.BUS_FAULT))
+      } else if (e instanceof CpuHalt) {
+        this.halted = e
+        throw e
+      } else throw e
+      // The instruction that faulted counts as executed; the handler runs from the next block.
+      this.pc = this.nextPc
+      this.cycles += instrs[i].cycles
+      this.instructions += i + 1 - from
+    }
   }
 
   /** Execute one instruction (or take a pending exception). Returns cycles spent. */
   step(): number {
     const before = this.cycles
     // Pending exceptions are taken between instructions.
-    const pend = this.scs.pendingToTake(this.executionPriority())
+    const pend = this.scs.anyPending() ? this.scs.pendingToTake(this.executionPriority()) : 0
     if (pend !== 0) {
       if (this.sleeping) this.leaveSleep()
       this.nextPc = this.pc
@@ -520,7 +837,7 @@ export class Cpu {
     if (this.sleeping) {
       this.cycles += 1
       this.sleepCycles += 1
-      if (!this.deep) this.scs.tick(1)
+      if (!this.deep && this.cycles >= this.scs.systDue) this.scs.sync(this.cycles)
       return 1
     }
     const pc = this.pc
@@ -561,10 +878,9 @@ export class Cpu {
     this.pc = this.nextPc
     this.cycles += instr.cycles
     this.instructions++
-    const spent = this.cycles - before
-    this.scs.tick(spent)
+    if (this.cycles >= this.scs.systDue) this.scs.sync(this.cycles)
     if (this.cycles >= this.nextEventCycle) this.onEvent()
-    return spent
+    return this.cycles - before
   }
 
   /** Run for at least `cycles` cycles; stops early when halted. Returns cycles actually spent. */
@@ -578,16 +894,35 @@ export class Cpu {
         // (SysTick is stopped along with the rest of the clocks in a deep sleep).
         if (this.wakeup()) this.leaveSleep()
         else {
-          const skip = Math.max(1, Math.min(target - this.cycles, this.deep ? Infinity : this.scs.cyclesUntilTick(), this.nextEventCycle - this.cycles))
+          const skip = Math.max(1, Math.min(target - this.cycles, this.deep ? Infinity : this.scs.systDue - this.cycles, this.nextEventCycle - this.cycles))
           this.cycles += skip
           this.sleepCycles += skip
-          if (!this.deep) this.scs.tick(skip)
+          if (!this.deep && this.cycles >= this.scs.systDue) this.scs.sync(this.cycles)
           if (this.cycles >= this.nextEventCycle) this.onEvent()
           continue
         }
-      } else if (this.breakpoints.size && this.breakpoints.has(this.pc)) {
-        this.halted = new CpuHalt("bkpt", "breakpoint", this.pc)
-        break
+      } else if (this.breakpoints.size) {
+        if (this.breakpoints.has(this.pc)) {
+          this.halted = new CpuHalt("bkpt", "breakpoint", this.pc)
+          break
+        }
+      } else if (this.itstate === 0 && this.scs.pendingCount === 0) {
+        // The common case: nothing pending, no IT block — run the straight line as a block.
+        if (this.bus.flashDirty) this.fetch(this.pc)
+        const block = this.blockAt(this.pc)
+        if (block !== null) {
+          if (block.fn !== null && block.lineShift === this.lineShift) {
+            this.runCompiled(block, target)
+            this.service()
+          } else this.runBlock(block, target)
+          continue
+        }
+        const cold = this.coldEntry
+        if (cold !== null) {
+          this.coldEntry = null
+          this.runBlock(cold.block, target, cold.index)
+          continue
+        }
       }
       this.step()
     }

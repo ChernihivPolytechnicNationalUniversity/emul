@@ -4,6 +4,8 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { compression } from 'vite-plugin-compression2'
 
+const ISOLATION = { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' }
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -17,6 +19,9 @@ export default defineConfig({
       threshold: 1024,
     }),
   ],
+  // Cross-origin isolation for SharedArrayBuffer: the simulation runs each MCU core in a worker of its own.
+  server: { headers: ISOLATION },
+  preview: { headers: ISOLATION },
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),

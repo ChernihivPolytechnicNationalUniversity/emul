@@ -1,4 +1,4 @@
-import type { Damage, PartState } from "@/schematic/types"
+import { partKey, type Damage, type PartState } from "@/schematic/types"
 import {
   capacityAfterAge,
   capacityAtTemp,
@@ -53,6 +53,17 @@ const REG_OPEN = 3
 const MAX_ITER = 60
 const ABS_TOL = 1e-6
 const REL_TOL = 1e-3
+/**
+ * A circuit that has stopped moving is not solved again until something drives it: after
+ * SETTLED_STEPS consecutive steps that moved no node by more than SETTLED_DV and left every
+ * capacitor and inductor drifting by less than SETTLED_DRIFT per second, the step is skipped.
+ */
+const SETTLED_STEPS = 3
+const SETTLED_DV = 1e-6
+const SETTLED_DRIFT = 1e-3
+/** Operating points remembered by switch/pad state (see `solve`). */
+const MEMO_POINTS = 64
+type OperatingPoint = { v: Float64Array; x: Float64Array; region: Uint8Array; jA: Float64Array; jB: Float64Array; live: Float64Array }
 /**
  * Overload before a current/power rating breaks the part: the excess ratio integrates over
  * simulated time and the part fails once it exceeds this (10 ms at 2× the rating, 1 ms at 11×).
@@ -114,14 +125,15 @@ const Q_BR = 3
 const BJT_REGIONS = ["cut-off", "saturation", "reverse", "active"] as const
 const MOS_REGIONS = ["off", "ohmic", "reverse", "saturation"] as const
 
-export type PartReader = (object: string, part: string) => PartState
+export type PartReader = (key: string) => PartState
 
 /** Whether a switch element conducts given its part's state. */
 function switchClosed(closed: "on" | "pressed" | "off", st: PartState): boolean {
   return closed === "on" ? !!st.on : closed === "off" ? !st.on : !!st.pressed
 }
 /** What an MCU pad (object, model node) drives right now. */
-export type PinReader = (object: string, node: string) => GpioState
+/** `index` is the element's position in the netlist, for the reader to cache its lookup by. */
+export type PinReader = (index: number, object: string, node: string) => GpioState
 const NO_PINS: PinReader = () => null
 /** GpioState encoded for the per-step array: 0 floating, 1 high, 2 low, 3 pull-up, 4 pull-down. */
 const GPIO_CODE: Record<string, number> = { high: 1, low: 2, pullup: 3, pulldown: 4 }
@@ -214,6 +226,8 @@ export class Engine {
   private readonly indV: Float64Array
   /** Accumulated overload (seconds × excess ratio). */
   private readonly stress: Float64Array
+  /** Load against the heating rating each element last ran at, for the settled steps. */
+  private readonly rRatio: Float64Array
   /** Last junction voltages used for limiting: [vd | vbe] and [vbc]. */
   private readonly jA: Float64Array
   private readonly jB: Float64Array
@@ -297,8 +311,23 @@ export class Engine {
   private readonly indexOf: Map<string, number>
   /** No diodes or transistors: one solve per step, and the matrix never changes. */
   private readonly linear: boolean
+  /** Every switch's part key, built once: the reader is called per element per step. */
+  private readonly partKeys: string[]
+  /** Indices of the elements read from pads each step: GPIO drivers and live resistors. */
+  private readonly padElements: Int32Array
+  /** Elements whose exact value the switch mask does not carry: live resistors and DAC-driven pads. */
+  private readonly liveElements: Int32Array
+  /** No capacitor, inductor or battery: the operating point is a function of the inputs alone. */
+  private readonly stateless: boolean
+  /** Diodes (their eye average moves every step) and, after each full update, the parts under load or still hot. */
+  private readonly diodeElements: Int32Array
+  private loadedElements: number[] = []
   /** RMS averaging time constant, seconds. */
   private readonly tau: number
+  /** Switch/pad hash of the current step, and how many steps in a row ended at a fixed point. */
+  private stepMask = 0
+  private settledRun = 0
+  private readonly hasBattery: boolean
   /** The `dt` and switch states `lu` was factorized for; a change invalidates it. */
   private luDt = 0
   private luSwitches = 0
@@ -328,12 +357,19 @@ export class Engine {
     this.ac = minFreq < Infinity
     this.tau = this.ac ? Math.max(RMS_MIN_TAU, RMS_PERIODS / minFreq) : 0
     this.linear = linear
+    this.partKeys = net.elements.map((el) => (el.kind === "SW" ? partKey(el.object, el.part) : ""))
+    this.padElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) ? [i] : [])))
+    this.diodeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "D" ? [i] : [])))
+    this.liveElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) ? [i] : [])))
+    this.stateless = !net.elements.some((el) => el.kind === "C" || el.kind === "L" || el.kind === "BAT")
+    this.hasBattery = net.elements.some((el) => el.kind === "BAT")
 
     this.capV = new Float64Array(m)
     this.capI = new Float64Array(m)
     this.indI = new Float64Array(m)
     this.indV = new Float64Array(m)
     this.stress = new Float64Array(m)
+    this.rRatio = new Float64Array(m)
     this.jA = new Float64Array(m)
     this.jB = new Float64Array(m)
     this.msI = new Float64Array(m)
@@ -410,6 +446,7 @@ export class Engine {
       this.indI[to] = prev.indI[from]
       this.indV[to] = prev.indV[from]
       this.stress[to] = prev.stress[from]
+      this.rRatio[to] = prev.rRatio[from]
       this.msI[to] = prev.msI[from]
       this.msV[to] = prev.msV[from]
       this.msP[to] = prev.msP[from]
@@ -710,7 +747,7 @@ export class Engine {
           break
         }
         case "SW": {
-          if (switchClosed(el.closed, parts(el.object, el.part))) {
+          if (switchClosed(el.closed, parts(this.partKeys[i]))) {
             if (withA) this.addG(el.a, el.b, 1 / el.ron)
           } else if (this.arc[i]) {
             // i = (v − pol·V_ARC) / R_ARC: a conductance and the Norton current of the arc drop.
@@ -744,13 +781,57 @@ export class Engine {
     }
   }
 
+  /**
+   * The running quantities of a settled step, with every current and voltage as it was: the
+   * LED eye averages move toward their currents and stressed parts keep heating. Returns
+   * false when a part would cross its limit, for the full update to record the failure.
+   */
+  private settledTick(dt: number): boolean {
+    this.failures.length = 0
+    const k = Math.min(1, dt / LED_EYE_TAU)
+    const diodes = this.diodeElements
+    for (let j = 0; j < diodes.length; j++) {
+      const i = diodes[j]
+      this.diodeAvg[i] += (this.rCurrent[i] - this.diodeAvg[i]) * k
+    }
+    const loaded = this.loadedElements
+    for (let j = 0; j < loaded.length; j++) {
+      const i = loaded[j]
+      const ratio = this.rRatio[i]
+      const stress = ratio > 20 ? Infinity : Math.max(0, this.stress[i] + dt * (ratio - 1))
+      if (stress > STRESS_LIMIT) return false
+      this.stress[i] = stress
+    }
+    return true
+  }
+
+  /**
+   * Whether the step just taken left the circuit where it was: converged, no strike, no AC
+   * source, nothing stored moving (a capacitor still charging or an inductor's current
+   * ramping would drift over the steps skipped), no battery (its state drifts by design),
+   * and the node voltages within tolerance of the step before.
+   */
+  private settledAfter(dt: number): boolean {
+    if (!this.converged || this.struck || this.ac || this.hasBattery) return false
+    const n = this.net.nodes
+    for (let i = 0; i < n; i++) if (Math.abs(this.v[i] - this.prevV[i]) > SETTLED_DV) return false
+    const elements = this.net.elements
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i]
+      // Drift bounds: at most SETTLED_DRIFT volts (or amps) per second if the state were frozen.
+      if (el.kind === "C" && Math.abs(this.capI[i]) > el.value * SETTLED_DRIFT) return false
+      if (el.kind === "L" && Math.abs(this.indV[i]) > el.value * SETTLED_DRIFT) return false
+    }
+    return dt > 0
+  }
+
   /** Hash of every switch and pad state, so a toggle invalidates the cached factorization. */
   private switchMask(parts: PartReader) {
     let mask = 0
     const elements = this.net.elements
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i]
-      if (el.kind === "SW") mask = (mask * 31 + (switchClosed(el.closed, parts(el.object, el.part)) ? 1 : this.arc[i] ? 2 : 0)) | 0
+      if (el.kind === "SW") mask = (mask * 31 + (switchClosed(el.closed, parts(this.partKeys[i])) ? 1 : this.arc[i] ? 2 : 0)) | 0
       else if (el.kind === "GPIO") mask = (mask * 31 + this.gpioState[i]) | 0
       else if (el.kind === "R" && el.live) mask = (mask * 31 + (this.ohms[i] | 0)) | 0
       else if (el.kind === "BAT") mask = (mask * 31 + this.batStep[i]) | 0
@@ -758,23 +839,52 @@ export class Engine {
     return mask
   }
 
-  step(dt: number, parts: PartReader, pins: PinReader = NO_PINS) {
+  /**
+   * One step of `dt`. `refreshPins` false promises the pads read exactly what they did last
+   * step (the caller tracks its MCUs' pad versions), so the reads are skipped.
+   */
+  step(dt: number, parts: PartReader, pins: PinReader = NO_PINS, refreshPins = true) {
     const n = this.net.nodes
     const elements = this.net.elements
 
     // Pad states are read once per step: the MCU may change them between steps, not within.
-    for (let i = 0; i < elements.length; i++) {
+    let disturbed = false
+    const padElements = this.padElements
+    for (let k = 0; refreshPins && k < padElements.length; k++) {
+      const i = padElements[k]
       const el = elements[i]
       if (el.kind === "GPIO") {
-        const st = pins(el.object, el.nodeKey)
+        const st = pins(i, el.object, el.nodeKey)
         if (typeof st === "number") {
+          if (this.gpioState[i] !== GPIO_VOLTS || this.gpioVolts[i] !== st) disturbed = true
           this.gpioState[i] = GPIO_VOLTS
           this.gpioVolts[i] = st
-        } else this.gpioState[i] = st ? GPIO_CODE[st] : 0
+        } else {
+          const code = st ? GPIO_CODE[st] : 0
+          if (this.gpioState[i] !== code) disturbed = true
+          this.gpioState[i] = code
+        }
       } else if (el.kind === "R" && el.live) {
-        const r = pins(el.object, el.live)
-        this.ohms[i] = typeof r === "number" && r > 0 ? r : el.value
+        const r = pins(i, el.object, el.live)
+        const ohms = typeof r === "number" && r > 0 ? r : el.value
+        if (this.ohms[i] !== ohms) disturbed = true
+        this.ohms[i] = ohms
       }
+    }
+    const mask = this.switchMask(parts)
+    if (mask !== this.stepMask) disturbed = true
+    this.stepMask = mask
+    if (disturbed) this.settledRun = 0
+
+    if (this.settledRun >= SETTLED_STEPS) {
+      // At a fixed point of the circuit with nothing driving it anywhere else, this step's
+      // solution is the previous one: only the running quantities move on.
+      this.struck = false
+      this.converged = true
+      if (!this.settledTick(dt)) this.updateState(dt, parts)
+      this.updateProbes(dt)
+      this.time += dt
+      return
     }
 
     this.struck = false
@@ -785,10 +895,17 @@ export class Engine {
       if (strike > 0) this.v.set(this.prevV)
       this.converged = this.solve(dt, parts)
       if (strike === MAX_STRIKES || !this.checkStrikes(parts)) break
+      // The arc is a switch state too: the next solve must not reuse the gap's factorization.
+      this.stepMask = this.switchMask(parts)
     }
 
     this.updateState(dt, parts)
     this.updateProbes(dt)
+    this.settledRun = this.settledAfter(dt) ? this.settledRun + 1 : 0
+    if (this.settledRun >= SETTLED_STEPS) {
+      this.loadedElements = []
+      for (let i = 0; i < this.rRatio.length; i++) if (this.rRatio[i] !== 0 || this.stress[i] !== 0) this.loadedElements.push(i)
+    }
 
     if (this.ac) {
       for (let i = 0; i < n; i++) this.v2[i] = this.msPrimed ? this.ema(this.v2[i], this.v[i] * this.v[i], dt) : this.v[i] * this.v[i]
@@ -810,7 +927,7 @@ export class Engine {
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i]
       if (el.kind !== "SW" || this.arc[i] || el.strike === Infinity) continue
-      if (switchClosed(el.closed, parts(el.object, el.part))) continue
+      if (switchClosed(el.closed, parts(this.partKeys[i]))) continue
       const vd = Math.abs(this.vol(el.a, this.v) - this.vol(el.b, this.v))
       if (vd < el.strike) continue
       this.arc[i] = this.vol(el.a, this.v) - this.vol(el.b, this.v) > 0 ? 1 : 2
@@ -845,14 +962,39 @@ export class Engine {
         }
       }
     }
-    guess.set(this.v)
     let converged = false
     /** Smallest error any iterate reached, and with it the `best` solution vector. */
     let bestErr = Infinity
 
     // A linear circuit has a constant matrix: factorize once and only rebuild the
     // right-hand side, which turns the per-step cost from O(n³) into O(n²).
-    const mask = this.switchMask(parts)
+    const mask = this.stepMask
+    // The operating point last found for these switch and pad states: on a circuit with no
+    // stored energy it is the answer (the same inputs give the same fixed point); on one
+    // with, it is where the iteration starts, which spares it the junction limiting of a
+    // cold start. A PWM dithering a pad flips between two such points every step.
+    const memo = this.linear || this.ac ? undefined : this.memo.get(mask)
+    if (memo !== undefined && this.memoMatches(memo)) {
+      if (this.stateless) {
+        this.v.set(memo.v)
+        x.set(memo.x)
+        this.rRegion.set(memo.region)
+        this.jA.set(memo.jA)
+        this.jB.set(memo.jB)
+        return true
+      }
+      this.v.set(memo.v)
+      for (let i = 0; i < elements.length; i++) {
+        const el = elements[i]
+        if (el.kind === "D") this.jA[i] = this.vol(el.anode, this.v) - this.vol(el.cathode, this.v)
+        else if (el.kind === "Q") {
+          const sg = el.polarity
+          this.jA[i] = sg * (this.vol(el.b, this.v) - this.vol(el.e, this.v))
+          this.jB[i] = sg * (this.vol(el.b, this.v) - this.vol(el.c, this.v))
+        }
+      }
+    }
+    guess.set(this.v)
     if (this.linear && this.luValid && this.luDt === dt && this.luSwitches === mask) {
       z.fill(0)
       this.stampLinear(dt, parts, false, true)
@@ -1055,7 +1197,35 @@ export class Engine {
 
     this.v.set(guess.subarray(0, n))
     if (this.linear) for (let i = 0; i < n; i++) this.v[i] = x[i]
+    if (converged && !this.linear && !this.ac) this.remember(mask)
     return converged
+  }
+
+  /** The operating points by switch/pad state, a few of the last distinct ones. */
+  private readonly memo = new Map<number, OperatingPoint>()
+  private remember(mask: number) {
+    const live = this.liveElements
+    const point: OperatingPoint = {
+      v: Float64Array.from(this.v),
+      x: Float64Array.from(this.x),
+      region: Uint8Array.from(this.rRegion),
+      jA: Float64Array.from(this.jA),
+      jB: Float64Array.from(this.jB),
+      live: Float64Array.from(live, (i) => (this.net.elements[i].kind === "GPIO" ? this.gpioVolts[i] : this.ohms[i])),
+    }
+    this.memo.delete(mask)
+    this.memo.set(mask, point)
+    if (this.memo.size > MEMO_POINTS) this.memo.delete(this.memo.keys().next().value!)
+  }
+  /** The mask rounds live resistances and leaves DAC voltages out: those must match exactly. */
+  private memoMatches(point: OperatingPoint): boolean {
+    const live = this.liveElements
+    for (let k = 0; k < live.length; k++) {
+      const i = live[k]
+      const now = this.net.elements[i].kind === "GPIO" ? this.gpioVolts[i] : this.ohms[i]
+      if (point.live[k] !== now) return false
+    }
+    return true
   }
 
   /**
@@ -1317,7 +1487,7 @@ export class Engine {
           break
         }
         case "SW": {
-          const closed = switchClosed(el.closed, parts(el.object, el.part))
+          const closed = switchClosed(el.closed, parts(this.partKeys[i]))
           const arcing = !closed && this.arc[i] !== 0
           const vd = this.vol(el.a, this.v) - this.vol(el.b, this.v)
           const pol = this.arc[i] === 2 ? -1 : 1
@@ -1447,6 +1617,7 @@ export class Engine {
     const lim = el.limits
     if (!lim) {
       this.rLoad[i] = -1
+      this.rRatio[i] = 0
       return
     }
     let load = lim.current !== undefined ? iLoad / lim.current : 0
@@ -1482,6 +1653,7 @@ export class Engine {
     // Far beyond the rating there is no thermal grace period.
     const stress = ratio > 20 ? Infinity : Math.max(0, this.stress[i] + dt * (ratio - 1))
     this.stress[i] = stress
+    this.rRatio[i] = ratio
     if (stress > STRESS_LIMIT) this.fail(el, lim.fail, what, actual, rated, unit)
   }
 

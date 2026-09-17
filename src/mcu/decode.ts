@@ -15,6 +15,20 @@ export type Instr = {
   exec: (c: Cpu) => void
   /** Disassembly, for the debugger and for error messages. */
   text: string
+  /**
+   * The same semantics as `exec` as JavaScript statements for the block compiler (jit.ts):
+   * over `c`, `r`, `bus`, `s`; a taken branch sets `c.pc` and ends with `$EXIT`.
+   * Absent for instructions the compiler calls through `exec`.
+   */
+  js?: string
+  /** The snippet may touch the bus or fault: state is flushed before it, checks run after. */
+  jsMem?: boolean
+  /**
+   * A branch with a static target, for the compiler to lay out (it may continue the block
+   * at the target): the condition as a JS expression (null: unconditional), the cycles a
+   * taken branch adds, and whether LR gets the return address first (BL).
+   */
+  jsBranch?: { target: number; extra: number; cond: string | null; link: boolean }
 }
 
 // --- arithmetic helpers -------------------------------------------------------------
@@ -132,6 +146,60 @@ const regList = (mask: number) => {
   return "{" + names.join(",") + "}"
 }
 
+// --- snippets for the block compiler (jit.ts) ----------------------------------------
+//
+// Each is the instruction's semantics as JavaScript statements over `c` (the Cpu), `r`
+// (its registers), `bus` and `s` (the FP registers). They
+// mirror the closures below exactly: whatever the closure computes, the snippet computes
+// the same way, and scripts/mcu-jit.ts checks the two agree on real firmware.
+
+/** Attach a snippet to a decoded instruction. */
+function J(instr: Instr, js: string, mem = false): Instr {
+  instr.js = js
+  if (mem) instr.jsMem = true
+  return instr
+}
+/** N and Z from the uint32 in `v`. */
+const NZ = (v: string) => `c.n = ${v} >>> 31; c.z = ${v} === 0 ? 1 : 0;`
+/** a + b + cin (uint32 expressions) into r[d] (or nowhere for d < 0), optionally with all four flags. */
+const ADDC = (d: number, a: string, b: string, cin: string, flags: boolean) =>
+  `const a = ${a}, b = ${b}, sum = a + b + ${cin}, v = sum >>> 0; ${d >= 0 ? `r[${d}] = v;` : ""} ${flags ? `${NZ("v")} c.c = sum > 0xffffffff ? 1 : 0; c.v = (~(a ^ b) & (a ^ v)) >>> 31;` : ""}`
+/** The bitwise complement of a uint32 expression, as uint32 (the b operand of a subtraction). */
+const NOT = (x: string) => `(~${x} >>> 0)`
+/** A shift by an immediate with the carry out, as shiftC computes it. */
+function SHIFT(d: number, x: string, type: number, n: number, flags: boolean): string {
+  let v: string
+  let carry: string
+  if (type === SRType.LSL) {
+    v = `(x << ${n}) >>> 0`
+    carry = `(x >>> ${32 - n}) & 1`
+  } else if (type === SRType.LSR) {
+    v = n === 32 ? "0" : `x >>> ${n}`
+    carry = n === 32 ? "x >>> 31" : `(x >>> ${n - 1}) & 1`
+  } else {
+    v = n === 32 ? "(x & 0x80000000 ? 0xffffffff : 0)" : `(x >> ${n}) >>> 0`
+    carry = n === 32 ? "x >>> 31" : `(x >>> ${n - 1}) & 1`
+  }
+  return `const x = ${x}, v = ${v}; r[${d}] = v; ${flags ? `${NZ("v")} c.c = ${carry};` : ""}`
+}
+/** Condition tests as condPassed evaluates them, by condition code. */
+const COND_JS = [
+  "c.z === 1", "c.z === 0", "c.c === 1", "c.c === 0", "c.n === 1", "c.n === 0", "c.v === 1", "c.v === 0",
+  "c.c === 1 && c.z === 0", "!(c.c === 1 && c.z === 0)", "c.n === c.v", "c.n !== c.v", "c.n === c.v && c.z === 0", "!(c.n === c.v && c.z === 0)", "true", "true",
+]
+/**
+ * Every FP snippet's entry: the coprocessor access check and the FP-context mark, as
+ * `coprocessor` wraps them. The fault sets the PC itself (`$A`, the compiler fills it in),
+ * so an FP instruction that touches no memory needs nothing flushed before it.
+ */
+const FPX = "if (!c.fpOn) c.fpDenied($A); c.control |= 4;"
+const JF = (instr: Instr, js: string, mem = false) => J(instr, `${FPX} ${js}`, mem)
+/** Mark a branch with a static target for the compiler; `extra` cycles when taken. */
+function BR(instr: Instr, target: number, extra: number, cond: string | null, link = false): Instr {
+  instr.jsBranch = { target: (target & ~1) >>> 0, extra, cond, link }
+  return instr
+}
+
 // --- helpers used by the closures ---------------------------------------------------
 
 function setNZ(c: Cpu, result: number) {
@@ -204,21 +272,27 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       const [srt, amount] = decodeImmShift(type, imm5)
       if (type === 0 && imm5 === 0) {
         // MOV (register) T2: MOVS Rd, Rm
-        return i2(1, `movs ${REG[rdN]}, ${REG[rm]}`, (c) => {
-          const v = c.r[rm]
-          c.r[rdN] = v
-          if (setflags) setNZ(c, v)
-        })
+        return J(
+          i2(1, `movs ${REG[rdN]}, ${REG[rm]}`, (c) => {
+            const v = c.r[rm]
+            c.r[rdN] = v
+            if (setflags) setNZ(c, v)
+          }),
+          `const v = r[${rm}]; r[${rdN}] = v; ${setflags ? NZ("v") : ""}`,
+        )
       }
       const name = ["lsl", "lsr", "asr"][type]
-      return i2(1, `${name}s ${REG[rdN]}, ${REG[rm]}, #${amount}`, (c) => {
-        const v = shiftC(c.r[rm], srt, amount, c.c)
-        c.r[rdN] = v
-        if (setflags) {
-          setNZ(c, v)
-          c.c = shiftCarry
-        }
-      })
+      return J(
+        i2(1, `${name}s ${REG[rdN]}, ${REG[rm]}, #${amount}`, (c) => {
+          const v = shiftC(c.r[rm], srt, amount, c.c)
+          c.r[rdN] = v
+          if (setflags) {
+            setNZ(c, v)
+            c.c = shiftCarry
+          }
+        }),
+        SHIFT(rdN, `r[${rm}]`, srt, amount, setflags),
+      )
     }
     if (opc === 0x0c || opc === 0x0d) {
       // ADD/SUB (register) T1
@@ -226,15 +300,18 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       const rn = (hw >>> 3) & 7
       const rm = (hw >>> 6) & 7
       const sub = opc === 0x0d
-      return i2(1, `${sub ? "subs" : "adds"} ${REG[rdN]}, ${REG[rn]}, ${REG[rm]}`, (c) => {
-        const v = sub ? addWithCarry(c.r[rn], ~c.r[rm], 1) : addWithCarry(c.r[rn], c.r[rm], 0)
-        c.r[rdN] = v
-        if (setflags) {
-          setNZ(c, v)
-          c.c = lastC
-          c.v = lastV
-        }
-      })
+      return J(
+        i2(1, `${sub ? "subs" : "adds"} ${REG[rdN]}, ${REG[rn]}, ${REG[rm]}`, (c) => {
+          const v = sub ? addWithCarry(c.r[rn], ~c.r[rm], 1) : addWithCarry(c.r[rn], c.r[rm], 0)
+          c.r[rdN] = v
+          if (setflags) {
+            setNZ(c, v)
+            c.c = lastC
+            c.v = lastV
+          }
+        }),
+        ADDC(rdN, `r[${rn}]`, sub ? NOT(`r[${rm}]`) : `r[${rm}]`, sub ? "1" : "0", setflags),
+      )
     }
     if (opc === 0x0e || opc === 0x0f) {
       // ADD/SUB (immediate) T1: imm3
@@ -242,51 +319,66 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       const rn = (hw >>> 3) & 7
       const imm = (hw >>> 6) & 7
       const sub = opc === 0x0f
-      return i2(1, `${sub ? "subs" : "adds"} ${REG[rdN]}, ${REG[rn]}, #${imm}`, (c) => {
-        const v = sub ? addWithCarry(c.r[rn], ~imm, 1) : addWithCarry(c.r[rn], imm, 0)
-        c.r[rdN] = v
-        if (setflags) {
-          setNZ(c, v)
-          c.c = lastC
-          c.v = lastV
-        }
-      })
+      return J(
+        i2(1, `${sub ? "subs" : "adds"} ${REG[rdN]}, ${REG[rn]}, #${imm}`, (c) => {
+          const v = sub ? addWithCarry(c.r[rn], ~imm, 1) : addWithCarry(c.r[rn], imm, 0)
+          c.r[rdN] = v
+          if (setflags) {
+            setNZ(c, v)
+            c.c = lastC
+            c.v = lastV
+          }
+        }),
+        ADDC(rdN, `r[${rn}]`, sub ? String(~imm >>> 0) : String(imm), sub ? "1" : "0", setflags),
+      )
     }
     const rdN = (hw >>> 8) & 7
     const imm8 = hw & 0xff
     switch (opc >>> 2) {
       case 4: // MOV (immediate) T1
-        return i2(1, `movs ${REG[rdN]}, #${imm8}`, (c) => {
-          c.r[rdN] = imm8
-          if (setflags) setNZ(c, imm8)
-        })
+        return J(
+          i2(1, `movs ${REG[rdN]}, #${imm8}`, (c) => {
+            c.r[rdN] = imm8
+            if (setflags) setNZ(c, imm8)
+          }),
+          `r[${rdN}] = ${imm8}; ${setflags ? `c.n = 0; c.z = ${imm8 === 0 ? 1 : 0};` : ""}`,
+        )
       case 5: // CMP (immediate) T1
-        return i2(1, `cmp ${REG[rdN]}, #${imm8}`, (c) => {
-          const v = addWithCarry(c.r[rdN], ~imm8, 1)
-          setNZ(c, v)
-          c.c = lastC
-          c.v = lastV
-        })
+        return J(
+          i2(1, `cmp ${REG[rdN]}, #${imm8}`, (c) => {
+            const v = addWithCarry(c.r[rdN], ~imm8, 1)
+            setNZ(c, v)
+            c.c = lastC
+            c.v = lastV
+          }),
+          ADDC(-1, `r[${rdN}]`, String(~imm8 >>> 0), "1", true),
+        )
       case 6: // ADD (immediate) T2
-        return i2(1, `adds ${REG[rdN]}, #${imm8}`, (c) => {
-          const v = addWithCarry(c.r[rdN], imm8, 0)
-          c.r[rdN] = v
-          if (setflags) {
-            setNZ(c, v)
-            c.c = lastC
-            c.v = lastV
-          }
-        })
+        return J(
+          i2(1, `adds ${REG[rdN]}, #${imm8}`, (c) => {
+            const v = addWithCarry(c.r[rdN], imm8, 0)
+            c.r[rdN] = v
+            if (setflags) {
+              setNZ(c, v)
+              c.c = lastC
+              c.v = lastV
+            }
+          }),
+          ADDC(rdN, `r[${rdN}]`, String(imm8), "0", setflags),
+        )
       default: // SUB (immediate) T2
-        return i2(1, `subs ${REG[rdN]}, #${imm8}`, (c) => {
-          const v = addWithCarry(c.r[rdN], ~imm8, 1)
-          c.r[rdN] = v
-          if (setflags) {
-            setNZ(c, v)
-            c.c = lastC
-            c.v = lastV
-          }
-        })
+        return J(
+          i2(1, `subs ${REG[rdN]}, #${imm8}`, (c) => {
+            const v = addWithCarry(c.r[rdN], ~imm8, 1)
+            c.r[rdN] = v
+            if (setflags) {
+              setNZ(c, v)
+              c.c = lastC
+              c.v = lastV
+            }
+          }),
+          ADDC(rdN, `r[${rdN}]`, String(~imm8 >>> 0), "1", setflags),
+        )
     }
   }
 
@@ -295,12 +387,15 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
     const opc = (hw >>> 6) & 0xf
     const rdn = hw & 7
     const rm = (hw >>> 3) & 7
-    const logic = (name: string, f: (a: number, b: number) => number, write = true) =>
-      i2(1, `${name}${write ? "s" : ""} ${REG[rdn]}, ${REG[rm]}`, (c) => {
-        const v = f(c.r[rdn], c.r[rm]) >>> 0
-        if (write) c.r[rdn] = v
-        if (setflags || !write) setNZ(c, v)
-      })
+    const logic = (name: string, f: (a: number, b: number) => number, write = true, js?: string) =>
+      J(
+        i2(1, `${name}${write ? "s" : ""} ${REG[rdn]}, ${REG[rm]}`, (c) => {
+          const v = f(c.r[rdn], c.r[rm]) >>> 0
+          if (write) c.r[rdn] = v
+          if (setflags || !write) setNZ(c, v)
+        }),
+        `const v = (${js ?? "0"}) >>> 0; ${write ? `r[${rdn}] = v;` : ""} ${setflags || !write ? NZ("v") : ""}`,
+      )
     const shift = (name: string, type: SRType) =>
       i2(1, `${name}s ${REG[rdn]}, ${REG[rm]}`, (c) => {
         const v = shiftC(c.r[rdn], type, c.r[rm] & 0xff, c.c)
@@ -312,9 +407,9 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       })
     switch (opc) {
       case 0:
-        return logic("and", (a, b) => a & b)
+        return logic("and", (a, b) => a & b, true, `r[${rdn}] & r[${rm}]`)
       case 1:
-        return logic("eor", (a, b) => a ^ b)
+        return logic("eor", (a, b) => a ^ b, true, `r[${rdn}] ^ r[${rm}]`)
       case 2:
         return shift("lsl", SRType.LSL)
       case 3:
@@ -344,7 +439,7 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       case 7:
         return shift("ror", SRType.ROR)
       case 8: // TST
-        return logic("tst", (a, b) => a & b, false)
+        return logic("tst", (a, b) => a & b, false, `r[${rdn}] & r[${rm}]`)
       case 9: // RSB (immediate) T1: negs
         return i2(1, `rsbs ${REG[rdn]}, ${REG[rm]}, #0`, (c) => {
           const v = addWithCarry(~c.r[rm], 0, 1)
@@ -356,12 +451,15 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
           }
         })
       case 10: // CMP (register) T1
-        return i2(1, `cmp ${REG[rdn]}, ${REG[rm]}`, (c) => {
-          const v = addWithCarry(c.r[rdn], ~c.r[rm], 1)
-          setNZ(c, v)
-          c.c = lastC
-          c.v = lastV
-        })
+        return J(
+          i2(1, `cmp ${REG[rdn]}, ${REG[rm]}`, (c) => {
+            const v = addWithCarry(c.r[rdn], ~c.r[rm], 1)
+            setNZ(c, v)
+            c.c = lastC
+            c.v = lastV
+          }),
+          ADDC(-1, `r[${rdn}]`, NOT(`r[${rm}]`), "1", true),
+        )
       case 11: // CMN
         return i2(1, `cmn ${REG[rdn]}, ${REG[rm]}`, (c) => {
           const v = addWithCarry(c.r[rdn], c.r[rm], 0)
@@ -370,21 +468,27 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
           c.v = lastV
         })
       case 12:
-        return logic("orr", (a, b) => a | b)
+        return logic("orr", (a, b) => a | b, true, `r[${rdn}] | r[${rm}]`)
       case 13: // MUL
-        return i2(1, `muls ${REG[rdn]}, ${REG[rm]}`, (c) => {
-          const v = Math.imul(c.r[rdn], c.r[rm]) >>> 0
-          c.r[rdn] = v
-          if (setflags) setNZ(c, v)
-        })
+        return J(
+          i2(1, `muls ${REG[rdn]}, ${REG[rm]}`, (c) => {
+            const v = Math.imul(c.r[rdn], c.r[rm]) >>> 0
+            c.r[rdn] = v
+            if (setflags) setNZ(c, v)
+          }),
+          `const v = Math.imul(r[${rdn}], r[${rm}]) >>> 0; r[${rdn}] = v; ${setflags ? NZ("v") : ""}`,
+        )
       case 14:
-        return logic("bic", (a, b) => a & ~b)
+        return logic("bic", (a, b) => a & ~b, true, `r[${rdn}] & ~r[${rm}]`)
       default: // MVN
-        return i2(1, `mvns ${REG[rdn]}, ${REG[rm]}`, (c) => {
-          const v = ~c.r[rm] >>> 0
-          c.r[rdn] = v
-          if (setflags) setNZ(c, v)
-        })
+        return J(
+          i2(1, `mvns ${REG[rdn]}, ${REG[rm]}`, (c) => {
+            const v = ~c.r[rm] >>> 0
+            c.r[rdn] = v
+            if (setflags) setNZ(c, v)
+          }),
+          `const v = ~r[${rm}] >>> 0; r[${rdn}] = v; ${setflags ? NZ("v") : ""}`,
+        )
     }
   }
 
@@ -394,20 +498,29 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
     const rm = (hw >>> 3) & 0xf
     const rdn = (hw & 7) | ((hw >>> 4) & 8)
     switch (opc) {
-      case 0: // ADD (register) T2, high registers, no flags
-        return i2(1, `add ${REG[rdn]}, ${REG[rm]}`, (c) => {
+      case 0: {
+        // ADD (register) T2, high registers, no flags
+        const instr = i2(1, `add ${REG[rdn]}, ${REG[rm]}`, (c) => {
           const v = (rd(c, rdn) + rd(c, rm)) >>> 0
           wr(c, rdn, v)
         })
-      case 1: // CMP (register) T2
-        return i2(1, `cmp ${REG[rdn]}, ${REG[rm]}`, (c) => {
+        return rdn === 15 || rm === 15 ? instr : J(instr, `r[${rdn}] = (r[${rdn}] + r[${rm}]) >>> 0;`)
+      }
+      case 1: {
+        // CMP (register) T2
+        const instr = i2(1, `cmp ${REG[rdn]}, ${REG[rm]}`, (c) => {
           const v = addWithCarry(rd(c, rdn), ~rd(c, rm), 1)
           setNZ(c, v)
           c.c = lastC
           c.v = lastV
         })
-      case 2: // MOV (register) T1
-        return i2(1, `mov ${REG[rdn]}, ${REG[rm]}`, (c) => wr(c, rdn, rd(c, rm)))
+        return rdn === 15 || rm === 15 ? instr : J(instr, ADDC(-1, `r[${rdn}]`, NOT(`r[${rm}]`), "1", true))
+      }
+      case 2: {
+        // MOV (register) T1
+        const instr = i2(1, `mov ${REG[rdn]}, ${REG[rm]}`, (c) => wr(c, rdn, rd(c, rm)))
+        return rdn === 15 || rm === 15 ? instr : J(instr, `r[${rdn}] = r[${rm}];`)
+      }
       default:
         if (hw & 0x80) {
           // BLX (register)
@@ -417,8 +530,9 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
             c.branchTo(target)
           })
         }
-        // BX
-        return i2(2, `bx ${REG[rm]}`, (c) => c.branchTo(rd(c, rm)))
+        // BX: through branchTo for the exception-return and interworking checks, so the
+        // snippet is flushed like a memory access (an exception return reads the stack).
+        return J(i2(2, `bx ${REG[rm]}`, (c) => c.branchTo(rd(c, rm))), rm === 15 ? "c.branchTo(c.readPc()); c.pc = c.nextPc; $EXIT" : `c.branchTo(r[${rm}]); c.pc = c.nextPc; $EXIT`, true)
     }
   }
 
@@ -426,10 +540,14 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
   if (op === 0x12 || op === 0x13) {
     const rt = (hw >>> 8) & 7
     const imm = (hw & 0xff) << 2
-    return i2(2, `ldr ${REG[rt]}, [pc, #${imm}]`, (c) => {
-      const base = (c.pc + 4) & ~3
-      c.r[rt] = c.bus.read32((base + imm) >>> 0)
-    })
+    return J(
+      i2(2, `ldr ${REG[rt]}, [pc, #${imm}]`, (c) => {
+        const base = (c.pc + 4) & ~3
+        c.r[rt] = c.bus.read32((base + imm) >>> 0)
+      }),
+      `r[${rt}] = bus.read32(${(((addr + 4) & ~3) + imm) >>> 0});`,
+      true,
+    )
   }
 
   // Load/store single data item (A5.2.4): 0101xx, 011xxx, 100xxx
@@ -442,23 +560,24 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       const opB = (hw >>> 9) & 7
       const ea = (c: Cpu) => (c.r[rn] + c.r[rm]) >>> 0
       const fmt = (name: string) => `${name} ${REG[rt]}, [${REG[rn]}, ${REG[rm]}]`
+      const EA = `((r[${rn}] + r[${rm}]) >>> 0)`
       switch (opB) {
         case 0:
-          return i2(2, fmt("str"), (c) => c.bus.write32(ea(c), c.r[rt]))
+          return J(i2(2, fmt("str"), (c) => c.bus.write32(ea(c), c.r[rt])), `bus.write32(${EA}, r[${rt}]);`, true)
         case 1:
-          return i2(2, fmt("strh"), (c) => c.bus.write16(ea(c), c.r[rt]))
+          return J(i2(2, fmt("strh"), (c) => c.bus.write16(ea(c), c.r[rt])), `bus.write16(${EA}, r[${rt}]);`, true)
         case 2:
-          return i2(2, fmt("strb"), (c) => c.bus.write8(ea(c), c.r[rt]))
+          return J(i2(2, fmt("strb"), (c) => c.bus.write8(ea(c), c.r[rt])), `bus.write8(${EA}, r[${rt}]);`, true)
         case 3:
-          return i2(2, fmt("ldrsb"), (c) => (c.r[rt] = signExtend(c.bus.read8(ea(c)), 8) >>> 0))
+          return J(i2(2, fmt("ldrsb"), (c) => (c.r[rt] = signExtend(c.bus.read8(ea(c)), 8) >>> 0)), `r[${rt}] = ((bus.read8(${EA}) << 24) >> 24) >>> 0;`, true)
         case 4:
-          return i2(2, fmt("ldr"), (c) => (c.r[rt] = c.bus.read32(ea(c))))
+          return J(i2(2, fmt("ldr"), (c) => (c.r[rt] = c.bus.read32(ea(c)))), `r[${rt}] = bus.read32(${EA});`, true)
         case 5:
-          return i2(2, fmt("ldrh"), (c) => (c.r[rt] = c.bus.read16(ea(c))))
+          return J(i2(2, fmt("ldrh"), (c) => (c.r[rt] = c.bus.read16(ea(c)))), `r[${rt}] = bus.read16(${EA});`, true)
         case 6:
-          return i2(2, fmt("ldrb"), (c) => (c.r[rt] = c.bus.read8(ea(c))))
+          return J(i2(2, fmt("ldrb"), (c) => (c.r[rt] = c.bus.read8(ea(c)))), `r[${rt}] = bus.read8(${EA});`, true)
         default:
-          return i2(2, fmt("ldrsh"), (c) => (c.r[rt] = signExtend(c.bus.read16(ea(c)), 16) >>> 0))
+          return J(i2(2, fmt("ldrsh"), (c) => (c.r[rt] = signExtend(c.bus.read16(ea(c)), 16) >>> 0)), `r[${rt}] = ((bus.read16(${EA}) << 16) >> 16) >>> 0;`, true)
       }
     }
     const imm5 = (hw >>> 6) & 0x1f
@@ -468,44 +587,44 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       const imm = imm5 << 2
       const fmt = (name: string) => `${name} ${REG[rt]}, [${REG[rn]}, #${imm}]`
       return load
-        ? i2(2, fmt("ldr"), (c) => (c.r[rt] = c.bus.read32((c.r[rn] + imm) >>> 0)))
-        : i2(2, fmt("str"), (c) => c.bus.write32((c.r[rn] + imm) >>> 0, c.r[rt]))
+        ? J(i2(2, fmt("ldr"), (c) => (c.r[rt] = c.bus.read32((c.r[rn] + imm) >>> 0))), `r[${rt}] = bus.read32((r[${rn}] + ${imm}) >>> 0);`, true)
+        : J(i2(2, fmt("str"), (c) => c.bus.write32((c.r[rn] + imm) >>> 0, c.r[rt])), `bus.write32((r[${rn}] + ${imm}) >>> 0, r[${rt}]);`, true)
     }
     if (op < 0x20) {
       // STRB/LDRB (immediate) T1
       const fmt = (name: string) => `${name} ${REG[rt]}, [${REG[rn]}, #${imm5}]`
       return load
-        ? i2(2, fmt("ldrb"), (c) => (c.r[rt] = c.bus.read8((c.r[rn] + imm5) >>> 0)))
-        : i2(2, fmt("strb"), (c) => c.bus.write8((c.r[rn] + imm5) >>> 0, c.r[rt]))
+        ? J(i2(2, fmt("ldrb"), (c) => (c.r[rt] = c.bus.read8((c.r[rn] + imm5) >>> 0))), `r[${rt}] = bus.read8((r[${rn}] + ${imm5}) >>> 0);`, true)
+        : J(i2(2, fmt("strb"), (c) => c.bus.write8((c.r[rn] + imm5) >>> 0, c.r[rt])), `bus.write8((r[${rn}] + ${imm5}) >>> 0, r[${rt}]);`, true)
     }
     if (op < 0x24) {
       // STRH/LDRH (immediate) T1
       const imm = imm5 << 1
       const fmt = (name: string) => `${name} ${REG[rt]}, [${REG[rn]}, #${imm}]`
       return load
-        ? i2(2, fmt("ldrh"), (c) => (c.r[rt] = c.bus.read16((c.r[rn] + imm) >>> 0)))
-        : i2(2, fmt("strh"), (c) => c.bus.write16((c.r[rn] + imm) >>> 0, c.r[rt]))
+        ? J(i2(2, fmt("ldrh"), (c) => (c.r[rt] = c.bus.read16((c.r[rn] + imm) >>> 0))), `r[${rt}] = bus.read16((r[${rn}] + ${imm}) >>> 0);`, true)
+        : J(i2(2, fmt("strh"), (c) => c.bus.write16((c.r[rn] + imm) >>> 0, c.r[rt])), `bus.write16((r[${rn}] + ${imm}) >>> 0, r[${rt}]);`, true)
     }
     // STR/LDR (immediate) T2, SP-relative
     const rt8 = (hw >>> 8) & 7
     const imm = (hw & 0xff) << 2
     const fmt = (name: string) => `${name} ${REG[rt8]}, [sp, #${imm}]`
     return load
-      ? i2(2, fmt("ldr"), (c) => (c.r[rt8] = c.bus.read32((c.r[13] + imm) >>> 0)))
-      : i2(2, fmt("str"), (c) => c.bus.write32((c.r[13] + imm) >>> 0, c.r[rt8]))
+      ? J(i2(2, fmt("ldr"), (c) => (c.r[rt8] = c.bus.read32((c.r[13] + imm) >>> 0))), `r[${rt8}] = bus.read32((r[13] + ${imm}) >>> 0);`, true)
+      : J(i2(2, fmt("str"), (c) => c.bus.write32((c.r[13] + imm) >>> 0, c.r[rt8])), `bus.write32((r[13] + ${imm}) >>> 0, r[${rt8}]);`, true)
   }
 
   // ADR T1: 10100x
   if (op === 0x28 || op === 0x29) {
     const rdN = (hw >>> 8) & 7
     const imm = (hw & 0xff) << 2
-    return i2(1, `adr ${REG[rdN]}, pc, #${imm}`, (c) => (c.r[rdN] = (((c.pc + 4) & ~3) + imm) >>> 0))
+    return J(i2(1, `adr ${REG[rdN]}, pc, #${imm}`, (c) => (c.r[rdN] = (((c.pc + 4) & ~3) + imm) >>> 0)), `r[${rdN}] = ${(((addr + 4) & ~3) + imm) >>> 0};`)
   }
   // ADD (SP plus immediate) T1: 10101x
   if (op === 0x2a || op === 0x2b) {
     const rdN = (hw >>> 8) & 7
     const imm = (hw & 0xff) << 2
-    return i2(1, `add ${REG[rdN]}, sp, #${imm}`, (c) => (c.r[rdN] = (c.r[13] + imm) >>> 0))
+    return J(i2(1, `add ${REG[rdN]}, sp, #${imm}`, (c) => (c.r[rdN] = (c.r[13] + imm) >>> 0)), `r[${rdN}] = (r[13] + ${imm}) >>> 0;`)
   }
 
   // Miscellaneous 16-bit instructions (A5.2.5): 1011xx
@@ -514,11 +633,11 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
     if ((opc & 0x7c) === 0) {
       // ADD (SP plus immediate) T2
       const imm = (hw & 0x7f) << 2
-      return i2(1, `add sp, #${imm}`, (c) => (c.r[13] = (c.r[13] + imm) >>> 0))
+      return J(i2(1, `add sp, #${imm}`, (c) => (c.r[13] = (c.r[13] + imm) >>> 0)), `r[13] = (r[13] + ${imm}) >>> 0;`)
     }
     if ((opc & 0x7c) === 0x04) {
       const imm = (hw & 0x7f) << 2
-      return i2(1, `sub sp, #${imm}`, (c) => (c.r[13] = (c.r[13] - imm) >>> 0))
+      return J(i2(1, `sub sp, #${imm}`, (c) => (c.r[13] = (c.r[13] - imm) >>> 0)), `r[13] = (r[13] - ${imm}) >>> 0;`)
     }
     if ((opc & 0x78) === 0x08 || (opc & 0x78) === 0x18 || (opc & 0x78) === 0x48 || (opc & 0x78) === 0x58) {
       // CBZ / CBNZ
@@ -526,12 +645,17 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       const i = (hw >>> 9) & 1
       const imm = ((i << 5) | ((hw >>> 3) & 0x1f)) << 1
       const rn = hw & 7
-      return i2(1, `cb${nonzero ? "nz" : "z"} ${REG[rn]}, ${hex(addr + 4 + imm)}`, (c) => {
-        if ((c.r[rn] === 0) !== nonzero) {
-          c.branchWritePc(c.pc + 4 + imm)
-          c.cycles += 1
-        }
-      })
+      return BR(
+        i2(1, `cb${nonzero ? "nz" : "z"} ${REG[rn]}, ${hex(addr + 4 + imm)}`, (c) => {
+          if ((c.r[rn] === 0) !== nonzero) {
+            c.branchWritePc(c.pc + 4 + imm)
+            c.cycles += 1
+          }
+        }),
+        addr + 4 + imm,
+        1,
+        `r[${rn}] ${nonzero ? "!==" : "==="} 0`,
+      )
     }
     if ((opc & 0x78) === 0x10) {
       // SXTH/SXTB/UXTH/UXTB
@@ -694,18 +818,23 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       })
     }
     const imm = signExtend(hw & 0xff, 8) << 1
-    return i2(1, `b${CONDS[cond]} ${hex(addr + 4 + imm)}`, (c) => {
-      if (c.condPassed(cond)) {
-        c.branchWritePc(c.pc + 4 + imm)
-        c.cycles += 1
-      }
-    })
+    return BR(
+      i2(1, `b${CONDS[cond]} ${hex(addr + 4 + imm)}`, (c) => {
+        if (c.condPassed(cond)) {
+          c.branchWritePc(c.pc + 4 + imm)
+          c.cycles += 1
+        }
+      }),
+      addr + 4 + imm,
+      1,
+      COND_JS[cond],
+    )
   }
 
   // B T2: 11100x
   if (op === 0x38 || op === 0x39) {
     const imm = signExtend(hw & 0x7ff, 11) << 1
-    return i2(2, `b ${hex(addr + 4 + imm)}`, (c) => c.branchWritePc(c.pc + 4 + imm))
+    return BR(i2(2, `b ${hex(addr + 4 + imm)}`, (c) => c.branchWritePc(c.pc + 4 + imm)), addr + 4 + imm, 0, null)
   }
 
   return undefinedInstr(hw, 0, 2)
@@ -961,25 +1090,33 @@ function loadStoreDualExclusiveTable(hw1: number, hw2: number, i4: I4): Instr {
         c.r[rt2] = c.bus.read32((base + 4) >>> 0)
       })
     }
-    return i4(3, `ldrd ${REG[rt]}, ${REG[rt2]}, ${addrText}`, (c) => {
+    return J(
+      i4(3, `ldrd ${REG[rt]}, ${REG[rt2]}, ${addrText}`, (c) => {
+        const base = c.r[rn]
+        const offAddr = (base + signed) >>> 0
+        const a = index ? offAddr : base
+        const v1 = c.bus.read32(a)
+        const v2 = c.bus.read32((a + 4) >>> 0)
+        if (wback) c.r[rn] = offAddr
+        c.r[rt] = v1
+        c.r[rt2] = v2
+      }),
+      `const base = r[${rn}], offAddr = (base + ${signed}) >>> 0, a = ${index ? "offAddr" : "base"}; const v1 = bus.read32(a), v2 = bus.read32((a + 4) >>> 0); ${wback ? `r[${rn}] = offAddr;` : ""} r[${rt}] = v1; r[${rt2}] = v2;`,
+      true,
+    )
+  }
+  return J(
+    i4(3, `strd ${REG[rt]}, ${REG[rt2]}, ${addrText}`, (c) => {
       const base = c.r[rn]
       const offAddr = (base + signed) >>> 0
       const a = index ? offAddr : base
-      const v1 = c.bus.read32(a)
-      const v2 = c.bus.read32((a + 4) >>> 0)
+      c.bus.write32(a, c.r[rt])
+      c.bus.write32((a + 4) >>> 0, c.r[rt2])
       if (wback) c.r[rn] = offAddr
-      c.r[rt] = v1
-      c.r[rt2] = v2
-    })
-  }
-  return i4(3, `strd ${REG[rt]}, ${REG[rt2]}, ${addrText}`, (c) => {
-    const base = c.r[rn]
-    const offAddr = (base + signed) >>> 0
-    const a = index ? offAddr : base
-    c.bus.write32(a, c.r[rt])
-    c.bus.write32((a + 4) >>> 0, c.r[rt2])
-    if (wback) c.r[rn] = offAddr
-  })
+    }),
+    `const base = r[${rn}], offAddr = (base + ${signed}) >>> 0, a = ${index ? "offAddr" : "base"}; bus.write32(a, r[${rt}]); bus.write32((a + 4) >>> 0, r[${rt2}]); ${wback ? `r[${rn}] = offAddr;` : ""}`,
+    true,
+  )
 }
 
 /** Shared body of the data-processing group: computes result + flags for one opcode. */
@@ -1106,6 +1243,57 @@ function dpText(opc: number, s: number, rdN: number, rn: number, operand: string
   return `${name}${s ? "s" : ""}.w ${REG[rdN]}, ${REG[rn]}, ${operand}`
 }
 
+/**
+ * Snippet of one data-processing opcode over `a` and `b` (uint32 expressions), `cin` the
+ * shifter carry-out expression, as dpOperation computes it; null for opcodes it has no form for.
+ */
+function dpJs(opc: number, a: string, b: string, cin: string, s: boolean, rdN: number): string | null {
+  const store = rdN !== 15 ? `r[${rdN}] = v;` : ""
+  const logical = (v: string) => `const v = (${v}) >>> 0; ${store} ${s ? `${NZ("v")} c.c = ${cin};` : ""}`
+  switch (opc) {
+    case 0:
+      return logical(`${a} & ${b}`)
+    case 1:
+      return logical(`${a} & ~${b}`)
+    case 2:
+      return logical(`${a} | ${b}`)
+    case 3:
+      return logical(`${a} | ~${b}`)
+    case 4:
+      return logical(`${a} ^ ${b}`)
+    case 8:
+      return ADDC(rdN === 15 ? -1 : rdN, a, b, "0", s)
+    case 10:
+      return ADDC(rdN, a, b, "c.c", s)
+    case 11:
+      return ADDC(rdN, a, NOT(b), "c.c", s)
+    case 13:
+      return ADDC(rdN === 15 ? -1 : rdN, a, NOT(b), "1", s)
+    case 14:
+      return ADDC(rdN, NOT(a), b, "1", s)
+    default:
+      return null
+  }
+}
+/** The shifted operand and its carry-out as expressions over a uint32 `x`, as shiftC computes them. */
+function shiftJs(srt: SRType, amount: number): [value: string, carry: string] {
+  if (amount === 0) return ["x", "c.c"]
+  switch (srt) {
+    case SRType.LSL:
+      return amount >= 32 ? ["0", amount === 32 ? "x & 1" : "0"] : [`(x << ${amount}) >>> 0`, `(x >>> ${32 - amount}) & 1`]
+    case SRType.LSR:
+      return amount >= 32 ? ["0", amount === 32 ? "x >>> 31" : "0"] : [`x >>> ${amount}`, `(x >>> ${amount - 1}) & 1`]
+    case SRType.ASR:
+      return amount >= 32 ? ["(x & 0x80000000 ? 0xffffffff : 0)", "x >>> 31"] : [`(x >> ${amount}) >>> 0`, `(x >>> ${amount - 1}) & 1`]
+    case SRType.ROR: {
+      const m = amount & 31
+      return m === 0 ? ["x", "x >>> 31"] : [`((x >>> ${m}) | (x << ${32 - m})) >>> 0`, "b0 >>> 31"]
+    }
+    case SRType.RRX:
+      return ["((x >>> 1) | (c.c << 31)) >>> 0", "x & 1"]
+  }
+}
+
 // A5.3.11 Data processing (shifted register)
 function dataProcessingShiftedRegister(hw1: number, hw2: number, i4: I4): Instr {
   const opc = (hw1 >>> 5) & 0xf
@@ -1131,11 +1319,15 @@ function dataProcessingShiftedRegister(hw1: number, hw2: number, i4: I4): Instr 
   const isMov = rn === 15 && (opc === 2 || opc === 3)
   const setflags = s === 1
   const text = dpText(opc, s, rdN, rn, `${REG[rm]}${shiftText}`)
-  return i4(1, text, (c) => {
+  const instr = i4(1, text, (c) => {
     const shifted = shiftC(c.r[rm], srt, amount, c.c)
     const a = isMov ? 0 : rd(c, rn)
     opFn(c, a, shifted, shiftCarry, setflags, rdN)
   })
+  if (rm === 15 || (rn === 15 && !isMov) || (rdN === 15 && !((opc === 0 || opc === 4 || opc === 8 || opc === 13) && setflags))) return instr
+  const [value, carry] = shiftJs(srt, amount)
+  const body = dpJs(opc, isMov ? "0" : `r[${rn}]`, "b0", "cin", setflags, rdN)
+  return body === null ? instr : J(instr, `const x = r[${rm}], b0 = ${value}, cin = ${carry}; ${body}`)
 }
 
 // A5.3.1 Data processing (modified immediate)
@@ -1157,16 +1349,20 @@ function dataProcessingModifiedImmediate(hw1: number, hw2: number, i4: I4): Inst
   const imm1 = thumbExpandImmC(imm12, 1)
   const carry1 = shiftCarry
   const text = dpText(opc, s, rdN, rn, `#${imm0}`)
-  if (carry0 === carry1 && imm0 === imm1) {
-    return i4(1, text, (c) => {
-      const a = isMov ? 0 : rd(c, rn)
-      opFn(c, a, imm0, carry0, setflags, rdN)
-    })
-  }
-  return i4(1, text, (c) => {
-    const a = isMov ? 0 : rd(c, rn)
-    opFn(c, a, c.c ? imm1 : imm0, c.c ? carry1 : carry0, setflags, rdN)
-  })
+  const fixed = carry0 === carry1 && imm0 === imm1
+  const instr = fixed
+    ? i4(1, text, (c) => {
+        const a = isMov ? 0 : rd(c, rn)
+        opFn(c, a, imm0, carry0, setflags, rdN)
+      })
+    : i4(1, text, (c) => {
+        const a = isMov ? 0 : rd(c, rn)
+        opFn(c, a, c.c ? imm1 : imm0, c.c ? carry1 : carry0, setflags, rdN)
+      })
+  if ((rn === 15 && !isMov) || (rdN === 15 && !((opc === 0 || opc === 4 || opc === 8 || opc === 13) && setflags))) return instr
+  const body = dpJs(opc, isMov ? "0" : `r[${rn}]`, "b0", "cin", setflags, rdN)
+  if (body === null) return instr
+  return J(instr, fixed ? `const b0 = ${imm0}, cin = ${carry0}; ${body}` : `const b0 = c.c ? ${imm1} : ${imm0}, cin = c.c ? ${carry1} : ${carry0}; ${body}`)
 }
 
 // A5.3.3 Data processing (plain binary immediate)
@@ -1181,19 +1377,19 @@ function dataProcessingPlainImmediate(hw1: number, hw2: number, i4: I4): Instr {
   switch (opc) {
     case 0: // ADDW / ADR
       if (rn === 15) return i4(1, `adr.w ${REG[rdN]}, pc, #${imm12}`, (c) => (c.r[rdN] = (((c.pc + 4) & ~3) + imm12) >>> 0))
-      return i4(1, `addw ${REG[rdN]}, ${REG[rn]}, #${imm12}`, (c) => (c.r[rdN] = (rd(c, rn) + imm12) >>> 0))
+      return J(i4(1, `addw ${REG[rdN]}, ${REG[rn]}, #${imm12}`, (c) => (c.r[rdN] = (rd(c, rn) + imm12) >>> 0)), `r[${rdN}] = (r[${rn}] + ${imm12}) >>> 0;`)
     case 4: {
       // MOVW
       const imm16 = ((hw1 & 0xf) << 12) | (i << 11) | (imm3 << 8) | imm8
-      return i4(1, `movw ${REG[rdN]}, #${imm16}`, (c) => (c.r[rdN] = imm16))
+      return J(i4(1, `movw ${REG[rdN]}, #${imm16}`, (c) => (c.r[rdN] = imm16)), `r[${rdN}] = ${imm16};`)
     }
     case 10: // SUBW / ADR (minus)
       if (rn === 15) return i4(1, `adr.w ${REG[rdN]}, pc, #-${imm12}`, (c) => (c.r[rdN] = (((c.pc + 4) & ~3) - imm12) >>> 0))
-      return i4(1, `subw ${REG[rdN]}, ${REG[rn]}, #${imm12}`, (c) => (c.r[rdN] = (rd(c, rn) - imm12) >>> 0))
+      return J(i4(1, `subw ${REG[rdN]}, ${REG[rn]}, #${imm12}`, (c) => (c.r[rdN] = (rd(c, rn) - imm12) >>> 0)), `r[${rdN}] = (r[${rn}] - ${imm12}) >>> 0;`)
     case 12: {
       // MOVT
       const imm16 = ((hw1 & 0xf) << 12) | (i << 11) | (imm3 << 8) | imm8
-      return i4(1, `movt ${REG[rdN]}, #${imm16}`, (c) => (c.r[rdN] = ((c.r[rdN] & 0xffff) | (imm16 << 16)) >>> 0))
+      return J(i4(1, `movt ${REG[rdN]}, #${imm16}`, (c) => (c.r[rdN] = ((c.r[rdN] & 0xffff) | (imm16 << 16)) >>> 0)), `r[${rdN}] = ((r[${rdN}] & 0xffff) | (${imm16} << 16)) >>> 0;`)
     }
     case 16:
     case 18: {
@@ -1225,10 +1421,13 @@ function dataProcessingPlainImmediate(hw1: number, hw2: number, i4: I4): Instr {
       // SBFX
       const imm5 = (imm3 << 2) | ((hw2 >>> 6) & 3)
       const width = (hw2 & 0x1f) + 1
-      return i4(1, `sbfx ${REG[rdN]}, ${REG[rn]}, #${imm5}, #${width}`, (c) => {
-        const v = c.r[rn] >>> imm5
-        c.r[rdN] = signExtend(v & (width === 32 ? 0xffffffff : (1 << width) - 1), width) >>> 0
-      })
+      return J(
+        i4(1, `sbfx ${REG[rdN]}, ${REG[rn]}, #${imm5}, #${width}`, (c) => {
+          const v = c.r[rn] >>> imm5
+          c.r[rdN] = signExtend(v & (width === 32 ? 0xffffffff : (1 << width) - 1), width) >>> 0
+        }),
+        `r[${rdN}] = ((((r[${rn}] >>> ${imm5}) & ${width === 32 ? 0xffffffff : (1 << width) - 1}) << ${32 - width}) >> ${32 - width}) >>> 0;`,
+      )
     }
     case 22: {
       // BFI / BFC
@@ -1236,10 +1435,13 @@ function dataProcessingPlainImmediate(hw1: number, hw2: number, i4: I4): Instr {
       const msb = hw2 & 0x1f
       const width = msb - lsb + 1
       const mask = width >= 32 ? 0xffffffff : (((1 << width) - 1) << lsb) >>> 0
-      if (rn === 15) return i4(1, `bfc ${REG[rdN]}, #${lsb}, #${width}`, (c) => (c.r[rdN] = (c.r[rdN] & ~mask) >>> 0))
-      return i4(1, `bfi ${REG[rdN]}, ${REG[rn]}, #${lsb}, #${width}`, (c) => {
-        c.r[rdN] = ((c.r[rdN] & ~mask) | ((c.r[rn] << lsb) & mask)) >>> 0
-      })
+      if (rn === 15) return J(i4(1, `bfc ${REG[rdN]}, #${lsb}, #${width}`, (c) => (c.r[rdN] = (c.r[rdN] & ~mask) >>> 0)), `r[${rdN}] = (r[${rdN}] & ${~mask}) >>> 0;`)
+      return J(
+        i4(1, `bfi ${REG[rdN]}, ${REG[rn]}, #${lsb}, #${width}`, (c) => {
+          c.r[rdN] = ((c.r[rdN] & ~mask) | ((c.r[rn] << lsb) & mask)) >>> 0
+        }),
+        `r[${rdN}] = ((r[${rdN}] & ${~mask}) | ((r[${rn}] << ${lsb}) & ${mask})) >>> 0;`,
+      )
     }
     case 24:
     case 26: {
@@ -1271,7 +1473,7 @@ function dataProcessingPlainImmediate(hw1: number, hw2: number, i4: I4): Instr {
       const imm5 = (imm3 << 2) | ((hw2 >>> 6) & 3)
       const width = (hw2 & 0x1f) + 1
       const mask = width === 32 ? 0xffffffff : (1 << width) - 1
-      return i4(1, `ubfx ${REG[rdN]}, ${REG[rn]}, #${imm5}, #${width}`, (c) => (c.r[rdN] = ((c.r[rn] >>> imm5) & mask) >>> 0))
+      return J(i4(1, `ubfx ${REG[rdN]}, ${REG[rn]}, #${imm5}, #${width}`, (c) => (c.r[rdN] = ((c.r[rn] >>> imm5) & mask) >>> 0)), `r[${rdN}] = ((r[${rn}] >>> ${imm5}) & ${mask}) >>> 0;`)
     }
   }
   return undefinedInstr(hw1, hw2, 4)
@@ -1291,12 +1493,17 @@ function branchesAndMisc(hw1: number, hw2: number, addr: number, _inIT: boolean,
       const imm6 = hw1 & 0x3f
       const imm11 = hw2 & 0x7ff
       const imm = signExtend((s << 20) | (j2 << 19) | (j1 << 18) | (imm6 << 12) | (imm11 << 1), 21)
-      return i4(1, `b${CONDS[cond]}.w ${hex(addr + 4 + imm)}`, (c) => {
-        if (c.condPassed(cond)) {
-          c.branchWritePc(c.pc + 4 + imm)
-          c.cycles += 1
-        }
-      })
+      return BR(
+        i4(1, `b${CONDS[cond]}.w ${hex(addr + 4 + imm)}`, (c) => {
+          if (c.condPassed(cond)) {
+            c.branchWritePc(c.pc + 4 + imm)
+            c.cycles += 1
+          }
+        }),
+        addr + 4 + imm,
+        1,
+        COND_JS[cond],
+      )
     }
     switch (op) {
       case 0x38:
@@ -1411,14 +1618,20 @@ function branchesAndMisc(hw1: number, hw2: number, addr: number, _inIT: boolean,
   const imm = signExtend((s << 24) | (i1 << 23) | (i2b << 22) | (imm10 << 12) | (imm11 << 1), 25)
   if ((op1 & 5) === 1) {
     // B T4
-    return i4(2, `b.w ${hex(addr + 4 + imm)}`, (c) => c.branchWritePc(c.pc + 4 + imm))
+    return BR(i4(2, `b.w ${hex(addr + 4 + imm)}`, (c) => c.branchWritePc(c.pc + 4 + imm)), addr + 4 + imm, 0, null)
   }
   if ((op1 & 5) === 5) {
     // BL T1
-    return i4(3, `bl ${hex(addr + 4 + imm)}`, (c) => {
-      c.r[14] = ((c.pc + 4) | 1) >>> 0
-      c.branchWritePc(c.pc + 4 + imm)
-    })
+    return BR(
+      i4(3, `bl ${hex(addr + 4 + imm)}`, (c) => {
+        c.r[14] = ((c.pc + 4) | 1) >>> 0
+        c.branchWritePc(c.pc + 4 + imm)
+      }),
+      addr + 4 + imm,
+      0,
+      null,
+      true,
+    )
   }
   return undefinedInstr(hw1, hw2, 4)
 }
@@ -1447,6 +1660,9 @@ type MemAccess = {
   ea: (c: Cpu) => number
   commit: ((c: Cpu) => void) | null
   literal: boolean
+  /** The same two as snippets: the address expression, and the writeback statement (or ""). */
+  eaJs: string
+  commitJs: string
 }
 
 function memAddressing(hw1: number, hw2: number, rn: number): MemAccess | null {
@@ -1461,12 +1677,14 @@ function memAddressing(hw1: number, hw2: number, rn: number): MemAccess | null {
       ea: (c) => (((c.pc + 4) & ~3) + off) >>> 0,
       commit: null,
       literal: true,
+      eaJs: `((((c.pc + 4) & ~3) + ${off}) >>> 0)`,
+      commitJs: "",
     }
   }
   if (op1bit) {
     // immediate offset, 12-bit positive
     const imm = hw2 & 0xfff
-    return { text: `[${REG[rn]}, #${imm}]`, ea: (c) => (c.r[rn] + imm) >>> 0, commit: null, literal: false }
+    return { text: `[${REG[rn]}, #${imm}]`, ea: (c) => (c.r[rn] + imm) >>> 0, commit: null, literal: false, eaJs: `((r[${rn}] + ${imm}) >>> 0)`, commitJs: "" }
   }
   const op2 = (hw2 >>> 8) & 0xf
   if (op2 === 0) {
@@ -1478,13 +1696,15 @@ function memAddressing(hw1: number, hw2: number, rn: number): MemAccess | null {
       ea: (c) => (c.r[rn] + (c.r[rm] << shift)) >>> 0,
       commit: null,
       literal: false,
+      eaJs: `((r[${rn}] + (r[${rm}] << ${shift})) >>> 0)`,
+      commitJs: "",
     }
   }
   if (op2 === 0xc || op2 === 0xe) {
     // imm8: 1100 = negative offset, 1110 = unprivileged (T) form, same address here
     const imm = hw2 & 0xff
-    if (op2 === 0xe) return { text: `[${REG[rn]}, #${imm}]`, ea: (c) => (c.r[rn] + imm) >>> 0, commit: null, literal: false }
-    return { text: `[${REG[rn]}, #-${imm}]`, ea: (c) => (c.r[rn] - imm) >>> 0, commit: null, literal: false }
+    if (op2 === 0xe) return { text: `[${REG[rn]}, #${imm}]`, ea: (c) => (c.r[rn] + imm) >>> 0, commit: null, literal: false, eaJs: `((r[${rn}] + ${imm}) >>> 0)`, commitJs: "" }
+    return { text: `[${REG[rn]}, #-${imm}]`, ea: (c) => (c.r[rn] - imm) >>> 0, commit: null, literal: false, eaJs: `((r[${rn}] - ${imm}) >>> 0)`, commitJs: "" }
   }
   if ((op2 & 0x9) === 0x9) {
     // pre/post-indexed with writeback: P = bit10, U = bit9, W = bit8
@@ -1498,6 +1718,8 @@ function memAddressing(hw1: number, hw2: number, rn: number): MemAccess | null {
         ea: (c) => (c.r[rn] + off) >>> 0,
         commit: (c) => (c.r[rn] = (c.r[rn] + off) >>> 0),
         literal: false,
+        eaJs: `((r[${rn}] + ${off}) >>> 0)`,
+        commitJs: `r[${rn}] = (r[${rn}] + ${off}) >>> 0;`,
       }
     }
     return {
@@ -1505,6 +1727,8 @@ function memAddressing(hw1: number, hw2: number, rn: number): MemAccess | null {
       ea: (c) => c.r[rn],
       commit: (c) => (c.r[rn] = (c.r[rn] + off) >>> 0),
       literal: false,
+      eaJs: `r[${rn}]`,
+      commitJs: `r[${rn}] = (r[${rn}] + ${off}) >>> 0;`,
     }
   }
   return null
@@ -1523,11 +1747,13 @@ function storeSingle(hw1: number, hw2: number, i4: I4): Instr {
   const width = (size === 0 ? 1 : size === 1 ? 2 : 4) as 1 | 2 | 4
   const commit = m.commit
   const ea = m.ea
-  return i4(2, `${name}.w ${REG[rt]}, ${m.text}`, (c) => {
+  const instr = i4(2, `${name}.w ${REG[rt]}, ${m.text}`, (c) => {
     const a = ea(c)
     c.bus.write(a, rd(c, rt), width)
     if (commit) commit(c)
   })
+  if (rt === 15) return instr
+  return J(instr, `bus.write${width * 8}(${m.eaJs}, r[${rt}]); ${m.commitJs}`, true)
 }
 
 // A5.3.8 Load byte, memory hints
@@ -1541,11 +1767,15 @@ function loadByteOrHint(hw1: number, hw2: number, i4: I4): Instr {
   const commit = m.commit
   const ea = m.ea
   const name = signed ? "ldrsb" : "ldrb"
-  return i4(2, `${name}.w ${REG[rt]}, ${m.text}`, (c) => {
-    const v = c.bus.read8(ea(c))
-    if (commit) commit(c)
-    c.r[rt] = signed ? signExtend(v, 8) >>> 0 : v
-  })
+  return J(
+    i4(2, `${name}.w ${REG[rt]}, ${m.text}`, (c) => {
+      const v = c.bus.read8(ea(c))
+      if (commit) commit(c)
+      c.r[rt] = signed ? signExtend(v, 8) >>> 0 : v
+    }),
+    `const v = bus.read8(${m.eaJs}); ${m.commitJs} r[${rt}] = ${signed ? "((v << 24) >> 24) >>> 0" : "v"};`,
+    true,
+  )
 }
 
 // A5.3.9 Load halfword
@@ -1559,11 +1789,15 @@ function loadHalfword(hw1: number, hw2: number, i4: I4): Instr {
   const commit = m.commit
   const ea = m.ea
   const name = signed ? "ldrsh" : "ldrh"
-  return i4(2, `${name}.w ${REG[rt]}, ${m.text}`, (c) => {
-    const v = c.bus.read16(ea(c))
-    if (commit) commit(c)
-    c.r[rt] = signed ? signExtend(v, 16) >>> 0 : v
-  })
+  return J(
+    i4(2, `${name}.w ${REG[rt]}, ${m.text}`, (c) => {
+      const v = c.bus.read16(ea(c))
+      if (commit) commit(c)
+      c.r[rt] = signed ? signExtend(v, 16) >>> 0 : v
+    }),
+    `const v = bus.read16(${m.eaJs}); ${m.commitJs} r[${rt}] = ${signed ? "((v << 16) >> 16) >>> 0" : "v"};`,
+    true,
+  )
 }
 
 // A5.3.7 Load word
@@ -1574,12 +1808,14 @@ function loadWord(hw1: number, hw2: number, i4: I4): Instr {
   if (!m) return undefinedInstr(hw1, hw2, 4)
   const commit = m.commit
   const ea = m.ea
-  return i4(2, `ldr.w ${REG[rt]}, ${m.text}`, (c) => {
+  const instr = i4(2, `ldr.w ${REG[rt]}, ${m.text}`, (c) => {
     const v = c.bus.read32(ea(c))
     if (commit) commit(c)
     wrLoad(c, rt, v)
     if (rt === 15) c.cycles += 2
   })
+  if (rt === 15) return instr
+  return J(instr, `const v = bus.read32(${m.eaJs}); ${m.commitJs} r[${rt}] = v;`, true)
 }
 
 // A5.3.12 Data processing (register)
@@ -1774,26 +2010,30 @@ function multiply(hw1: number, hw2: number, i4: I4): Instr {
   switch (op1) {
     case 0:
       if (op2 === 0) {
-        if (hasAcc) return i4(2, `mla ${REG[rdN]}, ${REG[rn]}, ${REG[rm]}, ${REG[ra]}`, (c) => (c.r[rdN] = (Math.imul(c.r[rn], c.r[rm]) + c.r[ra]) >>> 0))
-        return i4(1, `mul.w ${REG[rdN]}, ${REG[rn]}, ${REG[rm]}`, (c) => (c.r[rdN] = Math.imul(c.r[rn], c.r[rm]) >>> 0))
+        if (hasAcc) return J(i4(2, `mla ${REG[rdN]}, ${REG[rn]}, ${REG[rm]}, ${REG[ra]}`, (c) => (c.r[rdN] = (Math.imul(c.r[rn], c.r[rm]) + c.r[ra]) >>> 0)), `r[${rdN}] = (Math.imul(r[${rn}], r[${rm}]) + r[${ra}]) >>> 0;`)
+        return J(i4(1, `mul.w ${REG[rdN]}, ${REG[rn]}, ${REG[rm]}`, (c) => (c.r[rdN] = Math.imul(c.r[rn], c.r[rm]) >>> 0)), `r[${rdN}] = Math.imul(r[${rn}], r[${rm}]) >>> 0;`)
       }
-      if (op2 === 1) return i4(2, `mls ${REG[rdN]}, ${REG[rn]}, ${REG[rm]}, ${REG[ra]}`, (c) => (c.r[rdN] = (c.r[ra] - Math.imul(c.r[rn], c.r[rm])) >>> 0))
+      if (op2 === 1) return J(i4(2, `mls ${REG[rdN]}, ${REG[rn]}, ${REG[rm]}, ${REG[ra]}`, (c) => (c.r[rdN] = (c.r[ra] - Math.imul(c.r[rn], c.r[rm])) >>> 0)), `r[${rdN}] = (r[${ra}] - Math.imul(r[${rn}], r[${rm}])) >>> 0;`)
       break
     case 1: {
       // SMULxy / SMLAxy
       const nTop = (op2 & 2) !== 0
       const mTop = (op2 & 1) !== 0
       const suffix = (nTop ? "t" : "b") + (mTop ? "t" : "b")
+      const halfJs = (x: string, top: boolean) => (top ? `(${x} >> 16)` : `((${x} << 16) >> 16)`)
       if (hasAcc) {
-        return i4(1, `smla${suffix} ${REG[rdN]}, ${REG[rn]}, ${REG[rm]}, ${REG[ra]}`, (c) => {
-          const p = half(c.r[rn], nTop) * half(c.r[rm], mTop)
-          const sum = p + (c.r[ra] | 0)
-          const v = sum | 0
-          if (sum !== v) c.q = 1
-          c.r[rdN] = v >>> 0
-        })
+        return J(
+          i4(1, `smla${suffix} ${REG[rdN]}, ${REG[rn]}, ${REG[rm]}, ${REG[ra]}`, (c) => {
+            const p = half(c.r[rn], nTop) * half(c.r[rm], mTop)
+            const sum = p + (c.r[ra] | 0)
+            const v = sum | 0
+            if (sum !== v) c.q = 1
+            c.r[rdN] = v >>> 0
+          }),
+          `const sum = ${halfJs(`r[${rn}]`, nTop)} * ${halfJs(`r[${rm}]`, mTop)} + (r[${ra}] | 0), v = sum | 0; if (sum !== v) c.q = 1; r[${rdN}] = v >>> 0;`,
+        )
       }
-      return i4(1, `smul${suffix} ${REG[rdN]}, ${REG[rn]}, ${REG[rm]}`, (c) => (c.r[rdN] = (half(c.r[rn], nTop) * half(c.r[rm], mTop)) >>> 0))
+      return J(i4(1, `smul${suffix} ${REG[rdN]}, ${REG[rn]}, ${REG[rm]}`, (c) => (c.r[rdN] = (half(c.r[rn], nTop) * half(c.r[rm], mTop)) >>> 0)), `r[${rdN}] = (${halfJs(`r[${rn}]`, nTop)} * ${halfJs(`r[${rm}]`, mTop)}) >>> 0;`)
     }
     case 2: {
       // SMUAD / SMLAD (op2 bit0 = X swap)
@@ -2116,23 +2356,20 @@ function coprocessor(hw1: number, hw2: number, addr: number, i4: I4): Instr {
   if (coproc !== 10 && coproc !== 11) return unimplemented(hw1, hw2, 4, addr, "coprocessor")
   const dp = coproc === 11 // double-precision register form (D regs)
   const op1 = (hw1 >>> 4) & 0x3f
-  let instr: Instr
-  if ((hw1 & 0xff00) === 0xfe00 && (hw2 & 0x10) === 0) instr = fpv5(hw1, hw2, dp, addr, i4)
-  else if ((op1 & 0x3e) === 0x04) instr = fpTransfer64(hw1, hw2, dp, i4)
-  else if ((op1 & 0x20) === 0) instr = fpLoadStore(hw1, hw2, dp, i4)
-  else if ((hw2 & 0x10) === 0) instr = fpDataProcessing(hw1, hw2, dp, addr, i4)
-  else instr = fpTransfer32(hw1, hw2, dp, addr, i4)
   // Every FP instruction needs CP10/CP11 access (else UsageFault.NOCP) and marks the context
   // as owning FP state (CONTROL.FPCA), which is what makes exception entry stack s0–s15.
-  const inner = instr.exec
-  return {
-    ...instr,
-    exec: (c) => {
+  // Wrapped at creation, one closure deep, rather than around the finished instruction.
+  const fpI4: I4 = (cycles, text, exec) =>
+    i4(cycles, text, (c) => {
       if ((c.scs.cpacr & 0x00f00000) !== 0x00f00000) c.fault(EXC.USAGE_FAULT, "coprocessor access denied (CPACR)")
       c.control |= 4
-      inner(c)
-    },
-  }
+      exec(c)
+    })
+  if ((hw1 & 0xff00) === 0xfe00 && (hw2 & 0x10) === 0) return fpv5(hw1, hw2, dp, addr, fpI4)
+  if ((op1 & 0x3e) === 0x04) return fpTransfer64(hw1, hw2, dp, fpI4)
+  if ((op1 & 0x20) === 0) return fpLoadStore(hw1, hw2, dp, fpI4)
+  if ((hw2 & 0x10) === 0) return fpDataProcessing(hw1, hw2, dp, addr, fpI4)
+  return fpTransfer32(hw1, hw2, dp, addr, fpI4)
 }
 
 /** VMOV between two core registers and two S registers or one D register (A7.7.243). */
@@ -2186,18 +2423,27 @@ function fpLoadStore(hw1: number, hw2: number, dp: boolean, i4: I4): Instr {
     const off = u ? imm : -imm
     const regName = dp ? DREG(first / 2) : SREG(first)
     const base = (c: Cpu) => (rn === 15 ? (c.pc + 4) & ~3 : c.r[rn])
+    const baseJs = rn === 15 ? "((c.pc + 4) & ~3)" : `r[${rn}]`
     if (l) {
-      return i4(2, `vldr ${regName}, [${REG[rn]}, #${off}]`, (c) => {
-        const a = (base(c) + off) >>> 0
-        c.sBits[first] = c.bus.read32(a)
-        if (dp) c.sBits[first + 1] = c.bus.read32(a + 4)
-      })
+      return JF(
+        i4(2, `vldr ${regName}, [${REG[rn]}, #${off}]`, (c) => {
+          const a = (base(c) + off) >>> 0
+          c.sBits[first] = c.bus.read32(a)
+          if (dp) c.sBits[first + 1] = c.bus.read32(a + 4)
+        }),
+        `const a = (${baseJs} + ${off}) >>> 0; c.sBits[${first}] = bus.read32(a); ${dp ? `c.sBits[${first + 1}] = bus.read32(a + 4);` : ""}`,
+        true,
+      )
     }
-    return i4(2, `vstr ${regName}, [${REG[rn]}, #${off}]`, (c) => {
-      const a = (base(c) + off) >>> 0
-      c.bus.write32(a, c.sBits[first])
-      if (dp) c.bus.write32(a + 4, c.sBits[first + 1])
-    })
+    return JF(
+      i4(2, `vstr ${regName}, [${REG[rn]}, #${off}]`, (c) => {
+        const a = (base(c) + off) >>> 0
+        c.bus.write32(a, c.sBits[first])
+        if (dp) c.bus.write32(a + 4, c.sBits[first + 1])
+      }),
+      `const a = (${baseJs} + ${off}) >>> 0; bus.write32(a, c.sBits[${first}]); ${dp ? `bus.write32(a + 4, c.sBits[${first + 1}]);` : ""}`,
+      true,
+    )
   }
   // VLDM / VSTM (and VPUSH/VPOP aliases): count in S units
   const count = dp ? imm8 & ~1 : imm8
@@ -2227,19 +2473,22 @@ function fpTransfer32(hw1: number, hw2: number, dp: boolean, addr: number, i4: I
   const n = (hw2 >>> 7) & 1
   if (a === 0 && !dp) {
     const sn = (vn << 1) | n
-    if (l) return i4(1, `vmov ${REG[rt]}, ${SREG(sn)}`, (c) => (c.r[rt] = c.sBits[sn]))
-    return i4(1, `vmov ${SREG(sn)}, ${REG[rt]}`, (c) => (c.sBits[sn] = c.r[rt]))
+    if (l) return JF(i4(1, `vmov ${REG[rt]}, ${SREG(sn)}`, (c) => (c.r[rt] = c.sBits[sn])), `r[${rt}] = c.sBits[${sn}];`)
+    return JF(i4(1, `vmov ${SREG(sn)}, ${REG[rt]}`, (c) => (c.sBits[sn] = c.r[rt])), `c.sBits[${sn}] = r[${rt}];`)
   }
   if (a === 7 && vn === 1 && !dp) {
     // VMRS / VMSR FPSCR
     if (l) {
       if (rt === 15) {
-        return i4(1, "vmrs APSR_nzcv, fpscr", (c) => {
-          c.n = (c.fpscr >>> 31) & 1
-          c.z = (c.fpscr >>> 30) & 1
-          c.c = (c.fpscr >>> 29) & 1
-          c.v = (c.fpscr >>> 28) & 1
-        })
+        return JF(
+          i4(1, "vmrs APSR_nzcv, fpscr", (c) => {
+            c.n = (c.fpscr >>> 31) & 1
+            c.z = (c.fpscr >>> 30) & 1
+            c.c = (c.fpscr >>> 29) & 1
+            c.v = (c.fpscr >>> 28) & 1
+          }),
+          "const f = c.fpscr; c.n = (f >>> 31) & 1; c.z = (f >>> 30) & 1; c.c = (f >>> 29) & 1; c.v = (f >>> 28) & 1;",
+        )
       }
       return i4(1, `vmrs ${REG[rt]}, fpscr`, (c) => (c.r[rt] = c.fpscr))
     }
@@ -2269,17 +2518,44 @@ function fpDataProcessing(hw1: number, hw2: number, dp: boolean, addr: number, i
   const sm = dp ? (m << 4) | vm : (vm << 1) | m
   const fr = F.fr
   const R = F.name
-  const guard = dp ? needDouble : () => {}
-  const op = (cycles: number, text: string, exec: (c: Cpu) => void) =>
-    i4(cycles, text, (c) => {
-      guard(c)
-      exec(c)
-    })
+  // Single precision is the common case and gets flat closures on `c.s`; double goes through
+  // the view (and the FPU check) since it is rare.
+  const op = dp
+    ? (cycles: number, text: string, exec: (c: Cpu) => void) =>
+        i4(cycles, text, (c) => {
+          needDouble(c)
+          exec(c)
+        })
+    : i4
   const bin = (name: string, f: (a: number, b: number) => number, cycles = 1) =>
     op(cycles, `${name}.${F.ty} ${R(sd)}, ${R(sn)}, ${R(sm)}`, (c) => F.wr(c, sd, fr(f(F.rd(c, sn), F.rd(c, sm)))))
   const acc = (name: string, f: (d: number, n: number, m: number) => number) =>
     op(3, `${name}.${F.ty} ${R(sd)}, ${R(sn)}, ${R(sm)}`, (c) => F.wr(c, sd, fr(f(F.rd(c, sd), F.rd(c, sn), F.rd(c, sm)))))
   const slow = dp ? 30 : 14
+  const t3 = (name: string) => `${name}.${F.ty} ${R(sd)}, ${R(sn)}, ${R(sm)}`
+  if (!dp) {
+    // The arithmetic the compilers emit most, each its own closure so the call site stays flat.
+    switch (opc1 & 0xb) {
+      case 0:
+        return (opc3 & 1) === 0
+          ? JF(i4(3, t3("vmla"), (c) => (c.s[sd] = c.s[sd] + Math.fround(c.s[sn] * c.s[sm]))), `s[${sd}] = s[${sd}] + Math.fround(s[${sn}] * s[${sm}]);`)
+          : JF(i4(3, t3("vmls"), (c) => (c.s[sd] = c.s[sd] - Math.fround(c.s[sn] * c.s[sm]))), `s[${sd}] = s[${sd}] - Math.fround(s[${sn}] * s[${sm}]);`)
+      case 2:
+        return (opc3 & 1) === 0
+          ? JF(i4(1, t3("vmul"), (c) => (c.s[sd] = c.s[sn] * c.s[sm])), `s[${sd}] = s[${sn}] * s[${sm}];`)
+          : JF(i4(1, t3("vnmul"), (c) => (c.s[sd] = -(c.s[sn] * c.s[sm]))), `s[${sd}] = -(s[${sn}] * s[${sm}]);`)
+      case 3:
+        return (opc3 & 1) === 0
+          ? JF(i4(1, t3("vadd"), (c) => (c.s[sd] = c.s[sn] + c.s[sm])), `s[${sd}] = s[${sn}] + s[${sm}];`)
+          : JF(i4(1, t3("vsub"), (c) => (c.s[sd] = c.s[sn] - c.s[sm])), `s[${sd}] = s[${sn}] - s[${sm}];`)
+      case 8:
+        return JF(i4(slow, t3("vdiv"), (c) => (c.s[sd] = c.s[sn] / c.s[sm])), `s[${sd}] = s[${sn}] / s[${sm}];`)
+      case 10:
+        return (opc3 & 1) === 0
+          ? JF(i4(3, t3("vfma"), (c) => (c.s[sd] = c.s[sd] + c.s[sn] * c.s[sm])), `s[${sd}] = s[${sd}] + s[${sn}] * s[${sm}];`)
+          : JF(i4(3, t3("vfms"), (c) => (c.s[sd] = c.s[sd] - c.s[sn] * c.s[sm])), `s[${sd}] = s[${sd}] - s[${sn}] * s[${sm}];`)
+    }
+  }
   switch (opc1 & 0xb) {
     case 0: // VMLA / VMLS (the product rounds before the add)
       return (opc3 & 1) === 0 ? acc("vmla", (a, b, c) => a + fr(b * c)) : acc("vmls", (a, b, c) => a - fr(b * c))
@@ -2308,7 +2584,7 @@ function fpDataProcessing(hw1: number, hw2: number, dp: boolean, addr: number, i
         const b6 = (imm8 >>> 6) & 1
         const exp = ((b6 ^ 1) << 7) | (b6 ? 0x7c : 0) | ((imm8 >>> 4) & 3)
         const bits = ((sign << 31) | (exp << 23) | ((imm8 & 0xf) << 19)) >>> 0
-        return i4(1, `vmov.f32 ${SREG(sd)}, #${hex(bits)}`, (c) => (c.sBits[sd] = bits))
+        return JF(i4(1, `vmov.f32 ${SREG(sd)}, #${hex(bits)}`, (c) => (c.sBits[sd] = bits)), `c.sBits[${sd}] = ${bits};`)
       }
       // Other VFP data-processing: opc2 = vn, opc3 in bit 7
       const opc2 = vn
@@ -2317,15 +2593,16 @@ function fpDataProcessing(hw1: number, hw2: number, dp: boolean, addr: number, i
         case 0:
           if (opc3b === 0) {
             if (dp) return op(1, `vmov.f64 ${R(sd)}, ${R(sm)}`, (c) => (c.dBits[sd] = c.dBits[sm]))
-            return i4(1, `vmov.f32 ${SREG(sd)}, ${SREG(sm)}`, (c) => (c.sBits[sd] = c.sBits[sm]))
+            return JF(i4(1, `vmov.f32 ${SREG(sd)}, ${SREG(sm)}`, (c) => (c.sBits[sd] = c.sBits[sm])), `c.sBits[${sd}] = c.sBits[${sm}];`)
           }
           if (dp) return op(1, `vabs.f64 ${R(sd)}, ${R(sm)}`, (c) => (c.dBits[sd] = Math.abs(c.dBits[sm])))
-          return i4(1, `vabs.f32 ${SREG(sd)}, ${SREG(sm)}`, (c) => (c.sBits[sd] = c.sBits[sm] & 0x7fffffff))
+          return JF(i4(1, `vabs.f32 ${SREG(sd)}, ${SREG(sm)}`, (c) => (c.sBits[sd] = c.sBits[sm] & 0x7fffffff)), `c.sBits[${sd}] = c.sBits[${sm}] & 0x7fffffff;`)
         case 1:
           if (opc3b === 0) {
             if (dp) return op(1, `vneg.f64 ${R(sd)}, ${R(sm)}`, (c) => (c.dBits[sd] = -c.dBits[sm]))
-            return i4(1, `vneg.f32 ${SREG(sd)}, ${SREG(sm)}`, (c) => (c.sBits[sd] = (c.sBits[sm] ^ 0x80000000) >>> 0))
+            return JF(i4(1, `vneg.f32 ${SREG(sd)}, ${SREG(sm)}`, (c) => (c.sBits[sd] = (c.sBits[sm] ^ 0x80000000) >>> 0)), `c.sBits[${sd}] = (c.sBits[${sm}] ^ 0x80000000) >>> 0;`)
           }
+          if (!dp) return JF(i4(slow, `vsqrt.f32 ${SREG(sd)}, ${SREG(sm)}`, (c) => (c.s[sd] = Math.sqrt(c.s[sm]))), `s[${sd}] = Math.sqrt(s[${sm}]);`)
           return op(slow, `vsqrt.${F.ty} ${R(sd)}, ${R(sm)}`, (c) => F.wr(c, sd, fr(Math.sqrt(F.rd(c, sm)))))
         case 2:
         case 3: {
@@ -2341,10 +2618,16 @@ function fpDataProcessing(hw1: number, hw2: number, dp: boolean, addr: number, i
             c.sBits[sh] = (top ? (c.sBits[sh] & 0xffff) | (h << 16) : (c.sBits[sh] & 0xffff0000) | h) >>> 0
           })
         }
-        case 4: // VCMP / VCMPE (register)
-          return op(1, `vcmp${opc3b ? "e" : ""}.${F.ty} ${R(sd)}, ${R(sm)}`, (c) => fpCompare(c, F.rd(c, sd), F.rd(c, sm)))
-        case 5: // VCMP with #0.0
-          return op(1, `vcmp${opc3b ? "e" : ""}.${F.ty} ${R(sd)}, #0.0`, (c) => fpCompare(c, F.rd(c, sd), 0))
+        case 4: {
+          // VCMP / VCMPE (register)
+          const instr = op(1, `vcmp${opc3b ? "e" : ""}.${F.ty} ${R(sd)}, ${R(sm)}`, (c) => fpCompare(c, F.rd(c, sd), F.rd(c, sm)))
+          return dp ? instr : JF(instr, `H.fpCompare(c, s[${sd}], s[${sm}]);`)
+        }
+        case 5: {
+          // VCMP with #0.0
+          const instr = op(1, `vcmp${opc3b ? "e" : ""}.${F.ty} ${R(sd)}, #0.0`, (c) => fpCompare(c, F.rd(c, sd), 0))
+          return dp ? instr : JF(instr, `H.fpCompare(c, s[${sd}], 0);`)
+        }
         case 6: {
           // VRINTR (FPSCR rounding) / VRINTZ (toward zero)
           const text = `vrint${opc3b ? "z" : "r"}.${F.ty} ${R(sd)}, ${R(sm)}`
@@ -2374,7 +2657,8 @@ function fpDataProcessing(hw1: number, hw2: number, dp: boolean, addr: number, i
           // VCVT from integer (always an S source): op bit 7 = signed (1) / unsigned (0)
           const signed = opc3b === 1
           const smS = (vm << 1) | m
-          return op(1, `vcvt.${F.ty}.${signed ? "s32" : "u32"} ${R(sd)}, ${SREG(smS)}`, (c) => F.wr(c, sd, fr(signed ? c.sBits[smS] | 0 : c.sBits[smS])))
+          const instr = op(1, `vcvt.${F.ty}.${signed ? "s32" : "u32"} ${R(sd)}, ${SREG(smS)}`, (c) => F.wr(c, sd, fr(signed ? c.sBits[smS] | 0 : c.sBits[smS])))
+          return dp ? instr : JF(instr, `s[${sd}] = c.sBits[${smS}]${signed ? " | 0" : ""};`)
         }
         case 10:
         case 11:
@@ -2385,9 +2669,18 @@ function fpDataProcessing(hw1: number, hw2: number, dp: boolean, addr: number, i
           const signed = (opc2 & 1) === 1
           const roundZero = opc3b === 1
           const sdS = (vd << 1) | d
-          return op(1, `vcvt${roundZero ? "" : "r"}.${signed ? "s32" : "u32"}.${F.ty} ${SREG(sdS)}, ${R(sm)}`, (c) => {
+          const instr = op(1, `vcvt${roundZero ? "" : "r"}.${signed ? "s32" : "u32"}.${F.ty} ${SREG(sdS)}, ${R(sm)}`, (c) => {
             c.sBits[sdS] = fpToInt(F.rd(c, sm), !signed, roundZero ? "zero" : RMODE[(c.fpscr >>> 22) & 3])
           })
+          if (dp) return instr
+          if (roundZero)
+            return JF(
+              instr,
+              signed
+                ? `const v = Math.trunc(s[${sm}]); c.sBits[${sdS}] = v !== v ? 0 : v <= -2147483648 ? 0x80000000 : v >= 2147483647 ? 0x7fffffff : v >>> 0;`
+                : `const v = Math.trunc(s[${sm}]); c.sBits[${sdS}] = v !== v || v <= 0 ? 0 : v >= 4294967295 ? 4294967295 : v >>> 0;`,
+            )
+          return JF(instr, `c.sBits[${sdS}] = H.fpToInt(s[${sm}], ${!signed}, H.RMODE[(c.fpscr >>> 22) & 3]);`)
         }
         case 14:
         case 15:
@@ -2487,3 +2780,6 @@ function fpCvtFixed(hw1: number, hw2: number, sd: number, toFixed: boolean, F: F
     F.wr(c, sd, F.fr(v / scale))
   })
 }
+
+/** Helpers the compiled blocks (jit.ts) call by name through their `H` argument. */
+export const jitHelpers = { fpCompare, fpToInt, RMODE }

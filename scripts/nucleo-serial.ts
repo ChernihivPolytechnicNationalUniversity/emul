@@ -58,7 +58,7 @@ expect("echo of 'hi' upper-cased", after.slice(-2), "HI")
 expect("terminal TX pin back high", snap.pinVoltage[pinKey(term.id, "TX")] > 3 ? "high" : "low", "high")
 
 console.log("\nNon-ASCII goes out as UTF-8 bytes (and CP1251 when asked)")
-const mcu = (loop as unknown as { mcus: Map<string, { mcu: { bus: { read32: (a: number) => number }; firmware: { symbols: { name: string; value: number }[] } } }> }).mcus.get(u.id)!.mcu
+const mcu = (loop as unknown as { mcus: Map<string, { mcu: { mcu: { bus: { read32: (a: number) => number }; firmware: { symbols: { name: string; value: number }[] } } } }> }).mcus.get(u.id)!.mcu.mcu
 const rxCount = () => mcu.bus.read32(mcu.firmware.symbols.find((x) => x.name === "rxCount")!.value)
 let before = rxCount()
 loop.sendSerial(term.id, "Привет")

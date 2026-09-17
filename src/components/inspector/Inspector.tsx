@@ -358,6 +358,19 @@ function FirmwarePanel({ object, chip, sim, onChange }: { object: PlacedObject; 
               <dd className="text-right font-mono tabular-nums">{formatSI(status.time, "s", 4)}</dd>
               <dt className="text-muted-foreground">Instructions</dt>
               <dd className="text-right font-mono tabular-nums">{status.instructions.toLocaleString()}</dd>
+              <dt className="text-muted-foreground">Runs</dt>
+              <dd
+                className="text-right font-mono"
+                title={
+                  status.host === "worker (pipelined)"
+                    ? "The core runs on its own CPU thread one step (20 µs) ahead of the circuit solver: pad and pin levels cross with 20 µs of latency"
+                    : status.host === "worker (in step)"
+                      ? "The core runs on its own CPU thread, waiting for the solver each step while a digital part on its nets answers its edges"
+                      : "The core runs in the solver's thread (no cross-origin isolation, or in lockstep with another core on a shared net)"
+                }
+              >
+                {status.host}
+              </dd>
               {status.running && status.powered && (
                 <>
                   <dt className="text-muted-foreground">Power</dt>

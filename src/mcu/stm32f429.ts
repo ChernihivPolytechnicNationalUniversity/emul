@@ -869,6 +869,14 @@ export class Stm32 {
    * Fraction of the interval since the last call that a peripheral-driven pad was high, or
    * null when nothing drives it that way. Resets the accounting.
    */
+  /** Whether any pad is being toggled by a peripheral (a PWM), so duties are worth taking. */
+  hasDuty(): boolean {
+    return this.afHigh.size !== 0
+  }
+  /** The pads (port*16+pin) a peripheral drives, whose duty `takeDuty` reports. */
+  dutyPads(): IterableIterator<number> {
+    return this.afHigh.keys()
+  }
   takeDuty(p: PadRef, interval: number): number | null {
     const t = this.afHigh.get(p.port * 16 + p.pin)
     if (!t) return null

@@ -1,8 +1,6 @@
 import { getDef } from "@/schematic/registry"
 import { partKey, pinKey, type ComponentDef, type Damage, type PartState, type Schematic } from "@/schematic/types"
-import { chipById, STM32F429ZI } from "@/mcu/chip"
-import { CpuHalt } from "@/mcu/faults"
-import { parsePad, Stm32, type ClockStatus, type PadRef, type PowerStatus } from "@/mcu/stm32f429"
+import { parsePad, type PadRef } from "@/mcu/stm32f429"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import { crystalStartup } from "@/schematic/components/clock"
 import { parseValue } from "./units"
@@ -12,6 +10,7 @@ import { buildNetlist, GROUND, type GpioState } from "./netlist"
 import { UartDecoder, uartFrameEdges, uartFrameSeconds, type Edge } from "./serial"
 import { createDigitalPart, type DigitalPart } from "./digital"
 import { PanelInstance } from "./display"
+import { LocalCore, makeCore, type CoreHost, type CoreStatus, type CoreTransport, type PanelWiring } from "./core-host"
 
 /**
  * Shortest press a button registers, in simulated seconds. A mouse click can come and go
@@ -131,28 +130,10 @@ function encodeText(text: string, charset: string): Uint8Array {
 }
 
 /** What the UI shows about an MCU: where its core is and how it is doing. */
-export type McuStatus = {
+export type McuStatus = CoreStatus & {
   firmware: string
-  running: boolean
-  /** Why the core stopped, when it did. */
-  halted: string | null
-  time: number
-  pc: number
-  instructions: number
-  sysclk: number
-  /** Human-readable pending/fault notes for the debugger panel. */
-  faults: string[]
-  /** Peripheral blocks the firmware touched that the emulator does not model, busiest first. */
-  unmodelled: { block: string; reads: number; writes: number }[]
   /** VDD is up; below the power-on threshold the core is held in reset. */
   powered: boolean
-  /** System resets since power-on (watchdogs, SYSRESETREQ, Standby exit) and the cause of the last one. */
-  resets: number
-  lastReset: string | null
-  /** Power mode, share of the time asleep since the last status, and the supply-current estimate. */
-  power: PowerStatus
-  /** System clock source and rate, what feeds HSE/LSE, and why an oscillator the firmware waits on is not coming. */
-  clock: ClockStatus
 }
 
 /** A clock source found on an MCU's oscillator pins; an oscillator module only runs while its VCC net is up. */
@@ -160,7 +141,7 @@ type ClockFeed = { source: ClockSource | null; vccNet?: number }
 
 /** An emulated MCU sitting on a board object, with the map from model nodes to its pads. */
 class McuInstance {
-  readonly mcu: Stm32
+  mcu: CoreHost
   /** Model node ("CN7-10", "$PB7") → pad. */
   readonly pads = new Map<string, PadRef>()
   /**
@@ -171,12 +152,16 @@ class McuInstance {
   inputs: { pad: PadRef; node: number; key: string; digital: boolean }[] = []
   /** Net index by pad (port*16+pin) for the same pads. */
   padNode = new Map<number, number>()
+  /** The same inputs by pad (port*16+pin), for the duty sampling of PWM pads. */
+  inputByPad = new Map<number, { pad: PadRef; node: number; key: string; digital: boolean }>()
   /**
    * Level to present for pads that switched within the step just run (PWM faster than the
    * analog step), by model node. Sampled at a random instant of the step, so over many steps
    * a load sees the true duty rather than whatever phase a fixed sampling point aliases to.
    */
-  readonly sampled = new Map<string, GpioState>()
+  sampled = new Map<string, GpioState>()
+  /** The step before's samples, swapped in each step to compare against. */
+  sampledPrev = new Map<string, GpioState>()
   /** Pads that have received an exact-time edge: from then on the analog sampler leaves them alone. */
   readonly digitalPads = new Set<number>()
   /** Deliver an exact-time level to a pad, taking it over from the analog sampler. */
@@ -186,12 +171,35 @@ class McuInstance {
   }
   /** Shares a net with another core: runs in lockstep with it (see `runLockstep`). */
   coupled = false
+  /** Pads (port·16 + pin) on nets with a digital part: traffic there needs answers at exact times. */
+  readonly partPads = new Set<number>()
+  /** A remote core with part traffic runs in step with the loop for this many runs after the last edge. */
+  keepInStep() {
+    if (this.mcu instanceof LocalCore) return
+    ;(this.mcu as { keepInStep?: (runs: number) => void }).keepInStep?.(IN_STEP_RUNS)
+  }
+  /** Bring a remote core back into this thread (a peer to run in lockstep with turned up). */
+  relocate() {
+    if (this.mcu instanceof LocalCore) return
+    const remote = this.mcu
+    remote.dispose()
+    const def = getDef(this.defId)
+    this.mcu = makeCore(def?.chip, def?.mcuMemory, null)
+    if (this.data) this.mcu.load(this.data.slice(0), this.name)
+  }
+  /** The firmware image, kept for a relocation. */
+  data: ArrayBuffer | null = null
+  readonly defId: string
   /** engine time − this core's own time, as of the current step: cores restart at 0 on reset. */
   offset = 0
   /** Engine time the core last started from zero, so it can be driven to the engine's clock. */
   base = 0
   /** Dead silicon: stays halted through power cycles and resets until the next run. */
   burnt = false
+  /** What the pads last read as, for the engine to skip its scan while nothing changed. */
+  padVersion = -1
+  idd = 0
+  padsLive = false
   /** Net of the pin that powers the MCU (undefined: unsolved, treated as powered), and whether it is up. */
   powerNet: number | undefined = undefined
   /** Net of NRST (undefined: unsolved, treated as released). */
@@ -207,10 +215,11 @@ class McuInstance {
   name = ""
   readonly object: string
 
-  constructor(object: string, defId: string) {
+  constructor(object: string, defId: string, spawn: (() => CoreTransport) | null) {
     this.object = object
+    this.defId = defId
     const def = getDef(defId)
-    this.mcu = new Stm32((def?.chip && chipById(def.chip)) || STM32F429ZI, def?.mcuMemory)
+    this.mcu = makeCore(def?.chip, def?.mcuMemory, spawn)
     if (!def?.model) return
     for (const el of def.model) {
       if (el.kind !== "GPIO") continue
@@ -221,23 +230,7 @@ class McuInstance {
   }
 
   status(): McuStatus {
-    const { mcu } = this
-    return {
-      firmware: this.name,
-      running: mcu.running,
-      halted: mcu.cpu.halted?.message ?? null,
-      time: mcu.time,
-      pc: mcu.cpu.pc,
-      instructions: mcu.cpu.instructions,
-      sysclk: mcu.firmware ? mcu.clocks.sysclk : 0,
-      faults: mcu.cpu.scs.faults.slice(-5).map((f) => `${f.detail} at 0x${f.pc.toString(16)}`),
-      unmodelled: mcu.unmodelled.summary(),
-      powered: this.powered,
-      resets: mcu.resets,
-      lastReset: mcu.lastReset,
-      power: mcu.powerStatus(),
-      clock: mcu.clockStatus(),
-    }
+    return { ...this.mcu.status(), firmware: this.name, powered: this.powered }
   }
 }
 
@@ -255,6 +248,10 @@ export const DT = 20e-6
  * The budget scales with the requested speed, which stays a ceiling rather than a promise.
  */
 const STEPS_PER_TICK = 1500
+/** What a part with no state set reads as. */
+const NO_STATE: PartState = {}
+/** Runs a remote core stays in step with the loop after traffic with a digital part (~2 ms of steps). */
+const IN_STEP_RUNS = 100
 /** Time constant of the achieved-speed average, wall-clock seconds. */
 const RATE_TAU = 0.5
 /** Diode current that counts as fully lit, and the current below which an LED is dark. */
@@ -339,8 +336,13 @@ export class SimLoop {
   private mcus = new Map<string, McuInstance>()
   private terminals = new Map<string, TerminalInstance>()
   private digitalParts = new Map<string, DigitalPart>()
-  /** RGB panels, by object id. */
-  private panels = new Map<string, PanelInstance>()
+  /** RGB panels, by object id: their wiring to cores, and an instance of our own for one no core drives. */
+  private panels = new Map<string, PanelWiring & { own: PanelInstance }>()
+  /**
+   * Spawns the worker a remote core lives in; null runs every core in this thread. Set by the
+   * environment (the simulation worker in the browser, a script in node).
+   */
+  spawnCore: (() => CoreTransport) | null = (globalThis as { __emulSpawnCore?: () => CoreTransport }).__emulSpawnCore ?? null
   /** Nets on the exact-time path, by net index. */
   private digitalNets = new Map<number, DigitalNet>()
   /**
@@ -370,6 +372,8 @@ export class SimLoop {
   private last: number | null = null
   /** Achieved speed, an exponential average over the last RATE_TAU seconds of wall clock. */
   private rate: number | null = null
+  /** A terminal or digital part changed what it drives: the engine must read the pads again. */
+  private padsDirty = true
   speed = 1
   running = false
   /** Called for every part that burns out, once. */
@@ -391,7 +395,7 @@ export class SimLoop {
   }
 
   /** Whether a panel's logic supply pin is up, as the last solve left it. */
-  private panelPowered(p: PanelInstance): boolean {
+  private panelPowered(p: PanelWiring): boolean {
     const engine = this.engine
     if (!engine || !p.spec.power) return true
     const node = engine.net.pinNet.get(pinKey(p.object, p.spec.power))
@@ -406,9 +410,13 @@ export class SimLoop {
       const def = getDef(obj.def)
       if (!def?.panel) continue
       seen.add(obj.id)
-      if (!this.panels.has(obj.id)) this.panels.set(obj.id, new PanelInstance(obj.id, def.panel))
+      if (!this.panels.has(obj.id)) this.panels.set(obj.id, { object: obj.id, spec: def.panel, wired: new Map(), own: new PanelInstance(obj.id, def.panel) })
     }
-    for (const id of [...this.panels.keys()]) if (!seen.has(id)) this.panels.delete(id)
+    for (const id of [...this.panels.keys()])
+      if (!seen.has(id)) {
+        this.panels.delete(id)
+        for (const inst of this.mcus.values()) inst.mcu.dropPanel(id)
+      }
   }
 
   /** Digital parts follow the document: created for known definitions, reconfigured on prop edits. */
@@ -464,23 +472,23 @@ export class SimLoop {
       seen.add(obj.id)
       let inst = this.mcus.get(obj.id)
       if (!inst) {
-        inst = new McuInstance(obj.id, obj.def)
+        inst = new McuInstance(obj.id, obj.def, this.spawnCore)
         this.mcus.set(obj.id, inst)
       }
       if (inst.loadedFrom !== data) {
         inst.loadedFrom = data
         inst.name = obj.props?.firmware ?? "firmware"
-        try {
-          inst.mcu.load(decodeBase64(data), inst.name)
-          inst.base = this.engine?.time ?? 0
-        } catch (e) {
-          inst.mcu.firmware = null
-          inst.mcu.cpu.halted = new CpuHalt("fault", `cannot load firmware: ${(e as Error).message}`, 0)
-        }
+        inst.data = decodeBase64(data)
+        inst.mcu.load(inst.data.slice(0), inst.name)
+        inst.base = this.engine?.time ?? 0
         this.mapInputs()
       }
     }
-    for (const id of [...this.mcus.keys()]) if (!seen.has(id)) this.mcus.delete(id)
+    for (const id of [...this.mcus.keys()])
+      if (!seen.has(id)) {
+        this.mcus.get(id)!.mcu.dispose()
+        this.mcus.delete(id)
+      }
   }
 
   /**
@@ -529,18 +537,16 @@ export class SimLoop {
         inst.lse = def.mcuClocks ? { source: def.mcuClocks.lse } : this.oscillatorFeed(inst.object, def, "PC14", "PC15")
       }
       inst.padNode.clear()
+      inst.inputByPad.clear()
       for (const el of engine.net.elements) {
         if (el.kind !== "GPIO" || el.object !== inst.object) continue
         const pad = inst.pads.get(el.nodeKey)
         if (pad) {
-          inst.inputs.push({ pad, node: el.node, key: el.nodeKey, digital: false })
+          const input = { pad, node: el.node, key: el.nodeKey, digital: false }
+          inst.inputs.push(input)
           inst.padNode.set(pad.port * 16 + pad.pin, el.node)
+          inst.inputByPad.set(pad.port * 16 + pad.pin, input)
         }
-      }
-      // The ADC samples the pad's net as the last solve left it (a step old at most).
-      inst.mcu.analogRead = (pad) => {
-        const node = inst.padNode.get(pad.port * 16 + pad.pin)
-        return node === undefined ? null : node === GROUND ? 0 : engine.v[node]
       }
     }
     // Nets on the digital path: shared by two cores, at a terminal, or at a digital part.
@@ -586,7 +592,7 @@ export class SimLoop {
         const node = engine?.net.pinNet.get(pinKey(panel.object, pin))
         if (node === undefined) continue
         const pad = padsByNet.get(node)?.[0]
-        if (pad) panel.wired.set(signal, { mcu: pad.inst.mcu, pad: pad.pad })
+        if (pad) panel.wired.set(signal, { host: pad.inst.mcu, pad: pad.pad })
       }
     }
     const partNets = new Set<number>()
@@ -612,25 +618,41 @@ export class SimLoop {
     this.digitalNets = nets
     for (const inst of this.mcus.values()) {
       inst.coupled = false
-      inst.mcu.digitalWatch.clear()
-      let parts = false
+      inst.partPads.clear()
+      const watch: number[] = []
       for (const i of inst.inputs) {
         i.digital = nets.has(i.node)
         // Plain GPIO edges on those nets travel exactly too (a bit-banged chip select, a
         // bit-banged UART into the terminal), so they keep their order against the serial ones.
-        if (i.digital) inst.mcu.digitalWatch.add(i.pad.port * 16 + i.pad.pin)
+        if (i.digital) watch.push(i.pad.port * 16 + i.pad.pin)
         if (shared.has(i.node)) inst.coupled = true
-        if (partNets.has(i.node)) parts = true
+        if (partNets.has(i.node)) inst.partPads.add(i.pad.port * 16 + i.pad.pin)
       }
+      // Cores in lockstep with a peer run in this thread: a worker cannot yield per edge to another worker.
+      if (inst.coupled) inst.relocate()
+      inst.mcu.setDigitalWatch(watch)
+      inst.mcu.setPads(inst.inputs.map((i) => i.pad.port * 16 + i.pad.pin))
       // A part answers an edge at the edge's own time, so the core must hand edges over as it makes them.
-      inst.mcu.yieldOnOutput = inst.coupled || parts
+      inst.mcu.yieldOnOutput = inst.coupled || inst.partPads.size > 0
     }
+    // A relocated core is a new host: the panels wired to it must point at the new one.
+    for (const panel of this.panels.values())
+      for (const [signal, w] of panel.wired) {
+        const inst = padsByNet.get(engine!.net.pinNet.get(pinKey(panel.object, Object.entries(panel.spec.signals).find(([, s]) => s === signal)![0]))!)?.[0]
+        if (inst && inst.inst.mcu !== w.host) panel.wired.set(signal, { host: inst.inst.mcu, pad: w.pad })
+      }
   }
 
   // --- serial: the digital fast path ---------------------------------------------------------
   //
   // Bits between an MCU and a terminal (or another MCU) travel as timestamped edges, so a
   // 115200-baud frame survives the 20 µs analog step. The analog side still sees the levels.
+
+  /** Whether any core runs in a worker pipelined behind the loop (its edges arrive a step late). */
+  private get pipelined() {
+    for (const inst of this.mcus.values()) if (!(inst.mcu instanceof LocalCore)) return true
+    return false
+  }
 
   /** Deterministic uniform noise in [0, 1) for the sub-step sampling (a 32-bit LCG). */
   private ditherState = 0x2545f491
@@ -682,7 +704,10 @@ export class SimLoop {
   /** A net's resolved level at `time` goes to every pad, part and terminal on it. */
   private deliverLevel(net: DigitalNet, level: boolean, time: number) {
     for (const probe of net.logic) this.logEdge(probe, level, time)
-    for (const p of net.pads) p.inst.drive(p.pad, level, time - p.inst.offset)
+    for (const p of net.pads) {
+      if (net.parts.length) p.inst.keepInStep()
+      p.inst.drive(p.pad, level, time - p.inst.offset)
+    }
     for (const t of net.rx) t.decoder.edge({ time, level })
     for (const { part, pin } of net.parts) {
       part.input(pin, level, time)
@@ -694,6 +719,7 @@ export class SimLoop {
   private drainPart(part: DigitalPart) {
     const engine = this.engine
     if (!engine) return
+    this.padsDirty = true
     for (let round = 0; part.out.length && round < 16; round++) {
       const edges = part.out.splice(0, part.out.length)
       for (const e of edges) {
@@ -705,16 +731,18 @@ export class SimLoop {
   }
 
   /** Edges a core made in the run just done: onto their nets, to terminals, parts and other cores. */
-  private deliverDigital(inst: McuInstance) {
-    const out = inst.mcu.digitalOut
-    if (!out.length) return
+  private deliverDigital(inst: McuInstance): boolean {
+    const out = inst.mcu.drainEdges()
+    if (!out.length) return false
     for (const e of out) {
       const key = e.pad.port * 16 + e.pad.pin
+      // Traffic with a part: a remote core answers in step until it is over.
+      if (inst.partPads.has(key)) inst.keepInStep()
       const node = inst.padNode.get(key)
       const net = node === undefined ? undefined : this.digitalNets.get(node)
       if (net) this.setDriver(net, `${inst.object}/${key}`, e.level, e.time + inst.offset, true)
     }
-    out.length = 0
+    return true
   }
 
   /**
@@ -745,11 +773,7 @@ export class SimLoop {
       // Edges out, and whatever the peers answered synchronously to a late-applied edge.
       for (let round = 0; round < 8; round++) {
         let any = false
-        for (const i of group)
-          if (i.mcu.digitalOut.length) {
-            any = true
-            this.deliverDigital(i)
-          }
+        for (const i of group) if (this.deliverDigital(i)) any = true
         if (!any) break
       }
     }
@@ -760,7 +784,8 @@ export class SimLoop {
     const t = this.terminals.get(object)
     const engine = this.engine
     if (!t || !engine) return
-    let at = Math.max(t.txBusyUntil, engine.time + DT)
+    // A core in a worker may already be running the next step: start the frame past it.
+    let at = Math.max(t.txBusyUntil, engine.time + DT * (this.spawnCore ? 3 : 1))
     for (const byte of encodeText(text, t.charset)) {
       const edges = uartFrameEdges(byte, at, t.baud)
       t.txEdges.push(...edges)
@@ -776,12 +801,14 @@ export class SimLoop {
   private serviceTerminals(time: number) {
     for (const t of this.terminals.values()) {
       while (t.txEdges.length && t.txEdges[0].time <= time) {
+        this.padsDirty = true
         const e = t.txEdges.shift()!
         t.txLevel = e.level
         const net = t.txNet === undefined ? undefined : this.digitalNets.get(t.txNet)
         if (net) for (const probe of net.logic) this.logEdge(probe, e.level, e.time)
       }
-      t.decoder.poll(time)
+      // A core in a worker hands its edges over a step late: the decoder stays a step behind them.
+      t.decoder.poll(this.pipelined ? time - DT : time)
       if (t.decoder.bytes.length) {
         t.text += t.textDecoder.decode(new Uint8Array(t.decoder.bytes), { stream: true })
         t.decoder.bytes.length = 0
@@ -790,34 +817,64 @@ export class SimLoop {
     }
   }
 
-  /** What the pad behind (object, node) drives: the emulated MCU's GPIO block, or nothing without firmware. */
-  private readonly pinState: PinReader = (object, node): GpioState => {
+  /**
+   * What the pad behind (object, node) drives: the emulated MCU's GPIO block, a terminal, a
+   * digital part, or nothing. The lookup is resolved once per element and kept by index.
+   */
+  private readonly pinState: PinReader = (index, object, node): GpioState => {
+    let reader = this.pinReaders[index]
+    if (reader === undefined) {
+      reader = this.resolvePin(object, node)
+      this.pinReaders[index] = reader
+    }
+    return reader()
+  }
+  private pinReaders: (() => GpioState)[] = []
+  private resolvePin(object: string, node: string): () => GpioState {
     const inst = this.mcus.get(object)
-    if (inst?.mcu.firmware) {
+    if (inst?.mcu.loaded) {
       // The supply load follows the power mode: the resistance that draws the mode's current.
-      if (node === "$idd") return inst.mcu.chip.electrical.vdd / inst.mcu.supplyCurrent()
-      const s = inst.sampled.get(node)
-      if (s !== undefined) return s
+      if (node === "$idd") return () => (inst.mcu.loaded ? inst.mcu.chip.electrical.vdd / inst.idd : null)
       const pad = inst.pads.get(node)
-      if (pad) return inst.mcu.padDrive(pad)
+      if (!pad) return () => null
+      // The drive is recomputed only when the core's pads changed (its version counts every
+      // GPIO register write and DAC change), so a still board costs a compare per pad per step.
+      let version = -1
+      let drive: GpioState = null
+      return () => {
+        if (!inst.mcu.loaded) return null
+        if (inst.sampled.size !== 0) {
+          const s = inst.sampled.get(node)
+          if (s !== undefined) return s
+        }
+        if (inst.padVersion !== version) {
+          version = inst.padVersion
+          drive = inst.mcu.padDrive(pad)
+        }
+        return drive
+      }
     }
     const term = this.terminals.get(object)
-    if (term) return node === "TX" ? (term.txLevel ? "high" : "low") : node === "RX" ? "pullup" : null
+    if (term) return node === "TX" ? () => (term.txLevel ? "high" : "low") : node === "RX" ? () => "pullup" : () => null
     const part = this.digitalParts.get(object)
     if (part) {
-      const d = part.drive(node)
-      return d === null ? null : d ? "high" : "low"
+      return () => {
+        const d = part.drive(node)
+        return d === null ? null : d ? "high" : "low"
+      }
     }
-    return null
+    return () => null
   }
 
   /** After a solver step, feed the node voltages back into the MCU input registers. */
   private sampleInputs(engine: Engine) {
     for (const inst of this.mcus.values()) {
-      if (!inst.mcu.firmware) continue
+      if (!inst.mcu.loaded) continue
       for (const { pad, node, digital } of inst.inputs) {
-        if (digital && inst.digitalPads.has(pad.port * 16 + pad.pin)) continue
         const v = node === GROUND ? 0 : engine.v[node]
+        // The ADC samples the pad's net as the last solve left it (a step old at most).
+        inst.mcu.setAnalog(pad, v)
+        if (digital && inst.digitalPads.has(pad.port * 16 + pad.pin)) continue
         if (v > VIH) inst.mcu.setPad(pad, true)
         else if (v < VIL) inst.mcu.setPad(pad, false)
       }
@@ -953,12 +1010,18 @@ export class SimLoop {
       this.damage = {}
       this.stale = true
       for (const inst of this.mcus.values())
-        if (inst.mcu.firmware && inst.mcu.cpu.halted) {
+        if (inst.mcu.loaded && inst.mcu.halted) {
           inst.burnt = false
           inst.mcu.reset()
           inst.base = this.engine?.time ?? 0
         }
     }
+  }
+
+  /** Stop the workers the cores live in (a script that is done with the loop). */
+  dispose() {
+    for (const inst of this.mcus.values()) inst.mcu.dispose()
+    this.mcus.clear()
   }
 
   /** Throw away the accumulated state and start the next run from t = 0. */
@@ -986,6 +1049,8 @@ export class SimLoop {
   }
 
   private rebuild(adopt: boolean) {
+    this.padsDirty = true
+    this.pinReaders = []
     const prev = this.engine
     const next = new Engine(buildNetlist({ ...this.doc, parts: {} }, this.damage, undefined, this.probeKeys()))
     if (adopt && prev) next.adopt(prev)
@@ -1075,8 +1140,8 @@ export class SimLoop {
     // What this tick actually delivered against the wall clock, blended in by how long it took.
     const achieved = (steps * DT) / wall
     this.rate = this.rate === null ? achieved : this.rate + (achieved - this.rate) * (1 - Math.exp(-wall / RATE_TAU))
-    const read = (object: string, part: string) => this.parts[partKey(object, part)] ?? this.partDefaults[partKey(object, part)] ?? {}
-    const mcus = [...this.mcus.values()].filter((m) => m.mcu.firmware)
+    const read = (key: string) => this.parts[key] ?? this.partDefaults[key] ?? NO_STATE
+    const mcus = [...this.mcus.values()].filter((m) => m.mcu.loaded)
     for (let i = 0; i < steps; i++) {
       if (this.heldReleases.size) this.releaseHeld(engine.time)
       // The cores run ahead of the solver by one step, then the step sees their pads. A core
@@ -1124,14 +1189,37 @@ export class SimLoop {
         }
       }
       if (coupled.length) this.runLockstep(coupled, engine.time + DT)
+      // Whether any pad can read differently from the last step: the engine skips its pad
+      // scan otherwise (most steps of a board sitting on a fixed picture).
+      let refresh = this.padsDirty
+      this.padsDirty = false
       for (const inst of mcus) {
-        if (inst.burnt || !inst.powered) continue
-        // Outputs that switched within the step are sampled at a random instant of it.
-        inst.sampled.clear()
-        for (const { pad, key } of inst.inputs) {
-          const d = inst.mcu.takeDuty(pad, DT)
-          if (d !== null && d > 0 && d < 1) inst.sampled.set(key, this.dither() < d ? "high" : "low")
+        const live = !inst.burnt && inst.powered
+        if (live !== inst.padsLive) refresh = true
+        inst.padsLive = live
+        // A core held in reset still has pads (floating, or as the reset left them).
+        const version = inst.mcu.padVersion()
+        if (version !== inst.padVersion) refresh = true
+        inst.padVersion = version
+        if (!live) continue
+        const idd = inst.mcu.supplyCurrent()
+        if (idd !== inst.idd) refresh = true
+        inst.idd = idd
+        // Outputs that switched within the step are sampled at a random instant of it. The
+        // pads are only re-read when a sample differs from the step before.
+        const was = inst.sampled
+        const now = inst.sampledPrev
+        now.clear()
+        for (const padKey of inst.mcu.dutyPads()) {
+          const input = inst.inputByPad.get(padKey)
+          if (input === undefined) continue
+          const d = inst.mcu.takeDuty(input.pad, DT)
+          if (d !== null && d > 0 && d < 1) now.set(input.key, this.dither() < d ? "high" : "low")
         }
+        inst.sampled = now
+        inst.sampledPrev = was
+        if (now.size !== was.size) refresh = true
+        else for (const [key, level] of now) if (was.get(key) !== level) refresh = true
       }
       this.serviceTerminals(engine.time + DT)
       for (const part of this.digitalParts.values())
@@ -1139,7 +1227,7 @@ export class SimLoop {
           part.tick(engine.time + DT)
           if (part.out.length) this.drainPart(part)
         }
-      engine.step(DT, read, this.pinState)
+      engine.step(DT, read, this.pinState, refresh || this.padsDirty)
       this.accumulateFlow(engine, DT)
       if (mcus.length) this.sampleInputs(engine)
       if (engine.failures.length) {
@@ -1157,9 +1245,9 @@ export class SimLoop {
           this.damage[f.object] = f.damage
           // A burnt MCU is dead silicon: the core stops and its pads leave the circuit.
           const inst = this.mcus.get(f.object)
-          if (inst?.mcu.firmware) {
+          if (inst?.mcu.loaded) {
             inst.burnt = true
-            inst.mcu.cpu.halted = new CpuHalt("fault", `burnt out: ${f.damage.reason}`, inst.mcu.cpu.pc)
+            inst.mcu.halt(`burnt out: ${f.damage.reason}`)
           }
           this.onFailure?.(f)
         }
@@ -1168,6 +1256,14 @@ export class SimLoop {
       }
     }
     return steps
+  }
+
+  /** What a panel shows: composed by the core that drives its pixel clock, or by our own instance when none does. */
+  private capturePanel(p: PanelWiring & { own: PanelInstance }) {
+    const wall = performance.now()
+    const powered = this.panelPowered(p)
+    const host = p.wired.get("CLK")?.host
+    return host ? host.capturePanel(p, wall, powered) : p.own.capture(wall, powered)
   }
 
   /** Current operating point, shaped for the UI. Built on demand, not on every step. */
@@ -1240,7 +1336,7 @@ export class SimLoop {
       mcus: Object.fromEntries([...this.mcus].map(([id, inst]) => [id, inst.status()])),
       terminals: Object.fromEntries([...this.terminals].map(([id, t]) => [id, { text: t.text, framingErrors: t.decoder.framingErrors }])),
       digital: Object.fromEntries([...this.digitalParts].map(([id, p]) => [id, p.snapshot()])),
-      displays: Object.fromEntries([...this.panels].map(([id, p]) => [id, { width: p.spec.width, height: p.spec.height, ...p.capture(performance.now(), this.panelPowered(p)) }])),
+      displays: Object.fromEntries([...this.panels].map(([id, p]) => [id, { width: p.spec.width, height: p.spec.height, ...this.capturePanel(p) }])),
     }
   }
 }

@@ -42,7 +42,9 @@
     "nucleo-serial": "tsx --tsconfig tsconfig.app.json scripts/nucleo-serial.ts",
     "physics": "tsx --tsconfig tsconfig.app.json scripts/physics.ts",
     "battery": "tsx --tsconfig tsconfig.app.json scripts/battery.ts",
-    "wires": "tsx --tsconfig tsconfig.app.json scripts/wires.ts"
+    "wires": "tsx --tsconfig tsconfig.app.json scripts/wires.ts",
+    "bench": "tsx --tsconfig tsconfig.app.json scripts/bench.ts",
+    "mcu-jit": "tsx --tsconfig tsconfig.app.json scripts/mcu-jit.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

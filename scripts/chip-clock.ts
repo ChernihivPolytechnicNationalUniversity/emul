@@ -38,7 +38,7 @@ function start(doc: Schematic, mcuId: string) {
   loop.setRunning(true)
   let clock = 0
   loop.advance(clock)
-  const core = (loop as unknown as { mcus: Map<string, { mcu: Stm32 }> }).mcus.get(mcuId)!.mcu
+  const core = (loop as unknown as { mcus: Map<string, { mcu: { mcu: Stm32 } }> }).mcus.get(mcuId)!.mcu.mcu
   /** Advance by `seconds` in `tick`-second steps, sampling the status after each. */
   const run = (seconds: number, tick = 0.03, sample?: (st: McuStatus, t: number) => void) => {
     const end = clock + seconds * 1000

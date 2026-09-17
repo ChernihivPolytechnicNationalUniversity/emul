@@ -35,6 +35,7 @@ panel says which blocks the program touched that are missing**, so it is never a
 | MPU | registers kept, **not enforced** |
 | Instruction timing | per-instruction cycle counts plus flash wait states: ACR.LATENCY per new 128-bit (F7: 256-bit) line fetched from flash unless the prefetch buffer (sequential code) or the ART / instruction cache (64 lines, LRU) has it; data reads from flash likewise unless the data cache (DCEN, 8 lines) holds the line. **No** bus contention, pipeline or branch-prediction model (M7 dual-issue not modelled) |
 | Debugger UI (step, breakpoints, registers, memory) | **none** — only PC/instruction count in the inspector; breakpoints exist in the core API |
+| Execution speed | decoded instructions are compiled per basic block into JavaScript (`src/mcu/jit.ts`; straight-line code, calls and loops laid out into one function, exceptions and timer events still taken between instructions) — 50–180 MIPS on a desktop, so a 50 MHz F746 runs ~1.5–2× real time and a 200 MHz one at ~0.5–1.7× depending on the code; `pnpm mcu-jit` checks the compiled and interpreted cores agree register-for-register, `pnpm bench` measures every MCU example |
 
 ### Chips
 
@@ -164,9 +165,20 @@ cores; only cores that share a net pay it.
 
 ## Layout
 
-- `src/mcu/` — the emulator: `cpu.ts`, `decode.ts`, `scs.ts` (NVIC/SysTick/SCB), `bus.ts`, `periph/*`, `chip.ts` (profiles), `stm32f429.ts` (the SoC class `Stm32`)
-- `src/sim/` — analog engine (`engine.ts`), netlist, the co-simulation loop (`loop.ts`) and its worker, digital parts (`digital.ts`)
+- `src/mcu/` — the emulator: `cpu.ts`, `decode.ts`, `jit.ts` (blocks compiled to JavaScript), `scs.ts` (NVIC/SysTick/SCB), `bus.ts`, `periph/*`, `chip.ts` (profiles), `stm32f429.ts` (the SoC class `Stm32`), `core-worker.ts` (one core in a worker of its own)
+- `src/sim/` — analog engine (`engine.ts`), netlist, the co-simulation loop (`loop.ts`) and its worker, `core-host.ts` (a core in this thread or in a worker, over a SharedArrayBuffer), digital parts (`digital.ts`)
 - `src/schematic/` — component definitions (`components/*`), examples, geometry, `mcu-model.ts`; wiring in `nets.ts` (the net map), `wiring.ts` (connect, tap), `wire-colors.ts` (palette, shortcuts, the automatic rule)
 - `src/components/` — the React UI
 - `firmware/` — test firmware and HAL apps (`hal/Src/main.c` blink, `square.c`, `pwm.c`, `uart.c`, `spi.c`, `spi-slave.c`, `i2c.c`, `dma.c`, `adc.c`, `wdg.c`)
 - `scripts/` — the test drivers above
+
+## Threads
+
+The UI thread draws; the simulation worker runs the analog solver, the digital parts and the
+loop; and, when the page is cross-origin isolated (the dev server and nginx send the COOP/COEP
+headers), every MCU core runs in a worker of its own, pipelined one 20 µs step ahead of the
+solver — pad and pin levels cross with 20 µs of latency, which the inspector says ("Runs:
+worker (pipelined)"). A core with a digital part on its nets (an I²C EEPROM, the GT911) drops
+into step with the loop while that traffic lasts, and two cores sharing a net stay in the
+solver's thread in lockstep. Without isolation everything runs in the simulation worker.
+`pnpm bench "" 4 --workers` measures the worker arrangement under node.

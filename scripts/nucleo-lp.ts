@@ -28,7 +28,7 @@ loop.setRunning(true)
 let clock = 0
 loop.advance(clock)
 type Core = { mcu: { bus: { read32: (a: number) => number }; firmware: { symbols: { name: string; value: number }[] }; rcc: { get: (name: string) => number } } }
-const core = (loop as unknown as { mcus: Map<string, Core> }).mcus.get(u.id)!.mcu
+const core = (loop as unknown as { mcus: Map<string, { mcu: Core }> }).mcus.get(u.id)!.mcu.mcu
 const word = (name: string) => core.bus.read32(core.firmware.symbols.find((x) => x.name === name)!.value)
 
 /**

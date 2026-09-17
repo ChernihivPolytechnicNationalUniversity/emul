@@ -23,6 +23,13 @@ export class Scs extends WordPeripheral {
   private systCountflag = 0
   /** Sub-cycle accumulator for the /8 external clock. */
   private systDiv = 0
+  /**
+   * The counter is advanced lazily: `systAt` is the core cycle count its state is current
+   * to, `systDue` the cycle at which it next reaches zero (Infinity when it will not), which
+   * the CPU compares against between instructions instead of counting every one.
+   */
+  private systAt = 0
+  systDue = Infinity
 
   // SCB
   vtor = 0
@@ -59,7 +66,7 @@ export class Scs extends WordPeripheral {
   readonly active = new Uint8Array(NUM_EXC)
   /** Configured priority bytes: SHPR for 4..15, IPR for IRQs. Reset, NMI, HardFault are fixed. */
   readonly priority = new Uint8Array(NUM_EXC)
-  private pendingCount = 0
+  pendingCount = 0
   private activeCount = 0
 
   /** Faults recorded for the debugger, newest last. */
@@ -80,6 +87,8 @@ export class Scs extends WordPeripheral {
     this.systCvr = 0
     this.systCountflag = 0
     this.systDiv = 0
+    this.systAt = 0
+    this.systDue = Infinity
     this.aircr = 0xfa050000
     this.scr = 0
     this.ccr = 0x200
@@ -87,6 +96,7 @@ export class Scs extends WordPeripheral {
     this.cfsr = 0
     this.hfsr = 0
     this.cpacr = 0
+    this.cpu.fpOn = false
     this.mpuCtrl = 0
     this.mpuRnr = 0
     this.mpuRbar.fill(0)
@@ -140,6 +150,10 @@ export class Scs extends WordPeripheral {
    * The exception to take now, or 0: the most urgent pending enabled exception whose group
    * priority beats the current execution priority (B1.5.4). Ties go to the lower exception number.
    */
+  anyPending(): boolean {
+    return this.pendingCount !== 0
+  }
+
   pendingToTake(executionPriority: number): number {
     if (this.pendingCount === 0) return 0
     let bestExc = 0
@@ -210,7 +224,20 @@ export class Scs extends WordPeripheral {
   // --- SysTick -----------------------------------------------------------------------
 
   /** Advance the timer by `cycles` core clocks. */
-  tick(cycles: number) {
+  /** Bring the counter up to core cycle `now` and schedule its next zero. */
+  sync(now: number) {
+    const elapsed = now - this.systAt
+    this.systAt = now
+    if (elapsed > 0) this.tick(elapsed)
+    this.systDue = now + this.cyclesUntilTick()
+  }
+  /** The clocks stood still from `from` (a deep sleep): the counter did not run in between. */
+  resume(now: number) {
+    this.systAt = now
+    this.systDue = now + this.cyclesUntilTick()
+  }
+
+  private tick(cycles: number) {
     if ((this.systCsr & 1) === 0) return
     if ((this.systCsr & 4) === 0) {
       // External reference clock: HCLK/8 on STM32.
@@ -256,6 +283,7 @@ export class Scs extends WordPeripheral {
       case 0x008: // ACTLR
         return 0
       case 0x010: {
+        this.sync(this.cpu.cycles)
         const v = this.systCsr | (this.systCountflag << 16)
         this.systCountflag = 0
         return v
@@ -263,6 +291,7 @@ export class Scs extends WordPeripheral {
       case 0x014:
         return this.systRvr
       case 0x018:
+        this.sync(this.cpu.cycles)
         return this.systCvr
       case 0x01c: // CALIB: 10 ms at 18 MHz (STCLK = HCLK/8 at 144 MHz), NOREF = 0
         return 0x00011250 & 0x00ffffff
@@ -409,15 +438,21 @@ export class Scs extends WordPeripheral {
   writeWord(off: number, value: number): void {
     switch (off) {
       case 0x010:
+        this.sync(this.cpu.cycles)
         this.systCsr = value & 7
+        this.systDue = this.cpu.cycles + this.cyclesUntilTick()
         return
       case 0x014:
+        this.sync(this.cpu.cycles)
         this.systRvr = value & 0xffffff
+        this.systDue = this.cpu.cycles + this.cyclesUntilTick()
         return
       case 0x018:
         // Any write clears the counter and COUNTFLAG.
+        this.sync(this.cpu.cycles)
         this.systCvr = 0
         this.systCountflag = 0
+        this.systDue = this.cpu.cycles + this.cyclesUntilTick()
         return
       case 0xd04:
         if (value & (1 << 31)) this.setPending(EXC.NMI, true)
@@ -478,6 +513,7 @@ export class Scs extends WordPeripheral {
         return
       case 0xd88:
         this.cpacr = value & 0x00f00000
+        this.cpu.fpOn = this.cpacr === 0x00f00000
         return
       case 0xd94:
         this.mpuCtrl = value & 7
