@@ -1,7 +1,8 @@
 /**
  * The Open746I-C board on its own, running the lab 1 firmware: the USER LEDs step through
  * their staircase behind 1 kΩ, the joystick pulls its pins to ground, WAKEUP lifts PA0, RESET
- * holds the core, and the board is dead with the USART1 USB unplugged (S2 in its USB position).
+ * holds the core, the board runs from the module's USB (SW1 at USB) or from the USART1 USB or
+ * the jack through S2 (SW1 at 5Vin), and is dead with its source unplugged.
  *
  *   pnpm open746
  */
@@ -50,7 +51,7 @@ const v = (s: Snapshot, pin: string) => s.pinVoltage[pinKey(u.id, pin)]
 const press = (part: string, pressed: boolean) => loop.setParts({ [partKey(u.id, part)]: { pressed } })
 
 const wall0 = performance.now()
-console.log("Boot on the USART1 USB (S2 in its USB position)")
+console.log("Boot on the module's USB (SW1 at USB), the USART1 USB plugged for the serial port")
 run(0.05)
 let snap = loop.snapshot()!
 const st = snap.mcus[u.id]
@@ -110,8 +111,15 @@ snap = loop.snapshot()!
 expect("core restarted", snap.mcus[u.id].running ? "yes" : "no", "yes")
 expect("staircase from the top", ledStr(snap), "●○○○")
 
-console.log("\nUnplugging the USART1 USB: no 5 V, no 3.3 V, the core stops")
+console.log("\nUnplugging the USART1 USB changes nothing: the module runs from its own USB")
 loop.setParts({ [partKey(u.id, "USB")]: { on: false } })
+run(0.1)
+snap = loop.snapshot()!
+expect("3V3 rail", v(snap, "P23-1"), 3.3, 0.02)
+expect("core running", snap.mcus[u.id].running ? "yes" : "no", "yes")
+
+console.log("\nUnplugging the module's USB too: no 5 V, no 3.3 V, the core stops")
+loop.setParts({ [partKey(u.id, "MUSB")]: { on: false } })
 run(0.1)
 snap = loop.snapshot()!
 expect("5V rail", v(snap, "P22-1"), 0, 0.05)
@@ -119,7 +127,14 @@ expect("3V3 rail", v(snap, "P23-1"), 0, 0.05)
 expect("core unpowered", snap.mcus[u.id].powered ? "powered" : "off", "off")
 expect("LEDs dark", ledStr(snap), "○○○○")
 
-console.log("\nS2 to the jack, 5 V on 5VDC: the board comes back")
+console.log("\nSW1 to 5Vin with the USART1 USB back in (S2 at USB): the board runs from the board's USB")
+loop.setParts({ [partKey(u.id, "USB")]: { on: true }, [partKey(u.id, "SW1")]: { on: false } })
+run(0.3)
+snap = loop.snapshot()!
+expect("3V3 rail", v(snap, "P23-1"), 3.3, 0.02)
+expect("core running", snap.mcus[u.id].running ? "yes" : "no", "yes")
+
+console.log("\nSW1 at 5Vin, S2 to the jack, 5 V on 5VDC, both USBs out: the board comes back")
 {
   const doc2 = lab1Board.build(GRID)
   const u2 = doc2.objects.find((o) => o.def === "open746i-c")!
@@ -129,6 +144,8 @@ console.log("\nS2 to the jack, 5 V on 5VDC: the board comes back")
   doc2.objects.push(sup, gnd)
   doc2.wires.push({ id: "w1", from: { object: sup.id, pin: "V" }, to: { object: u2.id, pin: "5VDC" } }, { id: "w2", from: { object: gnd.id, pin: "GND" }, to: { object: u2.id, pin: "P24-1" } })
   doc2.parts[partKey(u2.id, "USB")] = { on: false }
+  doc2.parts[partKey(u2.id, "MUSB")] = { on: false }
+  doc2.parts[partKey(u2.id, "SW1")] = { on: false }
   doc2.parts[partKey(u2.id, "S2")] = { on: true }
   const loop2 = new SimLoop()
   loop2.setDoc(doc2)

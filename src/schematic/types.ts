@@ -98,6 +98,8 @@ export type PartDef =
       span: number
       pin?: string
       mcu?: string
+      /** Position the switch ships in (default off). */
+      initial?: PartState
     }
   | {
       /** Logic level indicator/toggle: a box reading 1 or 0, clicked to flip `on`. */

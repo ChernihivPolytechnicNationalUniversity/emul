@@ -234,7 +234,7 @@ export const nucleoSquare: Example = {
 /**
  * The same lab on the stand itself: the Waveshare Open746I-C with the Core746I module, whose
  * USER LEDs and joystick are exactly the pins the firmware drives. Nothing to wire — the board
- * is the circuit; the USART1 USB powers it.
+ * is the circuit; the module's USB powers it, the USART1 USB is there for the serial port.
  */
 export const lab1Board: Example = {
   id: "lab1-open746i-c",

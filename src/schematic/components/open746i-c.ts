@@ -249,7 +249,7 @@ const FFC_X = 35
 
 const pins: PinDef[] = [
   // Power: the 5 V jack on the top edge (S2 picks it or the USART1 USB) and the P22–P24 rails.
-  { id: "5VDC", label: "5VDC", x: 13, y: T.outer, side: "top", labelAt: "bottom", kind: "power", stub: T.outer, connector: "DC jack", note: "5 V in; S2 picks this or the USART1 USB" },
+  { id: "5VDC", label: "5VDC", x: 13, y: T.outer, side: "top", labelAt: "bottom", kind: "power", stub: T.outer, connector: "DC jack", note: "5 V in; S2 picks this or the USART1 USB as 5Vin, and the module takes 5Vin with SW1 off" },
   ...rail("P22", "5V", "power", 3),
   ...rail("P24", "GND", "gnd", 4),
   ...rail("P23", "3V3", "power", 5),
@@ -309,7 +309,7 @@ const body: BodyShape[] = [
   { type: "rect", x: 10, y: 7, w: 24, h: 34, rx: 0.4, fill: "zone" },
   { type: "rect", x: 11, y: 7.5, w: 1.5, h: 33, rx: 0.1, fill: "connector" },
   { type: "rect", x: 31.5, y: 7.5, w: 1.5, h: 33, rx: 0.1, fill: "connector" },
-  label(22, 42, "P16–P21: two 2×40 pin ports, every I/O (use the peripheral headers)", 0.24),
+  label(24, 42, "P16–P21: two 2×40 pin ports, every I/O (use the peripheral headers)", 0.24),
   ...block(16, 8, 12, 3.5, "JTAG/SWD", [22, 12.2]),
   { type: "path", d: `M ${CHIP.cx} ${CHIP.cy - CHIP.d} L ${CHIP.cx + CHIP.d} ${CHIP.cy} L ${CHIP.cx} ${CHIP.cy + CHIP.d} L ${CHIP.cx - CHIP.d} ${CHIP.cy} Z`, fill: "chip" },
   { type: "text", x: CHIP.cx, y: CHIP.cy - 0.2, text: "STM32F746IG", size: 0.55, inverse: true },
@@ -317,9 +317,10 @@ const body: BodyShape[] = [
   { type: "text", x: 14.5, y: 30, text: "Core7XXI", size: 0.8, rotate: -90 },
   ...block(19, 31, 2.5, 4, "BOOT0", [20.25, 35.7]),
   ...block(25.5, 31, 2, 4, "RESET", [26.5, 35.7]),
-  ...block(14.5, 36, 3, 3.5, "USB OTG", [16, 40.2]),
-  label(22, 38.6, "IS42S16400J", 0.26),
-  label(22, 39.3, "8 MB SDRAM (back)", 0.26),
+  label(15, 36.6, "USB OTG", 0.26),
+  label(19.6, 36.6, "SW1: USB ↔ 5Vin", 0.26),
+  label(24.5, 38.6, "IS42S16400J", 0.26),
+  label(24.5, 39.3, "8 MB SDRAM (back)", 0.26),
   label(28.5, 39.5, "PWR", 0.22),
   // --- top edge
   label(8, 1.2, "S2: 5VDC ↔ USB", 0.26),
@@ -365,8 +366,12 @@ const body: BodyShape[] = [
 ]
 
 const parts: PartDef[] = [
+  // Power comes in on the module's own micro-USB (SW1 at USB), as the lab runs it; the USART1
+  // micro-USB is plugged for the serial port and could power the board instead (SW1 at 5Vin, S2 at USB).
   { type: "usb", id: "USB", label: "USART1 USB", x: 49, y: 1.6, side: "top", initial: { on: true } },
-  { type: "switch", id: "S2", label: "S2: on = 5VDC jack, off = USB", x: 7, y: 3, span: 2 },
+  { type: "switch", id: "S2", label: "S2: on = 5VDC jack, off = USART1 USB", x: 7, y: 3, span: 2 },
+  { type: "usb", id: "MUSB", label: "Core746I USB OTG", x: 15, y: 38.5, side: "bottom", initial: { on: true } },
+  { type: "switch", id: "SW1", label: "SW1: on = the module's USB, off = 5Vin from the board (S2)", x: 18.8, y: 38.6, span: 1.6, initial: { on: true } },
   // The LED column top right: PWR, the CP2102's RX/TX, the four USER LEDs.
   { type: "led", id: "PWR", label: "PWR", x: 71, y: 3, color: "#ef4444" },
   { type: "led", id: "RXLED", label: "RX", x: 71, y: 5, color: "#ef4444" },
@@ -415,16 +420,24 @@ const model: Element[] = [
   { kind: "SHORT", nodes: v5Pins },
   { kind: "SHORT", nodes: v33Pins },
   { kind: "SHORT", nodes: [NRST, "CN2-3", "CN5-5"] },
-  // Power tree: the USART1 micro-USB's VBUS (U5V) or the 5 V jack, chosen by S2, is 5Vin; the
-  // Core746I's AMS1117-3.3 makes 3.3 V from it. The CP2102 lives on U5V alone.
+  // Power tree. On the board, S2 picks the USART1 micro-USB's VBUS (U5V) or the 5 V jack as
+  // 5Vin, which reaches the module over the pin ports. On the module, SW1 picks 5Vin or the
+  // module's own micro-USB (USB_5V) as its 5 V, and the AMS1117-3.3 makes 3.3 V from that. The
+  // CP2102 lives on U5V alone.
   { kind: "V", plus: "$usb", minus: GND, value: 5 },
   { kind: "SW", a: "$usb", b: "$u5v", part: "USB", closed: "on" },
   { kind: "REG", in: "$u5v", out: "$u5vlim", gnd: GND, value: 5, dropout: 0, imax: 0.5 },
   { kind: "R", a: "$u5v", b: GND, value: 250 },
   { kind: "SW", a: "$u5vlim", b: "$5vin", part: "S2", closed: "off" },
   { kind: "SW", a: "5VDC", b: "$5vin", part: "S2", closed: "on" },
-  { kind: "R", a: "$5vin", b: V5, value: 0.02 },
-  { kind: "REG", in: "$5vin", out: "$3v3", gnd: GND, value: 3.3, dropout: 1.1, imax: 1 },
+  { kind: "V", plus: "$musb", minus: GND, value: 5 },
+  { kind: "SW", a: "$musb", b: "$usb5v", part: "MUSB", closed: "on" },
+  { kind: "REG", in: "$usb5v", out: "$usb5vlim", gnd: GND, value: 5, dropout: 0, imax: 0.5 },
+  { kind: "R", a: "$usb5v", b: GND, value: 250 },
+  { kind: "SW", a: "$usb5vlim", b: "$5v", part: "SW1", closed: "on" },
+  { kind: "SW", a: "$5vin", b: "$5v", part: "SW1", closed: "off" },
+  { kind: "R", a: "$5v", b: V5, value: 0.02 },
+  { kind: "REG", in: "$5v", out: "$3v3", gnd: GND, value: 3.3, dropout: 1.1, imax: 1 },
   { kind: "R", a: "$3v3", b: V3V3, value: 0.02 },
   { kind: "R", a: "$3v3", b: "$pwrk", value: 330 },
   { kind: "D", anode: "$pwrk", cathode: GND, vf: LED_COLORS.red.vf, part: "PWR" },
@@ -487,8 +500,8 @@ export const open746ic: ComponentDef = {
     Joystick: "A PG2, B PG3, C PD4, D PD5, centre PI11, to GND (JMP4)",
     WAKEUP: "PA0, active high: 10 kΩ pull-down, K1 to 3.3 V through 10 kΩ (JMP6)",
     "LCD 7inch (P15)": "24-bit RGB on the LTDC, backlight PA3, GT911 touch on PD13/PD12 (I2C4), RST PD11, INT PD7",
-    "USB OTG FS (Core746I)": "DM PA11, DP PA12, ID PA10, VBUS PA9 — not modelled",
-    "Not fitted here": "BOOT0 switch (always boots from flash), JTAG/SWD (no debugger), the 2×40 pin ports P16–P21 (every I/O; use the peripheral headers), the 4.3\" LCD header P14 (RGB as P15 + XPT2046 touch on PF7/PF8/PF9, CS PF6, IRQ PD7), the USB OTG connector and its VBUS LED, the jumpers JMP1–JMP6, JMP5, OTG and VREF (always closed)",
+    "USB OTG (Core746I)": "Its VBUS powers the module with SW1 at USB (5Vin from the board's S2 otherwise); the data lines DM PA11, DP PA12, ID PA10, VBUS PA9 are not modelled",
+    "Not fitted here": "BOOT0 switch (always boots from flash), JTAG/SWD (no debugger), the 2×40 pin ports P16–P21 (every I/O; use the peripheral headers), the 4.3\" LCD header P14 (RGB as P15 + XPT2046 touch on PF7/PF8/PF9, CS PF6, IRQ PD7), the USB OTG data lines and VBUS LED, the jumpers JMP1–JMP6, JMP5, OTG and VREF (always closed)",
     Source: "Waveshare Open746I-C and Core746I schematics",
   },
 }
