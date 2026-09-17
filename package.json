@@ -46,6 +46,7 @@
     "battery": "tsx --tsconfig tsconfig.app.json scripts/battery.ts",
     "wires": "tsx --tsconfig tsconfig.app.json scripts/wires.ts",
     "bench": "tsx --tsconfig tsconfig.app.json scripts/bench.ts",
+    "field-bench": "tsx --tsconfig tsconfig.app.json scripts/field-bench.ts",
     "mcu-jit": "tsx --tsconfig tsconfig.app.json scripts/mcu-jit.ts",
     "symbols": "tsx --tsconfig tsconfig.app.json scripts/symbols.ts",
     "reflash": "tsx --tsconfig tsconfig.app.json scripts/reflash.ts"
@@ -73,6 +74,7 @@
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "oxlint": "^1.81.0",
+    "playwright-core": "^1.63.0",
     "tsx": "^4.23.13",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
