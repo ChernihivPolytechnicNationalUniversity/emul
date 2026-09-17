@@ -1,0 +1,13 @@
+{
+  "name": "emul-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts",
+    "dev": "node --watch --experimental-strip-types src/index.ts"
+  },
+  "dependencies": {
+    "emul-shared": "workspace:*",
+    "fastify": "^5.12.5"
+  }
+}

@@ -14,4 +14,29 @@ jobs:
     uses: ChernihivPolytechnicNationalUniversity/shared-actions/.github/workflows/ci-build.yml@main
     with:
       context: .
+      concurrency-key: site
+    secrets: inherit
+
+  api:
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    uses: ChernihivPolytechnicNationalUniversity/shared-actions/.github/workflows/ci-build.yml@main
+    with:
+      context: .
+      dockerfile: backend/api/Dockerfile
+      concurrency-key: api
+    secrets: inherit
+
+  worker:
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    uses: ChernihivPolytechnicNationalUniversity/shared-actions/.github/workflows/ci-build.yml@main
+    with:
+      context: .
+      dockerfile: backend/worker/Dockerfile
+      concurrency-key: worker
     secrets: inherit

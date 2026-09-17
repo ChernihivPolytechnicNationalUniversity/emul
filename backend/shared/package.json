@@ -1,0 +1,13 @@
+{
+  "name": "emul-shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1133.0",
+    "bullmq": "^6.3.6",
+    "ioredis": "^6.0.0"
+  }
+}

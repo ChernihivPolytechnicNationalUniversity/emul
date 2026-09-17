@@ -5,6 +5,8 @@
   "packageManager": "pnpm@11.1.2",
   "scripts": {
     "dev": "vite",
+    "api": "pnpm --filter emul-api dev",
+    "worker": "pnpm --filter emul-worker dev",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "typecheck": "tsc -b",

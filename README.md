@@ -171,6 +171,21 @@ cores; only cores that share a net pay it.
 - `src/components/` — the React UI
 - `firmware/` — test firmware and HAL apps (`hal/Src/main.c` blink, `square.c`, `pwm.c`, `uart.c`, `spi.c`, `spi-slave.c`, `i2c.c`, `dma.c`, `adc.c`, `wdg.c`)
 - `scripts/` — the test drivers above
+- `backend/` — the services below: `api/`, `worker/`, `shared/`
+
+## Services
+
+The site is static. Work that needs a machine — building firmware — goes through two more containers,
+each from its own Dockerfile and built in parallel by CI:
+
+- `api/` — Fastify. `POST /jobs` enqueues, `GET /jobs/:id` reports the state, `GET /jobs/:id/artifact`
+  streams the result out of S3 (the bucket stays private to the cluster). `/healthz` is 503 while Redis is down.
+- `worker/` — BullMQ consumer; one handler per job kind in `worker/src/handlers.ts`, artifacts under `jobs/<id>/` in S3.
+- `shared/` — the contract between them: job types, the queue, Redis and S3 clients, env config.
+
+Both read `REDIS_URL` and `S3_BUCKET`, `S3_ENDPOINT` (MinIO; unset for AWS), `S3_REGION`, `S3_FORCE_PATH_STYLE`,
+`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` (unset: the SDK's default chain); the worker also `WORKER_CONCURRENCY`.
+A missing bucket fails the process at start. Locally: `pnpm api`, `pnpm worker`; the Vite dev server proxies `/api` to the API.
 
 ## Threads
 
