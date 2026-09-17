@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "typecheck": "tsc -b",
-    "test": "pnpm exam && pnpm physics && pnpm battery && pnpm wires",
+    "test": "pnpm exam && pnpm physics && pnpm battery && pnpm wires && pnpm reflash",
     "preview": "vite preview",
     "exam": "tsx --tsconfig tsconfig.app.json scripts/exam.ts",
     "logic": "tsx --tsconfig tsconfig.app.json scripts/logic.ts",
@@ -47,7 +47,8 @@
     "wires": "tsx --tsconfig tsconfig.app.json scripts/wires.ts",
     "bench": "tsx --tsconfig tsconfig.app.json scripts/bench.ts",
     "mcu-jit": "tsx --tsconfig tsconfig.app.json scripts/mcu-jit.ts",
-    "symbols": "tsx --tsconfig tsconfig.app.json scripts/symbols.ts"
+    "symbols": "tsx --tsconfig tsconfig.app.json scripts/symbols.ts",
+    "reflash": "tsx --tsconfig tsconfig.app.json scripts/reflash.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

@@ -477,6 +477,7 @@ export class SimLoop {
       if (!data) continue
       seen.add(obj.id)
       let inst = this.mcus.get(obj.id)
+      const reflash = !!inst && inst.loadedFrom !== ""
       if (!inst) {
         inst = new McuInstance(obj.id, obj.def, this.spawnCore)
         this.mcus.set(obj.id, inst)
@@ -486,6 +487,10 @@ export class SimLoop {
         inst.name = obj.props?.firmware ?? "firmware"
         inst.data = decodeBase64(data)
         inst.mcu.load(inst.data.slice(0), inst.name)
+        // A new image on a live board is a debugger's flash-and-reset: the core starts over
+        // (the host's view of its clock too, or a remote core is never asked to run again),
+        // the backup domain keeps its time, the rest of the bench does not notice.
+        if (reflash) inst.mcu.reset({ backup: true })
         inst.base = this.engine?.time ?? 0
         this.mapInputs()
       }
