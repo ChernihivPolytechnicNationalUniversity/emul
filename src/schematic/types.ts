@@ -1,3 +1,4 @@
+import type { SourceFile } from "emul-shared/source"
 import type { MemoryRegion } from "@/mcu/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import type { Icon } from "./icons"
@@ -371,6 +372,11 @@ export type PlacedObject = {
   rotation?: Rotation
   /** ref, value and other per-instance props. */
   props?: Record<string, string>
+  /**
+   * Firmware sources of a board or chip (a def with `chip`), as the build service takes them.
+   * Edited outside the undo history, like part state: ⌘Z on the field never touches the code.
+   */
+  project?: SourceFile[]
 }
 
 export type Point = { x: number; y: number }

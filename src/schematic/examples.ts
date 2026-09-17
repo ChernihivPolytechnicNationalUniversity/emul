@@ -5,6 +5,7 @@ import { systemExam } from "./exam"
 import { transistorLogic } from "./logic"
 import type { Icon } from "./icons"
 import type { Schematic } from "./types"
+import { lab1Project, lcdProject, nucleoApp, type ProjectLoader } from "./projects"
 
 export type Example = {
   id: string
@@ -13,8 +14,8 @@ export type Example = {
   icon: Icon
   /** Builds the document; positions are in grid cells and scaled by `grid`. */
   build: (grid: number) => Schematic
-  /** Firmware to fetch and load into the boards with these designators once the document is built. */
-  firmware?: { ref: string; url: string }[]
+  /** Source projects for the boards with these designators; the student compiles them. */
+  projects?: { ref: string; load: ProjectLoader }[]
 }
 
 /**
@@ -176,7 +177,7 @@ export const nucleoBlink: Example = {
   name: "Nucleo blink",
   description: "Nucleo-144 running the STM32 HAL blink firmware, with an external LED on D13 through 220 Ω.",
   icon: CpuIcon,
-  firmware: [{ ref: "U1", url: "firmware/nucleo-blink.elf" }],
+  projects: [{ ref: "U1", load: nucleoApp("main") }],
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
@@ -207,7 +208,7 @@ export const nucleoSquare: Example = {
   name: "Nucleo signal generator",
   description: "STM32 firmware bit-banging 1 kHz on D13 and 250 Hz on D33 into resistive loads — probe them with the oscilloscope.",
   icon: CpuIcon,
-  firmware: [{ ref: "U1", url: "firmware/nucleo-square.elf" }],
+  projects: [{ ref: "U1", load: nucleoApp("square") }],
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
@@ -241,7 +242,7 @@ export const lab1Board: Example = {
   name: "Lab 1: Open746I-C board",
   description: "The Waveshare Open746I-C stand running the lab's LED staircase firmware on its own LEDs and joystick.",
   icon: CpuIcon,
-  firmware: [{ ref: "U1", url: "firmware/lab1-f746.elf" }],
+  projects: [{ ref: "U1", load: lab1Project }],
   build(grid) {
     const { doc, place } = builder(grid)
     place("open746i-c", 0, 0)
@@ -260,7 +261,7 @@ export const lcdDemo: Example = {
   name: "Open746I-C: 7\" LCD demo",
   description: "Waveshare's LCD demo on the stand: the 1024×600 panel on the LTDC with the framebuffer in the SDRAM, text drawn through the DMA2D.",
   icon: CpuIcon,
-  firmware: [{ ref: "U1", url: "firmware/open746-lcd.elf" }],
+  projects: [{ ref: "U1", load: lcdProject("display") }],
   build(grid) {
     const { doc, place } = builder(grid)
     place("open746i-c", 0, 0)
@@ -280,7 +281,7 @@ export const touchDemo: Example = {
   name: "Open746I-C: touch test",
   description: "Waveshare's GT911 test on the stand: press the panel and crosshairs follow; the controller's id goes out on USART1.",
   icon: CpuIcon,
-  firmware: [{ ref: "U1", url: "firmware/open746-touch.elf" }],
+  projects: [{ ref: "U1", load: lcdProject("touch") }],
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("open746i-c", 0, 0)
@@ -304,7 +305,7 @@ export const cubeDemo: Example = {
   name: "Open746I-C: spinning cube",
   description: "A textured cube rotating on the 7\" panel: software rasteriser in C++ into double-buffered SDRAM framebuffers, scanned out by the LTDC.",
   icon: CpuIcon,
-  firmware: [{ ref: "U1", url: "firmware/open746-cube.elf" }],
+  projects: [{ ref: "U1", load: lcdProject("cube") }],
   build(grid) {
     const { doc, place } = builder(grid)
     place("open746i-c", 0, 0)
@@ -318,7 +319,7 @@ export const lab1Stand: Example = {
   name: "Lab 1: STM32F746 stand",
   description: "Bare STM32F746IGT6 with four LEDs and a joystick, running the lab's LED staircase firmware.",
   icon: CpuIcon,
-  firmware: [{ ref: "DD1", url: "firmware/lab1-f746.elf" }],
+  projects: [{ ref: "DD1", load: lab1Project }],
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const chip = getDef("stm32f746ig")!
@@ -402,7 +403,7 @@ export const nucleoPwm: Example = {
   name: "Nucleo timers and PWM",
   description: "TIM3 PWM dimming LD1, TIM1 complementary PWM into an external LED, TIM2 interrupt blink, TIM4 input capture.",
   icon: CpuIcon,
-  firmware: [{ ref: "U1", url: "firmware/nucleo-pwm.elf" }],
+  projects: [{ ref: "U1", load: nucleoApp("pwm") }],
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
@@ -432,7 +433,7 @@ export const nucleoSerial: Example = {
   name: "Nucleo serial console",
   description: "USART3 over the ST-LINK virtual COM port into a serial terminal: prints ticks (some in UTF-8 Ukrainian), echoes what you type upper-cased.",
   icon: CpuIcon,
-  firmware: [{ ref: "U1", url: "firmware/nucleo-uart.elf" }],
+  projects: [{ ref: "U1", load: nucleoApp("uart") }],
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
@@ -455,9 +456,9 @@ export const nucleoSpi: Example = {
   name: "Nucleo SPI link",
   description: "Two Nucleos over SPI: master on U1 (SPI1, D13/D12/D11, chip select on D10) sends a byte every 10 ms, slave on U2 (SPI4 on CN9) answers with its count.",
   icon: CpuIcon,
-  firmware: [
-    { ref: "U1", url: "firmware/nucleo-spi-master.elf" },
-    { ref: "U2", url: "firmware/nucleo-spi-slave.elf" },
+  projects: [
+    { ref: "U1", load: nucleoApp("spi") },
+    { ref: "U2", load: nucleoApp("spi-slave") },
   ],
   build(grid) {
     const { doc, place, wire } = builder(grid)
@@ -485,7 +486,7 @@ export const nucleoI2c: Example = {
   name: "Nucleo I²C EEPROM",
   description: "I2C1 at 100 kHz to a 24C02: page writes with acknowledge polling, read-back check on LD1, a counter that survives resets.",
   icon: CpuIcon,
-  firmware: [{ ref: "U1", url: "firmware/nucleo-i2c.elf" }],
+  projects: [{ ref: "U1", load: nucleoApp("i2c") }],
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
@@ -523,7 +524,7 @@ export const nucleoAdc: Example = {
   name: "Nucleo ADC and DAC",
   description: "Potentiometer on A0 read by ADC1 dims LD1 through PWM; DAC1 on D24 plays a 50 Hz sine (TIM6 + DMA) into an LED — probe it.",
   icon: CpuIcon,
-  firmware: [{ ref: "U1", url: "firmware/nucleo-adc.elf" }],
+  projects: [{ ref: "U1", load: nucleoApp("adc") }],
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)

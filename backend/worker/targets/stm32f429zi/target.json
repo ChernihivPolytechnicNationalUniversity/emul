@@ -1,0 +1,7 @@
+{
+  "name": "STM32F429ZI (Nucleo-144)",
+  "family": "f4",
+  "cpu": ["-mcpu=cortex-m4", "-mthumb", "-mfpu=fpv4-sp-d16", "-mfloat-abi=hard"],
+  "defines": ["-DSTM32F429xx", "-DUSE_HAL_DRIVER", "-DHSE_VALUE=8000000"],
+  "linker": "STM32F429ZITX_FLASH.ld"
+}

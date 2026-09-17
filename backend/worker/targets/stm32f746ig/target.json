@@ -1,0 +1,7 @@
+{
+  "name": "STM32F746IG (Open746I-C)",
+  "family": "f7",
+  "cpu": ["-mcpu=cortex-m7", "-mthumb", "-mfpu=fpv5-d16", "-mfloat-abi=hard"],
+  "defines": ["-DSTM32F746xx", "-DUSE_HAL_DRIVER", "-DHSE_VALUE=8000000"],
+  "linker": "STM32F746IGTX_FLASH.ld"
+}

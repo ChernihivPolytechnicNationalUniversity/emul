@@ -38,6 +38,7 @@
 #include "stm32746g_lcd.h"
 #include "GT911.h"
 #include "CT_I2C.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/

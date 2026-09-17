@@ -1,6 +1,7 @@
 #include "GT911.h"
 #include "CT_I2C.h"
 #include "stm32746g_lcd.h"
+#include <stdio.h>
 
 GT911_Dev Dev_Now,Dev_Backup;
 

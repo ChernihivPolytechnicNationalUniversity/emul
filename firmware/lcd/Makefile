@@ -33,7 +33,7 @@ all: $(foreach a,$(APPS),build/$(a).elf build/$(a).lst)
 
 build/%.elf: %/Src/*.c %/BSP/*.c %/Fonts/*.c %/Inc/*.h %/BSP/*.h $(COMMON) STM32F746IGTX_FLASH.ld
 	@mkdir -p build
-	$(CC) $(CFLAGS) $(INC) -I$*/Inc -I$*/BSP -I$*/Fonts $*/Src/*.c $*/BSP/*.c $(COMMON) -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) $(INC) -I$*/Inc -I$*/BSP -I$*/Fonts $*/Src/*.c $*/BSP/*.c $*/Fonts/*.c $(COMMON) -o $@ $(LDFLAGS)
 
 # C++ app: the CubeMX C files plus main.cpp, no exceptions/RTTI (nothing to unwind on a bare core).
 build/cube.elf: cube/Src/*.c cube/Src/main.cpp cube/texture.s cube/texture.bin cube/BSP/*.c cube/Inc/*.h $(COMMON) STM32F746IGTX_FLASH.ld

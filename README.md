@@ -125,6 +125,7 @@ cores; only cores that share a net pay it.
 | Sensors, relays, motors, buzzers, servos | **missing** |
 | 24Cxx I²C EEPROM (24C01–24C256: page writes, sequential reads, write-cycle NACK, WP, address straps; contents shown in the inspector) | done; VCC or any pin past 6.5 V (the datasheet's absolute maximum) kills it |
 | Other SPI/I²C parts (25Qxx flash, ADC, RTC, SD card) | **missing** |
+| Code editor (⌘J): a board's or chip's firmware sources in Monaco (the editor of VS Code) with an explorer, tabs and a Compile button | done; the project belongs to the selected board (as in Proteus and Tinkercad) and is saved inside the schematic, so two MCUs on one bench carry two programs; the target is the board's chip; typing is not a schematic undo step; Compile sends the files to the build service and loads the `firmware.elf` that comes back onto that board, the log (GCC's own diagnostics, `Core/Src/main.c:12:3: error: …`) in an Output pane; the examples with code place their sources on the board and open the editor — nothing comes precompiled. **Not there yet:** IntelliSense (syntax colouring only), a per-chip template (a new project starts as the F429 HAL blink), errors marked in the editor's gutter |
 | Logic analyser on the probes (press L): every probe a digital channel from the exact-time edges, UART/SPI/I²C decoders drawing the bytes over the waveforms, follow or hold-and-pan, wheel-zoom | done (`pnpm analyser`); the decoders are protocol-agnostic (a bit-banged bus reads the same as a peripheral); a net with nothing digital on it is thresholded from the analog solution; **not modelled:** parallel/CAN/1-Wire decoders, trigger conditions, measurements |
 | Voltmeter and ammeter meter components (a live readout on the part): voltmeter 10 MΩ across two points, ammeter 0.01 Ω in series, RMS in an AC circuit | done (`pnpm meters`); the voltmeter burns past its `Max voltage` (600 V), the ammeter's `Fuse` (10 A; set it to 200 mA for a DMM's mA range) blows open; **not modelled:** ohm / capacitance / frequency ranges, a multimeter with a mode switch |
 
@@ -168,8 +169,9 @@ cores; only cores that share a net pay it.
 - `src/mcu/` — the emulator: `cpu.ts`, `decode.ts`, `jit.ts` (blocks compiled to JavaScript), `scs.ts` (NVIC/SysTick/SCB), `bus.ts`, `periph/*`, `chip.ts` (profiles), `stm32f429.ts` (the SoC class `Stm32`), `core-worker.ts` (one core in a worker of its own)
 - `src/sim/` — analog engine (`engine.ts`), netlist, the co-simulation loop (`loop.ts`) and its worker, `core-host.ts` (a core in this thread or in a worker, over a SharedArrayBuffer), digital parts (`digital.ts`)
 - `src/schematic/` — component definitions (`components/*`), examples, geometry, `mcu-model.ts`; wiring in `nets.ts` (the net map), `wiring.ts` (connect, tap), `wire-colors.ts` (palette, shortcuts, the automatic rule)
-- `src/components/` — the React UI
-- `firmware/` — test firmware and HAL apps (`hal/Src/main.c` blink, `square.c`, `pwm.c`, `uart.c`, `spi.c`, `spi-slave.c`, `i2c.c`, `dma.c`, `adc.c`, `wdg.c`)
+- `src/components/` — the React UI; `code/` is the editor panel (Monaco, explorer, tabs, build output)
+- `src/project/` — a board's firmware project: file operations that mirror the API's rules, the template, the build-service client
+- `firmware/` — test firmware and HAL apps (`hal/Src/main.c` blink, `square.c`, `pwm.c`, `uart.c`, `spi.c`, `spi-slave.c`, `i2c.c`, `dma.c`, `adc.c`, `wdg.c`), the lab's CubeIDE project (`lab1/`), the Open746I-C demos (`lcd/`); the examples bundle these as source projects (`src/schematic/projects.ts`)
 - `scripts/` — the test drivers above
 - `backend/` — the services below: `api/`, `worker/`, `shared/`
 
@@ -181,7 +183,11 @@ each from its own Dockerfile and built in parallel by CI:
 - `api/` — Fastify, on the site's host under `/api`. `POST /api/jobs` takes `{kind, target, files: [{path, content}]}`, stores the
   project in S3 and enqueues; `GET /api/jobs/:id` reports the state and, once done, the job's files as presigned S3 URLs (15 min) —
   the browser fetches them from the store directly, the bucket stays private. `/healthz` is 503 while Redis is down.
-- `worker/` — BullMQ consumer; one handler per job kind in `worker/src/handlers.ts`, each leaving files in `out/`.
+- `worker/` — BullMQ consumer; one handler per job kind in `worker/src/handlers.ts` (`echo` lists the project back, `build` compiles it),
+  each leaving files in `out/` and saying whether the project passed; a compile error is a completed job with `ok: false` and a log,
+  only the service's own failure fails the job. The worker holds **no store credentials**: each job carries presigned GET URLs for its
+  sources and presigned PUT URLs for its outputs (an hour), because it runs a compiler over code it did not write and a
+  `.incbin "/proc/1/environ"` must find nothing worth taking; the compiler also gets an empty environment.
 - `shared/` — the contract between them: job types, the S3 layout, the queue, Redis and S3 clients, env config.
 
 One prefix per job in the bucket, expired by a lifecycle rule after 7 days (ids are ULIDs, so they sort by time and never repeat):
@@ -193,9 +199,22 @@ jobs/<id>/out/<name>           firmware.elf, firmware.map, build.log, …
 jobs/<id>/result.json          ok, artifacts, finishedAt, durationMs — kept after Redis forgets the job
 ```
 
-Both read `REDIS_URL` and `S3_BUCKET`, `S3_ENDPOINT` (MinIO; unset for AWS), `S3_PUBLIC_ENDPOINT` (the host browsers reach, presigned URLs are signed for it), `S3_REGION`, `S3_FORCE_PATH_STYLE`,
-`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` (unset: the SDK's default chain); the worker also `WORKER_CONCURRENCY`.
-A missing bucket fails the process at start. Locally: `pnpm api`, `pnpm worker`; the Vite dev server proxies `/api` to the API.
+Both read `REDIS_URL`; the API also `S3_BUCKET`, `S3_ENDPOINT` (MinIO; unset for AWS), `S3_PUBLIC_ENDPOINT` (the host browsers reach, presigned URLs are signed for it), `S3_REGION`, `S3_FORCE_PATH_STYLE`,
+`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` (unset: the SDK's default chain), and a missing bucket fails it at start; the worker `WORKER_CONCURRENCY`.
+Locally: `pnpm api`, `pnpm worker`; the Vite dev server proxies `/api` to the API.
+
+### The build
+
+`worker/src/build.ts` compiles a project the way STM32CubeIDE would, with GNU Arm Embedded (Debian's `gcc-arm-none-eabi`, newlib nano):
+the project's `.c`/`.cpp`/`.s` files, every folder holding a header on the include path, ST's HAL and CMSIS, `-O2 -g3 -Wall
+-ffunction-sections -fdata-sections`, `--gc-sections`, one `firmware.elf` plus `firmware.map`. What a CubeMX project has and a
+bare one does not — the "batteries" — comes from `worker/targets/<chip>/`: the linker script, `startup_*.s`, `system_*.c`, `*_it.c`,
+`*_hal_msp.c`, `*_hal_conf.h` (every module on) and, for all chips, `targets/common/syscalls.c` (weak `_write`, `_sbrk`, …). A project
+file with the same name replaces the battery, so a CubeIDE export drops in as is (`firmware/lab1` is one). The HAL is compiled once
+per chip into `libhal.a` when the image is built (`worker/toolchain/`: ST's repos at pinned tags), so a build takes about a second;
+a project with its own `stm32fNxx_hal_conf.h` gets the HAL compiled from source against it instead (~10 s). 120 s and 4 MB of log
+are the limits. `targets/<chip>/target.json` names the chip, CPU flags, defines and linker script; adding a chip is adding a folder
+and a line in the Dockerfile.
 
 ## Threads
 

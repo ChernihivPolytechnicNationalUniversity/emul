@@ -1,6 +1,9 @@
 import { Queue } from "bullmq"
 import { ulid } from "ulid"
 import { connect } from "./redis.ts"
+import type { Target } from "./source.ts"
+
+export { SOURCE_LIMITS, TARGETS, sourcePath, type SourceFile, type Target } from "./source.ts"
 
 /** The contract between the API (producer) and the worker (consumer). */
 export const QUEUE = "jobs"
@@ -11,17 +14,33 @@ export const QUEUE = "jobs"
  */
 export const newJobId = () => ulid()
 
-/** Chips the emulator has a profile for (`src/mcu/chip.ts`); a job targets one of them. */
-export const TARGETS = ["stm32f429zi", "stm32f746ig"] as const
-export type Target = (typeof TARGETS)[number]
+/** `echo` lists the project back (a smoke test); `build` compiles it into `firmware.elf`. */
+export type JobKind = "echo" | "build"
+export const JOB_KINDS: JobKind[] = ["echo", "build"]
 
-/** One member per kind of work; the worker switches on `kind`. The project itself is in S3. */
-export type JobData = { kind: "echo"; target: Target }
-export type JobKind = JobData["kind"]
-export const JOB_KINDS: JobKind[] = ["echo"]
+/** The files each kind may leave in `out/`; the API presigns a PUT for each before the job runs. */
+export const OUTPUTS: Record<JobKind, string[]> = {
+  echo: ["build.log"],
+  build: ["build.log", "firmware.elf", "firmware.map"],
+}
 
-/** A source file as the client sends it: a relative path inside the project and its text. */
-export type SourceFile = { path: string; content: string }
+/**
+ * What the worker gets: the project as presigned GET URLs and its outputs as presigned PUT
+ * URLs, so the worker holds no store credentials at all. It runs a compiler over code it did
+ * not write; a `.incbin "/proc/1/environ"` in that code must find nothing worth taking.
+ */
+export type JobData = {
+  kind: JobKind
+  target: Target
+  sources: { path: string; url: string }[]
+  /** By output name, e.g. `firmware.elf`. */
+  outputs: Record<string, string>
+  /** Where `result.json` goes. */
+  result: string
+}
+
+/** How long a job's URLs stay valid: it may wait in the queue, then run for a while. */
+export const JOB_URL_TTL = 60 * 60
 
 /** What `input/project.json` records about the project a job was given. */
 export type ProjectManifest = {
@@ -33,13 +52,21 @@ export type ProjectManifest = {
 /** A file a finished job left in `out/`. */
 export type Artifact = { name: string; key: string; size: number; contentType: string }
 
-/** What a finished job leaves behind (also written to `result.json` next to the files). */
+/**
+ * What a finished job leaves behind (also written to `result.json` next to the files).
+ * `ok: false` with a log is a job that ran and found the project wanting (compile errors);
+ * a job that could not run at all fails in BullMQ instead and has no result.
+ */
 export type JobResult = {
   ok: boolean
   artifacts: Artifact[]
+  error?: string
   finishedAt: string
   durationMs: number
 }
+
+/** What a handler answers with; the worker adds the timing. */
+export type Outcome = Pick<JobResult, "ok" | "artifacts" | "error">
 
 /**
  * S3 layout, one prefix per job (a lifecycle rule expires `jobs/` after 7 days):
@@ -55,23 +82,6 @@ export const jobKeys = (jobId: string) => ({
   out: (name: string) => `jobs/${jobId}/out/${name}`,
   result: `jobs/${jobId}/result.json`,
 })
-
-const SOURCE_EXTENSIONS = new Set([".c", ".h", ".cpp", ".hpp", ".cc", ".s", ".S", ".ld", ".txt", ".md"])
-export const SOURCE_LIMITS = { files: 200, fileBytes: 1024 * 1024 }
-
-/**
- * A client path made safe for an S3 key and a build directory: relative, no `..`, plain
- * characters, a source extension. Returns null when it is anything else.
- */
-export function sourcePath(path: string): string | null {
-  const parts = path.replace(/\\/g, "/").split("/").filter((p) => p !== "" && p !== ".")
-  if (parts.length === 0 || parts.length > 8) return null
-  if (parts.some((p) => p === ".." || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(p))) return null
-  const name = parts[parts.length - 1]!
-  const ext = name.slice(name.lastIndexOf("."))
-  if (!SOURCE_EXTENSIONS.has(ext)) return null
-  return parts.join("/")
-}
 
 export function createQueue() {
   return new Queue<JobData, JobResult>(QUEUE, {

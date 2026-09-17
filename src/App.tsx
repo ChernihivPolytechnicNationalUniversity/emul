@@ -26,6 +26,7 @@ const emptyState: FieldState = {
   probing: false,
   scope: false,
   logic: false,
+  code: false,
 }
 
 /** A schematic is plain JSON, but a file picked off disk is not to be trusted with that. */
@@ -53,23 +54,23 @@ export default function App() {
 
   const open = React.useCallback(() => fileInput.current?.click(), [])
 
-  /** Examples with firmware fetch it from the site and store it on the board, like a user load would. */
+  /**
+   * An example with code hands each board its sources and opens the editor on it: the program
+   * is the student's to read and compile, no image comes ready-made.
+   */
   const loadExample = async (example: Example) => {
     const doc = example.build(GRID)
-    for (const fw of example.firmware ?? []) {
-      const board = doc.objects.find((o) => o.props?.ref === fw.ref)
+    for (const p of example.projects ?? []) {
+      const board = doc.objects.find((o) => o.props?.ref === p.ref)
+      if (!board) continue
       try {
-        const res = await fetch(fw.url)
-        if (!res.ok) throw new Error(res.statusText)
-        const bytes = new Uint8Array(await res.arrayBuffer())
-        let bin = ""
-        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
-        if (board) board.props = { ...board.props, firmware: fw.url.split("/").pop()!, firmwareData: btoa(bin) }
+        board.project = await p.load()
       } catch (e) {
-        toast.error("Could not fetch the example firmware", { description: `${fw.url}: ${(e as Error).message}` })
+        toast.error("Could not load the example's code", { description: `${p.ref}: ${(e as Error).message}` })
       }
     }
     field.current?.load(doc)
+    if (example.projects?.length) field.current?.openCode(example.projects[0]!.ref)
   }
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {

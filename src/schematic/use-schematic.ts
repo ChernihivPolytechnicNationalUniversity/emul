@@ -1,4 +1,6 @@
 import * as React from "react"
+import type { SourceFile } from "emul-shared/source"
+import { normalizeFiles } from "@/project/files"
 import { intersects, objectRect, objectSize, pinContacts, snap, type Point, type Rect } from "./geometry"
 import { getDef } from "./registry"
 import {
@@ -31,6 +33,16 @@ function nextRef(objects: readonly PlacedObject[], prefix: string): string {
 const HISTORY_LIMIT = 100
 
 type History = { past: Schematic[]; present: Schematic; future: Schematic[] }
+
+/** A history entry made present again, carrying over what is live now (parts, projects). */
+function keepLive(target: Schematic, current: Schematic): Schematic {
+  const projects = new Map(current.objects.map((o) => [o.id, o.project]))
+  return {
+    ...target,
+    parts: current.parts,
+    objects: target.objects.map((o) => (projects.has(o.id) && projects.get(o.id) !== o.project ? { ...o, project: projects.get(o.id) } : o)),
+  }
+}
 
 /** What copy puts on the clipboard: the picked objects, the wires among them, their part state. */
 export type Clip = Pick<Schematic, "objects" | "wires" | "parts">
@@ -78,14 +90,14 @@ export function useSchematic(grid: number) {
     setSelectedWires((s) => new Set([...s].filter((id) => wires.has(id))))
   }, [])
 
-  // Part state is a live control rather than an edit: it is not undone,
-  // so stepping through history keeps whatever the switches are set to now.
+  // Part state and firmware projects are live rather than edits: they are not undone, so
+  // stepping through history keeps whatever the switches are set to and the code as typed.
   const undo = React.useCallback(() => {
     dragging.current = false
     setHistory((h) => {
       const prev = h.past.at(-1)
       if (!prev) return h
-      const present = { ...prev, parts: h.present.parts }
+      const present = keepLive(prev, h.present)
       pruneSelection(present)
       return { past: h.past.slice(0, -1), present, future: [h.present, ...h.future] }
     })
@@ -96,7 +108,7 @@ export function useSchematic(grid: number) {
     setHistory((h) => {
       const next = h.future[0]
       if (!next) return h
-      const present = { ...next, parts: h.present.parts }
+      const present = keepLive(next, h.present)
       pruneSelection(present)
       return { past: [...h.past, h.present], present, future: h.future.slice(1) }
     })
@@ -153,10 +165,10 @@ export function useSchematic(grid: number) {
     setSelectedWires(new Set())
   }, [setDoc])
 
-  /** Replace the whole document (loading an example). */
+  /** Replace the whole document (loading an example or a file; projects in it are re-checked). */
   const load = React.useCallback(
     (next: Schematic) => {
-      setDoc(() => next)
+      setDoc(() => ({ ...next, objects: next.objects.map((o) => (o.project ? { ...o, project: normalizeFiles(o.project) } : o)) }))
       setSelectedObjects(new Set())
       setSelectedWires(new Set())
     },
@@ -242,6 +254,11 @@ export function useSchematic(grid: number) {
       ...d,
       objects: d.objects.map((o) => (o.id === id ? { ...o, props: { ...o.props, ...patch } } : o)),
     }))
+  }, [setDoc])
+
+  /** Replace a board's firmware sources; typing is not an undo step (see `undo`). */
+  const setProject = React.useCallback((id: string, files: SourceFile[]) => {
+    setDoc((d) => ({ ...d, objects: d.objects.map((o) => (o.id === id ? { ...o, project: files } : o)) }), { silent: true })
   }, [setDoc])
 
   /** Rotate objects by ±45° around their centers, keeping the centre on the grid. */
@@ -409,6 +426,7 @@ export function useSchematic(grid: number) {
     endDrag,
     rotate,
     setProps,
+    setProject,
     addWire,
     tapWire,
     setWirePoints,

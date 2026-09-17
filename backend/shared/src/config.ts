@@ -7,8 +7,11 @@ function required(name: string): string {
 
 export const config = {
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
-  s3: {
-    bucket: required("S3_BUCKET"),
+}
+
+/** Read when the S3 client is made (the API's start); the worker never asks, it has no keys. */
+export const s3Config = () => ({
+  bucket: required("S3_BUCKET"),
     // Endpoint and path style are for MinIO and the like; left unset, the SDK targets AWS.
     endpoint: process.env.S3_ENDPOINT,
     // Where browsers reach the store: presigned URLs are signed against this host (the cluster-internal
@@ -21,5 +24,4 @@ export const config = {
       process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY
         ? { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY }
         : undefined,
-  },
-}
+})

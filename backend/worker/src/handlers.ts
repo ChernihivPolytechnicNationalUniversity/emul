@@ -1,22 +1,43 @@
 import type { Job } from "bullmq"
-import { jobKeys, type Artifact, type JobData, type ProjectManifest } from "emul-shared/jobs"
-import { getJson, putObject } from "emul-shared/s3"
+import { jobKeys, type Artifact, type JobData, type JobKind, type Outcome } from "emul-shared/jobs"
+import type { SourceFile } from "emul-shared/source"
+import { build } from "./build.ts"
+import { download, upload } from "./store.ts"
 
-type Handler<K extends JobData["kind"]> = (job: Job<Extract<JobData, { kind: K }>>) => Promise<Artifact[]>
+type Handler = (job: Job<JobData>) => Promise<Outcome>
 
-/** Puts one file into the job's `out/` and describes it for the result. */
-async function emit(jobId: string, name: string, body: Buffer | string, contentType: string): Promise<Artifact> {
-  const key = jobKeys(jobId).out(name)
-  await putObject(key, body, contentType)
-  return { name, key, size: Buffer.byteLength(body), contentType }
+/** The project, fetched by the job's presigned URLs. */
+async function sources(job: Job<JobData>): Promise<SourceFile[]> {
+  return Promise.all(job.data.sources.map(async (s) => ({ path: s.path, content: (await download(s.url)).toString("utf8") })))
 }
 
-/** One handler per job kind, each answering with the files it left in `out/`; a thrown error fails the job. */
-export const handlers: { [K in JobData["kind"]]: Handler<K> } = {
-  // Placeholder until the build job lands: walks the project like a build would and leaves a log.
+/** Puts one file into the job's `out/` by its presigned URL and describes it for the result. */
+async function emit(job: Job<JobData>, name: string, body: Buffer | string, contentType: string): Promise<Artifact> {
+  const url = job.data.outputs[name]
+  if (!url) throw new Error(`no output URL for ${name}`)
+  await upload(url, body, contentType)
+  return { name, key: jobKeys(job.id!).out(name), size: Buffer.byteLength(body), contentType }
+}
+
+const TEXT = "text/plain; charset=utf-8"
+
+/**
+ * One handler per job kind, each answering with the files it left in `out/` and whether the
+ * project passed. A thrown error is the service's failure, not the project's.
+ */
+export const handlers: Record<JobKind, Handler> = {
+  /** Walks the project like a build would and leaves a log: a smoke test of the pipeline. */
   async echo(job) {
-    const manifest = await getJson<ProjectManifest>(jobKeys(job.id!).manifest)
-    const log = [`echo for ${manifest.target}`, ...manifest.files.map((f) => `  ${f.path}  ${f.size} B  ${f.sha256.slice(0, 12)}`)].join("\n") + "\n"
-    return [await emit(job.id!, "build.log", log, "text/plain; charset=utf-8")]
+    const files = await sources(job)
+    const log = [`echo for ${job.data.target}`, ...files.map((f) => `  ${f.path}  ${Buffer.byteLength(f.content)} B`)].join("\n") + "\n"
+    return { ok: true, artifacts: [await emit(job, "build.log", log, TEXT)] }
+  },
+  /** Compile the project for its chip; a compile error is `ok: false` with the log. */
+  async build(job) {
+    const out = await build(job.data.target, await sources(job))
+    const artifacts = [await emit(job, "build.log", out.log, TEXT)]
+    if (out.elf) artifacts.push(await emit(job, "firmware.elf", out.elf, "application/octet-stream"))
+    if (out.map) artifacts.push(await emit(job, "firmware.map", out.map, TEXT))
+    return { ok: out.ok, artifacts, error: out.error }
   },
 }

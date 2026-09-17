@@ -4,8 +4,12 @@ dist
 dist-ssr
 *.tsbuildinfo
 
-# Firmware sources and their compiled tests; the example ELFs in public/firmware are copied
-firmware
+# Firmware builds and archives; the sources are bundled as the examples' projects
+firmware/**/build
+firmware/**/*.elf
+firmware/**/*.bin
+firmware/**/*.o
+firmware/**/*.7z
 
 # Deploy-time settings are mounted at /etc/config/config.json at run time
 public/config.json

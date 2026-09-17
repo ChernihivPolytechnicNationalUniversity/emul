@@ -1,7 +1,8 @@
 import type { EepromSnapshot } from "@/sim/digital"
 import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
-import { CpuIcon, FlameIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
+import { CodeIcon, CpuIcon, FlameIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
+import { bytesToBase64 } from "@/lib/bytes"
 import { cn } from "@/lib/utils"
 import { chipById } from "@/mcu/chip"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -49,11 +50,13 @@ type InspectorProps = Omit<React.ComponentProps<typeof Card>, "onChange"> & {
   onChange: (id: string, patch: Record<string, string>) => void
   /** Text typed into a serial terminal. */
   onSerial?: (id: string, text: string) => void
+  /** Open the code panel on this board or chip. */
+  onCode?: (id: string) => void
   onRotate: (delta: 45 | -45) => void
   onDelete: () => void
 }
 
-export function Inspector({ selected, damage, sim, onChange, onSerial, onRotate, onDelete, className, ...props }: InspectorProps) {
+export function Inspector({ selected, damage, sim, onChange, onSerial, onCode, onRotate, onDelete, className, ...props }: InspectorProps) {
   if (selected.length === 0) return null
   const object = selected.length === 1 ? selected[0] : null
   const def = object && getDef(object.def)
@@ -93,7 +96,7 @@ export function Inspector({ selected, damage, sim, onChange, onSerial, onRotate,
               </AlertDescription>
             </Alert>
           )}
-          {def.chip && <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? "STM32"} sim={sim} onChange={onChange} />}
+          {def.chip && <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? "STM32"} sim={sim} onChange={onChange} onCode={onCode} />}
           {def.id === "serial-terminal" && <TerminalPanel object={object} sim={sim} onSend={(text) => onSerial?.(object.id, text)} />}
           {def.id === "eeprom-24c" && <EepromPanel object={object} sim={sim} />}
           {sim.live && !damage[object.id]?.fatal && <LiveReadings object={object} sim={sim} />}
@@ -225,12 +228,6 @@ function PropEditor({ field, value, onChange }: { field: PropField; value: strin
   }
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let bin = ""
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
-  return btoa(bin)
-}
-
 /**
  * Firmware for the board's MCU: an ELF/HEX/BIN straight from the toolchain, kept in the
  * document so a saved schematic carries its program. While the simulation runs, the panel
@@ -305,7 +302,7 @@ function EepromPanel({ object, sim }: { object: PlacedObject; sim: SimReadout })
   )
 }
 
-function FirmwarePanel({ object, chip, sim, onChange }: { object: PlacedObject; chip: string; sim: SimReadout; onChange: InspectorProps["onChange"] }) {
+function FirmwarePanel({ object, chip, sim, onChange, onCode }: { object: PlacedObject; chip: string; sim: SimReadout; onChange: InspectorProps["onChange"]; onCode?: (id: string) => void }) {
   const input = React.useRef<HTMLInputElement>(null)
   const name = object.props?.firmware
   const data = object.props?.firmwareData
@@ -326,6 +323,12 @@ function FirmwarePanel({ object, chip, sim, onChange }: { object: PlacedObject; 
         <div className="text-xs font-medium text-muted-foreground">Firmware</div>
         <input ref={input} type="file" accept=".elf,.hex,.bin,.axf,.out" className="hidden" onChange={onFile} />
         <ButtonGroup>
+          {onCode && (
+            <Button variant="outline" size="xs" onClick={() => onCode(object.id)} title="Source code (⌘J)">
+              <CodeIcon />
+              Code…
+            </Button>
+          )}
           <Button variant="outline" size="xs" onClick={() => input.current?.click()}>
             <UploadIcon />
             {data ? "Replace" : "Load…"}

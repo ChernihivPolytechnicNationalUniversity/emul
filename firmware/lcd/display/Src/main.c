@@ -42,6 +42,7 @@
 /* USER CODE BEGIN Includes */
 #include "stm32746g_sdram.h"
 #include "stm32746g_lcd.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/

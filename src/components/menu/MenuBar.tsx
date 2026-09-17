@@ -181,6 +181,10 @@ export function MenuBar({
               Components sidebar
               <MenubarShortcut>⌘B</MenubarShortcut>
             </MenubarCheckboxItem>
+            <MenubarCheckboxItem checked={state.code} onClick={act((f) => f.toggleCode())}>
+              Code editor
+              <MenubarShortcut>⌘J</MenubarShortcut>
+            </MenubarCheckboxItem>
             <MenubarSeparator />
             <MenubarItem onClick={act((f) => f.zoomIn())}>
               Zoom in

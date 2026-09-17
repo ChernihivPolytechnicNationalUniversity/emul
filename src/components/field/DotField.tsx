@@ -18,7 +18,8 @@ import { GRID as FIELD_GRID, nudgeRoutes, objectRect, resolvePin, routeAll, snap
 import { buildNets } from "@/schematic/nets"
 import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, WIRE_COLOR_BY_CODE, type WireColorKey } from "@/schematic/wire-colors"
 import { pinKey, type PinRef, type Schematic } from "@/schematic/types"
-import { pinName } from "@/schematic/registry"
+import { getDef, pinName } from "@/schematic/registry"
+import { bytesToBase64 } from "@/lib/bytes"
 import { useEvent } from "@/hooks/use-event"
 import { useSchematic, type Clip } from "@/schematic/use-schematic"
 import { toast } from "sonner"
@@ -28,6 +29,10 @@ import { Scope, SCOPE_COLUMNS, TIMEBASES, type ScopeMode } from "@/components/sc
 import { TraceStore } from "@/components/scope/trace-store"
 import { LogicAnalyser, LOGIC_SPANS, DEFAULT_DECODER, type DecoderConfig } from "@/components/logic/LogicAnalyser"
 import { LogicStore } from "@/components/logic/logic-store"
+import type { EditorHandle } from "@/components/code/Editor"
+
+/** Monaco is a few megabytes; it loads the first time the code panel opens, not with the page. */
+const CodePanel = React.lazy(() => import("@/components/code/CodePanel").then((m) => ({ default: m.CodePanel })))
 import { ComponentView } from "./ComponentView"
 import { MeasureLayer } from "./MeasureLayer"
 import { PinLayer } from "./PinLayer"
@@ -74,6 +79,9 @@ export type DotFieldHandle = {
   toggleProbe: () => void
   toggleScope: () => void
   toggleLogic: () => void
+  toggleCode: () => void
+  /** Show the code of the board with this designator. */
+  openCode: (ref: string) => void
 }
 
 /** What the menu needs to know to label and enable its items. */
@@ -92,6 +100,7 @@ export type FieldState = {
   probing: boolean
   scope: boolean
   logic: boolean
+  code: boolean
 }
 
 type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"> & {
@@ -161,6 +170,24 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       setLogicVersion(logic.version)
     },
     [logic],
+  )
+
+  // --- code panel -------------------------------------------------------------
+  const [codeOpen, setCodeOpen] = React.useState(false)
+  const codeEditor = React.useRef<EditorHandle | null>(null)
+  // The menu's Undo/Redo follow the focus: the text's own history while the cursor is in the code.
+  const undo = React.useCallback(() => (codeEditor.current?.focused() ? codeEditor.current.undo() : sch.undo()), [sch])
+  const redo = React.useCallback(() => (codeEditor.current?.focused() ? codeEditor.current.redo() : sch.redo()), [sch])
+  /** The board whose code the panel shows: the last one selected, kept while other things are picked. */
+  const [codeBoardId, setCodeBoardId] = React.useState<string | null>(null)
+  const boards = React.useMemo(() => sch.doc.objects.filter((o) => getDef(o.def)?.chip), [sch.doc.objects])
+  const selectedBoard = boards.findLast((o) => sch.selectedObjects.has(o.id))
+  if (selectedBoard && selectedBoard.id !== codeBoardId) setCodeBoardId(selectedBoard.id)
+  // The one board on the schematic needs no picking.
+  const codeBoard = boards.find((o) => o.id === codeBoardId) ?? (boards.length === 1 ? boards[0]! : null)
+  const onFirmware = React.useCallback(
+    (id: string, name: string, bytes: Uint8Array) => sch.setProps(id, { firmware: name, firmwareData: bytesToBase64(bytes) }),
+    [sch],
   )
 
   const { sim, restart, started, sendSerial } = useSimulation(sch.doc, simRunning, {
@@ -276,8 +303,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         probing: measure.active,
         scope: scopeOpen,
         logic: logicOpen,
+        code: codeOpen,
       }),
-    [onStateChange, hasSelection, hasObjects, isEmpty, sch.canUndo, sch.canRedo, clip, simRunning, started, speed, measure.active, scopeOpen, logicOpen],
+    [onStateChange, hasSelection, hasObjects, isEmpty, sch.canUndo, sch.canRedo, clip, simRunning, started, speed, measure.active, scopeOpen, logicOpen, codeOpen],
   )
 
   /** World point under the last right-click, used by the "Add" submenu. */
@@ -321,8 +349,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         logic.clear()
         sch.clear()
       },
-      undo: sch.undo,
-      redo: sch.redo,
+      undo,
+      redo,
       cut,
       copy,
       paste: () => paste(),
@@ -345,8 +373,14 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       toggleProbe: measure.toggle,
       toggleScope: () => setScopeOpen((o) => !o),
       toggleLogic: () => setLogicOpen((o) => !o),
+      toggleCode: () => setCodeOpen((o) => !o),
+      openCode: (ref) => {
+        const board = sch.doc.objects.find((o) => o.props?.ref === ref)
+        if (board) setCodeBoardId(board.id)
+        setCodeOpen(true)
+      },
     }),
-    [add, load, viewCenter, fitTo, grid, sch, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle],
+    [add, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle],
   )
 
   // --- moving objects -------------------------------------------------------
@@ -681,6 +715,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     } else if (mod && key === "d") {
       e.preventDefault()
       duplicate()
+    } else if (mod && key === "j") {
+      e.preventDefault()
+      setCodeOpen((o) => !o)
     } else if (!mod && !e.altKey && key === "m") {
       measure.toggle()
     } else if (!mod && !e.altKey && key === "o") {
@@ -757,8 +794,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   ]
 
   return (
+    <div className="flex h-full w-full overflow-hidden">
     <ContextMenu>
-      <ContextMenuTrigger data-slot="dot-field" className={cn("flex h-full w-full flex-col overflow-hidden bg-background", className)} {...props}>
+      <ContextMenuTrigger data-slot="dot-field" className={cn("flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background", className)} {...props}>
         <div data-slot="dot-field-stage" className="relative min-h-0 flex-1 overflow-hidden">
           <div
             ref={containerRef}
@@ -898,6 +936,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             sim={sim}
             onChange={sch.setProps}
             onSerial={sendSerial}
+            onCode={(id) => {
+              setCodeBoardId(id)
+              setCodeOpen(true)
+            }}
             onRotate={(d) => sch.rotate(sch.selectedObjects, d)}
             onDelete={sch.removeSelected}
             onPointerDown={(e) => e.stopPropagation()}
@@ -1002,6 +1044,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           <ContextMenuShortcut>Del</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
+        <ContextMenuItem disabled={!selectedBoard} onClick={() => setCodeOpen(true)}>
+          Source code
+          <ContextMenuShortcut>⌘J</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         <ContextMenuItem onClick={zoomIn}>
           Zoom in
           <ContextMenuShortcut>⌘+</ContextMenuShortcut>
@@ -1041,5 +1088,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+      {codeOpen && (
+        <React.Suspense fallback={<div className="w-160 shrink-0 border-l bg-background" />}>
+          <CodePanel ref={codeEditor} board={codeBoard} boards={boards} onPick={(id) => sch.selectObject(id)} onFiles={sch.setProject} onFirmware={onFirmware} onClose={() => setCodeOpen(false)} />
+        </React.Suspense>
+      )}
+    </div>
   )
 }
