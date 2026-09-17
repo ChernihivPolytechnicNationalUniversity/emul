@@ -111,6 +111,26 @@ snap = loop.snapshot()!
 expect("core restarted", snap.mcus[u.id].running ? "yes" : "no", "yes")
 expect("staircase from the top", ledStr(snap), "●○○○")
 
+console.log("\nBOOT to SYSTEM and a reset: the core starts in system memory and the firmware does not run")
+// setParts replaces the whole map, so the switch is held through the reset explicitly.
+const BOOT = partKey(u.id, "BOOT")
+const RESET = partKey(u.id, "RESET")
+loop.setParts({ [BOOT]: { on: true }, [RESET]: { pressed: true } })
+run(0.05)
+loop.setParts({ [BOOT]: { on: true } })
+run(0.2)
+snap = loop.snapshot()!
+expect("BOOT0 high (10 kΩ up, the pad's 40 kΩ down)", v(snap, "BOOT0"), 2.64, 0.05)
+expect("LEDs dark", ledStr(snap), "○○○○")
+expect("system bootloader flagged as unmodelled", snap.mcus[u.id].unmodelled.some((x) => /bootloader/.test(x.block)) ? "yes" : "no", "yes")
+loop.setParts({ [RESET]: { pressed: true } })
+run(0.05)
+loop.setParts({})
+run(0.1)
+snap = loop.snapshot()!
+expect("BOOT0 low again", v(snap, "BOOT0"), 0, 0.05)
+expect("firmware back", ledStr(snap), "●○○○")
+
 console.log("\nUnplugging the USART1 USB changes nothing: the module runs from its own USB")
 loop.setParts({ [partKey(u.id, "USB")]: { on: false } })
 run(0.1)

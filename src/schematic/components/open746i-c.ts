@@ -289,6 +289,8 @@ const pins: PinDef[] = [
   ...strip("CN4", CN4, { x: 63, y: 26, dir: "down", side: "right", labelAt: "left", stub: 1 }),
   ...strip("CN5", ICSP_ODD, { x: 53, y: 36, dir: "right", side: "bottom", labelAt: "top", stub: 2 }),
   ...strip("CN5", ICSP_EVEN, { x: 53, y: 37, dir: "right", side: "bottom", labelAt: "bottom", stub: 1 }),
+  // BOOT0 as the pin ports carry it, next to the module's BOOT switch that drives it.
+  { id: "BOOT0", label: "BOOT0", x: 21, y: 35, side: "bottom", labelAt: "right", kind: "digital", stub: 0, signal: "BOOT0", connector: "P16", connectorPin: 65, note: "Boot switch: FLASH ties it to ground, SYSTEM to 3.3 V through 10 kΩ (the ST bootloader is not modelled: the core idles in system memory)" },
 ]
 
 const label = (x: number, y: number, text: string, size = 0.32): BodyShape => ({ type: "text", x, y, text, size, muted: true })
@@ -315,8 +317,10 @@ const body: BodyShape[] = [
   { type: "text", x: CHIP.cx, y: CHIP.cy - 0.2, text: "STM32F746IG", size: 0.55, inverse: true },
   { type: "text", x: CHIP.cx, y: CHIP.cy + 1.1, text: "LQFP176 · 216 MHz", size: 0.35, inverse: true },
   { type: "text", x: 14.5, y: 30, text: "Core7XXI", size: 0.8, rotate: -90 },
-  ...block(19, 31, 2.5, 4, "BOOT0", [20.25, 35.7]),
-  ...block(25.5, 31, 2, 4, "RESET", [26.5, 35.7]),
+  label(21, 31.4, "BOOT", 0.26),
+  label(19.6, 32.5, "FLASH", 0.24),
+  label(22.4, 32.5, "SYSTEM", 0.24),
+  label(26.5, 31.4, "RESET", 0.26),
   label(15, 36.6, "USB OTG", 0.26),
   label(19.6, 36.6, "SW1: USB ↔ 5Vin", 0.26),
   label(24.5, 38.6, "IS42S16400J", 0.26),
@@ -372,6 +376,7 @@ const parts: PartDef[] = [
   { type: "switch", id: "S2", label: "S2: on = 5VDC jack, off = USART1 USB", x: 7, y: 3, span: 2 },
   { type: "usb", id: "MUSB", label: "Core746I USB OTG", x: 15, y: 38.5, side: "bottom", initial: { on: true } },
   { type: "switch", id: "SW1", label: "SW1: on = the module's USB, off = 5Vin from the board (S2)", x: 18.8, y: 38.6, span: 1.6, initial: { on: true } },
+  { type: "switch", id: "BOOT", label: "BOOT: off = FLASH (user firmware), on = SYSTEM (ST bootloader, not modelled)", x: 20.2, y: 33.5, span: 1.6, pin: "BOOT0" },
   // The LED column top right: PWR, the CP2102's RX/TX, the four USER LEDs.
   { type: "led", id: "PWR", label: "PWR", x: 71, y: 3, color: "#ef4444" },
   { type: "led", id: "RXLED", label: "RX", x: 71, y: 5, color: "#ef4444" },
@@ -390,6 +395,8 @@ const parts: PartDef[] = [
   { type: "button", id: "JOY_CTR", label: "", x: 65, y: 51, size: 1.2, mcu: "PI11" },
   { type: "button", id: "WAKEUP", label: "K1", x: 58, y: 52, mcu: "PA0", pin: "CN3-1" },
   { type: "button", id: "RESET", label: "", x: 8, y: 53, mcu: "NRST", pin: "P13-17" },
+  // The module's own reset button, on the same NRST.
+  { type: "button", id: "MRESET", label: "", x: 26.5, y: 33.5, size: 1.2, mcu: "NRST", pin: "P13-17" },
 ]
 
 // --- electrical model ---------------------------------------------------------
@@ -448,8 +455,13 @@ const model: Element[] = [
   { kind: "D", anode: "$txk", cathode: "VCP-TX", vf: LED_COLORS.red.vf, part: "TXLED" },
   { kind: "R", a: "$3v3", b: "$rxk", value: 1e3 },
   { kind: "D", anode: "$rxk", cathode: "VCP-RX", vf: LED_COLORS.red.vf, part: "RXLED" },
+  // BOOT switch on the module: FLASH grounds BOOT0, SYSTEM lifts it to 3.3 V through 10 kΩ.
+  { kind: "SW", a: "BOOT0", b: GND, part: "BOOT", closed: "off" },
+  { kind: "R", a: "$boot0hi", b: "$3v3", value: 10e3 },
+  { kind: "SW", a: "BOOT0", b: "$boot0hi", part: "BOOT", closed: "on" },
   // RESET shorts NRST (internal pull-up) to ground; the 1 nF on it is left out.
   { kind: "SW", a: NRST, b: GND, part: "RESET", closed: "pressed" },
+  { kind: "SW", a: NRST, b: GND, part: "MRESET", closed: "pressed" },
   // USER LEDs: pin → 1 kΩ → LED → GND (JMP3 closed).
   ...led("PB6", "LED1"),
   ...led("PB7", "LED2"),
@@ -469,7 +481,7 @@ const model: Element[] = [
   // Several header pins on one MCU pin share one driver.
   ...[...byMcu.values()].filter((ids) => ids.length > 1).map((ids): Element => ({ kind: "SHORT", nodes: ids })),
   // The MCU: supply load, NRST pull-up, a GPIO driver behind every header pin and every internal pin.
-  ...mcuModel(STM32F746IG, { vdd: "$3v3", gnd: GND, nrst: NRST, pads: [...[...byMcu.values()].map((ids) => ids[0]), "$PG2", "$PG3", "$PI11"] }),
+  ...mcuModel(STM32F746IG, { vdd: "$3v3", gnd: GND, nrst: NRST, boot0: "BOOT0", pads: [...[...byMcu.values()].map((ids) => ids[0]), "$PG2", "$PG3", "$PI11"] }),
 ]
 
 export const open746ic: ComponentDef = {
@@ -489,6 +501,7 @@ export const open746ic: ComponentDef = {
   chip: STM32F746IG.id,
   mcuPower: V3V3,
   mcuReset: NRST,
+  mcuBoot0: "BOOT0",
   // Core746I: 8 MHz crystal on PH0/PH1, 32.768 kHz on PC14/PC15.
   mcuClocks: { hse: { hz: 8e6, kind: "crystal", startup: 2e-3 }, lse: { hz: 32768, kind: "crystal", startup: 2 } },
   // IS42S16400J on FMC SDRAM bank 2: 8 MB at 0xD000_0000, usable once the FMC has set it up.
@@ -501,7 +514,8 @@ export const open746ic: ComponentDef = {
     WAKEUP: "PA0, active high: 10 kΩ pull-down, K1 to 3.3 V through 10 kΩ (JMP6)",
     "LCD 7inch (P15)": "24-bit RGB on the LTDC, backlight PA3, GT911 touch on PD13/PD12 (I2C4), RST PD11, INT PD7",
     "USB OTG (Core746I)": "Its VBUS powers the module with SW1 at USB (5Vin from the board's S2 otherwise); the data lines DM PA11, DP PA12, ID PA10, VBUS PA9 are not modelled",
-    "Not fitted here": "BOOT0 switch (always boots from flash), JTAG/SWD (no debugger), the 2×40 pin ports P16–P21 (every I/O; use the peripheral headers), the 4.3\" LCD header P14 (RGB as P15 + XPT2046 touch on PF7/PF8/PF9, CS PF6, IRQ PD7), the USB OTG data lines and VBUS LED, the jumpers JMP1–JMP6, JMP5, OTG and VREF (always closed)",
+    "BOOT switch": "FLASH grounds BOOT0, SYSTEM lifts it to 3.3 V: the core then starts in system memory, where ST's bootloader is not modelled (it idles; the firmware does not run)",
+    "Not fitted here": "JTAG/SWD (no debugger), the 2×40 pin ports P16–P21 (every I/O; use the peripheral headers), the 4.3\" LCD header P14 (RGB as P15 + XPT2046 touch on PF7/PF8/PF9, CS PF6, IRQ PD7), the USB OTG data lines and VBUS LED, the jumpers JMP1–JMP6, JMP5, OTG and VREF (always closed)",
     Source: "Waveshare Open746I-C and Core746I schematics",
   },
 }
