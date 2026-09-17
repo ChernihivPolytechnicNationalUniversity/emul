@@ -12,7 +12,7 @@ import { nucleoPwm } from "@/schematic/examples"
 import { partKey, pinKey } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
 
-const elf = readFileSync(join(import.meta.dirname, "..", "public", "firmware", "nucleo-pwm.elf"))
+const elf = readFileSync(join(import.meta.dirname, "..", "firmware", "examples", "nucleo-pwm.elf"))
 const doc = nucleoPwm.build(GRID)
 const u = doc.objects.find((o) => o.def === "nucleo-f429zi")!
 const led = doc.objects.find((o) => o.def === "led")!

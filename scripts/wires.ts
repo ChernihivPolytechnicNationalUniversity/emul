@@ -337,7 +337,7 @@ console.log("Two MCU pins tied through a junction to one button (the PG2/PG3 sta
   expect("…with SA3's contact", nets.netOfPin(pinKey(dd.id, "PG2")) === nets.netOfPin(pinKey(byRef("SA3").id, "1")), true)
   expect("SA2's contact is on it too", nets.netOfPin(pinKey(dd.id, "PG2")) === nets.netOfPin(pinKey(byRef("SA2").id, "1")), true)
 
-  const elf = readFileSync(join(import.meta.dirname, "..", "public", "firmware", "lab1-f746.elf"))
+  const elf = readFileSync(join(import.meta.dirname, "..", "firmware", "examples", "lab1-f746.elf"))
   dd.props = { ...dd.props, firmware: "lab1-f746.elf", firmwareData: elf.toString("base64") }
   const loop = new SimLoop()
   loop.setDoc(tapped)

@@ -13,7 +13,7 @@ import { lab1Board } from "@/schematic/examples"
 import { partKey, pinKey } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
 
-const elf = readFileSync(join(import.meta.dirname, "..", "public", "firmware", "lab1-f746.elf"))
+const elf = readFileSync(join(import.meta.dirname, "..", "firmware", "examples", "lab1-f746.elf"))
 const doc = lab1Board.build(GRID)
 const u = doc.objects.find((o) => o.def === "open746i-c")!
 u.props = { ...u.props, firmware: "lab1-f746.elf", firmwareData: elf.toString("base64") }

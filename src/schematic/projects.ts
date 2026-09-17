@@ -7,26 +7,30 @@ import type { SourceFile } from "emul-shared/source"
  */
 export type ProjectLoader = () => Promise<SourceFile[]>
 
-// Vite reads these options at build time, so they are spelled out at each glob.
+// Vite reads these options at build time, so they are spelled out at each glob. Outside Vite
+// (the test scripts under tsx import the examples too) there is no glob and no code to load.
 type Raw = Record<string, () => Promise<string>>
+const VITE = typeof import.meta.glob === "function"
 
-const halApps = import.meta.glob("../../firmware/hal/Src/{main,square,pwm,uart,i2c,adc,spi,spi-slave}.c", { query: "?raw", import: "default" }) as Raw
-const lab1 = import.meta.glob("../../firmware/lab1/Core/{Inc,Src}/*.{c,h}", { query: "?raw", import: "default" }) as Raw
-const lcd = import.meta.glob("../../firmware/lcd/{display,touch,cube}/{Src,Inc,BSP,Fonts}/*.{c,cpp,h}", { query: "?raw", import: "default" }) as Raw
-const cubeTexture = import.meta.glob("../../firmware/lcd/cube/texture.c", { query: "?raw", import: "default" }) as Raw
-const retarget = import.meta.glob("../../firmware/lcd/retarget.c", { query: "?raw", import: "default" }) as Raw
+const halApps = (VITE ? import.meta.glob("../../firmware/hal/Src/{main,square,pwm,uart,i2c,adc,spi,spi-slave}.c", { query: "?raw", import: "default" }) : {}) as Raw
+const lab1 = (VITE ? import.meta.glob("../../firmware/lab1/Core/{Inc,Src}/*.{c,h}", { query: "?raw", import: "default" }) : {}) as Raw
+const lcd = (VITE ? import.meta.glob("../../firmware/lcd/{display,touch,cube}/{Src,Inc,BSP,Fonts}/*.{c,cpp,h}", { query: "?raw", import: "default" }) : {}) as Raw
+const cubeTexture = (VITE ? import.meta.glob("../../firmware/lcd/cube/texture.c", { query: "?raw", import: "default" }) : {}) as Raw
+const retarget = (VITE ? import.meta.glob("../../firmware/lcd/retarget.c", { query: "?raw", import: "default" }) : {}) as Raw
 
 const MAIN_H = '#ifndef MAIN_H\n#define MAIN_H\n\n#include "stm32f4xx_hal.h"\n\n#endif /* MAIN_H */\n'
 
 /** One of the Nucleo HAL apps, laid out as CubeIDE would: the app as `Core/Src/main.c`. */
-export const nucleoApp = (name: string): ProjectLoader => {
-  const load = halApps[`../../firmware/hal/Src/${name}.c`]
-  if (!load) throw new Error(`no such firmware app: ${name}`)
-  return async () => [
-    { path: "Core/Inc/main.h", content: MAIN_H },
-    { path: "Core/Src/main.c", content: await load() },
-  ]
-}
+export const nucleoApp =
+  (name: string): ProjectLoader =>
+  async () => {
+    const load = halApps[`../../firmware/hal/Src/${name}.c`]
+    if (!load) throw new Error(`no such firmware app: ${name}`)
+    return [
+      { path: "Core/Inc/main.h", content: MAIN_H },
+      { path: "Core/Src/main.c", content: await load() },
+    ]
+  }
 
 /** Files of a glob under `prefix`, with the rest of each path kept as the project's. */
 async function under(files: Raw, prefix: string): Promise<SourceFile[]> {

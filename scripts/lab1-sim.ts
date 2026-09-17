@@ -13,7 +13,7 @@ import { lab1Stand } from "@/schematic/examples"
 import { partKey, pinKey } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
 
-const elf = readFileSync(join(import.meta.dirname, "..", "public", "firmware", "lab1-f746.elf"))
+const elf = readFileSync(join(import.meta.dirname, "..", "firmware", "examples", "lab1-f746.elf"))
 const doc = lab1Stand.build(GRID)
 const dd = doc.objects.find((o) => o.def === "stm32f746ig")!
 const byRef = (ref: string) => doc.objects.find((o) => o.props?.ref === ref)!

@@ -12,7 +12,7 @@ import { nucleoSpi } from "@/schematic/examples"
 import { pinKey } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
 
-const fw = (name: string) => readFileSync(join(import.meta.dirname, "..", "public", "firmware", name)).toString("base64")
+const fw = (name: string) => readFileSync(join(import.meta.dirname, "..", "firmware", "examples", name)).toString("base64")
 const doc = nucleoSpi.build(GRID)
 const u1 = doc.objects.find((o) => o.props?.ref === "U1")!
 const u2 = doc.objects.find((o) => o.props?.ref === "U2")!

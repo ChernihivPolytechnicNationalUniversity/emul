@@ -16,7 +16,7 @@ import { SimLoop, type Probe } from "@/sim/loop"
 import { LogicStore } from "@/components/logic/logic-store"
 import { decodeI2c, decodeSpi, decodeUart, type EdgeSeries } from "@/sim/protocols"
 
-const fw = (name: string) => readFileSync(join(import.meta.dirname, "..", "public", "firmware", name)).toString("base64")
+const fw = (name: string) => readFileSync(join(import.meta.dirname, "..", "firmware", "examples", name)).toString("base64")
 
 let failed = 0
 let total = 0

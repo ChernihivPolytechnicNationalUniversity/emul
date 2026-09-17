@@ -13,7 +13,7 @@ import { Stm32 } from "@/mcu/stm32f429"
 
 const filter = process.argv[2] ?? ""
 const seconds = Number(process.argv[3] ?? 0.3)
-const pub = (name: string) => join(import.meta.dirname, "..", "public", "firmware", name)
+const pub = (name: string) => join(import.meta.dirname, "..", "firmware", "examples", name)
 const images: [string, ChipProfile][] = [
   [pub("nucleo-blink.elf"), STM32F429ZI],
   [pub("nucleo-square.elf"), STM32F429ZI],

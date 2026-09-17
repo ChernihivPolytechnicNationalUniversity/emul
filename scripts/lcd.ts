@@ -25,7 +25,7 @@ const expect = (what: string, got: number | string, want: number | string, tol =
   console.log(`  ${ok ? "✓" : "✗"} ${what.padEnd(48)} ${fmt(got).padStart(12)}  expected ${fmt(want)}${tol ? ` ±${tol}` : ""}`)
 }
 
-const firmware = (name: string) => readFileSync(join(import.meta.dirname, "..", "public", "firmware", name)).toString("base64")
+const firmware = (name: string) => readFileSync(join(import.meta.dirname, "..", "firmware", "examples", name)).toString("base64")
 
 /** Colour histogram of a frame: the most common RGB triples and the count of each. */
 function colours(frame: Uint8ClampedArray, width: number, height: number, region?: { x: number; y: number; w: number; h: number }) {

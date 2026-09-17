@@ -171,7 +171,7 @@ cores; only cores that share a net pay it.
 - `src/schematic/` — component definitions (`components/*`), examples, geometry, `mcu-model.ts`; wiring in `nets.ts` (the net map), `wiring.ts` (connect, tap), `wire-colors.ts` (palette, shortcuts, the automatic rule)
 - `src/components/` — the React UI; `code/` is the editor panel (Monaco, explorer, tabs, build output)
 - `src/project/` — a board's firmware project: file operations that mirror the API's rules, the template, the build-service client
-- `firmware/` — test firmware and HAL apps (`hal/Src/main.c` blink, `square.c`, `pwm.c`, `uart.c`, `spi.c`, `spi-slave.c`, `i2c.c`, `dma.c`, `adc.c`, `wdg.c`), the lab's CubeIDE project (`lab1/`), the Open746I-C demos (`lcd/`); the examples bundle these as source projects (`src/schematic/projects.ts`)
+- `firmware/` — test firmware and HAL apps (`hal/Src/main.c` blink, `square.c`, `pwm.c`, `uart.c`, `spi.c`, `spi-slave.c`, `i2c.c`, `dma.c`, `adc.c`, `wdg.c`), the lab's CubeIDE project (`lab1/`), the Open746I-C demos (`lcd/`), and their built images in `examples/` for the test scripts; the site bundles the sources as the examples' projects (`src/schematic/projects.ts`)
 - `scripts/` — the test drivers above
 - `backend/` — the services below: `api/`, `worker/`, `shared/`
 

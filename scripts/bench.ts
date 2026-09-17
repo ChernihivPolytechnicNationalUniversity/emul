@@ -18,13 +18,30 @@ const filter = process.argv[2] ?? ""
 const seconds = Number(process.argv[3] ?? 3)
 const workers = process.argv.includes("--workers")
 
+/** The examples' programs as built ELFs (firmware/examples): the site ships sources, the bench wants images. */
+const FIRMWARE: Record<string, Record<string, string>> = {
+  "nucleo-blink": { U1: "nucleo-blink.elf" },
+  "nucleo-square": { U1: "nucleo-square.elf" },
+  "lab1-open746i-c": { U1: "lab1-f746.elf" },
+  "open746-lcd": { U1: "open746-lcd.elf" },
+  "open746-touch": { U1: "open746-touch.elf" },
+  "open746-cube": { U1: "open746-cube.elf" },
+  "lab1-f746": { DD1: "lab1-f746.elf" },
+  "nucleo-pwm": { U1: "nucleo-pwm.elf" },
+  "nucleo-serial": { U1: "nucleo-uart.elf" },
+  "nucleo-spi": { U1: "nucleo-spi-master.elf", U2: "nucleo-spi-slave.elf" },
+  "nucleo-i2c": { U1: "nucleo-i2c.elf" },
+  "nucleo-adc": { U1: "nucleo-adc.elf" },
+}
+
 for (const ex of examples) {
-  if (!ex.firmware || !ex.id.includes(filter)) continue
+  const firmware = FIRMWARE[ex.id]
+  if (!firmware || !ex.id.includes(filter)) continue
   const doc = ex.build(GRID)
-  for (const fw of ex.firmware) {
-    const obj = doc.objects.find((o) => o.props?.ref === fw.ref)!
-    const elf = readFileSync(join(process.cwd(), "public", fw.url))
-    obj.props = { ...obj.props, firmware: fw.url.split("/").pop(), firmwareData: elf.toString("base64") }
+  for (const [ref, name] of Object.entries(firmware)) {
+    const obj = doc.objects.find((o) => o.props?.ref === ref)!
+    const elf = readFileSync(join(process.cwd(), "firmware", "examples", name))
+    obj.props = { ...obj.props, firmware: name, firmwareData: elf.toString("base64") }
   }
   const loop = new SimLoop()
   if (workers) loop.spawnCore = spawnNodeCore

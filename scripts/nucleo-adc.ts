@@ -12,7 +12,7 @@ import { nucleoAdc } from "@/schematic/examples"
 import { partKey, pinKey } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
 
-const elf = readFileSync(join(import.meta.dirname, "..", "public", "firmware", "nucleo-adc.elf"))
+const elf = readFileSync(join(import.meta.dirname, "..", "firmware", "examples", "nucleo-adc.elf"))
 const doc = nucleoAdc.build(GRID)
 const u = doc.objects.find((o) => o.def === "nucleo-f429zi")!
 const pot = doc.objects.find((o) => o.def === "potentiometer")!

@@ -13,7 +13,7 @@ import { partKey, pinKey } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
 import type { EepromSnapshot } from "@/sim/digital"
 
-const elf = readFileSync(join(import.meta.dirname, "..", "public", "firmware", "nucleo-i2c.elf"))
+const elf = readFileSync(join(import.meta.dirname, "..", "firmware", "examples", "nucleo-i2c.elf"))
 const doc = nucleoI2c.build(GRID)
 const u = doc.objects.find((o) => o.def === "nucleo-f429zi")!
 const mem = doc.objects.find((o) => o.def === "eeprom-24c")!

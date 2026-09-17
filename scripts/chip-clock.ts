@@ -16,8 +16,8 @@ import { partKey, type Schematic } from "@/schematic/types"
 import { SimLoop, type McuStatus } from "@/sim/loop"
 import type { Stm32 } from "@/mcu/stm32f429"
 
-const lab1 = readFileSync(join(import.meta.dirname, "..", "public", "firmware", "lab1-f746.elf"))
-const blink = readFileSync(join(import.meta.dirname, "..", "public", "firmware", "nucleo-blink.elf"))
+const lab1 = readFileSync(join(import.meta.dirname, "..", "firmware", "examples", "lab1-f746.elf"))
+const blink = readFileSync(join(import.meta.dirname, "..", "firmware", "examples", "nucleo-blink.elf"))
 const wdg = readFileSync(join(import.meta.dirname, "..", "firmware", "hal", "build", "wdg.elf"))
 
 let failed = 0

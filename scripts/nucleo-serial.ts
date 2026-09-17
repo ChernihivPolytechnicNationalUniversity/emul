@@ -12,7 +12,7 @@ import { nucleoSerial } from "@/schematic/examples"
 import { pinKey } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
 
-const elf = readFileSync(join(import.meta.dirname, "..", "public", "firmware", "nucleo-uart.elf"))
+const elf = readFileSync(join(import.meta.dirname, "..", "firmware", "examples", "nucleo-uart.elf"))
 const doc = nucleoSerial.build(GRID)
 const u = doc.objects.find((o) => o.def === "nucleo-f429zi")!
 const term = doc.objects.find((o) => o.def === "serial-terminal")!
