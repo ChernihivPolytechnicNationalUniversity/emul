@@ -20,5 +20,5 @@ jobs:
         Dockerfile
         api=backend/api/Dockerfile
         worker=backend/worker/Dockerfile
-      on-missing-candidate: build
+      image-source: build
     secrets: inherit
