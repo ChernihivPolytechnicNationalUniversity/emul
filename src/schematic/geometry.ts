@@ -1,4 +1,5 @@
 import { getDef, getPin } from "./registry"
+import { SpatialIndex } from "./spatial"
 import type { ComponentDef, PinDef, PinRef, PlacedObject, Point, Rotation, Side, Wire } from "./types"
 
 export type { Point }
@@ -69,6 +70,9 @@ export const snap = (v: number, grid: number) => Math.round(v / grid) * grid
 export const intersects = (a: Rect, b: Rect) =>
   a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
 
+export const touches = (a: Rect, b: Rect) =>
+  a.x <= b.x + b.w && a.x + a.w >= b.x && a.y <= b.y + b.h && a.y + a.h >= b.y
+
 /** World-space bounding box of a placed object. */
 export function objectRect(obj: PlacedObject, grid: number): Rect {
   const def = getDef(obj.def)
@@ -77,76 +81,29 @@ export function objectRect(obj: PlacedObject, grid: number): Rect {
   return { x: obj.x, y: obj.y, w: w * grid, h: h * grid }
 }
 
+export type ObjectPin = { key: string; pin: PlacedPin; point: Point }
+
+const placementOf = (obj: PlacedObject, grid: number) => `${obj.id}|${obj.def}|${obj.x}|${obj.y}|${obj.rotation ?? 0}|${grid}`
+
+const placedPins = new WeakMap<PlacedObject, { placement: string; pins: readonly ObjectPin[] }>()
+
 /**
  * Every pin of a placed object, in world coordinates. Used wherever pins have to be found by
  * position rather than by name: touching pins, hit-testing, contact dots.
  */
-export function objectPins(obj: PlacedObject, grid: number): { key: string; pin: PlacedPin; point: Point }[] {
+export function objectPins(obj: PlacedObject, grid: number): readonly ObjectPin[] {
+  const placement = placementOf(obj, grid)
+  const cached = placedPins.get(obj)
+  if (cached && cached.placement === placement) return cached.pins
   const def = getDef(obj.def)
-  if (!def) return []
-  return def.pins.map((raw) => {
-    const pin = rotatePin(raw, def, obj.rotation)
-    return { key: `${obj.id}:${pin.id}`, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }
-  })
-}
-
-/**
- * Group pins that sit on the same point, so components placed pin-to-pin conduct without a
- * wire. Only an exact coincidence counts: a wire or a symbol merely passing over a pin is not
- * a connection. Returns every such pin keyed to its group's representative.
- */
-export function pinContacts(objects: readonly PlacedObject[], grid: number): Map<string, string> {
-  // Bucket by whole pixel, then compare against the neighbouring buckets, so the sweep stays
-  // linear however many pins a board has.
-  const buckets = new Map<string, { key: string; point: Point }[]>()
-  for (const obj of objects) {
-    for (const { key, pin, point } of objectPins(obj, grid)) {
-      if (pin.kind === "nc") continue
-      const at = `${Math.round(point.x)},${Math.round(point.y)}`
-      const list = buckets.get(at)
-      if (list) list.push({ key, point })
-      else buckets.set(at, [{ key, point }])
-    }
-  }
-  const EPS = 0.01
-  const parent = new Map<string, string>()
-  const find = (k: string): string => {
-    const p = parent.get(k)
-    if (p === undefined || p === k) return k
-    const root = find(p)
-    parent.set(k, root)
-    return root
-  }
-  // Every key that takes part is recorded, the group's representative included: callers sum
-  // terminal currents over a group, so a missing member would silently lose its current.
-  const joined = new Set<string>()
-  const union = (a: string, b: string) => {
-    joined.add(a)
-    joined.add(b)
-    const ra = find(a)
-    const rb = find(b)
-    if (ra !== rb) parent.set(ra, rb)
-  }
-  for (const [at, list] of buckets) {
-    const [bx, by] = at.split(",").map(Number)
-    const near: { key: string; point: Point }[] = []
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        const other = buckets.get(`${bx + dx},${by + dy}`)
-        if (other && (dx !== 0 || dy !== 0)) near.push(...other)
-      }
-    }
-    const all = [...list, ...near]
-    for (const a of list) {
-      for (const b of all) {
-        if (a.key === b.key) continue
-        if (Math.abs(a.point.x - b.point.x) < EPS && Math.abs(a.point.y - b.point.y) < EPS) union(a.key, b.key)
-      }
-    }
-  }
-  const contacts = new Map<string, string>()
-  for (const key of joined) contacts.set(key, find(key))
-  return contacts
+  const pins: readonly ObjectPin[] = def
+    ? def.pins.map((raw) => {
+        const pin = rotatePin(raw, def, obj.rotation)
+        return { key: `${obj.id}:${pin.id}`, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }
+      })
+    : []
+  placedPins.set(obj, { placement, pins })
+  return pins
 }
 
 /** World-space center of a pin. */
@@ -158,15 +115,20 @@ export function pinPoint(obj: PlacedObject, pinId: string, grid: number): Point 
   return { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid }
 }
 
+const objectIndexes = new WeakMap<readonly PlacedObject[], { size: number; byId: Map<string, PlacedObject> }>()
+
+export function objectIndex(objects: readonly PlacedObject[]): ReadonlyMap<string, PlacedObject> {
+  const cached = objectIndexes.get(objects)
+  if (cached && cached.size === objects.length) return cached.byId
+  const byId = new Map<string, PlacedObject>()
+  for (const o of objects) if (!byId.has(o.id)) byId.set(o.id, o)
+  objectIndexes.set(objects, { size: objects.length, byId })
+  return byId
+}
+
 /** Object, definition and the pin as seen on the field (rotation applied). */
 export function resolvePin(objects: readonly PlacedObject[], ref: PinRef, grid: number) {
-  const obj = objects.find((o) => o.id === ref.object)
-  if (!obj) return null
-  const def = getDef(obj.def)
-  const raw = def && getPin(def, ref.pin)
-  if (!def || !raw) return null
-  const pin = rotatePin(raw, def, obj.rotation)
-  return { obj, def, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }
+  return resolvePinIn(objectIndex(objects), ref, grid)
 }
 
 /** Unit vector pointing away from the component, per pin direction. */
@@ -237,7 +199,7 @@ export function routeWire(
   let horizontal = isHorizontal(aSide, a1, points[0] ?? b1)
 
   if (points.length === 0) {
-    for (const m of autoRoute(a1, aSide, b1, bSide, grid, avoid)) {
+    for (const m of autoRoute(a, a1, aSide, b, b1, bSide, grid, avoid)) {
       pts.push(m)
       owner.push(0)
     }
@@ -255,7 +217,16 @@ export function routeWire(
         const goHorizontalFirst = horizontal
           ? Math.sign(q.x - p.x) === Math.sign(dir.x) // continuing does not reverse
           : Math.sign(q.y - p.y) !== Math.sign(dir.y) // continuing vertical would reverse
-        pts.push(goHorizontalFirst ? { x: q.x, y: p.y } : { x: p.x, y: q.y })
+        const viaH = { x: q.x, y: p.y }
+        const viaV = { x: p.x, y: q.y }
+        let corner = goHorizontalFirst ? viaH : viaV
+        if (i === anchors.length - 1) {
+          const before = pts.length > 1 ? pts[pts.length - 2] : p
+          const other = goHorizontalFirst ? viaV : viaH
+          const arrival = (via: Point) => arrivesFromBehind(collapsed([before, p, via, q, b]), bSide)
+          if (arrival(other) < arrival(corner)) corner = other
+        }
+        pts.push(corner)
         owner.push(i)
       }
       const last = pts[pts.length - 1]
@@ -274,15 +245,41 @@ export function routeWire(
   return dedupeRoute(pts, owner)
 }
 
+const MID_LINE_STEPS_FROM_CENTRE = 6
+const MID_LINE_STEPS_PAST_END = 4
+const BODY_CROSSING_COST = 1e6
+const THROUGH_BODY_COST = 1e4
+
+const collapsed = (pts: readonly Point[]) => dedupeRoute([...pts], new Array<number>(Math.max(0, pts.length - 1)).fill(0)).pts
+
+function pathLength(pts: readonly Point[]) {
+  let sum = 0
+  for (let i = 1; i < pts.length; i++) sum += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
+  return sum
+}
+
+const leavesThroughBody = (pts: readonly Point[], aSide: Direction) =>
+  pts.length > 1 && Math.sign(pts[1].x - pts[0].x) * DIR[aSide].x + Math.sign(pts[1].y - pts[0].y) * DIR[aSide].y < 0 ? 1 : 0
+
+const arrivesFromBehind = (pts: readonly Point[], bSide: Direction) => {
+  const n = pts.length
+  return n > 1 && Math.sign(pts[n - 1].x - pts[n - 2].x) * DIR[bSide].x + Math.sign(pts[n - 1].y - pts[n - 2].y) * DIR[bSide].y > 0 ? 1 : 0
+}
+
 /**
  * Interior points of the automatic route between two stub ends: a centred Z when both stubs
  * point the same way, an L otherwise. When that path runs over another component's body, the
  * mid line is moved — first between the ends, then past them — to the nearest position that
  * clears every body, or the one crossing fewest if none does.
  */
-function autoRoute(a1: Point, aSide: Direction, b1: Point, bSide: Direction, grid: number, avoid: Rect[]): Point[] {
+function autoRoute(a: Point, a1: Point, aSide: Direction, b: Point, b1: Point, bSide: Direction, grid: number, avoid: Rect[]): Point[] {
   const ah = isHorizontal(aSide, a1, b1)
   const bh = isHorizontal(bSide, b1, a1)
+  const cost = (mid: Point[]) => {
+    const pts = collapsed([a, a1, ...mid, b1, b])
+    const throughBody = leavesThroughBody(pts, aSide) + arrivesFromBehind(pts, bSide)
+    return crossings(a1, mid, b1, avoid) * BODY_CROSSING_COST + throughBody * THROUGH_BODY_COST + pathLength(pts)
+  }
   const zx = (mx: number): Point[] => [
     { x: mx, y: a1.y },
     { x: mx, y: b1.y },
@@ -293,36 +290,30 @@ function autoRoute(a1: Point, aSide: Direction, b1: Point, bSide: Direction, gri
   ]
   const preferred: Point[] =
     ah && bh ? zx(snap((a1.x + b1.x) / 2, grid)) : !ah && !bh ? zy(snap((a1.y + b1.y) / 2, grid)) : ah ? [{ x: b1.x, y: a1.y }] : [{ x: a1.x, y: b1.y }]
-  if (avoid.length === 0 || crossings(a1, preferred, b1, avoid) === 0) return preferred
+  const preferredCost = cost(preferred)
+  if (preferredCost < THROUGH_BODY_COST) return preferred
 
   // Alternatives, nearest first: the mid line stepped away from centre, then beyond both ends.
   const lines = (lo: number, hi: number) => {
     const c = snap((lo + hi) / 2, grid)
     const out = [c]
-    for (let k = 1; k <= 6; k++) out.push(c + k * grid, c - k * grid)
-    for (let k = 1; k <= 4; k++) out.push(Math.max(lo, hi) + k * grid, Math.min(lo, hi) - k * grid)
+    for (let k = 1; k <= MID_LINE_STEPS_FROM_CENTRE; k++) out.push(c + k * grid, c - k * grid)
+    for (let k = 1; k <= MID_LINE_STEPS_PAST_END; k++) out.push(Math.max(lo, hi) + k * grid, Math.min(lo, hi) - k * grid)
     return out
   }
   const candidates: Point[][] = [{ x: b1.x, y: a1.y }, { x: a1.x, y: b1.y }].map((p) => [p])
   for (const mx of lines(a1.x, b1.x)) candidates.push(zx(mx))
   for (const my of lines(a1.y, b1.y)) candidates.push(zy(my))
   let best = preferred
-  let bestCost = crossings(a1, preferred, b1, avoid) * 1e6 + length(a1, preferred, b1)
+  let bestCost = preferredCost
   for (const c of candidates) {
-    const cost = crossings(a1, c, b1, avoid) * 1e6 + length(a1, c, b1)
-    if (cost < bestCost) {
+    const candidateCost = cost(c)
+    if (candidateCost < bestCost) {
       best = c
-      bestCost = cost
+      bestCost = candidateCost
     }
   }
   return best
-}
-
-function length(a1: Point, mid: Point[], b1: Point) {
-  const pts = [a1, ...mid, b1]
-  let sum = 0
-  for (let i = 1; i < pts.length; i++) sum += Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y)
-  return sum
 }
 
 /** How many body rectangles the orthogonal path a1 → mid… → b1 runs through (edges do not count). */
@@ -408,14 +399,29 @@ function dedupe(pts: Point[]): Point[] {
   return pts.filter((p, i) => i === 0 || p.x !== pts[i - 1].x || p.y !== pts[i - 1].y)
 }
 
+const samePoint = (p: Point, q: Point) => p.x === q.x && p.y === q.y
+
+const turnsBack = (a: Point, b: Point, c: Point) => {
+  const ax = Math.sign(b.x - a.x)
+  const ay = Math.sign(b.y - a.y)
+  const bx = Math.sign(c.x - b.x)
+  const by = Math.sign(c.y - b.y)
+  return ax * by === ay * bx && ax * bx + ay * by < 0
+}
+
 function dedupeRoute(pts: Point[], owner: number[]): Route {
   const outPts: Point[] = []
   const outOwner: number[] = []
   for (let i = 0; i < pts.length; i++) {
-    const prev = outPts[outPts.length - 1]
-    if (prev && prev.x === pts[i].x && prev.y === pts[i].y) continue
-    outPts.push(pts[i])
-    if (i > 0) outOwner.push(owner[i - 1])
+    const p = pts[i]
+    if (outPts.length && samePoint(outPts[outPts.length - 1], p)) continue
+    while (outPts.length >= 2 && turnsBack(outPts[outPts.length - 2], outPts[outPts.length - 1], p)) {
+      outPts.pop()
+      outOwner.pop()
+    }
+    if (outPts.length && samePoint(outPts[outPts.length - 1], p)) continue
+    outPts.push(p)
+    if (outPts.length > 1) outOwner.push(owner[i - 1])
   }
   return { pts: outPts, owner: outOwner }
 }
@@ -426,22 +432,138 @@ export type RoutedWire = {
   owner: number[]
 }
 
-export function routeAll(objects: readonly PlacedObject[], wires: readonly Wire[], grid: number): RoutedWire[] {
-  const index = new Map<string, PlacedObject>()
-  for (const o of objects) index.set(o.id, o)
-  const rects = objects.map((o) => ({ id: o.id, rect: objectRect(o, grid) }))
+const routeBoxes = new WeakMap<RoutedWire, Rect>()
 
-  const out: RoutedWire[] = []
-  for (const w of wires) {
-    const a = resolvePinIn(index, w.from, grid)
-    const b = resolvePinIn(index, w.to, grid)
-    if (!a || !b) continue
-    const avoid: Rect[] = []
-    for (const r of rects) if (r.id !== w.from.object && r.id !== w.to.object) avoid.push(r.rect)
-    const route = routeWire(a.point, a.pin.side, a.pin.stub ?? 1, b.point, b.pin.side, b.pin.stub ?? 1, grid, w.points ?? [], avoid)
-    out.push({ id: w.id, pts: route.pts, owner: route.owner })
+export function routeBox(route: RoutedWire): Rect {
+  const cached = routeBoxes.get(route)
+  if (cached) return cached
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const p of route.pts) {
+    if (p.x < minX) minX = p.x
+    if (p.x > maxX) maxX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.y > maxY) maxY = p.y
   }
-  return out
+  const box = { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+  routeBoxes.set(route, box)
+  return box
+}
+
+const SNAP_ERROR_CELLS = 0.5
+const ROUTE_SLACK_CELLS = 1
+const ROUTE_REACH_CELLS = Math.max(MID_LINE_STEPS_FROM_CENTRE + SNAP_ERROR_CELLS, MID_LINE_STEPS_PAST_END) + ROUTE_SLACK_CELLS
+
+export function routeArea(a: Point, aStub: number, b: Point, bStub: number, bends: readonly Point[], grid: number): Rect {
+  let minX = Math.min(a.x, b.x)
+  let maxX = Math.max(a.x, b.x)
+  let minY = Math.min(a.y, b.y)
+  let maxY = Math.max(a.y, b.y)
+  for (const p of bends) {
+    minX = Math.min(minX, p.x)
+    maxX = Math.max(maxX, p.x)
+    minY = Math.min(minY, p.y)
+    maxY = Math.max(maxY, p.y)
+  }
+  const reach = (Math.max(aStub, bStub) + ROUTE_REACH_CELLS) * grid
+  return { x: minX - reach, y: minY - reach, w: maxX - minX + 2 * reach, h: maxY - minY + 2 * reach }
+}
+
+type CachedRoute = {
+  signature: string
+  route: RoutedWire
+  wire: Wire
+  deps: readonly string[]
+  area: Rect
+}
+
+const NOTHING_MOVED: ReadonlySet<string> = new Set()
+
+export class Router {
+  private routes = new Map<string, CachedRoute>()
+  private objects: readonly PlacedObject[] | null = null
+  private grid = 0
+
+  private movedSinceLastCall(objects: readonly PlacedObject[], grid: number): ReadonlySet<string> | null {
+    const previous = this.objects
+    this.objects = objects
+    if (!previous || grid !== this.grid) {
+      this.grid = grid
+      return null
+    }
+    if (previous === objects) return NOTHING_MOVED
+    const before = objectIndex(previous)
+    const now = objectIndex(objects)
+    const moved = new Set<string>()
+    for (const o of objects) if (before.get(o.id) !== o) moved.add(o.id)
+    for (const o of previous) if (!now.has(o.id)) moved.add(o.id)
+    return moved
+  }
+
+  private survives(cached: CachedRoute, w: Wire, moved: ReadonlySet<string>, movedBodies: SpatialIndex | null): boolean {
+    if (cached.wire !== w) return false
+    if (!movedBodies) return true
+    if (moved.has(w.from.object) || moved.has(w.to.object)) return false
+    for (const id of cached.deps) if (moved.has(id)) return false
+    return !movedBodies.overlaps(cached.area)
+  }
+
+  routeAll(objects: readonly PlacedObject[], wires: readonly Wire[], grid: number): RoutedWire[] {
+    const moved = this.movedSinceLastCall(objects, grid)
+    const movedBodies = moved?.size ? new SpatialIndex(objects.filter((o) => moved.has(o.id)), grid) : null
+    const byId = objectIndex(objects)
+    let bodies: SpatialIndex | null = null
+    const kept = new Map<string, CachedRoute>()
+    const out: RoutedWire[] = []
+    for (const w of wires) {
+      const cached = this.routes.get(w.id)
+      if (moved && cached && this.survives(cached, w, moved, movedBodies)) {
+        kept.set(w.id, cached)
+        out.push(cached.route)
+        continue
+      }
+      const a = resolvePinIn(byId, w.from, grid)
+      const b = resolvePinIn(byId, w.to, grid)
+      if (!a || !b) continue
+      const aStub = a.pin.stub ?? 1
+      const bStub = b.pin.stub ?? 1
+      const bends = w.points ?? []
+      const avoid: Rect[] = []
+      const deps: string[] = []
+      const area = routeArea(a.point, aStub, b.point, bStub, bends, grid)
+      let signature = `${grid}:${a.point.x},${a.point.y},${a.pin.side},${aStub}/${b.point.x},${b.point.y},${b.pin.side},${bStub}`
+      for (const p of bends) signature += `/${p.x},${p.y}`
+      bodies ??= new SpatialIndex(objects, grid)
+      for (const o of bodies.query(area)) {
+        const rect = objectRect(o, grid)
+        if (!intersects(rect, area)) continue
+        deps.push(o.id)
+        if (o.id === w.from.object || o.id === w.to.object) continue
+        avoid.push(rect)
+        signature += `|${o.id}@${o.def},${o.x},${o.y},${o.rotation ?? 0}`
+      }
+      if (cached && cached.signature === signature) {
+        const same = { ...cached, wire: w, deps, area }
+        kept.set(w.id, same)
+        out.push(cached.route)
+        continue
+      }
+      const { pts, owner } = routeWire(a.point, a.pin.side, aStub, b.point, b.pin.side, bStub, grid, bends, avoid)
+      const route: RoutedWire = { id: w.id, pts, owner }
+      kept.set(w.id, { signature, route, wire: w, deps, area })
+      out.push(route)
+    }
+    this.routes = kept
+    return out
+  }
+}
+
+const defaultRouter = new Router()
+
+export function routeAll(objects: readonly PlacedObject[], wires: readonly Wire[], grid: number): RoutedWire[] {
+  return defaultRouter.routeAll(objects, wires, grid)
 }
 
 export function resolvePinIn(index: ReadonlyMap<string, PlacedObject>, ref: PinRef, grid: number) {
@@ -461,14 +583,30 @@ type Axis = "h" | "v"
 
 const axisOf = (p: Point, q: Point): Axis | null => (p.y === q.y ? "h" : p.x === q.x ? "v" : null)
 
-type Seg = {
-  wire: number
-  at: number
-  net: string
-  axis: Axis
-  lo: number
-  hi: number
-  lean: number
+type RouteSeg = { at: number; axis: Axis; lo: number; hi: number; lean: number; lane: number }
+
+const laneOf = (axis: Axis, along: number) => Math.round(along) * 2 + (axis === "h" ? 0 : 1)
+
+const routeSegs = new WeakMap<RoutedWire, readonly RouteSeg[]>()
+
+function segsOf(route: RoutedWire): readonly RouteSeg[] {
+  const cached = routeSegs.get(route)
+  if (cached) return cached
+  const segs: RouteSeg[] = []
+  const pts = route.pts
+  for (let at = 1; at < pts.length - 2; at++) {
+    const p = pts[at]
+    const q = pts[at + 1]
+    const axis = axisOf(p, q)
+    if (!axis) continue
+    const before = pts[at - 1]
+    const after = pts[at + 2]
+    const lean = axis === "h" ? (before.y + after.y) / 2 - p.y : (before.x + after.x) / 2 - p.x
+    const [lo, hi] = axis === "h" ? [Math.min(p.x, q.x), Math.max(p.x, q.x)] : [Math.min(p.y, q.y), Math.max(p.y, q.y)]
+    segs.push({ at, axis, lo, hi, lean, lane: laneOf(axis, axis === "h" ? p.y : p.x) })
+  }
+  routeSegs.set(route, segs)
+  return segs
 }
 
 /**
@@ -478,73 +616,69 @@ type Seg = {
  * orthogonal. Pins and the direction a wire leaves them are never touched.
  */
 export function nudgeRoutes(routes: RoutedWire[], netOf: (wireId: string) => string | undefined, grid: number): RoutedWire[] {
-  const segs: Seg[] = []
-  routes.forEach((r, wire) => {
-    const net = netOf(r.id) ?? r.id
-    for (let at = 1; at < r.pts.length - 2; at++) {
-      const p = r.pts[at]
-      const q = r.pts[at + 1]
-      const axis = axisOf(p, q)
-      if (!axis) continue
-      const before = r.pts[at - 1]
-      const after = r.pts[at + 2]
-      const lean = axis === "h" ? (before.y + after.y) / 2 - p.y : (before.x + after.x) / 2 - p.x
-      const [lo, hi] = axis === "h" ? [Math.min(p.x, q.x), Math.max(p.x, q.x)] : [Math.min(p.y, q.y), Math.max(p.y, q.y)]
-      segs.push({ wire, at, net, axis, lo, hi, lean })
-    }
-  })
-
-  const lanes = new Map<string, Seg[]>()
-  for (const s of segs) {
-    const p = routes[s.wire].pts[s.at]
-    const key = `${s.axis}${Math.round(s.axis === "h" ? p.y : p.x)}`
-    const list = lanes.get(key)
-    if (list) list.push(s)
-    else lanes.set(key, [s])
-  }
-
-  const offset = new Map<string, number>()
-  const separate = (cluster: Seg[]) => {
-    const nets = [...new Set(cluster.map((s) => s.net))]
-    if (nets.length < 2) return
-    nets.sort((a, b) => meanLean(cluster, a) - meanLean(cluster, b))
-    const step = Math.min(NUDGE_STEP * grid, (2 * NUDGE_MAX * grid) / (nets.length - 1))
-    const span = (nets.length - 1) / 2
-    const deltaOf = new Map(nets.map((net, i) => [net, (i - span) * step]))
-    for (const s of cluster) {
-      const delta = deltaOf.get(s.net) ?? 0
-      if (delta) offset.set(`${s.wire}:${s.at}`, delta)
+  const nets = routes.map((r) => netOf(r.id) ?? r.id)
+  const byWire = routes.map(segsOf)
+  const lanes = new Map<number, number[]>()
+  for (let wire = 0; wire < byWire.length; wire++) {
+    const segs = byWire[wire]
+    for (let i = 0; i < segs.length; i++) {
+      const list = lanes.get(segs[i].lane)
+      if (list) list.push(wire, i)
+      else lanes.set(segs[i].lane, [wire, i])
     }
   }
+
+  const offsets: (Map<number, number> | undefined)[] = new Array(routes.length)
+  let nudged = false
+  const segAt = (cluster: number[], k: number) => byWire[cluster[k]][cluster[k + 1]]
+  const separate = (cluster: number[]) => {
+    const sum = new Map<string, number>()
+    const count = new Map<string, number>()
+    for (let k = 0; k < cluster.length; k += 2) {
+      const net = nets[cluster[k]]
+      sum.set(net, (sum.get(net) ?? 0) + segAt(cluster, k).lean)
+      count.set(net, (count.get(net) ?? 0) + 1)
+    }
+    if (sum.size < 2) return
+    const lean = (net: string) => sum.get(net)! / count.get(net)!
+    const order = [...sum.keys()].sort((a, b) => lean(a) - lean(b))
+    const step = Math.min(NUDGE_STEP * grid, (2 * NUDGE_MAX * grid) / (order.length - 1))
+    const span = (order.length - 1) / 2
+    const deltaOf = new Map(order.map((net, i) => [net, (i - span) * step]))
+    for (let k = 0; k < cluster.length; k += 2) {
+      const delta = deltaOf.get(nets[cluster[k]]) ?? 0
+      if (!delta) continue
+      const wire = cluster[k]
+      const byAt = offsets[wire] ?? (offsets[wire] = new Map())
+      byAt.set(segAt(cluster, k).at, delta)
+      nudged = true
+    }
+  }
+
   for (const list of lanes.values()) {
-    if (list.length < 2) continue
-    list.sort((a, b) => a.lo - b.lo)
-    let cluster: Seg[] = []
+    if (list.length < 4) continue
+    const order = Array.from({ length: list.length / 2 }, (_, k) => k)
+    const at = (k: number) => byWire[list[k * 2]][list[k * 2 + 1]]
+    order.sort((a, b) => at(a).lo - at(b).lo)
+    let cluster: number[] = []
     let end = -Infinity
-    for (const s of list) {
-      if (cluster.length && s.lo >= end) {
+    for (const k of order) {
+      const seg = at(k)
+      if (cluster.length && seg.lo >= end) {
         separate(cluster)
         cluster = []
       }
-      cluster.push(s)
-      end = Math.max(end, s.hi)
+      cluster.push(list[k * 2], list[k * 2 + 1])
+      end = Math.max(end, seg.hi)
     }
     separate(cluster)
   }
 
-  if (offset.size === 0) return routes
-  return routes.map((r, wire) => applyOffsets(r, (at) => offset.get(`${wire}:${at}`) ?? 0))
-}
-
-function meanLean(cluster: Seg[], net: string): number {
-  let sum = 0
-  let n = 0
-  for (const s of cluster) {
-    if (s.net !== net) continue
-    sum += s.lean
-    n++
-  }
-  return n ? sum / n : 0
+  if (!nudged) return routes
+  return routes.map((r, wire) => {
+    const byAt = offsets[wire]
+    return byAt ? applyOffsets(r, (at) => byAt.get(at) ?? 0) : r
+  })
 }
 
 /**

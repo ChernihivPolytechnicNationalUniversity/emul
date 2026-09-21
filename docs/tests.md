@@ -2,12 +2,16 @@
 
 | Command | What it checks |
 |---|---|
+| `docker build -f backend/worker/Dockerfile -t emul-worker .` then `docker run --rm -v ./firmware:/fw:ro emul-worker node --experimental-strip-types backend/worker/scripts/try-build.ts stm32f746ig /fw/lab1-running-light` | the build service on a project directory, in the image the service ships in: the C++ lab, `/fw/lab1`, and the LCD demos assembled as their loaders send them |
+| `pnpm geom-bench` | what a committed edit costs the main thread — connectivity, routing and the derived maps — on the tiled lab-1 stand and, with `boards`, on tiled Open746I-Cs; budgets are scaled by a machine-speed reading taken at startup, because the same machine measured 2.5× apart two hours apart |
+| `pnpm field-bench` | drag, pan and zoom in headless Chromium at six document sizes, with per-size thresholds; `boards` runs the same on Open746I-C documents, and `EMUL_URL=http://localhost:4173/` measures a production build instead of the dev server. Needs a server listening |
 | `pnpm mcu-test` | core: `firmware/tests/*.c` at -O0/-O2 (Cortex-M4) and -O2 for the Cortex-M7 (double precision, FPv5) vs. host builds |
 | `pnpm mcu-blink` | HAL blink on the bare SoC: clocks, SysTick, GPIO, EXTI |
 | `pnpm nucleo-fw` | Nucleo blink through the full circuit: LEDs, button, USB power loss, reset |
 | `pnpm lab1` | Lab 1 firmware (STM32CubeIDE build for the F746) on the bare core |
 | `pnpm lab1-sim` | Lab 1 through the circuit: LED staircase, joystick, reset button, 100 V destruction |
 | `pnpm open746` | Lab 1 on the Open746I-C board: LEDs, joystick, WAKEUP, RESET, BOOT to SYSTEM, jumpers opened, a CR2032 on VBAT through a power cut, power from the module's USB, the USART1 USB or the 5 V jack through SW1/S2 |
+| `pnpm lab1-running` | Lab 1 as completed for variant 1 on the Open746I-C (`firmware/lab1-running-light`, C++ app over the CubeMX Core): the running light steps LED1→LED4 on joystick C and back on B, A and D set the dwell between 1 and 5 s, the centre stops it — all through EXTI on the release edge, from the HSI |
 | `pnpm lcd` | Waveshare's 1024×600 LCD demo on the board with the 7" panel docked: SDRAM init over the FMC, DMA2D clear, BSP text through the LTDC, backlight and panel currents, the picture gone with the USB and back after the reboot; their GT911 test: reset sequence, id over bit-banged I²C printed on USART1, presses drawn as crosshairs at 100 Hz, the release report's zero-length read, a second press; our C++ cube (`firmware/lcd/cube`): textured perspective renderer into double-buffered SDRAM framebuffers, the picture turning |
 | `pnpm mcu-tim` | timers on the bare SoC: PWM period/duty, update interrupt, input capture, complementary outputs |
 | `pnpm nucleo-pwm` | timers through the circuit: LED brightness follows duty, 20 kHz PWM into an external LED |

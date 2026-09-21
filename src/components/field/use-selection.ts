@@ -18,28 +18,42 @@ function rectFrom(a: Point, b: Point, grid: number): Rect {
  * Marquee selection, snapped to the grid. Left drag draws the box; on release the
  * caller reads the final rect (via `end`) and the box disappears.
  */
-export function useSelection(toWorld: (cx: number, cy: number) => Point, grid: number) {
-  const [selection, setSelection] = React.useState<Rect | null>(null)
-  const [dragging, setDragging] = React.useState(false)
+export function useSelection(toWorld: (cx: number, cy: number) => Point, worldPerPixel: () => number, grid: number) {
   const origin = React.useRef<Point | null>(null)
+  const boxRef = React.useRef<HTMLDivElement>(null)
+
+  const draw = React.useCallback((rect: Rect | null) => {
+    const el = boxRef.current
+    if (!el) return
+    if (!rect) {
+      el.style.display = "none"
+      return
+    }
+    el.style.display = ""
+    el.style.borderWidth = `${worldPerPixel()}px`
+    el.style.left = `${rect.x}px`
+    el.style.top = `${rect.y}px`
+    el.style.width = `${rect.w}px`
+    el.style.height = `${rect.h}px`
+  }, [worldPerPixel])
 
   const start = React.useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       e.currentTarget.setPointerCapture(e.pointerId)
-      origin.current = toWorld(e.clientX, e.clientY)
-      setSelection(null)
-      setDragging(true)
+      const at = toWorld(e.clientX, e.clientY)
+      origin.current = at
+      draw({ x: at.x, y: at.y, w: 0, h: 0 })
     },
-    [toWorld],
+    [toWorld, draw],
   )
 
   const move = React.useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (!origin.current) return false
-      setSelection(rectFrom(origin.current, toWorld(e.clientX, e.clientY), grid))
+      draw(rectFrom(origin.current, toWorld(e.clientX, e.clientY), grid))
       return true
     },
-    [toWorld, grid],
+    [toWorld, grid, draw],
   )
 
   /** Finish the drag. Returns the final rect, or null for a plain click / empty box. */
@@ -48,17 +62,21 @@ export function useSelection(toWorld: (cx: number, cy: number) => Point, grid: n
       if (!origin.current) return null
       const rect = rectFrom(origin.current, toWorld(e.clientX, e.clientY), grid)
       origin.current = null
-      setDragging(false)
-      setSelection(null)
+      draw(null)
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId)
       }
       return rect.w > 0 && rect.h > 0 ? rect : null
     },
-    [toWorld, grid],
+    [toWorld, grid, draw],
   )
 
-  const clear = React.useCallback(() => setSelection(null), [])
+  const clear = React.useCallback(() => {
+    origin.current = null
+    draw(null)
+  }, [draw])
+
+  const isDragging = React.useCallback(() => origin.current !== null, [])
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -68,5 +86,5 @@ export function useSelection(toWorld: (cx: number, cy: number) => Point, grid: n
     return () => window.removeEventListener("keydown", onKey)
   }, [clear])
 
-  return { selection, dragging, start, move, end, clear, setSelection }
+  return { boxRef, isDragging, start, move, end, clear }
 }

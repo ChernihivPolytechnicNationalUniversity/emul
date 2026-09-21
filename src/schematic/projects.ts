@@ -22,6 +22,7 @@ const glob = (load: () => Raw): Raw => {
 
 const halApps = glob(() => import.meta.glob("../../firmware/hal/Src/{main,square,pwm,uart,i2c,adc,spi,spi-slave}.c", { query: "?raw", import: "default" }) as Raw)
 const lab1 = glob(() => import.meta.glob("../../firmware/lab1/Core/{Inc,Src}/*.{c,h}", { query: "?raw", import: "default" }) as Raw)
+const lab1RunningLightFiles = glob(() => import.meta.glob("../../firmware/lab1-running-light/{Core,App}/{Inc,Src}/*.{c,cpp,h}", { query: "?raw", import: "default" }) as Raw)
 const lcd = glob(() => import.meta.glob("../../firmware/lcd/{display,touch,cube}/{Src,Inc,BSP,Fonts}/*.{c,cpp,h}", { query: "?raw", import: "default" }) as Raw)
 const cubeTexture = glob(() => import.meta.glob("../../firmware/lcd/cube/texture.c", { query: "?raw", import: "default" }) as Raw)
 const retarget = glob(() => import.meta.glob("../../firmware/lcd/retarget.c", { query: "?raw", import: "default" }) as Raw)
@@ -52,6 +53,9 @@ async function under(files: Raw, prefix: string): Promise<SourceFile[]> {
 
 /** The lab's CubeIDE project (`firmware/lab1`), Core/ only. */
 export const lab1Project: ProjectLoader = () => under(lab1, "../../firmware/lab1/")
+
+/** The lab as completed for variant 1 (`firmware/lab1-running-light`): the CubeMX Core/ and the App/ that drives it. */
+export const lab1RunningLightProject: ProjectLoader = () => under(lab1RunningLightFiles, "../../firmware/lab1-running-light/")
 
 /**
  * One of the Open746I-C demos (`firmware/lcd/<name>`) with printf retargeted to USART1; the

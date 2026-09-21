@@ -63,5 +63,3 @@ solver — pad and pin levels cross with 20 µs of latency, which the inspector 
 worker (pipelined)"). A core with a digital part on its nets (an I²C EEPROM, the GT911) drops
 into step with the loop while that traffic lasts, and two cores sharing a net stay in the
 solver's thread in lockstep. Without isolation everything runs in the simulation worker.
-`pnpm bench "" 4 --workers` measures the worker arrangement under node.
-

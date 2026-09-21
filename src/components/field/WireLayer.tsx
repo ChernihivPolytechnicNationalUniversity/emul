@@ -2,16 +2,19 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 import {
   nearestSegment,
+  objectRect,
   resolvePin,
-  routeObstacles,
+  routeArea,
   routeToPoint,
   routeWire,
   toPath,
   type Point,
   type RoutedWire,
 } from "@/schematic/geometry"
+import type { SpatialIndex } from "@/schematic/spatial"
 import type { PinRef, PlacedObject } from "@/schematic/types"
 import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
+import { wireCornerRadius } from "./wire-style"
 import type { WireFlow } from "./wire-flow"
 
 export type PendingWire = {
@@ -31,8 +34,6 @@ const CASING_PX = 3
 const SELECTED_EXTRA_PX = 1
 const HALO_PX = 7
 const HIT_PX = 14
-const CORNER = 0.3
-
 const HANDLE_CELLS = 0.15
 const HANDLE_MIN_PX = 2.5
 const HANDLE_MAX_PX = 4
@@ -40,7 +41,6 @@ const HANDLE_HIT_PX = 11
 
 type WireLayerProps = {
   routes: readonly RoutedWire[]
-  objects: readonly PlacedObject[]
   grid: number
   scale: number
   selected: ReadonlySet<string>
@@ -48,7 +48,6 @@ type WireLayerProps = {
   colorOf: (wireId: string) => WireColorKey
   netOfWire: (wireId: string) => string | undefined
   bendsOf: (wireId: string) => readonly Point[] | undefined
-  pending: PendingWire | null
   flow: WireFlow
   onWirePointerDown: (e: React.PointerEvent<SVGPathElement>, id: string) => void
   onWirePointerEnter: (id: string) => void
@@ -71,7 +70,6 @@ type NetGroup = { net: string; wires: RoutedWire[] }
  */
 export const WireLayer = React.memo(function WireLayer({
   routes,
-  objects,
   grid,
   scale,
   selected,
@@ -79,7 +77,6 @@ export const WireLayer = React.memo(function WireLayer({
   colorOf,
   netOfWire,
   bendsOf,
-  pending,
   flow,
   onWirePointerDown,
   onWirePointerEnter,
@@ -93,7 +90,7 @@ export const WireLayer = React.memo(function WireLayer({
   React.useEffect(() => {
     flow.setScale(scale)
   }, [flow, scale])
-  const radius = CORNER * grid
+  const radius = wireCornerRadius(grid)
   const px = 1 / scale
   const handleR = handleRadius(grid, scale)
 
@@ -116,6 +113,7 @@ export const WireLayer = React.memo(function WireLayer({
               selected.has(route.id) && (
                 <path
                   key={route.id}
+                  data-wire={route.id}
                   d={pathOf(route.id)}
                   fill="none"
                   stroke="var(--primary)"
@@ -130,6 +128,7 @@ export const WireLayer = React.memo(function WireLayer({
           {wires.map((route) => (
             <path
               key={route.id}
+              data-wire={route.id}
               d={pathOf(route.id)}
               fill="none"
               stroke="var(--background)"
@@ -187,6 +186,7 @@ export const WireLayer = React.memo(function WireLayer({
                   bendsOf(route.id)?.map((p, idx) => (
                     <g
                       key={idx}
+                      data-bend={idx}
                       className="group/bend pointer-events-auto cursor-move"
                       onPointerDown={(e) => onBendPointerDown(e, route.id, idx)}
                       onPointerMove={onBendPointerMove}
@@ -216,10 +216,18 @@ export const WireLayer = React.memo(function WireLayer({
           })}
         </g>
       ))}
-      {pending && <Pending objects={objects} pending={pending} grid={grid} radius={radius} handleR={handleR} />}
     </svg>
   )
 })
+
+export function PendingWireLayer({ objects, index, pending, grid, scale }: { objects: readonly PlacedObject[]; index: SpatialIndex; pending: PendingWire | null; grid: number; scale: number }) {
+  if (!pending) return null
+  return (
+    <svg data-slot="pending-wire" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
+      <Pending objects={objects} index={index} pending={pending} grid={grid} radius={wireCornerRadius(grid)} handleR={handleRadius(grid, scale)} />
+    </svg>
+  )
+}
 
 function groupByNet(routes: readonly RoutedWire[], netOfWire: (wireId: string) => string | undefined): NetGroup[] {
   const byNet = new Map<string, RoutedWire[]>()
@@ -236,8 +244,8 @@ function handleRadius(grid: number, scale: number) {
   return Math.min(Math.max(HANDLE_CELLS * grid, HANDLE_MIN_PX / scale), HANDLE_MAX_PX / scale)
 }
 
-function Pending({ objects, pending, grid, radius, handleR }: { objects: readonly PlacedObject[]; pending: PendingWire; grid: number; radius: number; handleR: number }) {
-  const pts = pendingPoints(objects, pending, grid)
+function Pending({ objects, index, pending, grid, radius, handleR }: { objects: readonly PlacedObject[]; index: SpatialIndex; pending: PendingWire; grid: number; radius: number; handleR: number }) {
+  const pts = pendingPoints(objects, index, pending, grid)
   if (!pts) return null
   const d = toPath(pts, radius)
   const color = wireColorVar(pending.color)
@@ -263,13 +271,18 @@ function Pending({ objects, pending, grid, radius, handleR }: { objects: readonl
   )
 }
 
-function pendingPoints(objects: readonly PlacedObject[], p: PendingWire, grid: number): Point[] | null {
+function pendingPoints(objects: readonly PlacedObject[], index: SpatialIndex, p: PendingWire, grid: number): Point[] | null {
   const a = resolvePin(objects, p.from, grid)
   if (!a) return null
   const target = p.target && resolvePin(objects, p.target, grid)
   if (target && p.target) {
-    const avoid = routeObstacles(objects, grid, p.from.object, p.target.object)
-    return routeWire(a.point, a.pin.side, a.pin.stub ?? 1, target.point, target.pin.side, target.pin.stub ?? 1, grid, p.points, avoid).pts
+    const aStub = a.pin.stub ?? 1
+    const bStub = target.pin.stub ?? 1
+    const avoid = index
+      .query(routeArea(a.point, aStub, target.point, bStub, p.points, grid))
+      .filter((o) => o.id !== p.from.object && o.id !== p.target!.object)
+      .map((o) => objectRect(o, grid))
+    return routeWire(a.point, a.pin.side, aStub, target.point, target.pin.side, bStub, grid, p.points, avoid).pts
   }
   return routeToPoint(a.point, a.pin.side, a.pin.stub ?? 1, p.cursor, grid, p.points)
 }

@@ -15,7 +15,7 @@ export function wireCurrents(
   pinNet: Map<string, number>,
   groundKeys: Set<string>,
   terminal: (key: string) => number,
-  contacts: Map<string, string> = new Map(),
+  contacts: ReadonlyMap<string, string> = new Map(),
 ): Map<string, number> {
   const result = new Map<string, number>()
   const vertex = (key: string) => contacts.get(key) ?? key

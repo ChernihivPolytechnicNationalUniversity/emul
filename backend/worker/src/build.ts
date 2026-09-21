@@ -87,8 +87,9 @@ export async function build(target: Target, files: SourceFile[]): Promise<BuildO
       }
     }
 
-    const cxx = sources.some((s) => CXX.test(s))
-    const args = [
+    const cxxSources = sources.filter((s) => CXX.test(s))
+    const cSources = sources.filter((s) => !CXX.test(s))
+    const common = [
       ...spec.cpu,
       ...spec.defines,
       "-O2",
@@ -98,19 +99,7 @@ export async function build(target: Target, files: SourceFile[]): Promise<BuildO
       "-fdata-sections",
       "-fdiagnostics-color=never",
       "-fmax-errors=50",
-      ...(cxx ? ["-fno-exceptions", "-fno-rtti"] : []),
       ...[...includes, targetDir, path.join(family, "hal", "Inc"), path.join(family, "cmsis", "Include"), path.join(ST_ROOT, "core", "Include")].map((i) => `-I${i}`),
-      ...withLanguages([...sources, ...batteries, ...halSources]),
-      "-o",
-      "firmware.elf",
-      `-T${linker}`,
-      "-specs=nano.specs",
-      "-Wl,--gc-sections",
-      "-Wl,-Map=firmware.map",
-      ...(ownConf ? [] : [`-L${path.join(HAL_ROOT, target)}`, "-lhal"]),
-      // The gcc driver for C++ too: g++ applies `-x c` to the first file only (GCC 14.2).
-      ...(cxx ? ["-lstdc++"] : []),
-      "-lm",
     ]
     const driver = `${GCC}gcc`
     const lines = [
@@ -122,6 +111,34 @@ export async function build(target: Target, files: SourceFile[]): Promise<BuildO
     // A clean environment and a working directory of its own: the compiler sees the sources
     // and the toolchain, nothing of this process.
     const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: dir, LANG: "C" }
+
+    // C++ files are compiled on their own so the C++-only switches reach no C file; a program of
+    // ours never unwinds or asks for a type at run time, so the C++ runtime it needs is what the
+    // C one already has.
+    const cxxObjects: string[] = []
+    for (const source of cxxSources) {
+      const object = path.join("obj", `${source.replace(/[\\/]/g, "__")}.o`)
+      await mkdir(path.join(src, "obj"), { recursive: true })
+      const compile = await exec(driver, [...common, "-x", "c++", "-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics", "-c", source, "-o", object], src, env)
+      lines.push(compile.output)
+      if (compile.error) return { ok: false, log: lines.join("\n"), error: compile.error }
+      cxxObjects.push(object)
+    }
+
+    const args = [
+      ...common,
+      ...withLanguages([...cSources, ...batteries, ...halSources]),
+      ...(cxxObjects.length ? ["-x", "none", ...cxxObjects] : []),
+      "-o",
+      "firmware.elf",
+      `-T${linker}`,
+      "-specs=nano.specs",
+      "-Wl,--gc-sections",
+      "-Wl,-Map=firmware.map",
+      ...(ownConf ? [] : [`-L${path.join(HAL_ROOT, target)}`, "-lhal"]),
+      ...(cxxObjects.length ? ["-lstdc++"] : []),
+      "-lm",
+    ]
     const compile = await exec(driver, args, src, env)
     lines.push(compile.output)
     if (compile.error) return { ok: false, log: lines.join("\n"), error: compile.error }
