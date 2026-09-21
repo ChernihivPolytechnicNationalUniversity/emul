@@ -1,0 +1,21 @@
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    ["@semantic-release/commit-analyzer", {
+      "preset": "conventionalcommits",
+      "releaseRules": [
+        { "type": "refactor", "release": "patch" },
+        { "type": "build", "release": "patch" },
+        { "type": "revert", "release": "patch" },
+        { "type": "chore", "release": "patch" },
+        { "type": "ci", "release": "patch" },
+        { "type": "docs", "release": "patch" },
+        { "type": "test", "release": "patch" },
+        { "type": "style", "release": "patch" }
+      ]
+    }],
+    ["@semantic-release/release-notes-generator", { "preset": "conventionalcommits" }],
+    ["@semantic-release/github", { "successComment": false }]
+  ]
+}

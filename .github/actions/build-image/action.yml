@@ -1,0 +1,60 @@
+name: "Build image"
+description: "Build one of this repo's images with buildx and the GHCR layer cache; push it tagged with the given version when asked to."
+
+inputs:
+  dockerfile:
+    description: "Path to the Dockerfile, relative to the repository root"
+    required: true
+  suffix:
+    description: "Image name suffix: ghcr.io/<owner>/<repo>-<suffix>; empty for the primary image"
+    required: false
+    default: ""
+  version:
+    description: "Release version to tag the image with (no leading v). Empty on a CI build."
+    required: false
+    default: ""
+  push:
+    description: "Push the image and refresh its buildcache"
+    required: false
+    default: "false"
+  github-token:
+    description: "Token for GHCR"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - id: name
+      shell: bash
+      env:
+        SUFFIX: ${{ inputs.suffix }}
+      run: |
+        name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
+        echo "value=${name}${SUFFIX:+-$SUFFIX}" >> "$GITHUB_OUTPUT"
+
+    - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.github-token }}
+
+    - id: meta
+      uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+      with:
+        images: ghcr.io/${{ steps.name.outputs.value }}
+        tags: |
+          type=raw,value=${{ inputs.version }},priority=1000,enable=${{ inputs.version != '' }}
+          type=sha,priority=700
+          type=ref,event=branch
+
+    - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+    - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+      with:
+        context: .
+        file: ${{ inputs.dockerfile }}
+        push: ${{ inputs.push }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=registry,ref=ghcr.io/${{ steps.name.outputs.value }}:buildcache
+        cache-to: ${{ inputs.push == 'true' && format('type=registry,ref=ghcr.io/{0}:buildcache,mode=max,ignore-error=true', steps.name.outputs.value) || '' }}

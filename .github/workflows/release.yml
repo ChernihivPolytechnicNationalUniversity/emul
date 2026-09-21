@@ -1,3 +1,6 @@
+# Every merge to main ships: semantic-release resolves the next version from the conventional
+# commits, the three images are built and pushed to GHCR under that version, then the tag and
+# the GitHub Release are cut. Deployment is Argo's job: it watches the registry.
 name: Release
 
 on:
@@ -6,19 +9,74 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  release:
+  version:
+    name: Resolve the version
+    runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.release.outputs.new_release_version }}
+      released: ${{ steps.release.outputs.new_release_published }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      - id: release
+        uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        with:
+          semantic_version: 24
+          extra_plugins: conventional-changelog-conventionalcommits@8
+          dry_run: "true"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  image:
+    name: Publish ${{ matrix.image.suffix || 'site' }} image
+    needs: version
+    if: needs.version.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
       packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        image:
+          - { suffix: "", dockerfile: Dockerfile }
+          - { suffix: api, dockerfile: backend/api/Dockerfile }
+          - { suffix: worker, dockerfile: backend/worker/Dockerfile }
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: ./.github/actions/build-image
+        with:
+          dockerfile: ${{ matrix.image.dockerfile }}
+          suffix: ${{ matrix.image.suffix }}
+          version: ${{ needs.version.outputs.version }}
+          push: "true"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    name: Tag the release
+    needs: [version, image]
+    if: needs.version.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
       issues: write
       pull-requests: write
-    uses: ChernihivPolytechnicNationalUniversity/shared-actions/.github/workflows/gitops-release.yml@main
-    with:
-      context: .
-      images: |
-        Dockerfile
-        api=backend/api/Dockerfile
-        worker=backend/worker/Dockerfile
-      image-source: build
-    secrets: inherit
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        with:
+          semantic_version: 24
+          extra_plugins: conventional-changelog-conventionalcommits@8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
