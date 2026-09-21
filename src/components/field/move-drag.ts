@@ -27,18 +27,37 @@ export type MovePlan = {
 
 const shifted = (p: Point, dx: number, dy: number): Point => ({ x: p.x + dx, y: p.y + dy })
 
+const snappedOffset = (plan: MovePlan, at: Point): Point => ({
+  x: snap(at.x - plan.origin.x, plan.grid),
+  y: snap(at.y - plan.origin.y, plan.grid),
+})
+
 function terminalOf(index: ReadonlyMap<string, PlacedObject>, ref: PinRef, grid: number): Terminal | null {
   const found = resolvePinIn(index, ref, grid)
   return found && { point: found.point, side: found.pin.side, stub: found.pin.stub ?? 1 }
 }
 
+const pathsOf = (el: Element): SVGPathElement[] => (el instanceof SVGPathElement ? [el] : [...el.querySelectorAll("path")])
+
 function wirePaths(root: ParentNode, wireId: string): SVGPathElement[] {
-  const out: SVGPathElement[] = []
-  for (const el of root.querySelectorAll(`[data-wire="${CSS.escape(wireId)}"]`)) {
-    if (el instanceof SVGPathElement) out.push(el)
-    else out.push(...el.querySelectorAll("path"))
+  return [...root.querySelectorAll(`[data-wire="${CSS.escape(wireId)}"]`)].flatMap(pathsOf)
+}
+
+function wirePathsById(root: ParentNode): Map<string, SVGPathElement[]> {
+  const byId = new Map<string, SVGPathElement[]>()
+  for (const el of root.querySelectorAll<SVGElement>("[data-wire]")) {
+    const id = el.dataset.wire!
+    const paths = byId.get(id)
+    if (paths) paths.push(...pathsOf(el))
+    else byId.set(id, pathsOf(el))
   }
-  return out
+  return byId
+}
+
+function handlesById<T extends Element>(root: ParentNode, attribute: string): Map<string, T> {
+  const byId = new Map<string, T>()
+  for (const el of root.querySelectorAll<T>(`[${attribute}]`)) byId.set(el.getAttribute(attribute)!, el)
+  return byId
 }
 
 export function planMove(
@@ -53,28 +72,29 @@ export function planMove(
 ): MovePlan {
   const index = new Map(objects.map((o) => [o.id, o]))
   const startPositions = new Map<string, Point>()
-  const bodies: HTMLElement[] = []
-  const pinGroups: SVGGElement[] = []
-  if (layer?.element) bodies.push(layer.element)
-  for (const o of objects) {
-    if (!moving.has(o.id)) continue
-    startPositions.set(o.id, { x: o.x, y: o.y })
-    if (layer?.whole) continue
-    const body = root.querySelector<HTMLElement>(`[data-body="${CSS.escape(o.id)}"]`)
-    if (body) bodies.push(body)
-    const pins = root.querySelector<SVGGElement>(`[data-pins="${CSS.escape(o.id)}"]`)
-    if (pins) pinGroups.push(pins)
-  }
+  for (const o of objects) if (moving.has(o.id)) startPositions.set(o.id, { x: o.x, y: o.y })
+  const bodies: HTMLElement[] = layer?.element ? [layer.element] : []
   if (layer?.whole) return { origin, grid, cornerRadius, startPositions, bodies, pinGroups: [], rigidWires: [], elasticWires: [] }
 
+  const bodyOf = handlesById<HTMLElement>(root, "data-body")
+  const pinsOf = handlesById<SVGGElement>(root, "data-pins")
+  const pinGroups: SVGGElement[] = []
+  for (const id of startPositions.keys()) {
+    const body = bodyOf.get(id)
+    if (body) bodies.push(body)
+    const pins = pinsOf.get(id)
+    if (pins) pinGroups.push(pins)
+  }
+
+  const wirePathsOf = wirePathsById(root)
   const rigidWires: RigidWire[] = []
   const elasticWires: ElasticWire[] = []
   for (const w of wires) {
     const fromMoves = moving.has(w.from.object)
     const toMoves = moving.has(w.to.object)
     if (!fromMoves && !toMoves) continue
-    const paths = wirePaths(root, w.id)
-    if (paths.length === 0) continue
+    const paths = wirePathsOf.get(w.id)
+    if (!paths?.length) continue
     if (fromMoves && toMoves) {
       rigidWires.push({ paths })
       continue
@@ -173,10 +193,11 @@ export class BendDrag {
 
   clearAndFinish(): { wire: string; points: Point[] } | null {
     const plan = this.plan
-    const moved = this.moved
     const at = this.pointer
     this.cancel()
-    if (!plan || !moved || !at) return null
+    if (!plan || !at) return null
+    const from = plan.points[plan.index]
+    if (at.x === from.x && at.y === from.y) return null
     const points = plan.points.slice()
     points[plan.index] = at
     return { wire: plan.wire, points }
@@ -222,12 +243,13 @@ export class MoveDrag {
 
   clearAndFinish(): { plan: MovePlan; dx: number; dy: number } | null {
     const plan = this.plan
-    const { x: dx, y: dy } = this.offset
+    const at = this.pointer
     if (this.raf) {
       cancelAnimationFrame(this.raf)
       this.raf = 0
     }
-    if (plan && (dx || dy)) this.paint(plan, 0, 0)
+    if (plan && (this.offset.x || this.offset.y)) this.paint(plan, 0, 0)
+    const { x: dx, y: dy } = plan && at ? snappedOffset(plan, at) : { x: 0, y: 0 }
     this.plan = null
     this.pointer = null
     this.offset = { x: 0, y: 0 }
@@ -239,8 +261,7 @@ export class MoveDrag {
     const plan = this.plan
     const at = this.pointer
     if (!plan || !at) return
-    const dx = snap(at.x - plan.origin.x, plan.grid)
-    const dy = snap(at.y - plan.origin.y, plan.grid)
+    const { x: dx, y: dy } = snappedOffset(plan, at)
     if (dx === this.offset.x && dy === this.offset.y) return
     this.offset = { x: dx, y: dy }
     this.paint(plan, dx, dy)
