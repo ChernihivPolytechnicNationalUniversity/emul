@@ -6,7 +6,7 @@ import { getDef, partInitial } from "@/schematic/registry"
 import { partKey, type BodyShape, type Damage, type Fill, type PartDef, type PartState, type PlacedObject, type Rotation } from "@/schematic/types"
 import { LED_COLORS } from "@/schematic/components/basic"
 import type { DisplayFrame } from "@/sim/use-simulation"
-import { useObjectSim, type ObjectSim, type SimStore } from "@/sim/sim-store"
+import { useObjectReadings, useObjectSim, type SimStore } from "@/sim/sim-store"
 import type { FieldDetail } from "./detail"
 import { formatSI } from "@/sim/units"
 import { fixedText } from "./symbol-raster"
@@ -136,7 +136,7 @@ export const ComponentView = React.memo(function ComponentView({
           )
         })}
       </g>
-      {def.meter && detail.labels && <Meter def={def} live={live} g={g} rotation={rotation} />}
+      {def.meter && detail.labels && <Meter def={def} objectId={object.id} sim={sim} live={live.live} g={g} rotation={rotation} />}
       {damage && (
         <g pointerEvents="none">
           <rect x={0} y={0} width={w} height={h} rx={g(0.6)} className="fill-destructive/15 stroke-destructive" strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeDasharray={`${g(0.25)} ${g(0.25)}`} />
@@ -155,19 +155,33 @@ export const ComponentView = React.memo(function ComponentView({
   )
 })
 
-
 /**
  * A meter's live readout: the operating point of one of its model elements (voltage across,
  * current through, power), formatted with an SI prefix, RMS in an AC circuit. The text is
  * counter-rotated so it stays upright whichever way the meter is turned. "—" before the run.
  */
-function Meter({ def, live, g, rotation }: { def: NonNullable<ReturnType<typeof getDef>>; live: ObjectSim; g: (v: number) => number; rotation: Rotation }) {
+function Meter({
+  def,
+  objectId,
+  sim,
+  live,
+  g,
+  rotation,
+}: {
+  def: NonNullable<ReturnType<typeof getDef>>
+  objectId: string
+  sim: SimStore
+  live: boolean
+  g: (v: number) => number
+  rotation: Rotation
+}) {
+  const readings = useObjectReadings(sim, objectId)
   const m = def.meter!
   const x = g(m.x)
   const y = g(m.y)
   let text = "—"
-  if (live.live) {
-    const r = live.readings.find((v) => v.element === (m.element ?? 0))
+  if (live) {
+    const r = readings.find((v) => v.element === (m.element ?? 0))
     if (r) {
       const val = m.read === "voltage" ? (r.rms ? r.rms.voltage : r.voltage) : m.read === "current" ? (r.rms ? r.rms.current : r.current) : r.rms ? r.rms.power : r.power
       text = formatSI(val, m.unit, 3)
