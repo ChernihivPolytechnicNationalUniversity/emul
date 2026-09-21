@@ -5,40 +5,29 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  ci:
+  build:
+    name: Build ${{ matrix.image.suffix || 'site' }} image
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read
-      actions: read
-    uses: ChernihivPolytechnicNationalUniversity/shared-actions/.github/workflows/ci-build.yml@main
-    with:
-      context: .
-      concurrency-key: site
-    secrets: inherit
-
-  api:
-    permissions:
-      contents: read
-      packages: read
-      actions: read
-    uses: ChernihivPolytechnicNationalUniversity/shared-actions/.github/workflows/ci-build.yml@main
-    with:
-      context: .
-      dockerfile: backend/api/Dockerfile
-      image-suffix: api
-      concurrency-key: api
-    secrets: inherit
-
-  worker:
-    permissions:
-      contents: read
-      packages: read
-      actions: read
-    uses: ChernihivPolytechnicNationalUniversity/shared-actions/.github/workflows/ci-build.yml@main
-    with:
-      context: .
-      dockerfile: backend/worker/Dockerfile
-      image-suffix: worker
-      concurrency-key: worker
-    secrets: inherit
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - { suffix: "", dockerfile: Dockerfile }
+          - { suffix: api, dockerfile: backend/api/Dockerfile }
+          - { suffix: worker, dockerfile: backend/worker/Dockerfile }
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: ./.github/actions/build-image
+        with:
+          dockerfile: ${{ matrix.image.dockerfile }}
+          suffix: ${{ matrix.image.suffix }}
+          push: "false"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
