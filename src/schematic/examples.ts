@@ -5,7 +5,7 @@ import { systemExam } from "./exam"
 import { transistorLogic } from "./logic"
 import type { Icon } from "./icons"
 import type { Schematic } from "./types"
-import { lab1Project, lcdProject, nucleoApp, type ProjectLoader } from "./projects"
+import { lab1Project, lab1RunningLightProject, lcdProject, nucleoApp, type ProjectLoader } from "./projects"
 
 export type Example = {
   id: string
@@ -243,6 +243,25 @@ export const lab1Board: Example = {
   description: "The Waveshare Open746I-C stand running the lab's LED staircase firmware on its own LEDs and joystick.",
   icon: CpuIcon,
   projects: [{ ref: "U1", load: lab1Project }],
+  build(grid) {
+    const { doc, place } = builder(grid)
+    place("open746i-c", 0, 0)
+    return doc
+  },
+}
+
+/**
+ * Lab 1 as completed for variant 1, on the same board: a running light — one LED lit at a time,
+ * stepping along the row and wrapping. The joystick drives it through EXTI on the release edge:
+ * C runs it one way, B the other, A adds a second to the dwell and D takes one off (1…5 s),
+ * the centre stops it. The core runs from the 16 MHz HSI, so it needs no crystal.
+ */
+export const lab1RunningLight: Example = {
+  id: "lab1-running-light",
+  name: "Lab 1: running light",
+  description: "The lab as completed for variant 1 on the Open746I-C: one LED runs along the row; joystick C and B set the direction, A and D the dwell (1–5 s), the centre stops it.",
+  icon: CpuIcon,
+  projects: [{ ref: "U1", load: lab1RunningLightProject }],
   build(grid) {
     const { doc, place } = builder(grid)
     place("open746i-c", 0, 0)
@@ -546,4 +565,4 @@ export const nucleoAdc: Example = {
   },
 }
 
-export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoAdc, lab1Board, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, systemExam, transistorLogic, lissajous, bridge]
+export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoAdc, lab1Board, lab1RunningLight, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, systemExam, transistorLogic, lissajous, bridge]
