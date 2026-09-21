@@ -1,235 +1,34 @@
-# εmul
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+    <img src="docs/assets/logo-light.svg" width="180" alt="εmul">
+  </picture>
+</p>
 
-A circuit simulator for microcontroller labs: an analog engine (nodal solver with real
-resistors, diodes, transistors, regulators and burn-out ratings) co-simulated with an
-STM32 emulator that runs real firmware — the ELF straight out of STM32CubeIDE, unmodified.
-The goal is a Proteus replacement that gets the things right Proteus gets wrong: timing,
-sleep and wake-up, and the serial peripherals.
+<p align="center">
+  A circuit simulator for microcontroller labs that runs your real STM32 firmware.<br>
+  <a href="https://emul.digituni.org/"><b>emul.digituni.org</b></a>
+</p>
+
+<p align="center">
+  <a href="https://emul.digituni.org/"><img alt="Live" src="https://img.shields.io/badge/live-emul.digituni.org-7c3aed.svg"></a>
+  <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
+  <img alt="STM32 F429 · F746" src="https://img.shields.io/badge/STM32-F429%20%C2%B7%20F746-03234B.svg">
+</p>
+
+<a href="https://emul.digituni.org/"><img src="docs/assets/bench.png" alt="An Open746I-C with its 7″ LCD running a C++ cube renderer, three Nucleo-F429ZI boards on I²C, UART and ADC, and analog benches: a mains rectifier, a battery, Lissajous sources"></a>
+
+Drop the `.elf` from STM32CubeIDE onto a board, wire the parts, press Run. The firmware executes on
+an emulated Cortex-M4/M7 while a nodal solver works out the bench around it: timers, UART, SPI,
+I²C, DMA, ADC/DAC, sleep and wake-up, flash, an SDRAM-backed LTDC panel, all against real parts
+with real ratings. Two boards on one net run in lockstep; a shorted output or 12 V on a GPIO does
+what it does on the desk. A Monaco editor and a build service compile a project the way CubeIDE would.
 
 ```sh
-pnpm install
-pnpm dev            # http://localhost:5173
+pnpm install && pnpm dev     # http://localhost:5173
+pnpm test                    # bench physics, batteries, wires, reflash
 ```
 
-Firmware is built with the ARM GNU toolchain (`~/tools/arm-gnu-toolchain-14.2…`) and ST's
-CMSIS/HAL clones (`~/tools/st`); `make` in `firmware/` and `firmware/hal/`. `firmware/lcd/` builds
-Waveshare's Open746I-C LCD and touch demos with GCC against the F7 HAL staged in `~/tools/st/f7`
-(the `Drivers/` folder of their demo archive); `cube/` there is our own C++ demo (a spinning
-textured cube, `cube/gen-texture.py photo.png` makes its texture).
+**Docs:** [what is modelled, and what is not](docs/coverage.md) · [architecture](docs/architecture.md) · [tests](docs/tests.md) · [roadmap](docs/plan.md)
 
-## What is modelled — and what is not
-
-The emulator answers reads from a peripheral it does not have with zeros, so firmware that
-touches one does not crash; it spins on a ready flag or times out. **The inspector's firmware
-panel says which blocks the program touched that are missing**, so it is never a guess.
-
-### MCU core
-
-| | Status |
-|---|---|
-| ARMv7E-M instruction set (Thumb-2, DSP, FPv4-SP) | done, tested against host builds (`pnpm mcu-test`) |
-| FPv5-D16 on the Cortex-M7: double-precision VFP (arithmetic, fused multiply-add, sqrt, compare, conversions between precisions, integers and fixed point), VSEL, VMAXNM/VMINNM, VRINT{A,N,P,M,X,Z,R}, VCVT{A,N,P,M}, half-precision VCVTB/VCVTT | done — the tests are also built for the M7 (`-M7` images run on the F746 profile); an M4 profile faults on them as the real part does |
-| Exceptions, NVIC priorities/preemption, SysTick, PendSV/SVC | done |
-| WFI/WFE sleep and wake-up (event register, SEVONPEND, SLEEPONEXIT) | done |
-| Cortex-M7 profile (CPUID, MVFR, cache registers) | done; caches are no-ops |
-| MPU | registers kept, **not enforced** |
-| Instruction timing | per-instruction cycle counts plus flash wait states: ACR.LATENCY per new 128-bit (F7: 256-bit) line fetched from flash unless the prefetch buffer (sequential code) or the ART / instruction cache (64 lines, LRU) has it; data reads from flash likewise unless the data cache (DCEN, 8 lines) holds the line. **No** bus contention, pipeline or branch-prediction model (M7 dual-issue not modelled) |
-| Debugger UI (step, breakpoints, registers, memory) | **none** — only PC/instruction count in the inspector; breakpoints exist in the core API |
-| Execution speed | decoded instructions are compiled per basic block into JavaScript (`src/mcu/jit.ts`; straight-line code, calls and loops laid out into one function, exceptions and timer events still taken between instructions) — 50–180 MIPS on a desktop, so a 50 MHz F746 runs ~1.5–2× real time and a 200 MHz one at ~0.5–1.7× depending on the code; `pnpm mcu-jit` checks the compiled and interpreted cores agree register-for-register, `pnpm bench` measures every MCU example |
-
-### Chips
-
-`src/mcu/chip.ts` holds the profiles; a new part is a profile plus a package pin table.
-
-| Part | Package component | Board |
-|---|---|---|
-| STM32F429ZIT6 (Cortex-M4F, 2 MB / 256 KB) | `STM32F429ZI` LQFP144 | Nucleo-144 (NUCLEO-F429ZI) |
-| STM32F746IGT6 (Cortex-M7, 1 MB / 320 KB) | `STM32F746IG` LQFP176 | Open746I-C (Waveshare, with the Core746I module) |
-
-### Peripherals
-
-| Block | Status |
-|---|---|
-| RCC — HSI/HSE/PLL clock tree, bus prescalers, peripheral clock enables; HSE/LSE from what the circuit puts on OSC_IN/OSC_OUT and OSC32_IN/OSC32_OUT | done (`pnpm chip-clock`); a clock switch takes effect from the next instruction; the PLL locks instantly on a running source; HSE/LSE report ready only with a crystal there (HSEON/LSEON, after the crystal's start-up — 2 ms, 2 s for a 32 kHz watch crystal) or, in bypass, an oscillator module's clock on the input pin; nothing there and the HAL times out into its error handler, as on a real board — the inspector says which ("No clock"). A board brings its own (the Nucleo: the ST-LINK's 8 MHz MCO in bypass, an LSE crystal); a core run without a circuit takes either mode at once. **Not modelled:** the clock signal itself (nothing oscillates on the pins or on MCO), CSS, crystal drive level/load capacitors, HSI/LSI trimming and tolerance |
-| PWR — voltage scaling, over-drive flags; Sleep, Stop (main/low-power regulator, under-drive) and Standby with SLEEPDEEP/PDDS; wake-up by EXTI interrupt or event (WFI/WFE), RTC alarm/wake-up timer, WKUP pin(s), watchdog; Stop freezes every 1.2 V-domain clock (SysTick, timers, serial, WWDG — the RTC and IWDG run on), switches HSE/PLL off and wakes on HSI after the datasheet's latency; Standby floats the I/Os and ends in a reset with SBF/WUF set and the backup domain kept; F4 (CR/CSR) and F7 (CR1/CSR1/CR2/CSR2, six WKUP pins) maps | done (`pnpm mcu-lp`, `pnpm nucleo-lp`); the inspector shows the mode, the share of time in WFI and a supply-current estimate; the board's supply load follows it. F7 map untested by firmware. **Not modelled:** PVD (EXTI 16), backup SRAM and its regulator (BRE), flash power-down (FPDS — no effect), DBP write protection of the backup domain (writes always go through) |
-| FLASH — latency, caches/ART; controller: KEYR unlock, PG with PSIZE (byte/half/word/double), sector and mass erase, EOP/PGSERR/PGPERR/PGAERR/WRPERR and the interrupt; option bytes behind OPTKEYR (RDP, BOR_LEV, WDG_SW, nRST_STOP/STDBY, nWRP, F7 BOOT_ADD0/1) read back at 0x1FFFC000 / 0x1FFF0000 | done (`pnpm mcu-flash`); programming AND-s bits, erase sets 0xFF; the core stalls for the datasheet time (16 µs a word, 0.25–2 s a sector, 8 s mass erase) so BSY always reads clear; flash and option bytes survive resets and power cycles, a firmware load erases both; BOR_LEV sets the board's reset threshold, WDG_SW=0 starts the IWDG at reset, nRST_STOP/STDBY turn the mode into a reset; write protection honoured; **RDP stored, not enforced**; no PCROP, no dual-boot (BFB2), erase cannot be interrupted |
-| GPIO A–K — modes, pulls, ODR/BSRR/IDR, alternate-function claim hook | done; a mode/type/pull/AF write changes the pad the moment it lands (a bit-banged bus that turns SDA from input to output sees the edge then, not at the next ODR write) |
-| SYSCFG, EXTI — pin interrupts, software triggers | done |
-| DWT CYCCNT, DBGMCU IDCODE | done |
-| TIM1–14 — counting modes, update/compare interrupts, PWM with preload and polarity, complementary outputs, input capture, one-pulse | done (`pnpm mcu-tim`, `pnpm nucleo-pwm`); TRGO from CR2.MMS (update, CC1 pulse, OCxREF) feeds the ADC and DAC triggers; **no** encoder mode, slave modes (SMCR), DMA burst (DCR/DMAR), dead-time/break, input filters |
-| USART/UART 1–8 — baud (16×/8×), 8/9 bits, parity, stop bits, TX/RX shifters, TXE/TC/RXNE/ORE/FE/PE/IDLE and interrupts; F4 and F7 register maps | done (`pnpm mcu-uart`, `pnpm nucleo-serial`); the F7 map is implemented but only the F4 one is firmware-tested; **no** flow control, synchronous mode, LIN/IrDA/smartcard |
-| SPI 1–6 — master/slave, CPOL/CPHA, 8/16 bits (F7: 4–16 with FIFOs and packing), MSB/LSB first, prescaler, NSS soft/hard (SSOE, NSSP), RXONLY, TXE/RXNE/BSY/OVR/MODF and interrupts | done (`pnpm mcu-spi`, `pnpm nucleo-spi`); F7 map untested by firmware; **no** bidirectional single-wire mode, CRC, TI frames (reported in the inspector when turned on) |
-| I²S | **missing** |
-| I²C 1–4 — master: START/repeated START/STOP, 7-bit address, ACK/NACK, SCL from CCR (F4) or TIMINGR (F7) with the master waiting for SCL to rise (stretching, missing pull-ups), F4 SR1/SR2 sequences with BTF/ADDR stretching, F7 NBYTES/AUTOEND/RELOAD/TC | done (`pnpm mcu-i2c` HAL Mem_Write/Read + acknowledge polling, `pnpm nucleo-i2c` through the field, `pnpm mcu-i2c-v2` F7 map at register level); **no** MCU slave mode, 10-bit addresses, SMBus/PEC, DMA, general call (reported when turned on); pull-up rise times not modelled |
-| ADC 1–3 — regular/injected sequences, scan, continuous, discontinuous, software start and timer triggers (EXTSEL/JEXTSEL), sampling times, 6–12 bit, alignment, EOC/EOCS/JEOC/OVR, analog watchdog, interrupts, DMA; samples the pad's net voltage from the solver (one 20 µs step old at most); VREFINT/temperature/VBAT channels | done (`pnpm mcu-adc`, `pnpm nucleo-adc`); **no** multi-ADC modes; the temperature sensor reads a fixed 25 °C |
-| DAC 1–2 — DHR12R/L, DHR8, dual registers, software and timer (TRGO) triggers, DMA; the pad sources the voltage through 100 Ω | done (same tests: 50 Hz sine from a table by TIM6 + DMA); **no** noise/triangle generation |
-| DMA1/2 — 8 streams each, request channels routed per RM0090 tables 42/43, P→M / M→P / M→M, increments, byte/half/word, circular, half/complete/error flags and interrupts; requests from USART (DMAT/DMAR), SPI (TX/RXDMAEN), TIM (UDE/CCxDE/TDE) | done (`pnpm mcu-dma`: HAL memory copy, UART TX/RX by DMA, TIM3-paced circular stream into GPIO); **no** FIFO/bursts (direct mode only), double buffer, peripheral flow control, PSIZE≠MSIZE packing; I²C and ADC requests wait for those blocks |
-| RTC — BCD calendar on LSE/LSI/HSE÷n with the prescalers, init mode behind the WPR keys, RSF, subseconds, alarms A/B with masks, wake-up timer, 20 backup registers, ±1 h, 12/24 h; the backup domain survives system resets | done (`pnpm mcu-wdg`); **no** timestamp/tamper, calibration, alarm output pin |
-| IWDG, WWDG — IWDG key sequence, prescaler and reload, reset on timeout; WWDG window, early-wake-up interrupt, reset on T6 clearing or a refresh above the window; RCC CSR reset flags say which one bit | done (`pnpm mcu-wdg`); the inspector shows the reset count and cause; DBGMCU freeze is ignored |
-| FMC — SDRAM controller: SDCR/SDTR per bank, the SDCMR command sequence (clock enable, precharge all, auto-refresh, load mode register, self-refresh, power-down), SDSR modes, write protection; a board's SDRAM (the Core746I's 8 MB at 0xD000_0000) answers only once its bank has been through the sequence — before that reads are floating-bus noise, writes go nowhere and the inspector reports the access | done (`pnpm lcd`); NOR/PSRAM and NAND register sets are stored so HAL init runs, but nothing hangs on them. **Not modelled:** command timing (BUSY never reads 1), refresh (SDRTR is stored; data never decays), SDCLK/burst/pipe settings, the NOR/NAND buses |
-| LTDC — timings (SSCR/BPCR/AWCR/TWCR), polarities, two layers with window, pixel format (ARGB8888/RGB888/RGB565/ARGB1555/ARGB4444/L8/AL44/AL88 with CLUT), constant and pixel alpha blending (BFCR), default colour, background colour, shadow registers reloaded by SRCR, line and reload interrupts timed from PLLSAI's pixel clock, CPSR/CDSR position and signal status; pixel clock from PLLSAI ÷ PLLSAIDIVR with the APB2 gate | done (`pnpm lcd`): the frame is composed from memory when a panel asks for it (a framebuffer store or a register change marks it dirty; at most ~12 compositions a second), not clocked out pixel by pixel. **Not modelled:** colour keying, dithering, the FIFO underrun and transfer-error interrupts, VBR reloads waiting for the blanking (immediate) |
-| DMA2D (Chrom-ART) — register-to-memory fill, memory-to-memory copy with pixel-format conversion and alpha blending, FG/BG alpha modes, every input format (L4/A8/A4 included), output ARGB8888/RGB888/RGB565/ARGB1555/ARGB4444, line offsets, CLUT loading, TC/CTC/CE flags and interrupt | done (`pnpm lcd`): a transfer completes the moment START is written. **Not modelled:** transfer timing, suspend/abort mid-way, the watermark and dead-time registers (stored only) |
-| CAN, USB OTG, Ethernet, SDIO, SAI, QSPI, CRC, RNG | **missing** |
-| BOOT0 pin, boot from SRAM/system memory | done: BOOT0 (sampled as reset is released; the bare chips expose the pin) with BOOT1 = PB2 picks flash, system memory or SRAM on the F4 and aliases it at address 0, as does SYSCFG MEMRMP; the F7 boots from BOOT_ADD0/1. **System memory holds a stub** (sleeps forever) instead of ST's UART/USB DFU bootloader — reported in the inspector when booted into |
-
-**Supply current** is a datasheet typical per mode, not a model of what the code does: run and
-sleep scale with HCLK (all peripherals clocked), Stop by regulator, Standby with the RTC on. A
-core sleeping 97 % of the time between SysTicks reads as the blend, and an ammeter on the
-board sees the same number.
-
-Phase 1 of PLAN.md (the MCU side) is complete apart from the long tail of blocks no lab has
-needed (CAN, USB, Ethernet…); Phase 2, the components on the field, is under way (2.1 crystals
-and clock modules, 2.3 the logic analyser, 2.4 meters done).
-
-**Digital fast path.** The analog engine steps every 20 µs; a 115200-baud bit is 8.7 µs. Serial
-bits therefore travel between an MCU pad and a terminal (or another MCU's pad on the same net)
-as exact-time edges, not as sampled voltages; the analog side still sees the levels for the
-scope and the loads. Likewise a PWM faster than the step is sampled at a random instant of each
-step, so loads see the true duty instead of an aliased one.
-
-**Digital parts** (the 24Cxx EEPROM; more to come) sit on the same exact-time path: each net
-with a part, a terminal or a second core on it is resolved as a wired-AND of its drivers
-(open-drain pulls low or releases, push-pull wins, otherwise the pull-ups decide — read off the
-analog circuit, so a bus without pull-ups stays low and the firmware times out, as on the bench).
-A core with parts on its nets hands over every edge as it makes it, so an EEPROM ACKs at the
-clock edge's own time.
-
-**Two cores on one net** (SPI, or anything bit-banged between boards) run in lockstep: the
-core that is behind runs until it catches up, yielding whenever it puts an edge on the shared
-net, so a slave answers a clock edge at the edge's own time and the master samples the answer
-half a period later. Plain GPIO edges on such nets take the exact path too, so a bit-banged
-chip select stays in order with the hardware clock. Costs roughly 1.5× over two independent
-cores; only cores that share a net pay it.
-
-### Circuit engine
-
-| | Status |
-|---|---|
-| R, C, L, potentiometer, diode, zener, LED, NPN/PNP, N/P-MOSFET, transformer | done, with power/current/voltage ratings that burn the part — the way the real part fails: resistors, inductors, LEDs and windings go open; diodes, zeners, transistors and MOSFETs fail **short** (the die melts through), capacitors punch through to a short, and half a potentiometer's track can burn while the other half keeps working. An electrolytic minds its polarity (breaks down past 1.5 V reversed, pin 1 is the anode). BJTs carry a collector resistance (`Rc`, 5 Ω on a BC547) so Vce(sat) reads ~90 mV pin to pin rather than the 40 mV of a bare Ebers–Moll junction. The transformer has both winding resistances and a magnetising inductance: it draws its no-load current on AC, and on DC the primary is just its winding, which burns past 1.3× the nameplate current. **Not modelled:** core saturation, thermal time constants (every part fails on the same 10 ms-at-2× stress rule), secondary breakdown |
-| Inductive kick (`pnpm physics`) | done: an open switch is a contact gap, not a vanished element — a coil whose current has nowhere to go drives the gap up to its strike voltage (300 V, a small snap-action contact in air), it arcs over (15 V drop + 20 Ω) and carries the current until the energy is spent, then goes out; the scope sees the strike and anything rated below it breaks — a MOSFET switching a relay without a flyback diode dies of its own Vds rating, with the diode it sees 12.8 V. The strike voltage is per switch (`strike`); a logic driver's internal switch is ideal. **Not modelled:** contact bounce, arc erosion over many operations, the gap's capacitance (the spike rises within one 20 µs step) |
-| Ideal regulator element (dropout, current limit) | done — used inside boards |
-| DC/AC/pulse sources, ground, labelled supply rail | done; every source has an internal resistance and a current rating; the rail's supply trips (goes dead) past its `Max current` |
-| Battery with real chemistry (`pnpm battery`): alkaline, zinc–carbon, Li-ion, LiFePO₄, NiMH, NiCd, lead-acid, lithium coin (CR), Li-SOCl₂; cells in series, capacity, starting charge in %, temperature, cycles, age, cell mismatch | done — open-circuit voltage from the chemistry's discharge curve at the state of charge, which the solver coulomb-counts from the current per cell; internal resistance from the chemistry and capacity (overridable) that climbs towards empty and collapses once the cell is exhausted; Peukert rate loss (an AA at 1 A gives half its nameplate Ah, a CR2032 at 20 mA lasts hours, not days); self-discharge (a coin cell on a sleeping MCU is limited by it). **Temperature:** capacity and resistance follow the ambient (an AA at −20 °C has 40 % of its capacity and 4× the resistance; self-discharge doubles every 10 °C), and the cell warms itself with its losses through a thermal mass and a surface to the air. **Diffusion:** two RC branches behind the ohmic resistance, so the voltage keeps sagging for minutes under load and rests back up after it instead of snapping to open-circuit. **Wear:** capacity fade and resistance growth per cycle and per year (an 18650 after 500 cycles and two years: 76 %, 2.2× R); cycles also accrue live from the charge that flows. **Packs:** a capacity spread between the cells — the same current drains the small cell first, the pack is empty when it is and its strongest cell overcharges first. The inspector shows the charge, open-circuit voltage, present resistance and polarization, cell temperature, the capacity now, the cells' spread, the average load over the last 10 s (a load that has held steady for a second is taken as is, so the figure settles within a second of a switch) and the **time left** at that load (or the time to full on charge). Failure modes: the losses heat the cell to its vent temperature (lithium: thermal runaway at 130 °C, a short; the rest vent open — a 500 mAh pouch shorted through a wire goes in ~20 s); a primary cell force-charged 3 % of its capacity vents; Li-ion/LiFePO₄ overcharged 5–8 % past full go into thermal runaway (short), NiMH/NiCd/lead-acid vent/gas dry (open); rechargeable lithium dragged below its cut-off dies of copper dissolution. **Not modelled:** temperature's effect on the OCV curve and on charge acceptance (cold charging lithium plates it), thermal coupling between cells, self-heating raising the capacity back, lead-acid sulphation, gassing losses on charge, ageing from time at high SOC/temperature, a BMS/balancer or protection circuit (add one as a circuit) |
-| Pushbutton, toggle switch, USB cable, logic-state instrument | done; switches have a contact resistance and a contact rating in the inspector (tactile button 50 mA / 100 mΩ, toggle 3 A / 50 mΩ) and **weld** past it — the contacts stay closed; the logic state drives through 25 Ω and burns past its output rating |
-| Waveshare Open746I-C board (`pnpm open746`): Core746I with the STM32F746IGT6, 8 MHz/32 kHz crystals and the 8 MB SDRAM; USER LEDs (1 kΩ), five-way joystick, WAKEUP (active high, 10 kΩ divider), RESET; USART1 through the CP2102 as VCP pins with its TX/RX LEDs; power from the module's own USB (SW1 at USB, as the lab runs it) or from the USART1 USB / the 5 V jack through S2 (SW1 at 5Vin), then the AMS1117; every peripheral header (SPI1/2, USART3, QUADSPI, I2C1/2, I2S2/3, SDMMC, CAN1/2, SAI, ULPI, ETH, 8-bit FMC, DCMI, the P22–P24 power rails, the 7" LCD FFC as 2 × 20) and the Arduino headers with ICSP as pins, laid out from Waveshare's dimension drawing (73 × 53 cells, every header, LED and button where it is on the board) | done — the lab 1 firmware runs on it as handed out (`Open746I-C: LED staircase`) and as completed for variant 1 (`Lab 1: running light`, `pnpm lab1-running`); the SDRAM is mapped once the FMC has set it up. BOOT switch (SYSTEM parks the core in system memory: ST's bootloader is not modelled); jumpers JMP1 (card detect), JMP3 (LEDs), JMP4 (joystick), JMP6 (WAKEUP) and VBAT as switches — with the VBAT jumper open, a battery on the VBAT pin keeps the RTC and backup registers through a power cut and the RTC counts the cut on the LSE (`ComponentDef.mcuVbat`); **Not modelled:** JTAG/SWD, the USB OTG data lines (its VBUS does power the module), JMP2 and JMP5 (always closed: a switch does not carry the digital edge path), the VREF+ jumper, the 2×40 pin ports P16–P21 (every I/O, use the peripheral headers), the 4.3" LCD header P14 (drawn only), the USB OTG connector and VBUS LED, JMP1–JMP6 jumpers (always closed) |
-| Serial terminal instrument (8N1, selectable baud, UTF-8 or Windows-1251; the Nucleo exposes its ST-LINK VCP pins) | done; TX and RX burn past 5.5 V (the transceiver's absolute maximum) |
-| Oscilloscope on probes (O), pin/wire readouts, current flow animation | done; each column is a bucket of solver steps drawn trough to peak, so a one-step spike still shows at its full height, and a part's death is on the screen: the buckets in flight survive the rebuild a failure causes (`pnpm physics`). Sweep with phosphor fade, repeating trigger and **single shot** (arm, freeze on the next rising edge of the chosen channel, a division of pre-trigger), XY, hold, one vertical scale or one per channel (Split), hover readout with min…max per bucket, a planted cursor for Δt / 1/Δt / ΔV, CSV export, drag the top edge to resize. **Not modelled:** anything faster than the 20 µs step — a 20 kHz PWM is sampled at a random instant of each step and shows as noise, and the fastest timebase (100 µs/div) has 50 columns; the trigger level is the middle of the swing (no level, slope or holdoff controls) and ignores swings under 100 µV; no trace maths, FFT or persistence beyond the sweep |
-| The field at scale: a drag, a pan and a zoom that cost what the interaction touches rather than what the document holds | done (`pnpm field-bench`, `pnpm geom-bench`) — a drag is a render-time offset committed once on release, pan and zoom never reach React, only what the view shows is in the DOM, below the zoom where a pin can be aimed at the field is one canvas, and every piece of text a definition owns — its pin names and its silkscreen — is blitted from a sheet cached per definition. Measured headless on the production build at 1600 × 1000: **5 010 objects / 32 398 pins** load in 1.5 s and drag, pan and zoom at frame time; **1 700 Open746I-C boards / 440 300 pins** load in 1.6 s and do the same, with 375 `<text>` nodes on screen against 8 300 before and a zoom frame 5 % blocked against 82 %. Moving one of those boards costs 3 ms of geometry against 350 ms before. **Not there yet:** a designator and a value are still `<text>`, one or two per object; placing the pins of a document that has never been seen is 22 ms of its load. FIELD.md holds the numbers and the plan |
-| Wires: net map, junctions by tapping a wire, colour per wire or per net (resistor code on `0-9`, `C`, `M`; automatic red for a rail), net highlight on hover, casing at crossings, nudging of shared corridors, a route never doubles back on itself or enters a pin through its own symbol, constant screen width, DOM-driven flow animation | done (`pnpm wires`, which also checks every example's wiring for spurs, bodies crossed and pins run over); **not modelled:** wire-aware auto-routing (a new wire does not yet avoid an occupied corridor), buses and net labels, diagonal segments |
-| LED brightness as the eye sees it (10 ms average, so PWM dims instead of strobing) | done |
-| MCU pads as drivers (25 Ω) with pulls (40 kΩ), Schmitt input thresholds, absolute maximum ratings; DAC pads as voltage sources (100 Ω) | done, generated from the chip profile; a pin driven past its absolute maximum blows its protection diode onto the rail and takes the die: the core halts and the chip's supply becomes a short, so whatever fed the pin now feeds that short (a battery on a Nucleo pin burns itself next) |
-| Crystal and clock-oscillator module (markers on the OSC pins that the emulated RCC reads: frequency, crystal vs. bypass, start-up time; the module needs VCC) | done (`pnpm chip-clock`); the oscillator module dies past its `Max supply voltage`; **not modelled** as waveforms — a scope on OSC_IN shows nothing — and the crystal cannot be damaged electrically: at DC it is an open circuit, and its drive level would need the waveform |
-| Op-amps, comparators, 555 | **missing** |
-| Logic ICs (74xx gates, flip-flops, counters, shift registers) | **missing** |
-| Waveshare 7inch Capacitive Touch LCD (F) (`pnpm lcd`): 1024 × 600 panel on 24-bit parallel RGB with a GT911 touch controller, 40-pin FFC drawn as two rows of twenty pin-compatible with the Open746I-C's P15 (dock it under the board — touching pins conduct — or wire the lines) | done — the picture is the LTDC's composed frame of whichever MCU drives the pixel clock pin, seen through the colour lines as wired (a swapped or missing line shows in the picture); dark without its 3.3 V, static when powered without a clock or with a sync line not on an LTDC pad, and only for a pixel clock the panel locks to (25–75 MHz); an active size other than 1024 × 600 shows cropped/short as on the glass. Backlight: the PT4103 boost from the 3.3 V pin (~0.25 A) enabled by DISP (the board ties it high); panel logic ~0.1 A. **GT911:** address from INT at reset (0x5D/0x14), 16-bit registers, product id/version/config, buffer-ready flag and up to one point (the pointer on the glass) every 10 ms while pressed, INT pulled low while a report waits; Waveshare's own GT911 test firmware reads it over bit-banged I²C and draws crosshairs. **Not modelled:** PWM dimming of the backlight (the RC into the boost's feedback: full brightness whenever DISP is high), HS/VS/DE polarity checks, multi-touch, the GT911's configuration block affecting anything, gestures |
-| Displays: 7-segment, HD44780 LCD, graphic LCD/OLED | **missing** |
-| Sensors, relays, motors, buzzers, servos | **missing** |
-| 24Cxx I²C EEPROM (24C01–24C256: page writes, sequential reads, write-cycle NACK, WP, address straps; contents shown in the inspector) | done; VCC or any pin past 6.5 V (the datasheet's absolute maximum) kills it |
-| Other SPI/I²C parts (25Qxx flash, ADC, RTC, SD card) | **missing** |
-| Code editor (⌘J): a board's or chip's firmware sources in Monaco (the editor of VS Code) with an explorer, tabs and a Compile button | done; the project belongs to the selected board (as in Proteus and Tinkercad) and is saved inside the schematic, so two MCUs on one bench carry two programs; the target is the board's chip; typing is not a schematic undo step; Compile sends the files to the build service and loads the `firmware.elf` that comes back onto that board (on a running board it is a debugger's flash-and-reset: the core starts over, the backup domain and the bench keep their time — `pnpm reflash`), the log in an Output pane and GCC's diagnostics as markers in the code (squiggles, gutter, hover; a line in Output opens the place; the error count sits by the button); completion, hover and parameter help for the whole HAL, CMSIS and device header with ST's doxygen text (`HAL_GPIO_Init(`, `__HAL_RCC_`, `GPIO_PIN_`, `GPIOA->` members, `EXTI15_10_IRQn`, `#include "`), plus the project's own functions, macros and structs — from a symbol index per chip generated at build time (`pnpm symbols`), no language server; the examples with code place their sources on the board and open the editor — nothing comes precompiled. **Not there yet:** type-aware completion beyond `…TypeDef` declarations and peripheral macros (no real parser), a per-chip template (a new project starts as the F429 HAL blink) |
-| Logic analyser on the probes (press L): every probe a digital channel from the exact-time edges, UART/SPI/I²C decoders drawing the bytes over the waveforms, follow or hold-and-pan, wheel-zoom | done (`pnpm analyser`); the decoders are protocol-agnostic (a bit-banged bus reads the same as a peripheral); a net with nothing digital on it is thresholded from the analog solution; **not modelled:** parallel/CAN/1-Wire decoders, trigger conditions, measurements |
-| Voltmeter and ammeter meter components (a live readout on the part): voltmeter 10 MΩ across two points, ammeter 0.01 Ω in series, RMS in an AC circuit | done (`pnpm meters`); the voltmeter burns past its `Max voltage` (600 V), the ammeter's `Fuse` (10 A; set it to 200 mA for a DMM's mA range) blows open; **not modelled:** ohm / capacitance / frequency ranges, a multimeter with a mode switch |
-
-## Tests
-
-| Command | What it checks |
-|---|---|
-| `docker build -f backend/worker/Dockerfile -t emul-worker .` then `docker run --rm -v ./firmware:/fw:ro emul-worker node --experimental-strip-types backend/worker/scripts/try-build.ts stm32f746ig /fw/lab1-running-light` | the build service on a project directory, in the image the service ships in: the C++ lab, `/fw/lab1`, and the LCD demos assembled as their loaders send them |
-| `pnpm geom-bench` | what a committed edit costs the main thread — connectivity, routing and the derived maps — on the tiled lab-1 stand and, with `boards`, on tiled Open746I-Cs; budgets are scaled by a machine-speed reading taken at startup, because the same machine measured 2.5× apart two hours apart |
-| `pnpm field-bench` | drag, pan and zoom in headless Chromium at six document sizes, with per-size thresholds; `boards` runs the same on Open746I-C documents, and `EMUL_URL=http://localhost:4173/` measures a production build instead of the dev server. Needs a server listening |
-| `pnpm mcu-test` | core: `firmware/tests/*.c` at -O0/-O2 (Cortex-M4) and -O2 for the Cortex-M7 (double precision, FPv5) vs. host builds |
-| `pnpm mcu-blink` | HAL blink on the bare SoC: clocks, SysTick, GPIO, EXTI |
-| `pnpm nucleo-fw` | Nucleo blink through the full circuit: LEDs, button, USB power loss, reset |
-| `pnpm lab1` | Lab 1 firmware (STM32CubeIDE build for the F746) on the bare core |
-| `pnpm lab1-sim` | Lab 1 through the circuit: LED staircase, joystick, reset button, 100 V destruction |
-| `pnpm open746` | Lab 1 on the Open746I-C board: LEDs, joystick, WAKEUP, RESET, BOOT to SYSTEM, jumpers opened, a CR2032 on VBAT through a power cut, power from the module's USB, the USART1 USB or the 5 V jack through SW1/S2 |
-| `pnpm lab1-running` | Lab 1 as completed for variant 1 on the Open746I-C (`firmware/lab1-running-light`, C++ app over the CubeMX Core): the running light steps LED1→LED4 on joystick C and back on B, A and D set the dwell between 1 and 5 s, the centre stops it — all through EXTI on the release edge, from the HSI |
-| `pnpm lcd` | Waveshare's 1024×600 LCD demo on the board with the 7" panel docked: SDRAM init over the FMC, DMA2D clear, BSP text through the LTDC, backlight and panel currents, the picture gone with the USB and back after the reboot; their GT911 test: reset sequence, id over bit-banged I²C printed on USART1, presses drawn as crosshairs at 100 Hz, the release report's zero-length read, a second press; our C++ cube (`firmware/lcd/cube`): textured perspective renderer into double-buffered SDRAM framebuffers, the picture turning |
-| `pnpm mcu-tim` | timers on the bare SoC: PWM period/duty, update interrupt, input capture, complementary outputs |
-| `pnpm nucleo-pwm` | timers through the circuit: LED brightness follows duty, 20 kHz PWM into an external LED |
-| `pnpm mcu-uart` | USART3 on the bare SoC: TX decode at 115200, interrupt RX and echo, framing error |
-| `pnpm nucleo-serial` | USART through the VCP pins into the terminal; typing back; baud mismatch reads as garbage |
-| `pnpm mcu-spi` | SPI1 master on the bare SoC: SCK rate, MOSI bytes, chip select timing, MISO reply read back |
-| `pnpm nucleo-spi` | two Nucleos over SPI1 through the wires: master and slave logs agree, no HAL errors |
-| `pnpm mcu-i2c` | I2C1 master on the bare SoC against the 24C02 model: HAL page writes, acknowledge polling, read-back, 100 kHz |
-| `pnpm nucleo-i2c` | I²C through the field: pull-ups from a rail, EEPROM contents in the snapshot, counter survives a restart |
-| `pnpm mcu-i2c-v2` | the F7 I²C register map at register level: AUTOEND write, repeated-START read, NACK handling |
-| `pnpm mcu-dma` | DMA: memory-to-memory, USART3 TX/RX through the HAL's DMA interrupt chain, TIM3-paced circular stream toggling a pin |
-| `pnpm mcu-adc` | ADC1 polling with a scripted pad voltage → PWM duty, VREFINT, clipping; DAC1 sine by TIM6 TRGO + DMA |
-| `pnpm nucleo-adc` | ADC through the field: potentiometer on A0 dims LD1; DAC sine into an LED load |
-| `pnpm mcu-wdg` | three lives: IWDG timeout reset, WWDG early wake-up + timeout reset, RTC calendar/alarm/wake-up on LSE, WWDG window violation; backup registers across resets |
-| `pnpm mcu-lp` | a current probe on the supply through Sleep, four Stops (RTC wake-up, EXTI interrupt, EXTI event with WFE, under-drive), Standby by RTC and by the WKUP pin, sleep-on-exit; SysTick frozen in Stop, HSI on wake-up, latencies, SBF/WUF; VDD off with VBAT up: backup domain kept and the RTC an hour on, or cleared without VBAT |
-| `pnpm nucleo-lp` | the same firmware on the board: the MCU's VDD element draws the mode's current, the USER button wakes it from Stop, the Standby exit shows as a reset |
-| `pnpm mcu-flash` | a boot counter logged into flash across five resets with a sector erase when full (EEPROM emulation), byte/halfword/word programming, a store while locked, option bytes (nRST_STOP makes Stop a reset, hardware IWDG), flash across a power cycle and a reload, wait states with the caches on/off, BOOT0/BOOT1 into system memory and SRAM |
-| `pnpm battery` | battery chemistry: an alkaline pair's terminal voltage and time left at 32 mA and at 1 A (Peukert), a 12 V lead-acid block, a CR2032 sagging at 18 mA and its self-discharge life at 3 µA, a Li-ion cell run down through an LED until it is empty, exhausted and then dead, an alkaline force-charged until it vents, a Li-ion overcharged into thermal runaway, a NiMH cell on charge reporting the time to full; the AA pair at −20 °C and 60 °C, diffusion (sag under load, rest after it), a 500 mAh pouch shorted into thermal runaway, an aged 18650, a mismatched 3S pack |
-| `pnpm wires` | the wire subsystem: stubs and the 45° grid snap, obstacle avoidance, rounded corners, the net map over wires and touching pins, automatic colour by what is on the net, every colour's flow colour reading against it in both themes, nudging (two nets apart by ⅓ cell, a jog instead of a tilted stub, the ladder capped at half a cell, one net alongside itself left alone), tapping a wire (the junction lands on the wire, a tap from a pin of the same object, from the wire's own end, on its end pin), and the PG2/PG3 stand: two MCU pins tied through a junction to one button, both pulled low, the junction's outgoing current the sum of the incoming |
-| `pnpm physics` | bench physics: a coil let go by a switch (strike, arc, decay), a MOSFET switching a relay coil with and without a flyback diode, an electrolytic both ways round, a diode failing short, a button welding, Vce(sat) of a saturated BC547, a rail tripping, an ammeter's fuse, a voltmeter over range, a transformer on mains and on a battery, half a potentiometer burning, 12 V on a Nucleo pin |
-| `pnpm meters` | a voltmeter across a resistive divider (its 10 MΩ input barely loads it), an ammeter reading a load current with its shunt's burden voltage, both reading RMS on an AC source |
-| `pnpm analyser` | the logic analyser's decoders over the example buses: the serial console's "tick N" and its echo at 115200 (and garbage at the wrong baud), the SPI link's 0xA0+n / 0x50+n in mode 0 with chip-select framing (and shifted in the wrong mode), the I²C EEPROM's page write with acknowledge polling and a repeated-start read, a bit-banged square wave and a pulse source thresholded off an analog net |
-| `pnpm chip-clock` | the lab 1 stand on its 8 MHz crystal (HSERDY 2 ms after HSEON), without it (HAL timeout into Error_Handler, the inspector's "No clock"), with an oscillator module the crystal-mode firmware cannot use; a bare F429 on an oscillator module in bypass, with and without the module's VCC; the Nucleo's LSE crystal taking 2 s |
-| `pnpm exam`, `pnpm logic`, `pnpm bridge`, `pnpm nucleo` | analog engine scenarios |
-
-## Layout
-
-- `src/mcu/` — the emulator: `cpu.ts`, `decode.ts`, `jit.ts` (blocks compiled to JavaScript), `scs.ts` (NVIC/SysTick/SCB), `bus.ts`, `periph/*`, `chip.ts` (profiles), `stm32f429.ts` (the SoC class `Stm32`), `core-worker.ts` (one core in a worker of its own)
-- `src/sim/` — analog engine (`engine.ts`), netlist, the co-simulation loop (`loop.ts`) and its worker, `core-host.ts` (a core in this thread or in a worker, over a SharedArrayBuffer), digital parts (`digital.ts`)
-- `src/schematic/` — component definitions (`components/*`), examples, geometry, `mcu-model.ts`; wiring in `nets.ts` (the net map), `wiring.ts` (connect, tap), `wire-colors.ts` (palette, shortcuts, the automatic rule)
-- `src/components/` — the React UI; `code/` is the editor panel (Monaco, explorer, tabs, build output)
-- `src/project/` — a board's firmware project: file operations that mirror the API's rules, the template, the build-service client
-- `firmware/` — test firmware and HAL apps (`hal/Src/main.c` blink, `square.c`, `pwm.c`, `uart.c`, `spi.c`, `spi-slave.c`, `i2c.c`, `dma.c`, `adc.c`, `wdg.c`), the lab's CubeIDE project (`lab1/`), the Open746I-C demos (`lcd/`), and their built images in `examples/` for the test scripts; the site bundles the sources as the examples' projects (`src/schematic/projects.ts`)
-- `scripts/` — the test drivers above
-- `backend/` — the services below: `api/`, `worker/`, `shared/`
-
-## Services
-
-The site is static. Work that needs a machine — building firmware — goes through two more containers,
-each from its own Dockerfile and built in parallel by CI:
-
-- `api/` — Fastify, on the site's host under `/api`. `POST /api/jobs` takes `{kind, target, files: [{path, content}]}`, stores the
-  project in S3 and enqueues; `GET /api/jobs/:id` reports the state and, once done, the job's files as presigned S3 URLs (15 min) —
-  the browser fetches them from the store directly, the bucket stays private. `/healthz` is 503 while Redis is down.
-- `worker/` — BullMQ consumer; one handler per job kind in `worker/src/handlers.ts` (`echo` lists the project back, `build` compiles it),
-  each leaving files in `out/` and saying whether the project passed; a compile error is a completed job with `ok: false` and a log,
-  only the service's own failure fails the job. The worker holds **no store credentials**: each job carries presigned GET URLs for its
-  sources and presigned PUT URLs for its outputs (an hour), because it runs a compiler over code it did not write and a
-  `.incbin "/proc/1/environ"` must find nothing worth taking; the compiler also gets an empty environment.
-- `shared/` — the contract between them: job types, the S3 layout, the queue, Redis and S3 clients, env config.
-
-One prefix per job in the bucket, expired by a lifecycle rule after 7 days (ids are ULIDs, so they sort by time and never repeat):
-
-```
-jobs/<id>/input/project.json   target, createdAt, files with size and sha256
-jobs/<id>/input/src/<path>     sources as sent; paths relative, plain characters, source extensions only
-jobs/<id>/out/<name>           firmware.elf, firmware.map, build.log, …
-jobs/<id>/result.json          ok, artifacts, finishedAt, durationMs — kept after Redis forgets the job
-```
-
-Both read `REDIS_URL`; the API also `S3_BUCKET`, `S3_ENDPOINT` (MinIO; unset for AWS), `S3_PUBLIC_ENDPOINT` (the host browsers reach, presigned URLs are signed for it), `S3_REGION`, `S3_FORCE_PATH_STYLE`,
-`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` (unset: the SDK's default chain), and a missing bucket fails it at start; the worker `WORKER_CONCURRENCY`.
-Locally: `pnpm api`, `pnpm worker`; the Vite dev server proxies `/api` to the API. The editor's completions come from
-`public/symbols/<chip>.json` (`scripts/symbols.ts` over the staged ST sources: `sh backend/worker/toolchain/stage-st.sh /tmp/st && pnpm symbols /tmp/st public/symbols`);
-the site image does this at build time, a dev checkout without it has the project's own symbols only.
-
-### The build
-
-`worker/src/build.ts` compiles a project the way STM32CubeIDE would, with GNU Arm Embedded (Debian's `gcc-arm-none-eabi`, newlib nano):
-the project's `.c`/`.cpp`/`.s` files, every folder holding a header on the include path, ST's HAL and CMSIS, `-O2 -g3 -Wall
--ffunction-sections -fdata-sections`, `--gc-sections`, one `firmware.elf` plus `firmware.map`. What a CubeMX project has and a
-bare one does not — the "batteries" — comes from `worker/targets/<chip>/`: the linker script, `startup_*.s`, `system_*.c`, `*_it.c`,
-`*_hal_msp.c`, `*_hal_conf.h` (every module on) and, for all chips, `targets/common/syscalls.c` (weak `_write`, `_sbrk`, …). A project
-file with the same name replaces the battery, so a CubeIDE export drops in as is (`firmware/lab1` is one). The HAL is compiled once
-per chip into `libhal.a` when the image is built (`worker/toolchain/`: ST's repos at pinned tags), so a build takes about a second;
-a project with its own `stm32fNxx_hal_conf.h` gets the HAL compiled from source against it instead (~10 s). 120 s and 4 MB of log
-are the limits. `targets/<chip>/target.json` names the chip, CPU flags, defines and linker script; adding a chip is adding a folder
-and a line in the Dockerfile.
-
-## Threads
-
-The UI thread draws; the simulation worker runs the analog solver, the digital parts and the
-loop; and, when the page is cross-origin isolated (the dev server and nginx send the COOP/COEP
-headers), every MCU core runs in a worker of its own, pipelined one 20 µs step ahead of the
-solver — pad and pin levels cross with 20 µs of latency, which the inspector says ("Runs:
-worker (pipelined)"). A core with a digital part on its nets (an I²C EEPROM, the GT911) drops
-into step with the loop while that traffic lasts, and two cores sharing a net stay in the
-solver's thread in lockstep. Without isolation everything runs in the simulation worker.
-`pnpm bench "" 4 --workers` measures the worker arrangement under node.
+Apache-2.0 · Copyright 2026 Bohdan Nahornyi, Denys Lysenok, Andrii Savenko · [third-party notices](THIRD_PARTY_NOTICES.md)

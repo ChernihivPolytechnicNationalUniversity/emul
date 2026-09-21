@@ -1,7 +1,7 @@
 # Plan: closing the gaps
 
 Ordered by what labs need first and by dependencies. Each item is done when it has a model,
-a firmware or circuit test in `scripts/`, and its row in README's coverage table flipped.
+a firmware or circuit test in `scripts/`, and its row in the coverage table (`docs/coverage.md`) flipped.
 Ticked items are shipped.
 
 ## Phase 1 — MCU peripherals (the emulator side)
@@ -76,7 +76,7 @@ the NVIC. Reported by name in the inspector until then.
 - [ ] **2.8c Open746I-C tech debt** — what the stand still cannot do, in order of how soon a lab will need it:
   - the accessory boards from the box as components: DP83848 Ethernet, USB3300 ULPI, WM8960 audio, Micro SD, OV2640
     camera, W25QXX flash (2.13), 10 DOF IMU, SN65HVD230 CAN, Analog Test Board — each with its firmware and a scenario;
-  - the F7 peripherals behind them in the core: CAN, USB OTG, Ethernet, SDMMC, SAI, QUADSPI (README's "missing" row);
+  - the F7 peripherals behind them in the core: CAN, USB OTG, Ethernet, SDMMC, SAI, QUADSPI (the "missing" row in `docs/coverage.md`);
   - the 2×40 pin ports P16–P21 as pins (an I/O that is only there cannot be wired today);
   - JMP2 (USART1 ↔ CP2102) and JMP5 (A4/A5 ↔ PB9/PB8) as switches: a switch joins nets only in the analog solver, the
     digital edge path does not cross it, so a serial or I²C line through an open-able jumper needs the netlist to merge
@@ -102,7 +102,7 @@ the NVIC. Reported by name in the inspector until then.
 
 ## Process
 
-- Every new limitation found goes into README's table the moment it is found.
+- Every new limitation found goes into the table in `docs/coverage.md` the moment it is found.
 - Anything detectable at run time (unmodelled block, unclaimed AF pin, unsupported instruction) is reported in
   the inspector, never swallowed.
 - `pnpm mcu-test mcu-blink nucleo-fw lab1 lab1-sim mcu-tim nucleo-pwm mcu-uart nucleo-serial mcu-spi nucleo-spi mcu-i2c nucleo-i2c mcu-i2c-v2 mcu-dma mcu-adc nucleo-adc mcu-wdg mcu-lp nucleo-lp mcu-flash chip-clock analyser meters physics exam` stay green after every step.
