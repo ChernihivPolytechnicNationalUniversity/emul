@@ -134,6 +134,7 @@ cores; only cores that share a net pay it.
 
 | Command | What it checks |
 |---|---|
+| `docker build -f backend/worker/Dockerfile -t emul-worker .` then `docker run --rm -v ./firmware:/fw:ro emul-worker node --experimental-strip-types backend/worker/scripts/try-build.ts stm32f746ig /fw/lab1-running-light` | the build service on a project directory, in the image the service ships in: the C++ lab, `/fw/lab1`, and the LCD demos assembled as their loaders send them |
 | `pnpm geom-bench` | what a committed edit costs the main thread — connectivity, routing and the derived maps — on the tiled lab-1 stand and, with `boards`, on tiled Open746I-Cs; budgets are scaled by a machine-speed reading taken at startup, because the same machine measured 2.5× apart two hours apart |
 | `pnpm field-bench` | drag, pan and zoom in headless Chromium at six document sizes, with per-size thresholds; `boards` runs the same on Open746I-C documents, and `EMUL_URL=http://localhost:4173/` measures a production build instead of the dev server. Needs a server listening |
 | `pnpm mcu-test` | core: `firmware/tests/*.c` at -O0/-O2 (Cortex-M4) and -O2 for the Cortex-M7 (double precision, FPv5) vs. host builds |
