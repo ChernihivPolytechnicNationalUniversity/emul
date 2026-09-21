@@ -785,5 +785,50 @@ console.log("Coincident pins, against a brute-force sweep over every pair")
   expect("two pins 0.4 px apart stay separate", pinContacts(apart, GRID).groups.size, 0)
 }
 
+console.log("Every example routes cleanly: no run doubles back, no wire through a body or over a foreign pin")
+{
+  const segmentCrosses = (p: Point, q: Point, r: { x: number; y: number; w: number; h: number }) => {
+    const [x0, x1, y0, y1] = [r.x + 0.5, r.x + r.w - 0.5, r.y + 0.5, r.y + r.h - 0.5]
+    return p.y === q.y
+      ? p.y > y0 && p.y < y1 && Math.max(p.x, q.x) > x0 && Math.min(p.x, q.x) < x1
+      : p.x === q.x && p.x > x0 && p.x < x1 && Math.max(p.y, q.y) > y0 && Math.min(p.y, q.y) < y1
+  }
+  const runsOver = (p: Point, q: Point, t: Point) =>
+    (p.y === q.y && Math.abs(t.y - p.y) < 0.5 && t.x > Math.min(p.x, q.x) + 0.5 && t.x < Math.max(p.x, q.x) - 0.5) ||
+    (p.x === q.x && Math.abs(t.x - p.x) < 0.5 && t.y > Math.min(p.y, q.y) + 0.5 && t.y < Math.max(p.y, q.y) - 0.5)
+  const turnsBack = (a: Point, b: Point, c: Point) => {
+    const dot = (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
+    return dot < 0 && Math.abs(cross) < 1e-6
+  }
+  const axisAligned = (o: PlacedObject) => (o.rotation ?? 0) % 90 === 0
+  for (const example of examples) {
+    const doc = example.build(GRID)
+    const nets = buildNets(doc.objects, doc.wires, GRID)
+    const routes = nudgeRoutes(new Router().routeAll(doc.objects, doc.wires, GRID), nets.netOfWire, GRID)
+    const wireById = new Map(doc.wires.map((w) => [w.id, w]))
+    const refOf = (id: string) => doc.objects.find((o) => o.id === id)?.props?.ref ?? id
+    const name = (id: string) => {
+      const w = wireById.get(id)!
+      return `${refOf(w.from.object)}.${w.from.pin}→${refOf(w.to.object)}.${w.to.pin}`
+    }
+    const issues = new Set<string>()
+    for (const r of routes) {
+      const w = wireById.get(r.id)!
+      for (let i = 1; i + 1 < r.pts.length; i++) if (turnsBack(r.pts[i - 1], r.pts[i], r.pts[i + 1])) issues.add(`${name(r.id)} doubles back`)
+      for (const o of doc.objects) {
+        if (o.id === w.from.object || o.id === w.to.object || !axisAligned(o)) continue
+        const rect = objectRect(o, GRID)
+        if (r.pts.some((p, i) => i > 0 && segmentCrosses(r.pts[i - 1], p, rect))) issues.add(`${name(r.id)} crosses ${refOf(o.id)}`)
+        for (const pin of objectPins(o, GRID)) {
+          if (pin.pin.kind === "nc") continue
+          if (r.pts.some((p, i) => i > 0 && runsOver(r.pts[i - 1], p, pin.point))) issues.add(`${name(r.id)} runs over ${refOf(o.id)}.${pin.pin.id}`)
+        }
+      }
+    }
+    expect(example.id, [...issues].join("; ") || "clean", "clean")
+  }
+}
+
 console.log(`\n${total - failed}/${total} checks passed in ${Math.round(performance.now() - wall0)} ms`)
 process.exit(failed ? 1 : 0)

@@ -199,7 +199,7 @@ export function routeWire(
   let horizontal = isHorizontal(aSide, a1, points[0] ?? b1)
 
   if (points.length === 0) {
-    for (const m of autoRoute(a1, aSide, b1, bSide, grid, avoid)) {
+    for (const m of autoRoute(a, a1, aSide, b, b1, bSide, grid, avoid)) {
       pts.push(m)
       owner.push(0)
     }
@@ -217,7 +217,16 @@ export function routeWire(
         const goHorizontalFirst = horizontal
           ? Math.sign(q.x - p.x) === Math.sign(dir.x) // continuing does not reverse
           : Math.sign(q.y - p.y) !== Math.sign(dir.y) // continuing vertical would reverse
-        pts.push(goHorizontalFirst ? { x: q.x, y: p.y } : { x: p.x, y: q.y })
+        const viaH = { x: q.x, y: p.y }
+        const viaV = { x: p.x, y: q.y }
+        let corner = goHorizontalFirst ? viaH : viaV
+        if (i === anchors.length - 1) {
+          const before = pts.length > 1 ? pts[pts.length - 2] : p
+          const other = goHorizontalFirst ? viaV : viaH
+          const arrival = (via: Point) => arrivesFromBehind(collapsed([before, p, via, q, b]), bSide)
+          if (arrival(other) < arrival(corner)) corner = other
+        }
+        pts.push(corner)
         owner.push(i)
       }
       const last = pts[pts.length - 1]
@@ -238,6 +247,24 @@ export function routeWire(
 
 const MID_LINE_STEPS_FROM_CENTRE = 6
 const MID_LINE_STEPS_PAST_END = 4
+const BODY_CROSSING_COST = 1e6
+const THROUGH_BODY_COST = 1e4
+
+const collapsed = (pts: readonly Point[]) => dedupeRoute([...pts], new Array<number>(Math.max(0, pts.length - 1)).fill(0)).pts
+
+function pathLength(pts: readonly Point[]) {
+  let sum = 0
+  for (let i = 1; i < pts.length; i++) sum += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
+  return sum
+}
+
+const leavesThroughBody = (pts: readonly Point[], aSide: Direction) =>
+  pts.length > 1 && Math.sign(pts[1].x - pts[0].x) * DIR[aSide].x + Math.sign(pts[1].y - pts[0].y) * DIR[aSide].y < 0 ? 1 : 0
+
+const arrivesFromBehind = (pts: readonly Point[], bSide: Direction) => {
+  const n = pts.length
+  return n > 1 && Math.sign(pts[n - 1].x - pts[n - 2].x) * DIR[bSide].x + Math.sign(pts[n - 1].y - pts[n - 2].y) * DIR[bSide].y > 0 ? 1 : 0
+}
 
 /**
  * Interior points of the automatic route between two stub ends: a centred Z when both stubs
@@ -245,9 +272,14 @@ const MID_LINE_STEPS_PAST_END = 4
  * mid line is moved — first between the ends, then past them — to the nearest position that
  * clears every body, or the one crossing fewest if none does.
  */
-function autoRoute(a1: Point, aSide: Direction, b1: Point, bSide: Direction, grid: number, avoid: Rect[]): Point[] {
+function autoRoute(a: Point, a1: Point, aSide: Direction, b: Point, b1: Point, bSide: Direction, grid: number, avoid: Rect[]): Point[] {
   const ah = isHorizontal(aSide, a1, b1)
   const bh = isHorizontal(bSide, b1, a1)
+  const cost = (mid: Point[]) => {
+    const pts = collapsed([a, a1, ...mid, b1, b])
+    const throughBody = leavesThroughBody(pts, aSide) + arrivesFromBehind(pts, bSide)
+    return crossings(a1, mid, b1, avoid) * BODY_CROSSING_COST + throughBody * THROUGH_BODY_COST + pathLength(pts)
+  }
   const zx = (mx: number): Point[] => [
     { x: mx, y: a1.y },
     { x: mx, y: b1.y },
@@ -258,7 +290,8 @@ function autoRoute(a1: Point, aSide: Direction, b1: Point, bSide: Direction, gri
   ]
   const preferred: Point[] =
     ah && bh ? zx(snap((a1.x + b1.x) / 2, grid)) : !ah && !bh ? zy(snap((a1.y + b1.y) / 2, grid)) : ah ? [{ x: b1.x, y: a1.y }] : [{ x: a1.x, y: b1.y }]
-  if (avoid.length === 0 || crossings(a1, preferred, b1, avoid) === 0) return preferred
+  const preferredCost = cost(preferred)
+  if (preferredCost < THROUGH_BODY_COST) return preferred
 
   // Alternatives, nearest first: the mid line stepped away from centre, then beyond both ends.
   const lines = (lo: number, hi: number) => {
@@ -272,22 +305,15 @@ function autoRoute(a1: Point, aSide: Direction, b1: Point, bSide: Direction, gri
   for (const mx of lines(a1.x, b1.x)) candidates.push(zx(mx))
   for (const my of lines(a1.y, b1.y)) candidates.push(zy(my))
   let best = preferred
-  let bestCost = crossings(a1, preferred, b1, avoid) * 1e6 + length(a1, preferred, b1)
+  let bestCost = preferredCost
   for (const c of candidates) {
-    const cost = crossings(a1, c, b1, avoid) * 1e6 + length(a1, c, b1)
-    if (cost < bestCost) {
+    const candidateCost = cost(c)
+    if (candidateCost < bestCost) {
       best = c
-      bestCost = cost
+      bestCost = candidateCost
     }
   }
   return best
-}
-
-function length(a1: Point, mid: Point[], b1: Point) {
-  const pts = [a1, ...mid, b1]
-  let sum = 0
-  for (let i = 1; i < pts.length; i++) sum += Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y)
-  return sum
 }
 
 /** How many body rectangles the orthogonal path a1 → mid… → b1 runs through (edges do not count). */
@@ -373,14 +399,29 @@ function dedupe(pts: Point[]): Point[] {
   return pts.filter((p, i) => i === 0 || p.x !== pts[i - 1].x || p.y !== pts[i - 1].y)
 }
 
+const samePoint = (p: Point, q: Point) => p.x === q.x && p.y === q.y
+
+const turnsBack = (a: Point, b: Point, c: Point) => {
+  const ax = Math.sign(b.x - a.x)
+  const ay = Math.sign(b.y - a.y)
+  const bx = Math.sign(c.x - b.x)
+  const by = Math.sign(c.y - b.y)
+  return ax * by === ay * bx && ax * bx + ay * by < 0
+}
+
 function dedupeRoute(pts: Point[], owner: number[]): Route {
   const outPts: Point[] = []
   const outOwner: number[] = []
   for (let i = 0; i < pts.length; i++) {
-    const prev = outPts[outPts.length - 1]
-    if (prev && prev.x === pts[i].x && prev.y === pts[i].y) continue
-    outPts.push(pts[i])
-    if (i > 0) outOwner.push(owner[i - 1])
+    const p = pts[i]
+    if (outPts.length && samePoint(outPts[outPts.length - 1], p)) continue
+    while (outPts.length >= 2 && turnsBack(outPts[outPts.length - 2], outPts[outPts.length - 1], p)) {
+      outPts.pop()
+      outOwner.pop()
+    }
+    if (outPts.length && samePoint(outPts[outPts.length - 1], p)) continue
+    outPts.push(p)
+    if (outPts.length > 1) outOwner.push(owner[i - 1])
   }
   return { pts: outPts, owner: outOwner }
 }

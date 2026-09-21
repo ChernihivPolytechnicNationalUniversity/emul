@@ -122,7 +122,7 @@ const bridge: Example = {
     const r6 = place("resistor", 13, 6, r("R6", "3.3 kΩ"), 225)
     const r7 = place("resistor", 17, 6, r("R7", "680 Ω"), 315)
     const r3 = place("resistor", 15, 5, r("R3", "4.7 kΩ"))
-    const r4 = place("resistor", 4, 2, r("R4", "1.5 kΩ"), 90)
+    const r4 = place("resistor", 4, 1, r("R4", "1.5 kΩ"), 90)
     const r5 = place("resistor", 8, 11, r("R5", "470 Ω"))
     const v = place("supply", 4, -4, { value: "+12V", voltage: "12 V" })
     const g = place("ground", 4, 14)
@@ -131,7 +131,7 @@ const bridge: Example = {
     wire(r4, "1", r1, "2", [[5, 0], [17, 0]])
     wire(r1, "2", r2, "2")
     // Left corner.
-    wire(r4, "2", r1, "1", [[5, 6]])
+    wire(r4, "2", r1, "1")
     wire(r1, "1", r6, "2")
     wire(r1, "1", r3, "1", [[13, 6]])
     // Right corner.
@@ -140,7 +140,7 @@ const bridge: Example = {
     // Bottom corner out through R5 to B, which is ground.
     wire(r6, "1", r7, "1")
     wire(r6, "1", r5, "2", [[17, 12]])
-    wire(r5, "1", g, "GND", [[8, 12], [5, 12]])
+    wire(r5, "1", g, "GND", [[5, 12]])
     return doc
   },
 }
@@ -157,7 +157,7 @@ const batteryLife: Example = {
     const sw = place("switch", 6, 2)
     const r = place("resistor", 12, 2, { value: "100 Ω", power: "0.25" })
     const led = place("led", 18, 2, { value: "red" })
-    const gnd = place("ground", 23, 10)
+    const gnd = place("ground", 23, 11)
     wire(bat, "+", sw, "1", [[3, 3]])
     wire(sw, "2", r, "1")
     wire(r, "2", led, "1")
@@ -330,9 +330,9 @@ export const lab1Stand: Example = {
     const v33 = place("supply", -9, y("VDD") - 3, { value: "+3V3", voltage: "3.3 V" })
     const gnd = place("ground", -9, y("VSS") + 1)
     wire(v33, "V", dd, "VDD", [[-8, y("VDD")]])
-    wire(v33, "V", dd, "VDDA", [[-6, y("VDD") - 1], [-6, y("VDDA")]])
+    wire(v33, "V", dd, "VDDA", [[-6, y("VDD")], [-6, y("VDDA")]])
     wire(dd, "VSS", gnd, "GND", [[-8, y("VSS")]])
-    wire(dd, "VSSA", gnd, "GND", [[-5, y("VSSA")], [-5, y("VSSA") + 1], [-8, y("VSSA") + 1]])
+    wire(dd, "VSSA", gnd, "GND", [[-4, y("VSS")]])
     // Reset button SA1 from NRST to ground.
     const sa1 = place("pushbutton", -15, y("NRST") + 1, { ref: "SA1" })
     wire(dd, "NRST", sa1, "2", [[-9, y("NRST")], [-9, y("NRST") + 2]])
@@ -410,7 +410,7 @@ export const nucleoPwm: Example = {
     // D6 is CN10 pin 4 (PE9) at (25,25), inner column; its stub runs 4 cells out to (29,25).
     const r = place("resistor", 34, 24, { value: "330 Ω", power: "0.25" })
     const led = place("led", 40, 24, { value: "green", imax: "20 mA" })
-    const gnd = place("ground", 47, 27)
+    const gnd = place("ground", 47, 30)
     wire(u, "CN10-4", r, "1")
     wire(r, "2", led, "1")
     wire(led, "2", gnd, "GND", [[46, 25], [46, 29], [48, 29]])
@@ -493,20 +493,20 @@ export const nucleoI2c: Example = {
     // CN7-2 (D15, SCL) ends at (29,13), CN7-4 (D14, SDA) at (29,14). The EEPROM's bus pins
     // face them at (40,11) and (40,12); the pull-ups hang off a rail above.
     const mem = place("eeprom-24c", 40, 10, { value: "24C02" })
-    const rail = place("supply", 31, 3, { value: "+3V3", voltage: "3.3 V" })
-    const r1 = place("resistor", 34, 6, { value: "4.7 kΩ", power: "0.25" })
-    const r2 = place("resistor", 34, 9, { value: "4.7 kΩ", power: "0.25" })
+    const rail = place("supply", 37, -1, { value: "+3V3", voltage: "3.3 V" })
+    const r1 = place("resistor", 36, 3, { value: "4.7 kΩ", power: "0.25" }, 90)
+    const r2 = place("resistor", 38, 3, { value: "4.7 kΩ", power: "0.25" }, 90)
     const gnd = place("ground", 42, 20)
     wire(u, "CN7-2", mem, "SCL", [[33, 13], [33, 11]])
     wire(u, "CN7-4", mem, "SDA", [[35, 14], [35, 12]])
-    wire(rail, "V", r1, "1", [[32, 7]])
-    wire(rail, "V", r2, "1", [[32, 10]])
-    wire(r1, "2", mem, "SCL", [[39, 7], [39, 11]])
-    wire(r2, "2", mem, "SDA", [[38, 12]])
-    wire(rail, "V", mem, "VCC", [[32, 5], [32, 2], [43, 2]])
+    wire(rail, "V", r1, "1")
+    wire(rail, "V", r2, "1")
+    wire(r1, "2", mem, "SCL")
+    wire(r2, "2", mem, "SDA")
+    wire(rail, "V", mem, "VCC", [[38, 2], [43, 2]])
     wire(mem, "GND", gnd, "GND")
     // Address straps and write protect to ground.
-    wire(mem, "A0", gnd, "GND", [[48, 11], [48, 21], [43, 21]])
+    wire(mem, "A0", gnd, "GND", [[48, 11], [48, 19]])
     wire(mem, "A1", gnd, "GND", [[48, 12]])
     wire(mem, "A2", gnd, "GND", [[48, 13]])
     wire(mem, "WP", gnd, "GND", [[39, 14], [39, 18], [43, 18]])
