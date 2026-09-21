@@ -201,7 +201,7 @@ export function buildExam(grid: number): ExamBench {
     wire(load, "2", q2, "C")
     // Diode-connected Q1: collector tied to its base, and to Q2's base.
     wire(q1, "C", j, "J", [[ox + 3, 8], [ox + 5, 8]])
-    wire(q1, "B", j, "J", [[ox - 1, 11], [ox - 1, 7], [ox + 5, 7]])
+    wire(q1, "B", q1, "C", [[ox - 1, 11], [ox - 1, 8]])
     wire(q2, "B", j, "J")
     wire(q1, "E", g, "GND", [[ox + 3, 14], [ox + 5, 14]])
     wire(q2, "E", g, "GND", [[ox + 11, 14], [ox + 5, 14]])

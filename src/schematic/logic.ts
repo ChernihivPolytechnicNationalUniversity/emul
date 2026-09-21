@@ -82,7 +82,7 @@ export function buildLogic(grid: number): LogicBench {
     wire(p2, "D", out, "J", [[ox + 9, oy + 9]])
     wire(a, "J", p1, "G")
     wire(a, "J", n1, "G", [[ox - 2, oy + 12]])
-    wire(b, "J", p2, "G", [[ox + 5, oy + 1], [ox + 5, oy + 6]])
+    wire(b, "J", p2, "G", [[ox - 4, oy - 1], [ox + 5, oy - 1], [ox + 5, oy + 6]])
     wire(b, "J", n2, "G", [[ox - 4, oy + 18]])
     return { a, b, out }
   }

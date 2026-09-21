@@ -24,6 +24,8 @@ import { SPEEDS, formatSpeed } from "@/sim/speeds"
 // A desktop menu is compact: small type, one line per command, a check column on the left
 // that every row shares so labels line up, and a shortcut column on the right. The generated
 // menu components are sized for touch and to the trigger's width, so each is restyled here.
+const DEVELOPERS = ["true_normis", "cerobreath", "andrys1"]
+
 const ITEM = "gap-6 rounded-sm py-1 pr-2 pl-6 text-xs whitespace-nowrap"
 const CONTENT = "w-auto min-w-52 rounded-md p-1"
 
@@ -257,10 +259,12 @@ export function MenuBar({
               Version
               <MenubarShortcut className="text-foreground">{config.version}</MenubarShortcut>
             </MenubarItem>
-            <MenubarItem render={<a href="https://t.me/true_normis" target="_blank" rel="noreferrer" />}>
-              Developer
-              <MenubarShortcut>@true_normis</MenubarShortcut>
-            </MenubarItem>
+            {DEVELOPERS.map((handle) => (
+              <MenubarItem key={handle} render={<a href={`https://t.me/${handle}`} target="_blank" rel="noreferrer" />}>
+                Developer
+                <MenubarShortcut>@{handle}</MenubarShortcut>
+              </MenubarItem>
+            ))}
           </MenubarContent>
         </MenubarMenu>
       </Menubar>

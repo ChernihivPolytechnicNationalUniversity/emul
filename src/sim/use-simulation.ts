@@ -1,5 +1,7 @@
 import * as React from "react"
+import { SimStore } from "./sim-store"
 import { pinKey, type Damage, type PartState, type Schematic } from "@/schematic/types"
+import { TopologyGate } from "./topology"
 import type { Failure, ProbeReading, Reading, TraceChunk } from "./engine"
 import type { LogicChunk, McuStatus, Probe, Snapshot } from "./loop"
 import type { FromWorker, ToWorker } from "./worker"
@@ -109,6 +111,7 @@ function toReadout(s: Snapshot, displays: Map<string, DisplayFrame>): SimReadout
 export type SimOptions = {
   /** Simulated seconds per real second; 1 is real time. */
   speed?: number
+  contacts?: ReadonlyMap<string, string>
   /** Voltages to track across every solver step; the array identity drives the update. */
   probes?: Probe[]
   onFailure?: (f: Failure) => void
@@ -122,6 +125,7 @@ export type SimOptions = {
 }
 
 const NO_PROBES: Probe[] = []
+const NO_CONTACTS: ReadonlyMap<string, string> = new Map()
 
 /**
  * Runs the electrical simulation on a worker thread, at `speed` × real time.
@@ -131,7 +135,7 @@ const NO_PROBES: Probe[] = []
 export function useSimulation(
   doc: Schematic,
   running: boolean,
-  { speed = 1, probes = NO_PROBES, onFailure, traceBucket = 0, onTrace, logic = false, onLogic }: SimOptions = {},
+  { speed = 1, contacts = NO_CONTACTS, probes = NO_PROBES, onFailure, traceBucket = 0, onTrace, logic = false, onLogic }: SimOptions = {},
 ) {
   const [readout, setReadout] = React.useState<SimReadout>(idle)
   /** True once the worker has taken a step: there is then state a restart would throw away. */
@@ -180,9 +184,10 @@ export function useSimulation(
   const send = React.useCallback((msg: ToWorker) => workerRef.current?.postMessage(msg), [])
 
   // Topology and values: anything that changes the netlist.
+  const [topologyGate] = React.useState(() => new TopologyGate())
   const topology = React.useMemo(
-    () => ({ objects: doc.objects, wires: doc.wires }),
-    [doc.objects, doc.wires],
+    () => topologyGate.latest({ objects: doc.objects, wires: doc.wires }, contacts),
+    [doc.objects, doc.wires, contacts, topologyGate],
   )
   React.useEffect(() => {
     send({ t: "doc", doc: { ...topology, parts: {} } })
@@ -228,5 +233,9 @@ export function useSimulation(
     if (!readout.live) return { ...idle, damage: readout.damage }
     return { ...readout, running: false, paused: true }
   }, [running, readout])
-  return { sim, restart, started, sendSerial }
+
+  const [simStore] = React.useState(() => new SimStore())
+  React.useLayoutEffect(() => simStore.push(sim), [simStore, sim])
+
+  return { sim, simStore, restart, started, sendSerial }
 }
