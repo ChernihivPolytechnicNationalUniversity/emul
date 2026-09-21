@@ -140,6 +140,12 @@ uint8_t BSP_SDRAM_Init(void)
   static uint8_t sdramstatus = SDRAM_ERROR;
   /* SDRAM device configuration */
   sdramHandle.Instance = FMC_SDRAM_DEVICE;
+  /* The controller is set up by CubeMX's MX_FMC_Init() through its own handle (the HAL_SDRAM_Init
+   * below is commented out), so this handle never leaves HAL_SDRAM_STATE_RESET. The HAL shipped
+   * with the demo sent commands regardless; HAL v1.2+ HAL_SDRAM_SendCommand() refuses with
+   * HAL_ERROR unless the state is READY or PRECHARGED, and the JEDEC sequence below is silently
+   * skipped: the SDRAM never comes up and the panel stays black. Mark the handle ready. */
+  sdramHandle.State = HAL_SDRAM_STATE_READY;
     
 //  /* Timing configuration for 100Mhz as SD clock frequency (System clock is up to 200Mhz) */
 //  Timing.LoadToActiveDelay    = 2;
