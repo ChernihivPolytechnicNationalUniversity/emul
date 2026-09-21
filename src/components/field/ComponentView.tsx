@@ -103,7 +103,7 @@ export const ComponentView = React.memo(function ComponentView({
       {damage && <title>{`${props.ref ?? def.name} burnt: ${damage.reason}`}</title>}
       <g className={cn("body", damage && "opacity-50 saturate-0")}>
         {def.body.map((s, i) => (
-          <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} sheeted={sheeted} props={props} rotation={rotation} />
+          <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} boost={detail.textBoost} sheeted={sheeted} props={props} rotation={rotation} />
         ))}
       </g>
       {selected && (
@@ -207,6 +207,7 @@ function Shape({
   g,
   grid,
   labels,
+  boost,
   sheeted,
   props,
   rotation,
@@ -215,6 +216,7 @@ function Shape({
   g: (v: number) => number
   grid: number
   labels: boolean
+  boost: number
   sheeted: boolean
   props: Record<string, string>
   rotation: Rotation
@@ -255,7 +257,7 @@ function Shape({
         <text
           x={g(shape.x)}
           y={g(shape.y)}
-          fontSize={g(shape.size ?? 0.4)}
+          fontSize={g((shape.size ?? 0.4) * boost)}
           textAnchor={shape.anchor ?? "middle"}
           dominantBaseline="middle"
           // Counter-rotate so labels stay readable whatever the component's rotation.

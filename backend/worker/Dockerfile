@@ -1,5 +1,5 @@
 # The build worker: Node for the queue, GNU Arm Embedded (Debian's gcc-arm-none-eabi 12.2 with
-# newlib, nano included) for the compiling, ST's HAL and CMSIS pinned by tag and compiled once
+# newlib, nano included, and libstdc++ built against both) for the compiling, ST's HAL and CMSIS pinned by tag and compiled once
 # per chip into libhal.a, so a student's build only compiles the student's files.
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
@@ -19,7 +19,7 @@ RUN /toolchain/stage-st.sh /opt/st \
   && /toolchain/build-hal.sh stm32f746ig /targets /opt/st /opt/hal 2>/dev/null
 
 FROM node:22-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends gcc-arm-none-eabi libnewlib-arm-none-eabi \
+RUN apt-get update && apt-get install -y --no-install-recommends gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=hal /opt/st /opt/st

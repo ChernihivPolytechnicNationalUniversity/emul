@@ -955,7 +955,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 <>
                   {objectViews}
                   <div ref={dragLayerRef} data-slot="field-drag-layer" className="pointer-events-none absolute top-0 left-0">
-                    {liftedArea && <TextCanvas objects={liftedLabels} view={liftedArea} grid={grid} scale={scale} raster={textRaster} />}
+                    {liftedArea && <TextCanvas objects={liftedLabels} view={liftedArea} grid={grid} scale={scale} boost={detail.textBoost} raster={textRaster} />}
                   </div>
                 </>
               )}
@@ -980,7 +980,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 onBendPointerUp={onBendPointerUp}
               />
               )}
-              {labelsOnCanvas && <TextCanvas objects={labelledObjects} view={view} grid={grid} scale={scale} raster={textRaster} />}
+              {labelsOnCanvas && <TextCanvas objects={labelledObjects} view={view} grid={grid} scale={scale} boost={detail.textBoost} raster={textRaster} />}
               {/* Above the wires: a pin on a wire has to stay visible and clickable. */}
               <PinLayer
                 objects={visibleObjects}

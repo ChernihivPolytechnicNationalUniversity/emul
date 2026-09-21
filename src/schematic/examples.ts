@@ -239,8 +239,8 @@ export const nucleoSquare: Example = {
  */
 export const lab1Board: Example = {
   id: "lab1-open746i-c",
-  name: "Lab 1: Open746I-C board",
-  description: "The Waveshare Open746I-C stand running the lab's LED staircase firmware on its own LEDs and joystick.",
+  name: "Open746I-C: LED staircase",
+  description: "The Waveshare Open746I-C running the LED staircase the lab starts from — the CubeIDE project as handed out — on its own LEDs and joystick.",
   icon: CpuIcon,
   projects: [{ ref: "U1", load: lab1Project }],
   build(grid) {
@@ -335,8 +335,8 @@ export const cubeDemo: Example = {
 
 export const lab1Stand: Example = {
   id: "lab1-f746",
-  name: "Lab 1: STM32F746 stand",
-  description: "Bare STM32F746IGT6 with four LEDs and a joystick, running the lab's LED staircase firmware.",
+  name: "STM32F746 stand: LED staircase",
+  description: "Bare STM32F746IGT6 with four LEDs and a joystick drawn around it, running the handed-out LED staircase firmware.",
   icon: CpuIcon,
   projects: [{ ref: "DD1", load: lab1Project }],
   build(grid) {

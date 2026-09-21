@@ -215,7 +215,7 @@ export class TextRaster {
     return Math.min(scale, MAX_SHEET_PX / world.w, MAX_SHEET_PX / world.h, Math.sqrt(MAX_SHEET_AREA / (world.w * world.h)))
   }
 
-  get(def: ComponentDef, rotation: Rotation, grid: number, scale: number): Symbol | null {
+  get(def: ComponentDef, rotation: Rotation, grid: number, scale: number, boost: number): Symbol | null {
     const palette = this.palette
     if (!palette) return null
     if (scale !== this.drawnAt) {
@@ -223,15 +223,15 @@ export class TextRaster {
       this.cache.clear()
     }
     const drawAt = this.fitting(def, rotation, grid, scale)
-    const id = key(def, rotation, palette.theme, drawAt)
+    const id = `${key(def, rotation, palette.theme, drawAt)}|${boost}`
     const cached = this.cache.get(id)
     if (cached) return cached
-    const drawn = this.draw(def, rotation, grid, drawAt, palette)
+    const drawn = this.draw(def, rotation, grid, drawAt, boost, palette)
     if (drawn) this.cache.set(id, drawn)
     return drawn
   }
 
-  private draw(def: ComponentDef, rotation: Rotation, grid: number, scale: number, palette: FieldPalette): Symbol | null {
+  private draw(def: ComponentDef, rotation: Rotation, grid: number, scale: number, boost: number, palette: FieldPalette): Symbol | null {
     const box = objectSize(def, rotation)
     const margin = LABEL_MARGIN_CELLS * grid * scale
     const width = Math.max(1, Math.ceil(box.w * grid * scale + margin * 2))
@@ -246,7 +246,7 @@ export class TextRaster {
 
     context.save()
     context.scale(scale, scale)
-    context.font = `${LABEL_CELLS * grid}px ${palette.text.mono}`
+    context.font = `${LABEL_CELLS * boost * grid}px ${palette.text.mono}`
     for (const raw of def.pins) {
       if (!raw.label) continue
       const pin = rotatePin(raw, def, rotation)
@@ -270,7 +270,7 @@ export class TextRaster {
       context.translate(x, y)
       const turn = (shape.rotate ?? 0) - rotation
       if (turn) context.rotate((turn * Math.PI) / 180)
-      context.font = `${(shape.size ?? BODY_TEXT_CELLS) * grid}px ${palette.text.sans}`
+      context.font = `${(shape.size ?? BODY_TEXT_CELLS) * boost * grid}px ${palette.text.sans}`
       context.textAlign = TEXT_ANCHOR[shape.anchor ?? "middle"]
       context.fillStyle = shape.inverse ? palette.text.inverse : shape.muted ? palette.text.muted : palette.text.plain
       context.fillText(shape.text, 0, 0)
