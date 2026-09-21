@@ -10,12 +10,13 @@ type TextCanvasProps = {
   view: Rect
   grid: number
   scale: number
+  boost: number
   raster: TextRaster
 }
 
 type Drawn = { surface: string; objects: readonly PlacedObject[] }
 
-export function TextCanvas({ objects, view, grid, scale, raster }: TextCanvasProps) {
+export function TextCanvas({ objects, view, grid, scale, boost, raster }: TextCanvasProps) {
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const drawn = React.useRef<Drawn | null>(null)
   const theme = useThemeName()
@@ -48,7 +49,7 @@ export function TextCanvas({ objects, view, grid, scale, raster }: TextCanvasPro
 
     const placed = (object: PlacedObject): (Rect & { sheet: Symbol; stretch: number }) | null => {
       const def = getDef(object.def)
-      const sheet = def && raster.get(def, object.rotation ?? 0, grid, pixels)
+      const sheet = def && raster.get(def, object.rotation ?? 0, grid, pixels, boost)
       if (!sheet) return null
       const stretch = pixels / sheet.scale
       const rect = objectRect(object, grid)
@@ -66,7 +67,7 @@ export function TextCanvas({ objects, view, grid, scale, raster }: TextCanvasPro
       if (at) context.drawImage(at.sheet.image, at.x, at.y, at.w, at.h)
     }
 
-    const surface = `${width}x${height}|${view.x},${view.y}|${pixels}|${theme}`
+    const surface = `${width}x${height}|${view.x},${view.y}|${pixels}|${boost}|${theme}`
     const before = drawn.current
     const patch = before?.surface === surface ? changedArea(before.objects, objects, placed) : "everything"
     drawn.current = { surface, objects }
@@ -90,7 +91,7 @@ export function TextCanvas({ objects, view, grid, scale, raster }: TextCanvasPro
     canvas.height = height
     context.clearRect(0, 0, width, height)
     for (const object of objects) blit(object)
-  }, [objects, view, grid, scale, theme, fonts, raster])
+  }, [objects, view, grid, scale, boost, theme, fonts, raster])
 
   if (view.w <= 0) return null
   return (

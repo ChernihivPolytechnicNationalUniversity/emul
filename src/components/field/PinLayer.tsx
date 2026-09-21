@@ -139,7 +139,7 @@ export const PinLayer = React.memo(function PinLayer({
                   <text
                     x={label.x}
                     y={label.y}
-                    fontSize={g(0.3)}
+                    fontSize={g(0.3 * detail.textBoost)}
                     textAnchor={ANCHOR[pin.labelAt as Direction]}
                     dominantBaseline="middle"
                     className={cn(
