@@ -1,7 +1,9 @@
 /**
  * A new image on a running board: Compile while the simulation runs. The core must start
  * over on the new program (time from 0, instructions from 0) while the bench keeps its time —
- * and, in a worker, must actually be asked to run again. Both core arrangements are checked.
+ * and, in a worker, must actually be asked to run again. Both core arrangements are checked,
+ * and so is the first image on a board that has been running without one (an example's
+ * sources compiled on a live bench): the core must start the same way.
  *
  *   pnpm reflash
  */
@@ -55,6 +57,37 @@ for (const workers of [false, true]) {
   run(0.5)
   const s2 = loop.snapshot()!.mcus[u.id]!
   expect("still running half a second later", s2.running && s2.time > s1.time + 0.4, `t=${s2.time.toFixed(3)} s`)
+  loop.dispose()
+}
+for (const workers of [false, true]) {
+  console.log(workers ? "\nFirst image on a live board, core in a worker thread" : "\nFirst image on a live board, core in this thread")
+  const doc = nucleoBlink.build(GRID)
+  const u = doc.objects.find((o) => o.def === "nucleo-f429zi")!
+  u.props = { ...u.props, firmware: "", firmwareData: "" }
+  const loop = new SimLoop()
+  if (workers) loop.spawnCore = spawnNodeCore
+  loop.setDoc(doc)
+  loop.setParts(doc.parts)
+  loop.setRunning(true)
+  let clock = 0
+  const run = (seconds: number) => {
+    const end = clock + seconds * 1000
+    while (clock < end) {
+      clock = Math.min(end, clock + 30)
+      loop.advance(clock)
+    }
+  }
+  run(1.0)
+  const before = loop.snapshot()!
+  expect("no core while the board has no program", before.mcus[u.id] === undefined, before.mcus[u.id] ? "an MCU status exists" : "none")
+
+  // The build lands on the powered board.
+  u.props = { ...u.props, firmware: "nucleo-blink.elf", firmwareData: fw("nucleo-blink.elf") }
+  loop.setDoc({ ...doc, objects: doc.objects.map((o) => (o.id === u.id ? { ...o, props: { ...u.props } } : o)) })
+  run(1.0)
+  const s1 = loop.snapshot()!.mcus[u.id]!
+  expect("image on the board", s1?.firmware === "nucleo-blink.elf", s1?.firmware ?? "no status")
+  expect("core runs from its reset", !!s1 && s1.running && s1.time > 0.5 && s1.instructions > 1e5, s1 ? `running=${s1.running} t=${s1.time.toFixed(3)} s, ${s1.instructions} instr` : "no status")
   loop.dispose()
 }
 console.log(failed ? `\n${failed} check(s) FAILED` : "\nreflash OK")
