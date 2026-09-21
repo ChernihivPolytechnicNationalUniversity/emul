@@ -489,9 +489,18 @@ export class RemoteCore implements CoreHost {
   }
 
   load(data: ArrayBuffer, name: string) {
+    // The worker's load ends in a reset, as the local core's does (`Stm32.load`): the program
+    // runs from time 0 the moment it lands. Mirror that here, or a core loaded without a reset
+    // of its own (the first image on a board already powered) never gets asked to run.
+    this.finish()
     this.loadedFlag = true
     this.haltedFlag = false
+    this.haltReason = null
     this.post({ t: "load", data, name }, [data])
+    this.runningFlag = true
+    this.lastTime = 0
+    this.outBank.fill(0, OUT.DRIVE, OUT.DRIVE + PAD_KEYS)
+    this.version++
   }
   reset(opts: { backup?: boolean } = {}) {
     this.finish()
