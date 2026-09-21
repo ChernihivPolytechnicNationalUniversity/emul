@@ -128,7 +128,7 @@ export async function build(target: Target, files: SourceFile[]): Promise<BuildO
     const args = [
       ...common,
       ...withLanguages([...cSources, ...batteries, ...halSources]),
-      ...cxxObjects,
+      ...(cxxObjects.length ? ["-x", "none", ...cxxObjects] : []),
       "-o",
       "firmware.elf",
       `-T${linker}`,
