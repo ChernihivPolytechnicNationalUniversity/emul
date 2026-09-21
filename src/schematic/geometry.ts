@@ -70,6 +70,9 @@ export const snap = (v: number, grid: number) => Math.round(v / grid) * grid
 export const intersects = (a: Rect, b: Rect) =>
   a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
 
+export const touches = (a: Rect, b: Rect) =>
+  a.x <= b.x + b.w && a.x + a.w >= b.x && a.y <= b.y + b.h && a.y + a.h >= b.y
+
 /** World-space bounding box of a placed object. */
 export function objectRect(obj: PlacedObject, grid: number): Rect {
   const def = getDef(obj.def)
@@ -101,70 +104,6 @@ export function objectPins(obj: PlacedObject, grid: number): readonly ObjectPin[
     : []
   placedPins.set(obj, { placement, pins })
   return pins
-}
-
-const PIXEL_KEY_SPAN = 1 << 25
-const PIXEL_KEY_BIAS = 1 << 24
-
-const pixelKey = (x: number, y: number) => (x + PIXEL_KEY_BIAS) * PIXEL_KEY_SPAN + (y + PIXEL_KEY_BIAS)
-
-/**
- * Group pins that sit on the same point, so components placed pin-to-pin conduct without a
- * wire. Only an exact coincidence counts: a wire or a symbol merely passing over a pin is not
- * a connection. Returns every such pin keyed to its group's representative.
- */
-export function pinContacts(objects: readonly PlacedObject[], grid: number): Map<string, string> {
-  // Bucket by whole pixel, then compare against the neighbouring buckets, so the sweep stays
-  // linear however many pins a board has.
-  const buckets = new Map<number, ObjectPin[]>()
-  for (const obj of objects) {
-    for (const placed of objectPins(obj, grid)) {
-      if (placed.pin.kind === "nc") continue
-      const at = pixelKey(Math.round(placed.point.x), Math.round(placed.point.y))
-      const bucket = buckets.get(at)
-      if (bucket) bucket.push(placed)
-      else buckets.set(at, [placed])
-    }
-  }
-  const EPS = 0.01
-  const parent = new Map<string, string>()
-  const find = (k: string): string => {
-    const p = parent.get(k)
-    if (p === undefined || p === k) return k
-    const root = find(p)
-    parent.set(k, root)
-    return root
-  }
-  // Every key that takes part is recorded, the group's representative included: callers sum
-  // terminal currents over a group, so a missing member would silently lose its current.
-  const joined = new Set<string>()
-  const union = (a: string, b: string) => {
-    joined.add(a)
-    joined.add(b)
-    const ra = find(a)
-    const rb = find(b)
-    if (ra !== rb) parent.set(ra, rb)
-  }
-  const touching = (a: ObjectPin, b: ObjectPin) =>
-    a.key !== b.key && Math.abs(a.point.x - b.point.x) < EPS && Math.abs(a.point.y - b.point.y) < EPS
-  const near: ObjectPin[] = []
-  for (const [at, bucket] of buckets) {
-    near.length = 0
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        if (dx === 0 && dy === 0) continue
-        const other = buckets.get(at + dx * PIXEL_KEY_SPAN + dy)
-        if (other) for (const placed of other) near.push(placed)
-      }
-    }
-    for (const a of bucket) {
-      for (const b of bucket) if (touching(a, b)) union(a.key, b.key)
-      for (const b of near) if (touching(a, b)) union(a.key, b.key)
-    }
-  }
-  const contacts = new Map<string, string>()
-  for (const key of joined) contacts.set(key, find(key))
-  return contacts
 }
 
 /** World-space center of a pin. */
@@ -452,6 +391,26 @@ export type RoutedWire = {
   owner: number[]
 }
 
+const routeBoxes = new WeakMap<RoutedWire, Rect>()
+
+export function routeBox(route: RoutedWire): Rect {
+  const cached = routeBoxes.get(route)
+  if (cached) return cached
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const p of route.pts) {
+    if (p.x < minX) minX = p.x
+    if (p.x > maxX) maxX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.y > maxY) maxY = p.y
+  }
+  const box = { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+  routeBoxes.set(route, box)
+  return box
+}
+
 const SNAP_ERROR_CELLS = 0.5
 const ROUTE_SLACK_CELLS = 1
 const ROUTE_REACH_CELLS = Math.max(MID_LINE_STEPS_FROM_CENTRE + SNAP_ERROR_CELLS, MID_LINE_STEPS_PAST_END) + ROUTE_SLACK_CELLS
@@ -471,17 +430,59 @@ export function routeArea(a: Point, aStub: number, b: Point, bStub: number, bend
   return { x: minX - reach, y: minY - reach, w: maxX - minX + 2 * reach, h: maxY - minY + 2 * reach }
 }
 
-type CachedRoute = { signature: string; route: RoutedWire }
+type CachedRoute = {
+  signature: string
+  route: RoutedWire
+  wire: Wire
+  deps: readonly string[]
+  area: Rect
+}
+
+const NOTHING_MOVED: ReadonlySet<string> = new Set()
 
 export class Router {
   private routes = new Map<string, CachedRoute>()
+  private objects: readonly PlacedObject[] | null = null
+  private grid = 0
+
+  private movedSinceLastCall(objects: readonly PlacedObject[], grid: number): ReadonlySet<string> | null {
+    const previous = this.objects
+    this.objects = objects
+    if (!previous || grid !== this.grid) {
+      this.grid = grid
+      return null
+    }
+    if (previous === objects) return NOTHING_MOVED
+    const before = objectIndex(previous)
+    const now = objectIndex(objects)
+    const moved = new Set<string>()
+    for (const o of objects) if (before.get(o.id) !== o) moved.add(o.id)
+    for (const o of previous) if (!now.has(o.id)) moved.add(o.id)
+    return moved
+  }
+
+  private survives(cached: CachedRoute, w: Wire, moved: ReadonlySet<string>, movedBodies: SpatialIndex | null): boolean {
+    if (cached.wire !== w) return false
+    if (!movedBodies) return true
+    if (moved.has(w.from.object) || moved.has(w.to.object)) return false
+    for (const id of cached.deps) if (moved.has(id)) return false
+    return !movedBodies.overlaps(cached.area)
+  }
 
   routeAll(objects: readonly PlacedObject[], wires: readonly Wire[], grid: number): RoutedWire[] {
+    const moved = this.movedSinceLastCall(objects, grid)
+    const movedBodies = moved?.size ? new SpatialIndex(objects.filter((o) => moved.has(o.id)), grid) : null
     const byId = objectIndex(objects)
-    const bodies = new SpatialIndex(objects, grid)
+    let bodies: SpatialIndex | null = null
     const kept = new Map<string, CachedRoute>()
     const out: RoutedWire[] = []
     for (const w of wires) {
+      const cached = this.routes.get(w.id)
+      if (moved && cached && this.survives(cached, w, moved, movedBodies)) {
+        kept.set(w.id, cached)
+        out.push(cached.route)
+        continue
+      }
       const a = resolvePinIn(byId, w.from, grid)
       const b = resolvePinIn(byId, w.to, grid)
       if (!a || !b) continue
@@ -489,22 +490,28 @@ export class Router {
       const bStub = b.pin.stub ?? 1
       const bends = w.points ?? []
       const avoid: Rect[] = []
+      const deps: string[] = []
+      const area = routeArea(a.point, aStub, b.point, bStub, bends, grid)
       let signature = `${grid}:${a.point.x},${a.point.y},${a.pin.side},${aStub}/${b.point.x},${b.point.y},${b.pin.side},${bStub}`
       for (const p of bends) signature += `/${p.x},${p.y}`
-      for (const o of bodies.query(routeArea(a.point, aStub, b.point, bStub, bends, grid))) {
+      bodies ??= new SpatialIndex(objects, grid)
+      for (const o of bodies.query(area)) {
+        const rect = objectRect(o, grid)
+        if (!intersects(rect, area)) continue
+        deps.push(o.id)
         if (o.id === w.from.object || o.id === w.to.object) continue
-        avoid.push(objectRect(o, grid))
+        avoid.push(rect)
         signature += `|${o.id}@${o.def},${o.x},${o.y},${o.rotation ?? 0}`
       }
-      const cached = this.routes.get(w.id)
       if (cached && cached.signature === signature) {
-        kept.set(w.id, cached)
+        const same = { ...cached, wire: w, deps, area }
+        kept.set(w.id, same)
         out.push(cached.route)
         continue
       }
       const { pts, owner } = routeWire(a.point, a.pin.side, aStub, b.point, b.pin.side, bStub, grid, bends, avoid)
       const route: RoutedWire = { id: w.id, pts, owner }
-      kept.set(w.id, { signature, route })
+      kept.set(w.id, { signature, route, wire: w, deps, area })
       out.push(route)
     }
     this.routes = kept
@@ -535,14 +542,30 @@ type Axis = "h" | "v"
 
 const axisOf = (p: Point, q: Point): Axis | null => (p.y === q.y ? "h" : p.x === q.x ? "v" : null)
 
-type Seg = {
-  wire: number
-  at: number
-  net: string
-  axis: Axis
-  lo: number
-  hi: number
-  lean: number
+type RouteSeg = { at: number; axis: Axis; lo: number; hi: number; lean: number; lane: number }
+
+const laneOf = (axis: Axis, along: number) => Math.round(along) * 2 + (axis === "h" ? 0 : 1)
+
+const routeSegs = new WeakMap<RoutedWire, readonly RouteSeg[]>()
+
+function segsOf(route: RoutedWire): readonly RouteSeg[] {
+  const cached = routeSegs.get(route)
+  if (cached) return cached
+  const segs: RouteSeg[] = []
+  const pts = route.pts
+  for (let at = 1; at < pts.length - 2; at++) {
+    const p = pts[at]
+    const q = pts[at + 1]
+    const axis = axisOf(p, q)
+    if (!axis) continue
+    const before = pts[at - 1]
+    const after = pts[at + 2]
+    const lean = axis === "h" ? (before.y + after.y) / 2 - p.y : (before.x + after.x) / 2 - p.x
+    const [lo, hi] = axis === "h" ? [Math.min(p.x, q.x), Math.max(p.x, q.x)] : [Math.min(p.y, q.y), Math.max(p.y, q.y)]
+    segs.push({ at, axis, lo, hi, lean, lane: laneOf(axis, axis === "h" ? p.y : p.x) })
+  }
+  routeSegs.set(route, segs)
+  return segs
 }
 
 /**
@@ -552,73 +575,69 @@ type Seg = {
  * orthogonal. Pins and the direction a wire leaves them are never touched.
  */
 export function nudgeRoutes(routes: RoutedWire[], netOf: (wireId: string) => string | undefined, grid: number): RoutedWire[] {
-  const segs: Seg[] = []
-  routes.forEach((r, wire) => {
-    const net = netOf(r.id) ?? r.id
-    for (let at = 1; at < r.pts.length - 2; at++) {
-      const p = r.pts[at]
-      const q = r.pts[at + 1]
-      const axis = axisOf(p, q)
-      if (!axis) continue
-      const before = r.pts[at - 1]
-      const after = r.pts[at + 2]
-      const lean = axis === "h" ? (before.y + after.y) / 2 - p.y : (before.x + after.x) / 2 - p.x
-      const [lo, hi] = axis === "h" ? [Math.min(p.x, q.x), Math.max(p.x, q.x)] : [Math.min(p.y, q.y), Math.max(p.y, q.y)]
-      segs.push({ wire, at, net, axis, lo, hi, lean })
-    }
-  })
-
-  const lanes = new Map<string, Seg[]>()
-  for (const s of segs) {
-    const p = routes[s.wire].pts[s.at]
-    const key = `${s.axis}${Math.round(s.axis === "h" ? p.y : p.x)}`
-    const list = lanes.get(key)
-    if (list) list.push(s)
-    else lanes.set(key, [s])
-  }
-
-  const offset = new Map<string, number>()
-  const separate = (cluster: Seg[]) => {
-    const nets = [...new Set(cluster.map((s) => s.net))]
-    if (nets.length < 2) return
-    nets.sort((a, b) => meanLean(cluster, a) - meanLean(cluster, b))
-    const step = Math.min(NUDGE_STEP * grid, (2 * NUDGE_MAX * grid) / (nets.length - 1))
-    const span = (nets.length - 1) / 2
-    const deltaOf = new Map(nets.map((net, i) => [net, (i - span) * step]))
-    for (const s of cluster) {
-      const delta = deltaOf.get(s.net) ?? 0
-      if (delta) offset.set(`${s.wire}:${s.at}`, delta)
+  const nets = routes.map((r) => netOf(r.id) ?? r.id)
+  const byWire = routes.map(segsOf)
+  const lanes = new Map<number, number[]>()
+  for (let wire = 0; wire < byWire.length; wire++) {
+    const segs = byWire[wire]
+    for (let i = 0; i < segs.length; i++) {
+      const list = lanes.get(segs[i].lane)
+      if (list) list.push(wire, i)
+      else lanes.set(segs[i].lane, [wire, i])
     }
   }
+
+  const offsets: (Map<number, number> | undefined)[] = new Array(routes.length)
+  let nudged = false
+  const segAt = (cluster: number[], k: number) => byWire[cluster[k]][cluster[k + 1]]
+  const separate = (cluster: number[]) => {
+    const sum = new Map<string, number>()
+    const count = new Map<string, number>()
+    for (let k = 0; k < cluster.length; k += 2) {
+      const net = nets[cluster[k]]
+      sum.set(net, (sum.get(net) ?? 0) + segAt(cluster, k).lean)
+      count.set(net, (count.get(net) ?? 0) + 1)
+    }
+    if (sum.size < 2) return
+    const lean = (net: string) => sum.get(net)! / count.get(net)!
+    const order = [...sum.keys()].sort((a, b) => lean(a) - lean(b))
+    const step = Math.min(NUDGE_STEP * grid, (2 * NUDGE_MAX * grid) / (order.length - 1))
+    const span = (order.length - 1) / 2
+    const deltaOf = new Map(order.map((net, i) => [net, (i - span) * step]))
+    for (let k = 0; k < cluster.length; k += 2) {
+      const delta = deltaOf.get(nets[cluster[k]]) ?? 0
+      if (!delta) continue
+      const wire = cluster[k]
+      const byAt = offsets[wire] ?? (offsets[wire] = new Map())
+      byAt.set(segAt(cluster, k).at, delta)
+      nudged = true
+    }
+  }
+
   for (const list of lanes.values()) {
-    if (list.length < 2) continue
-    list.sort((a, b) => a.lo - b.lo)
-    let cluster: Seg[] = []
+    if (list.length < 4) continue
+    const order = Array.from({ length: list.length / 2 }, (_, k) => k)
+    const at = (k: number) => byWire[list[k * 2]][list[k * 2 + 1]]
+    order.sort((a, b) => at(a).lo - at(b).lo)
+    let cluster: number[] = []
     let end = -Infinity
-    for (const s of list) {
-      if (cluster.length && s.lo >= end) {
+    for (const k of order) {
+      const seg = at(k)
+      if (cluster.length && seg.lo >= end) {
         separate(cluster)
         cluster = []
       }
-      cluster.push(s)
-      end = Math.max(end, s.hi)
+      cluster.push(list[k * 2], list[k * 2 + 1])
+      end = Math.max(end, seg.hi)
     }
     separate(cluster)
   }
 
-  if (offset.size === 0) return routes
-  return routes.map((r, wire) => applyOffsets(r, (at) => offset.get(`${wire}:${at}`) ?? 0))
-}
-
-function meanLean(cluster: Seg[], net: string): number {
-  let sum = 0
-  let n = 0
-  for (const s of cluster) {
-    if (s.net !== net) continue
-    sum += s.lean
-    n++
-  }
-  return n ? sum / n : 0
+  if (!nudged) return routes
+  return routes.map((r, wire) => {
+    const byAt = offsets[wire]
+    return byAt ? applyOffsets(r, (at) => byAt.get(at) ?? 0) : r
+  })
 }
 
 /**

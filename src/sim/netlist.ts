@@ -1,4 +1,5 @@
-import { GRID, pinContacts } from "@/schematic/geometry"
+import { GRID } from "@/schematic/geometry"
+import { pinContacts } from "@/schematic/contacts"
 import { getDef } from "@/schematic/registry"
 import { pinKey, type Damage, type Element, type Limits, type NodeRef, type PlacedObject, type Schematic, type Value } from "@/schematic/types"
 import { chemistryById, defaultResistance, type Chemistry } from "./battery"
@@ -71,7 +72,7 @@ export type Netlist = {
   /** Node keys tied to the reference node by GND elements (current sinks for wire flow). */
   groundKeys: Set<string>
   /** Pins joined by touching another pin rather than by a wire, keyed to their group. */
-  contacts: Map<string, string>
+  contacts: ReadonlyMap<string, string>
 }
 
 const VT = 0.025852
@@ -207,7 +208,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
   for (const w of doc.wires) uf.union(pinKey(w.from.object, w.from.pin), pinKey(w.to.object, w.to.pin))
   // Pins placed on top of each other are the same conductor, wire or no wire.
   const contacts = pinContacts(doc.objects, grid)
-  for (const [key, root] of contacts) uf.union(key, root)
+  for (const [key, root] of contacts.groups) uf.union(key, root)
 
   type Pending = { obj: PlacedObject; el: Element; index: number; props: Record<string, string> }
   const pending: Pending[] = []
@@ -445,5 +446,5 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
     }
   }
 
-  return { nodes, sources, elements, pinNet, groundKeys, contacts }
+  return { nodes, sources, elements, pinNet, groundKeys, contacts: contacts.groups }
 }

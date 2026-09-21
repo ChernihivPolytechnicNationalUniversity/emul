@@ -1,13 +1,28 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { builder } from "@/schematic/builder"
-import { lab1Stand } from "@/schematic/examples"
-import { GRID, nudgeRoutes, objectRect, routeAll, toPath, type Point, type RoutedWire } from "@/schematic/geometry"
+import { pinContacts } from "@/schematic/contacts"
+import { examples, lab1Stand } from "@/schematic/examples"
+import {
+  GRID,
+  nudgeRoutes,
+  objectPins,
+  objectRect,
+  resolvePin,
+  routeAll,
+  routeObstacles,
+  Router,
+  routeWire,
+  toPath,
+  type Point,
+  type RoutedWire,
+} from "@/schematic/geometry"
 import { buildNets } from "@/schematic/nets"
 import { autoNetColor, semanticNetColor, WIRE_COLORS } from "@/schematic/wire-colors"
 import { tapWireAt } from "@/schematic/wiring"
-import { partKey, pinKey, type PinKind, type Schematic } from "@/schematic/types"
+import { partKey, pinKey, type PinKind, type PlacedObject, type Schematic } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
+import { TopologyGate } from "@/sim/topology"
 
 let failed = 0
 let total = 0
@@ -371,6 +386,403 @@ console.log("Two MCU pins tied through a junction to one button (the PG2/PG3 sta
   loop.setParts({ [partKey(byRef("SA2").id, "SW")]: { pressed: false } })
   run(0.05)
   expect("released: both back high", Math.min(v("PG2"), v("PG3")), 3.3, 0.05)
+}
+
+console.log("Nudging by cached lanes draws what the straightforward sweep drew")
+{
+  type Axis = "h" | "v"
+  type Seg = { wire: number; at: number; net: string; axis: Axis; lo: number; hi: number; lean: number }
+  const axisOf = (p: Point, q: Point): Axis | null => (p.y === q.y ? "h" : p.x === q.x ? "v" : null)
+  const NUDGE_STEP = 1 / 3
+  const NUDGE_MAX = 1 / 2
+
+  const applyOffsets = (r: RoutedWire, offsetOf: (segment: number) => number): RoutedWire => {
+    const { pts, owner } = r
+    const last = pts.length - 1
+    let touched = false
+    for (let i = 0; i < last; i++) if (offsetOf(i)) touched = true
+    if (!touched) return r
+    const moved = (segment: number, p: Point): Point => {
+      const d = offsetOf(segment)
+      if (!d) return p
+      const axis = axisOf(pts[segment], pts[segment + 1])
+      if (axis === "h") return { x: p.x, y: p.y + d }
+      if (axis === "v") return { x: p.x + d, y: p.y }
+      return p
+    }
+    const outPts: Point[] = [pts[0]]
+    const outOwner: number[] = []
+    for (let i = 1; i < last; i++) {
+      const inAxis = axisOf(pts[i - 1], pts[i])
+      const outAxis = axisOf(pts[i], pts[i + 1])
+      const turns = inAxis !== null && outAxis !== null && inAxis !== outAxis
+      if (turns) {
+        outPts.push(moved(i, moved(i - 1, pts[i])))
+        outOwner.push(owner[i - 1])
+        continue
+      }
+      outPts.push(moved(i - 1, pts[i]))
+      outOwner.push(owner[i - 1])
+      if (offsetOf(i - 1) !== offsetOf(i)) {
+        outPts.push(moved(i, pts[i]))
+        outOwner.push(owner[i])
+      }
+    }
+    outPts.push(pts[last])
+    outOwner.push(owner[last - 1])
+    return { ...r, pts: outPts, owner: outOwner }
+  }
+
+  const plainly = (routes: RoutedWire[], netOf: (id: string) => string | undefined, grid: number): RoutedWire[] => {
+    const segs: Seg[] = []
+    routes.forEach((r, wire) => {
+      const net = netOf(r.id) ?? r.id
+      for (let at = 1; at < r.pts.length - 2; at++) {
+        const p = r.pts[at]
+        const q = r.pts[at + 1]
+        const axis = axisOf(p, q)
+        if (!axis) continue
+        const before = r.pts[at - 1]
+        const after = r.pts[at + 2]
+        const lean = axis === "h" ? (before.y + after.y) / 2 - p.y : (before.x + after.x) / 2 - p.x
+        const [lo, hi] = axis === "h" ? [Math.min(p.x, q.x), Math.max(p.x, q.x)] : [Math.min(p.y, q.y), Math.max(p.y, q.y)]
+        segs.push({ wire, at, net, axis, lo, hi, lean })
+      }
+    })
+    const lanes = new Map<string, Seg[]>()
+    for (const s of segs) {
+      const p = routes[s.wire].pts[s.at]
+      const key = `${s.axis}${Math.round(s.axis === "h" ? p.y : p.x)}`
+      const list = lanes.get(key)
+      if (list) list.push(s)
+      else lanes.set(key, [s])
+    }
+    const meanLean = (cluster: Seg[], net: string) => {
+      let sum = 0
+      let n = 0
+      for (const s of cluster) {
+        if (s.net !== net) continue
+        sum += s.lean
+        n++
+      }
+      return n ? sum / n : 0
+    }
+    const offset = new Map<string, number>()
+    const separate = (cluster: Seg[]) => {
+      const nets = [...new Set(cluster.map((s) => s.net))]
+      if (nets.length < 2) return
+      nets.sort((a, b) => meanLean(cluster, a) - meanLean(cluster, b))
+      const step = Math.min(NUDGE_STEP * grid, (2 * NUDGE_MAX * grid) / (nets.length - 1))
+      const span = (nets.length - 1) / 2
+      const deltaOf = new Map(nets.map((net, i) => [net, (i - span) * step]))
+      for (const s of cluster) {
+        const delta = deltaOf.get(s.net) ?? 0
+        if (delta) offset.set(`${s.wire}:${s.at}`, delta)
+      }
+    }
+    for (const list of lanes.values()) {
+      if (list.length < 2) continue
+      list.sort((a, b) => a.lo - b.lo)
+      let cluster: Seg[] = []
+      let end = -Infinity
+      for (const s of list) {
+        if (cluster.length && s.lo >= end) {
+          separate(cluster)
+          cluster = []
+        }
+        cluster.push(s)
+        end = Math.max(end, s.hi)
+      }
+      separate(cluster)
+    }
+    if (offset.size === 0) return routes
+    return routes.map((r, wire) => applyOffsets(r, (at) => offset.get(`${wire}:${at}`) ?? 0))
+  }
+
+  const shape = (routes: readonly RoutedWire[]) =>
+    routes
+      .map((r) => `${r.id} ${r.pts.map((p) => `${p.x},${p.y}`).join(" ")} / ${r.owner.join(",")}`)
+      .sort()
+      .join("\n")
+
+  let apart = 0
+  let nudgedAnything = 0
+  const agrees = (doc: Schematic) => {
+    const nets = buildNets(doc.objects, doc.wires, GRID)
+    const straight = new Router().routeAll(doc.objects, doc.wires, GRID)
+    const now = nudgeRoutes(new Router().routeAll(doc.objects, doc.wires, GRID), nets.netOfWire, GRID)
+    const before = plainly(new Router().routeAll(doc.objects, doc.wires, GRID), nets.netOfWire, GRID)
+    if (shape(now) !== shape(straight)) nudgedAnything++
+    if (shape(now) !== shape(before)) apart++
+  }
+
+  for (const example of examples) agrees(example.build(GRID))
+  let seed = 5150
+  const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+  const base = lab1Stand.build(GRID)
+  for (let i = 0; i < 12; i++) {
+    agrees({
+      ...base,
+      objects: base.objects.map((o) => ({ ...o, x: o.x + Math.round(random() * 6 - 3) * GRID, y: o.y + Math.round(random() * 6 - 3) * GRID })),
+    })
+  }
+  expect("every document nudges to the same routes", apart, 0)
+  expect("and the corpus does exercise nudging", nudgedAnything > 0, true)
+}
+
+console.log("The contact index answers with the same map until the answer changes")
+{
+  const { doc, place } = builder(GRID)
+  const r1 = place("resistor", 0, 0)
+  const r2 = place("resistor", 20, 0)
+  const at = (o: { id: string }, x: number): Schematic => ({ ...doc, objects: doc.objects.map((p) => (p.id === o.id ? { ...p, x: x * GRID } : p)) })
+
+  const apart = pinContacts(doc.objects, GRID)
+  expect("asking twice about one document", pinContacts(doc.objects, GRID) === apart, true)
+  expect("nothing touches to begin with", apart.groups.size, 0)
+  const shifted = at(r2, 30)
+  expect("a move that touches nothing keeps the same map", pinContacts(shifted.objects, GRID) === apart, true)
+  const meeting = at(r2, 4)
+  const met = pinContacts(meeting.objects, GRID)
+  expect("a move that lands a pin on another does not", met === apart, false)
+  expect("…and the two pins are grouped", met.groups.size, 2)
+  expect("…and the kinds came with them", met.kinds.size, 2)
+  expect("the pins are R1.2 and R2.1", [...met.groups.keys()].sort().join(" "), [pinKey(r1.id, "2"), pinKey(r2.id, "1")].sort().join(" "))
+  expect("…and asking again about the same contact keeps the map", pinContacts(at(r2, 4).objects, GRID) === met, true)
+  const parted = pinContacts(at(r2, 20).objects, GRID)
+  expect("moving apart again drops the contact", parted.groups.size, 0)
+  expect("…and settles back on the empty map", pinContacts(at(r2, 25).objects, GRID) === parted, true)
+}
+
+console.log("The solver is told about the document only when the circuit changed")
+{
+  const gate = new TopologyGate()
+  const { doc, place, wire } = builder(GRID)
+  const r1 = place("resistor", 0, 0)
+  const r2 = place("resistor", 20, 0)
+  const gnd = place("ground", 30, 4)
+  const w = wire(r2, "2", gnd, "GND")
+  const shift = (o: { id: string }, x: number): Schematic => ({ ...doc, objects: doc.objects.map((p) => (p.id === o.id ? { ...p, x: x * GRID } : p)) })
+  const sent = (d: Schematic) => gate.latest({ objects: d.objects, wires: d.wires }, buildNets(d.objects, d.wires, GRID).contacts)
+
+  const first = sent(doc)
+  expect("the same document twice is sent once", sent(doc) === first, true)
+  expect("a move that connects nothing is not resent", sent(shift(r2, 24)) === first, true)
+  const met = sent(shift(r2, 4))
+  expect("a move that lands a pin on another is", met !== first, true)
+  expect("…and staying there is not", sent(shift(r2, 4)) === met, true)
+  const apart = sent(shift(r2, 20))
+  expect("moving apart again is", apart !== met, true)
+
+  const settled = sent(doc)
+  const coloured: Schematic = { ...doc, wires: doc.wires.map((x) => ({ ...x, color: "blue" as const })) }
+  expect("a wire recoloured is not", sent(coloured) === settled, true)
+  const bent: Schematic = { ...coloured, wires: coloured.wires.map((x) => ({ ...x, points: [{ x: 0, y: 0 }] })) }
+  expect("a bend point moved is not", sent(bent) === settled, true)
+  const rotated: Schematic = { ...bent, objects: bent.objects.map((o) => (o.id === gnd.id ? { ...o, rotation: 90 as const } : o)) }
+  expect("a rotation that touches nothing is not", sent(rotated) === settled, true)
+  const revalued: Schematic = { ...rotated, objects: rotated.objects.map((o) => (o.id === r1.id ? { ...o, props: { ...o.props, value: "2 kΩ" } } : o)) }
+  const valued = sent(revalued)
+  expect("a component's value is", valued !== settled, true)
+  const unwired: Schematic = { ...revalued, wires: revalued.wires.filter((x) => x.id !== w.id) }
+  expect("a wire removed is", sent(unwired) !== valued, true)
+}
+
+console.log("Obstacles queried near a wire route what the whole document would")
+{
+  const trace = (id: string, pts: readonly Point[]) => `${id} ${pts.map((p) => `${p.x},${p.y}`).join(" ")}`
+  const globally = (doc: Schematic) =>
+    doc.wires
+      .flatMap((w) => {
+        const a = resolvePin(doc.objects, w.from, GRID)
+        const b = resolvePin(doc.objects, w.to, GRID)
+        if (!a || !b) return []
+        const route = routeWire(
+          a.point,
+          a.pin.side,
+          a.pin.stub ?? 1,
+          b.point,
+          b.pin.side,
+          b.pin.stub ?? 1,
+          GRID,
+          w.points ?? [],
+          routeObstacles(doc.objects, GRID, w.from.object, w.to.object),
+        )
+        return [trace(w.id, route.pts)]
+      })
+      .sort()
+      .join("\n")
+  const locally = (doc: Schematic) =>
+    new Router()
+      .routeAll(doc.objects, doc.wires, GRID)
+      .map((r) => trace(r.id, r.pts))
+      .sort()
+      .join("\n")
+  for (const example of examples) {
+    const doc = example.build(GRID)
+    expect(`${example.id}`.padEnd(16), locally(doc) === globally(doc), true)
+  }
+  let seed = 7401
+  const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+  let apart = 0
+  const base = lab1Stand.build(GRID)
+  for (let i = 0; i < 12; i++) {
+    const jittered: Schematic = {
+      ...base,
+      objects: base.objects.map((o) => ({ ...o, x: o.x + Math.round(random() * 6 - 3) * GRID, y: o.y + Math.round(random() * 6 - 3) * GRID })),
+    }
+    if (locally(jittered) !== globally(jittered)) apart++
+  }
+  expect("12 jumbled copies of the stand agree too", apart, 0)
+}
+
+console.log("A router kept between edits routes exactly what a fresh one does")
+{
+  const shape = (routes: readonly RoutedWire[]) =>
+    routes
+      .map((r) => `${r.id} ${r.pts.map((p) => `${p.x},${p.y}`).join(" ")} / ${r.owner.join(",")}`)
+      .sort()
+      .join("\n")
+  const kept = new Router()
+  let doc = lab1Stand.build(GRID)
+  let previous: readonly RoutedWire[] = []
+  let step = 0
+  const after = (what: string, next: Schematic) => {
+    doc = next
+    const got = kept.routeAll(doc.objects, doc.wires, GRID)
+    const want = new Router().routeAll(doc.objects, doc.wires, GRID)
+    expect(`${String(++step).padStart(2)}. ${what}`, shape(got) === shape(want), true)
+    previous = got
+    return got
+  }
+
+  const byRef = (ref: string) => doc.objects.find((o) => o.props?.ref === ref)!
+  const moveBy = (id: string, dx: number, dy: number): Schematic => ({
+    ...doc,
+    objects: doc.objects.map((o) => (o.id === id ? { ...o, x: o.x + dx * GRID, y: o.y + dy * GRID } : o)),
+  })
+
+  after("the document as built", doc)
+  const unchanged = kept.routeAll(doc.objects, doc.wires, GRID)
+  expect("    routing it again hands back the same routes", unchanged.every((r, i) => r === previous[i]), true)
+
+  const led = byRef("VD1").id
+  const settled = new Map(previous.map((r) => [r.id, r]))
+  const moved = after("one LED moved a cell", moveBy(led, 1, 0))
+  const rerouted = moved.filter((r) => settled.get(r.id) !== r)
+  expect("    and only the wires near it are routed again", `${rerouted.length} of ${moved.length}`, `6 of ${moved.length}`)
+  after("the LED moved back", moveBy(led, -1, 0))
+  after("the LED dropped across the field", moveBy(led, 30, 12))
+  after("the LED brought back", moveBy(led, -30, -12))
+  after("a resistor rotated", { ...doc, objects: doc.objects.map((o) => (o.id === byRef("R2").id ? { ...o, rotation: 90 as const } : o)) })
+  const bent = doc.wires.find((w) => (w.points?.length ?? 0) > 0)!
+  after("a bend point moved", {
+    ...doc,
+    wires: doc.wires.map((w) => (w.id === bent.id ? { ...w, points: w.points!.map((p, i) => (i === 0 ? { x: p.x + GRID, y: p.y } : p)) } : w)),
+  })
+  after("a wire recoloured", { ...doc, wires: doc.wires.map((w) => (w.id === bent.id ? { ...w, color: "blue" as const } : w)) })
+  const ground = doc.objects.find((o) => o.def === "ground")!
+  after("a ground deleted with its wires", {
+    ...doc,
+    objects: doc.objects.filter((o) => o.id !== ground.id),
+    wires: doc.wires.filter((w) => w.from.object !== ground.id && w.to.object !== ground.id),
+  })
+  after("a fresh object dropped in the middle of the wiring", {
+    ...doc,
+    objects: [...doc.objects, { id: "intruder", def: "resistor", x: -9 * GRID, y: 6 * GRID, rotation: 90 as const }],
+  })
+  after("the intruder shuffled along", moveBy("intruder", 0, 2))
+  after("the intruder removed", { ...doc, objects: doc.objects.filter((o) => o.id !== "intruder") })
+  after("the whole schematic moved", { ...doc, objects: doc.objects.map((o) => ({ ...o, x: o.x + 3 * GRID, y: o.y - GRID })) })
+
+  let seed = 424242
+  const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+  let drifted = 0
+  for (let i = 0; i < 60; i++) {
+    const victim = doc.objects[Math.floor(random() * doc.objects.length)]
+    const next = {
+      ...doc,
+      objects: doc.objects.map((o) =>
+        o.id === victim.id ? { ...o, x: o.x + Math.round(random() * 8 - 4) * GRID, y: o.y + Math.round(random() * 8 - 4) * GRID } : o,
+      ),
+    }
+    doc = next
+    if (shape(kept.routeAll(doc.objects, doc.wires, GRID)) !== shape(new Router().routeAll(doc.objects, doc.wires, GRID))) drifted++
+  }
+  expect("60 random moves, each routed the same either way", drifted, 0)
+}
+
+console.log("Coincident pins, against a brute-force sweep over every pair")
+{
+  const EPS = 0.01
+  const brute = (objects: readonly PlacedObject[]) => {
+    const placed = objects.flatMap((o) => objectPins(o, GRID).filter((p) => p.pin.kind !== "nc"))
+    const parent = new Map<string, string>()
+    const find = (k: string): string => {
+      const p = parent.get(k)
+      if (p === undefined || p === k) return k
+      const root = find(p)
+      parent.set(k, root)
+      return root
+    }
+    const joined = new Set<string>()
+    for (let i = 0; i < placed.length; i++) {
+      for (let j = i + 1; j < placed.length; j++) {
+        const a = placed[i]
+        const b = placed[j]
+        if (a.key === b.key || Math.abs(a.point.x - b.point.x) >= EPS || Math.abs(a.point.y - b.point.y) >= EPS) continue
+        joined.add(a.key)
+        joined.add(b.key)
+        const ra = find(a.key)
+        const rb = find(b.key)
+        if (ra !== rb) parent.set(ra, rb)
+      }
+    }
+    const out = new Map<string, string>()
+    for (const key of joined) out.set(key, find(key))
+    return out
+  }
+  const partition = (m: ReadonlyMap<string, string>) => {
+    const groups = new Map<string, string[]>()
+    for (const [key, root] of m) {
+      const list = groups.get(root)
+      if (list) list.push(key)
+      else groups.set(root, [key])
+    }
+    return [...groups.values()].map((list) => [...list].sort().join(" ")).sort().join(" | ")
+  }
+  const agrees = (what: string, objects: readonly PlacedObject[]) => {
+    const got = partition(pinContacts(objects, GRID).groups)
+    const want = partition(brute(objects))
+    expect(what, got === want, true)
+    return got
+  }
+
+  for (const example of examples) agrees(`${example.id}`.padEnd(16), example.build(GRID).objects)
+
+  let seed = 20260917
+  const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+  const jumbled: PlacedObject[] = []
+  for (let i = 0; i < 400; i++) {
+    const def = ["resistor", "led", "ground", "pushbutton"][Math.floor(random() * 4)]
+    jumbled.push({
+      id: `j${i}`,
+      def,
+      x: Math.round(random() * 24) * GRID,
+      y: Math.round(random() * 24) * GRID,
+      rotation: ([0, 45, 90, 135, 180, 225, 270, 315] as const)[Math.floor(random() * 8)],
+    })
+  }
+  const found = agrees("400 objects piled on 25×25 cells", jumbled)
+  expect("…and it found contacts to compare", found.length > 0, true)
+
+  const pinOffset = objectPins({ id: "probe", def: "ground", x: 0, y: 0 }, GRID)[0].point
+  const groundAt = (id: string, x: number) => ({ id, def: "ground", x: x - pinOffset.x, y: -pinOffset.y })
+  const straddling = [groundAt("a", 0.5 - 1e-7), groundAt("b", 0.5 + 1e-7)]
+  expect("two pins 2e-7 apart across a cell edge join", pinContacts(straddling, GRID).groups.size, 2)
+  expect("…and the brute-force sweep agrees", partition(pinContacts(straddling, GRID).groups) === partition(brute(straddling)), true)
+  const apart = [groundAt("a", 0.5 - 0.2), groundAt("b", 0.5 + 0.2)]
+  expect("two pins 0.4 px apart stay separate", pinContacts(apart, GRID).groups.size, 0)
 }
 
 console.log(`\n${total - failed}/${total} checks passed in ${Math.round(performance.now() - wall0)} ms`)

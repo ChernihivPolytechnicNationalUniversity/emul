@@ -54,11 +54,6 @@ export function useSchematic(grid: number) {
   const [selectedObjects, setSelectedObjects] = React.useState<ReadonlySet<string>>(() => new Set())
   const [selectedWires, setSelectedWires] = React.useState<ReadonlySet<string>>(() => new Set())
 
-  /**
-   * Every document change goes through here. An interaction reaches it once, when it is over —
-   * a drag is applied to the DOM while it runs and committed on release — so every call is one
-   * undo step. `silent` marks a change not worth one at all (a button pressed while simulating).
-   */
   const setDoc = React.useCallback(
     (fn: (d: Schematic) => Schematic, opts: { silent?: boolean } = {}) => {
       setHistory((h) => {
@@ -205,11 +200,6 @@ export function useSchematic(grid: number) {
     [doc.objects, grid],
   )
 
-  /**
-   * Move objects from their pre-drag positions by (dx, dy), snapped to the grid. Called once,
-   * when the drag is released, against the document as it stood when it started — so the bend
-   * points on file are still the ones to offset.
-   */
   const moveTo = React.useCallback(
     (from: ReadonlyMap<string, Point>, dx: number, dy: number) => {
       const sdx = snap(dx, grid)
@@ -298,7 +288,6 @@ export function useSchematic(grid: number) {
     [grid, setDoc],
   )
 
-  /** Replace the bend points of a wire (empty = auto route). */
   const setWirePoints = React.useCallback(
     (id: string, points: Point[]) => {
       setDoc((d) => ({

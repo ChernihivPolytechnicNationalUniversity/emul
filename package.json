@@ -47,6 +47,7 @@
     "wires": "tsx --tsconfig tsconfig.app.json scripts/wires.ts",
     "bench": "tsx --tsconfig tsconfig.app.json scripts/bench.ts",
     "field-bench": "tsx --tsconfig tsconfig.app.json scripts/field-bench.ts",
+    "geom-bench": "tsx --tsconfig tsconfig.app.json scripts/geom-bench.ts",
     "mcu-jit": "tsx --tsconfig tsconfig.app.json scripts/mcu-jit.ts",
     "symbols": "tsx --tsconfig tsconfig.app.json scripts/symbols.ts",
     "reflash": "tsx --tsconfig tsconfig.app.json scripts/reflash.ts"

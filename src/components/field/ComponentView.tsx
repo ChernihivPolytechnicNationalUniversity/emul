@@ -9,6 +9,7 @@ import type { DisplayFrame } from "@/sim/use-simulation"
 import { useObjectSim, type ObjectSim, type SimStore } from "@/sim/sim-store"
 import type { FieldDetail } from "./detail"
 import { formatSI } from "@/sim/units"
+import { fixedText } from "./symbol-raster"
 
 const FILL: Record<Fill, string> = {
   board: "fill-card stroke-border",
@@ -39,6 +40,7 @@ type ComponentViewProps = {
   object: PlacedObject
   grid: number
   detail: FieldDetail
+  sheeted: boolean
   selected: boolean
   parts: Record<string, PartState>
   sim: SimStore
@@ -54,6 +56,7 @@ export const ComponentView = React.memo(function ComponentView({
   object,
   grid,
   detail,
+  sheeted,
   selected,
   parts,
   sim,
@@ -100,7 +103,7 @@ export const ComponentView = React.memo(function ComponentView({
       {damage && <title>{`${props.ref ?? def.name} burnt: ${damage.reason}`}</title>}
       <g className={cn("body", damage && "opacity-50 saturate-0")}>
         {def.body.map((s, i) => (
-          <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} props={props} rotation={rotation} />
+          <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} sheeted={sheeted} props={props} rotation={rotation} />
         ))}
       </g>
       {selected && (
@@ -190,6 +193,7 @@ function Shape({
   g,
   grid,
   labels,
+  sheeted,
   props,
   rotation,
 }: {
@@ -197,10 +201,11 @@ function Shape({
   g: (v: number) => number
   grid: number
   labels: boolean
+  sheeted: boolean
   props: Record<string, string>
   rotation: Rotation
 }) {
-  if (shape.type === "text" && !labels) return null
+  if (shape.type === "text" && (!labels || (sheeted && fixedText(shape.text)))) return null
   switch (shape.type) {
     case "path":
       return (

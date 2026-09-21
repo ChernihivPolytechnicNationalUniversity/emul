@@ -3,35 +3,31 @@ import { existsSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { chromium, type Browser, type Page } from "playwright-core"
-import { lab1Stand } from "@/schematic/examples"
 import { GRID, objectPins, objectRect } from "@/schematic/geometry"
-import { partKey, type PartState, type PlacedObject, type Schematic, type Wire } from "@/schematic/types"
+import type { Schematic } from "@/schematic/types"
+import { boardDocuments, stressDocuments } from "./lib/stress"
 
-/**
- * All three interactions run at the display's frame time once culling bounds what is on screen.
- * The 1200-object zoom is the one loose limit: the harness normalises every document to about
- * 50 % zoom, which is just above the threshold where labels stop being drawn, so that row alone
- * rasterises four thousand glyphs. Nobody reads a 1200-object schematic at 50 %.
- */
 export const THRESHOLDS: Record<number, { dragP95: number; panP95: number; zoomP95: number }> = {
   30: { dragP95: 20, panP95: 20, zoomP95: 20 },
-  120: { dragP95: 20, panP95: 20, zoomP95: 50 },
-  480: { dragP95: 20, panP95: 20, zoomP95: 20 },
-  1200: { dragP95: 50, panP95: 50, zoomP95: 150 },
-  2010: { dragP95: 20, panP95: 20, zoomP95: 150 },
-  5010: { dragP95: 20, panP95: 20, zoomP95: 200 },
+  120: { dragP95: 20, panP95: 20, zoomP95: 70 },
+  480: { dragP95: 20, panP95: 20, zoomP95: 50 },
+  1200: { dragP95: 50, panP95: 50, zoomP95: 70 },
+  2010: { dragP95: 50, panP95: 50, zoomP95: 70 },
+  5010: { dragP95: 50, panP95: 50, zoomP95: 120 },
+  1: { dragP95: 20, panP95: 20, zoomP95: 20 },
+  4: { dragP95: 20, panP95: 20, zoomP95: 50 },
+  25: { dragP95: 50, panP95: 50, zoomP95: 100 },
+  100: { dragP95: 50, panP95: 50, zoomP95: 100 },
+  400: { dragP95: 50, panP95: 50, zoomP95: 100 },
+  1700: { dragP95: 50, panP95: 50, zoomP95: 100 },
 }
 
-const DEV_SERVER = "http://localhost:5173/"
+const DEV_SERVER = process.env.EMUL_URL ?? "http://localhost:5173/"
 const VIEWPORT = { width: 1600, height: 1000 }
-const TILINGS = [1, 4, 16, 40, 67, 167]
-const TILE_PITCH = { x: 100 * GRID, y: 80 * GRID }
 const LOAD_TIMEOUT_MS = 120_000
 const SETTLE_MS = 2500
 const WORKING_ZOOM = 0.48
-/** Well inside the band where the field is one canvas. */
 const CANVAS_BAND_ZOOM = 0.14
-/** The band only engages when enough is on screen to pay for the switch, so check it on a big one. */
 const CANVAS_BAND_OBJECTS = 1200
 const ZOOM_PRESSES = 24
 const ZOOM_STEP_TIMEOUT_MS = 8000
@@ -73,40 +69,8 @@ async function devServerIsUp() {
   }
 }
 
-function tiled(base: Schematic, tiles: number): Schematic {
-  const objects: PlacedObject[] = []
-  const wires: Wire[] = []
-  const parts: Record<string, PartState> = {}
-  const columns = Math.ceil(Math.sqrt(tiles))
-  for (let tile = 0; tile < tiles; tile++) {
-    const dx = (tile % columns) * TILE_PITCH.x
-    const dy = Math.floor(tile / columns) * TILE_PITCH.y
-    const renamed = new Map(base.objects.map((object) => [object.id, `${object.id}-${tile}`]))
-    for (const object of base.objects) objects.push({ ...object, id: renamed.get(object.id)!, x: object.x + dx, y: object.y + dy })
-    for (const wire of base.wires)
-      wires.push({
-        ...wire,
-        id: `${wire.id}-${tile}`,
-        from: { ...wire.from, object: renamed.get(wire.from.object)! },
-        to: { ...wire.to, object: renamed.get(wire.to.object)! },
-        points: wire.points?.map((point) => ({ x: point.x + dx, y: point.y + dy })),
-      })
-    for (const [key, state] of Object.entries(base.parts)) {
-      const [object, part] = key.split(":")
-      const renamedObject = renamed.get(object)
-      if (renamedObject) parts[partKey(renamedObject, part)] = state
-    }
-  }
-  return { objects, wires, parts }
-}
-
 const pinCount = (doc: Schematic) => doc.objects.reduce((sum, object) => sum + objectPins(object, GRID).length, 0)
 
-/**
- * What the field is showing, whichever way it is drawing it. A document large enough to open
- * zoomed into the canvas band has no component elements at all, so counting those alone would
- * wait forever.
- */
 const drawnSignature = (page: Page) =>
   page.evaluate(() => {
     const components = document.querySelectorAll("[data-slot=component]").length
@@ -114,10 +78,6 @@ const drawnSignature = (page: Page) =>
     return components > 0 ? `dom:${components}` : canvas ? `canvas:${canvas.width}x${canvas.height}` : "none"
   })
 
-/**
- * Culling means the field never holds the whole document, so readiness is "the picture stopped
- * changing" rather than "every object is in the DOM".
- */
 async function waitUntilDrawn(page: Page) {
   const deadline = Date.now() + LOAD_TIMEOUT_MS
   let previous = ""
@@ -199,16 +159,35 @@ const componentOrigins = (page: Page) =>
 
 const largestComponentInView = (page: Page) =>
   page.evaluate((margin) => {
-    let best: { x: number; y: number; width: number } | null = null
+    const safe = { left: margin.left, right: innerWidth - margin.right, top: margin.top, bottom: innerHeight - margin.bottom }
+    const candidates: { element: Element; box: DOMRect; area: number; overlap: { left: number; right: number; top: number; bottom: number } }[] = []
     for (const element of document.querySelectorAll("[data-slot=component]")) {
       const box = element.getBoundingClientRect()
-      const x = box.x + box.width / 2
-      const y = box.y + box.height / 2
-      const inView = x >= margin.left && x <= innerWidth - margin.right && y >= margin.top && y <= innerHeight - margin.bottom
-      if (!inView) continue
-      if (!best || box.width > best.width) best = { x, y, width: box.width }
+      const overlap = {
+        left: Math.max(box.left, safe.left),
+        right: Math.min(box.right, safe.right),
+        top: Math.max(box.top, safe.top),
+        bottom: Math.min(box.bottom, safe.bottom),
+      }
+      if (overlap.right <= overlap.left || overlap.bottom <= overlap.top) continue
+      candidates.push({ element, box, area: (overlap.right - overlap.left) * (overlap.bottom - overlap.top), overlap })
     }
-    return best
+    candidates.sort((a, b) => b.area - a.area)
+    for (const candidate of candidates) {
+      const { box, overlap } = candidate
+      const points: { x: number; y: number }[] = [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }]
+      for (const fx of [0.5, 0.25, 0.75]) {
+        for (const fy of [0.5, 0.25, 0.75]) {
+          points.push({ x: overlap.left + (overlap.right - overlap.left) * fx, y: overlap.top + (overlap.bottom - overlap.top) * fy })
+        }
+      }
+      for (const point of points) {
+        if (point.x < safe.left || point.x > safe.right || point.y < safe.top || point.y > safe.bottom) continue
+        if (document.elementFromPoint(point.x, point.y)?.closest("[data-slot=component]") !== candidate.element) continue
+        return { x: point.x, y: point.y, width: box.width }
+      }
+    }
+    return null
   }, GRAB_MARGIN)
 
 async function instrument(page: Page) {
@@ -327,7 +306,6 @@ const fieldShape = (page: Page): Promise<FieldShape> =>
     return out
   })
 
-/** What moved differently from the objects: everything should travel by the same offset. */
 function drifted(from: FieldShape, to: FieldShape) {
   const shared = Object.keys(from).filter((key) => key in to)
   const anObject = shared.find((key) => key.startsWith("object "))
@@ -351,11 +329,6 @@ async function dragEverything(page: Page) {
   await page.waitForTimeout(500)
 }
 
-/**
- * Selecting the whole schematic and moving it must translate it, twice running. The first pass
- * of the drag rewrite left the bend-point cache from one drag in place for the next, so every
- * bent wire crept away from its own pins on the second move and only the first was undoable.
- */
 async function checkRepeatedDrag(page: Page) {
   const before = await fieldShape(page)
   await dragEverything(page)
@@ -407,12 +380,6 @@ async function zoomTo(page: Page, want: number) {
   return (await readZoom(page)) ?? 0
 }
 
-/**
- * Below the zoom where a pin can be aimed at, the field is one canvas and the DOM holds only
- * overlays. What has to keep working there: the picture, selecting and moving a symbol by
- * geometry rather than by `elementFromPoint`, and coming back to the DOM on the way up.
- */
-/** A screen point over some object, worked out from the document — the canvas has no elements. */
 async function pointOverObject(page: Page, doc: Schematic) {
   const placed = doc.objects.map((object) => {
     const rect = objectRect(object, GRID)
@@ -424,7 +391,6 @@ async function pointOverObject(page: Page, doc: Schematic) {
       const field = document.querySelector("[data-slot=dot-field-viewport]")?.getBoundingClientRect()
       if (!content || !field) return null
       const m = new DOMMatrix(getComputedStyle(content).transform)
-      // Against the field's own box, not the window: the sidebar owns the first 256 px.
       for (const centre of centres) {
         const x = field.left + m.e + centre.x * m.a
         const y = field.top + m.f + centre.y * m.d
@@ -480,7 +446,21 @@ async function checkCanvasBand(page: Page, doc: Schematic) {
   check("leaving the band brings the DOM layers back", back.canvases === 0 && back.components > 0, `${back.components} components, ${back.canvases} canvas`)
 }
 
-type ExtraChecks = { repeatedDrag?: boolean; canvasBand?: boolean }
+async function checkThemeSwap(page: Page) {
+  const shot = () => page.evaluate(() => (document.querySelector("[data-slot=field-text]") as HTMLCanvasElement | null)?.toDataURL().length ?? 0)
+  const drawn = await shot()
+  check("the pin names are on a canvas", drawn > 0, `${drawn} bytes`)
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  await page.waitForTimeout(900)
+  const dark = await shot()
+  check("switching to dark redraws them", dark !== drawn, `${drawn} → ${dark} bytes`)
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
+  await page.waitForTimeout(900)
+  const back = await shot()
+  check("and switching back redraws them again", back !== dark, `${dark} → ${back} bytes`)
+}
+
+type ExtraChecks = { repeatedDrag?: boolean; canvasBand?: boolean; themeSwap?: boolean }
 
 async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChecks): Promise<Measured> {
   const pins = pinCount(doc)
@@ -491,6 +471,7 @@ async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChe
     const nodes = await fieldNodes(page)
     console.log(`  loaded in ${mountMs} ms, zoom ${Math.round(zoom * 100)}%, ${nodes.total} nodes in the field (path ${nodes.path}, circle ${nodes.circle}, text ${nodes.text})`)
 
+    if (extra.themeSwap) await checkThemeSwap(page)
     if (extra.canvasBand) await checkCanvasBand(page, doc)
     if (extra.repeatedDrag) await checkRepeatedDrag(page)
     if (extra.canvasBand || extra.repeatedDrag) {
@@ -565,14 +546,13 @@ const atMost = (what: string, got: number, limit: number) =>
   check(what, got <= limit, `${ms(got).padStart(12)}   at most ${ms(limit)}`)
 
 const wall0 = performance.now()
-const base = lab1Stand.build(GRID)
+const boards = process.argv.includes("boards")
 const requested = process.argv.slice(2).map(Number).filter(Number.isFinite)
-const documents = TILINGS.map((tiles) => tiled(base, tiles)).filter(
-  (doc) => requested.length === 0 || requested.includes(doc.objects.length),
-)
+const every = boards ? boardDocuments() : stressDocuments()
+const documents = every.filter((doc) => requested.length === 0 || requested.includes(doc.objects.length))
 
 if (!documents.length) {
-  console.log(`No document of that size. Sizes are ${TILINGS.map((tiles) => tiles * base.objects.length).join(", ")}.`)
+  console.log(`No document of that size. Sizes are ${every.map((doc) => doc.objects.length).join(", ")}.`)
   process.exit(1)
 }
 
@@ -593,7 +573,8 @@ for (const doc of documents) {
     results.push(
       await measureDocument(browser, doc, {
         repeatedDrag: doc === documents[0],
-        canvasBand: doc === documents[documents.length - 1] && doc.objects.length >= CANVAS_BAND_OBJECTS,
+        canvasBand: !boards && doc === documents[documents.length - 1] && doc.objects.length >= CANVAS_BAND_OBJECTS,
+        themeSwap: doc === documents[documents.length - 1],
       }),
     )
   } catch (error) {

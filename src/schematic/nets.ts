@@ -1,5 +1,7 @@
-import { objectPins, pinContacts } from "./geometry"
-import { pinKey, type PinKind, type PlacedObject, type Wire } from "./types"
+import { pinContacts } from "./contacts"
+import { objectIndex } from "./geometry"
+import { getDef, getPin } from "./registry"
+import { pinKey, type PinKind, type PinRef, type PlacedObject, type Wire } from "./types"
 
 export type NetMap = {
   netOfPin: (key: string) => string | undefined
@@ -9,6 +11,7 @@ export type NetMap = {
   kindsOf: (net: string) => ReadonlySet<PinKind>
   nets: readonly string[]
   contacts: ReadonlyMap<string, string>
+  connected: (key: string) => boolean
 }
 
 const EMPTY_KINDS: ReadonlySet<PinKind> = new Set()
@@ -23,6 +26,7 @@ export const emptyNets = (): NetMap => ({
   kindsOf: () => EMPTY_KINDS,
   nets: EMPTY_LIST,
   contacts: EMPTY_CONTACTS,
+  connected: () => false,
 })
 
 export function buildNets(objects: readonly PlacedObject[], wires: readonly Wire[], grid: number): NetMap {
@@ -46,12 +50,23 @@ export function buildNets(objects: readonly PlacedObject[], wires: readonly Wire
   }
 
   const contacts = pinContacts(objects, grid)
-  for (const [key, root] of contacts) union(key, root)
-  for (const w of wires) union(pinKey(w.from.object, w.from.pin), pinKey(w.to.object, w.to.pin))
+  for (const [key, root] of contacts.groups) union(key, root)
 
-  const kindOfPin = new Map<string, PinKind>()
-  for (const obj of objects) {
-    for (const { key, pin } of objectPins(obj, grid)) if (parent.has(key)) kindOfPin.set(key, pin.kind)
+  const byId = objectIndex(objects)
+  const kindOfPin = new Map<string, PinKind>(contacts.kinds)
+  const noteKind = (key: string, ref: PinRef) => {
+    if (kindOfPin.has(key)) return
+    const obj = byId.get(ref.object)
+    const def = obj && getDef(obj.def)
+    const kind = def && getPin(def, ref.pin)?.kind
+    if (kind) kindOfPin.set(key, kind)
+  }
+  for (const w of wires) {
+    const from = pinKey(w.from.object, w.from.pin)
+    const to = pinKey(w.to.object, w.to.pin)
+    union(from, to)
+    noteKind(from, w.from)
+    noteKind(to, w.to)
   }
 
   const wiresOf = new Map<string, string[]>()
@@ -90,6 +105,7 @@ export function buildNets(objects: readonly PlacedObject[], wires: readonly Wire
     pinsOf: (net) => pinsOf.get(net) ?? EMPTY_LIST,
     kindsOf: (net) => kindsOf.get(net) ?? EMPTY_KINDS,
     nets,
-    contacts,
+    contacts: contacts.groups,
+    connected: (key) => parent.has(key),
   }
 }

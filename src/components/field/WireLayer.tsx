@@ -220,10 +220,6 @@ export const WireLayer = React.memo(function WireLayer({
   )
 })
 
-/**
- * The wire being drawn, in an overlay of its own: it follows the cursor, and re-rendering it
- * must not touch the wires already on the field.
- */
 export function PendingWireLayer({ objects, index, pending, grid, scale }: { objects: readonly PlacedObject[]; index: SpatialIndex; pending: PendingWire | null; grid: number; scale: number }) {
   if (!pending) return null
   return (

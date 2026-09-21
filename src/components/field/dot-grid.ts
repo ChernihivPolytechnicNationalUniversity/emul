@@ -1,13 +1,8 @@
-/** Screen distance below which grid dots are thinned out. */
 const MIN_DOT_PX = 16
 
 const dotLayer = (radius: number, alpha: number) =>
   `radial-gradient(color-mix(in oklch, var(--muted-foreground) ${Math.round(35 * alpha)}%, transparent) ${radius}px, transparent ${radius}px)`
 
-/**
- * The dot grid adapts to zoom: when cells get too dense, show every 2nd/4th/… node; the dropped
- * level fades in as it grows so zooming does not pop.
- */
 export function dotGridStyle(grid: number, scale: number) {
   const cellPx = grid * scale
   let level = 1

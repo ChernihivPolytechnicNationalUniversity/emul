@@ -1,6 +1,7 @@
 import * as React from "react"
 import { SimStore } from "./sim-store"
 import { pinKey, type Damage, type PartState, type Schematic } from "@/schematic/types"
+import { TopologyGate } from "./topology"
 import type { Failure, ProbeReading, Reading, TraceChunk } from "./engine"
 import type { LogicChunk, McuStatus, Probe, Snapshot } from "./loop"
 import type { FromWorker, ToWorker } from "./worker"
@@ -110,6 +111,7 @@ function toReadout(s: Snapshot, displays: Map<string, DisplayFrame>): SimReadout
 export type SimOptions = {
   /** Simulated seconds per real second; 1 is real time. */
   speed?: number
+  contacts?: ReadonlyMap<string, string>
   /** Voltages to track across every solver step; the array identity drives the update. */
   probes?: Probe[]
   onFailure?: (f: Failure) => void
@@ -123,43 +125,7 @@ export type SimOptions = {
 }
 
 const NO_PROBES: Probe[] = []
-
-type Topology = Pick<Schematic, "objects" | "wires">
-
-/**
- * Whether two documents describe the same circuit. Positions count — coincident pins conduct
- * without a wire — but a colour, a bend point or anything else cosmetic must not restart the
- * solver.
- */
-function sameTopology(a: Topology, b: Topology) {
-  if (a.objects.length !== b.objects.length || a.wires.length !== b.wires.length) return false
-  for (let i = 0; i < a.objects.length; i++) {
-    const x = a.objects[i]
-    const y = b.objects[i]
-    if (x === y) continue
-    if (x.id !== y.id || x.def !== y.def || x.x !== y.x || x.y !== y.y) return false
-    if ((x.rotation ?? 0) !== (y.rotation ?? 0) || x.props !== y.props) return false
-  }
-  for (let i = 0; i < a.wires.length; i++) {
-    const x = a.wires[i]
-    const y = b.wires[i]
-    if (x === y) continue
-    if (x.id !== y.id) return false
-    if (x.from.object !== y.from.object || x.from.pin !== y.from.pin) return false
-    if (x.to.object !== y.to.object || x.to.pin !== y.to.pin) return false
-  }
-  return true
-}
-
-class TopologyGate {
-  private sent: Topology | null = null
-
-  latest(next: Topology): Topology {
-    if (this.sent && sameTopology(this.sent, next)) return this.sent
-    this.sent = next
-    return next
-  }
-}
+const NO_CONTACTS: ReadonlyMap<string, string> = new Map()
 
 /**
  * Runs the electrical simulation on a worker thread, at `speed` × real time.
@@ -169,7 +135,7 @@ class TopologyGate {
 export function useSimulation(
   doc: Schematic,
   running: boolean,
-  { speed = 1, probes = NO_PROBES, onFailure, traceBucket = 0, onTrace, logic = false, onLogic }: SimOptions = {},
+  { speed = 1, contacts = NO_CONTACTS, probes = NO_PROBES, onFailure, traceBucket = 0, onTrace, logic = false, onLogic }: SimOptions = {},
 ) {
   const [readout, setReadout] = React.useState<SimReadout>(idle)
   /** True once the worker has taken a step: there is then state a restart would throw away. */
@@ -220,8 +186,8 @@ export function useSimulation(
   // Topology and values: anything that changes the netlist.
   const [topologyGate] = React.useState(() => new TopologyGate())
   const topology = React.useMemo(
-    () => topologyGate.latest({ objects: doc.objects, wires: doc.wires }),
-    [doc.objects, doc.wires, topologyGate],
+    () => topologyGate.latest({ objects: doc.objects, wires: doc.wires }, contacts),
+    [doc.objects, doc.wires, contacts, topologyGate],
   )
   React.useEffect(() => {
     send({ t: "doc", doc: { ...topology, parts: {} } })

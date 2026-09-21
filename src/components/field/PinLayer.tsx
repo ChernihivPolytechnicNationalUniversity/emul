@@ -25,10 +25,6 @@ const ANCHOR: Record<Direction, "start" | "middle" | "end"> = {
   "bottom-right": "start",
 }
 
-/**
- * Fills for the far-zoom marks. A digital pin is drawn hollow up close, which at one pixel would
- * be nothing at all, so out here it takes a muted fill instead.
- */
 const PIN_MARK: Record<PinKind, string> = {
   power: "fill-red-500",
   gnd: "fill-neutral-700 dark:fill-neutral-300",
@@ -46,20 +42,16 @@ type PinLayerProps = {
   objects: readonly PlacedObject[]
   grid: number
   detail: FieldDetail
-  connectedPins: ReadonlySet<string>
+  connected: (pinKey: string) => boolean
   /** Pins that touch another pin; they are drawn as a junction dot, without a label. */
-  contactPins: ReadonlySet<string>
+  contacts: ReadonlyMap<string, string>
+  sheeted?: (object: PlacedObject) => boolean
   netColor?: (pinKey: string) => string | undefined
   onPinPointerDown: PinPointerHandler
   onPinPointerMove: PinPointerHandler
   onPinPointerUp: PinPointerHandler
 }
 
-/**
- * Every pin of one object as a single filled path per kind, for zooms where a pin is a mark
- * rather than a terminal. A 148-pin chip costs three nodes here instead of nearly six hundred,
- * which is what lets the symbol keep its pins all the way out instead of emptying into a box.
- */
 function PinMarks({ object, grid }: { object: PlacedObject; grid: number }) {
   const r = grid * MARK_CELLS
   const byKind = new Map<PinKind, string[]>()
@@ -83,17 +75,16 @@ export const PinLayer = React.memo(function PinLayer({
   objects,
   grid,
   detail,
-  connectedPins,
-  contactPins,
+  connected,
+  contacts,
+  sheeted,
   netColor,
   onPinPointerDown,
   onPinPointerMove,
   onPinPointerUp,
 }: PinLayerProps) {
   const g = (v: number) => v * grid
-  const labelled = detail.labels
   if (!detail.pins) {
-    // The canvas band draws the marks into the symbol raster instead.
     if (!detail.pinMarks || detail.canvas) return null
     return (
       <svg data-slot="pins" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
@@ -107,12 +98,14 @@ export const PinLayer = React.memo(function PinLayer({
   }
   return (
     <svg data-slot="pins" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
-      {objects.map((object) => (
+      {objects.map((object) => {
+        const names = detail.labels && !sheeted?.(object)
+        return (
         <g key={object.id} data-pins={object.id}>
           {objectPins(object, grid).map(({ key, pin, point }) => {
-            const connected = connectedPins.has(key)
-            const contact = contactPins.has(key)
-            const color = connected ? netColor?.(key) : undefined
+            const live = connected(key)
+            const contact = contacts.has(key)
+            const color = live ? netColor?.(key) : undefined
             const dir = DIR[pin.labelAt as Direction]
             const label = { x: point.x + dir.x * g(LABEL_OFFSET), y: point.y + dir.y * g(LABEL_OFFSET) }
 
@@ -126,8 +119,6 @@ export const PinLayer = React.memo(function PinLayer({
                 onPointerMove={(e) => onPinPointerMove(e, object.id, pin.id)}
                 onPointerUp={(e) => onPinPointerUp(e, object.id, pin.id)}
               >
-                {/* generous hit area; a bare node's pin sits in the middle of its body, so it keeps
-                    to its own dot and the body around it stays there to drag the node by */}
                 <circle cx={point.x} cy={point.y} r={g(pin.stub === 0 ? 0.22 : 0.45)} className="fill-transparent stroke-none" />
                 <circle
                   cx={point.x}
@@ -138,15 +129,13 @@ export const PinLayer = React.memo(function PinLayer({
                   className={cn(
                     "transition-[r] group-hover/pin:stroke-primary",
                     !color && "stroke-foreground/60",
-                    !color && connected && !contact && "stroke-primary",
+                    !color && live && !contact && "stroke-primary",
                     !(color && (contact || pin.kind === "node")) && (contact ? "fill-foreground" : PIN_FILL[pin.kind]),
                   )}
-                  strokeWidth={connected ? 2 : 1}
+                  strokeWidth={live ? 2 : 1}
                   vectorEffect="non-scaling-stroke"
                 />
-                {/* Two pins on one point draw one dot between them; their labels would overlap, and
-                    the joint is the node, not either terminal. The names stay in the readout. */}
-                {!contact && labelled && (
+                {!contact && names && (
                   <text
                     x={label.x}
                     y={label.y}
@@ -165,7 +154,8 @@ export const PinLayer = React.memo(function PinLayer({
             )
           })}
         </g>
-      ))}
+        )
+      })}
     </svg>
   )
 })

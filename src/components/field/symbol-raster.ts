@@ -1,20 +1,28 @@
-import { objectSize, rotatePin } from "@/schematic/geometry"
-import type { ComponentDef, Rotation } from "@/schematic/types"
+import { DIR, objectRect, objectSize, rotatePin, type Direction, type Rect } from "@/schematic/geometry"
+import type { ComponentDef, PlacedObject, Rotation } from "@/schematic/types"
 import type { FieldPalette } from "./field-palette"
 
-/** Stroke width of symbol paths, in screen pixels, matching the DOM layer's non-scaling stroke. */
 const SYMBOL_STROKE_PX = 2
 const HAIRLINE_PX = 1
 const PIN_MARK_CELLS = 0.16
-/** Grown by this much on every side so a stroke on the outline is not clipped. */
 const MARGIN_PX = 4
+const MAX_SYMBOL_PX = 4096
+
+export const MAX_CANVAS_PX = 16384
+
+export const deviceScale = () => Math.min(2, typeof devicePixelRatio === "number" ? devicePixelRatio : 1)
+
+const BUCKETS = [0.03125, 0.0625, 0.125, 0.25, 0.5, 1]
+
+export const rasterBucket = (scale: number) => BUCKETS.find((b) => b >= scale) ?? BUCKETS[BUCKETS.length - 1]
+
+export const labelCanvasFits = (view: Rect, scale: number) =>
+  view.w * scale * deviceScale() <= MAX_CANVAS_PX && view.h * scale * deviceScale() <= MAX_CANVAS_PX
 
 export type Symbol = {
   image: CanvasImageSource
-  /** Where the object's world origin sits inside the image, in image pixels. */
   originX: number
   originY: number
-  /** Image pixels per world pixel. */
   scale: number
   width: number
   height: number
@@ -31,14 +39,6 @@ function makeCanvas(width: number, height: number) {
   return canvas
 }
 
-/**
- * One rasterised picture per `(definition, rotation, theme, zoom bucket)`, blitted once per
- * instance. A schematic is a few dozen definitions in thousands of copies, so the cache is tiny
- * and every copy after the first is a `drawImage`. FIELD.md §11.
- *
- * Only what the canvas band draws is in here: body shapes and pin marks. Labels are already off
- * at these zooms, which is what lets per-instance props stay out of the key.
- */
 export class SymbolRaster {
   private cache = new Map<string, Symbol>()
   private palette: FieldPalette | null = null
@@ -74,7 +74,7 @@ export class SymbolRaster {
     const worldHeight = box.h * grid
     const width = Math.max(1, Math.ceil(worldWidth * scale) + MARGIN_PX * 2)
     const height = Math.max(1, Math.ceil(worldHeight * scale) + MARGIN_PX * 2)
-    if (width > 4096 || height > 4096) return null
+    if (width > MAX_SYMBOL_PX || height > MAX_SYMBOL_PX) return null
 
     const canvas = makeCanvas(width, height)
     const context = canvas.getContext("2d") as CanvasRenderingContext2D | null
@@ -82,7 +82,6 @@ export class SymbolRaster {
 
     context.translate(MARGIN_PX, MARGIN_PX)
     context.save()
-    // The symbol is drawn unrotated and turned about its own centre, exactly as the DOM svg is.
     const unrotatedWidth = def.width * grid
     const unrotatedHeight = def.height * grid
     context.translate((worldWidth * scale) / 2, (worldHeight * scale) / 2)
@@ -148,5 +147,137 @@ export class SymbolRaster {
       context.fillStyle = palette.pinMark[pin.kind]
       context.fillRect(pin.x * grid - r, pin.y * grid - r, r * 2, r * 2)
     }
+  }
+}
+
+const LABEL_OFFSET_CELLS = 0.45
+const LABEL_CELLS = 0.3
+const LABEL_MARGIN_CELLS = 6
+const MAX_SHEET_PX = 8192
+const MAX_SHEET_AREA = 8e6
+
+export function labelArea(objects: readonly PlacedObject[], grid: number): Rect | null {
+  if (objects.length === 0) return null
+  const margin = LABEL_MARGIN_CELLS * grid
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const object of objects) {
+    const rect = objectRect(object, grid)
+    minX = Math.min(minX, rect.x - margin)
+    minY = Math.min(minY, rect.y - margin)
+    maxX = Math.max(maxX, rect.x + rect.w + margin)
+    maxY = Math.max(maxY, rect.y + rect.h + margin)
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+}
+
+const BODY_TEXT_CELLS = 0.4
+
+export const fixedText = (text: string) => !text.includes("{")
+
+const TEXT_ANCHOR: Record<"start" | "middle" | "end", CanvasTextAlign> = { start: "start", middle: "center", end: "end" }
+
+const ALIGN: Record<Direction, CanvasTextAlign> = {
+  left: "right",
+  right: "left",
+  top: "center",
+  bottom: "center",
+  "top-left": "right",
+  "bottom-left": "right",
+  "top-right": "left",
+  "bottom-right": "left",
+}
+
+export class TextRaster {
+  private cache = new Map<string, Symbol>()
+  private palette: FieldPalette | null = null
+  private drawnAt = 0
+
+  setPalette(palette: FieldPalette) {
+    if (this.palette?.theme === palette.theme) return
+    this.palette = palette
+    this.cache.clear()
+  }
+
+  forgetFonts() {
+    this.cache.clear()
+  }
+
+  get size() {
+    return this.cache.size
+  }
+
+  private fitting(def: ComponentDef, rotation: Rotation, grid: number, scale: number) {
+    const box = objectSize(def, rotation)
+    const world = { w: (box.w + LABEL_MARGIN_CELLS * 2) * grid, h: (box.h + LABEL_MARGIN_CELLS * 2) * grid }
+    return Math.min(scale, MAX_SHEET_PX / world.w, MAX_SHEET_PX / world.h, Math.sqrt(MAX_SHEET_AREA / (world.w * world.h)))
+  }
+
+  get(def: ComponentDef, rotation: Rotation, grid: number, scale: number): Symbol | null {
+    const palette = this.palette
+    if (!palette) return null
+    if (scale !== this.drawnAt) {
+      this.drawnAt = scale
+      this.cache.clear()
+    }
+    const drawAt = this.fitting(def, rotation, grid, scale)
+    const id = key(def, rotation, palette.theme, drawAt)
+    const cached = this.cache.get(id)
+    if (cached) return cached
+    const drawn = this.draw(def, rotation, grid, drawAt, palette)
+    if (drawn) this.cache.set(id, drawn)
+    return drawn
+  }
+
+  private draw(def: ComponentDef, rotation: Rotation, grid: number, scale: number, palette: FieldPalette): Symbol | null {
+    const box = objectSize(def, rotation)
+    const margin = LABEL_MARGIN_CELLS * grid * scale
+    const width = Math.max(1, Math.ceil(box.w * grid * scale + margin * 2))
+    const height = Math.max(1, Math.ceil(box.h * grid * scale + margin * 2))
+
+    const canvas = makeCanvas(width, height)
+    const context = canvas.getContext("2d") as CanvasRenderingContext2D | null
+    if (!context) return null
+
+    context.translate(margin, margin)
+    context.textBaseline = "middle"
+
+    context.save()
+    context.scale(scale, scale)
+    context.font = `${LABEL_CELLS * grid}px ${palette.text.mono}`
+    for (const raw of def.pins) {
+      if (!raw.label) continue
+      const pin = rotatePin(raw, def, rotation)
+      const dir = DIR[pin.labelAt]
+      context.fillStyle = pin.kind === "nc" ? palette.text.muted : palette.text.plain
+      context.textAlign = ALIGN[pin.labelAt]
+      context.fillText(pin.label, (pin.x + dir.x * LABEL_OFFSET_CELLS) * grid, (pin.y + dir.y * LABEL_OFFSET_CELLS) * grid)
+    }
+    context.restore()
+
+    context.save()
+    context.translate((box.w * grid * scale) / 2, (box.h * grid * scale) / 2)
+    if (rotation) context.rotate((rotation * Math.PI) / 180)
+    context.scale(scale, scale)
+    context.translate((-def.width * grid) / 2, (-def.height * grid) / 2)
+    for (const shape of def.body) {
+      if (shape.type !== "text" || !fixedText(shape.text)) continue
+      const x = shape.x * grid
+      const y = shape.y * grid
+      context.save()
+      context.translate(x, y)
+      const turn = (shape.rotate ?? 0) - rotation
+      if (turn) context.rotate((turn * Math.PI) / 180)
+      context.font = `${(shape.size ?? BODY_TEXT_CELLS) * grid}px ${palette.text.sans}`
+      context.textAlign = TEXT_ANCHOR[shape.anchor ?? "middle"]
+      context.fillStyle = shape.inverse ? palette.text.inverse : shape.muted ? palette.text.muted : palette.text.plain
+      context.fillText(shape.text, 0, 0)
+      context.restore()
+    }
+    context.restore()
+
+    return { image: canvas, originX: margin, originY: margin, scale, width, height }
   }
 }

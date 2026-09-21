@@ -1,4 +1,4 @@
-import { objectRect, type Rect } from "./geometry"
+import { intersects, objectRect, type Rect } from "./geometry"
 import type { PlacedObject } from "./types"
 
 export const BUCKET_CELLS = 32
@@ -12,6 +12,7 @@ const bucketKey = (cx: number, cy: number) => (cx + BUCKET_BIAS) * BUCKET_SPAN +
 export class SpatialIndex {
   private readonly bucket: number
   private readonly objects: readonly PlacedObject[]
+  private readonly rects: Rect[]
   private readonly cells = new Map<number, number[]>()
   private readonly returnedOn: Int32Array
   private visits = 0
@@ -19,13 +20,28 @@ export class SpatialIndex {
   constructor(objects: readonly PlacedObject[], grid: number) {
     this.bucket = BUCKET_CELLS * grid
     this.objects = objects
+    this.rects = objects.map((o) => objectRect(o, grid))
     this.returnedOn = new Int32Array(objects.length)
-    for (let i = 0; i < objects.length; i++) this.bucketise(i, objectRect(objects[i], grid))
+    for (let i = 0; i < objects.length; i++) this.bucketise(i, this.rects[i])
   }
 
   query(rect: Rect): readonly PlacedObject[] {
-    const visit = this.nextVisit()
     const candidates: PlacedObject[] = []
+    this.sweep(rect, (i) => void candidates.push(this.objects[i]))
+    return candidates
+  }
+
+  overlaps(rect: Rect): boolean {
+    let found = false
+    this.sweep(rect, (i) => {
+      found ||= intersects(this.rects[i], rect)
+      return found
+    })
+    return found
+  }
+
+  private sweep(rect: Rect, visit: (index: number) => boolean | void) {
+    const at = this.nextVisit()
     const x1 = Math.floor((rect.x + rect.w) / this.bucket)
     const y1 = Math.floor((rect.y + rect.h) / this.bucket)
     for (let cx = Math.floor(rect.x / this.bucket); cx <= x1; cx++) {
@@ -33,13 +49,12 @@ export class SpatialIndex {
         const list = this.cells.get(bucketKey(cx, cy))
         if (!list) continue
         for (const i of list) {
-          if (this.returnedOn[i] === visit) continue
-          this.returnedOn[i] = visit
-          candidates.push(this.objects[i])
+          if (this.returnedOn[i] === at) continue
+          this.returnedOn[i] = at
+          if (visit(i)) return
         }
       }
     }
-    return candidates
   }
 
   private bucketise(i: number, rect: Rect) {

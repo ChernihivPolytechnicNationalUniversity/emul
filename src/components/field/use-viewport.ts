@@ -10,11 +10,6 @@ export const MAX_SCALE = 8
 const ZOOM_STEP = 1.2
 /** Time constant of the zoom follow animation: the view closes ~63% of the gap per TAU_MS. */
 const TAU_MS = 70
-/**
- * The world rectangle React renders is the screen grown by this many screens on each side, and
- * it is republished once the view has travelled a quarter of a screen or changed scale by a
- * noticeable step. The padding is what lets a pan run for a while without remounting anything.
- */
 const VIEW_PADDING_SCREENS = 1
 const VIEW_TRAVEL_FRACTION = 0.25
 const VIEW_SCALE_STEP = 0.14
@@ -32,13 +27,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scale: 0.5 }) {
   const containerRef = React.useRef<HTMLDivElement>(null)
   const contentRef = React.useRef<HTMLDivElement>(null)
-  /**
-   * The scale React is allowed to see. A pan publishes nothing at all, and a zoom publishes when
-   * it has moved a noticeable step or come to rest — the picture itself follows every frame
-   * through `paint`, which touches the DOM and not React.
-   */
   const [publishedScale, setPublishedScale] = React.useState(initial.scale)
-  /** The padded world rectangle worth rendering. Everything outside it stays out of the DOM. */
   const [view, setView] = React.useState<Rect>(EMPTY_VIEW)
   const viewPublishedAt = React.useRef<Viewport | null>(null)
   const publish = React.useCallback((scale: number) => setPublishedScale(scale), [])
@@ -55,9 +44,16 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   const paintedScale = React.useRef(NaN)
   React.useEffect(() => () => cancelAnimationFrame(raf.current), [])
 
-  const publishView = React.useCallback((v: Viewport, container: HTMLDivElement, animating: boolean) => {
-    const width = container.clientWidth
-    const height = container.clientHeight
+  const size = React.useRef({ width: 0, height: 0 })
+  const measure = React.useCallback(() => {
+    const container = containerRef.current
+    if (container) size.current = { width: container.clientWidth, height: container.clientHeight }
+    return size.current
+  }, [])
+
+  const publishView = React.useCallback((v: Viewport, animating: boolean) => {
+    const { width, height } = size.current.width ? size.current : measure()
+    if (!width || !height) return
     const shown = viewPublishedAt.current
     if (shown && animating) return
     const travelled =
@@ -75,7 +71,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
       w: width / v.scale + padX * 2,
       h: height / v.scale + padY * 2,
     })
-  }, [])
+  }, [measure])
 
   const paint = React.useCallback(
     (v: Viewport, animating = false) => {
@@ -83,7 +79,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
       if (content) content.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`
       const container = containerRef.current
       if (!container) return
-      publishView(v, container, animating)
+      publishView(v, animating)
       container.style.backgroundPosition = `${v.x}px ${v.y}px`
       if (v.scale === paintedScale.current) return
       paintedScale.current = v.scale
@@ -100,12 +96,13 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     const container = containerRef.current
     if (!container || typeof ResizeObserver === "undefined") return
     const observer = new ResizeObserver(() => {
+      measure()
       viewPublishedAt.current = null
-      publishView(current.current, container, false)
+      publishView(current.current, false)
     })
     observer.observe(container)
     return () => observer.disconnect()
-  }, [publishView])
+  }, [measure, publishView])
 
   const follow = React.useCallback(() => {
     if (raf.current) return
@@ -154,13 +151,13 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
 
   /** Viewport zoomed by `factor` around a field point (defaults to the center). */
   const zoomed = React.useCallback((v: Viewport, factor: number, px?: number, py?: number): Viewport => {
-    const el = containerRef.current
-    const cx = px ?? (el ? el.clientWidth / 2 : 0)
-    const cy = py ?? (el ? el.clientHeight / 2 : 0)
+    const { width, height } = size.current.width ? size.current : measure()
+    const cx = px ?? width / 2
+    const cy = py ?? height / 2
     const scale = clamp(v.scale * factor, MIN_SCALE, MAX_SCALE)
     const k = scale / v.scale
     return { scale, x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k }
-  }, [])
+  }, [measure])
 
   /** Smooth zoom around a point (wheel / pinch); chains from the current target. */
   const zoomAt = React.useCallback(
@@ -174,16 +171,16 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   /** Zoom and pan so that a world rectangle fills the view, with some margin. */
   const fitTo = React.useCallback(
     (r: { x: number; y: number; w: number; h: number }, margin = 48) => {
-      const el = containerRef.current
-      if (!el) return
-      const scale = clamp(Math.min((el.clientWidth - 2 * margin) / r.w, (el.clientHeight - 2 * margin) / r.h), MIN_SCALE, MAX_SCALE)
+      const { width, height } = measure()
+      if (!width || !height) return
+      const scale = clamp(Math.min((width - 2 * margin) / r.w, (height - 2 * margin) / r.h), MIN_SCALE, MAX_SCALE)
       animateTo({
         scale,
-        x: el.clientWidth / 2 - (r.x + r.w / 2) * scale,
-        y: el.clientHeight / 2 - (r.y + r.h / 2) * scale,
+        x: width / 2 - (r.x + r.w / 2) * scale,
+        y: height / 2 - (r.y + r.h / 2) * scale,
       })
     },
-    [animateTo],
+    [animateTo, measure],
   )
   const panBy = React.useCallback(
     (dx: number, dy: number) => setNow((v) => ({ ...v, x: v.x + dx, y: v.y + dy })),
@@ -191,7 +188,6 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   )
 
   /** Screen (client) coordinates -> world coordinates. */
-  /** World px per screen px, for the few things that must size themselves against the zoom. */
   const worldPerPixel = React.useCallback(() => 1 / current.current.scale, [])
 
   const toWorld = React.useCallback((clientX: number, clientY: number): Point => {
