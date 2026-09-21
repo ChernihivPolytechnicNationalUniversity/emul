@@ -1,5 +1,5 @@
 /**
- * Co-simulation check of lab 1: the "Lab 1: STM32F746 stand" schematic — a bare STM32F746IGT6
+ * Co-simulation check of lab 1: the "STM32F746 stand: LED staircase" schematic — a bare STM32F746IGT6
  * with LEDs and a joystick drawn around it — running the lab's firmware through the same
  * SimLoop the worker uses. Checks the LED staircase through the real resistors and diodes,
  * the joystick pull-ups, and the reset button on NRST.
