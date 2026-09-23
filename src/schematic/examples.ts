@@ -252,9 +252,10 @@ export const lab1Board: Example = {
 
 /**
  * Lab 1 as completed for variant 1, on the same board: a running light — one LED lit at a time,
- * stepping along the row and wrapping. The joystick drives it through EXTI on the release edge:
- * C runs it one way, B the other, A adds a second to the dwell and D takes one off (1…5 s),
- * the centre stops it. The core runs from the 16 MHz HSI, so it needs no crystal.
+ * stepping along the row and wrapping. The joystick drives it through EXTI, each edge restarting a
+ * 20 ms TIM7 window before the lines are read: C runs it one way, B the other, A adds a second to
+ * the dwell and D takes one off (1…5 s), the centre stops it. The core runs at 50 MHz from the
+ * board's 8 MHz crystal through the PLL.
  */
 export const lab1RunningLight: Example = {
   id: "lab1-running-light",
