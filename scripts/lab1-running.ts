@@ -1,9 +1,9 @@
 /**
  * Lab 1 as completed for variant 1 on the Open746I-C: a running light stepped by the joystick.
  * One LED is lit at a time; C runs it LED1→LED4, B the other way, A and D lengthen and shorten
- * the dwell between 1 and 5 s, the centre stops it. The joystick is read through EXTI on the
- * release edge (the inputs are pulled up and the buttons pull them low), so every press here is
- * a press and a release.
+ * the dwell between 1 and 5 s, the centre stops it. Every joystick edge restarts TIM7 through EXTI
+ * and the lines are read once they have held still for 20 ms; the core runs at 50 MHz from the
+ * 8 MHz crystal.
  *
  *   pnpm lab1-running
  */
@@ -50,7 +50,7 @@ const ledOn = (s: Snapshot, id: string) => s.parts[partKey(u.id, id)]?.on ?? fal
 const ledStr = (s: Snapshot) => LEDS.map((l) => (ledOn(s, l) ? "●" : "○")).join("")
 const leds = () => ledStr(loop.snapshot()!)
 
-/** Press a joystick position and let go of it: the firmware acts on the release. */
+/** Press a joystick position and let go of it: the firmware acts 20 ms into the press. */
 function tap(part: string) {
   loop.setParts({ [partKey(u.id, part)]: { pressed: true } })
   run(0.05)
@@ -72,12 +72,12 @@ function until(want: string, within: number) {
 }
 
 const wall0 = performance.now()
-console.log("Boot: HSI, LED1 lit, nothing running")
+console.log("Boot: 50 MHz from the crystal through the PLL, LED1 lit, nothing running")
 run(0.1)
 const st = loop.snapshot()!.mcus[u.id]
 expect("MCU loaded", st?.firmware ?? "none", "lab1-running-light.elf")
 expect("core running", st?.running ? "yes" : `no: ${st?.halted}`, "yes")
-expect("SYSCLK = HSI", st?.sysclk ?? 0, 16e6)
+expect("SYSCLK = HSE 8 MHz / 4 × 50 / 2", st?.sysclk ?? 0, 50e6)
 expect("LEDs after boot", leds(), "●○○○")
 run(2.5)
 expect("still LED1 after 2.5 s: stopped until told", leds(), "●○○○")
