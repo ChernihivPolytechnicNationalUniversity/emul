@@ -4,7 +4,7 @@ import { parsePad, type PadRef } from "@/mcu/stm32f429"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import { crystalStartup } from "@/schematic/components/clock"
 import { parseValue } from "./units"
-import { Engine, type Failure, type PinReader, type ProbeReading, type Reading, type TraceChunk } from "./engine"
+import { Engine, type Failure, type PartReader, type PinReader, type ProbeReading, type Reading, type TraceChunk } from "./engine"
 import { wireCurrents } from "./flow"
 import { buildNetlist, GROUND, type GpioState } from "./netlist"
 import { UartDecoder, uartFrameEdges, uartFrameSeconds, type Edge } from "./serial"
@@ -257,6 +257,8 @@ export const DT = 20e-6
 const STEPS_PER_TICK = 1500
 /** What a part with no state set reads as. */
 const NO_STATE: PartState = {}
+/** Most steps a core runs ahead of the solver in one go (`quietSteps`). */
+const QUIET_STEPS = 500
 /** Runs a remote core stays in step with the loop after traffic with a digital part (~2 ms of steps). */
 const IN_STEP_RUNS = 100
 /** Time constant of the achieved-speed average, wall-clock seconds. */
@@ -382,6 +384,8 @@ export class SimLoop {
   /** A terminal or digital part changed what it drives: the engine must read the pads again. */
   private padsDirty = true
   speed = 1
+  /** Most steps a core runs ahead of the solver in one go; 1 steps everything in lockstep. */
+  quietMax = QUIET_STEPS
   running = false
   /** Called for every part that burns out, once. */
   onFailure: ((f: Failure) => void) | null = null
@@ -1221,6 +1225,19 @@ export class SimLoop {
       }
       if (this.digitalNets.size) this.refreshReleased(engine, engine.time)
       const coupled = active.filter((i) => i.coupled)
+      // A lone core on a circuit at rest runs ahead over the steps where nothing it drives
+      // changes; the solver takes those steps after it, and the step where something did
+      // change the usual way below (the core already stands at its end).
+      if (active.length === 1 && mcus.length === 1 && !coupled.length) {
+        const inst = active[0]
+        const n = this.quietSteps(engine, inst, steps - i)
+        if (n > 1) {
+          const k = inst.mcu.runSteps(engine.time, inst.base, DT, n, inst.padVersion, inst.idd, () => this.quietDuty(inst), () => this.quietStep(engine, read))
+          if (k > 1) i += k - 1
+          // An edge that ended the run goes out before the core runs on, as after any run.
+          if (k > 0) this.deliverDigital(inst)
+        }
+      }
       for (const inst of active) {
         if (inst.coupled) continue
         const target = engine.time + DT - inst.base
@@ -1298,6 +1315,71 @@ export class SimLoop {
       }
     }
     return steps
+  }
+
+  /**
+   * How many of the next `left` steps a lone core may run ahead of the solver: the circuit
+   * settled and staying so, nothing queued to reach it (a held release, a terminal's frame,
+   * a part's scan), no pad sampled at random from a duty. 1 when it must go step by step.
+   */
+  private quietSteps(engine: Engine, inst: McuInstance, left: number): number {
+    if (left < 2 || this.padsDirty || this.heldReleases.size || !inst.padsLive) return 1
+    // An in-process core's PWM pads are sampled step by step as they run (`quietDuty`); a worker's are not.
+    if (inst.sampled.size && !(inst.mcu instanceof LocalCore)) return 1
+    for (const t of this.terminals.values()) if (t.txEdges.length) return 1
+    let n = Math.min(left, this.quietMax, engine.settledFor(DT) + 1)
+    for (const part of this.digitalParts.values()) {
+      if (!part.tick) continue
+      if (!part.quietUntil) return 1
+      // The quiet steps tick the part at their ends: all of them before it may drive.
+      n = Math.min(n, Math.floor((part.quietUntil() - engine.time) / DT))
+    }
+    return n
+  }
+
+  /**
+   * After a quiet step of an in-process core: the step's end as `advance` samples it — each
+   * wired PWM pad's duty, dithered — and whether the solver would read every pad as before.
+   * If it would, the duties are taken and the samples kept, as the step itself would have;
+   * if not, nothing is touched and the step is the core's last, for `advance` to take.
+   */
+  private quietDuty(inst: McuInstance): boolean {
+    const core = inst.mcu as LocalCore
+    const drive = (key: string) => {
+      const pad = inst.pads.get(key)
+      return pad ? core.padDrive(pad) : null
+    }
+    let state = this.ditherState
+    const now = inst.sampledPrev
+    now.clear()
+    for (const padKey of core.dutyPads()) {
+      const input = inst.inputByPad.get(padKey)
+      if (input === undefined) continue
+      const d = core.peekDuty(input.pad, DT)
+      if (d !== null && d > 0 && d < 1) {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+        now.set(input.key, state / 4294967296 < d ? "high" : "low")
+      }
+    }
+    // A sampled pad reads as its sample, any other as it drives.
+    for (const [key, level] of now) if (level !== (inst.sampled.get(key) ?? drive(key))) return false
+    for (const [key, level] of inst.sampled) if (!now.has(key) && level !== drive(key)) return false
+    for (const padKey of core.dutyPads()) {
+      const input = inst.inputByPad.get(padKey)
+      if (input !== undefined) core.takeDuty(input.pad, DT)
+    }
+    this.ditherState = state
+    inst.sampledPrev = inst.sampled
+    inst.sampled = now
+    return true
+  }
+
+  /** A step the core has already run with nothing changing: the rest of the step as `advance` takes it. */
+  private quietStep(engine: Engine, read: PartReader) {
+    this.serviceTerminals(engine.time + DT)
+    for (const part of this.digitalParts.values()) part.tick?.(engine.time + DT)
+    engine.step(DT, read, this.pinState, false)
+    this.accumulateFlow(engine, DT)
   }
 
   /** What a panel shows: composed by the core that drives its pixel clock, or by our own instance when none does. */

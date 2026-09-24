@@ -190,10 +190,10 @@ export class Dma2d extends RegBlock {
     const bcolr = this.get("BGCOLR")
     const ocolr = this.get("OCOLR") >>> 0
     // Register-to-memory: the colour is already in the output format.
-    const fill = mode === 3 ? (ocm === 0 ? ocolr : ocm === 1 ? (0xff000000 | (ocolr & 0xffffff)) >>> 0 : 0) : 0
+    const fill = mode === 3 ? (ocm === 0 ? ocolr : ocm === 1 ? (0xff000000 | (ocolr & 0xffffff)) >>> 0 : ocolr & 0xffff) : 0
     // The two bulk cases straight through memory: a fill in a 32/24-bit format, and a copy
     // between identical formats with the alpha untouched. Anything else goes pixel by pixel.
-    const bulkFill = mode === 3 && ocm <= 1
+    const bulkFill = mode === 3
     const bulkCopy = mode === 0 && fcm === ocm && ((fgpfccr >>> 16) & 3) === 0 && obpp === fbpp
     for (let y = 0; y < lines; y++) {
       const rowBytes = pixels * obpp
@@ -204,6 +204,9 @@ export class Dma2d extends RegBlock {
           if (obpp === 4) {
             const view = new DataView(bytes.buffer, bytes.byteOffset)
             for (let x = 0; x < pixels; x++) view.setUint32(offset + x * 4, fill, true)
+          } else if (obpp === 2) {
+            const view = new DataView(bytes.buffer, bytes.byteOffset)
+            for (let x = 0; x < pixels; x++) view.setUint16(offset + x * 2, fill, true)
           } else {
             const b = fill & 0xff
             const g = (fill >>> 8) & 0xff

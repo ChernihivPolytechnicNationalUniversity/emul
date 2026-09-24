@@ -28,6 +28,8 @@ export interface DigitalPart {
   interact?(part: string, state: PartState, time: number): void
   /** Time passes (called every solver step): for parts with a clock of their own (a scan period). */
   tick?(time: number): void
+  /** Until when `tick` drives nothing, as long as no input or interaction comes (a part with a `tick` and without this is never skipped over). */
+  quietUntil?(): number
   /** What the UI shows about the part, if anything. Plain data: it crosses the worker boundary. */
   snapshot(): unknown
 }
@@ -608,6 +610,11 @@ export class Gt911 extends I2cSlave {
       this.changed = false
       this.report(time)
     }
+  }
+
+  quietUntil() {
+    if (!this.rst || !(this.touches.length || this.changed) || this.regs[GT_STATUS - 0x8000] & 0x80) return Infinity
+    return this.nextReport
   }
 
   snapshot(): Gt911Snapshot {
