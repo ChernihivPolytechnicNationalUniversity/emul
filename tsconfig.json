@@ -8,9 +8,6 @@
       "path": "./tsconfig.node.json"
     },
     {
-      "path": "./tsconfig.test.json"
-    },
-    {
       "path": "./backend/shared/tsconfig.json"
     },
     {
