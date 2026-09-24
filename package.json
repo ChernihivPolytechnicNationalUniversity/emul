@@ -11,7 +11,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "typecheck": "tsc -b",
-    "test": "pnpm exam && pnpm physics && pnpm battery && pnpm wires && pnpm reflash",
+    "test": "pnpm exam && pnpm physics && pnpm battery && pnpm wires && pnpm reflash && pnpm debug",
     "preview": "vite preview",
     "exam": "tsx --tsconfig tsconfig.app.json scripts/exam.ts",
     "logic": "tsx --tsconfig tsconfig.app.json scripts/logic.ts",
@@ -52,6 +52,9 @@
     "geom-bench": "tsx --tsconfig tsconfig.app.json scripts/geom-bench.ts",
     "mcu-jit": "tsx --tsconfig tsconfig.app.json scripts/mcu-jit.ts",
     "symbols": "tsx --tsconfig tsconfig.app.json scripts/symbols.ts",
+    "st-sources": "tsx --tsconfig tsconfig.app.json scripts/st-sources.ts",
+    "peripherals": "tsx --tsconfig tsconfig.app.json scripts/peripherals.ts",
+    "debug": "tsx --tsconfig tsconfig.app.json scripts/debug.ts",
     "reflash": "tsx --tsconfig tsconfig.app.json scripts/reflash.ts"
   },
   "dependencies": {

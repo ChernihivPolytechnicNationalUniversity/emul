@@ -7,10 +7,10 @@
  */
 import { RegBlock, type RegDef } from "./regblock"
 import type { Syscfg } from "./misc"
+import { PORT_NAMES } from "../pads"
 
 export const GPIO_BASE = 0x40020000
 export const GPIO_PORTS = 11 // A..K
-export const PORT_NAMES = "ABCDEFGHIJK"
 
 /**
  * What a pad presents to the circuit. `high`/`low` are the push-pull driver (or an open-drain

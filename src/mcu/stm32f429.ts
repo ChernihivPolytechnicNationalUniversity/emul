@@ -8,9 +8,13 @@ import { Bus, type Peripheral } from "./bus"
 import type { Clocked } from "./periph/clocked"
 import { STM32F429ZI, type ChipProfile, type MemoryRegion } from "./chip"
 import { Cpu } from "./cpu"
+import { CoreDebugger } from "./debugger"
 import { parseFirmware, type Firmware } from "./elf"
 import { CpuHalt } from "./faults"
-import { Exti, Gpio, GPIO_PORTS, PORT_NAMES, type PadDrive } from "./periph/gpio"
+import type { BlockInfo, CoreDebugCommand, CoreRegisters, DebugStop, InspectReply, InspectRequest, MemoryChunk } from "@/debug/protocol"
+import { RegBlock } from "./periph/regblock"
+import { Exti, Gpio, GPIO_PORTS, type PadDrive } from "./periph/gpio"
+import { parsePad, type PadRef } from "./pads"
 import { FlashIf } from "./periph/flash"
 import { Dbgmcu, Dwt, Pwr, Syscfg } from "./periph/misc"
 import { Rcc, type ClockSource, type ClockTree } from "./periph/rcc"
@@ -70,7 +74,7 @@ class Unmodelled implements Peripheral {
   }
 }
 
-export type PadRef = { port: number; pin: number }
+export { padName, parsePad, type PadRef } from "./pads"
 export type ResetCause = "por" | "system" | "iwdg" | "wwdg" | "standby"
 export type PowerMode = "run" | "sleep" | "stop" | "standby"
 export type ClockStatus = {
@@ -84,18 +88,6 @@ export type ClockStatus = {
 }
 
 export type PowerStatus = { mode: PowerMode; asleep: number; current: number; regulator: "main" | "low-power" | "under-drive" }
-
-/** "PA5" → { port: 0, pin: 5 }. */
-export function parsePad(name: string): PadRef | null {
-  const m = /^P([A-K])(\d{1,2})$/.exec(name)
-  if (!m) return null
-  const pin = Number(m[2])
-  if (pin > 15) return null
-  return { port: PORT_NAMES.indexOf(m[1]), pin }
-}
-export function padName(p: PadRef) {
-  return `P${PORT_NAMES[p.port]}${p.pin}`
-}
 
 export class Stm32 {
   readonly chip: ChipProfile
@@ -463,6 +455,105 @@ export class Stm32 {
     for (const seg of this.firmware.segments) this.bus.load(seg.addr, seg.data)
     this.flash.restoreOptions()
     this.reset()
+    // Breakpoints go onto the new image before its first instruction runs.
+    this.cpu.dbg?.onLoad(this.firmware)
+  }
+
+  // --- debugging ---------------------------------------------------------------------------------
+
+  /** The debug unit, made the first time anything debugs this core (plain `cpu.breakpoints` halt it instead). */
+  get debugger(): CoreDebugger {
+    let d = this.cpu.dbg
+    if (!d) {
+      d = new CoreDebugger(this.cpu)
+      this.cpu.dbg = d
+      d.onLoad(this.firmware)
+    }
+    return d
+  }
+
+  debug(cmd: CoreDebugCommand) {
+    const d = this.debugger
+    switch (cmd.op) {
+      case "breakpoints":
+        d.setBreakpoints(cmd.list)
+        break
+      case "catch":
+        d.catchFaults = cmd.faults
+        break
+      case "resume":
+        d.resume()
+        break
+      case "step":
+        d.step(cmd.step)
+        break
+    }
+  }
+
+  /** Where the core is stopped for the debugger, when it is. */
+  get debugStop(): DebugStop | null {
+    return this.cpu.dbg?.stop ?? null
+  }
+
+  /** Registers and memory as they are, read without side effects: the debugger's view of a stopped (or any) core. */
+  inspect(req: InspectRequest): InspectReply {
+    const cpu = this.cpu
+    let regs: CoreRegisters | null = null
+    if (req.regs) {
+      const r = [...cpu.r]
+      r[15] = cpu.pc
+      regs = {
+        r,
+        xpsr: cpu.xpsr,
+        msp: cpu.getMsp(),
+        psp: cpu.getPsp(),
+        primask: cpu.primask,
+        basepri: cpu.basepri,
+        faultmask: cpu.faultmask,
+        control: cpu.control,
+        s: [...cpu.sBits],
+        fpscr: cpu.fpscr,
+        cycles: cpu.cycles,
+        instructions: cpu.instructions,
+        sleeping: cpu.sleeping,
+      }
+    }
+    const blocks: BlockInfo[] | undefined = req.blocks
+      ? this.bus.peripherals
+          .filter((p) => p !== this.unmodelled)
+          .map((p) => ({ name: p.name, base: p.base, size: p.size, registers: p instanceof RegBlock ? p.registerList().map((d) => ({ name: d.name, offset: d.offset })) : [] }))
+          .sort((a, b) => a.base - b.base)
+      : undefined
+    return { regs, memory: (req.ranges ?? []).map((q) => this.peekRange(q.addr >>> 0, Math.max(0, Math.min(q.size, 1 << 24)))), blocks, stop: this.debugStop, time: this.time, halted: cpu.halted?.message ?? null }
+  }
+
+  /** `size` bytes from `addr`: memories copied as they are, registers peeked a word at a time. */
+  private peekRange(addr: number, size: number): MemoryChunk {
+    const bytes = new Uint8Array(size)
+    const invalid: [number, number][] = []
+    const bad = (lo: number, hi: number) => {
+      const last = invalid[invalid.length - 1]
+      if (last && last[1] === lo) last[1] = hi
+      else invalid.push([lo, hi])
+    }
+    const end = addr + size
+    for (let a = addr; a < end; ) {
+      const mem = this.bus.memoryAt(a)
+      if (mem) {
+        const off = mem.offsetOf(a)
+        const n = Math.min(end - a, mem.bytes.length - off)
+        bytes.set(mem.bytes.subarray(off, off + n), a - addr)
+        a += n
+        continue
+      }
+      const word = a & ~3
+      const v = this.bus.peek(word >>> 0, 4)
+      const stop = Math.min(end, word + 4)
+      if (v === null) bad(a, stop)
+      else for (let b = a; b < stop; b++) bytes[b - addr] = (v >>> ((b - word) * 8)) & 0xff
+      a = stop
+    }
+    return invalid.length ? { addr, bytes, invalid } : { addr, bytes }
   }
 
   /**
@@ -655,6 +746,7 @@ export class Stm32 {
       if (vector === this.chip.flash.system.base) this.unmodelled.feature("system bootloader (BOOT0 high)")
       if (this.flash.iwdgHardware()) this.iwdg.hardwareStart()
     } else this.cpu.halted = new CpuHalt("fault", "no firmware loaded", 0)
+    this.cpu.dbg?.onReset()
   }
 
   get clocks(): ClockTree {
@@ -676,8 +768,9 @@ export class Stm32 {
     return this.clocksCache
   }
 
+  /** Firmware loaded, not halted, and not stopped by the debugger. */
   get running() {
-    return this.firmware !== null && this.cpu.halted === null
+    return this.firmware !== null && this.cpu.halted === null && !this.cpu.dbg?.stop
   }
 
   /**
@@ -710,6 +803,8 @@ export class Stm32 {
         this.sliceStart = this.cpu.cycles
         // A breakpoint halts the core without spending cycles; stop instead of spinning.
         if (this.cpu.halted) return false
+        // Stopped for the debugger (a breakpoint, a finished step): the slice ends here.
+        if (this.cpu.dbg?.stop) return false
         if (this.cpu.resetRequested) {
           const cause = this.resetCause === "por" ? "system" : this.resetCause
           this.resetCause = "por"

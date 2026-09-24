@@ -4,6 +4,7 @@ import { parsePad, type PadRef } from "@/mcu/stm32f429"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import { crystalStartup } from "@/schematic/components/clock"
 import { parseValue } from "./units"
+import { DT } from "./speeds"
 import { Engine, type Failure, type PinReader, type ProbeReading, type Reading, type TraceChunk } from "./engine"
 import { wireCurrents } from "./flow"
 import { buildNetlist, GROUND, type GpioState } from "./netlist"
@@ -11,6 +12,7 @@ import { UartDecoder, uartFrameEdges, uartFrameSeconds, type Edge } from "./seri
 import { createDigitalPart, type DigitalPart } from "./digital"
 import { PanelInstance } from "./display"
 import { LocalCore, makeCore, type CoreHost, type CoreStatus, type CoreTransport, type PanelWiring } from "./core-host"
+import type { BreakpointSpec, CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 
 /**
  * Shortest press a button registers, in simulated seconds. A mouse click can come and go
@@ -187,7 +189,14 @@ class McuInstance {
     remote.dispose()
     const def = getDef(this.defId)
     this.mcu = makeCore(def?.chip, def?.mcuMemory, null)
+    this.applyDebug()
     if (this.data) this.mcu.load(this.data.slice(0), this.name)
+  }
+  /** What the debugger has set for this board: kept here so a new core (a relocation) gets it too. */
+  debug: { breakpoints: BreakpointSpec[]; faults: boolean } = { breakpoints: [], faults: false }
+  applyDebug() {
+    this.mcu.debug({ op: "breakpoints", list: this.debug.breakpoints })
+    this.mcu.debug({ op: "catch", faults: this.debug.faults })
   }
   /** The firmware image, kept for a relocation. */
   data: ArrayBuffer | null = null
@@ -247,8 +256,6 @@ function decodeBase64(text: string): ArrayBuffer {
   return out.buffer
 }
 
-/** Simulation time step. */
-export const DT = 20e-6
 /**
  * Solver steps per tick at 1× speed, so heavy circuits slow down instead of freezing.
  * The budget scales with the requested speed, which stays a ceiling rather than a promise.
@@ -384,6 +391,10 @@ export class SimLoop {
   running = false
   /** Called for every part that burns out, once. */
   onFailure: ((f: Failure) => void) | null = null
+  /** Called when cores stop for the debugger; the bench is paused by then. */
+  onDebugStop: ((stops: { object: string; stop: DebugStop }[]) => void) | null = null
+  /** Debug settings by board, for boards whose core does not exist yet (the document has not arrived). */
+  private debugConfig = new Map<string, { breakpoints: BreakpointSpec[]; faults: boolean }>()
 
   setDoc(doc: Schematic) {
     this.doc = doc
@@ -480,6 +491,11 @@ export class SimLoop {
       const reflash = !!inst && inst.loadedFrom !== ""
       if (!inst) {
         inst = new McuInstance(obj.id, obj.def, this.spawnCore)
+        const cfg = this.debugConfig.get(obj.id)
+        if (cfg) {
+          inst.debug = cfg
+          inst.applyDebug()
+        }
         this.mcus.set(obj.id, inst)
       }
       if (inst.loadedFrom !== data) {
@@ -1014,6 +1030,8 @@ export class SimLoop {
   setRunning(running: boolean) {
     if (running === this.running) return
     this.running = running
+    // The bench goes on: every core stopped for the debugger goes on with it.
+    if (running) for (const inst of this.mcus.values()) if (inst.mcu.debugStop) inst.mcu.debug({ op: "resume" })
     // A pause must not bank wall-clock time, or resuming would fast-forward.
     this.last = null
     this.rate = null
@@ -1028,6 +1046,64 @@ export class SimLoop {
           inst.base = this.engine?.time ?? 0
         }
     }
+  }
+
+  // --- debugging -------------------------------------------------------------------------------
+  //
+  // A core that stops for the debugger (a breakpoint, a step done, a fault caught) freezes the
+  // whole bench at that instant: the circuit, the instruments and every other core wait with
+  // it, and going on (continue, or a step) takes all of them along — a step advances the bench
+  // by exactly the time the stepped code takes.
+
+  /** A debugger command for a board's core; `resume` and `step` also set the bench running. */
+  debug(object: string, cmd: CoreDebugCommand) {
+    const cfg = this.debugConfig.get(object) ?? { breakpoints: [], faults: false }
+    if (cmd.op === "breakpoints") cfg.breakpoints = cmd.list
+    if (cmd.op === "catch") cfg.faults = cmd.faults
+    this.debugConfig.set(object, cfg)
+    const inst = this.mcus.get(object)
+    if (inst) inst.debug = cfg
+    if (cmd.op === "breakpoints" || cmd.op === "catch") {
+      inst?.mcu.debug(cmd)
+      return
+    }
+    if (cmd.op === "step" && inst) inst.mcu.debug(cmd)
+    this.setRunning(true)
+  }
+
+  /**
+   * Reset one board's core as a debug probe does: the program starts over, the backup domain
+   * and the rest of the bench keep their state and their time.
+   */
+  resetCore(object: string) {
+    const inst = this.mcus.get(object)
+    if (!inst?.mcu.loaded) return
+    inst.mcu.reset({ backup: true })
+    inst.base = this.engine?.time ?? 0
+    inst.digitalPads.clear()
+  }
+
+  /** Registers and memory of a board's core, read without side effects; null when it has none. */
+  inspect(object: string, req: InspectRequest): Promise<InspectReply | null> {
+    const inst = this.mcus.get(object)
+    return inst ? inst.mcu.inspect(req) : Promise.resolve(null)
+  }
+
+  /** After the cores' runs of a step: pause the bench if any stopped for the debugger. */
+  private debugStops(mcus: McuInstance[]): boolean {
+    let stops: { object: string; stop: DebugStop }[] | null = null
+    for (const inst of mcus) {
+      const stop = inst.mcu.debugStop
+      if (stop) (stops ??= []).push({ object: inst.object, stop })
+    }
+    if (!stops) return false
+    this.running = false
+    this.last = null
+    this.rate = null
+    // All-stop, as GDB has it: a step another core was taking is over.
+    for (const inst of mcus) if (!inst.mcu.debugStop && inst.mcu.running) inst.mcu.debug({ op: "resume" })
+    this.onDebugStop?.(stops)
+    return true
   }
 
   /** Stop the workers the cores live in (a script that is done with the loop). */
@@ -1276,6 +1352,10 @@ export class SimLoop {
         this.rebuild(true)
         return i + 1
       }
+      // A core stopped for the debugger freezes the bench at the end of this step: the circuit
+      // shows what the core left on its pins (a step over a GPIO write lights the LED), and
+      // nothing runs on.
+      if (this.debugStops(mcus)) return i + 1
     }
     return steps
   }
@@ -1288,10 +1368,10 @@ export class SimLoop {
     return host ? host.capturePanel(p, wall, powered) : p.own.capture(wall, powered)
   }
 
-  /** Current operating point, shaped for the UI. Built on demand, not on every step. */
-  snapshot(): Snapshot | null {
+  /** Current operating point, shaped for the UI. Built on demand, not on every step; `paused` builds one for a bench that is not running (a debugger stop). */
+  snapshot(paused = false): Snapshot | null {
     const engine = this.engine
-    if (!engine || !this.running) return null
+    if (!engine || (!this.running && !paused)) return null
     const { net } = engine
     const pinVoltage: Record<string, number> = {}
     const pinVoltageRms: Record<string, number> = {}
@@ -1303,7 +1383,9 @@ export class SimLoop {
     net.elements.forEach((el, index) => {
       if (el.kind !== "D" || !el.part) return
       // Brightness follows the current the eye would average, so PWM dimming and AC both read steadily.
-      const i = engine.diodeAvg[index]
+      // A bench frozen by the debugger shows the current as it stands: the pins stay where the
+      // stopped code left them for as long as the eye cares to look.
+      const i = paused && !this.running ? engine.diodeI[index] : engine.diodeAvg[index]
       const level = i < LED_DARK ? 0 : Math.min(1, i / LED_FULL)
       parts[partKey(el.object, el.part)] = { on: level > 0.05, level }
     })

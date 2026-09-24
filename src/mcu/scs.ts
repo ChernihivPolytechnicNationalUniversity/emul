@@ -276,6 +276,15 @@ export class Scs extends WordPeripheral {
 
   // --- register file ----------------------------------------------------------------------
 
+  /** SYST_CSR without clearing COUNTFLAG, the one read here with a side effect. */
+  peekWord(off: number): number {
+    if (off === 0x010) {
+      this.sync(this.cpu.cycles)
+      return this.systCsr | (this.systCountflag << 16)
+    }
+    return this.readWord(off)
+  }
+
   readWord(off: number): number {
     switch (off) {
       case 0x004: // ICTR: number of interrupt lines / 32 - 1

@@ -94,8 +94,10 @@ the NVIC. Reported by name in the inspector until then.
 
 ## Phase 3 — Debugging and tooling
 
-- [ ] **3.1 Debugger panel** — run/pause/step, breakpoints by address and by source line (DWARF from the ELF),
-  registers, call stack, memory view, disassembly with symbols.
+- [x] **3.1 Debugger panel** (2026-09-24; no watchpoints, conditional breakpoints or writes to registers/memory) — run/pause/step, breakpoints by address and by source line (DWARF from the ELF),
+  registers, call stack, memory view, disassembly with symbols. In the code editor: the current line, values inline and
+  on hover, watches, peripheral registers; sources added for an image built elsewhere, ST's sources from the site; the
+  optimization level per board. A stop freezes the whole bench. Test: `pnpm debug`.
 - [ ] **3.2 MPU enforcement** — MemManage faults on region violations, so the CubeMX MPU config is real.
 - [ ] **3.3 Performance** — the interpreter runs at ~0.3–0.5× real time at 50–180 MHz; a decoded-block cache or
   a JIT-free threaded dispatch to reach ≥ 1×.
@@ -105,5 +107,5 @@ the NVIC. Reported by name in the inspector until then.
 - Every new limitation found goes into the table in `docs/coverage.md` the moment it is found.
 - Anything detectable at run time (unmodelled block, unclaimed AF pin, unsupported instruction) is reported in
   the inspector, never swallowed.
-- `pnpm mcu-test mcu-blink nucleo-fw lab1 lab1-sim mcu-tim nucleo-pwm mcu-uart nucleo-serial mcu-spi nucleo-spi mcu-i2c nucleo-i2c mcu-i2c-v2 mcu-dma mcu-adc nucleo-adc mcu-wdg mcu-lp nucleo-lp mcu-flash chip-clock analyser meters physics exam` stay green after every step.
+- `pnpm mcu-test mcu-blink nucleo-fw lab1 lab1-sim mcu-tim nucleo-pwm mcu-uart nucleo-serial mcu-spi nucleo-spi mcu-i2c nucleo-i2c mcu-i2c-v2 mcu-dma mcu-adc nucleo-adc mcu-wdg mcu-lp nucleo-lp mcu-flash chip-clock analyser meters physics exam debug` stay green after every step.
 - Test the bench, not just the palette: a part's readout and rating say nothing about what happens when a switch opens on a coil, a supply is reversed, or an output is shorted. `pnpm physics` holds those scenarios; every new part gets one.

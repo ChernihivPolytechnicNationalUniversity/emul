@@ -25,8 +25,10 @@ import { bytesToBase64 } from "@/lib/bytes"
 import { useEvent } from "@/hooks/use-event"
 import { useSchematic, type Clip } from "@/schematic/use-schematic"
 import { toast } from "sonner"
-import { DT } from "@/sim/loop"
+import { DT } from "@/sim/speeds"
 import { useSimulation } from "@/sim/use-simulation"
+import { boardFromObject, DebugController } from "@/debug/session"
+import type { BuildRecord } from "@/debug/sources"
 import { Scope, SCOPE_COLUMNS, TIMEBASES, type ScopeMode } from "@/components/scope/Scope"
 import { TraceStore } from "@/components/scope/trace-store"
 import { LogicAnalyser, LOGIC_SPANS, DEFAULT_DECODER, type DecoderConfig } from "@/components/logic/LogicAnalyser"
@@ -194,15 +196,32 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   if (selectedBoard && selectedBoard.id !== codeBoardId) setCodeBoardId(selectedBoard.id)
   // The one board on the schematic needs no picking.
   const codeBoard = boards.find((o) => o.id === codeBoardId) ?? (boards.length === 1 ? boards[0]! : null)
+  // A build's image goes onto the board with what it was built from, which the debugger reads.
   const onFirmware = React.useCallback(
-    (id: string, name: string, bytes: Uint8Array) => sch.setProps(id, { firmware: name, firmwareData: bytesToBase64(bytes) }),
+    (id: string, name: string, bytes: Uint8Array, build: BuildRecord) => sch.setProps(id, { firmware: name, firmwareData: bytesToBase64(bytes), firmwareBuild: JSON.stringify(build) }),
     [sch],
   )
+
+  // --- the debugger ----------------------------------------------------------------
+  // One controller for the bench: it reaches the cores through the simulation worker (set
+  // below, once the hook has made it) and drives Run/Pause and the code panel.
+  const [debug] = React.useState(
+    () =>
+      new DebugController({
+        setRunning: (running) => setSimRunning(running),
+        reveal: (object) => {
+          setCodeBoardId(object)
+          setCodeOpen(true)
+        },
+      }),
+  )
+  React.useEffect(() => debug.sync(boards.map((o) => boardFromObject(o, getDef(o.def)?.chip ?? ""))), [debug, boards])
+  React.useEffect(() => debug.onRunning(simRunning), [debug, simRunning])
 
   const { objects: docObjects, wires: docWires } = sch.doc
   const [router] = React.useState(() => new Router())
   const nets = React.useMemo(() => buildNets(docObjects, docWires, grid), [docObjects, docWires, grid])
-  const { sim, simStore, restart, started, sendSerial } = useSimulation(sch.doc, simRunning, {
+  const { sim, simStore, restart, started, sendSerial, debug: debugApi } = useSimulation(sch.doc, simRunning, {
     speed,
     contacts: nets.contacts,
     probes: measure.probes,
@@ -211,7 +230,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     onTrace,
     logic: logicOpen,
     onLogic,
+    onDebugStop: (stops) => debug.onStop(stops),
+    onRunning: setSimRunning,
   })
+  React.useLayoutEffect(() => debug.attach(debugApi), [debug, debugApi])
   const index = React.useMemo(() => new SpatialIndex(docObjects, grid), [docObjects, grid])
   const routes = React.useMemo(
     () => nudgeRoutes(router.routeAll(docObjects, docWires, grid), nets.netOfWire, grid),
@@ -1198,7 +1220,18 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     </ContextMenu>
       {codeOpen && (
         <React.Suspense fallback={<div className="w-160 shrink-0 border-l bg-background" />}>
-          <CodePanel ref={codeEditor} board={codeBoard} boards={boards} onPick={(id) => sch.selectObject(id)} onFiles={sch.setProject} onFirmware={onFirmware} onClose={() => setCodeOpen(false)} />
+          <CodePanel
+            ref={codeEditor}
+            board={codeBoard}
+            boards={boards}
+            onPick={(id) => sch.selectObject(id)}
+            onFiles={sch.setProject}
+            onFirmware={onFirmware}
+            onBuild={sch.setBuild}
+            onDebug={sch.setDebug}
+            debug={debug}
+            onClose={() => setCodeOpen(false)}
+          />
         </React.Suspense>
       )}
     </div>

@@ -181,3 +181,57 @@
     @apply font-sans;
     }
 }
+/*
+ * The debugger's marks in the code editor (components/code/Editor.tsx): breakpoints in the
+ * glyph margin — set, set where the program has no code, turned off, and the hint where the
+ * pointer would set one — the line the core is at (and a caller's, in green), and the values
+ * shown after the lines that use them. The editor is always on its light theme.
+ */
+.monaco-editor .dbg-bp::before,
+.monaco-editor .dbg-bp-hint::before {
+  content: "";
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: 5px auto 0;
+  border-radius: 50%;
+}
+.monaco-editor .dbg-bp-verified::before {
+  background: #e51400;
+}
+.monaco-editor .dbg-bp-unverified::before {
+  border: 1.5px solid #848484;
+  background: transparent;
+}
+.monaco-editor .dbg-bp-disabled::before {
+  background: #a0a0a0;
+}
+.monaco-editor .dbg-bp-hint::before {
+  background: rgb(229 20 0 / 0.35);
+}
+.monaco-editor .dbg-exec-line {
+  background: rgb(255 238 0 / 0.28);
+}
+.monaco-editor .dbg-frame-line {
+  background: rgb(63 185 80 / 0.18);
+}
+.monaco-editor .dbg-exec-arrow::after,
+.monaco-editor .dbg-frame-arrow::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: 3px;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 9px solid #c4a000;
+}
+.monaco-editor .dbg-frame-arrow::after {
+  border-left-color: #2f9e44;
+}
+.monaco-editor .dbg-inline-value {
+  color: #6b7280;
+  font-style: italic;
+  opacity: 0.9;
+}

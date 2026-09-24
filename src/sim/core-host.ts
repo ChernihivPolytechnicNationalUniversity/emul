@@ -23,6 +23,7 @@ import { CpuHalt } from "@/mcu/faults"
 import type { PadDrive } from "@/mcu/periph/gpio"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import { Stm32, type ClockStatus, type PadRef, type PowerStatus } from "@/mcu/stm32f429"
+import type { CoreDebugCommand, DebugStop, InspectReply, InspectRequest, StopReason } from "@/debug/protocol"
 import type { PanelSignal, PanelSpec } from "@/schematic/types"
 import { PanelInstance } from "./display"
 
@@ -48,6 +49,8 @@ export type CoreStatus = {
   power: PowerStatus
   /** System clock source and rate, what feeds HSE/LSE, and why an oscillator the firmware waits on is not coming. */
   clock: ClockStatus
+  /** Stopped for the debugger: a breakpoint, a finished step, a caught fault. */
+  debug: DebugStop | null
   /**
    * Where the core runs: in the loop's thread, in a worker pipelined one step behind it (pad
    * and pin levels cross with 20 µs of latency), or in a worker in step with it.
@@ -111,6 +114,12 @@ export interface CoreHost {
   capturePanel(panel: PanelWiring, wall: number, powered: boolean): { frame: ArrayBuffer | null; status: string }
   /** The panel left the document. */
   dropPanel(object: string): void
+  /** Breakpoints, vector catch, resume and steps for the core's debug unit (see mcu/debugger.ts). */
+  debug(cmd: CoreDebugCommand): void
+  /** Where the core is stopped for the debugger; a remote core's is as of its last completed run. */
+  readonly debugStop: DebugStop | null
+  /** Registers and memory, read without side effects. */
+  inspect(req: InspectRequest): Promise<InspectReply>
   dispose(): void
 }
 
@@ -258,6 +267,15 @@ export class LocalCore implements CoreHost {
   dropPanel(object: string) {
     this.panels.delete(object)
   }
+  debug(cmd: CoreDebugCommand) {
+    this.mcu.debug(cmd)
+  }
+  get debugStop() {
+    return this.mcu.debugStop
+  }
+  inspect(req: InspectRequest) {
+    return Promise.resolve(this.mcu.inspect(req))
+  }
   dispose() {}
 }
 
@@ -277,6 +295,7 @@ export function statusOf(mcu: Stm32, host: CoreStatus["host"]): CoreStatus {
     backupKept: mcu.backupKept,
     power: mcu.powerStatus(),
     clock: mcu.clockStatus(),
+    debug: mcu.debugStop,
     host,
   }
 }
@@ -317,11 +336,15 @@ export const CMD_BACKUP = 8
 export const OUT_LOADED = 1
 export const OUT_RUNNING = 2
 export const OUT_HALTED = 4
+/** Stopped for the debugger; the output bank has the PC and the reason. */
+export const OUT_STOPPED = 8
+/** Stop reasons as the output bank codes them. */
+export const STOP_REASONS: StopReason[] = ["breakpoint", "step", "pause", "bkpt", "exception", "reset"]
 
 /** Command bank layout (Float64 offsets within the bank). */
 export const CMD = { TARGET: 0, FLAGS: 1, HSE_HZ: 2, HSE_KIND: 3, HSE_START: 4, LSE_HZ: 5, LSE_KIND: 6, LSE_START: 7, LEVELS: 8, ANALOG: 8 + PAD_KEYS, BATTERY: 8 + 2 * PAD_KEYS, SIZE: 9 + 2 * PAD_KEYS } as const
 /** Output bank layout. */
-export const OUT = { TIME: 0, FLAGS: 1, IDD: 2, POR: 3, DRIVE: 4, DUTY: 4 + PAD_KEYS, SIZE: 4 + 2 * PAD_KEYS } as const
+export const OUT = { TIME: 0, FLAGS: 1, IDD: 2, POR: 3, STOP_PC: 4, STOP_REASON: 5, DRIVE: 6, DUTY: 6 + PAD_KEYS, SIZE: 6 + 2 * PAD_KEYS } as const
 /** Edge rings: [time, code] pairs; code = key·4 + level (0 low, 1 high, 2 released). */
 export const OUT_RING = 8192
 export const IN_RING = 2048
@@ -372,8 +395,13 @@ export type ToCore =
   | { t: "panel"; object: string; spec: PanelSpec; wired: [PanelSignal, PadRef][] }
   | { t: "capture"; object: string; wall: number; powered: boolean }
   | { t: "drop"; object: string }
+  | { t: "debug"; cmd: CoreDebugCommand }
+  | { t: "inspect"; seq: number; req: InspectRequest }
 /** Messages from the core worker. */
-export type FromCore = { t: "status"; seq: number; status: CoreStatus } | { t: "frame"; object: string; frame: ArrayBuffer | null; status: string }
+export type FromCore =
+  | { t: "status"; seq: number; status: CoreStatus }
+  | { t: "frame"; object: string; frame: ArrayBuffer | null; status: string }
+  | { t: "inspected"; seq: number; reply: InspectReply }
 
 /** How a remote core's messages travel; the environment (browser or node) provides it. */
 export interface CoreTransport {
@@ -401,6 +429,10 @@ export class RemoteCore implements CoreHost {
   private loadedFlag = false
   private haltedFlag = false
   private runningFlag = false
+  /** The debugger's stop, as the last completed run reported it. */
+  private stopFlag: DebugStop | null = null
+  private inspectSeq = 0
+  private readonly inspecting = new Map<number, (reply: InspectReply) => void>()
   private lastTime = 0
   private targetTime = 0
   private lastStatus: CoreStatus | null = null
@@ -450,6 +482,10 @@ export class RemoteCore implements CoreHost {
           f.frame = msg.frame
           f.status = msg.status
         }
+      } else if (msg.t === "inspected") {
+        const done = this.inspecting.get(msg.seq)
+        this.inspecting.delete(msg.seq)
+        done?.(msg.reply)
       }
     })
     this.post({ t: "init", chip: chip.id, external, shm })
@@ -496,6 +532,7 @@ export class RemoteCore implements CoreHost {
     this.loadedFlag = true
     this.haltedFlag = false
     this.haltReason = null
+    this.stopFlag = null
     this.post({ t: "load", data, name }, [data])
     this.runningFlag = true
     this.lastTime = 0
@@ -508,6 +545,7 @@ export class RemoteCore implements CoreHost {
     this.resetBackup = !!opts.backup
     this.haltedFlag = false
     this.haltReason = null
+    this.stopFlag = null
     this.runningFlag = this.loadedFlag
     this.lastTime = 0
     // Pads come up floating at reset; the core confirms after its next run.
@@ -575,6 +613,7 @@ export class RemoteCore implements CoreHost {
     this.loadedFlag = (flags & OUT_LOADED) !== 0
     this.runningFlag = (flags & OUT_RUNNING) !== 0
     this.haltedFlag = (flags & OUT_HALTED) !== 0
+    this.stopFlag = flags & OUT_STOPPED ? { reason: STOP_REASONS[this.outBank[OUT.STOP_REASON]] ?? "breakpoint", pc: this.outBank[OUT.STOP_PC] } : null
     this.lastTime = this.outBank[OUT.TIME]
     // Edges the run made, in order.
     const head = Atomics.load(this.ctl, CTL.OUT_HEAD)
@@ -591,7 +630,7 @@ export class RemoteCore implements CoreHost {
 
   runUntil(end: number) {
     this.finish()
-    if (!this.loadedFlag || this.haltedFlag) return false
+    if (!this.loadedFlag || this.haltedFlag || this.stopFlag) return false
     const bank = this.next
     bank[CMD.TARGET] = end
     // Yielding per edge only makes sense in step: pipelined, a run that stopped early would fall behind.
@@ -677,9 +716,10 @@ export class RemoteCore implements CoreHost {
         backupKept: false,
         power: { mode: "run", asleep: 0, current: 0, regulator: "main" },
         clock: { source: "HSI", pllSource: "HSI", sysclk: 0, hse: null, lse: null, problems: [] },
+        debug: this.stopFlag,
         host,
       }
-    return { ...s, running: this.runningFlag, halted: this.haltedFlag ? (this.haltReason ?? s.halted ?? "halted") : null, time: this.lastTime, host }
+    return { ...s, running: this.runningFlag, halted: this.haltedFlag ? (this.haltReason ?? s.halted ?? "halted") : null, time: this.lastTime, debug: this.stopFlag, host }
   }
   capturePanel(panel: PanelWiring, wall: number, powered: boolean) {
     const wired: [PanelSignal, PadRef][] = []
@@ -701,8 +741,34 @@ export class RemoteCore implements CoreHost {
     this.frames.delete(object)
     this.post({ t: "drop", object })
   }
+  debug(cmd: CoreDebugCommand) {
+    // The worker takes it before the next run; a core going on is running from now on as far as the loop is concerned.
+    this.finish()
+    this.post({ t: "debug", cmd })
+    if (cmd.op === "resume" || cmd.op === "step") {
+      this.stopFlag = null
+      this.runningFlag = this.loadedFlag && !this.haltedFlag
+    }
+  }
+  get debugStop() {
+    return this.stopFlag
+  }
+  inspect(req: InspectRequest): Promise<InspectReply> {
+    const seq = ++this.inspectSeq
+    return new Promise((resolve) => {
+      this.inspecting.set(seq, resolve)
+      this.post({ t: "inspect", seq, req })
+      // Where replies are taken synchronously (node), wait for this one here, as `status` does.
+      if (this.transport.poll) {
+        const deadline = performance.now() + 2000
+        while (this.inspecting.has(seq) && performance.now() < deadline) this.transport.poll()
+      }
+    })
+  }
   dispose() {
     this.transport.terminate()
+    for (const done of this.inspecting.values()) done({ regs: null, memory: [], stop: null, time: 0, halted: "the core is gone" })
+    this.inspecting.clear()
   }
 }
 

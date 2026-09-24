@@ -4,19 +4,27 @@
  */
 
 export type Segment = { addr: number; data: Uint8Array }
-export type Symbol = { name: string; value: number; size: number; type: "func" | "object" | "other" }
+export type Symbol = { name: string; value: number; size: number; type: "func" | "object" | "other"; /** STB_LOCAL: a `static`, one of possibly several of that name. */ local?: boolean }
+/** ARM mapping symbols (AAELF32 5.5.5): where Thumb code (`t`), ARM code (`a`) and data (`d`) start. */
+export type MappingSymbol = { addr: number; kind: "t" | "a" | "d" }
 
 export type Firmware = {
   format: "elf" | "hex" | "bin"
   segments: Segment[]
   entry: number | null
   symbols: Symbol[]
+  /** Mapping symbols by address, for a disassembler to tell literal pools from code. */
+  mapping?: MappingSymbol[]
+  /** The ELF image as loaded: the debugger reads its sections (DWARF) from it. */
+  image?: Uint8Array
 }
 
 const PT_LOAD = 1
 const SHT_SYMTAB = 2
+const SHT_NOBITS = 8
 const STT_OBJECT = 1
 const STT_FUNC = 2
+const STB_LOCAL = 0
 
 export function parseElf(buf: ArrayBuffer): Firmware {
   const v = new DataView(buf)
@@ -47,6 +55,8 @@ export function parseElf(buf: ArrayBuffer): Firmware {
   }
 
   const symbols: Symbol[] = []
+  const mapping: MappingSymbol[] = []
+  const decoder = new TextDecoder()
   for (let i = 0; i < shnum; i++) {
     const s = shoff + i * shentsize
     if (v.getUint32(s + 4, true) !== SHT_SYMTAB) continue
@@ -61,7 +71,7 @@ export function parseElf(buf: ArrayBuffer): Firmware {
     const name = (idx: number) => {
       let end = idx
       while (end < strtab.length && strtab[end] !== 0) end++
-      return new TextDecoder().decode(strtab.subarray(idx, end))
+      return decoder.decode(strtab.subarray(idx, end))
     }
     for (let o = symOff; o + entsize <= symOff + symSize; o += entsize) {
       const nameIdx = v.getUint32(o, true)
@@ -71,12 +81,70 @@ export function parseElf(buf: ArrayBuffer): Firmware {
       const type = info & 0xf
       if (nameIdx === 0) continue
       const n = name(nameIdx)
-      if (n.startsWith("$")) continue // mapping symbols ($t, $d)
-      symbols.push({ name: n, value: type === STT_FUNC ? value & ~1 : value, size, type: type === STT_FUNC ? "func" : type === STT_OBJECT ? "object" : "other" })
+      if (n.startsWith("$")) {
+        // Mapping symbols: `$t`, `$a`, `$d`, optionally with a `.suffix`.
+        const kind = n[1]
+        if ((kind === "t" || kind === "a" || kind === "d") && (n.length === 2 || n[2] === ".")) mapping.push({ addr: value & ~1, kind })
+        continue
+      }
+      symbols.push({ name: n, value: type === STT_FUNC ? value & ~1 : value, size, type: type === STT_FUNC ? "func" : type === STT_OBJECT ? "object" : "other", local: info >>> 4 === STB_LOCAL })
     }
   }
   symbols.sort((a, b) => a.value - b.value)
-  return { format: "elf", segments, entry, symbols }
+  mapping.sort((a, b) => a.addr - b.addr)
+  return { format: "elf", segments, entry, symbols, mapping, image: bytes }
+}
+
+/**
+ * Where the image's allocated sections live at run time (their VMAs, `.bss` included): the
+ * addresses code and data can have. Debug information for anything outside them is for code
+ * the linker dropped (`--gc-sections` leaves it at address 0).
+ */
+export function elfAllocRanges(image: Uint8Array): { addr: number; size: number }[] {
+  const out: { addr: number; size: number }[] = []
+  const v = new DataView(image.buffer, image.byteOffset, image.byteLength)
+  if (image.length < 52 || v.getUint32(0, false) !== 0x7f454c46) return out
+  const shoff = v.getUint32(32, true)
+  const shentsize = v.getUint16(46, true)
+  const shnum = v.getUint16(48, true)
+  if (shoff === 0 || shoff + shnum * shentsize > image.length) return out
+  for (let i = 0; i < shnum; i++) {
+    const s = shoff + i * shentsize
+    const flags = v.getUint32(s + 8, true)
+    const size = v.getUint32(s + 20, true)
+    if (flags & 2 && size > 0) out.push({ addr: v.getUint32(s + 12, true), size })
+  }
+  return out
+}
+
+/**
+ * The ELF's sections by name (`.debug_info`, `.debug_line`, …), as views into the image;
+ * sections that occupy no file space (`.bss`) are left out.
+ */
+export function elfSections(image: Uint8Array): Map<string, Uint8Array> {
+  const out = new Map<string, Uint8Array>()
+  const v = new DataView(image.buffer, image.byteOffset, image.byteLength)
+  if (image.length < 52 || v.getUint32(0, false) !== 0x7f454c46) return out
+  const shoff = v.getUint32(32, true)
+  const shentsize = v.getUint16(46, true)
+  const shnum = v.getUint16(48, true)
+  const shstrndx = v.getUint16(50, true)
+  if (shoff === 0 || shstrndx >= shnum || shoff + shnum * shentsize > image.length) return out
+  const names = shoff + shstrndx * shentsize
+  const namesOff = v.getUint32(names + 16, true)
+  const decoder = new TextDecoder()
+  for (let i = 0; i < shnum; i++) {
+    const s = shoff + i * shentsize
+    if (v.getUint32(s + 4, true) === SHT_NOBITS) continue
+    let end = namesOff + v.getUint32(s, true)
+    const start = end
+    while (end < image.length && image[end] !== 0) end++
+    const name = decoder.decode(image.subarray(start, end))
+    const offset = v.getUint32(s + 16, true)
+    const size = v.getUint32(s + 20, true)
+    if (name && offset + size <= image.length) out.set(name, image.subarray(offset, offset + size))
+  }
+  return out
 }
 
 /** Intel HEX with extended linear addresses (what STM32CubeIDE emits). */

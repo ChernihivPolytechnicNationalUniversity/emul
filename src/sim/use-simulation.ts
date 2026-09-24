@@ -5,6 +5,8 @@ import { TopologyGate } from "./topology"
 import type { Failure, ProbeReading, Reading, TraceChunk } from "./engine"
 import type { LogicChunk, McuStatus, Probe, Snapshot } from "./loop"
 import type { FromWorker, ToWorker } from "./worker"
+import type { DebugStop, InspectReply } from "@/debug/protocol"
+import type { DebugBridge } from "@/debug/session"
 
 /** A display panel's picture: the last frame received, its size, and what the panel makes of the signal. */
 export type DisplayFrame = { width: number; height: number; frame: Uint8ClampedArray | null; seq: number; status: string }
@@ -122,7 +124,14 @@ export type SimOptions = {
   /** Logic analyser on: probed nets are recorded as exact-time edges. */
   logic?: boolean
   onLogic?: (chunk: LogicChunk, probes: string[]) => void
+  /** Cores stopped for the debugger; the bench has paused. */
+  onDebugStop?: (stops: { object: string; stop: DebugStop }[]) => void
+  /** The bench started or stopped on its own (a debugger stop, a step): what `running` should now be. */
+  onRunning?: (running: boolean) => void
 }
+
+/** The debugger's line to the cores: commands, and reads of registers and memory. */
+export type { DebugBridge } from "@/debug/session"
 
 const NO_PROBES: Probe[] = []
 const NO_CONTACTS: ReadonlyMap<string, string> = new Map()
@@ -135,7 +144,7 @@ const NO_CONTACTS: ReadonlyMap<string, string> = new Map()
 export function useSimulation(
   doc: Schematic,
   running: boolean,
-  { speed = 1, contacts = NO_CONTACTS, probes = NO_PROBES, onFailure, traceBucket = 0, onTrace, logic = false, onLogic }: SimOptions = {},
+  { speed = 1, contacts = NO_CONTACTS, probes = NO_PROBES, onFailure, traceBucket = 0, onTrace, logic = false, onLogic, onDebugStop, onRunning }: SimOptions = {},
 ) {
   const [readout, setReadout] = React.useState<SimReadout>(idle)
   /** True once the worker has taken a step: there is then state a restart would throw away. */
@@ -146,11 +155,23 @@ export function useSimulation(
   const onFailureRef = React.useRef(onFailure)
   const onTraceRef = React.useRef(onTrace)
   const onLogicRef = React.useRef(onLogic)
+  const onDebugStopRef = React.useRef(onDebugStop)
+  const onRunningRef = React.useRef(onRunning)
   React.useEffect(() => {
     onFailureRef.current = onFailure
     onTraceRef.current = onTrace
     onLogicRef.current = onLogic
-  }, [onFailure, onTrace, onLogic])
+    onDebugStopRef.current = onDebugStop
+    onRunningRef.current = onRunning
+  }, [onFailure, onTrace, onLogic, onDebugStop, onRunning])
+  /**
+   * What the worker last said about running (or was last told): the `running` prop is sent
+   * only when it differs, so a state the worker reached by itself (a stop, a step) is not
+   * sent back to it late — a step that has already finished must not be restarted.
+   */
+  const workerRunning = React.useRef(false)
+  const inspecting = React.useRef(new Map<number, (reply: InspectReply | null) => void>())
+  const inspectSeq = React.useRef(0)
 
   React.useEffect(() => {
     const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" })
@@ -173,7 +194,15 @@ export function useSimulation(
         // A null snapshot is the worker acknowledging a restart: nothing left to start over from.
         if (!msg.snapshot) setStarted(false)
       } else if (msg.t === "started") setStarted(true)
-      else onFailureRef.current?.(msg.failure)
+      else if (msg.t === "debug-stop") onDebugStopRef.current?.(msg.stops)
+      else if (msg.t === "running") {
+        workerRunning.current = msg.running
+        onRunningRef.current?.(msg.running)
+      } else if (msg.t === "inspected") {
+        const done = inspecting.current.get(msg.id)
+        inspecting.current.delete(msg.id)
+        done?.(msg.reply)
+      } else onFailureRef.current?.(msg.failure)
     }
     return () => {
       workerRef.current = null
@@ -215,8 +244,25 @@ export function useSimulation(
   }, [send, logic])
 
   React.useEffect(() => {
+    if (running === workerRunning.current) return
+    workerRunning.current = running
     send({ t: "running", running })
   }, [send, running])
+
+  const debug = React.useMemo<DebugBridge>(
+    () => ({
+      command: (object, cmd) => send({ t: "debug", object, cmd }),
+      resetCore: (object) => send({ t: "reset-core", object }),
+      inspect: (object, req) =>
+        new Promise((resolve) => {
+          if (!workerRef.current) return resolve(null)
+          const id = ++inspectSeq.current
+          inspecting.current.set(id, resolve)
+          send({ t: "inspect", id, object, req })
+        }),
+    }),
+    [send],
+  )
 
   const restart = React.useCallback(() => {
     setReadout(idle)
@@ -237,5 +283,5 @@ export function useSimulation(
   const [simStore] = React.useState(() => new SimStore())
   React.useLayoutEffect(() => simStore.push(sim), [simStore, sim])
 
-  return { sim, simStore, restart, started, sendSerial }
+  return { sim, simStore, restart, started, sendSerial, debug }
 }

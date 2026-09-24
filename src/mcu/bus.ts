@@ -28,6 +28,11 @@ export interface Peripheral {
   readonly size: number
   read(offset: number, size: 1 | 2 | 4): number
   write(offset: number, value: number, size: 1 | 2 | 4): void
+  /**
+   * What `read` would return, without what a read does besides (a data register popping its
+   * FIFO, a status read clearing a flag): the debugger's view of the register.
+   */
+  peek?(offset: number, size: 1 | 2 | 4): number
   /** Called when the CPU is reset. */
   reset(): void
 }
@@ -48,10 +53,20 @@ export abstract class WordPeripheral implements Peripheral {
   abstract readWord(offset: number): number
   abstract writeWord(offset: number, value: number): void
   reset(): void {}
+  /** A register as `readWord` would give it, without its side effects; blocks whose reads have some override this. */
+  peekWord(offset: number): number {
+    return this.readWord(offset)
+  }
 
   read(offset: number, size: 1 | 2 | 4): number {
     if (size === 4) return this.readWord(offset) >>> 0
     const word = this.readWord(offset & ~3) >>> 0
+    const shift = (offset & 3) * 8
+    return (word >>> shift) & (size === 1 ? 0xff : 0xffff)
+  }
+  peek(offset: number, size: 1 | 2 | 4): number {
+    if (size === 4) return this.peekWord(offset) >>> 0
+    const word = this.peekWord(offset & ~3) >>> 0
     const shift = (offset & 3) * 8
     return (word >>> shift) & (size === 1 ? 0xff : 0xffff)
   }
@@ -350,6 +365,32 @@ export class Bus {
     if (write) return 0
     const pattern = ((addr * 2654435761) ^ (addr >>> 7)) >>> 0
     return size === 4 ? pattern : size === 2 ? pattern & 0xffff : pattern & 0xff
+  }
+
+  /**
+   * What a read of `size` bytes at `addr` would see, without any of its effects: memories as
+   * they are (an external one even before its controller is up), peripherals through their
+   * `peek`. Null where nothing answers.
+   */
+  peek(addr: number, size: 1 | 2 | 4): number | null {
+    addr >>>= 0
+    const mem = this.locate(addr)
+    if (mem) {
+      const off = locOff
+      if (off + size > mem.bytes.length) return null
+      return size === 4 ? mem.view.getUint32(off, true) : size === 2 ? mem.view.getUint16(off, true) : mem.bytes[off]
+    }
+    if (this.bitBand && addr >= 0x22000000 && addr < 0x24000000) {
+      const b = this.peek(SRAM_BASE + ((addr - 0x22000000) >>> 5), 1)
+      return b === null ? null : (b >>> (((addr - 0x22000000) >>> 2) & 7)) & 1
+    }
+    if (this.bitBand && addr >= 0x42000000 && addr < 0x44000000) {
+      const b = this.peek(PERIPH_BASE + ((addr - 0x42000000) >>> 5), 1)
+      return b === null ? null : (b >>> (((addr - 0x42000000) >>> 2) & 7)) & 1
+    }
+    const p = this.peripheralAt(addr)
+    if (p) return (p.peek ? p.peek(addr - p.base, size) : 0) >>> 0
+    return null
   }
 
   /**

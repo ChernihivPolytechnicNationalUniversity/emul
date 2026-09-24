@@ -184,6 +184,14 @@ export class Usart extends RegBlock implements Clocked {
     this.sync()
     return super.read(offset, size)
   }
+  peek(offset: number, size: 1 | 2 | 4): number {
+    this.sync()
+    return super.peek(offset, size)
+  }
+  /** The received byte as it waits: reading DR for real clears RXNE. */
+  protected peekValue(d: RegDef, current: number): number {
+    return d.name === "DR" || d.name === "RDR" ? this.rdr : this.onRead(d, current)
+  }
   write(offset: number, value: number, size: 1 | 2 | 4): void {
     this.sync()
     super.write(offset, value, size)

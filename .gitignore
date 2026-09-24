@@ -34,3 +34,6 @@ logs
 
 # The editor's HAL/CMSIS symbol index, generated at build time (`pnpm symbols`)
 public/symbols
+# The debugger's ST sources and peripheral register maps, generated at build time (`pnpm st-sources`, `pnpm peripherals`)
+public/st
+public/peripherals

@@ -230,6 +230,15 @@ export class Spi extends RegBlock implements Clocked {
     if ((offset & ~3) === 0x0c) return this.popRx(size)
     return super.read(offset, size)
   }
+  /** DR shows the word at the head of the receive FIFO without popping it; SR without arming or clearing OVR/MODF. */
+  peek(offset: number, size: 1 | 2 | 4): number {
+    this.sync()
+    if ((offset & ~3) === 0x0c) return this.rxFifo[0] ?? 0
+    return super.peek(offset, size)
+  }
+  protected peekValue(d: RegDef, current: number): number {
+    return d.name === "SR" ? this.status() : this.onRead(d, current)
+  }
   write(offset: number, value: number, size: 1 | 2 | 4): void {
     this.sync()
     if ((offset & ~3) === 0x0c) this.pushTx(value, size)

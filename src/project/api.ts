@@ -1,4 +1,4 @@
-import type { SourceFile, Target } from "emul-shared/source"
+import type { BuildOptions, SourceFile, Target } from "emul-shared/source"
 
 /**
  * The build service, as the site sees it: `POST /api/jobs` with the project, then poll
@@ -28,11 +28,11 @@ async function readError(res: Response): Promise<string> {
   return `${res.status} ${res.statusText}`
 }
 
-export async function submitBuild(target: Target, files: SourceFile[]): Promise<string> {
+export async function submitBuild(target: Target, files: SourceFile[], options: BuildOptions = {}): Promise<string> {
   const res = await fetch("/api/jobs", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ kind: "build", target, files }),
+    body: JSON.stringify({ kind: "build", target, files, options }),
   })
   if (!res.ok) throw new Error(await readError(res))
   const body = (await res.json()) as { id: string }

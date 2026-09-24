@@ -1,6 +1,6 @@
 import * as React from "react"
 import { toast } from "sonner"
-import { XIcon } from "lucide-react"
+import { BinaryIcon, FileQuestionIcon, LockIcon, XIcon } from "lucide-react"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 
@@ -13,6 +13,23 @@ type TabsProps = Omit<React.ComponentProps<"div">, "onChange"> & {
 }
 
 const DRAG_TYPE = "application/x-emul-tab"
+
+/**
+ * How a tab is labelled: a project file by its name and folder; the debugger's own tabs —
+ * the disassembly, a read-only source (`@src:<path the image names it by>`), a source the
+ * program was built from that is not here (`@missing:<path>`) — with an icon of their own.
+ */
+function tabLabel(id: string): { name: string; dir: string; icon: React.ReactNode; title: string } {
+  if (id === "@disasm") return { name: "Disassembly", dir: "", icon: <BinaryIcon className="size-3 shrink-0" />, title: "The instructions around the PC" }
+  const special = /^@(src|missing):(.*)$/.exec(id)
+  const path = special ? special[2] : id
+  const parts = path.split("/").filter(Boolean)
+  const name = parts.pop() ?? path
+  const dir = special ? parts.slice(-2).join("/") : parts.join("/")
+  const icon = special?.[1] === "src" ? <LockIcon className="size-3 shrink-0 opacity-70" /> : special?.[1] === "missing" ? <FileQuestionIcon className="size-3 shrink-0 opacity-70" /> : null
+  const title = special?.[1] === "src" ? `${path} (read-only)` : special?.[1] === "missing" ? `${path} (no source here)` : path
+  return { name, dir, icon, title }
+}
 
 /**
  * The open files, one tab each, the way an editor shows them: name, folder in grey, a close
@@ -82,16 +99,14 @@ export function Tabs({ open, active, onActivate, onChange, className, ...props }
         {...props}
       >
         {open.map((path, i) => {
-          const slash = path.lastIndexOf("/")
-          const name = slash < 0 ? path : path.slice(slash + 1)
-          const dir = slash < 0 ? "" : path.slice(0, slash)
+          const { name, dir, icon, title } = tabLabel(path)
           const current = path === active
           return (
             <div
               key={path}
               role="tab"
               aria-selected={current}
-              title={path}
+              title={title}
               draggable
               className={cn(
                 "group relative flex max-w-48 shrink-0 cursor-default items-center gap-1.5 border-r pr-1 pl-3 text-xs select-none",
@@ -115,6 +130,7 @@ export function Tabs({ open, active, onActivate, onChange, className, ...props }
                 setDropAt(e.clientX < r.left + r.width / 2 ? i : i + 1)
               }}
             >
+              {icon}
               <span className="truncate">{name}</span>
               {dir && <span className="truncate text-[0.6875rem] text-muted-foreground/70">{dir}</span>}
               <button
