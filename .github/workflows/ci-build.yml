@@ -10,24 +10,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build ${{ matrix.image.suffix || 'site' }} image
+  test:
+    name: Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read
-    strategy:
-      fail-fast: false
-      matrix:
-        image:
-          - { suffix: "", dockerfile: Dockerfile }
-          - { suffix: api, dockerfile: backend/api/Dockerfile }
-          - { suffix: worker, dockerfile: backend/worker/Dockerfile }
+    env:
+      TOOL: ${{ github.workspace }}/../tools/arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-
+      ST: ${{ github.workspace }}/../tools/st
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - uses: ./.github/actions/build-image
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          dockerfile: ${{ matrix.image.dockerfile }}
-          suffix: ${{ matrix.image.suffix }}
-          push: "false"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          node-version: "24.x"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: tools
+        with:
+          path: ${{ github.workspace }}/../tools
+          key: tools-arm-gnu-14.2.rel1-${{ hashFiles('backend/worker/toolchain/stage-st.sh') }}
+      - if: steps.tools.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ../tools
+          curl -fsSL https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi.tar.xz | tar -xJ -C ../tools
+          sh backend/worker/toolchain/stage-st.sh "$ST"
+      - run: make -C firmware -j"$(nproc)" all expect TOOL="$TOOL"
+      - run: make -C firmware/hal -j"$(nproc)" TOOL="$TOOL" HAL="$ST/f4/hal" CMSIS_DEV="$ST/f4/cmsis" CMSIS_CORE="$ST/core"
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -p tsconfig.test.json
+      - run: pnpm test

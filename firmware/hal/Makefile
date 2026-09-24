@@ -23,6 +23,8 @@ COMMON = Src/stm32f4xx_it.c Src/stm32f4xx_hal_msp.c Src/system_stm32f4xx.c $(add
 # One program per Src/<app>.c that defines main(); `main.c` is the blink.
 APPS = blink square spi spi-slave pwm uart i2c dma adc wdg lowpower flash
 
+$(shell mkdir -p build)
+
 all: $(foreach a,$(APPS),build/$(a).elf build/$(a).hex build/$(a).bin build/$(a).lst)
 	@$(SIZE) $(foreach a,$(APPS),build/$(a).elf)
 
