@@ -16,6 +16,8 @@ OPTS  := O0 O2
 ELFS  := $(foreach t,$(TESTS),$(foreach o,$(OPTS),build/$(t)-$(o).elf) build/$(t)-M7.elf)
 HOSTS := $(foreach t,$(TESTS),build/$(t).host)
 
+$(shell mkdir -p build)
+
 all: $(ELFS) $(HOSTS) $(ELFS:.elf=.lst)
 
 build/%-O0.elf: tests/%.c common/startup.c common/test.h common/stm32f429.ld

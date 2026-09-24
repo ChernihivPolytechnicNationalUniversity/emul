@@ -7,7 +7,7 @@ import type { PlacedObject, Schematic } from "./types"
  * Digital logic out of discrete transistors: CMOS gates built from the N- and P-channel
  * MOSFETs, driven by toggle switches and read out on LEDs. A NOT, a NAND and a NOR on their
  * own, and a half adder that puts four of them together: Sum = (A NOR B) NOR (A AND B),
- * Carry = A AND B. `scripts/logic.ts` walks every input combination headlessly and checks
+ * Carry = A AND B. `tests/sim/logic.test.ts` walks every input combination headlessly and checks
  * the truth tables; the same document opens from File › Examples.
  *
  * Every gate is a cell with junctions for its inputs (`a`, `b`) and output (`out`), so the

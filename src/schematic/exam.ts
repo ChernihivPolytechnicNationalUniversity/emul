@@ -5,7 +5,7 @@ import type { PlacedObject, Schematic } from "./types"
 
 /**
  * A bench of textbook circuits with answers known in closed form, so the simulator can be
- * marked against them: every block below states what it is meant to read. `scripts/exam.ts`
+ * marked against them: every block below states what it is meant to read. `tests/sim/exam.test.ts`
  * runs the checks headlessly; the same document opens from File › Examples for a look.
  *
  * Blocks share nothing but the drawing: each has its own rail and ground symbol.

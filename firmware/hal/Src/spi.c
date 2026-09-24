@@ -31,10 +31,10 @@ int main(void)
   gpio.Alternate = GPIO_AF5_SPI1;
   HAL_GPIO_Init(GPIOA, &gpio);
 
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
   gpio.Pin = GPIO_PIN_14;
   gpio.Mode = GPIO_MODE_OUTPUT_PP;
   HAL_GPIO_Init(GPIOD, &gpio);
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
   gpio.Pin = GPIO_PIN_0 | GPIO_PIN_14;
   HAL_GPIO_Init(GPIOB, &gpio);
 
