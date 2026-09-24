@@ -19,7 +19,7 @@ import { SpatialIndex } from "@/schematic/spatial"
 import { fieldDetail } from "./detail"
 import { buildNets } from "@/schematic/nets"
 import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, WIRE_COLOR_BY_CODE, type WireColorKey } from "@/schematic/wire-colors"
-import { pinKey, type PinRef, type PlacedObject, type Schematic } from "@/schematic/types"
+import { partKey, pinKey, type PinRef, type PlacedObject, type Schematic } from "@/schematic/types"
 import { getDef, pinName } from "@/schematic/registry"
 import { bytesToBase64 } from "@/lib/bytes"
 import { useEvent } from "@/hooks/use-event"
@@ -194,10 +194,18 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   if (selectedBoard && selectedBoard.id !== codeBoardId) setCodeBoardId(selectedBoard.id)
   // The one board on the schematic needs no picking.
   const codeBoard = boards.find((o) => o.id === codeBoardId) ?? (boards.length === 1 ? boards[0]! : null)
-  const onFirmware = React.useCallback(
-    (id: string, name: string, bytes: Uint8Array) => sch.setProps(id, { firmware: name, firmwareData: bytesToBase64(bytes) }),
-    [sch],
-  )
+  const onFirmware = useEvent((id: string, name: string, bytes: Uint8Array) => {
+    const obj = sch.doc.objects.find((o) => o.id === id)
+    const boot = obj && getDef(obj.def)?.mcuProgramBoot
+    if (boot && !sch.doc.parts[partKey(id, boot)]?.on) {
+      toast.error(`${obj.props?.ref || getDef(obj.def)?.name} not programmed`, {
+        description: "The board takes new firmware only through the ST bootloader: set BOOT to SYSTEM and flash again, then back to FLASH and press RESET to run it.",
+      })
+      return false
+    }
+    sch.setProps(id, { firmware: name, firmwareData: bytesToBase64(bytes) })
+    return true
+  })
 
   const { objects: docObjects, wires: docWires } = sch.doc
   const [router] = React.useState(() => new Router())
@@ -1043,6 +1051,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             damage={sim.damage}
             sim={sim}
             onChange={sch.setProps}
+            onFirmware={onFirmware}
             onSerial={sendSerial}
             onCode={(id) => {
               setCodeBoardId(id)

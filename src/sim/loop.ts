@@ -215,7 +215,7 @@ class McuInstance {
   /** What the circuit puts on OSC_IN/OSC_OUT and OSC32_IN/OSC32_OUT (a board's own parts, or crystals wired to a bare chip). */
   hse: ClockFeed = { source: null }
   lse: ClockFeed = { source: null }
-  powered = true
+  powered = false
   /** The base64 the firmware was loaded from, so a re-sent document does not reload it. */
   loadedFrom = ""
   name = ""
@@ -490,7 +490,10 @@ export class SimLoop {
         // A new image on a live board is a debugger's flash-and-reset: the core starts over
         // (the host's view of its clock too, or a remote core is never asked to run again),
         // the backup domain keeps its time, the rest of the bench does not notice.
-        if (reflash) inst.mcu.reset({ backup: true })
+        if (reflash) {
+          inst.mcu.boot0 = this.boot0High(inst)
+          inst.mcu.reset({ backup: true })
+        }
         inst.base = this.engine?.time ?? 0
         this.mapInputs()
       }
@@ -530,6 +533,11 @@ export class SimLoop {
       }
     }
     return { source: null }
+  }
+
+  private boot0High(inst: McuInstance) {
+    const engine = this.engine
+    return !!engine && inst.boot0Net !== undefined && inst.boot0Net !== GROUND && engine.v[inst.boot0Net] > BOOT_HIGH
   }
 
   /** Bind each MCU pad to the matrix node of its GPIO element, if that node is solved. */
@@ -1030,6 +1038,11 @@ export class SimLoop {
     }
   }
 
+  get booting() {
+    for (const inst of this.mcus.values()) if (!inst.mcu.ready) return true
+    return false
+  }
+
   /** Stop the workers the cores live in (a script that is done with the loop). */
   dispose() {
     for (const inst of this.mcus.values()) inst.mcu.dispose()
@@ -1045,6 +1058,7 @@ export class SimLoop {
     this.rate = null
     for (const inst of this.mcus.values()) {
       inst.burnt = false
+      inst.powered = false
       inst.mcu.reset()
       inst.digitalPads.clear()
       inst.base = 0
@@ -1161,6 +1175,10 @@ export class SimLoop {
       const active: McuInstance[] = []
       for (const inst of mcus) {
         if (inst.burnt) continue
+        if (!inst.mcu.ready) {
+          inst.base = engine.time
+          continue
+        }
         // Reset is held while VDD is below the POR threshold or NRST is pulled low; the core
         // starts from the vector table when both are released.
         const vdd = inst.powerNet === undefined ? Infinity : inst.powerNet === GROUND ? 0 : engine.v[inst.powerNet]
@@ -1184,7 +1202,7 @@ export class SimLoop {
         if (!inst.powered) {
           inst.powered = true
           // The boot pins are sampled as reset is released.
-          inst.mcu.boot0 = inst.boot0Net !== undefined && inst.boot0Net !== GROUND && engine.v[inst.boot0Net] > BOOT_HIGH
+          inst.mcu.boot0 = this.boot0High(inst)
           if (inst.offAt !== null) inst.mcu.runOnBattery(engine.time - inst.offAt)
           inst.mcu.reset({ backup: inst.offAt !== null })
           inst.offAt = null

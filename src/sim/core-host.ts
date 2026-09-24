@@ -65,6 +65,7 @@ export interface CoreHost {
   readonly chip: ChipProfile
   /** Firmware is loaded (the core can run). */
   readonly loaded: boolean
+  readonly ready: boolean
   /** The core stopped on a fault, breakpoint or burn-out. */
   readonly halted: boolean
   readonly running: boolean
@@ -143,6 +144,7 @@ export class LocalCore implements CoreHost {
   get loaded() {
     return this.mcu.firmware !== null
   }
+  readonly ready = true
   get halted() {
     return this.mcu.cpu.halted !== null
   }
@@ -304,7 +306,8 @@ export const CTL = {
   MAIL: 6,
   /** Edges the core had to drop because the ring was full. */
   DROPPED: 7,
-  WORDS: 8,
+  READY: 8,
+  WORDS: 9,
 } as const
 
 /** Command flags (per run, in the command bank). */
@@ -466,6 +469,9 @@ export class RemoteCore implements CoreHost {
 
   get loaded() {
     return this.loadedFlag
+  }
+  get ready() {
+    return Atomics.load(this.ctl, CTL.READY) !== 0
   }
   get halted() {
     return this.haltedFlag

@@ -1,14 +1,20 @@
-import type { SourceFile } from "emul-shared/source"
+import type { SourceFile, Target } from "emul-shared/source"
 
 /**
  * What a board's project starts as: the CubeIDE layout (`Core/Inc`, `Core/Src`) around the
- * repo's own Nucleo-F429ZI HAL blink (`firmware/hal/Src/main.c`), so the first build has
- * something to show on the board's LEDs.
+ * repo's own Nucleo-F429ZI HAL blink (`firmware/hal/Src/main.c`), or an Open746I-C one for the
+ * F746, so the first build has something to show on the board's LEDs.
  */
-export const template = (): SourceFile[] => [
-  { path: "Core/Inc/main.h", content: MAIN_H },
-  { path: "Core/Src/main.c", content: MAIN_C },
-]
+export const template = (target: Target): SourceFile[] =>
+  target === "stm32f746ig"
+    ? [
+        { path: "Core/Inc/main.h", content: F7_MAIN_H },
+        { path: "Core/Src/main.c", content: F7_MAIN_C },
+      ]
+    : [
+        { path: "Core/Inc/main.h", content: MAIN_H },
+        { path: "Core/Src/main.c", content: MAIN_C },
+      ]
 
 /** The file the editor opens first. */
 export const TEMPLATE_MAIN = "Core/Src/main.c"
@@ -145,6 +151,60 @@ static void Error_Handler(void)
   while (1)
   {
     __asm volatile("bkpt 0xEE");
+  }
+}
+`
+
+const F7_MAIN_H = `#ifndef MAIN_H
+#define MAIN_H
+
+#include "stm32f7xx_hal.h"
+
+#endif /* MAIN_H */
+`
+
+const F7_MAIN_C = `/*
+ * Open746I-C blink on the ST HAL: the core stays on the 16 MHz HSI, SysTick at 1 kHz.
+ *
+ *   LED1 (PB6)  toggles every 500 ms from the main loop (HAL_Delay)
+ *   LED2 (PB7)  toggles every 100 ms from the SysTick callback
+ */
+#include "main.h"
+
+static void GPIO_Init(void);
+
+int main(void)
+{
+  HAL_Init();
+  GPIO_Init();
+
+  while (1)
+  {
+    HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
+    HAL_Delay(500);
+  }
+}
+
+static void GPIO_Init(void)
+{
+  GPIO_InitTypeDef gpio = {0};
+
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  gpio.Pin = GPIO_PIN_6 | GPIO_PIN_7;
+  gpio.Mode = GPIO_MODE_OUTPUT_PP;
+  gpio.Pull = GPIO_NOPULL;
+  gpio.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &gpio);
+}
+
+void HAL_SYSTICK_Callback(void)
+{
+  static uint32_t n;
+  if (++n >= 100)
+  {
+    n = 0;
+    HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
   }
 }
 `

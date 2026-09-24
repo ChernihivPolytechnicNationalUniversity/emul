@@ -529,6 +529,7 @@ export const open746ic: ComponentDef = {
   mcuPower: V3V3,
   mcuReset: NRST,
   mcuBoot0: "BOOT0",
+  mcuProgramBoot: "BOOT",
   mcuVbat: "VBAT",
   // Core746I: 8 MHz crystal on PH0/PH1, 32.768 kHz on PC14/PC15.
   mcuClocks: { hse: { hz: 8e6, kind: "crystal", startup: 2e-3 }, lse: { hz: 32768, kind: "crystal", startup: 2 } },

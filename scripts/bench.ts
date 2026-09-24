@@ -49,6 +49,7 @@ for (const ex of examples) {
   loop.setParts(doc.parts)
   loop.speed = 8
   loop.setRunning(true)
+  while (loop.booting) await new Promise((r) => setTimeout(r, 10))
   loop.advance(performance.now())
   const wall0 = performance.now()
   let now = wall0

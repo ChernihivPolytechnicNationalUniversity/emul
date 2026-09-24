@@ -14,6 +14,9 @@ import { nucleoBlink } from "@/schematic/examples"
 import { SimLoop } from "@/sim/loop"
 import { spawnNodeCore } from "./lib/core-threads"
 
+const booted = async (loop: SimLoop) => {
+  while (loop.booting) await new Promise((r) => setTimeout(r, 10))
+}
 const fw = (name: string) => readFileSync(join(import.meta.dirname, "..", "firmware", "examples", name)).toString("base64")
 let failed = 0
 const expect = (what: string, ok: boolean, got: string) => {
@@ -31,6 +34,7 @@ for (const workers of [false, true]) {
   loop.setDoc(doc)
   loop.setParts(doc.parts)
   loop.setRunning(true)
+  await booted(loop)
   let clock = 0
   const run = (seconds: number) => {
     const end = clock + seconds * 1000
@@ -47,6 +51,7 @@ for (const workers of [false, true]) {
   // The build lands: the board gets a different image, the document is re-sent as the UI does.
   u.props = { ...u.props, firmware: "nucleo-square.elf", firmwareData: fw("nucleo-square.elf") }
   loop.setDoc({ ...doc, objects: doc.objects.map((o) => (o.id === u.id ? { ...o, props: { ...u.props } } : o)) })
+  await booted(loop)
   run(1.0)
   const after = loop.snapshot()!
   const s1 = after.mcus[u.id]!
@@ -69,6 +74,7 @@ for (const workers of [false, true]) {
   loop.setDoc(doc)
   loop.setParts(doc.parts)
   loop.setRunning(true)
+  await booted(loop)
   let clock = 0
   const run = (seconds: number) => {
     const end = clock + seconds * 1000
@@ -84,6 +90,7 @@ for (const workers of [false, true]) {
   // The build lands on the powered board.
   u.props = { ...u.props, firmware: "nucleo-blink.elf", firmwareData: fw("nucleo-blink.elf") }
   loop.setDoc({ ...doc, objects: doc.objects.map((o) => (o.id === u.id ? { ...o, props: { ...u.props } } : o)) })
+  await booted(loop)
   run(1.0)
   const s1 = loop.snapshot()!.mcus[u.id]!
   expect("image on the board", s1?.firmware === "nucleo-blink.elf", s1?.firmware ?? "no status")

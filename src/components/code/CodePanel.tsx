@@ -31,7 +31,7 @@ type CodePanelProps = Omit<React.ComponentProps<"div">, "ref"> & {
   onPick: (id: string) => void
   onFiles: (id: string, files: SourceFile[]) => void
   /** A build produced an image: load it on the board as the inspector's "Load…" would. */
-  onFirmware: (id: string, name: string, bytes: Uint8Array) => void
+  onFirmware: (id: string, name: string, bytes: Uint8Array) => boolean
   onClose: () => void
 }
 
@@ -71,8 +71,8 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onC
 
   // A board opened for the first time gets the template, so there is something to build.
   React.useEffect(() => {
-    if (board && !board.project) onFiles(board.id, template())
-  }, [board, onFiles])
+    if (board && chip && !board.project) onFiles(board.id, template(chip))
+  }, [board, chip, onFiles])
 
   const tab: TabState = (id ? tabs[id] : undefined) ?? { open: [], active: null }
   // No tabs yet: start on main.c (the template's) or the first file, as an IDE opens a project.
@@ -132,12 +132,13 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onC
     const startedAt = Date.now()
     setBuilds((b) => ({ ...b, [id]: { phase: "running", startedAt } }))
     let done: Build
+    let flashed = false
     try {
       const job = await waitForJob(await submitBuild(chip, files))
       const log = job.artifacts.find((a) => a.name === "build.log")
       const elf = job.artifacts.find((a) => a.name === "firmware.elf")
       const ok = !!job.result?.ok && !!elf
-      if (elf && ok) onFirmware(id, "firmware.elf", await fetchArtifact(elf))
+      if (elf && ok) flashed = onFirmware(id, "firmware.elf", await fetchArtifact(elf))
       const text = log ? await fetchText(log) : ""
       done = {
         phase: "done",
@@ -151,7 +152,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onC
       done = { phase: "done", ok: false, log: "", error: (e as Error).message, durationMs: Date.now() - startedAt, diagnostics: [] }
     }
     setBuilds((b) => ({ ...b, [id]: done }))
-    if (done.ok) toast.success(`${boardName(board)} programmed`, { description: `Built in ${formatSI(done.durationMs / 1000, "s", 2)}.` })
+    if (done.ok && flashed) toast.success(`${boardName(board)} programmed`, { description: `Built in ${formatSI(done.durationMs / 1000, "s", 2)}.` })
   }
 
   const onResizeStart = (e: React.PointerEvent) => {
