@@ -142,20 +142,26 @@ snap = loop.snapshot()!
 expect("BOOT0 low again", v(snap, "BOOT0"), 0, 0.05)
 expect("firmware back", ledStr(snap), "●○○○")
 
-console.log("\nFlashed with BOOT at SYSTEM: the new image waits in flash until BOOT goes back to FLASH and RESET")
+console.log("\nFlashed with BOOT at SYSTEM: the loader's Go starts the image, a RESET with BOOT still at SYSTEM lands back in the loader")
 loop.setParts({ [BOOT]: { on: true } })
 run(0.05)
 u.props = { ...u.props, firmwareData: Buffer.concat([elf, Buffer.from([0])]).toString("base64") }
 loop.setDoc({ ...doc, objects: doc.objects.map((o) => (o.id === u.id ? { ...o, props: { ...u.props } } : o)) })
+run(0.1)
+snap = loop.snapshot()!
+expect("new image runs", ledStr(snap), "●○○○")
+loop.setParts({ [BOOT]: { on: true }, [RESET]: { pressed: true } })
+run(0.05)
+loop.setParts({ [BOOT]: { on: true } })
 run(0.2)
 snap = loop.snapshot()!
-expect("LEDs dark", ledStr(snap), "○○○○")
+expect("RESET at SYSTEM: back in the loader", ledStr(snap), "○○○○")
 loop.setParts({ [RESET]: { pressed: true } })
 run(0.05)
 loop.setParts({})
 run(0.1)
 snap = loop.snapshot()!
-expect("new image runs", ledStr(snap), "●○○○")
+expect("RESET at FLASH: the image again", ledStr(snap), "●○○○")
 
 console.log("\nUnplugging the USART1 USB changes nothing: the module runs from its own USB")
 loop.setParts({ [partKey(u.id, "USB")]: { on: false } })
