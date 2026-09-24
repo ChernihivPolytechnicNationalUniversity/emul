@@ -371,17 +371,23 @@ export const pmos: ComponentDef = {
   ],
 }
 
+const BOUNCE_FIELDS: PropField[] = [
+  { key: "bounce", label: "Contact bounce", type: "select", options: [{ value: "off", label: "Off" }, { value: "on", label: "On" }] },
+  { key: "tbounce", label: "Bounce time", type: "quantity", unit: "s" },
+]
+
 export const pushbutton = base({
   id: "pushbutton",
   name: "Pushbutton",
   category: "Switches",
   icon: PushbuttonIcon,
   prefix: "SW",
-  defaults: { value: "tactile", imax: "50 mA", rcontact: "100 mΩ" },
+  defaults: { value: "tactile", imax: "50 mA", rcontact: "100 mΩ", bounce: "off", tbounce: "5 ms" },
   fields: [
     { key: "value", label: "Type", type: "text", placeholder: "e.g. tactile" },
     { key: "imax", label: "Contact rating", type: "quantity", unit: "A" },
     { key: "rcontact", label: "Contact resistance", type: "quantity", unit: "Ω" },
+    ...BOUNCE_FIELDS,
   ],
   body: [
     { type: "path", d: LEADS },
@@ -402,11 +408,12 @@ export const toggleSwitch = base({
   category: "Switches",
   icon: SwitchIcon,
   prefix: "SW",
-  defaults: { value: "SPST", imax: "3 A", rcontact: "50 mΩ" },
+  defaults: { value: "SPST", imax: "3 A", rcontact: "50 mΩ", bounce: "off", tbounce: "10 ms" },
   fields: [
     { key: "value", label: "Type", type: "text", placeholder: "e.g. SPST" },
     { key: "imax", label: "Contact rating", type: "quantity", unit: "A" },
     { key: "rcontact", label: "Contact resistance", type: "quantity", unit: "Ω" },
+    ...BOUNCE_FIELDS,
   ],
   body: [{ type: "path", d: LEADS }, ...labels(3.6)],
   parts: [{ type: "switch", id: "SW", label: "", x: 1, y: 1, span: 2 }],

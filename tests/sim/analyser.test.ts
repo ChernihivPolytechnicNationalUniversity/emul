@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest"
 import { GRID } from "@/schematic/geometry"
 import { builder } from "@/schematic/builder"
 import { nucleoI2c, nucleoSerial, nucleoSpi, nucleoSquare } from "@/schematic/examples"
-import { pinKey, type Schematic } from "@/schematic/types"
+import { partKey, pinKey, type Schematic } from "@/schematic/types"
 import { SimLoop, type Probe } from "@/sim/loop"
 import { LogicStore } from "@/components/logic/logic-store"
 import { decodeI2c, decodeSpi, decodeUart, type EdgeSeries } from "@/sim/protocols"
@@ -149,5 +149,41 @@ describe("logic analyser", () => {
     const fall = [...Array(gen.count).keys()].filter((i) => gen.levels[i] === 0).map((i) => gen.times[i])
     const high = fall.find((t) => t > rise[4])! - rise[4]
     expect.soft(high * 1e6, "25 % duty (µs high)").toBeNear(250, 25)
+  })
+
+  it("sees a button bounce on press and release only when bounce is on", () => {
+    const edgesOf = (bounce: string) => {
+      const { doc, place, wire } = builder(GRID)
+      const bat = place("dc-source", 0, 0, { value: "3.3 V" })
+      const r = place("resistor", 6, 0, { value: "10 kΩ" })
+      const sw = place("pushbutton", 12, 0, { bounce })
+      const gnd = place("ground", 3, 6)
+      wire(bat, "+", r, "1")
+      wire(r, "2", sw, "1")
+      wire(sw, "2", gnd, "GND")
+      wire(bat, "-", gnd, "GND")
+      const { loop, run, edges } = analyse(doc, [{ id: "in", a: pinKey(sw.id, "1"), b: null }])
+      run(0.02)
+      const idle = edges("in").count
+      loop.setParts({ [partKey(sw.id, "SW")]: { pressed: true } })
+      run(0.05)
+      const at = edges("in").count
+      const pressed = at - idle
+      loop.setParts({ [partKey(sw.id, "SW")]: { pressed: false } })
+      run(0.05)
+      const e = edges("in")
+      const span = (from: number, to: number) => e.times[to - 1] - e.times[from]
+      return { pressed, released: e.count - at, last: e.levels[e.count - 1], pressSpan: span(idle, at), releaseSpan: span(at, e.count) }
+    }
+    const off = edgesOf("off")
+    expect.soft(off.pressed, "off: one edge on press").toBe(1)
+    expect.soft(off.released, "off: one edge on release").toBe(1)
+    const on = edgesOf("on")
+    expect.soft(on.pressed, "on: a burst on press").toBeGreaterThan(1)
+    expect.soft(on.released, "on: a burst on release").toBeGreaterThan(1)
+    expect.soft(on.pressed % 2, "on: settles low after the press").toBe(1)
+    expect.soft(on.last, "on: settles high after the release").toBe(1)
+    expect.soft(on.pressSpan * 1e3, "press burst within 5 ms").toBeLessThanOrEqual(5)
+    expect.soft(on.releaseSpan * 1e3, "release burst within 5 ms").toBeLessThanOrEqual(5)
   })
 })

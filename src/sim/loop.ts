@@ -341,6 +341,8 @@ export class SimLoop {
   /** Simulated time each part was pressed at, and releases waiting for MIN_PRESS to pass. */
   private pressedAt = new Map<string, number>()
   private heldReleases = new Map<string, PartState>()
+  private bounceTime = new Map<string, { time: number; field: "pressed" | "on" }>()
+  private bouncing = new Map<string, { state: PartState; field: "pressed" | "on"; flips: number[] }>()
   private probes: Probe[] = []
   private mcus = new Map<string, McuInstance>()
   private terminals = new Map<string, TerminalInstance>()
@@ -399,6 +401,7 @@ export class SimLoop {
       if (!def) continue
       for (const p of def.parts) if ("initial" in p && p.initial) this.partDefaults[partKey(obj.id, p.id)] = p.initial
     }
+    this.syncBounce()
     this.syncFirmware()
     this.syncTerminals()
     this.syncDigitalParts()
@@ -910,7 +913,7 @@ export class SimLoop {
     const now = this.engine?.time ?? 0
     const next: Record<string, PartState> = { ...parts }
     for (const key of new Set([...Object.keys(parts), ...Object.keys(this.parts)])) {
-      const was = this.parts[key]?.pressed ?? false
+      const was = (this.bouncing.get(key)?.state ?? this.parts[key])?.pressed ?? false
       const is = parts[key]?.pressed ?? false
       if (is && !was) {
         this.pressedAt.set(key, now)
@@ -921,7 +924,9 @@ export class SimLoop {
         next[key] = { ...(parts[key] ?? {}), pressed: true }
       }
     }
+    const prev = this.parts
     this.parts = next
+    for (const key of this.bounceTime.keys()) this.startBounce(key, prev[key], now)
     // Touch panels and the like: the part's state goes to the digital part behind it.
     for (const [key, state] of Object.entries(parts)) {
       const i = key.indexOf(":")
@@ -937,14 +942,59 @@ export class SimLoop {
     if (this.heldReleases.size === 0) return
     for (const [key, state] of this.heldReleases) {
       if (now - (this.pressedAt.get(key) ?? 0) < MIN_PRESS) continue
+      const prev = this.parts[key]
       this.parts = { ...this.parts, [key]: state }
       this.heldReleases.delete(key)
+      this.startBounce(key, prev, now)
       const i = key.indexOf(":")
       const part = this.digitalParts.get(key.slice(0, i))
       if (part?.interact) {
         part.interact(key.slice(i + 1), state, now)
         this.drainPart(part)
       }
+    }
+  }
+
+  private syncBounce() {
+    for (const [key, b] of this.bouncing) this.parts = { ...this.parts, [key]: b.state }
+    this.bouncing.clear()
+    this.bounceTime.clear()
+    for (const obj of this.doc.objects) {
+      const def = getDef(obj.def)
+      if (!def) continue
+      const props = { ...def.defaults, ...obj.props }
+      if (props.bounce !== "on") continue
+      const time = parseValue(props.tbounce ?? "")
+      if (!(time > 0)) continue
+      for (const p of def.parts) {
+        if (p.type === "button") this.bounceTime.set(partKey(obj.id, p.id), { time, field: "pressed" })
+        else if (p.type === "switch") this.bounceTime.set(partKey(obj.id, p.id), { time, field: "on" })
+      }
+    }
+  }
+
+  private startBounce(key: string, before: PartState | undefined, now: number) {
+    const b = this.bounceTime.get(key)
+    if (!b) return
+    const state = this.parts[key] ?? {}
+    const cur = this.bouncing.get(key)
+    if (!!state[b.field] === !!(cur?.state ?? before)?.[b.field]) {
+      if (cur) cur.state = state
+      return
+    }
+    const n = 2 * (2 + Math.floor(Math.random() * 5))
+    const flips = Array.from({ length: n }, () => now + b.time * Math.random() ** 2).sort((x, y) => x - y)
+    this.bouncing.set(key, { state, field: b.field, flips })
+  }
+
+  private applyBounce(now: number) {
+    for (const [key, b] of this.bouncing) {
+      let i = 0
+      while (i < b.flips.length && b.flips[i] <= now) i++
+      if (i) b.flips = b.flips.slice(i)
+      const value = b.flips.length % 2 ? !b.state[b.field] : !!b.state[b.field]
+      if (!b.flips.length) this.bouncing.delete(key)
+      if (!!this.parts[key]?.[b.field] !== value) this.parts = { ...this.parts, [key]: { ...b.state, [b.field]: value } }
     }
   }
 
@@ -1175,6 +1225,7 @@ export class SimLoop {
     const mcus = [...this.mcus.values()].filter((m) => m.mcu.loaded)
     for (let i = 0; i < steps; i++) {
       if (this.heldReleases.size) this.releaseHeld(engine.time)
+      if (this.bouncing.size) this.applyBounce(engine.time)
       // The cores run ahead of the solver by one step, then the step sees their pads. A core
       // whose VDD is below the power-on threshold sits in reset until the rail comes back.
       const active: McuInstance[] = []
@@ -1323,7 +1374,7 @@ export class SimLoop {
    * a part's scan), no pad sampled at random from a duty. 1 when it must go step by step.
    */
   private quietSteps(engine: Engine, inst: McuInstance, left: number): number {
-    if (left < 2 || this.padsDirty || this.heldReleases.size || !inst.padsLive) return 1
+    if (left < 2 || this.padsDirty || this.heldReleases.size || this.bouncing.size || !inst.padsLive) return 1
     // An in-process core's PWM pads are sampled step by step as they run (`quietDuty`); a worker's are not.
     if (inst.sampled.size && !(inst.mcu instanceof LocalCore)) return 1
     for (const t of this.terminals.values()) if (t.txEdges.length) return 1
