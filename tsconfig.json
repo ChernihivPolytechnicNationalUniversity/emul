@@ -1,27 +1,15 @@
 {
   "files": [],
   "references": [
-    {
-      "path": "./tsconfig.app.json"
-    },
-    {
-      "path": "./tsconfig.node.json"
-    },
-    {
-      "path": "./backend/shared/tsconfig.json"
-    },
-    {
-      "path": "./backend/api/tsconfig.json"
-    },
-    {
-      "path": "./backend/worker/tsconfig.json"
-    }
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" },
+    { "path": "./backend/shared/tsconfig.json" },
+    { "path": "./backend/api/tsconfig.json" },
+    { "path": "./backend/worker/tsconfig.json" }
   ],
   "compilerOptions": {
     "paths": {
-      "@/*": [
-        "./src/*"
-      ]
+      "@/*": ["./src/*"]
     }
   }
 }
