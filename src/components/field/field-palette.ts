@@ -77,8 +77,8 @@ export function readFieldPalette(host: Element, theme: string): FieldPalette {
   }
 }
 
-const readTheme = () => (document.documentElement.classList.contains("dark") ? "dark" : "light")
-const serverTheme = () => "light"
+const readTheme = (): "dark" | "light" => (document.documentElement.classList.contains("dark") ? "dark" : "light")
+const serverTheme = (): "dark" | "light" => "light"
 
 function watchTheme(listener: () => void) {
   const observer = new MutationObserver(listener)

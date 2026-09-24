@@ -79,6 +79,7 @@ p.onMessage((msg) => {
         const v = analogBank[CMD.ANALOG + pad.port * 16 + pad.pin]
         return Number.isNaN(v) ? null : v
       }
+      Atomics.store(ctl, CTL.READY, 1)
       break
     }
     case "load":
