@@ -199,7 +199,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const boot = obj && getDef(obj.def)?.mcuProgramBoot
     if (boot && !sch.doc.parts[partKey(id, boot)]?.on) {
       toast.error(`${obj.props?.ref || getDef(obj.def)?.name} not programmed`, {
-        description: "The board takes new firmware only through the ST bootloader: set BOOT to SYSTEM and flash again, then back to FLASH and press RESET to run it.",
+        description: "The board takes new firmware only through the ST bootloader: set BOOT to SYSTEM and flash again. Set it back to FLASH before the next RESET.",
       })
       return false
     }

@@ -216,6 +216,7 @@ class McuInstance {
   hse: ClockFeed = { source: null }
   lse: ClockFeed = { source: null }
   powered = false
+  go = false
   /** The base64 the firmware was loaded from, so a re-sent document does not reload it. */
   loadedFrom = ""
   name = ""
@@ -491,9 +492,9 @@ export class SimLoop {
         // (the host's view of its clock too, or a remote core is never asked to run again),
         // the backup domain keeps its time, the rest of the bench does not notice.
         if (reflash) {
-          inst.mcu.boot0 = this.boot0High(inst)
+          inst.mcu.boot0 = false
           inst.mcu.reset({ backup: true })
-        }
+        } else inst.go = true
         inst.base = this.engine?.time ?? 0
         this.mapInputs()
       }
@@ -1202,7 +1203,8 @@ export class SimLoop {
         if (!inst.powered) {
           inst.powered = true
           // The boot pins are sampled as reset is released.
-          inst.mcu.boot0 = this.boot0High(inst)
+          inst.mcu.boot0 = !inst.go && this.boot0High(inst)
+          inst.go = false
           if (inst.offAt !== null) inst.mcu.runOnBattery(engine.time - inst.offAt)
           inst.mcu.reset({ backup: inst.offAt !== null })
           inst.offAt = null
