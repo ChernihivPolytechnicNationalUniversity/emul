@@ -14,7 +14,7 @@ import { chipById, STM32F429ZI } from "./chip"
 import { CpuHalt } from "./faults"
 import { Stm32, type PadRef } from "./stm32f429"
 import { PanelInstance } from "@/sim/display"
-import { CMD, CMD_BACKUP, CMD_BOOT0, CMD_RESET, CMD_YIELD, CTL, IN_RING, OUT, OUT_HALTED, OUT_LOADED, OUT_RING, OUT_RUNNING, PAD_KEYS, SHM, decodeClock, encodeDrive, statusOf, type FromCore, type ToCore } from "@/sim/core-host"
+import { CMD, CMD_BACKUP, CMD_BOOT0, CMD_RESET, CMD_STEPS, CMD_YIELD, CTL, IN_RING, OUT, OUT_HALTED, OUT_LOADED, OUT_RING, OUT_RUNNING, PAD_KEYS, SHM, decodeClock, encodeDrive, statusOf, type FromCore, type ToCore } from "@/sim/core-host"
 
 type Port = { post(msg: FromCore, transfer?: ArrayBuffer[]): void; onMessage(cb: (msg: ToCore) => void): void }
 
@@ -121,12 +121,12 @@ p.onMessage((msg) => {
 /** The command bank of the current run, for the ADC callback. */
 let analogBank: Float64Array<ArrayBufferLike> = new Float64Array(0)
 
-function publish(parity: number, running: boolean) {
+function publish(parity: number, running: boolean, idd: number) {
   const m = mcu!
   const out = outBanks[parity]
   out[OUT.TIME] = m.time
   out[OUT.FLAGS] = (m.firmware ? OUT_LOADED : 0) | (running ? OUT_RUNNING : 0) | (m.cpu.halted ? OUT_HALTED : 0)
-  out[OUT.IDD] = m.supplyCurrent()
+  out[OUT.IDD] = lastIdd = idd
   out[OUT.POR] = m.porThreshold
   const pad: PadRef = { port: 0, pin: 0 }
   for (let i = 0; i < padList.length; i++) {
@@ -161,11 +161,26 @@ function publish(parity: number, running: boolean) {
 }
 /** `takeDuty` measures against an interval; the value is turned back into seconds, so any interval does. */
 const DUTY_INTERVAL = 1
+/** The supply current last reported: what the loop saw before a batch of steps. */
+let lastIdd = 0
+
+/** Every reported pad's duty so far, as `publish` counts it. */
+function accumulateDuty() {
+  const m = mcu!
+  const pad: PadRef = { port: 0, pin: 0 }
+  for (let i = 0; i < padList.length; i++) {
+    const key = padList[i]
+    pad.port = key >>> 4
+    pad.pin = key & 15
+    const d = m.takeDuty(pad, DUTY_INTERVAL)
+    if (d === null) dutyAcc[key] = -1
+    else dutyAcc[key] = (dutyAcc[key] < 0 ? 0 : dutyAcc[key]) + d * DUTY_INTERVAL
+  }
+}
 
 /** Apply the queued exact-time edges (the digital fast path in). */
-function takeEdgesIn() {
+function takeEdgesIn(head: number) {
   const m = mcu!
-  const head = Atomics.load(ctl, CTL.IN_HEAD)
   let tail = Atomics.load(ctl, CTL.IN_TAIL)
   for (; tail < head; tail++) {
     const at = SHM.inRing + (tail % IN_RING) * 2
@@ -198,15 +213,31 @@ function run(seq: number) {
     pad.pin = key & 15
     m.setPad(pad, lv === 2)
   }
-  takeEdgesIn()
+  takeEdgesIn(cmd[CMD.IN_UPTO])
   const target = cmd[CMD.TARGET]
   let running = m.running
+  if (flags & CMD_STEPS) {
+    // The duty the loop has taken up to the last step: the quiet steps' part counted in, step by step.
+    const out = outBanks[parity]
+    out.set(dutyAcc, OUT.DUTY_BASE)
+    let past = 0
+    out[OUT.STEPS] = running
+      ? m.runSteps(target, cmd[CMD.BASE], cmd[CMD.STEP], cmd[CMD.STEPS], lastIdd, () => {
+          accumulateDuty()
+          out.set(dutyAcc, OUT.DUTY_BASE)
+          Atomics.store(ctl, CTL.PROGRESS, ++past)
+          return true
+        })
+      : 0
+    publish(parity, m.running, running ? m.stepIdd : m.supplyCurrent())
+    return
+  }
   if (running) {
     if (m.yieldOnOutput) running = m.runUntil(target)
     else while (m.time < target && m.running) if (!m.runUntil(target)) break
     running = m.running
   }
-  publish(parity, running)
+  publish(parity, running, m.supplyCurrent())
 }
 
 async function main() {

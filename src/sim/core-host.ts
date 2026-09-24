@@ -97,6 +97,17 @@ export interface CoreHost {
   setAnalog(pad: PadRef, volts: number): void
   /** Run to `end` (own time). Returns false when the core stopped. */
   runUntil(end: number): boolean
+  /**
+   * Run up to `n` of the loop's steps from loop time `time` (the core's own time is loop time
+   * less `base`) while nothing the loop reads changes, stopping after the step where something
+   * did (`Stm32.runSteps`). `version` and `idd` are the pad version and supply current the loop
+   * last saw; an in-process core asks `quiet` after each step whether the loop would read its
+   * pads as before (and the loop takes the step's duties if so). `step` takes the solver's side
+   * of each step before the last, in order, as soon as the core is past it. Returns the steps
+   * run; 0 when the core was not where the loop saw it (a pipelined run in flight changed
+   * something), and the loop steps as usual.
+   */
+  runSteps(time: number, base: number, dt: number, n: number, version: number, idd: number, quiet: () => boolean, step: () => void): number
   padDrive(pad: PadRef): PadDrive
   /** Counts every change of what the pads drive (GPIO register writes, DAC outputs): a cheap "re-read the pads?" test. */
   padVersion(): number
@@ -220,6 +231,20 @@ export class LocalCore implements CoreHost {
     }
     return ok
   }
+  /** The last batched step's supply current, for the loop's next read. */
+  private stepIdd: number | null = null
+  runSteps(time: number, base: number, dt: number, n: number, version: number, idd: number, quiet: () => boolean, step: () => void) {
+    const m = this.mcu
+    if (!m.running || m.padVersion() !== version) return 0
+    const k = m.runSteps(time, base, dt, n, idd, quiet)
+    for (let j = 1; j < k; j++) step()
+    this.stepIdd = m.stepIdd
+    if (m.digitalOut.length) {
+      this.edges.push(...m.digitalOut)
+      m.digitalOut.length = 0
+    }
+    return k
+  }
   padDrive(pad: PadRef) {
     return this.mcu.padDrive(pad)
   }
@@ -232,6 +257,9 @@ export class LocalCore implements CoreHost {
   takeDuty(pad: PadRef, interval: number) {
     return this.mcu.takeDuty(pad, interval)
   }
+  peekDuty(pad: PadRef, interval: number) {
+    return this.mcu.peekDuty(pad, interval)
+  }
   drainEdges() {
     if (this.mcu.digitalOut.length) {
       this.edges.push(...this.mcu.digitalOut)
@@ -242,7 +270,10 @@ export class LocalCore implements CoreHost {
     return out
   }
   supplyCurrent() {
-    return this.mcu.supplyCurrent()
+    const idd = this.stepIdd
+    if (idd === null) return this.mcu.supplyCurrent()
+    this.stepIdd = null
+    return idd
   }
   status(): CoreStatus {
     return statusOf(this.mcu, "in-process")
@@ -307,7 +338,9 @@ export const CTL = {
   /** Edges the core had to drop because the ring was full. */
   DROPPED: 7,
   READY: 8,
-  WORDS: 9,
+  /** Steps of a `CMD_STEPS` run the core is past without anything changing: the loop may take them meanwhile. */
+  PROGRESS: 9,
+  WORDS: 10,
 } as const
 
 /** Command flags (per run, in the command bank). */
@@ -316,15 +349,17 @@ export const CMD_BOOT0 = 2
 export const CMD_YIELD = 4
 /** The reset keeps the backup domain (VBAT held it through the outage). */
 export const CMD_BACKUP = 8
+/** Run the loop's steps (`CMD.STEPS` of `CMD.STEP` from loop time `CMD.TARGET`) while nothing changes. */
+export const CMD_STEPS = 16
 /** Output flags (per run, in the output bank). */
 export const OUT_LOADED = 1
 export const OUT_RUNNING = 2
 export const OUT_HALTED = 4
 
 /** Command bank layout (Float64 offsets within the bank). */
-export const CMD = { TARGET: 0, FLAGS: 1, HSE_HZ: 2, HSE_KIND: 3, HSE_START: 4, LSE_HZ: 5, LSE_KIND: 6, LSE_START: 7, LEVELS: 8, ANALOG: 8 + PAD_KEYS, BATTERY: 8 + 2 * PAD_KEYS, SIZE: 9 + 2 * PAD_KEYS } as const
+export const CMD = { TARGET: 0, FLAGS: 1, HSE_HZ: 2, HSE_KIND: 3, HSE_START: 4, LSE_HZ: 5, LSE_KIND: 6, LSE_START: 7, LEVELS: 8, ANALOG: 8 + PAD_KEYS, BATTERY: 8 + 2 * PAD_KEYS, BASE: 9 + 2 * PAD_KEYS, STEP: 10 + 2 * PAD_KEYS, STEPS: 11 + 2 * PAD_KEYS, IN_UPTO: 12 + 2 * PAD_KEYS, SIZE: 13 + 2 * PAD_KEYS } as const
 /** Output bank layout. */
-export const OUT = { TIME: 0, FLAGS: 1, IDD: 2, POR: 3, DRIVE: 4, DUTY: 4 + PAD_KEYS, SIZE: 4 + 2 * PAD_KEYS } as const
+export const OUT = { TIME: 0, FLAGS: 1, IDD: 2, POR: 3, STEPS: 4, DRIVE: 5, DUTY: 5 + PAD_KEYS, DUTY_BASE: 5 + 2 * PAD_KEYS, SIZE: 5 + 3 * PAD_KEYS } as const
 /** Edge rings: [time, code] pairs; code = key·4 + level (0 low, 1 high, 2 released). */
 export const OUT_RING = 8192
 export const IN_RING = 2048
@@ -598,11 +633,45 @@ export class RemoteCore implements CoreHost {
   runUntil(end: number) {
     this.finish()
     if (!this.loadedFlag || this.haltedFlag) return false
+    this.issue(end, 0)
+    if (this.sync) this.finish()
+    return this.runningFlag
+  }
+  runSteps(time: number, base: number, dt: number, n: number, version: number, idd: number, _quiet: () => boolean, step: () => void) {
+    // The worker counts the quiet steps' duties itself; the pipelined core's dither is its own anyway.
+    this.finish()
+    if (!this.loadedFlag || this.haltedFlag || this.sync || this.version !== version || this.outBank[OUT.IDD] !== idd || this.edges.length) return 0
+    const bank = this.next
+    bank[CMD.BASE] = base
+    bank[CMD.STEP] = dt
+    bank[CMD.STEPS] = n
+    Atomics.store(this.ctl, CTL.PROGRESS, 0)
+    this.issue(time, CMD_STEPS)
+    // The solver follows the core through the steps it is past, while it runs on.
+    let taken = 0
+    while (Atomics.load(this.ctl, CTL.ACK) !== this.seq) {
+      const past = Atomics.load(this.ctl, CTL.PROGRESS)
+      if (taken < past) {
+        for (; taken < past; taken++) step()
+      }
+    }
+    this.finish()
+    const k = this.outBank[OUT.STEPS]
+    for (; taken < k - 1; taken++) step()
+    // The loop takes the last step's duty against the level the quiet steps ended at.
+    const out = this.outBank
+    for (const key of this.pads) if (out[OUT.DUTY_BASE + key] >= 0) this.dutyPrev[key] = out[OUT.DUTY_BASE + key]
+    return k
+  }
+  /** Hand the core its next run: to `end`, or the loop's steps from `end` with `CMD_STEPS`. */
+  private issue(end: number, steps: number) {
     const bank = this.next
     bank[CMD.TARGET] = end
     // Yielding per edge only makes sense in step: pipelined, a run that stopped early would fall behind.
-    bank[CMD.FLAGS] = (this.resetPending ? CMD_RESET : 0) | (this.resetPending && this.resetBackup ? CMD_BACKUP : 0) | (this.boot0 ? CMD_BOOT0 : 0) | (this.sync ? CMD_YIELD : 0)
+    bank[CMD.FLAGS] = (this.resetPending ? CMD_RESET : 0) | (this.resetPending && this.resetBackup ? CMD_BACKUP : 0) | (this.boot0 ? CMD_BOOT0 : 0) | (this.sync ? CMD_YIELD : 0) | steps
     bank[CMD.BATTERY] = this.resetPending ? this.battery : 0
+    // The edges in so far are this run's; one queued while it runs waits for the next, whenever the core looks.
+    bank[CMD.IN_UPTO] = Atomics.load(this.ctl, CTL.IN_HEAD)
     encodeClock(bank, CMD.HSE_HZ, this.hse)
     encodeClock(bank, CMD.LSE_HZ, this.lse)
     this.resetPending = false
@@ -619,8 +688,6 @@ export class RemoteCore implements CoreHost {
     const nxt = this.next
     nxt.fill(0, CMD.LEVELS, CMD.ANALOG)
     nxt.set(bank.subarray(CMD.ANALOG, CMD.SIZE), CMD.ANALOG)
-    if (this.sync) this.finish()
-    return this.runningFlag
   }
   padDrive(pad: PadRef) {
     return decodeDrive(this.outBank[OUT.DRIVE + pad.port * 16 + pad.pin])
@@ -657,10 +724,11 @@ export class RemoteCore implements CoreHost {
   private statusGot = 0
   status(): CoreStatus {
     this.post({ t: "status", seq: ++this.statusAsked })
-    // Where replies can be taken synchronously (node), give the core a moment to answer, so a
-    // script reading the status right after a run sees this run's figures.
+    // Where replies can be taken synchronously (node), give the core a moment to answer (it may
+    // still be in a batch of quiet steps), so a script reading the status right after a run
+    // sees this run's figures.
     if (this.transport.poll) {
-      const deadline = performance.now() + (this.lastStatus ? 5 : 100)
+      const deadline = performance.now() + (this.lastStatus ? 50 : 100)
       for (;;) {
         this.transport.poll()
         if (this.statusGot >= this.statusAsked || performance.now() > deadline) break

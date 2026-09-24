@@ -126,6 +126,21 @@ export type LtdcTiming = {
 }
 
 /** Convert one framebuffer pixel of the given format (little-endian bytes at `i`) to 0xAARRGGBB. */
+/** An RGBA pixel as one little-endian word of a `Uint8ClampedArray`'s buffer. */
+const rgba = (r: number, g: number, b: number) => (0xff000000 | (b << 16) | (g << 8) | r) >>> 0
+
+/** Every RGB565 value as the RGBA word `pixelToArgb` and an opaque blend make of it. */
+const RGB565 = (() => {
+  const t = new Uint32Array(65536)
+  for (let v = 0; v < 65536; v++) {
+    const r = (v >>> 11) & 0x1f
+    const g = (v >>> 5) & 0x3f
+    const b = v & 0x1f
+    t[v] = rgba((r << 3) | (r >>> 2), (g << 2) | (g >>> 4), (b << 3) | (b >>> 2))
+  }
+  return t
+})()
+
 export function pixelToArgb(bytes: Uint8Array, i: number, format: PixelFormat, clut: Uint32Array | null): number {
   switch (format) {
     case 0:
@@ -415,12 +430,8 @@ export class Ltdc extends RegBlock implements Clocked {
     const br = (bccr >>> 16) & 0xff
     const bg = (bccr >>> 8) & 0xff
     const bb = bccr & 0xff
-    for (let i = 0; i < width * height * 4; i += 4) {
-      out[i] = br
-      out[i + 1] = bg
-      out[i + 2] = bb
-      out[i + 3] = 255
-    }
+    const words = new Uint32Array(out.buffer, out.byteOffset, width * height)
+    words.fill(rgba(br, bg, bb))
     for (let li = 0; li < 2; li++) {
       const l = this.layers[li]
       if (!l.enabled) continue
@@ -436,12 +447,23 @@ export class Ltdc extends RegBlock implements Clocked {
       const da = l.defaultColor >>> 24
       const pixelsPerLine = Math.floor(l.lineBytes / bpp)
       const winW = l.x1 - l.x0
+      // An opaque layer without alpha of its own covers what is under it: its pixels go straight in.
+      const opaque = l.alpha === 255 && (l.format === 1 || l.format === 2)
       for (let y = y0; y < y1; y++) {
         const line = y - l.y0
         const lineAddr = (l.address + line * l.pitch) >>> 0
         const mem = line < l.lines ? this.bus.frameBytes(lineAddr, pixelsPerLine * bpp) : null
-        let o = (y * width + x0) * 4
-        for (let x = x0; x < x1; x++, o += 4) {
+        let x = x0
+        if (opaque && mem) {
+          const bytes = mem.bytes
+          const end = Math.min(x1, l.x0 + pixelsPerLine)
+          let w = y * width + x
+          let i = mem.offset + (x - l.x0) * bpp
+          if (l.format === 2) for (; x < end; x++, w++, i += 2) words[w] = RGB565[bytes[i] | (bytes[i + 1] << 8)]
+          else for (; x < end; x++, w++, i += 3) words[w] = rgba(bytes[i + 2], bytes[i + 1], bytes[i])
+        }
+        let o = (y * width + x) * 4
+        for (; x < x1; x++, o += 4) {
           const px = x - l.x0
           let argb: number
           if (mem && px < pixelsPerLine) argb = pixelToArgb(mem.bytes, mem.offset + px * bpp, l.format, clut)

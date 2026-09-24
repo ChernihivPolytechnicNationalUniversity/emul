@@ -806,6 +806,24 @@ export class Engine {
   }
 
   /**
+   * How many steps of `dt` from here are sure to take the settled path, pads and switches
+   * as they are: none unless the circuit is at its fixed point, and fewer when a stressed
+   * part would reach its limit on the way.
+   */
+  settledFor(dt: number): number {
+    if (this.settledRun < SETTLED_STEPS) return 0
+    let steps = Infinity
+    const loaded = this.loadedElements
+    for (let j = 0; j < loaded.length; j++) {
+      const i = loaded[j]
+      const ratio = this.rRatio[i]
+      if (ratio > 20) return 0
+      if (ratio > 1) steps = Math.min(steps, Math.floor((STRESS_LIMIT - this.stress[i]) / (dt * (ratio - 1))) - 1)
+    }
+    return Math.max(0, steps)
+  }
+
+  /**
    * Whether the step just taken left the circuit where it was: converged, no strike, no AC
    * source, nothing stored moving (a capacitor still charging or an inductor's current
    * ramping would drift over the steps skipped), no battery (its state drifts by design),

@@ -738,6 +738,28 @@ export class Stm32 {
     return true
   }
 
+  /**
+   * Run up to `n` of the loop's steps in one go, as the loop would one at a time (step `j`
+   * ends at the loop's clock `time` plus `j` steps, less `base`), while nothing the loop
+   * reads changes: the pads, the supply current (`idd` before the first step), an edge out, a
+   * stop. The step where something did change, or the `n`th, is the last one run; `quiet` is
+   * asked after each step before it and makes it the last by returning false. Returns the
+   * steps run; `stepIdd` is the last step's supply current, which the loop takes instead of
+   * reading the meter again.
+   */
+  runSteps(time: number, base: number, dt: number, n: number, idd: number, quiet: () => boolean): number {
+    const version = this.padVersion()
+    let t = time
+    for (let k = 1; ; k++) {
+      const end = t + dt - base
+      this.runUntil(end)
+      this.stepIdd = this.supplyCurrent()
+      if (k >= n || !this.running || this.time < end || this.digitalOut.length !== 0 || this.padVersion() !== version || this.stepIdd !== idd || !quiet()) return k
+      t += dt
+    }
+  }
+  stepIdd = 0
+
   // --- clocked peripherals ---------------------------------------------------------------
   //
   // Timers and serial shifters are not ticked per instruction. Each active one remembers the
@@ -891,6 +913,13 @@ export class Stm32 {
   /** The pads (port*16+pin) a peripheral drives, whose duty `takeDuty` reports. */
   dutyPads(): IterableIterator<number> {
     return this.afHigh.keys()
+  }
+  /** What `takeDuty` would return now, leaving the accounting as it is. */
+  peekDuty(p: PadRef, interval: number): number | null {
+    const t = this.afHigh.get(p.port * 16 + p.pin)
+    if (!t) return null
+    const high = t.level ? t.high + (this.now - t.since) : t.high
+    return interval > 0 ? Math.min(1, high / interval) : t.level ? 1 : 0
   }
   takeDuty(p: PadRef, interval: number): number | null {
     const t = this.afHigh.get(p.port * 16 + p.pin)
