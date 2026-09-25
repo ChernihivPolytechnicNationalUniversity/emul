@@ -11,7 +11,7 @@ import ring from "./hdl/ring.json"
 import shreg from "./hdl/shreg.json"
 import top from "./hdl/top.json"
 
-const module = (name: string, netlist: unknown): HdlModule => ({ id: `hdl:${name}`, name, files: [], netlist: netlist as HdlNetlist, built: name })
+const module = (name: string, netlist: unknown): HdlModule => ({ id: `hdl:${name}`, name, files: [], netlist: netlist as unknown as HdlNetlist, built: name })
 
 function part(name: string, netlist: unknown) {
   const m = module(name, netlist)

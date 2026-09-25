@@ -26,7 +26,7 @@ describe.each([
   ["this thread", false],
   ["a worker thread", true],
 ])("an HDL divider between two pins of a Nucleo, the core in %s", (_, workers) => {
-  const m: HdlModule = { id: "hdl:div", name: "div", files: [], netlist: ripple as HdlNetlist, built: "div" }
+  const m: HdlModule = { id: "hdl:div", name: "div", files: [], netlist: ripple as unknown as HdlNetlist, built: "div" }
   const { doc, place, wire } = builder(GRID)
   doc.library = [m]
   const u = place("nucleo-f429zi", 0, 0)
@@ -74,7 +74,7 @@ describe.each([
 })
 
 describe("two instances of one component, rebuilt narrower while running", () => {
-  const m: HdlModule = { id: "hdl:cnt", name: "cnt", files: [], netlist: counter as HdlNetlist, built: "w4" }
+  const m: HdlModule = { id: "hdl:cnt", name: "cnt", files: [], netlist: counter as unknown as HdlNetlist, built: "w4" }
   const { doc, place, wire } = builder(GRID)
   doc.library = [m]
   setLibrary(doc.library)
@@ -118,7 +118,7 @@ describe("two instances of one component, rebuilt narrower while running", () =>
   })
 
   it("keeps running when the component is rebuilt with fewer pins than its wires reach", () => {
-    const narrow: Schematic = { ...doc, library: [{ ...m, netlist: counter2 as HdlNetlist, built: "w2" }] }
+    const narrow: Schematic = { ...doc, library: [{ ...m, netlist: counter2 as unknown as HdlNetlist, built: "w2" }] }
     setLibrary(narrow.library)
     expect(() => loop.setDoc(narrow)).not.toThrow()
     run(0.05)

@@ -24,14 +24,17 @@ import { partKey } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
 
 function part(name: string, netlist: unknown) {
-  const m: HdlModule = { id: `hdl:${name}`, name, files: [], netlist: netlist as HdlNetlist, built: name }
+  const m: HdlModule = { id: `hdl:${name}`, name, files: [], netlist: netlist as unknown as HdlNetlist, built: name }
   setLibrary([m])
   return new HdlPart("U1", m.id, m.netlist!, m.built)
 }
 
 class Bench {
   t = 0
-  constructor(readonly p: HdlPart) {}
+  readonly p: HdlPart
+  constructor(p: HdlPart) {
+    this.p = p
+  }
   set(pin: string, level: boolean) {
     this.p.input(pin, level, (this.t += 1e-6))
   }
@@ -207,7 +210,7 @@ describe("designs synthesised by the service", () => {
   })
 
   it("keeps escaped Verilog names as pins", () => {
-    const def = hdlDef({ id: "hdl:esc", name: "esc", files: [], netlist: escaped as HdlNetlist, built: "x" })!
+    const def = hdlDef({ id: "hdl:esc", name: "esc", files: [], netlist: escaped as unknown as HdlNetlist, built: "x" })!
     expect(def.pins.map((p) => p.id)).toEqual(expect.arrayContaining(["a+b", "clk", "out$[0]", "out$[3]", "VCC", "GND"]))
   })
 })
@@ -245,7 +248,7 @@ describe("hdl symbols and files", () => {
 
 describe("a Verilog UART on the bench", () => {
   it("sends Hello to the serial terminal, clocked by a pulse source", () => {
-    const m: HdlModule = { id: "hdl:hello", name: "hello", files: [], netlist: hello as HdlNetlist, built: "hello" }
+    const m: HdlModule = { id: "hdl:hello", name: "hello", files: [], netlist: hello as unknown as HdlNetlist, built: "hello" }
     const { doc, place, wire } = builder(GRID)
     doc.library = [m]
     setLibrary(doc.library)
@@ -292,7 +295,7 @@ describe("choosing the top unit", () => {
 
 describe("a Verilog UART receiving from the serial terminal", () => {
   it("decodes the bytes the terminal sends", () => {
-    const m: HdlModule = { id: "hdl:uart", name: "uart", files: [], netlist: uart as HdlNetlist, built: "uart" }
+    const m: HdlModule = { id: "hdl:uart", name: "uart", files: [], netlist: uart as unknown as HdlNetlist, built: "uart" }
     const { doc, place, wire } = builder(GRID)
     doc.library = [m]
     setLibrary(doc.library)
