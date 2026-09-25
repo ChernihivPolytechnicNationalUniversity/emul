@@ -56,6 +56,7 @@ export function ComponentsSidebar({ onPick, onHdlNew, onHdlImport, onHdlOpen, ..
             Nothing found
           </div>
         )}
+        {(!q || hdl.length > 0) && (
         <SidebarGroup>
           <SidebarGroupLabel>HDL · VHDL / Verilog</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -106,6 +107,7 @@ export function ComponentsSidebar({ onPick, onHdlNew, onHdlImport, onHdlOpen, ..
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        )}
         {groups.map((group) => (
           <SidebarGroup key={group.id}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
