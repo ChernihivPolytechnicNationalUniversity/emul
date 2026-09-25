@@ -82,6 +82,10 @@ const emptyPage = (): CachePage => ({ instrs: [], blocks: [], inside: [], heat: 
 /** Entries at an address inside another block before it becomes a block start of its own. */
 const HOT = 32
 
+/** What a line fetch costs, as `fetchCost` found it (`Cpu.lineKind`). */
+export const LINE_FREE = 0
+export const LINE_PLAIN = 1
+
 export class Cpu {
   readonly bus: Bus
   readonly scs: Scs
@@ -565,7 +569,13 @@ export class Cpu {
   set flashTiming(t) {
     this.timing = t
     this.timed = t.latency !== 0
+    this.fetchLatency = t.latency
+    this.fetchPrefetch = t.prefetch
+    this.artEpoch++
   }
+  /** The timing's wait states and prefetch as plain fields, for the compiled blocks' own charge of a plain line. */
+  fetchLatency = 0
+  fetchPrefetch = false
   /** Compile blocks to JavaScript (jit.ts); off runs them through the instruction closures. */
   jit = true
   /** log2 of the line size, kept apart so the per-fetch check is one shift and one compare. */
@@ -575,7 +585,20 @@ export class Cpu {
   set flashRanges(ranges: [number, number][]) {
     this.flashPages.fill(0)
     for (const [lo, hi] of ranges) for (let p = lo >>> 16; p <= (hi - 1) >>> 16; p++) this.flashPages[p] = 1
+    this.artEpoch++
   }
+  /**
+   * Counts every change of what a fetch costs besides the sequence of lines: an accelerator
+   * line added or dropped, new timing or flash ranges. What `fetchCost` found out about a
+   * line (`lineKind`) holds until the next, and compiled blocks skip the lookup meanwhile.
+   */
+  artEpoch = 0
+  /**
+   * The line `fetchCost` just charged: `LINE_FREE` in the accelerator or not flash at all (free
+   * again), `LINE_PLAIN` flash with no accelerator (the wait states unless prefetched in
+   * sequence), `LINE_LOOKUP` for anything else.
+   */
+  lineKind = 0
   private lastLine = -1
   /**
    * The accelerator's 64 lines: a FIFO ring of line numbers for eviction and an open-addressed
@@ -595,6 +618,7 @@ export class Cpu {
     this.dataRing.fill(-1)
     this.dataNext = 0
     this.lastLine = -1
+    this.artEpoch++
   }
   private artHas(line: number) {
     const h = this.artHash
@@ -627,6 +651,7 @@ export class Cpu {
     }
     this.artRing[this.artNext] = line
     this.artNext = (this.artNext + 1) & (ART_LINES - 1)
+    this.artEpoch++
     let i = artSlot(line)
     while (h[i] !== -1) i = (i + 1) & (ART_HASH - 1)
     h[i] = line
@@ -643,16 +668,17 @@ export class Cpu {
     const t = this.timing
     const sequential = line === this.lastLine + 1
     this.lastLine = line
+    this.lineKind = LINE_FREE
     if (!this.inFlash(addr)) return 0
     if (t.cache && this.artHas(line)) return 0
     if (t.cache) this.artAdd(line)
+    else this.lineKind = LINE_PLAIN
     return t.prefetch && sequential ? 0 : t.latency
   }
   /** A data read from flash (literal pools, tables): the wait states unless the data cache has the line. */
   dataPenalty(addr: number) {
     const t = this.timing
     if (!t.latency) return
-    this.bus.slow = true
     const line = addr >>> this.lineShift
     const lines = t.dataLines
     if (lines) {
@@ -773,6 +799,30 @@ export class Cpu {
   service() {
     if (this.cycles >= this.scs.systDue) this.scs.sync(this.cycles)
     if (this.cycles >= this.nextEventCycle) this.onEvent()
+  }
+  /**
+   * Compiled code at its deadline: take what came due, then the next deadline, or -1 when the
+   * block must leave (the slice is over, a stop request, an exception pending).
+   */
+  tick(target: number): number {
+    this.service()
+    return this.cycles >= target || this.stop || this.scs.pendingCount !== 0 ? -1 : this.deadline(target)
+  }
+  /**
+   * Compiled code after an access the bus flagged as slow: the deadline may have moved, an
+   * exception may be pending, and a flash cache reset makes the next fetch (`next`, on the
+   * same line) pay again. The next deadline, or -1 when the block must leave.
+   */
+  slowTick(target: number, next: number): number {
+    this.bus.slow = false
+    if (next >= 0 && this.lastLine === -1 && this.timed) this.cycles += this.fetchCost(next, next >>> this.lineShift)
+    let dl = this.deadline(target)
+    if (this.cycles >= dl) {
+      this.service()
+      if (this.cycles >= target || this.stop || this.scs.pendingCount !== 0) return -1
+      dl = this.deadline(target)
+    }
+    return this.stop || this.scs.pendingCount !== 0 ? -1 : dl
   }
   /** Cycles the interpreter/compiled code compare against before the next instruction. */
   deadline(target: number): number {

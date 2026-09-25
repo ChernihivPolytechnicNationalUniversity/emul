@@ -47,7 +47,6 @@ LTDC_HandleTypeDef hltdc;
 void MX_LTDC_Init(void)
 {
   LTDC_LayerCfgTypeDef pLayerCfg;
-  LTDC_LayerCfgTypeDef pLayerCfg1;
 
   hltdc.Instance = LTDC;
   hltdc.Init.HSPolarity = LTDC_HSPOLARITY_AL;
@@ -84,22 +83,6 @@ void MX_LTDC_Init(void)
   pLayerCfg.Backcolor.Red = 0;
   HAL_LTDC_ConfigLayer(&hltdc, &pLayerCfg, 0);
 
-  pLayerCfg1.WindowX0 = 0;
-  pLayerCfg1.WindowX1 = 1024;
-  pLayerCfg1.WindowY0 = 0;
-  pLayerCfg1.WindowY1 = 600;
-  pLayerCfg1.PixelFormat = LTDC_PIXEL_FORMAT_RGB565;
-  pLayerCfg1.Alpha = 0;
-  pLayerCfg1.Alpha0 = 0;
-  pLayerCfg1.BlendingFactor1 = LTDC_BLENDING_FACTOR1_PAxCA;
-  pLayerCfg1.BlendingFactor2 = LTDC_BLENDING_FACTOR2_PAxCA;
-  pLayerCfg1.FBStartAdress = 0xD0200000;
-  pLayerCfg1.ImageWidth = 1024;
-  pLayerCfg1.ImageHeight = 600;
-  pLayerCfg1.Backcolor.Blue = 0;
-  pLayerCfg1.Backcolor.Green = 0;
-  pLayerCfg1.Backcolor.Red = 0;
-//  HAL_LTDC_ConfigLayer(&hltdc, &pLayerCfg1, 1);
 
 }
 

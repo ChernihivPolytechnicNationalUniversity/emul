@@ -2,7 +2,6 @@ import type { EepromSnapshot } from "@/sim/digital"
 import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
 import { CodeIcon, CpuIcon, FlameIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
-import { bytesToBase64 } from "@/lib/bytes"
 import { cn } from "@/lib/utils"
 import { chipById } from "@/mcu/chip"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -48,6 +47,7 @@ type InspectorProps = Omit<React.ComponentProps<typeof Card>, "onChange"> & {
   damage: Record<string, Damage>
   sim: SimReadout
   onChange: (id: string, patch: Record<string, string>) => void
+  onFirmware: (id: string, name: string, bytes: Uint8Array) => boolean
   /** Text typed into a serial terminal. */
   onSerial?: (id: string, text: string) => void
   /** Open the code panel on this board or chip. */
@@ -56,7 +56,7 @@ type InspectorProps = Omit<React.ComponentProps<typeof Card>, "onChange"> & {
   onDelete: () => void
 }
 
-export function Inspector({ selected, damage, sim, onChange, onSerial, onCode, onRotate, onDelete, className, ...props }: InspectorProps) {
+export function Inspector({ selected, damage, sim, onChange, onFirmware, onSerial, onCode, onRotate, onDelete, className, ...props }: InspectorProps) {
   if (selected.length === 0) return null
   const object = selected.length === 1 ? selected[0] : null
   const def = object && getDef(object.def)
@@ -96,7 +96,7 @@ export function Inspector({ selected, damage, sim, onChange, onSerial, onCode, o
               </AlertDescription>
             </Alert>
           )}
-          {def.chip && <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? "STM32"} sim={sim} onChange={onChange} onCode={onCode} />}
+          {def.chip && <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? "STM32"} sim={sim} onChange={onChange} onFirmware={onFirmware} onCode={onCode} />}
           {def.id === "serial-terminal" && <TerminalPanel object={object} sim={sim} onSend={(text) => onSerial?.(object.id, text)} />}
           {def.id === "eeprom-24c" && <EepromPanel object={object} sim={sim} />}
           {sim.live && !damage[object.id]?.fatal && <LiveReadings object={object} sim={sim} />}
@@ -302,7 +302,7 @@ function EepromPanel({ object, sim }: { object: PlacedObject; sim: SimReadout })
   )
 }
 
-function FirmwarePanel({ object, chip, sim, onChange, onCode }: { object: PlacedObject; chip: string; sim: SimReadout; onChange: InspectorProps["onChange"]; onCode?: (id: string) => void }) {
+function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { object: PlacedObject; chip: string; sim: SimReadout; onChange: InspectorProps["onChange"]; onFirmware: InspectorProps["onFirmware"]; onCode?: (id: string) => void }) {
   const input = React.useRef<HTMLInputElement>(null)
   const name = object.props?.firmware
   const data = object.props?.firmwareData
@@ -313,9 +313,8 @@ function FirmwarePanel({ object, chip, sim, onChange, onCode }: { object: Placed
     const file = e.target.files?.[0]
     e.target.value = ""
     if (!file) return
-    const bytes = new Uint8Array(await file.arrayBuffer())
-    // An image from elsewhere: not built from this project (the debugger then asks for its sources).
-    onChange(object.id, { firmware: file.name, firmwareData: bytesToBase64(bytes), firmwareBuild: "" })
+    // An image from elsewhere, built from nothing on the board: the debugger asks for its sources.
+    onFirmware(object.id, file.name, new Uint8Array(await file.arrayBuffer()))
   }
 
   return (

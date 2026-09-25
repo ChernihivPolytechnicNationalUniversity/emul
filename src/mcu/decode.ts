@@ -192,7 +192,7 @@ const COND_JS = [
  * `coprocessor` wraps them. The fault sets the PC itself (`$A`, the compiler fills it in),
  * so an FP instruction that touches no memory needs nothing flushed before it.
  */
-const FPX = "if (!c.fpOn) c.fpDenied($A); c.control |= 4;"
+export const FPX = "if (!c.fpOn) c.fpDenied($A); c.control |= 4;"
 const JF = (instr: Instr, js: string, mem = false) => J(instr, `${FPX} ${js}`, mem)
 /** Mark a branch with a static target for the compiler; `extra` cycles when taken. */
 function BR(instr: Instr, target: number, extra: number, cond: string | null, link = false): Instr {

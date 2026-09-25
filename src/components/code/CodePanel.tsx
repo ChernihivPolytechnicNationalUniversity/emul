@@ -57,8 +57,8 @@ type CodePanelProps = Omit<React.ComponentProps<"div">, "ref"> & {
   boards: PlacedObject[]
   onPick: (id: string) => void
   onFiles: (id: string, files: SourceFile[]) => void
-  /** A build produced an image: load it on the board as the inspector's "Load…" would, with what it was built from. */
-  onFirmware: (id: string, name: string, bytes: Uint8Array, build: BuildRecord) => void
+  /** A build produced an image: load it on the board as the inspector's "Load…" would, with what it was built from; false when the board did not take it. */
+  onFirmware: (id: string, name: string, bytes: Uint8Array, build?: BuildRecord) => boolean
   onBuild: (id: string, build: NonNullable<PlacedObject["build"]>) => void
   onDebug: (id: string, fn: (d: BoardDebug) => BoardDebug) => void
   debug: DebugController
@@ -127,8 +127,8 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
   // A board opened for the first time gets the template, so there is something to build —
   // unless it has a program from elsewhere, whose sources are then the ones to add.
   React.useEffect(() => {
-    if (board && !board.project && !board.props?.firmwareData) onFiles(board.id, template())
-  }, [board, onFiles])
+    if (board && chip && !board.project && !board.props?.firmwareData) onFiles(board.id, template(chip))
+  }, [board, chip, onFiles])
 
   const project = React.useMemo(() => files ?? [], [files])
   const resolve = React.useCallback((image: string) => resolveSource(image, { project: dboard?.project ?? null, added }), [dboard?.project, added])
@@ -404,12 +404,13 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
     // What the image is built from, so the debugger knows the project's files are its sources.
     const record: BuildRecord = { opt, files: Object.fromEntries(files.map((f) => [f.path, contentHash(f.content)])) }
     let done: Build
+    let flashed = false
     try {
       const job = await waitForJob(await submitBuild(chip, files, { opt }))
       const log = job.artifacts.find((a) => a.name === "build.log")
       const elf = job.artifacts.find((a) => a.name === "firmware.elf")
       const ok = !!job.result?.ok && !!elf
-      if (elf && ok) onFirmware(id, "firmware.elf", await fetchArtifact(elf), record)
+      if (elf && ok) flashed = onFirmware(id, "firmware.elf", await fetchArtifact(elf), record)
       const text = log ? await fetchText(log) : ""
       done = {
         phase: "done",
@@ -423,7 +424,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
       done = { phase: "done", ok: false, log: "", error: (e as Error).message, durationMs: Date.now() - startedAt, diagnostics: [] }
     }
     setBuilds((b) => ({ ...b, [id]: done }))
-    if (done.ok) toast.success(`${boardName(board)} programmed`, { description: `Built at ${opt} in ${formatSI(done.durationMs / 1000, "s", 2)}.` })
+    if (done.ok && flashed) toast.success(`${boardName(board)} programmed`, { description: `Built at ${opt} in ${formatSI(done.durationMs / 1000, "s", 2)}.` })
   }
 
   const onResizeStart = (e: React.PointerEvent) => {
