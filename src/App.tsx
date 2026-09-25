@@ -9,6 +9,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import type { Example } from "@/schematic/examples"
 import type { Schematic } from "@/schematic/types"
+import { HDL_ACCEPT, readHdlFiles } from "@/components/hdl/files"
 
 /** Height of the menu bar; the sidebar is fixed, so it has to be told to start below it. */
 const MENU_H = 28
@@ -40,6 +41,19 @@ export default function App() {
   const [state, setState] = React.useState<FieldState>(emptyState)
   const [sidebarOpen, setSidebarOpen] = React.useState(true)
   const fileInput = React.useRef<HTMLInputElement>(null)
+  const hdlInput = React.useRef<HTMLInputElement>(null)
+  const importHdl = React.useCallback(() => hdlInput.current?.click(), [])
+  const onHdlFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const list = Array.from(e.target.files ?? [])
+    e.target.value = ""
+    if (!list.length) return
+    const files = await readHdlFiles(list)
+    if (!files.length) {
+      toast.error("Nothing to import", { description: "Pick .vhd, .vhdl, .v or .sv files." })
+      return
+    }
+    field.current?.importHdl(files)
+  }
 
   const save = React.useCallback(() => {
     const doc = field.current?.doc()
@@ -112,12 +126,16 @@ export default function App() {
           onSidebarToggle={() => setSidebarOpen((v) => !v)}
           onOpenFile={open}
           onSaveFile={save}
+          onImportHdl={importHdl}
           onExample={(example) => void loadExample(example)}
           style={{ height: MENU_H }}
         />
         <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} style={{ minHeight: 0, flex: 1 }}>
           <ComponentsSidebar
             onPick={(item) => field.current?.addAtCenter(item.id)}
+            onHdlNew={(language) => field.current?.newHdl(language)}
+            onHdlImport={importHdl}
+            onHdlOpen={(id) => field.current?.openHdl(id)}
             style={{ top: MENU_H, height: `calc(100svh - ${MENU_H}px)` }}
           />
           <SidebarInset className="relative min-h-0 flex-1 overflow-hidden">
@@ -127,6 +145,7 @@ export default function App() {
         </SidebarProvider>
       </div>
       <input ref={fileInput} type="file" accept="application/json,.json" className="hidden" onChange={onFile} />
+      <input ref={hdlInput} type="file" multiple accept={HDL_ACCEPT} className="hidden" onChange={onHdlFiles} />
       <Toaster position="bottom-center" richColors />
     </TooltipProvider>
   )

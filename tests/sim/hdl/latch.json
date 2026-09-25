@@ -1,0 +1,1 @@
+{"top":"lat","language":"vhdl","nets":5,"ports":[{"name":"en","dir":"input","bits":[2],"offset":0,"upto":false},{"name":"d","dir":"input","bits":[3],"offset":0,"upto":false},{"name":"q","dir":"output","bits":[4],"offset":0,"upto":false}],"cells":[["$_DLATCH_P_",2,3,4]],"init":[]}

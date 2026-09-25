@@ -10,7 +10,7 @@
 - `src/project/` — a board's firmware project: file operations that mirror the API's rules, the template, the build-service client
 - `firmware/` — test firmware and HAL apps (`hal/Src/main.c` blink, `square.c`, `pwm.c`, `uart.c`, `spi.c`, `spi-slave.c`, `i2c.c`, `dma.c`, `adc.c`, `wdg.c`), the lab's CubeIDE project (`lab1/`), the Open746I-C demos (`lcd/`), and their built images in `examples/` for the test scripts; the site bundles the sources as the examples' projects (`src/schematic/projects.ts`)
 - `scripts/` — the test drivers above
-- `backend/` — the services below: `api/`, `worker/`, `shared/`
+- `backend/` — the services below: `api/`, `worker/` (firmware builds, and HDL synthesis in a second image), `shared/`
 
 ## Services
 
@@ -58,6 +58,31 @@ per chip into `libhal.a` when the image is built (`worker/toolchain/`: ST's repo
 a project with its own `stm32fNxx_hal_conf.h` gets the HAL compiled from source against it instead (~10 s). 120 s and 4 MB of log
 are the limits. `targets/<chip>/target.json` names the chip, CPU flags, defines and linker script; adding a chip is adding a folder
 and a line in the Dockerfile.
+
+## HDL components
+
+A component can be described in VHDL or Verilog: File › New VHDL/Verilog component, or Import VHDL / Verilog… for existing files.
+The sources live in the schematic (`Schematic.library`, one `HdlModule` per component, with the top unit and generic values), so a
+saved file carries its components and every placed instance shares one definition. Build sends a `synth` job to the `hdl` queue,
+which a second worker image (`backend/worker/Dockerfile.hdl`, Debian trixie with GHDL 5 and Yosys, `WORKER_QUEUE=hdl`) takes:
+
+- VHDL goes through GHDL inside Yosys (ghdl-yosys-plugin, built in the image at a commit pinned for GHDL 5), `--std=08 -fsynopsys --latches`,
+  retried as VHDL-93 when 2008 fails; Verilog goes to `read_verilog -sv`. The top is the one asked for, else the unit with ports that
+  nothing else instantiates (a testbench has no ports, and what it instantiates does not count).
+- Yosys runs twice over an RTLIL snapshot: `proc; flatten; tribuf; memory -nomap` first, so a memory over 16 Kbit is refused in a
+  fraction of a second instead of being mapped to flip-flops for a minute; then `synth -flatten`, flip-flops and latches legalised to
+  `$_DFF_P_`, `$_DFFSR_PPP_`, `$_DLATCH_P_`, `$_DLATCHSR_PPP_`, and the JSON packed into `netlist.json` (`backend/shared/src/hdl.ts`:
+  nets as integers, 0 and 1 the constants). VHDL port ranges (`0 to 7`, `8 downto 1`) are restored from the source.
+- Only synthesisable code is accepted: `wait for`, `after`, `report` and file I/O are testbench constructs with no hardware behind them.
+
+The netlist is saved with the module, so a schematic runs without the service. `src/schematic/hdl.ts` turns it into a symbol (inputs
+left, outputs and inouts right, VCC and GND; 7 V and 25 mA per pin absolute maximum) and `src/sim/hdl.ts` simulates it as a digital
+part: event-driven, combinational cells settle first and every flip-flop then samples at once, `inout` pins drive through their
+tri-state buffers and release otherwise (several on one net resolve together, low winning a conflict), and a loop that never settles is reported on the inspector instead of hanging the step.
+Inputs arrive from the digital nets like any digital part's, so a clock from a pulse source is resolved to the analog step (20 µs)
+and one from an MCU pin exactly. A rebuild replaces the part on the running bench with the new netlist, starting from power-on with
+the levels its nets have now. Cost is per clock edge and grows with the flip-flop count: about 3 µs for a UART, 9 µs for a small
+8-bit CPU, 1.3 ms for a 2 KB RAM (53 000 cells).
 
 ## Threads
 

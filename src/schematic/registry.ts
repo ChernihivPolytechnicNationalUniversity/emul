@@ -1,4 +1,5 @@
-import type { ComponentDef, PartDef, PartState, PinDef, PinRef, PlacedObject } from "./types"
+import type { ComponentDef, HdlModule, PartDef, PartState, PinDef, PinRef, PlacedObject } from "./types"
+import { hdlDef } from "./hdl"
 import { basicComponents } from "./components/basic"
 import { nucleoF429zi } from "./components/nucleo-f429zi"
 import { open746ic } from "./components/open746i-c"
@@ -15,8 +16,55 @@ export const registry: ComponentDef[] = [open746ic, nucleoF429zi, stm32f746ig, s
 
 const byId = new Map(registry.map((d) => [d.id, d]))
 
+const library = new Map<string, { module: HdlModule; def: ComponentDef | null }>()
+const listeners = new Set<() => void>()
+let libraryVersion = 0
+
 export function getDef(id: string): ComponentDef | undefined {
-  return byId.get(id)
+  return byId.get(id) ?? library.get(id)?.def ?? undefined
+}
+
+export function setLibrary(modules: readonly HdlModule[] | undefined): boolean {
+  const list = modules ?? []
+  let changed = list.length !== library.size
+  const next = new Map<string, { module: HdlModule; def: ComponentDef | null }>()
+  for (const m of list) {
+    const known = library.get(m.id)
+    if (known && known.module.built === m.built && known.module.name === m.name) {
+      next.set(m.id, { module: m, def: known.def })
+      if (known.module !== m) known.module = m
+      continue
+    }
+    changed = true
+    next.set(m.id, { module: m, def: hdlDef(m) })
+  }
+  if (!changed) {
+    for (const [id, entry] of next) library.set(id, entry)
+    return false
+  }
+  library.clear()
+  for (const [id, entry] of next) library.set(id, entry)
+  libraryVersion++
+  return true
+}
+
+export function notifyLibrary() {
+  for (const l of listeners) l()
+}
+
+export function subscribeLibrary(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+export const getLibraryVersion = () => libraryVersion
+
+export function libraryEntries(): { module: HdlModule; def: ComponentDef | null }[] {
+  return [...library.values()]
+}
+
+export function hdlModule(id: string): HdlModule | undefined {
+  return library.get(id)?.module
 }
 
 type Identified = { id: string }

@@ -214,9 +214,10 @@ export function useSimulation(
 
   // Topology and values: anything that changes the netlist.
   const [topologyGate] = React.useState(() => new TopologyGate())
+  const library = React.useMemo(() => doc.library?.map((m) => ({ ...m, files: [] })), [doc.library])
   const topology = React.useMemo(
-    () => topologyGate.latest({ objects: doc.objects, wires: doc.wires }, contacts),
-    [doc.objects, doc.wires, contacts, topologyGate],
+    () => topologyGate.latest({ objects: doc.objects, wires: doc.wires, library }, contacts),
+    [doc.objects, doc.wires, library, contacts, topologyGate],
   )
   React.useEffect(() => {
     send({ t: "doc", doc: { ...topology, parts: {} } })

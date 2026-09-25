@@ -20,7 +20,11 @@ import { fieldDetail } from "./detail"
 import { buildNets } from "@/schematic/nets"
 import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, WIRE_COLOR_BY_CODE, type WireColorKey } from "@/schematic/wire-colors"
 import { partKey, pinKey, type PinRef, type PlacedObject, type Schematic } from "@/schematic/types"
-import { getDef, pinName } from "@/schematic/registry"
+import { getDef, notifyLibrary, pinName, setLibrary } from "@/schematic/registry"
+import { newModuleId, TEMPLATES } from "@/schematic/hdl"
+import type { HdlLanguage } from "emul-shared/hdl"
+import { languageOf } from "emul-shared/hdl"
+import type { SourceFile } from "emul-shared/source"
 import { bytesToBase64 } from "@/lib/bytes"
 import { useEvent } from "@/hooks/use-event"
 import { useSchematic, type Clip } from "@/schematic/use-schematic"
@@ -37,6 +41,7 @@ import type { EditorHandle } from "@/components/code/Editor"
 
 /** Monaco is a few megabytes; it loads the first time the code panel opens, not with the page. */
 const CodePanel = React.lazy(() => import("@/components/code/CodePanel").then((m) => ({ default: m.CodePanel })))
+const HdlPanel = React.lazy(() => import("@/components/hdl/HdlPanel").then((m) => ({ default: m.HdlPanel })))
 import { ComponentView } from "./ComponentView"
 import { MeasureLayer } from "./MeasureLayer"
 import { PinLayer } from "./PinLayer"
@@ -88,6 +93,9 @@ export type DotFieldHandle = {
   toggleCode: () => void
   /** Show the code of the board with this designator. */
   openCode: (ref: string) => void
+  newHdl: (language: HdlLanguage) => void
+  importHdl: (files: SourceFile[]) => void
+  openHdl: (id: string) => void
 }
 
 /** What the menu needs to know to label and enable its items. */
@@ -144,6 +152,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const marquee = useSelection(toWorld, worldPerPixel, grid)
   const { boxRef: marqueeRef } = marquee
   const sch = useSchematic(grid)
+  setLibrary(sch.doc.library)
+  React.useEffect(() => notifyLibrary(), [sch.doc.library])
+  const [hdlId, setHdlId] = React.useState<string | null>(null)
+  const hdlOpen = sch.doc.library?.find((m) => m.id === hdlId) ?? null
   const measure = useMeasure()
   const [simRunning, setSimRunning] = React.useState(false)
   const onFailure = React.useCallback(
@@ -448,6 +460,24 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         if (board) setCodeBoardId(board.id)
         setCodeOpen(true)
       },
+      newHdl: (language) => {
+        const taken = new Set((sch.doc.library ?? []).map((m) => m.name))
+        let n = 1
+        while (taken.has(`${language === "vhdl" ? "counter" : "counter_v"}${n > 1 ? n : ""}`)) n++
+        const name = `${language === "vhdl" ? "counter" : "counter_v"}${n > 1 ? n : ""}`
+        const id = newModuleId()
+        sch.setModule({ id, name, files: [TEMPLATES[language](name)] })
+        setHdlId(id)
+      },
+      importHdl: (files) => {
+        const hdl = files.filter((f) => languageOf(f.path))
+        if (!hdl.length) return
+        const id = newModuleId()
+        const name = hdl[0]!.path.replace(/^.*\//, "").replace(/\.[^.]+$/, "")
+        sch.setModule({ id, name, files: hdl })
+        setHdlId(id)
+      },
+      openHdl: (id) => setHdlId(id),
     }),
     [add, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle],
   )
@@ -1080,6 +1110,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               setCodeBoardId(id)
               setCodeOpen(true)
             }}
+            onHdl={setHdlId}
             onRotate={(d) => sch.rotate(sch.selectedObjects, d)}
             onDelete={sch.removeSelected}
             onPointerDown={(e) => e.stopPropagation()}
@@ -1241,6 +1272,20 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onDebug={sch.setDebug}
             debug={debug}
             onClose={() => setCodeOpen(false)}
+          />
+        </React.Suspense>
+      )}
+      {hdlOpen && (
+        <React.Suspense fallback={<div className="w-155 shrink-0 border-l bg-background" />}>
+          <HdlPanel
+            module={hdlOpen}
+            placed={sch.doc.objects.filter((o) => o.def === hdlOpen.id).length}
+            onChange={sch.setModule}
+            onDelete={(id) => {
+              sch.removeModule(id)
+              setHdlId(null)
+            }}
+            onClose={() => setHdlId(null)}
           />
         </React.Suspense>
       )}

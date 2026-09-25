@@ -1,0 +1,28 @@
+FROM node:22-trixie-slim AS deps
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY backend/worker/package.json backend/worker/
+COPY backend/shared/package.json backend/shared/
+RUN pnpm install --frozen-lockfile --prod --filter emul-worker...
+
+FROM debian:trixie-slim AS plugin
+ARG GHDL_YOSYS_PLUGIN=4ea20ad3f1c1177b912a93308a8e926d5981792d
+RUN apt-get update && apt-get install -y --no-install-recommends ghdl libghdl-dev yosys-dev g++ make git ca-certificates pkg-config \
+  && rm -rf /var/lib/apt/lists/*
+RUN git clone https://github.com/ghdl/ghdl-yosys-plugin /src && cd /src && git checkout "$GHDL_YOSYS_PLUGIN" \
+  && make GHDL=ghdl YOSYS_CONFIG=yosys-config
+
+FROM node:22-trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ghdl yosys libghdl-5-0-1 \
+  && rm -rf /var/lib/apt/lists/*
+COPY --from=plugin /src/ghdl.so /usr/lib/yosys/plugins/ghdl.so
+WORKDIR /app
+COPY --from=deps /app/node_modules node_modules
+COPY --from=deps /app/backend/worker/node_modules backend/worker/node_modules
+COPY --from=deps /app/backend/shared/node_modules backend/shared/node_modules
+COPY backend/worker/ backend/worker/
+COPY backend/shared/ backend/shared/
+ENV WORKER_QUEUE=hdl
+USER node
+CMD ["node", "--experimental-strip-types", "backend/worker/src/index.ts"]

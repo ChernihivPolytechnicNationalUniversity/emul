@@ -1,0 +1,1 @@
+{"top":"g","language":"vhdl","nets":8,"ports":[{"name":"a","dir":"input","bits":[2,3,4],"offset":0,"upto":false},{"name":"y","dir":"output","bits":[5,6,7],"offset":0,"upto":false},{"name":"k","dir":"output","bits":[0,1,1,0],"offset":0,"upto":false}],"cells":[["$_NOT_",2,5],["$_NOT_",3,6],["$_NOT_",4,7]],"init":[]}

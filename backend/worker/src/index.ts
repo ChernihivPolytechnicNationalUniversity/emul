@@ -5,13 +5,16 @@
  *   pnpm worker        (WORKER_CONCURRENCY jobs at once, 2 by default)
  */
 import { Worker } from "bullmq"
-import { QUEUE, type JobData, type JobResult, type Outcome } from "emul-shared/jobs"
+import { QUEUE, QUEUES, type JobData, type JobResult, type Outcome, type QueueName } from "emul-shared/jobs"
 import { connect } from "emul-shared/redis"
 import { handlers } from "./handlers.ts"
 import { uploadJson } from "./store.ts"
 
+const queue = (process.env.WORKER_QUEUE ?? QUEUE) as QueueName
+if (!QUEUES.includes(queue)) throw new Error(`WORKER_QUEUE must be one of ${QUEUES.join(", ")}`)
+
 const worker = new Worker<JobData, JobResult>(
-  QUEUE,
+  queue,
   async (job) => {
     // `result.json` sits next to the files so the outcome outlives the job's hour in Redis, failures included.
     const started = Date.now()
@@ -30,7 +33,7 @@ const worker = new Worker<JobData, JobResult>(
 worker.on("completed", (job) => console.log(`job ${job.id} (${job.data.kind}) done`))
 worker.on("failed", (job, err) => console.error(`job ${job?.id} (${job?.data.kind}) failed: ${err.message}`))
 worker.on("error", (err) => console.error(err))
-console.log(`worker on queue "${QUEUE}"`)
+console.log(`worker on queue "${queue}"`)
 
 // The container's PID 1 gets SIGTERM from the orchestrator; finish the running jobs and exit.
 for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => worker.close().then(() => process.exit(0)))

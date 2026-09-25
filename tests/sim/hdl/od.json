@@ -1,0 +1,1 @@
+{"top":"od","language":"vhdl","nets":4,"ports":[{"name":"pull_low","dir":"input","bits":[2],"offset":0,"upto":false},{"name":"sda","dir":"inout","bits":[3],"offset":0,"upto":false},{"name":"seen","dir":"output","bits":[3],"offset":0,"upto":false}],"cells":[["$_TBUF_",0,2,3]],"init":[]}

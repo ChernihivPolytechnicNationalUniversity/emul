@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto"
-import { JOB_KINDS, JOB_URL_TTL, OPT_LEVELS, OUTPUTS, SOURCE_LIMITS, TARGETS, jobKeys, newJobId, sourcePath, type BuildOptions, type JobData, type JobKind, type ProjectManifest, type SourceFile, type Target } from "emul-shared/jobs"
+import { JOB_KINDS, JOB_URL_TTL, OPT_LEVELS, OUTPUTS, QUEUES, SOURCE_LIMITS, TARGETS, jobKeys, newJobId, queueOf, sourcePath, type BuildOptions, type JobData, type JobKind, type ProjectManifest, type SourceFile, type Target } from "emul-shared/jobs"
+import { checkSynthOptions, type SynthOptions } from "emul-shared/hdl"
 import { presignGet, presignRead, presignWrite, putJson, putObject } from "emul-shared/s3"
 import type { FastifyInstance } from "fastify"
 
-type NewJob = { kind: JobKind; target: Target; files: SourceFile[]; options?: BuildOptions }
+type NewJob = { kind: JobKind; target?: Target; files: SourceFile[]; options?: BuildOptions & SynthOptions }
 
 /** Enqueue a job over a project and poll its state; the worker does the work. */
 export async function jobs(app: FastifyInstance) {
@@ -13,11 +14,19 @@ export async function jobs(app: FastifyInstance) {
       schema: {
         body: {
           type: "object",
-          required: ["kind", "target", "files"],
+          required: ["kind", "files"],
           properties: {
             kind: { type: "string", enum: JOB_KINDS },
             target: { type: "string", enum: TARGETS },
-            options: { type: "object", additionalProperties: false, properties: { opt: { type: "string", enum: OPT_LEVELS } } },
+            options: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                opt: { type: "string", enum: OPT_LEVELS },
+                top: { type: "string", maxLength: 64 },
+                generics: { type: "object", maxProperties: 64, additionalProperties: { type: "string", maxLength: 300 } },
+              },
+            },
             files: {
               type: "array",
               minItems: 1,
@@ -34,6 +43,11 @@ export async function jobs(app: FastifyInstance) {
     },
     async (req, reply) => {
       const { files, kind, target, options } = req.body
+      if (kind !== "synth" && !target) return reply.code(400).send({ ok: false, error: "target is required" })
+      if (kind === "synth") {
+        const bad = checkSynthOptions(options ?? {})
+        if (bad) return reply.code(400).send({ ok: false, error: bad })
+      }
       // The project goes to S3 under the job's prefix; Redis carries the kind, the target, the options and URLs.
       const seen = new Set<string>()
       const manifest: ProjectManifest = { target, options, createdAt: new Date().toISOString(), files: [] }
@@ -60,7 +74,7 @@ export async function jobs(app: FastifyInstance) {
         outputs: Object.fromEntries(await Promise.all(OUTPUTS[kind].map(async (name) => [name, await presignWrite(keys.out(name), JOB_URL_TTL)]))),
         result: await presignWrite(keys.result, JOB_URL_TTL),
       }
-      const job = await app.queue.add(kind, data, { jobId: id })
+      const job = await app.queues[queueOf(kind)].add(kind, data, { jobId: id })
       return reply.code(202).send({ ok: true, id: job.id })
     },
   )
@@ -68,7 +82,7 @@ export async function jobs(app: FastifyInstance) {
   // A finished job lists its files with presigned URLs: the browser downloads from the store directly
   // (the bucket stays private, the URL expires), nothing streams through the API.
   app.get<{ Params: { id: string } }>("/jobs/:id", async (req, reply) => {
-    const job = await app.queue.getJob(req.params.id)
+    const job = (await Promise.all(QUEUES.map((q) => app.queues[q].getJob(req.params.id)))).find(Boolean)
     if (!job) return reply.code(404).send({ ok: false, error: "not found" })
     const result = job.returnvalue
     const artifacts = await Promise.all(

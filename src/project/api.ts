@@ -1,4 +1,5 @@
 import type { BuildOptions, SourceFile, Target } from "emul-shared/source"
+import type { SynthOptions } from "emul-shared/hdl"
 
 /**
  * The build service, as the site sees it: `POST /api/jobs` with the project, then poll
@@ -33,6 +34,17 @@ export async function submitBuild(target: Target, files: SourceFile[], options: 
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ kind: "build", target, files, options }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const body = (await res.json()) as { id: string }
+  return body.id
+}
+
+export async function submitSynth(files: SourceFile[], options: SynthOptions = {}): Promise<string> {
+  const res = await fetch("/api/jobs", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "synth", files, options }),
   })
   if (!res.ok) throw new Error(await readError(res))
   const body = (await res.json()) as { id: string }

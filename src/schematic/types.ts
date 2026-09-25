@@ -1,4 +1,5 @@
 import type { OptLevel, SourceFile } from "emul-shared/source"
+import type { HdlNetlist } from "emul-shared/hdl"
 import type { BreakpointSpec } from "@/debug/protocol"
 import type { MemoryRegion } from "@/mcu/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
@@ -426,11 +427,23 @@ export type DamageEntry = { reason: string; /** What the broken element became. 
  */
 export type Damage = DamageEntry & { fatal: boolean; also?: DamageEntry[] }
 
+export type HdlModule = {
+  id: string
+  name: string
+  files: SourceFile[]
+  top?: string
+  generics?: Record<string, string>
+  netlist?: HdlNetlist
+  built?: string
+  builtFrom?: string
+}
+
 export type Schematic = {
   objects: PlacedObject[]
   wires: Wire[]
   /** Keyed by partKey(objectId, partId). */
   parts: Record<string, PartState>
+  library?: HdlModule[]
 }
 
 export const partKey = (object: string, part: string) => `${object}:${part}`

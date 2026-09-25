@@ -50,6 +50,7 @@ jobs:
           - { suffix: "", dockerfile: Dockerfile }
           - { suffix: api, dockerfile: backend/api/Dockerfile }
           - { suffix: worker, dockerfile: backend/worker/Dockerfile }
+          - { suffix: hdl, dockerfile: backend/worker/Dockerfile.hdl }
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: ./.github/actions/build-image

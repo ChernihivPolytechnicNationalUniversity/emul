@@ -1,4 +1,5 @@
 import type { EepromSnapshot } from "@/sim/digital"
+import type { HdlSnapshot } from "@/sim/hdl"
 import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
 import { CodeIcon, CpuIcon, FlameIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
@@ -13,7 +14,8 @@ import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
-import { getDef } from "@/schematic/registry"
+import { getDef, hdlModule } from "@/schematic/registry"
+import { isHdlDef, isModified } from "@/schematic/hdl"
 import type { Damage, PlacedObject, PropField } from "@/schematic/types"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import type { SimReadout } from "@/sim/use-simulation"
@@ -52,11 +54,12 @@ type InspectorProps = Omit<React.ComponentProps<typeof Card>, "onChange"> & {
   onSerial?: (id: string, text: string) => void
   /** Open the code panel on this board or chip. */
   onCode?: (id: string) => void
+  onHdl?: (defId: string) => void
   onRotate: (delta: 45 | -45) => void
   onDelete: () => void
 }
 
-export function Inspector({ selected, damage, sim, onChange, onFirmware, onSerial, onCode, onRotate, onDelete, className, ...props }: InspectorProps) {
+export function Inspector({ selected, damage, sim, onChange, onFirmware, onSerial, onCode, onHdl, onRotate, onDelete, className, ...props }: InspectorProps) {
   if (selected.length === 0) return null
   const object = selected.length === 1 ? selected[0] : null
   const def = object && getDef(object.def)
@@ -99,6 +102,7 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
           {def.chip && <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? "STM32"} sim={sim} onChange={onChange} onFirmware={onFirmware} onCode={onCode} />}
           {def.id === "serial-terminal" && <TerminalPanel object={object} sim={sim} onSend={(text) => onSerial?.(object.id, text)} />}
           {def.id === "eeprom-24c" && <EepromPanel object={object} sim={sim} />}
+          {isHdlDef(def.id) && <HdlInfo defId={def.id} sim={sim} objectId={object.id} onHdl={onHdl} />}
           {sim.live && !damage[object.id]?.fatal && <LiveReadings object={object} sim={sim} />}
           <FieldGroup className="gap-4">
             {def.prefix && (
@@ -298,6 +302,45 @@ function EepromPanel({ object, sim }: { object: PlacedObject; sim: SimReadout })
       <pre className="h-48 overflow-auto rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-[10.5px] leading-snug">
         {rows.length ? rows.join("\n") : <span className="text-muted-foreground">Run the simulation to see the contents.</span>}
       </pre>
+    </div>
+  )
+}
+
+function HdlInfo({ defId, objectId, sim, onHdl }: { defId: string; objectId: string; sim: SimReadout; onHdl?: (defId: string) => void }) {
+  const module = hdlModule(defId)
+  const state = sim.digital(objectId) as HdlSnapshot | undefined
+  if (!module) return null
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-medium text-muted-foreground">{module.netlist?.language === "verilog" ? "Verilog" : "VHDL"}</div>
+        {onHdl && (
+          <Button variant="outline" size="xs" onClick={() => onHdl(defId)}>
+            <CodeIcon />
+            Source…
+          </Button>
+        )}
+      </div>
+      <div className="text-xs text-muted-foreground">
+        {module.netlist ? `${module.netlist.top}: ${module.netlist.ports.length} ports, ${module.netlist.cells.length} cells` : "Not built"}
+        {isModified(module) && module.netlist && " · edited since the build"}
+      </div>
+      {sim.live && state && state.floating.length > 0 && (
+        <Alert>
+          <TriangleAlertIcon />
+          <AlertTitle>Inputs not connected</AlertTitle>
+          <AlertDescription>
+            {state.floating.join(", ")} read as 0. Tie each to a level (ground, the supply, a logic state) so the design sees what you mean.
+          </AlertDescription>
+        </Alert>
+      )}
+      {state?.oscillating && (
+        <Alert variant="destructive">
+          <TriangleAlertIcon />
+          <AlertTitle>Does not settle</AlertTitle>
+          <AlertDescription>A combinational loop keeps toggling: the outputs hold their last values.</AlertDescription>
+        </Alert>
+      )}
     </div>
   )
 }
