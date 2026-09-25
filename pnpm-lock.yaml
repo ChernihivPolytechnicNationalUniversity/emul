@@ -14,6 +14,9 @@ importers:
       '@fontsource-variable/geist':
         specifier: ^5.3.0
         version: 5.3.0
+      '@hpcc-js/wasm-zstd':
+        specifier: ^1.16.1
+        version: 1.16.1
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.0(@types/node@24.13.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13))
@@ -566,6 +569,9 @@ packages:
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
+
+  '@hpcc-js/wasm-zstd@1.16.1':
+    resolution: {integrity: sha512-mMAkjBmrtkThCRY2h9FazYEsDhn42z+6hQ2zPtIP3TEtwZKgIqUBrnH4r39ujK/MNP94MFEJmVm7h9wcpzMo3Q==}
 
   '@ioredis/commands@2.0.0':
     resolution: {integrity: sha512-vrx0AE/T0h7cRZwfo1M39Cr+ZhZrkf0V8mQN75wucKCxCLD9l/VX6no3gFvrLqD1IlG/1LtzWovqEw3t0Vr9zg==}
@@ -3283,6 +3289,8 @@ snapshots:
   '@hono/node-server@2.1.1(hono@4.13.7)':
     dependencies:
       hono: 4.13.7
+
+  '@hpcc-js/wasm-zstd@1.16.1': {}
 
   '@ioredis/commands@2.0.0': {}
 

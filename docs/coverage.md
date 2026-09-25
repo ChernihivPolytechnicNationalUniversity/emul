@@ -58,9 +58,8 @@ sleep scale with HCLK (all peripherals clocked), Stop by regulator, Standby with
 core sleeping 97 % of the time between SysTicks reads as the blend, and an ammeter on the
 board sees the same number.
 
-Phase 1 of `plan.md` (the MCU side) is complete apart from the long tail of blocks no lab has
-needed (CAN, USB, Ethernet…); Phase 2, the components on the field, is under way (2.1 crystals
-and clock modules, 2.3 the logic analyser, 2.4 meters done); of Phase 3, the debugger (3.1) is done.
+The MCU side is complete apart from the long tail of blocks no lab has needed (CAN, USB,
+Ethernet…); what is still to build is in `plan.md`.
 
 **Digital fast path.** The analog engine steps every 20 µs; a 115200-baud bit is 8.7 µs. Serial
 bits therefore travel between an MCU pad and a terminal (or another MCU's pad on the same net)

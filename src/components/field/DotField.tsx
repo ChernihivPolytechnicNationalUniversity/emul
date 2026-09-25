@@ -49,6 +49,8 @@ import { FieldReadout, ProbeReadout, type HoverTarget } from "./Readout"
 import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
 import { FieldCanvas } from "./FieldCanvas"
+import { exportPng } from "./export-image"
+import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
 import { labelArea, labelCanvasFits, SymbolRaster, TextRaster } from "./symbol-raster"
 import { PendingWireLayer, WireLayer, type PendingWire } from "./WireLayer"
@@ -70,6 +72,7 @@ export type DotFieldHandle = {
   load: (doc: Schematic) => void
   /** The document as it stands, for saving. */
   doc: () => Schematic
+  exportPng: () => Promise<Blob | null>
   clear: () => void
   undo: () => void
   redo: () => void
@@ -117,7 +120,7 @@ export type FieldState = {
   code: boolean
 }
 
-type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"> & {
+type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref" | "onChange"> & {
   ref?: React.Ref<DotFieldHandle>
   grid?: number
   onSelectionChange?: (rect: Rect | null) => void
@@ -398,6 +401,13 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return toWorld((r?.left ?? 0) + (el?.clientWidth ?? 0) / 2, (r?.top ?? 0) + (el?.clientHeight ?? 0) / 2)
   }, [containerRef, toWorld])
 
+  const theme = useThemeName()
+  const exportImage = useEvent(async () => {
+    const host = containerRef.current
+    if (!host) return null
+    return exportPng({ host, theme, objects: docObjects, routes, grid, colorOf, symbols: symbolRaster, texts: textRaster })
+  })
+
   const { add, load } = sch
   React.useImperativeHandle(
     ref,
@@ -423,6 +433,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         })
       },
       doc: () => sch.doc,
+      exportPng: exportImage,
       clear: () => {
         setSimRunning(false)
         restart()
@@ -479,7 +490,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       },
       openHdl: (id) => setHdlId(id),
     }),
-    [add, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle],
+    [add, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle, exportImage],
   )
 
   // --- moving objects -------------------------------------------------------

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/menubar"
 import type { DotFieldHandle, FieldState } from "@/components/field/DotField"
 import { examples, type Example } from "@/schematic/examples"
+import type { ProjectMeta } from "@/project/project-store"
 import { SPEEDS, formatSpeed } from "@/sim/speeds"
 
 // A desktop menu is compact: small type, one line per command, a check column on the left
@@ -60,8 +61,15 @@ type MenuBarProps = React.ComponentProps<"div"> & {
   state: FieldState
   sidebarOpen: boolean
   onSidebarToggle: () => void
+  project: string | null
+  recent: readonly ProjectMeta[]
+  onNew: () => void
+  onProjects: () => void
+  onOpenProject: (id: string) => void
   onOpenFile: () => void
   onSaveFile: () => void
+  onShare: () => void
+  onExportPng: () => void
   onImportHdl: () => void
   onExample: (example: Example) => void
 }
@@ -75,8 +83,15 @@ export function MenuBar({
   state,
   sidebarOpen,
   onSidebarToggle,
+  project,
+  recent,
+  onNew,
+  onProjects,
+  onOpenProject,
   onOpenFile,
   onSaveFile,
+  onShare,
+  onExportPng,
   onImportHdl,
   onExample,
   className,
@@ -99,16 +114,35 @@ export function MenuBar({
         <MenubarMenu>
           <MenubarTrigger>File</MenubarTrigger>
           <MenubarContent>
-            <MenubarItem onClick={act((f) => f.clear())} disabled={state.isEmpty}>
-              New
+            <MenubarItem onClick={onNew}>New project</MenubarItem>
+            <MenubarItem onClick={onProjects}>
+              Projects…
+              <MenubarShortcut>⇧⌘O</MenubarShortcut>
             </MenubarItem>
+            <MenubarSub>
+              <MenubarSubTrigger disabled={recent.length === 0}>Open recent</MenubarSubTrigger>
+              <MenubarSubContent className="min-w-44">
+                {recent.map((p) => (
+                  <MenubarItem key={p.id} onClick={() => onOpenProject(p.id)}>
+                    {p.name}
+                  </MenubarItem>
+                ))}
+              </MenubarSubContent>
+            </MenubarSub>
+            <MenubarSeparator />
             <MenubarItem onClick={onOpenFile}>
-              Open…
+              Open file…
               <MenubarShortcut>⌘O</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={onSaveFile} disabled={state.isEmpty}>
-              Save
+              Save to file
               <MenubarShortcut>⌘S</MenubarShortcut>
+            </MenubarItem>
+            <MenubarItem onClick={onShare} disabled={state.isEmpty}>
+              Copy share link
+            </MenubarItem>
+            <MenubarItem onClick={onExportPng} disabled={state.isEmpty}>
+              Export image (PNG)
             </MenubarItem>
             <MenubarSeparator />
             <MenubarItem onClick={act((f) => f.newHdl("vhdl"))}>New VHDL component</MenubarItem>
@@ -274,6 +308,16 @@ export function MenuBar({
           </MenubarContent>
         </MenubarMenu>
       </Menubar>
+      {project && (
+        <button
+          type="button"
+          onClick={onProjects}
+          title="Projects"
+          className="mx-auto max-w-80 truncate rounded-sm px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          {project}
+        </button>
+      )}
     </div>
   )
 }
