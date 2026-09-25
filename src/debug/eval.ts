@@ -9,7 +9,7 @@
 import { DW_ATE } from "./dwarf/consts"
 import type { VariableInfo } from "./info"
 import { strip, typeName, VOID, type DType } from "./types"
-import { addressOf, isSignedEncoding, leBytes, Pending, scalarOf, Unreadable, valueBytes, variableValue, type Env, type Scalar, type Value } from "./values"
+import { addressOf, isSignedEncoding, leBytes, partOrigin, Pending, scalarOf, Unreadable, valueBytes, variableValue, type Env, type Scalar, type Value } from "./values"
 
 export { Pending, Unreadable }
 
@@ -523,12 +523,13 @@ function member(env: Env, value: Value, name: string): Value {
   const t = strip(value.type)
   if (t.kind !== "struct") throw new Unreadable(`${typeName(value.type)} has no members`)
   // A struct in registers or in pieces (optimized code): its bytes, then the member of them.
-  const v: Value = value.loc.kind === "memory" || value.loc.kind === "bytes" ? value : { type: value.type, loc: { kind: "bytes", bytes: valueBytes(env, value) } }
+  const v: Value = value.loc.kind === "memory" || value.loc.kind === "bytes" ? value : { type: value.type, loc: { kind: "bytes", bytes: valueBytes(env, value) }, origin: { value, offset: 0 } }
   const find = (s: DType & { kind: "struct" }, offset: number): Value | null => {
     for (const m of s.members) {
       if (m.name === name && !m.base) {
         const loc = v.loc.kind === "memory" ? { kind: "memory" as const, addr: (v.loc.addr + offset + m.offset) >>> 0 } : v.loc.kind === "bytes" ? { kind: "bytes" as const, bytes: v.loc.bytes.subarray(offset + m.offset) } : { kind: "unavailable" as const, why: "not in memory" }
         const out: Value = { type: m.type, loc }
+        if (loc.kind === "bytes") out.origin = partOrigin(v, offset + m.offset)
         if (m.bitSize !== undefined) {
           out.bitSize = m.bitSize
           out.bitOffset = m.bitOffset ?? 0
@@ -677,7 +678,8 @@ function unaryOp(env: Env, op: string, v: Value): Value {
   return intValue(op === "-" ? -x : op === "~" ? ~x : x, type)
 }
 
-function castTo(env: Env, type: DType, v: Value): Value {
+/** A value converted to a scalar type as a C cast (and an assignment) converts it. */
+export function castTo(env: Env, type: DType, v: Value): Value {
   const t = strip(type)
   if (t.kind === "struct" || t.kind === "array") throw new Unreadable(`cannot cast to ${typeName(type)}`)
   if (t.kind === "void") return { type, loc: { kind: "unavailable", why: "void" } }

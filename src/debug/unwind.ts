@@ -13,12 +13,28 @@ import type { MemorySnapshot } from "./memory"
 import type { CoreRegisters } from "./protocol"
 import { evaluateValue, type ExprContext } from "./dwarf/expr"
 
+/**
+ * Where a frame's register value is kept, for setting it: in one of the core's registers (the
+ * same one, or another a rule moved it to: a caller's PC is the callee's LR until it is saved),
+ * or in the stack slot a callee saved it to (it is restored from there on the way back).
+ * `reg` counts r0–r15, or s0–s31 for an FP register's home. `thumb`: kept as a return
+ * address, with bit 0 set (a caller's PC in its callee's LR or its save slot).
+ */
+export type RegHome = ({ kind: "register"; reg: number } | { kind: "memory"; addr: number }) & { thumb?: boolean }
+
 export type FrameRegs = {
   /** r0–r15 as far as this frame knows them: a caller does not know the scratch registers (null). */
   r: (number | null)[]
   /** The FP registers, as bit patterns; only the innermost frame has them for certain. */
   s: number[] | null
+  /** Where each of r0–r15 is kept; null for a value that is computed (the caller's SP) or lost. */
+  rHome: (RegHome | null)[]
+  /** Where each FP register is kept, where `s` is known. */
+  sHome: (RegHome | null)[] | null
 }
+
+const inRegister = (reg: number): RegHome => ({ kind: "register", reg })
+const slot = (addr: number): RegHome => ({ kind: "memory", addr: addr >>> 0 })
 
 export type StackFrame = {
   /** Position in the stack, 0 innermost; inlined frames count too. */
@@ -50,6 +66,8 @@ export function unwind(info: DebugInfo, regs: CoreRegisters, mem: MemorySnapshot
   const frames: StackFrame[] = []
   let r: (number | null)[] = regs.r.slice(0, 16)
   let s: number[] | null = regs.s
+  let rHome: (RegHome | null)[] = r.map((_, n) => inRegister(n))
+  let sHome: (RegHome | null)[] | null = s ? s.map((_, k) => inRegister(k)) : null
   let interrupted = false
   let interruptedBy: string | null = null
   let psp = regs.psp
@@ -73,36 +91,46 @@ export function unwind(info: DebugInfo, regs: CoreRegisters, mem: MemorySnapshot
       // instruction nothing is pushed yet, and a leaf never pushes; take SP and LR as they are.
       cfa = r[13]
     }
-    pushFrames(frames, info, { pc, lookup, cfa, regs: { r, s }, interruptedBy })
+    pushFrames(frames, info, { pc, lookup, cfa, regs: { r, s, rHome, sHome }, interruptedBy })
     interruptedBy = null
     interrupted = false
     if (cfa === null) break
 
-    // The caller's registers.
+    // The caller's registers, and where each is kept.
     const next: (number | null)[] = new Array(16).fill(null)
-    for (let n = 4; n <= 11; n++) next[n] = r[n]
+    const nextHome: (RegHome | null)[] = new Array(16).fill(null)
+    for (let n = 4; n <= 11; n++) {
+      next[n] = r[n]
+      nextHome[n] = rHome[n]
+    }
     next[13] = cfa
     let ra: number | null = r[14]
+    let raHome: RegHome | null = rHome[14]
     if (row) {
       for (const [n, rule] of row.regs) {
         if (n >= 16) continue
         let v: number | null = null
+        let home: RegHome | null = null
         switch (rule.kind) {
           case "offset":
             v = mem.u32((cfa + rule.n) >>> 0)
+            home = slot(cfa + rule.n)
             break
           case "val-offset":
             v = (cfa + rule.n) >>> 0
             break
           case "register":
             v = regOf(rule.reg)
+            home = rule.reg < 16 ? rHome[rule.reg] : null
             break
           case "same":
             v = r[n]
+            home = rHome[n]
             break
           case "expr": {
             const a = evaluateValue(rule.expr, ctx(regOf, mem), cfa)
             v = a === null ? null : mem.u32(a)
+            home = a === null ? null : slot(a)
             break
           }
           case "val-expr":
@@ -112,8 +140,11 @@ export function unwind(info: DebugInfo, regs: CoreRegisters, mem: MemorySnapshot
             v = null
         }
         next[n] = v
+        nextHome[n] = v === null ? null : home
       }
-      ra = row.regs.has(row.returnRegister) ? next[row.returnRegister] : r[row.returnRegister]
+      const kept = row.regs.has(row.returnRegister)
+      ra = kept ? next[row.returnRegister] : r[row.returnRegister]
+      raHome = kept ? nextHome[row.returnRegister] : rHome[row.returnRegister]
     }
     if (ra === null) break
 
@@ -128,6 +159,9 @@ export function unwind(info: DebugInfo, regs: CoreRegisters, mem: MemorySnapshot
       if (words.some((w) => w === null)) break
       const [r0, r1, r2, r3, r12, lr, rpc, xpsr] = words as number[]
       const stacked: (number | null)[] = [...next]
+      const stackedHome: (RegHome | null)[] = [...nextHome]
+      // The hardware's frame: r0–r3, r12, lr, pc, xPSR, a word each; they are popped back on return.
+      ;[0, 1, 2, 3, 12, 14, 15].forEach((n, i) => (stackedHome[n] = slot(frame + i * 4)))
       stacked[0] = r0
       stacked[1] = r1
       stacked[2] = r2
@@ -137,16 +171,24 @@ export function unwind(info: DebugInfo, regs: CoreRegisters, mem: MemorySnapshot
       stacked[15] = rpc & ~1
       const size = fp ? 0x68 : 0x20
       stacked[13] = (frame + size + (xpsr & (1 << 9) ? 4 : 0)) >>> 0
+      stackedHome[13] = null
       if (fp && s) {
         const sv = [...s]
-        for (let i = 0; i < 16; i++) sv[i] = mem.u32((frame + 32 + i * 4) >>> 0) ?? sv[i]
+        const svHome = [...(sHome ?? s.map(() => null))]
+        for (let i = 0; i < 16; i++) {
+          const v = mem.u32((frame + 32 + i * 4) >>> 0)
+          sv[i] = v ?? sv[i]
+          if (v !== null) svHome[i] = slot(frame + 32 + i * 4)
+        }
         s = sv
+        sHome = svHome
       }
       if (onPsp) psp = stacked[13]!
       ipsr = xpsr & 0x1ff
       interrupted = true
       interruptedBy = excName(handler)
       r = stacked
+      rHome = stackedHome
       continue
     }
     // The end of the stack: Reset_Handler's LR, or nothing to return to.
@@ -154,9 +196,13 @@ export function unwind(info: DebugInfo, regs: CoreRegisters, mem: MemorySnapshot
     const callerPc = (ra & ~1) >>> 0
     if (depth > 0 && next[13] !== null && r[13] !== null && next[13]! < r[13]!) break
     next[15] = callerPc
+    // Its PC is the return address: changing it changes where the callee returns to.
+    nextHome[15] = raHome && { ...raHome, thumb: true }
     // A caller only knows the registers the callee had to keep (r4–r11) and what the rules restore.
     r = next
+    rHome = nextHome
     s = null
+    sHome = null
   }
   return frames
 }

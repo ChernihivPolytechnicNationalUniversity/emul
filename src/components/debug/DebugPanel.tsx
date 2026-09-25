@@ -1,5 +1,6 @@
 import * as React from "react"
-import { CircleIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react"
+import { toast } from "sonner"
+import { CircleIcon, PencilIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { BreakpointSpec } from "@/debug/protocol"
 import type { BoardView, DebugController } from "@/debug/session"
@@ -104,7 +105,7 @@ export function DebugPanel(p: Props) {
         {tab === "watch" && <WatchView debug={debug} boardId={boardId} view={view} watches={p.watches} onWatches={p.onWatches} />}
         {tab === "stack" && <CallStackView debug={debug} boardId={boardId} view={view} />}
         {tab === "breakpoints" && <BreakpointsView info={info} breakpoints={p.breakpoints} onBreakpoints={p.onBreakpoints} catchFaults={p.catchFaults} onCatchFaults={p.onCatchFaults} onReveal={p.onReveal} hit={view.stop?.reason === "breakpoint" ? view.stop.breakpoint : undefined} />}
-        {tab === "registers" && <RegistersView view={view} />}
+        {tab === "registers" && <RegistersView debug={debug} boardId={boardId} view={view} />}
         {tab === "peripherals" && <PeripheralsView debug={debug} boardId={boardId} chip={p.chip} view={view} />}
         {tab === "memory" && <MemoryView debug={debug} boardId={boardId} view={view} at={p.memoryAt} />}
       </div>
@@ -167,7 +168,7 @@ function VariablesView({ debug, boardId, view, info, onWatch }: { debug: DebugCo
           </button>
           {open[s.id] &&
             (s.roots.length ? (
-              <ValueTree env={env} before={before} roots={s.roots} radix={debug.radix} expanded={expanded} onToggle={toggle} onPick={(_, path) => onWatch(path)} className="pl-3" />
+              <ValueTree env={env} before={before} roots={s.roots} radix={debug.radix} expanded={expanded} onToggle={toggle} onPick={(_, path) => onWatch(path)} onAssign={(v, text) => debug.assign(boardId, v, text)} className="pl-3" />
             ) : (
               <div className="pl-7 text-[11px] text-muted-foreground">none</div>
             ))}
@@ -206,7 +207,7 @@ function WatchView({ debug, boardId, view, watches, onWatches }: { debug: DebugC
   }
   return (
     <div className="flex flex-col py-0.5">
-      <ValueTree env={env} before={before} roots={roots} radix={debug.radix} expanded={expanded} onToggle={toggle} />
+      <ValueTree env={env} before={before} roots={roots} radix={debug.radix} expanded={expanded} onToggle={toggle} onAssign={(v, text) => debug.assign(boardId, v, text)} />
       <form
         className="flex items-center gap-1 px-1 pt-0.5"
         onSubmit={(e) => {
@@ -333,25 +334,75 @@ function xpsrText(v: number) {
   return `${f(31, "N")}${f(30, "Z")}${f(29, "C")}${f(28, "V")}${f(27, "Q")} GE=${((v >>> 16) & 0xf).toString(2).padStart(4, "0")} ${ipsr ? excName(ipsr) : "Thread"}`
 }
 
-function RegistersView({ view }: { view: BoardView }) {
+/**
+ * The core's registers, r0–r15 as the selected frame has them (a caller's are where its callees
+ * saved them), the rest as the core has them. A value is set in place: its pencil, or a
+ * double-click, takes a C expression (for s0–s31 a float, or the bits as an integer).
+ */
+function RegistersView({ debug, boardId, view }: { debug: DebugController; boardId: string; view: BoardView }) {
+  const [editing, setEditing] = React.useState<{ name: string; text: string; busy?: boolean } | null>(null)
   const why = notStopped(view)
   if (why) return <Empty>{why}</Empty>
   const regs = view.regs!
   const prev = view.prevRegs
   const frame = view.frames[view.frame]
   // A caller's frame knows the registers the calls kept (r4–r11, SP, PC); the rest are the callee's business.
-  const r = view.frame > 0 && frame ? frame.regs.r : regs.r
-  const cell = (name: string, value: number | null, before: number | null | undefined, extra?: string) => (
-    <div key={name} className="flex h-5 items-center gap-2 px-2" title={extra}>
-      <span className="w-14 shrink-0 text-violet-700 dark:text-violet-300">{name}</span>
-      <span className={cn("tabular-nums", value !== null && before !== undefined && before !== null && before !== value && "rounded-sm bg-amber-200/60 px-0.5 dark:bg-amber-500/30", value === null && "text-muted-foreground")}>{value === null ? "—" : hex8(value)}</span>
-      {extra && <span className="min-w-0 truncate text-muted-foreground">{extra}</span>}
-    </div>
-  )
+  const outer = view.frame > 0 && frame
+  const r = outer ? frame.regs.r : regs.r
+  const commit = async (name: string, text: string) => {
+    if (!text.trim()) return setEditing(null)
+    setEditing({ name, text, busy: true })
+    const error = await debug.setRegister(boardId, name, text, CORE.includes(name) ? view.frame : 0)
+    if (error) {
+      toast.error(`Cannot set ${name}`, { description: error })
+      setEditing({ name, text })
+    } else setEditing(null)
+  }
+  const cell = (name: string, value: number | null, before: number | null | undefined, extra?: string, opts: { settable?: boolean; editText?: string } = {}) => {
+    const edit = editing?.name === name ? editing : null
+    const canSet = opts.settable !== false && value !== null
+    const start = () => setEditing({ name, text: opts.editText ?? hex8(value ?? 0) })
+    return (
+      <div key={name} className="group flex h-5 min-w-0 items-center gap-2 px-2" title={extra}>
+        <span className="w-14 shrink-0 text-violet-700 dark:text-violet-300">{name}</span>
+        {edit ? (
+          <input
+            autoFocus
+            className="h-4 w-28 min-w-0 rounded-sm border bg-background px-1 font-mono text-[11px] outline-none focus:border-primary"
+            value={edit.text}
+            readOnly={edit.busy}
+            spellCheck={false}
+            aria-label={`New value of ${name}`}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => setEditing({ name, text: e.target.value })}
+            onBlur={() => !edit.busy && setEditing(null)}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === "Enter") void commit(name, edit.text)
+              else if (e.key === "Escape") setEditing(null)
+            }}
+          />
+        ) : (
+          <span
+            className={cn("tabular-nums", value !== null && before !== undefined && before !== null && before !== value && "rounded-sm bg-amber-200/60 px-0.5 dark:bg-amber-500/30", value === null && "text-muted-foreground", canSet && "cursor-text")}
+            onDoubleClick={canSet ? start : undefined}
+          >
+            {value === null ? "—" : hex8(value)}
+          </span>
+        )}
+        {extra && !edit && <span className="min-w-0 truncate text-muted-foreground">{extra}</span>}
+        {canSet && !edit && (
+          <Button variant="ghost" size="icon-xs" className="ml-auto shrink-0 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100" aria-label={`Set ${name}`} title="Set the value (or double-click it)" onClick={start}>
+            <PencilIcon />
+          </Button>
+        )}
+      </div>
+    )
+  }
   const u = (x: number) => new DataView(new Uint32Array([x]).buffer).getFloat32(0, true)
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] py-0.5 font-mono text-[11px]">
-      {CORE.map((n, i) => cell(n, r[i] ?? null, view.frame === 0 ? prev?.r[i] : undefined, i >= 13 ? undefined : r[i] !== null && r[i] !== undefined ? String(r[i]! | 0) : undefined))}
+      {CORE.map((n, i) => cell(n, r[i] ?? null, view.frame === 0 ? prev?.r[i] : undefined, i >= 13 ? undefined : r[i] !== null && r[i] !== undefined ? String(r[i]! | 0) : undefined, { settable: !outer || frame.regs.rHome[i] !== null }))}
       {cell("xPSR", regs.xpsr, prev?.xpsr, xpsrText(regs.xpsr))}
       {cell("MSP", regs.msp, prev?.msp)}
       {cell("PSP", regs.psp, prev?.psp)}
@@ -359,11 +410,11 @@ function RegistersView({ view }: { view: BoardView }) {
       {cell("BASEPRI", regs.basepri, prev?.basepri)}
       {cell("FAULTMASK", regs.faultmask, prev?.faultmask)}
       {cell("CONTROL", regs.control, prev?.control, `${regs.control & 1 ? "unprivileged" : "privileged"}, ${regs.control & 2 ? "PSP" : "MSP"}${regs.control & 4 ? ", FP active" : ""}`)}
-      {cell("cycles", regs.cycles, undefined, `${regs.instructions.toLocaleString()} instructions${regs.sleeping ? ", asleep" : ""}`)}
+      {cell("cycles", regs.cycles, undefined, `${regs.instructions.toLocaleString()} instructions${regs.sleeping ? ", asleep" : ""}`, { settable: false })}
       {regs.s && (
         <>
           {cell("FPSCR", regs.fpscr, prev?.fpscr)}
-          {regs.s.map((bits, i) => cell(`s${i}`, bits, prev?.s?.[i], String(u(bits))))}
+          {regs.s.map((bits, i) => cell(`s${i}`, bits, prev?.s?.[i], String(u(bits)), { editText: String(u(bits)) }))}
         </>
       )}
     </div>

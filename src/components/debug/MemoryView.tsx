@@ -1,4 +1,5 @@
 import * as React from "react"
+import { toast } from "sonner"
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { BoardView, DebugController } from "@/debug/session"
@@ -12,13 +13,15 @@ const hex = (v: number, w = 8) => (v >>> 0).toString(16).padStart(w, "0")
 /**
  * Memory as a hex dump: an address or an expression (a pointer, a variable, a peripheral) to
  * start from, bytes grouped by 1, 2 or 4, the text beside them. Bytes that changed since the
- * stop before are marked; unmapped ones read `??`.
+ * stop before are marked; unmapped ones read `??`. A double-click on a group edits it in hex,
+ * stored little-endian as the core would store it.
  */
 export function MemoryView({ debug, boardId, view, at }: { debug: DebugController; boardId: string; view: BoardView; at: { addr: number; seq: number } | null }) {
   const [addr, setAddr] = React.useState(0x20000000)
   const [text, setText] = React.useState("0x20000000")
   const [group, setGroup] = React.useState<1 | 2 | 4>(1)
   const [error, setError] = React.useState<string | null>(null)
+  const [editing, setEditing] = React.useState<{ addr: number; text: string; busy?: boolean } | null>(null)
   // "Show in memory" from elsewhere: a new request moves the view there.
   const [seen, setSeen] = React.useState(at)
   if (at !== seen) {
@@ -59,6 +62,24 @@ export function MemoryView({ debug, boardId, view, at }: { debug: DebugControlle
     setError(null)
   }
 
+  const commit = async (at: number, text: string) => {
+    const digits = text.trim().replace(/^0x/i, "")
+    if (!digits) return setEditing(null)
+    if (!/^[0-9a-f]+$/i.test(digits) || BigInt(`0x${digits}`) >> BigInt(group * 8) !== 0n) {
+      toast.error(`Cannot store at 0x${hex(at)}`, { description: `${group === 1 ? "a byte" : group === 2 ? "a halfword" : "a word"} is ${group * 2} hex digits` })
+      return
+    }
+    let v = BigInt(`0x${digits}`)
+    const bytes = new Uint8Array(group)
+    for (let i = 0; i < group; i++, v >>= 8n) bytes[i] = Number(v & 0xffn)
+    setEditing({ addr: at, text, busy: true })
+    const failed = await debug.writeMemory(boardId, at, bytes)
+    if (failed) {
+      toast.error(`Cannot store at 0x${hex(at)}`, { description: failed })
+      setEditing({ addr: at, text })
+    } else setEditing(null)
+  }
+
   const rows: React.ReactNode[] = []
   for (let i = 0; i < ROWS; i++) {
     const a = (addr + i * 16) >>> 0
@@ -73,10 +94,37 @@ export function MemoryView({ debug, boardId, view, at }: { debug: DebugControlle
         v = v * 256 + (b ? b[k + j] : 0)
         if (b && old && old[k + j] !== b[k + j]) changed = true
       }
+      const at = (a + k) >>> 0
+      const edit = editing?.addr === at ? editing : null
       cells.push(
-        <span key={k} className={cn("tabular-nums", changed && "rounded-sm bg-amber-200/60 dark:bg-amber-500/30", !b && "text-muted-foreground")}>
-          {b ? hex(v, group * 2) : "??".repeat(group)}
-        </span>,
+        edit ? (
+          <input
+            key={k}
+            autoFocus
+            className="h-4 rounded-sm border bg-background px-0.5 font-mono text-[11px] outline-none focus:border-primary"
+            style={{ width: `${group * 2 + 1.5}ch` }}
+            value={edit.text}
+            readOnly={edit.busy}
+            spellCheck={false}
+            aria-label={`New value at 0x${hex(at)}`}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => setEditing({ addr: at, text: e.target.value })}
+            onBlur={() => !edit.busy && setEditing(null)}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === "Enter") void commit(at, edit.text)
+              else if (e.key === "Escape") setEditing(null)
+            }}
+          />
+        ) : (
+          <span
+            key={k}
+            className={cn("tabular-nums", changed && "rounded-sm bg-amber-200/60 dark:bg-amber-500/30", !b && "text-muted-foreground", b && "cursor-text")}
+            onDoubleClick={b ? () => setEditing({ addr: at, text: hex(v, group * 2) }) : undefined}
+          >
+            {b ? hex(v, group * 2) : "??".repeat(group)}
+          </span>
+        ),
       )
     }
     const ascii = b ? [...b].map((c) => (c >= 32 && c < 127 ? String.fromCharCode(c) : ".")).join("") : ""

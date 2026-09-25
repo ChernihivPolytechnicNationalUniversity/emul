@@ -11,7 +11,7 @@ import { Cpu } from "./cpu"
 import { CoreDebugger } from "./debugger"
 import { parseFirmware, type Firmware } from "./elf"
 import { CpuHalt } from "./faults"
-import type { BlockInfo, CoreDebugCommand, CoreRegisters, DebugStop, InspectReply, InspectRequest, MemoryChunk } from "@/debug/protocol"
+import type { BlockInfo, CoreDebugCommand, CoreRegisters, DebugStop, DebugWrite, InspectReply, InspectRequest, MemoryChunk } from "@/debug/protocol"
 import { RegBlock } from "./periph/regblock"
 import { Exti, Gpio, GPIO_PORTS, type PadDrive } from "./periph/gpio"
 import { parsePad, type PadRef } from "./pads"
@@ -495,9 +495,13 @@ export class Stm32 {
     return this.cpu.dbg?.stop ?? null
   }
 
-  /** Registers and memory as they are, read without side effects: the debugger's view of a stopped (or any) core. */
+  /**
+   * Registers and memory as they are, read without side effects: the debugger's view of a
+   * stopped (or any) core. The request's writes come first, so what is read is after them.
+   */
   inspect(req: InspectRequest): InspectReply {
     const cpu = this.cpu
+    const writeErrors = req.write?.length ? this.applyWrites(req.write) : undefined
     let regs: CoreRegisters | null = null
     if (req.regs) {
       const r = [...cpu.r]
@@ -524,7 +528,105 @@ export class Stm32 {
           .map((p) => ({ name: p.name, base: p.base, size: p.size, registers: p instanceof RegBlock ? p.registerList().map((d) => ({ name: d.name, offset: d.offset })) : [] }))
           .sort((a, b) => a.base - b.base)
       : undefined
-    return { regs, memory: (req.ranges ?? []).map((q) => this.peekRange(q.addr >>> 0, Math.max(0, Math.min(q.size, 1 << 24)))), blocks, stop: this.debugStop, time: this.time, halted: cpu.halted?.message ?? null }
+    return { regs, memory: (req.ranges ?? []).map((q) => this.peekRange(q.addr >>> 0, Math.max(0, Math.min(q.size, 1 << 24)))), blocks, stop: this.debugStop, time: this.time, halted: cpu.halted?.message ?? null, writeErrors }
+  }
+
+  /** The debugger's changes, in order; what could not be done, one message each. */
+  private applyWrites(list: DebugWrite[]): string[] {
+    const errors: string[] = []
+    let stored = false
+    for (const w of list) {
+      const error = w.kind === "memory" ? this.pokeMemory(w.addr >>> 0, w.bytes) : this.pokeRegister(w.reg, w.value >>> 0)
+      if (error) errors.push(error)
+      else stored ||= w.kind === "memory"
+    }
+    // Code may have been changed under the decoded instructions: they are decoded again.
+    if (stored) this.cpu.flushBlocks()
+    return errors
+  }
+
+  /**
+   * Bytes stored as the core's own stores would be: into RAM (a framebuffer notices), and into
+   * a peripheral in the widths the bytes allow, so a register takes one store of its size and
+   * does what such a store does. Flash is programmed through its controller and ROM not at
+   * all; memory its controller has not set up takes nothing.
+   */
+  private pokeMemory(addr: number, bytes: Uint8Array): string | null {
+    const bus = this.bus
+    const at = (a: number) => `0x${(a >>> 0).toString(16).padStart(8, "0")}`
+    for (let i = 0; i < bytes.length; ) {
+      const a = (addr + i) >>> 0
+      const mem = bus.memoryAt(a)
+      if (mem) {
+        if (mem.kind === "rom") return `${at(a)} is read-only memory`
+        if (mem.isFlash) return `${at(a)} is in flash, which only a new build changes`
+        if (!mem.enabled) return `${at(a)} is in ${mem.name}, which the program has not set up yet`
+        if (mem.writeProtected) return `${at(a)} is in ${mem.name}, which the program has write-protected`
+        const n = Math.min(bytes.length - i, mem.bytes.length - mem.offsetOf(a))
+        for (let k = 0; k < n; k++) bus.write8((a + k) >>> 0, bytes[i + k])
+        i += n
+        continue
+      }
+      const left = bytes.length - i
+      const size = left >= 4 && (a & 3) === 0 ? 4 : left >= 2 && (a & 1) === 0 ? 2 : 1
+      if (bus.peek(a, size) === null) return `nothing answers at ${at(a)}`
+      let v = 0
+      for (let k = size - 1; k >= 0; k--) v = v * 256 + bytes[i + k]
+      try {
+        bus.write(a, v, size)
+      } catch (e) {
+        return `${at(a)}: ${(e as Error).message}`
+      }
+      i += size
+    }
+    return null
+  }
+
+  /** A core register set from outside, as a probe sets it; the flags only of xPSR (IPSR and EPSR are the core's). */
+  private pokeRegister(name: string, v: number): string | null {
+    const cpu = this.cpu
+    const r = /^r(\d{1,2})$/.exec(name)
+    const n = r ? Number(r[1]) : ({ sp: 13, lr: 14, pc: 15 } as Record<string, number>)[name] ?? -1
+    const s = /^s(\d{1,2})$/.exec(name)
+    if (n >= 0 && n <= 12) cpu.r[n] = v
+    else if (n === 13) cpu.r[13] = v & ~3
+    else if (n === 14) cpu.r[14] = v
+    else if (n === 15) {
+      cpu.pc = cpu.nextPc = (v & ~1) >>> 0
+      // The stop is where the core now goes on from.
+      const d = cpu.dbg
+      if (d?.stop) d.stop = { ...d.stop, pc: cpu.pc }
+    } else if (s && Number(s[1]) < 32) cpu.sBits[Number(s[1])] = v
+    else
+      switch (name) {
+        case "xpsr":
+          cpu.apsr = v
+          break
+        case "msp":
+          cpu.setMsp(v & ~3)
+          break
+        case "psp":
+          cpu.setPsp(v & ~3)
+          break
+        case "primask":
+          cpu.primask = v & 1
+          break
+        case "faultmask":
+          cpu.faultmask = v & 1
+          break
+        case "basepri":
+          cpu.basepri = v & 0xff
+          break
+        case "control":
+          cpu.setControl(v)
+          break
+        case "fpscr":
+          cpu.fpscr = v
+          break
+        default:
+          return `no register ${name}`
+      }
+    return null
   }
 
   /** `size` bytes from `addr`: memories copied as they are, registers peeked a word at a time. */

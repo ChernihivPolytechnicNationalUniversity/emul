@@ -70,8 +70,20 @@ export type CoreRegisters = {
   sleeping: boolean
 }
 
-/** `blocks` asks for the peripheral blocks the emulator models, with their registers. */
-export type InspectRequest = { regs?: boolean; ranges?: { addr: number; size: number }[]; blocks?: boolean }
+/**
+ * A change the debugger makes at a stop: bytes stored into memory as the core's own stores
+ * would go (RAM and peripherals; flash, ROM and memory not set up refuse), or a core register
+ * by name (r0–r12, sp, lr, pc, xpsr for its flags, msp, psp, primask, basepri, faultmask,
+ * control, fpscr, s0–s31).
+ */
+export type DebugWrite = { kind: "memory"; addr: number; bytes: Uint8Array } | { kind: "register"; reg: string; value: number }
+
+/**
+ * `blocks` asks for the peripheral blocks the emulator models, with their registers. `write`
+ * is done first, in order, so the reply reads the state after it; what it could not do comes
+ * back in `writeErrors`.
+ */
+export type InspectRequest = { regs?: boolean; ranges?: { addr: number; size: number }[]; blocks?: boolean; write?: DebugWrite[] }
 
 /** A peripheral block the emulator models, and the registers it has. */
 export type BlockInfo = { name: string; base: number; size: number; registers: { name: string; offset: number }[] }
@@ -87,4 +99,6 @@ export type InspectReply = {
   /** The core's own time, seconds since its last reset. */
   time: number
   halted: string | null
+  /** Why writes of the request were refused, one message each. */
+  writeErrors?: string[]
 }

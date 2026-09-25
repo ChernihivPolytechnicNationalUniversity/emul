@@ -19,6 +19,7 @@ import { MemorySnapshot } from "@/debug/memory"
 import { DebugInfo } from "@/debug/info"
 import { unwind } from "@/debug/unwind"
 import { evaluateExpression, Pending } from "@/debug/eval"
+import { assignment, registerAssignment } from "@/debug/assign"
 import { contentHash, fetchSiteSource, resolveSource, sharedTail, type BuildRecord, type SourceRef } from "@/debug/sources"
 import { show, variableValue } from "@/debug/values"
 import { typeName } from "@/debug/types"
@@ -34,7 +35,7 @@ import { Tabs } from "./Tabs"
 import { setDebugHover } from "./debug-hover"
 
 // The debugger's analysis travels with this panel's chunk, not with the page.
-provideAnalysis({ parseFirmware, MemorySnapshot, DebugInfo, unwind, evaluateExpression, Pending, show })
+provideAnalysis({ parseFirmware, MemorySnapshot, DebugInfo, unwind, evaluateExpression, Pending, show, assignment, registerAssignment })
 
 /** Panel width limits when dragged, and where it starts. */
 const MIN_WIDTH = 420

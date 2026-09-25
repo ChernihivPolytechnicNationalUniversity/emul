@@ -19,7 +19,15 @@ export type Value = {
   /** A bit-field: its width and the offset of its lowest bit in the bytes at the location. */
   bitSize?: number
   bitOffset?: number
+  /**
+   * A part taken from the bytes of a value that lives in registers or pieces: that value, and
+   * where in it the part starts. Setting the part writes the whole value back.
+   */
+  origin?: { value: Value; offset: number }
 }
+
+/** Where a part at `offset` into `whole` came from, when the whole was read out of its home. */
+export const partOrigin = (whole: Value, offset: number): Value["origin"] => (whole.origin ? { value: whole.origin.value, offset: whole.origin.offset + offset } : undefined)
 
 /** What reading needs: the memory as held, and the registers of the frame the value belongs to. */
 export type Env = {
@@ -379,6 +387,7 @@ function part(v: Value, type: DType, offset: number, m?: Member): Value {
       at = { kind: "unavailable", why: "part of a value not in memory" }
   }
   const out: Value = { type, loc: at }
+  if (loc.kind === "bytes") out.origin = partOrigin(v, offset)
   if (m?.bitSize !== undefined) {
     out.bitSize = m.bitSize
     out.bitOffset = m.bitOffset ?? 0
@@ -393,7 +402,7 @@ export function children(env: Env, v: Value, start = 0, max = 100): Child[] {
   // A value outside memory is split up from its bytes.
   if (v.loc.kind !== "memory" && v.loc.kind !== "bytes" && (t.kind === "struct" || t.kind === "array")) {
     try {
-      base = { type: v.type, loc: { kind: "bytes", bytes: valueBytes(env, v) } }
+      base = { type: v.type, loc: { kind: "bytes", bytes: valueBytes(env, v) }, origin: { value: v, offset: 0 } }
     } catch {
       base = v
     }

@@ -12,7 +12,7 @@ import type { SourceFile } from "emul-shared/source"
 import { chipById, type ChipProfile } from "@/mcu/chip"
 import type { Firmware } from "@/mcu/elf"
 import { base64ToBytes } from "@/lib/bytes"
-import type { BlockInfo, BreakpointSpec, CoreDebugCommand, CoreRegisters, DebugStop, InspectReply, InspectRequest, StepRequest } from "./protocol"
+import type { BlockInfo, BreakpointSpec, CoreDebugCommand, CoreRegisters, DebugStop, DebugWrite, InspectReply, InspectRequest, StepRequest } from "./protocol"
 import type { DebugInfo } from "./info"
 import type { MemorySnapshot } from "./memory"
 import type { StackFrame } from "./unwind"
@@ -32,6 +32,8 @@ export type Analysis = {
   evaluateExpression: typeof import("./eval").evaluateExpression
   Pending: typeof import("./eval").Pending
   show: typeof import("./values").show
+  assignment: typeof import("./assign").assignment
+  registerAssignment: typeof import("./assign").registerAssignment
 }
 let analysis: Analysis | null = null
 let provided: (a: Analysis) => void = () => {}
@@ -283,20 +285,27 @@ export class DebugController {
     this.changed()
   }
 
-  /** Registers, RAM and the stack of a stopped (or paused) core. */
-  private async refresh(b: Board, stop: DebugStop | null) {
+  /**
+   * Registers, RAM and the stack of a stopped (or paused) core. With `write`, after making
+   * those changes: the frame picked stays picked unless the PC moved. Resolves to the reasons
+   * writes were refused.
+   */
+  private async refresh(b: Board, stop: DebugStop | null, write?: DebugWrite[]): Promise<string[]> {
     const gen = b.gen
     const ram = (b.chipProfile?.memory ?? []).filter((r) => r.kind === "ram" && !r.external).map((r) => ({ addr: r.base, size: r.size }))
-    const [reply, a] = await Promise.all([this.bridge.inspect(b.id, { regs: true, ranges: ram }), analysisReady])
-    if (gen !== b.gen) return
+    const [reply, a] = await Promise.all([this.bridge.inspect(b.id, { regs: true, ranges: ram, write }), analysisReady])
+    const refused = reply?.writeErrors ?? []
+    if (gen !== b.gen) return refused
     if (!reply?.regs) {
       b.view = { ...b.view, error: reply?.halted ?? "the core does not answer", version: b.view.version + 1 }
       this.changed()
-      return
+      return write ? [...refused, reply?.halted ?? "the core does not answer"] : refused
     }
     const info = this.info(b.id)
     const mem = new a.MemorySnapshot(info?.firmware.segments ?? [], reply.memory)
     const real = reply.stop ?? stop
+    const frames = info ? a.unwind(info, reply.regs, mem) : []
+    const stay = write !== undefined && reply.regs.r[15] === b.view.regs?.r[15]
     b.view = {
       ...b.view,
       status: real ? "stopped" : "paused",
@@ -304,14 +313,15 @@ export class DebugController {
       regs: reply.regs,
       mem,
       time: reply.time,
-      frames: info ? a.unwind(info, reply.regs, mem) : [],
-      frame: 0,
+      frames,
+      frame: stay ? Math.min(b.view.frame, Math.max(0, frames.length - 1)) : 0,
       error: reply.halted,
       version: b.view.version + 1,
     }
     this.changed()
-    this.show(b.id)
+    if (!stay) this.show(b.id)
     await this.fill(b)
+    return refused
   }
 
   /** Fetch the memory the last evaluations missed, and evaluate again (a pointer to follow, a struct in SDRAM). */
@@ -470,6 +480,48 @@ export class DebugController {
   readMemory(id: string | null, addr: number, size: number): Uint8Array | null {
     const b = id ? this.boards.get(id) : undefined
     return b?.view.mem?.bytes(addr, size) ?? null
+  }
+
+  // --- changing values --------------------------------------------------------------------------
+
+  /** Set a value at the stop to `text`, a C expression in the selected frame. Resolves to why it could not be, or null. */
+  assign(id: string, target: Value, text: string): Promise<string | null> {
+    return this.change(id, (a, env) => a.assignment(env, { locals: this.locals(id) }, target, text))
+  }
+
+  /** Set a register as the registers view names it, in a frame (a caller's r4 is where its callee saved it); the selected one by default. */
+  setRegister(id: string, name: string, text: string, frame?: number): Promise<string | null> {
+    return this.change(id, (a, env) => a.registerAssignment(env, { locals: this.locals(id, frame) }, name, text), frame)
+  }
+
+  /** Store bytes at an address, as the memory view edits it. */
+  writeMemory(id: string, addr: number, bytes: Uint8Array): Promise<string | null> {
+    return this.change(id, () => [{ kind: "memory", addr: addr >>> 0, bytes }])
+  }
+
+  /** Plan the writes at the stop (fetching what the plan needs to read), make them, and read the core again. */
+  private async change(id: string, plan: (a: Analysis, env: Env) => DebugWrite[], frame?: number): Promise<string | null> {
+    const b = this.boards.get(id)
+    if (!b || !analysis || this.running || !b.view.regs || b.view.status === "stepping") return "the core is running: pause the bench first"
+    for (let round = 0; round < 4; round++) {
+      const env = this.env(id, frame)
+      if (!env) return "not stopped"
+      let writes: DebugWrite[]
+      try {
+        writes = plan(analysis, env)
+      } catch (e) {
+        if (!(e instanceof analysis.Pending)) return (e as Error).message
+        // Bytes it has to keep (a bit-field's neighbours) are not read yet: read them, and plan again.
+        const misses = env.mem.takeMisses()
+        const reply = misses.length ? await this.bridge.inspect(b.id, { ranges: misses }) : null
+        if (!reply) break
+        for (const c of reply.memory) env.mem.add(c)
+        continue
+      }
+      const refused = await this.refresh(b, b.view.stop, writes)
+      return refused.length ? refused.join("; ") : null
+    }
+    return "the memory it needs cannot be read"
   }
 
   setRadix(radix: Radix) {

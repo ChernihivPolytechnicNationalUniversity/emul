@@ -133,8 +133,8 @@ export class CoreDebugger {
   /** Leave a stop: the next instruction runs, and the core goes on until something stops it. */
   resume() {
     const cpu = this.cpu
-    if (this.stop?.reason === "bkpt") {
-      // A BKPT stays where it is: going on means going past it.
+    if (this.stop?.reason === "bkpt" && /^bkpt\b/.test(cpu.instrAt(cpu.pc)?.text ?? "")) {
+      // A BKPT stays where it is: going on means going past it (unless the PC was moved off it).
       cpu.pc = (cpu.pc + 2) >>> 0
       cpu.nextPc = cpu.pc
     }

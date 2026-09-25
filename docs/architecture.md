@@ -88,7 +88,11 @@ disturb a peripheral: a USART's DR or an I²C status register is peeked, not rea
 The UI's side is `src/debug/session.ts`. At a stop it fetches the registers and the chip's RAM, unwinds the stack through the call
 frame information and the exception frames (a handler shows what it interrupted), and evaluates what the views ask for: variables
 through their location lists, C expressions over the program's types, the macros (`GPIOB->ODR`). Memory it does not have is
-fetched, and the view is read again. The DWARF reader and the evaluator come with the code panel's chunk, not the page's. A file
+fetched, and the view is read again. A value set from the views (`src/debug/assign.ts`) becomes writes that travel with an
+`inspect`: the core makes them first and the reply reads the state after them. Memory is stored as the core's own stores
+would be (a peripheral register does what a store to it does; flash and ROM refuse), a caller's register goes to the stack
+slot its callee saved it in, and a member of a struct the compiler split into registers sends the whole struct back. The
+DWARF reader and the evaluator come with the code panel's chunk, not the page's. A file
 the image names is shown from the board's project when the image was built from it (Compile records the files' hashes on the
 board, so a file edited since the build is flagged), from a read-only source added for the debugger and saved with the
 board, or from the site's `/st/`. Failing all of those, the disassembly is the view; it is one click away for any image, HEX and
