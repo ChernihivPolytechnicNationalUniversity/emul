@@ -62,6 +62,7 @@ type MenuBarProps = React.ComponentProps<"div"> & {
   onSidebarToggle: () => void
   onOpenFile: () => void
   onSaveFile: () => void
+  onImportHdl: () => void
   onExample: (example: Example) => void
 }
 
@@ -76,6 +77,7 @@ export function MenuBar({
   onSidebarToggle,
   onOpenFile,
   onSaveFile,
+  onImportHdl,
   onExample,
   className,
   ...props
@@ -108,6 +110,10 @@ export function MenuBar({
               Save
               <MenubarShortcut>⌘S</MenubarShortcut>
             </MenubarItem>
+            <MenubarSeparator />
+            <MenubarItem onClick={act((f) => f.newHdl("vhdl"))}>New VHDL component</MenubarItem>
+            <MenubarItem onClick={act((f) => f.newHdl("verilog"))}>New Verilog component</MenubarItem>
+            <MenubarItem onClick={onImportHdl}>Import VHDL / Verilog…</MenubarItem>
             <MenubarSeparator />
             <MenubarSub>
               <MenubarSubTrigger>Examples</MenubarSubTrigger>

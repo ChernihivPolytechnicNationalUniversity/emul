@@ -1,0 +1,1 @@
+{"top":"ir","language":"verilog","nets":8,"ports":[{"name":"clk","dir":"input","bits":[2],"offset":0,"upto":false},{"name":"q","dir":"output","bits":[3,4,5,0,3,4,5,0],"offset":0,"upto":false}],"cells":[["$_NOT_",6,3],["$_XOR_",7,6,4],["$_AND_",7,6,5],["$_DFF_P_",2,3,6],["$_DFF_P_",2,4,7]],"init":[]}

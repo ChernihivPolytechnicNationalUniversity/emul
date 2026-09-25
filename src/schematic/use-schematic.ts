@@ -1,5 +1,6 @@
 import * as React from "react"
 import { isOptLevel, type SourceFile } from "emul-shared/source"
+import { isNetlist } from "emul-shared/hdl"
 import { normalizeFiles } from "@/project/files"
 import { normalizeDebug } from "@/debug/saved"
 import { intersects, objectRect, objectSize, snap, type Point, type Rect } from "./geometry"
@@ -13,8 +14,10 @@ import {
   type Rotation,
   type Schematic,
   type BoardDebug,
+  type HdlModule,
   type Wire,
 } from "./types"
+import { isHdlDef } from "./hdl"
 import type { WireColorKey } from "./wire-colors"
 import { connectPins, tapWireAt } from "./wiring"
 
@@ -25,6 +28,20 @@ function checked(o: PlacedObject): PlacedObject {
   const opt = build?.opt
   const repaired = normalizeDebug(debug)
   return { ...rest, ...(project && { project: normalizeFiles(project) }), ...(isOptLevel(opt) && { build: { opt } }), ...(repaired && { debug: repaired }) }
+}
+
+function checkedLibrary(library: unknown): HdlModule[] | undefined {
+  if (!Array.isArray(library)) return undefined
+  const modules = library.filter(
+    (m): m is HdlModule => !!m && typeof m.id === "string" && isHdlDef(m.id) && typeof m.name === "string" && Array.isArray(m.files),
+  )
+  return modules.length
+    ? modules.map((m) => {
+        const { netlist, built, builtFrom, ...rest } = m
+        const valid = isNetlist(netlist) && typeof built === "string"
+        return { ...rest, files: normalizeFiles(m.files), ...(valid && { netlist, built, builtFrom }) }
+      })
+    : undefined
 }
 
 function recolor(w: Wire, color: WireColorKey | undefined): Wire {
@@ -51,6 +68,7 @@ function keepLive(target: Schematic, current: Schematic): Schematic {
   return {
     ...target,
     parts: current.parts,
+    library: current.library,
     objects: target.objects.map((o) => {
       const now = live.get(o.id)
       if (!now || (now.project === o.project && now.build === o.build && now.debug === o.debug)) return o
@@ -139,6 +157,7 @@ export function useSchematic(grid: number) {
   /** Remove objects (with their wires and part state) and wires. */
   const remove = React.useCallback((objects: ReadonlySet<string>, wires: ReadonlySet<string>) => {
     setDoc((d) => ({
+      ...d,
       objects: d.objects.filter((o) => !objects.has(o.id)),
       wires: d.wires.filter(
         (w) => !wires.has(w.id) && !objects.has(w.from.object) && !objects.has(w.to.object),
@@ -165,7 +184,11 @@ export function useSchematic(grid: number) {
   /** Replace the whole document (loading an example or a file; the boards' projects, build options and debugger settings are re-checked). */
   const load = React.useCallback(
     (next: Schematic) => {
-      setDoc(() => ({ ...next, objects: next.objects.map(checked) }))
+      setDoc(() => {
+        const { library, ...rest } = next
+        const modules = checkedLibrary(library)
+        return { ...rest, objects: next.objects.map(checked), ...(modules && { library: modules }) }
+      })
       setSelectedObjects(new Set())
       setSelectedWires(new Set())
     },
@@ -257,6 +280,29 @@ export function useSchematic(grid: number) {
   /** A board's debugger settings (breakpoints, added sources, watches); not an undo step. */
   const setDebug = React.useCallback((id: string, fn: (d: BoardDebug) => BoardDebug) => {
     setDoc((d) => ({ ...d, objects: d.objects.map((o) => (o.id === id ? { ...o, debug: fn(o.debug ?? {}) } : o)) }), { silent: true })
+  }, [setDoc])
+
+  const setModule = React.useCallback((module: HdlModule) => {
+    setDoc(
+      (d) => {
+        const library = d.library ?? []
+        const i = library.findIndex((m) => m.id === module.id)
+        return { ...d, library: i < 0 ? [...library, module] : library.map((m, k) => (k === i ? module : m)) }
+      },
+      { silent: true },
+    )
+  }, [setDoc])
+
+  const removeModule = React.useCallback((id: string) => {
+    setDoc(
+      (d) => {
+        if (d.objects.some((o) => o.def === id)) return d
+        const library = (d.library ?? []).filter((m) => m.id !== id)
+        const { library: _old, ...rest } = d
+        return library.length ? { ...rest, library } : rest
+      },
+      { silent: true },
+    )
   }, [setDoc])
 
   /** Rotate objects by ±45° around their centers, keeping the centre on the grid. */
@@ -403,6 +449,8 @@ export function useSchematic(grid: number) {
     setProject,
     setBuild,
     setDebug,
+    setModule,
+    removeModule,
     addWire,
     tapWire,
     setWirePoints,

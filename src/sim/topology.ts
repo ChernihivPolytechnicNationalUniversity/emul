@@ -1,9 +1,13 @@
 import type { Schematic } from "@/schematic/types"
 
-export type Topology = Pick<Schematic, "objects" | "wires">
+export type Topology = Pick<Schematic, "objects" | "wires" | "library">
 
 export function sameTopology(a: Topology, b: Topology) {
   if (a.objects.length !== b.objects.length || a.wires.length !== b.wires.length) return false
+  const la = a.library ?? []
+  const lb = b.library ?? []
+  if (la.length !== lb.length) return false
+  for (let i = 0; i < la.length; i++) if (la[i]!.id !== lb[i]!.id || la[i]!.built !== lb[i]!.built || la[i]!.name !== lb[i]!.name) return false
   for (let i = 0; i < a.objects.length; i++) {
     const x = a.objects[i]
     const y = b.objects[i]

@@ -23,7 +23,7 @@ export const isOptLevel = (v: unknown): v is OptLevel => typeof v === "string" &
 /** How a build job compiles; anything left out is the service's default. */
 export type BuildOptions = { opt?: OptLevel }
 
-const SOURCE_EXTENSIONS = new Set([".c", ".h", ".cpp", ".hpp", ".cc", ".s", ".S", ".ld", ".txt", ".md"])
+const SOURCE_EXTENSIONS = new Set([".c", ".h", ".cpp", ".hpp", ".cc", ".s", ".S", ".ld", ".txt", ".md", ".vhd", ".vhdl", ".v", ".sv"])
 export const SOURCE_LIMITS = { files: 200, fileBytes: 1024 * 1024 }
 
 /**

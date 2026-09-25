@@ -7,6 +7,9 @@
  */
 
 import type { PartState } from "@/schematic/types"
+import { hdlModule } from "@/schematic/registry"
+import { isHdlDef } from "@/schematic/hdl"
+import { HdlPart } from "./hdl"
 
 export type DigitalEdge = { pin: string; level: boolean | null; time: number }
 
@@ -32,6 +35,8 @@ export interface DigitalPart {
   quietUntil?(): number
   /** What the UI shows about the part, if anything. Plain data: it crosses the worker boundary. */
   snapshot(): unknown
+  outdated?(): boolean
+  prime?(levels: Map<string, boolean>, time: number): void
 }
 
 // --- 24Cxx I²C EEPROM ------------------------------------------------------------------------
@@ -629,7 +634,9 @@ export function createDigitalPart(def: string, object: string, props: Record<str
       return new Eeprom24(object, props)
     case "lcd7-f":
       return new Gt911(object, { sda: "37", scl: "38", rst: "39", int: "40" })
-    default:
-      return null
+    default: {
+      const module = isHdlDef(def) ? hdlModule(def) : undefined
+      return module?.netlist ? new HdlPart(object, def, module.netlist, module.built) : null
+    }
   }
 }

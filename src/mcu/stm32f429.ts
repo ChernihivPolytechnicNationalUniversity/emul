@@ -1197,6 +1197,11 @@ export class Stm32 {
       } else if (this.padHasAf(p.port, p.pin, p.af)) {
         this.gpio[p.port].setAfOutput(p.pin, level, true)
         this.trackAf(p.port, p.pin, level)
+        const key = p.port * 16 + p.pin
+        if (this.digitalWatch.has(key) && this.digitalLevel.get(key) !== level) {
+          this.digitalLevel.set(key, level)
+          this.emit({ port: p.port, pin: p.pin }, level)
+        }
       }
     }
   }

@@ -1,6 +1,7 @@
 import { Queue } from "bullmq"
 import { ulid } from "ulid"
 import { connect } from "./redis.ts"
+import type { SynthOptions } from "./hdl.ts"
 import type { BuildOptions, Target } from "./source.ts"
 
 export { DEFAULT_OPT, OPT_LEVELS, SOURCE_LIMITS, TARGETS, isOptLevel, sourcePath, type BuildOptions, type OptLevel, type SourceFile, type Target } from "./source.ts"
@@ -15,13 +16,19 @@ export const QUEUE = "jobs"
 export const newJobId = () => ulid()
 
 /** `echo` lists the project back (a smoke test); `build` compiles it into `firmware.elf`. */
-export type JobKind = "echo" | "build"
-export const JOB_KINDS: JobKind[] = ["echo", "build"]
+export type JobKind = "echo" | "build" | "synth"
+export const JOB_KINDS: JobKind[] = ["echo", "build", "synth"]
+
+export const HDL_QUEUE = "hdl"
+export const QUEUES = [QUEUE, HDL_QUEUE] as const
+export type QueueName = (typeof QUEUES)[number]
+export const queueOf = (kind: JobKind): QueueName => (kind === "synth" ? HDL_QUEUE : QUEUE)
 
 /** The files each kind may leave in `out/`; the API presigns a PUT for each before the job runs. */
 export const OUTPUTS: Record<JobKind, string[]> = {
   echo: ["build.log"],
   build: ["build.log", "firmware.elf", "firmware.map"],
+  synth: ["build.log", "netlist.json"],
 }
 
 /**
@@ -31,9 +38,9 @@ export const OUTPUTS: Record<JobKind, string[]> = {
  */
 export type JobData = {
   kind: JobKind
-  target: Target
+  target?: Target
   /** How to compile (a `build` job): the optimization level. */
-  options?: BuildOptions
+  options?: BuildOptions & SynthOptions
   sources: { path: string; url: string }[]
   /** By output name, e.g. `firmware.elf`. */
   outputs: Record<string, string>
@@ -46,8 +53,8 @@ export const JOB_URL_TTL = 60 * 60
 
 /** What `input/project.json` records about the project a job was given. */
 export type ProjectManifest = {
-  target: Target
-  options?: BuildOptions
+  target?: Target
+  options?: BuildOptions & SynthOptions
   createdAt: string
   files: { path: string; size: number; sha256: string }[]
 }
@@ -86,8 +93,8 @@ export const jobKeys = (jobId: string) => ({
   result: `jobs/${jobId}/result.json`,
 })
 
-export function createQueue() {
-  return new Queue<JobData, JobResult>(QUEUE, {
+export function createQueue(name: QueueName = QUEUE) {
+  return new Queue<JobData, JobResult>(name, {
     connection: connect(),
     defaultJobOptions: { removeOnComplete: { age: 3600 }, removeOnFail: { age: 24 * 3600 }, attempts: 1 },
   })

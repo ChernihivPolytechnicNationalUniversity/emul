@@ -1,4 +1,5 @@
-import { registry, PALETTE_DRAG_TYPE } from "@/schematic/registry"
+import * as React from "react"
+import { getLibraryVersion, libraryEntries, registry, subscribeLibrary, PALETTE_DRAG_TYPE } from "@/schematic/registry"
 import type { ComponentDef } from "@/schematic/types"
 
 export { PALETTE_DRAG_TYPE }
@@ -15,3 +16,11 @@ export const paletteGroups: PaletteGroup[] = registry.reduce<PaletteGroup[]>((gr
   g.items.push(def)
   return groups
 }, [])
+
+export function useLibrary() {
+  const version = React.useSyncExternalStore(subscribeLibrary, getLibraryVersion)
+  return React.useMemo(() => {
+    void version
+    return libraryEntries()
+  }, [version])
+}

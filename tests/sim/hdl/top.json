@@ -1,0 +1,1 @@
+{"top":"top","language":"vhdl","nets":6,"ports":[{"name":"a","dir":"input","bits":[2],"offset":0,"upto":false},{"name":"b","dir":"input","bits":[3],"offset":0,"upto":false},{"name":"y","dir":"output","bits":[4,5],"offset":0,"upto":true}],"cells":[["$_OR_",3,2,4],["$_AND_",3,2,5]],"init":[]}

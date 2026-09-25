@@ -243,6 +243,14 @@ export const ChipIcon = make(
   </>,
 )
 
+export const HdlIcon = make(
+  "HdlIcon",
+  <>
+    <rect x={6} y={5} width={12} height={14} rx={1} />
+    <path d="M6 9H3M6 15H3M21 9h-3M21 15h-3M10.5 10 9 12l1.5 2M13.5 10l1.5 2-1.5 2" />
+  </>,
+)
+
 export const MemoryIcon = make(
   "MemoryIcon",
   <>

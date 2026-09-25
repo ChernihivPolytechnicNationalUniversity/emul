@@ -2,6 +2,7 @@ import type { Job } from "bullmq"
 import { jobKeys, type Artifact, type JobData, type JobKind, type Outcome } from "emul-shared/jobs"
 import type { SourceFile } from "emul-shared/source"
 import { build } from "./build.ts"
+import { synth } from "./synth.ts"
 import { download, upload } from "./store.ts"
 
 type Handler = (job: Job<JobData>) => Promise<Outcome>
@@ -34,10 +35,17 @@ export const handlers: Record<JobKind, Handler> = {
   },
   /** Compile the project for its chip; a compile error is `ok: false` with the log. */
   async build(job) {
+    if (!job.data.target) throw new Error("a build job needs a target")
     const out = await build(job.data.target, await sources(job), job.data.options)
     const artifacts = [await emit(job, "build.log", out.log, TEXT)]
     if (out.elf) artifacts.push(await emit(job, "firmware.elf", out.elf, "application/octet-stream"))
     if (out.map) artifacts.push(await emit(job, "firmware.map", out.map, TEXT))
+    return { ok: out.ok, artifacts, error: out.error }
+  },
+  async synth(job) {
+    const out = await synth(await sources(job), job.data.options)
+    const artifacts = [await emit(job, "build.log", out.log, TEXT)]
+    if (out.netlist) artifacts.push(await emit(job, "netlist.json", JSON.stringify(out.netlist), "application/json"))
     return { ok: out.ok, artifacts, error: out.error }
   },
 }

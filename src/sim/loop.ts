@@ -1,4 +1,4 @@
-import { getDef } from "@/schematic/registry"
+import { getDef, setLibrary } from "@/schematic/registry"
 import { partKey, pinKey, type ComponentDef, type Damage, type PartState, type Schematic } from "@/schematic/types"
 import { parsePad, type PadRef } from "@/mcu/stm32f429"
 import type { ClockSource } from "@/mcu/periph/rcc"
@@ -354,6 +354,7 @@ export class SimLoop {
   private mcus = new Map<string, McuInstance>()
   private terminals = new Map<string, TerminalInstance>()
   private digitalParts = new Map<string, DigitalPart>()
+  private freshParts = new Set<DigitalPart>()
   /** RGB panels, by object id: their wiring to cores, and an instance of our own for one no core drives. */
   private panels = new Map<string, PanelWiring & { own: PanelInstance }>()
   /**
@@ -404,6 +405,7 @@ export class SimLoop {
   private debugConfig = new Map<string, { breakpoints: BreakpointSpec[]; faults: boolean }>()
 
   setDoc(doc: Schematic) {
+    setLibrary(doc.library)
     this.doc = doc
     this.stale = true
     this.partDefaults = {}
@@ -450,11 +452,12 @@ export class SimLoop {
     for (const obj of this.doc.objects) {
       const props = obj.props ?? {}
       let part = this.digitalParts.get(obj.id)
-      if (!part) {
+      if (!part || part.outdated?.()) {
         const made = createDigitalPart(obj.def, obj.id, props)
         if (!made) continue
         part = made
         this.digitalParts.set(obj.id, part)
+        this.freshParts.add(part)
       } else part.configure(props)
       seen.add(obj.id)
     }
@@ -660,6 +663,23 @@ export class SimLoop {
       if (this.digitalNets.has(node) || n.terminal) for (const probe of n.logic) this.logicLevel[probe] = probe * 2 + (n.terminal || n.level ? 1 : 0)
     }
     this.digitalNets = nets
+    if (this.freshParts.size && engine) {
+      const live = [...this.freshParts].filter((part) => this.digitalParts.get(part.object) === part)
+      for (const part of live) {
+        for (const e of part.out) e.time = Math.max(e.time, engine.time)
+        this.drainPart(part)
+      }
+      const levels = new Map<DigitalPart, Map<string, boolean>>()
+      for (const n of nets.values())
+        for (const { part, pin } of n.parts) {
+          if (!this.freshParts.has(part)) continue
+          if (part.prime) levels.set(part, (levels.get(part) ?? new Map()).set(pin, n.level))
+          else part.input(pin, n.level, engine.time)
+        }
+      for (const [part, pins] of levels) part.prime!(pins, engine.time)
+      for (const part of live) this.drainPart(part)
+      this.freshParts.clear()
+    }
     for (const inst of this.mcus.values()) {
       inst.coupled = false
       inst.partPads.clear()
@@ -849,7 +869,16 @@ export class SimLoop {
         const e = t.txEdges.shift()!
         t.txLevel = e.level
         const net = t.txNet === undefined ? undefined : this.digitalNets.get(t.txNet)
-        if (net) for (const probe of net.logic) this.logEdge(probe, e.level, e.time)
+        if (net) {
+          for (const probe of net.logic) this.logEdge(probe, e.level, e.time)
+          if (net.parts.length) {
+            net.level = e.level
+            for (const { part, pin } of net.parts) {
+              part.input(pin, e.level, e.time)
+              this.drainPart(part)
+            }
+          }
+        }
       }
       // A core in a worker hands its edges over a step late: the decoder stays a step behind them.
       t.decoder.poll(this.pipelined ? time - DT : time)
