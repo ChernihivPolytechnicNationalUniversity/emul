@@ -157,16 +157,50 @@ describe("bench physics", () => {
     const { doc, place, wire } = builder(GRID)
     const bat = place("dc-source", 0, 0, { value: "5 V", imax: "10 A" })
     const d = place("diode", 6, 0, { value: "1N4148", vf: "0.7", imax: "300 mA", vrev: "100 V" })
-    const r = place("resistor", 12, 0, { value: "10 Ω", power: "5" })
+    const r = place("resistor", 12, 0, { value: "2 Ω", power: "25" })
     const gnd = place("ground", 3, 6)
     wire(bat, "+", d, "1")
     wire(d, "2", r, "1")
     wire(r, "2", gnd, "GND")
     wire(bat, "-", gnd, "GND")
-    const snap = start(doc).run(0.2)
+    const t = start(doc)
+    expect.soft(t.run(0.3).damage[d.id], "1.6 A, five times its average rating: it takes a while").toBeFalsy()
+    const snap = t.run(0.7)
     expect.soft(snap.damage[d.id], "the diode burnt").toBeTruthy()
     expect.soft(snap.damage[d.id]?.fail ?? "?", "as a short").toBe("short")
-    expect.soft(Math.abs(reading(snap, r.id).current) * 1e3, "current after: 5 / (10 + 0.5 + 0.01) (mA)").toBeNear(476, 3)
+    expect.soft(Math.abs(reading(snap, r.id).current) * 1e3, "current after: 5 / (2 + 0.5 + 0.01) (mA)").toBeNear(1992, 10)
+  })
+
+  it("a 1N4148 holds 1 A for about a second, as its datasheet's surge rating says", () => {
+    const { doc, place, wire } = builder(GRID)
+    const bat = place("dc-source", 0, 0, { value: "10 V", imax: "10 A" })
+    const d = place("diode", 6, 0)
+    const r = place("resistor", 12, 0, { value: "9.1 Ω", power: "100" })
+    const gnd = place("ground", 3, 6)
+    wire(bat, "+", d, "1")
+    wire(d, "2", r, "1")
+    wire(r, "2", gnd, "GND")
+    wire(bat, "-", gnd, "GND")
+    const t = start(doc)
+    expect.soft(t.run(0.8).damage[d.id], "alive at 0.8 s").toBeFalsy()
+    expect.soft(t.run(0.5).damage[d.id], "dead by 1.3 s").toBeTruthy()
+  })
+
+  it("a transformer with its secondary shorted overheats in seconds, not milliseconds", () => {
+    const { doc, place, wire } = builder(GRID)
+    const mains = place("ac-source", 0, 0)
+    const tr = place("transformer", 6, 0)
+    const short = place("resistor", 14, 0, { value: "0.1 Ω", power: "100" })
+    const gnd = place("ground", 3, 8)
+    wire(mains, "+", tr, "P1")
+    wire(mains, "-", tr, "P2")
+    wire(tr, "S1", short, "1")
+    wire(tr, "S2", short, "2")
+    wire(tr, "S2", gnd, "GND")
+    wire(mains, "-", gnd, "GND")
+    const t = start(doc)
+    expect.soft(t.run(5).damage[tr.id], "alive at 5 s").toBeFalsy()
+    expect.soft(t.run(15).damage[tr.id]?.fail ?? "fine", "the winding burnt open by 20 s").toBe("open")
   })
 
   it("contacts weld: a tactile button (50 mA) on 3 V into 1 Ω stays closed after", () => {
@@ -279,7 +313,9 @@ describe("bench physics", () => {
     wire(tr, "S2", load, "2")
     wire(tr, "S2", gnd, "GND")
     wire(bat, "-", gnd, "GND")
-    const snap = start(doc).run(0.3)
+    const t = start(doc)
+    expect.soft(t.run(0.5).damage[tr.id], "the magnetising inductance holds the current back at first").toBeFalsy()
+    const snap = t.run(2.5)
     expect(snap.damage[tr.id]?.fail ?? "fine", "on DC the primary winding burnt").toBe("open")
   })
 
@@ -343,6 +379,93 @@ describe("bench physics", () => {
     expect.soft(snap.damage[q.id], "the MOSFET died of the spike").toBeTruthy()
     expect.soft(peak, "the scope's trace holds the spike (V)").toBeGreaterThan(55)
     expect.soft(buckets, "and no buckets were lost to the rebuild").toBe(Math.floor(snap.time / 2e-3))
+  })
+
+  describe("a 12 V series regulator behind a bridge and 5000 µF", () => {
+    const regulator = (diode: Record<string, string>, grounded = true, transformer: Record<string, string> = { value: "230 V", sec: "15 V", va: "50 VA" }) => {
+      const { doc, place, wire } = builder(GRID)
+      const mains = place("ac-source", 0, 0)
+      const tr = place("transformer", 5, 0, transformer)
+      const bridge = [0, 4, 8, 12].map((y) => place("diode", 12, y, diode))
+      const c1 = place("capacitor-polarized", 20, 0, { value: "5000 µF", vmax: "35 V" })
+      const r1 = place("resistor", 20, 4, { value: "680 Ω" })
+      const dz = place("zener", 20, 8, { value: "12 V" })
+      const q = place("npn", 26, 0)
+      const c2 = place("capacitor", 32, 0, { value: "10 nF" })
+      const vm = place("voltmeter", 32, 4)
+      wire(mains, "+", tr, "P1")
+      wire(mains, "-", tr, "P2")
+      wire(tr, "S1", bridge[0], "1")
+      wire(tr, "S2", bridge[1], "1")
+      wire(bridge[2], "2", tr, "S1")
+      wire(bridge[3], "2", tr, "S2")
+      wire(bridge[0], "2", c1, "1")
+      wire(bridge[1], "2", c1, "1")
+      wire(bridge[2], "1", c1, "2")
+      wire(bridge[3], "1", c1, "2")
+      wire(c1, "1", r1, "1")
+      wire(c1, "1", q, "C")
+      wire(r1, "2", dz, "2")
+      wire(dz, "2", q, "B")
+      wire(dz, "1", c1, "2")
+      wire(q, "E", c2, "1")
+      wire(q, "E", vm, "+")
+      wire(c2, "2", c1, "2")
+      wire(vm, "-", c1, "2")
+      const ground = () => wire(c1, "2", place("ground", 20, 16), "GND")
+      if (grounded) ground()
+      return { doc, bridge, tr, after: [c1, r1, dz, q, c2, vm], r1, q, c1, ground }
+    }
+    const peak = (snap: Snapshot) => Math.max(...Object.values(snap.pinVoltage).map(Math.abs))
+
+    it("works: about 11.4 V out", () => {
+      const { doc, q } = regulator({ value: "1N5408", imax: "3 A", ifsm: "200 A" })
+      const snap = start(doc).run(0.3)
+      expect.soft(snap.pinVoltage[pinKey(q.id, "E")], "zener 12 V less one Vbe (V)").toBeNear(11.4, 0.4)
+      expect.soft(failures(snap), "nothing burnt").toBe("")
+    })
+
+    it("a 1N4007 bridge (1 A average, 30 A surge) on a 10 VA transformer rides out the inrush", () => {
+      const { doc, q } = regulator({ value: "1N4007", imax: "1 A", ifsm: "30 A", vrev: "1000 V" }, true, {})
+      const snap = start(doc).run(3)
+      expect.soft(failures(snap), "nothing burnt").toBe("")
+      expect.soft(snap.pinVoltage[pinKey(q.id, "E")], "regulating (V)").toBeNear(11.4, 0.4)
+    })
+
+    it("a bridge of 300 mA diodes dies of the inrush; what comes after it does not", () => {
+      const { doc, bridge, after } = regulator({ value: "1N4148", imax: "300 mA" })
+      let worst = 0
+      const snap = start(doc).run(0.3, (s) => (worst = Math.max(worst, peak(s))))
+      expect.soft(bridge.some((d) => snap.damage[d.id]), "the inrush into 5000 µF burnt the bridge").toBe(true)
+      for (const obj of after) expect.soft(snap.damage[obj.id]?.reason ?? "", `${obj.props?.ref} survives the bridge`).toBe("")
+      expect.soft(worst, "no node ever went past the mains peak (V)").toBeLessThan(330)
+    })
+
+    it("an edit while it runs keeps the transistor's operating point", () => {
+      const { doc, r1, q } = regulator({ value: "1N5408", imax: "3 A", ifsm: "200 A" })
+      const t = start(doc)
+      t.run(0.3)
+      r1.props = { ...r1.props, value: "1 kΩ" }
+      t.loop.setDoc({ ...doc })
+      let worst = 0
+      const snap = t.run(0.05, (s) => (worst = Math.max(worst, peak(s))))
+      expect.soft(worst, "no node ever went past the mains peak (V)").toBeLessThan(330)
+      expect.soft(snap.pinVoltage[pinKey(q.id, "E")], "still regulating (V)").toBeNear(11.4, 0.4)
+      expect.soft(failures(snap), "nothing burnt").toBe("")
+    })
+
+    it("grounded while it runs: the reference moves to the secondary, the output stays", () => {
+      const { doc, q, c1, ground } = regulator({ value: "1N5408", imax: "3 A", ifsm: "200 A" }, false)
+      const t = start(doc)
+      t.run(2)
+      ground()
+      t.loop.setDoc({ ...doc, objects: [...doc.objects], wires: [...doc.wires] })
+      let worst = 0
+      const snap = t.run(0.05, (s) => (worst = Math.max(worst, peak(s))))
+      expect.soft(worst, "no node ever went past the mains peak (V)").toBeLessThan(330)
+      expect.soft(snap.pinVoltage[pinKey(q.id, "E")] - snap.pinVoltage[pinKey(c1.id, "2")], "still regulating (V)").toBeNear(11.4, 0.4)
+      expect.soft(failures(snap), "nothing burnt").toBe("")
+    })
   })
 
   it("the speed gauge reports what the solver manages, not the setting", () => {

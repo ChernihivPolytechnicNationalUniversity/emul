@@ -102,11 +102,7 @@ const SETTLED_DRIFT = 1e-3
 /** Operating points remembered by switch/pad state (see `solve`). */
 const MEMO_POINTS = 64
 type OperatingPoint = { v: Float64Array; x: Float64Array; region: Uint8Array; jA: Float64Array; jB: Float64Array; live: Float64Array }
-/**
- * Overload before a current/power rating breaks the part: the excess ratio integrates over
- * simulated time and the part fails once it exceeds this (10 ms at 2× the rating, 1 ms at 11×).
- */
-const STRESS_LIMIT = 0.01
+const SURGE = 20
 /** Averaging window for RMS readings in AC circuits: at least this long, and a few periods of the slowest source. */
 const RMS_MIN_TAU = 0.05
 const RMS_PERIODS = 3
@@ -159,6 +155,7 @@ export type Reading = {
 }
 
 const Q_IS = 1e-14
+const Q_VCRIT = VT * Math.log(VT / (Math.SQRT2 * Q_IS))
 const Q_BR = 3
 const BJT_REGIONS = ["cut-off", "saturation", "reverse", "active"] as const
 const MOS_REGIONS = ["off", "ohmic", "reverse", "saturation"] as const
@@ -521,9 +518,11 @@ export class Engine {
     // Node voltages carry over by pin (nets get renumbered): the next step starts from the
     // old solution, and an MCU does not see its supply at zero for a step after an edit.
     // Node averages are not carried; they re-prime from the next solution.
-    for (const [key, to] of this.net.pinNet) {
-      const from = prev.net.pinNet.get(key)
-      if (from !== undefined && to !== GROUND && from !== GROUND) this.v[to] = prev.v[from]
+    for (const nets of ["pinNet", "nodeNet"] as const) {
+      for (const [key, to] of this.net[nets]) {
+        const from = prev.net[nets].get(key)
+        if (from !== undefined && to !== GROUND && from !== GROUND) this.v[to] = prev.v[from]
+      }
     }
     this.time = prev.time
     this.setTrace(prev.traceBucket)
@@ -868,12 +867,14 @@ export class Engine {
       this.diodeAvg[i] += (this.rCurrent[i] - this.diodeAvg[i]) * k
     }
     const loaded = this.loadedElements
+    const elements = this.net.elements
     for (let j = 0; j < loaded.length; j++) {
       const i = loaded[j]
-      const ratio = this.rRatio[i]
-      const stress = ratio > 20 ? Infinity : Math.max(0, this.stress[i] + dt * (ratio - 1))
-      if (stress > STRESS_LIMIT) return false
-      this.stress[i] = stress
+      const lim = elements[i].limits
+      if (!lim) continue
+      const heat = this.stress[i] + (this.rRatio[i] - this.stress[i]) * -Math.expm1(-dt / lim.tau)
+      if (heat > 1) return false
+      this.stress[i] = heat
     }
     return true
   }
@@ -887,11 +888,14 @@ export class Engine {
     if (this.settledRun < SETTLED_STEPS) return 0
     let steps = Infinity
     const loaded = this.loadedElements
+    const elements = this.net.elements
     for (let j = 0; j < loaded.length; j++) {
       const i = loaded[j]
-      const ratio = this.rRatio[i]
-      if (ratio > 20) return 0
-      if (ratio > 1) steps = Math.min(steps, Math.floor((STRESS_LIMIT - this.stress[i]) / (dt * (ratio - 1))) - 1)
+      const load = this.rRatio[i]
+      const lim = elements[i].limits
+      if (!lim || load <= 1) continue
+      const t = lim.tau * Math.log((load - this.stress[i]) / (load - 1))
+      steps = Math.min(steps, Math.floor(t / dt) - 1)
     }
     return Math.max(0, steps)
   }
@@ -1045,12 +1049,14 @@ export class Engine {
       for (let i = 0; i < elements.length; i++) {
         const el = elements[i]
         if (el.kind === "D") {
-          this.jA[i] = this.vol(el.anode, this.v) - this.vol(el.cathode, this.v)
+          const nvt = el.n * VT
+          const vcrit = nvt * Math.log(nvt / (Math.SQRT2 * el.is))
+          this.jA[i] = Math.min(vcrit, this.vol(el.anode, this.v) - this.vol(el.cathode, this.v))
           this.jB[i] = 0
         } else if (el.kind === "Q") {
           const s = el.polarity
-          this.jA[i] = s * (this.vol(el.b, this.v) - this.vol(el.e, this.v))
-          this.jB[i] = s * (this.vol(el.b, this.v) - this.vol(el.c, this.v))
+          this.jA[i] = Math.min(Q_VCRIT, s * (this.vol(el.b, this.v) - this.vol(el.e, this.v)))
+          this.jB[i] = Math.min(Q_VCRIT, s * (this.vol(el.b, this.v) - this.vol(el.c, this.v)))
         }
       }
     }
@@ -1130,9 +1136,8 @@ export class Engine {
           } else if (el.kind === "Q") {
             // Ebers-Moll transport model; PNP handled by mirroring voltages and currents.
             const s = el.polarity
-            const vcrit = VT * Math.log(VT / (Math.SQRT2 * Q_IS))
-            const vbe = limit(s * (g(el.b) - g(el.e)), this.jA[i], VT, vcrit)
-            const vbc = limit(s * (g(el.b) - g(el.c)), this.jB[i], VT, vcrit)
+            const vbe = limit(s * (g(el.b) - g(el.e)), this.jA[i], VT, Q_VCRIT)
+            const vbc = limit(s * (g(el.b) - g(el.c)), this.jB[i], VT, Q_VCRIT)
             this.jA[i] = vbe
             this.jB[i] = vbc
             const ef = Math.exp(Math.min(vbe / VT, 80))
@@ -1905,8 +1910,6 @@ export class Engine {
         this.msV[i] = v * v
         this.msP[i] = p
       }
-      // Heating ratings compare against RMS values on AC, which also rides out the inrush into a
-      // filter capacitor; voltage breakdown is always instantaneous.
       iLoad = Math.sqrt(this.msI[i])
       pLoad = this.msP[i]
     }
@@ -1927,30 +1930,33 @@ export class Engine {
     // Polarity: an electrolytic the wrong way round breaks down long before its rating.
     if (lim.reverse !== undefined && -ratedV > lim.reverse)
       return this.fail(el, lim.fail, "reverse voltage", -ratedV, lim.reverse, "V")
-    let ratio = 0
+    let heating = 0
     let what = "current"
     let actual = 0
     let rated = 0
     let unit = "A"
     if (lim.current !== undefined) {
-      ratio = iLoad / lim.current
+      if (lim.surge !== undefined ? Math.abs(cur) > lim.surge : iLoad > SURGE * lim.current)
+        return lim.surge !== undefined ? this.fail(el, lim.fail, "surge current", Math.abs(cur), lim.surge, "A") : this.fail(el, lim.fail, "current", iLoad, lim.current, "A")
+      const r = Math.abs(cur) / lim.current
+      heating = el.kind === "D" ? r : r * r
       actual = iLoad
       rated = lim.current
     }
-    if (lim.power !== undefined && pLoad / lim.power > ratio) {
-      ratio = pLoad / lim.power
-      what = "power"
-      actual = pLoad
-      rated = lim.power
-      unit = "W"
+    if (lim.power !== undefined) {
+      if (pLoad > SURGE * lim.power) return this.fail(el, lim.fail, "power", pLoad, lim.power, "W")
+      if (Math.abs(p) / lim.power > heating) {
+        heating = Math.abs(p) / lim.power
+        what = "power"
+        actual = pLoad
+        rated = lim.power
+        unit = "W"
+      }
     }
-    // Below the rating the part cools at the same pace it heats above it, so the peaks of an
-    // AC cycle only add up when the average load is over the limit.
-    // Far beyond the rating there is no thermal grace period.
-    const stress = ratio > 20 ? Infinity : Math.max(0, this.stress[i] + dt * (ratio - 1))
-    this.stress[i] = stress
-    this.rRatio[i] = ratio
-    if (stress > STRESS_LIMIT) this.fail(el, lim.fail, what, actual, rated, unit)
+    const heat = this.stress[i] + (heating - this.stress[i]) * -Math.expm1(-dt / lim.tau)
+    this.stress[i] = heat
+    this.rRatio[i] = heating
+    if (heat > 1) this.fail(el, lim.fail, what, actual, rated, unit)
   }
 
   private fail(el: Resolved, how: "open" | "short", what: string, actual: number, rated: number, unit: string) {

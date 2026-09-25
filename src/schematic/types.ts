@@ -162,7 +162,7 @@ export type Value = number | string | ((props: Record<string, string>) => number
  * default) when it takes the whole component with it — one die, one winding — and not when
  * the rest of the part keeps working on its own (the other half of a potentiometer).
  */
-export type Limits = { power?: Value; current?: Value; voltage?: Value; reverse?: Value; fail?: "open" | "short"; fatal?: boolean }
+export type Limits = { power?: Value; current?: Value; voltage?: Value; reverse?: Value; surge?: Value; tau?: Value; fail?: "open" | "short"; fatal?: boolean }
 
 export type Element =
   /** `live` names a pin-reader key the simulation loop answers with the resistance to use right now (an MCU's supply load by power mode). */

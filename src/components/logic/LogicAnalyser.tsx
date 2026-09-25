@@ -7,25 +7,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { formatSI } from "@/sim/units"
 import { decodeI2c, decodeSpi, decodeUart, levelAt, type EdgeSeries, type Frame } from "@/sim/protocols"
 import type { ScopeChannel } from "@/components/scope/Scope"
+import { LOGIC_SPANS, type DecoderConfig, type Protocol } from "./decoder-config"
 import type { LogicStore } from "./logic-store"
 
-/** Screen widths on offer, in seconds: from a few SPI clocks to a whole second. */
-export const LOGIC_SPANS = [20e-6, 50e-6, 100e-6, 200e-6, 500e-6, 1e-3, 2e-3, 5e-3, 10e-3, 20e-3, 50e-3, 0.1, 0.2, 0.5, 1] as const
 const ROW = 34
 const LABEL_W = 0
 const BAUDS = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 1000000]
-
-export type Protocol = "none" | "uart" | "spi" | "i2c"
-
-/** Decoder settings: which channel plays which bus signal (channel ids), and the bus options. */
-export type DecoderConfig = {
-  protocol: Protocol
-  /** Signal role → channel id. */
-  roles: Record<string, string>
-  baud: number
-  cpol: 0 | 1
-  cpha: 0 | 1
-}
 
 const PROTOCOLS: { value: Protocol; label: string }[] = [
   { value: "none", label: "No decoder" },
@@ -36,8 +23,6 @@ const PROTOCOLS: { value: Protocol; label: string }[] = [
 const SPAN_ITEMS = LOGIC_SPANS.map((t) => ({ value: String(t), label: formatSI(t, "s", 0) }))
 const BAUD_ITEMS = BAUDS.map((b) => ({ value: String(b), label: `${b} Bd` }))
 const MODE_ITEMS = ["00", "01", "10", "11"].map((m) => ({ value: m, label: `Mode ${Number(m[0]) * 2 + Number(m[1])}` }))
-
-export const DEFAULT_DECODER: DecoderConfig = { protocol: "none", roles: {}, baud: 115200, cpol: 0, cpha: 0 }
 
 const ROLES: Record<Protocol, { key: string; label: string; optional?: boolean }[]> = {
   none: [],
