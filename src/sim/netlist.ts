@@ -8,7 +8,9 @@ import { parseValue } from "./units"
 /** Net index; GROUND is the reference node and has no matrix row. */
 export const GROUND = -1
 
-export type ResolvedLimits = { power?: number; current?: number; voltage?: number; reverse?: number; fail: "open" | "short"; fatal: boolean }
+export type ResolvedLimits = { power?: number; current?: number; voltage?: number; reverse?: number; surge?: number; tau: number; fail: "open" | "short"; fatal: boolean }
+
+export const DEFAULT_TAU = 0.035
 
 /** Common to every solved element: owner object, model element index, display ref, ratings. `hidden` keeps it out of the inspector. */
 type Base = { id: string; object: string; element: number; ref: string; limits?: ResolvedLimits; hidden?: boolean }
@@ -92,6 +94,7 @@ export type Netlist = {
   elements: Resolved[]
   /** pinKey -> net index, for every pin that belongs to a solved net. */
   pinNet: Map<string, number>
+  nodeNet: Map<string, number>
   /** Node keys tied to the reference node by GND elements (current sinks for wire flow). */
   groundKeys: Set<string>
   /** Pins joined by touching another pin rather than by a wire, keyed to their group. */
@@ -165,7 +168,7 @@ function resolveLimits(l: Limits | undefined, props: Record<string, string>): Re
     const n = resolveValue(v, props)
     return Number.isFinite(n) && n > 0 ? n : undefined
   }
-  const out = { power: num(l.power), current: num(l.current), voltage: num(l.voltage), reverse: num(l.reverse), fail: l.fail ?? "open", fatal: l.fatal ?? true }
+  const out = { power: num(l.power), current: num(l.current), voltage: num(l.voltage), reverse: num(l.reverse), surge: num(l.surge), tau: num(l.tau) ?? DEFAULT_TAU, fail: l.fail ?? "open", fatal: l.fatal ?? true }
   // Every rating left blank (a battery without a stated max current): the element is unrated.
   if (out.power === undefined && out.current === undefined && out.voltage === undefined && out.reverse === undefined) return undefined
   return out
@@ -262,7 +265,11 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
 
   // Nets that need a matrix row: touched by a conducting element.
   const active = new Set<string>()
-  const touch = (obj: PlacedObject, ref: string) => active.add(uf.find(node(obj, ref)))
+  const touched = new Set<string>()
+  const touch = (obj: PlacedObject, ref: string) => {
+    touched.add(node(obj, ref))
+    active.add(uf.find(node(obj, ref)))
+  }
   let firstMinus: string | null = null
   const gpios: Pending[] = []
   for (const p of pending) {
@@ -340,6 +347,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
     return root === groundRoot ? GROUND : (index.get(root) ?? GROUND)
   }
 
+  const nodeNet = new Map<string, number>()
   const elements: Resolved[] = []
   let sources = 0
   // Internal nodes an element adds for itself come after the ones the wiring made.
@@ -437,6 +445,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         if (withRc) {
           c = nodes++
           cKey = `${node(obj, el.c)}$rc`
+          nodeNet.set(cKey, c)
         }
         elements.push({ ...base, kind: "Q", polarity: el.polarity === "npn" ? 1 : -1, b: netOf(obj, el.b), c, e: netOf(obj, el.e), beta: Number.isFinite(beta) && beta > 0 ? beta : 200, cPin, keys: [node(obj, el.b), cKey, node(obj, el.e)] })
         if (withRc) elements.push({ ...base, id: `${base.id}$rc`, kind: "R", a: cPin, b: c, value: rc, hidden: true, limits: undefined, keys: [node(obj, el.c), cKey] })
@@ -544,6 +553,12 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
     }
   }
 
+  for (const key of touched) {
+    const root = uf.find(key)
+    if (root === groundRoot) nodeNet.set(key, GROUND)
+    else if (index.has(root)) nodeNet.set(key, index.get(root)!)
+  }
+
   const pinNet = new Map<string, number>()
   for (const obj of doc.objects) {
     const def = getDef(obj.def)
@@ -555,5 +570,5 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
     }
   }
 
-  return { nodes, sources, elements, pinNet, groundKeys, contacts: contacts.groups }
+  return { nodes, sources, elements, pinNet, nodeNet, groundKeys, contacts: contacts.groups }
 }

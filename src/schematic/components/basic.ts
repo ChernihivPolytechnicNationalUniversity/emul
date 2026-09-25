@@ -177,17 +177,18 @@ export const diode = base({
   category: "Semiconductors",
   icon: DiodeIcon,
   prefix: "D",
-  defaults: { value: "1N4148", vf: "0.7", imax: "300 mA", vrev: "100 V" },
+  defaults: { value: "1N4148", vf: "0.7", imax: "300 mA", ifsm: "4 A", vrev: "100 V" },
   fields: [
     { key: "value", label: "Part", type: "text", placeholder: "e.g. 1N4148" },
     { key: "vf", label: "Forward voltage", type: "range", min: 0.2, max: 1.2, step: 0.05, unit: "V" },
-    { key: "imax", label: "Max forward current", type: "quantity", unit: "A" },
+    { key: "imax", label: "Max average forward current", type: "quantity", unit: "A" },
+    { key: "ifsm", label: "Surge current (IFSM)", type: "quantity", unit: "A" },
     { key: "vrev", label: "Max reverse voltage", type: "quantity", unit: "V" },
   ],
   pins: DIODE_PINS,
   body: [{ type: "path", d: `${DIODE_LEADS} M2.4 0.5 V1.5` }, DIODE_TRIANGLE, ...labels()],
   // A junction pushed past its current or reverse voltage punches through and stays a short.
-  model: [{ kind: "D", anode: "1", cathode: "2", vf: (p) => Number(p.vf) || 0.7, limits: { current: "{imax}", voltage: "{vrev}", fail: "short" } }],
+  model: [{ kind: "D", anode: "1", cathode: "2", vf: (p) => Number(p.vf) || 0.7, limits: { current: "{imax}", surge: "{ifsm}", voltage: "{vrev}", tau: 3, fail: "short" } }],
 })
 
 export const zener = base({
@@ -200,7 +201,7 @@ export const zener = base({
   fields: [VALUE_FIELD("Zener voltage", "V"), { key: "power", label: "Power rating", type: "select", options: POWER_RATINGS }],
   pins: DIODE_PINS,
   body: [{ type: "path", d: `${DIODE_LEADS} M2.55 0.4 L2.4 0.5 V1.5 L2.25 1.6` }, DIODE_TRIANGLE, ...labels()],
-  model: [{ kind: "D", anode: "1", cathode: "2", vf: 0.7, zener: (p) => parseValue(p.value) || 5.1, limits: { power: "{power}", fail: "short" } }],
+  model: [{ kind: "D", anode: "1", cathode: "2", vf: 0.7, zener: (p) => parseValue(p.value) || 5.1, limits: { power: "{power}", tau: 3, fail: "short" } }],
 })
 
 export const led = base({
@@ -647,9 +648,9 @@ export const transformer: ComponentDef = {
   // short on DC, so a transformer on a battery burns its primary winding — rated at 1.3× the
   // nameplate current, like the copper it is.
   model: [
-    { kind: "XFMR", p1: "$p", p2: "P2", s1: "$s", s2: "S2", ratio: (p) => parseValue(p.sec) / parseValue(p.value), limits: { power: "{va}" } },
+    { kind: "XFMR", p1: "$p", p2: "P2", s1: "$s", s2: "S2", ratio: (p) => parseValue(p.sec) / parseValue(p.value), limits: { power: "{va}", tau: 600 } },
     { kind: "R", a: "$s", b: "S1", value: "{rs}" },
-    { kind: "R", a: "P1", b: "$p", value: "{rp}", hidden: true, limits: { current: (p) => (1.3 * parseValue(p.va)) / parseValue(p.value) } },
+    { kind: "R", a: "P1", b: "$p", value: "{rp}", hidden: true, limits: { current: (p) => (1.3 * parseValue(p.va)) / parseValue(p.value), tau: 600 } },
     { kind: "L", a: "$p", b: "P2", value: "{lm}", hidden: true },
   ],
 }
