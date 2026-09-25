@@ -15,6 +15,9 @@ import { useProjects } from "@/hooks/use-projects"
 import { fileName, nameFromFile, projectFile, readProjectFile, shareLink } from "@/project/project-store"
 import { Button } from "@/components/ui/button"
 import { ProjectsSheet } from "@/components/projects/ProjectsSheet"
+import { hostedRoom, roomFromPath, useLive } from "@/collab/use-live"
+import { LiveCursors } from "@/components/share/LiveCursors"
+import { ShareDialog } from "@/components/share/ShareDialog"
 
 /** Height of the menu bar; the sidebar is fixed, so it has to be told to start below it. */
 const MENU_H = 28
@@ -40,8 +43,77 @@ export default function App() {
   const [state, setState] = React.useState<FieldState>(emptyState)
   const [sidebarOpen, setSidebarOpen] = React.useState(true)
   const fileInput = React.useRef<HTMLInputElement>(null)
-  const projects = useProjects(React.useCallback((doc: Schematic) => field.current?.load(doc), []))
+  const store = useProjects(React.useCallback((doc: Schematic) => field.current?.load(doc), []))
+  const live = useLive(React.useCallback((doc: Schematic) => field.current?.merge(doc), []))
+  const projects = React.useMemo(
+    () => ({
+      ...store,
+      open: async (id: string) => {
+        if (id !== store.current?.id) live.leave()
+        await store.open(id)
+      },
+      create: async (name: string, doc?: Schematic) => {
+        live.leave()
+        await store.create(name, doc)
+      },
+      remove: async (id: string) => {
+        if (id === store.current?.id) live.leave()
+        await store.remove(id)
+      },
+    }),
+    [store, live],
+  )
+  const ghosts = React.useMemo(
+    () => live.peers.flatMap((p) => (p.moving ? [{ key: p.clientId, color: p.color, ...p.moving }] : [])),
+    [live.peers],
+  )
   const [projectsOpen, setProjectsOpen] = React.useState(false)
+  const [shareOpen, setShareOpen] = React.useState(false)
+
+  const startLive = async () => {
+    const doc = field.current?.doc()
+    if (!doc) return
+    try {
+      await live.start(projects.current?.name ?? "Live bench", doc)
+    } catch (e) {
+      toast.error("Could not start a live session", { description: (e as Error).message })
+      return live.leave()
+    }
+    const link = live.linkFor()
+    if (link) await navigator.clipboard.writeText(link).then(() => toast.success("Live session started", { description: "Link copied: send it to whoever joins." }), () => {})
+  }
+
+  const { onChange: storeChange } = store
+  const { onChange: liveChange } = live
+  const onFieldChange = React.useCallback(
+    (doc: Schematic) => {
+      storeChange(doc)
+      liveChange(doc)
+    },
+    [storeChange, liveChange],
+  )
+
+  const autoJoined = React.useRef(false)
+  const joinLive = useEvent(async () => {
+    const room = roomFromPath()
+    if (room) {
+      const got = await live.join(room).catch(() => null)
+      if (!got) {
+        history.replaceState(null, "", "/")
+        return void toast.error("That live session is not there", { description: "It has ended, or the link is cut short." })
+      }
+      await store.visit(got.name, got.doc)
+      return
+    }
+    const hosted = hostedRoom()
+    const doc = field.current?.doc()
+    if (hosted && doc) await live.start(store.current?.name ?? "Live bench", doc).catch(() => live.leave())
+  })
+  React.useEffect(() => {
+    if (!store.ready || autoJoined.current) return
+    autoJoined.current = true
+    void joinLive()
+  }, [store.ready, joinLive])
   const hdlInput = React.useRef<HTMLInputElement>(null)
   const importHdl = React.useCallback(() => hdlInput.current?.click(), [])
   const onHdlFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -203,6 +275,10 @@ export default function App() {
           onOpenFile={open}
           onSaveFile={save}
           onShare={() => void share()}
+          onShareDialog={() => setShareOpen(true)}
+          onLive={() => setShareOpen(true)}
+          people={live.room ? [live.me, ...live.peers] : []}
+          live={live.status}
           onExportPng={() => void exportImage()}
           onImportHdl={importHdl}
           onExample={(example) => void loadExample(example)}
@@ -220,16 +296,33 @@ export default function App() {
             <SidebarTrigger className="absolute top-3 left-3 z-10" />
             {projects.shared && (
               <div className="absolute top-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-3 rounded-md border bg-background/95 py-1 pr-1 pl-3 text-xs shadow-sm backdrop-blur-sm">
-                <span className="text-muted-foreground">Opened from a link: changes are not kept until you save it.</span>
+                <span className="text-muted-foreground">
+                  {live.room ? "Live session: your edits reach everyone. Keep your own copy too?" : "Opened from a link: changes are not kept until you save it."}
+                </span>
                 <Button size="xs" onClick={() => void projects.keep(field.current?.doc() ?? { objects: [], wires: [], parts: {} })}>
                   Save to my projects
                 </Button>
               </div>
             )}
-            <DotField ref={field} onChange={projects.onChange} onStateChange={setState} />
+            <DotField ref={field} onChange={onFieldChange} onStateChange={setState} onPointerWorld={live.onPointer}
+              onMovePreview={live.onMove}
+              onWirePreview={live.onWire}
+              ghosts={ghosts}
+            >
+              <LiveCursors peers={live.peers} />
+            </DotField>
           </SidebarInset>
         </SidebarProvider>
       </div>
+      <ShareDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        live={live}
+        empty={state.isEmpty}
+        onStart={() => void startLive()}
+        onCopyLink={() => void share()}
+        onExportPng={() => void exportImage()}
+      />
       <ProjectsSheet open={projectsOpen} onOpenChange={setProjectsOpen} projects={projects} onNew={newProject} onDownload={(id) => void downloadProject(id)} />
       <input ref={fileInput} type="file" accept=".emul" className="hidden" onChange={onFile} />
       <input ref={hdlInput} type="file" multiple accept={HDL_ACCEPT} className="hidden" onChange={onHdlFiles} />

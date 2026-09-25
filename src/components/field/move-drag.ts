@@ -191,6 +191,13 @@ export class BendDrag {
     this.moved = false
   }
 
+  preview(at: Point): { wire: string; points: Point[] } | null {
+    if (!this.plan) return null
+    const points = this.plan.points.slice()
+    points[this.plan.index] = at
+    return { wire: this.plan.wire, points }
+  }
+
   clearAndFinish(): { wire: string; points: Point[] } | null {
     const plan = this.plan
     const at = this.pointer
@@ -239,6 +246,12 @@ export class MoveDrag {
     if (!this.plan) return
     this.pointer = at
     if (!this.raf) this.raf = requestAnimationFrame(this.frame)
+  }
+
+  preview(): { ids: string[]; dx: number; dy: number } | null {
+    if (!this.plan || !this.pointer) return null
+    const { x: dx, y: dy } = snappedOffset(this.plan, this.pointer)
+    return { ids: [...this.plan.startPositions.keys()], dx, dy }
   }
 
   clearAndFinish(): { plan: MovePlan; dx: number; dy: number } | null {

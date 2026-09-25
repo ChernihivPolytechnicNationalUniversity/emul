@@ -2,32 +2,19 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 import {
   nearestSegment,
-  objectRect,
-  resolvePin,
-  routeArea,
-  routeToPoint,
-  routeWire,
   toPath,
   type Point,
   type RoutedWire,
 } from "@/schematic/geometry"
 import type { SpatialIndex } from "@/schematic/spatial"
-import type { PinRef, PlacedObject } from "@/schematic/types"
+import type { PlacedObject } from "@/schematic/types"
 import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
 import { wireCornerRadius } from "./wire-style"
+import { pendingPoints, type PendingWire } from "./pending-wire"
 import type { WireFlow } from "./wire-flow"
 
-export type PendingWire = {
-  from: PinRef
-  cursor: Point
-  target: PinRef | null
-  /** Bend points placed so far. */
-  points: Point[]
-  /** "drag": mouse still held from the first pin; "click": placing bends click by click. */
-  mode: "drag" | "click"
-  color: WireColorKey
-  chosen: boolean
-}
+export type { PendingWire }
+
 
 const WIRE_PX = 2
 const CASING_PX = 3
@@ -269,22 +256,6 @@ function Pending({ objects, index, pending, grid, radius, handleR }: { objects: 
       <circle cx={end.x} cy={end.y} r={pending.target ? handleR * 1.4 : handleR} fill={pending.target ? color : "var(--background)"} stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
     </g>
   )
-}
-
-function pendingPoints(objects: readonly PlacedObject[], index: SpatialIndex, p: PendingWire, grid: number): Point[] | null {
-  const a = resolvePin(objects, p.from, grid)
-  if (!a) return null
-  const target = p.target && resolvePin(objects, p.target, grid)
-  if (target && p.target) {
-    const aStub = a.pin.stub ?? 1
-    const bStub = target.pin.stub ?? 1
-    const avoid = index
-      .query(routeArea(a.point, aStub, target.point, bStub, p.points, grid))
-      .filter((o) => o.id !== p.from.object && o.id !== p.target!.object)
-      .map((o) => objectRect(o, grid))
-    return routeWire(a.point, a.pin.side, aStub, target.point, target.pin.side, bStub, grid, p.points, avoid).pts
-  }
-  return routeToPoint(a.point, a.pin.side, a.pin.stub ?? 1, p.cursor, grid, p.points)
 }
 
 function clientToLocal(e: React.MouseEvent<SVGPathElement>): Point {

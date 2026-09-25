@@ -22,7 +22,7 @@ export default defineConfig({
   // Cross-origin isolation for SharedArrayBuffer: the simulation runs each MCU core in a worker of its own.
   // /api goes to the api service (`pnpm api`), as the ingress routes it in production — or to a deployed
   // one: `EMUL_API=https://emul.digituni.org pnpm dev` drives the real build service from a dev checkout.
-  server: { headers: ISOLATION, proxy: { '/api': { target: process.env.EMUL_API ?? 'http://localhost:8787', changeOrigin: true } } },
+  server: { headers: ISOLATION, proxy: { '/api': { target: process.env.EMUL_API ?? 'http://localhost:8787', changeOrigin: true }, '/collab': { target: process.env.EMUL_COLLAB ?? 'ws://localhost:8788', ws: true, changeOrigin: true } } },
   // The core worker awaits its message port at top level, which the default iife worker bundle cannot express.
   worker: { format: 'es' },
   preview: { headers: ISOLATION },

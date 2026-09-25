@@ -181,6 +181,24 @@ export function useSchematic(grid: number) {
     setSelectedWires(new Set())
   }, [setDoc])
 
+  const replace = React.useCallback(
+    (next: Schematic) => {
+      setDoc(
+        () => {
+          const { library, ...rest } = next
+          const modules = checkedLibrary(library)
+          return { ...rest, objects: next.objects.map(checked), ...(modules && { library: modules }) }
+        },
+        { silent: true },
+      )
+      const objects = new Set(next.objects.map((o) => o.id))
+      const wires = new Set(next.wires.map((w) => w.id))
+      setSelectedObjects((s) => ([...s].every((id) => objects.has(id)) ? s : new Set([...s].filter((id) => objects.has(id)))))
+      setSelectedWires((s) => ([...s].every((id) => wires.has(id)) ? s : new Set([...s].filter((id) => wires.has(id)))))
+    },
+    [setDoc],
+  )
+
   /** Replace the whole document (loading an example or a file; the boards' projects, build options and debugger settings are re-checked). */
   const load = React.useCallback(
     (next: Schematic) => {
@@ -456,6 +474,7 @@ export function useSchematic(grid: number) {
     setWirePoints,
     setWireColors,
     setPart,
+    replace,
     undo,
     redo,
     canUndo,

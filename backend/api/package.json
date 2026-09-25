@@ -5,10 +5,16 @@
   "type": "module",
   "scripts": {
     "start": "node --experimental-strip-types src/index.ts",
-    "dev": "node --watch --experimental-strip-types src/index.ts"
+    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "collab": "node --experimental-strip-types src/collab.ts",
+    "collab:dev": "node --watch --experimental-strip-types src/collab.ts"
   },
   "dependencies": {
+    "@hocuspocus/extension-database": "^4.7.0",
+    "@hocuspocus/extension-redis": "^4.7.0",
+    "@hocuspocus/server": "^4.7.0",
     "emul-shared": "workspace:*",
-    "fastify": "^5.12.5"
+    "fastify": "^5.12.5",
+    "yjs": "^13.6.33"
   }
 }

@@ -32,8 +32,9 @@ a firmware or circuit test, and its row in `docs/coverage.md` flipped; then it l
 - [ ] **SD card (SPI mode)** — later, if a lab needs it.
 - [ ] **Cloud projects** — sign-in through digituni SSO, projects on the server and on every device; a teacher hands
   out a lab template, a student submits their project, the teacher opens the submission; owner/editor/viewer rights.
-- [ ] **Live collaboration** — a room by link, a WebSocket relay, other people's cursors; the simulation runs on
-  one host and the others watch, since a deterministic run on every peer is out of reach for now.
+- [ ] **Live sessions, the rest** — room snapshots in S3 rather than Redis alone; `Y.UndoManager` so ⌘Z undoes only
+  your own edits; offline edits kept through `y-indexeddb`; per-field merging instead of whole objects; limits on room
+  size and connections; the simulation run by one host and watched by the others.
 
 ## Process
 

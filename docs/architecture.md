@@ -22,6 +22,11 @@ each from its own Dockerfile and built in parallel by CI:
   the browser fetches them from the store directly, the bucket stays private. `/healthz` is 503 while Redis is down.
   `POST /api/shares` takes a zstd `.emul` project (`application/zstd`, 60 per IP an hour), stores it and returns an 8-character id;
   `GET /api/shares/:id` serves it back. The site opens `/s/<id>` as a read-only view of that project.
+- `api/src/collab.ts` — live sessions, a second process from the same image (`pnpm collab`, port 8788), on the site's host
+  under `/collab`. Hocuspocus over WebSocket: one Yjs document per room (`/r/<10 chars>`), the bench split into one entry
+  per object, wire, part state and HDL module (`src/collab/elements.ts`), last writer wins per entry. Rooms are kept in
+  Redis for 7 days and fanned out across replicas through Redis. Cursors, names and in-progress drags travel as
+  awareness, never as document edits.
 - `worker/` — BullMQ consumer; one handler per job kind in `worker/src/handlers.ts` (`echo` lists the project back, `build` compiles it),
   each leaving files in `out/` and saying whether the project passed; a compile error is a completed job with `ok: false` and a log,
   only the service's own failure fails the job. The worker holds **no store credentials**: each job carries presigned GET URLs for its

@@ -54,6 +54,8 @@ import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
 import { labelArea, labelCanvasFits, SymbolRaster, TextRaster } from "./symbol-raster"
 import { PendingWireLayer, WireLayer, type PendingWire } from "./WireLayer"
+import { bentWirePoints, pendingPoints } from "./pending-wire"
+import { GhostLayer, type Ghost } from "./GhostLayer"
 import { wireCornerRadius } from "./wire-style"
 import { BendDrag, MoveDrag, planBend, planMove } from "./move-drag"
 import { WireFlow } from "./wire-flow"
@@ -70,6 +72,7 @@ export type DotFieldHandle = {
   addAtCenter: (defId: string) => void
   /** Replace the schematic and bring it into view. */
   load: (doc: Schematic) => void
+  merge: (doc: Schematic) => void
   /** The document as it stands, for saving. */
   doc: () => Schematic
   exportPng: () => Promise<Blob | null>
@@ -128,6 +131,10 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
   onChange?: (doc: Schematic) => void
   /** Called whenever something the menu shows changes. */
   onStateChange?: (state: FieldState) => void
+  onPointerWorld?: (point: Point | null) => void
+  onMovePreview?: (move: { ids: string[]; dx: number; dy: number } | null) => void
+  onWirePreview?: (points: Point[] | null) => void
+  ghosts?: readonly Ghost[]
 }
 
 const EMPTY_IDS: ReadonlySet<string> = new Set()
@@ -150,7 +157,7 @@ function pinAt(clientX: number, clientY: number): PinRef | null {
   return target?.kind === "pin" ? target.ref : null
 }
 
-export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, children, ...props }: DotFieldProps) {
+export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, children, ...props }: DotFieldProps) {
   const { containerRef, contentRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, toWorld, isPanStart, startPan, movePan, endPan } = useViewport(grid)
   const marquee = useSelection(toWorld, worldPerPixel, grid)
   const { boxRef: marqueeRef } = marquee
@@ -371,7 +378,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     sch.removeSelected()
   }, [copy, sch])
 
-  React.useEffect(() => onChange?.(sch.doc), [sch.doc, onChange])
+  const initialDoc = React.useRef(sch.doc)
+  React.useEffect(() => {
+    if (sch.doc !== initialDoc.current) onChange?.(sch.doc)
+  }, [sch.doc, onChange])
   React.useEffect(
     () =>
       onStateChange?.({
@@ -432,6 +442,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           h: Math.max(...rects.map((r) => r.y + r.h)) + grid - y,
         })
       },
+      merge: sch.replace,
       doc: () => sch.doc,
       exportPng: exportImage,
       clear: () => {
@@ -513,7 +524,14 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     )
   })
 
+  const trackMove = useEvent((at: Point) => {
+    drag.track(at)
+    const move = drag.preview()
+    if (move) onMovePreview?.(move)
+  })
+
   const endMove = useEvent(() => {
+    onMovePreview?.(null)
     if (lifted.size) setLifted(EMPTY_IDS)
     const done = drag.clearAndFinish()
     if (done && (done.dx || done.dy)) sch.moveTo(done.plan.startPositions, done.dx, done.dy)
@@ -526,7 +544,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     e.currentTarget.setPointerCapture(e.pointerId)
   })
   const onBodyPointerMove = useEvent((e: React.PointerEvent<SVGSVGElement>) => {
-    if (drag.active) drag.track(toWorld(e.clientX, e.clientY))
+    if (drag.active) trackMove(toWorld(e.clientX, e.clientY))
   })
   const onBodyPointerUp = useEvent((e: React.PointerEvent<SVGSVGElement>) => {
     endMove()
@@ -612,6 +630,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   // --- wiring: drag from pin to pin, or click bend by bend ------------------
   const [pending, setPending] = React.useState<PendingWire | null>(null)
+  React.useEffect(() => {
+    onWirePreview?.(pending ? pendingPoints(docObjects, index, pending, grid) : null)
+  }, [pending, docObjects, index, grid, onWirePreview])
   const snapPoint = (p: Point): Point => ({
     x: snap(p.x, grid),
     y: snap(p.y, grid),
@@ -714,9 +735,15 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     bend.begin(planBend(content, docObjects, w, index, grid, wireCornerRadius(grid)))
   })
   const onBendPointerMove = useEvent((e: React.PointerEvent<SVGGElement>) => {
-    if (bend.active) bend.track(snapPoint(toWorld(e.clientX, e.clientY)))
+    if (!bend.active) return
+    const at = snapPoint(toWorld(e.clientX, e.clientY))
+    bend.track(at)
+    const move = bend.preview(at)
+    const w = move && wireById.get(move.wire)
+    if (w && onWirePreview) onWirePreview(bentWirePoints(docObjects, index, w.from, w.to, move.points, grid))
   })
   const onBendPointerUp = useEvent((e: React.PointerEvent<SVGGElement>) => {
+    onWirePreview?.(null)
     const done = bend.clearAndFinish()
     if (done) sch.setWirePoints(done.wire, done.points)
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
@@ -801,9 +828,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    onPointerWorld?.(toWorld(e.clientX, e.clientY))
     if (movePan(e)) return
     if (drag.active) {
-      drag.track(toWorld(e.clientX, e.clientY))
+      trackMove(toWorld(e.clientX, e.clientY))
       return
     }
     if (pending?.mode === "click") {
@@ -999,7 +1027,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
-            onPointerLeave={forgetHover}
+            onPointerLeave={() => {
+              forgetHover()
+              onPointerWorld?.(null)
+            }}
             onContextMenu={(e) => {
               menuPoint.current = toWorld(e.clientX, e.clientY)
               if (pending) {
@@ -1067,6 +1098,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 onPinPointerUp={onPinPointerUp}
               />
               <PendingWireLayer objects={docObjects} index={index} pending={pending} grid={grid} scale={scale} />
+              {ghosts && ghosts.length > 0 && (
+                <GhostLayer ghosts={ghosts} objects={docObjects} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} />
+              )}
               <MeasureLayer tips={tips} held={heldTips} grid={grid} />
               <div
                 ref={marqueeRef}
