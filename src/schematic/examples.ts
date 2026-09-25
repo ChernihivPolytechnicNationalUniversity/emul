@@ -171,6 +171,85 @@ const batteryLife: Example = {
   },
 }
 
+const chargeBoostChips: Example = {
+  id: "charge-boost-chips",
+  name: "Li-ion charger + boost from chips",
+  description: "The LX-LCBST's circuit from bare chips: TP4056 at 1 A (R_PROG 1.2 kΩ) with CHRG/STDBY LEDs, DW03 on the cell, MT3608 with 22 µH, an SS34 and 75k/10k for 5.1 V into 100 Ω. SW1 is the USB plug.",
+  icon: BatteryMediumIcon,
+  build(grid) {
+    const { doc, place, wire } = builder(grid)
+    const usb = place("dc-source", 0, 3, { value: "5 V", rint: "0.15 Ω", imax: "3 A" })
+    const plug = place("switch", 3, 1)
+    const u1 = place("tp4056", 10, 0)
+    const rprog = place("resistor", 4, 7, { value: "1.2 kΩ" })
+    const r2 = place("resistor", 10, -6, { value: "1 kΩ" })
+    const led1 = place("led", 14, -6, { value: "red" })
+    const r3 = place("resistor", 10, -3, { value: "1 kΩ" })
+    const led2 = place("led", 14, -3, { value: "blue" })
+    const bat = place("battery", 24, 4, { chem: "li-ion", cells: "1", capacity: "2 Ah", soc: "50" })
+    const u2 = place("dw03", 22, 11)
+    const u3 = place("mt3608", 36, 4)
+    const l1 = place("inductor", 38, 0, { value: "22 µH", imax: "3 A" })
+    const d1 = place("diode", 46, 4, { value: "SS34", vf: "0.3", imax: "3 A", vrev: "40 V" })
+    const r4 = place("resistor", 46, 7, { value: "75 kΩ" })
+    const r5 = place("resistor", 46, 10, { value: "10 kΩ" })
+    const sw = place("switch", 52, 4)
+    const load = place("resistor", 56, 4, { value: "100 Ω", power: "0.5" })
+    const gnd = (x: number, y: number) => place("ground", x, y)
+    wire(usb, "+", plug, "1")
+    wire(usb, "-", gnd(0, 9), "GND")
+    wire(plug, "2", u1, "VCC")
+    wire(u1, "VCC", u1, "CE")
+    wire(u1, "TEMP", rprog, "1")
+    wire(u1, "PROG", rprog, "2")
+    wire(rprog, "1", gnd(3, 10), "GND")
+    wire(u1, "GND", gnd(14, 10), "GND")
+    wire(r2, "1", r3, "1")
+    wire(r3, "1", u1, "VCC")
+    wire(led1, "2", u1, "CHRG")
+    wire(led2, "2", u1, "STDBY")
+    wire(u1, "BAT", bat, "+")
+    wire(bat, "+", u2, "VDD")
+    wire(bat, "-", u2, "GND")
+    wire(u2, "VM", gnd(28, 17), "GND")
+    wire(bat, "+", u3, "IN")
+    wire(u3, "IN", u3, "EN")
+    wire(u3, "IN", l1, "1")
+    wire(l1, "2", u3, "SW")
+    wire(u3, "SW", d1, "1")
+    wire(u3, "FB", r4, "1")
+    wire(r4, "2", d1, "2")
+    wire(u3, "FB", r5, "1")
+    wire(r5, "2", gnd(50, 13), "GND")
+    wire(u3, "GND", gnd(40, 12), "GND")
+    wire(d1, "2", sw, "1")
+    wire(load, "2", gnd(60, 7), "GND")
+    doc.parts[`${sw.id}:SW`] = { on: true }
+    return doc
+  },
+}
+
+const chargeBoost: Example = {
+  id: "charge-boost",
+  name: "Li-ion charger + boost",
+  description: "An 18650 on an LX-LCBST module (TP4056 + DW03 + MT3608), 5 V into 100 Ω. Plug the USB-C in to charge; short the output or run the cell flat to see the protection.",
+  icon: BatteryMediumIcon,
+  build(grid) {
+    const { doc, place, wire } = builder(grid)
+    const mod = place("lx-lcbst", 8, 6)
+    const bat = place("battery", 22, 0, { chem: "li-ion", cells: "1", capacity: "2 Ah", soc: "50" })
+    const sw = place("switch", 0, 1)
+    const load = place("resistor", 6, 1, { value: "100 Ω", power: "0.5" })
+    wire(bat, "+", mod, "B+", [[23, -1], [16, -1]])
+    wire(bat, "-", mod, "B-", [[23, 5], [19, 5]])
+    wire(mod, "VO+", sw, "1", [[10, 4], [-1, 4], [-1, 2]])
+    wire(sw, "2", load, "1")
+    wire(load, "2", mod, "VO-", [[13, 2]])
+    doc.parts[`${sw.id}:SW`] = { on: true }
+    return doc
+  },
+}
+
 /**
  * The Arduino "blink" wiring on a Nucleo-144: D13 through 220 Ω into an LED to GND. The board
  * runs the HAL blink firmware (firmware/hal): LD1 and D13 toggle every 500 ms, LD2 every
@@ -570,4 +649,4 @@ export const nucleoAdc: Example = {
   },
 }
 
-export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoAdc, lab1Board, lab1RunningLight, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, systemExam, transistorLogic, lissajous, bridge]
+export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoAdc, lab1Board, lab1RunningLight, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, chargeBoost, chargeBoostChips, systemExam, transistorLogic, lissajous, bridge]

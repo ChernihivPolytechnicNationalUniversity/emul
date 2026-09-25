@@ -254,8 +254,13 @@ export type Element =
    * blocks when something else holds `out` higher. Draws no quiescent current.
    */
   | { kind: "REG"; in: NodeRef; out: NodeRef; gnd: NodeRef; value: Value; dropout?: Value; imax?: Value; limits?: Limits }
+  | { kind: "CHG"; in: NodeRef; bat: NodeRef; gnd: NodeRef; prog: NodeRef; chrg?: NodeRef; stdby?: NodeRef; ce?: NodeRef; temp?: NodeRef; value?: Value; limits?: Limits }
+  | { kind: "PROT"; vdd: NodeRef; vss: NodeRef; cs: NodeRef; od: NodeRef; oc: NodeRef; chip: ProtChip; limits?: Limits }
+  | { kind: "BOOST"; in: NodeRef; out?: NodeRef; gnd: NodeRef; fb: NodeRef; vcc?: NodeRef; en?: NodeRef; vref?: Value; eff?: Value; ilim?: Value; uvlo?: Value; iq?: Value; limits?: Limits }
   /** Nodes that are the same conductor inside the component (a ground rail). */
   | { kind: "SHORT"; nodes: NodeRef[] }
+
+export type ProtChip = "dw01a" | "dw03"
 
 /** An editable per-instance property shown in the inspector. */
 export type PropField =
