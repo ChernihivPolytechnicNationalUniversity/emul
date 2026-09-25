@@ -6,12 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatSI } from "@/sim/units"
+import { SCOPE_COLUMNS, TIMEBASES } from "./timebase"
 import type { TraceStore } from "./trace-store"
 
-/** Screen widths on offer, in seconds. */
-export const TIMEBASES = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5] as const
-/** Samples across one screen; the worker's bucket is the timebase divided by this. */
-export const SCOPE_COLUMNS = 500
 const DIVISIONS = 10
 /** How many screens of history set the vertical scale. */
 const SCALE_SCREENS = 4
