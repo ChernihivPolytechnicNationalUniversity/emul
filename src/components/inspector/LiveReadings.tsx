@@ -26,6 +26,9 @@ const KIND_LABEL: Record<Reading["kind"], string> = {
   SW: "Switch",
   GPIO: "Pin driver",
   REG: "Regulator",
+  CHG: "Charger",
+  PROT: "Protection",
+  BOOST: "Boost converter",
 }
 
 /** Below this an element on a board counts as idle and is left out of the inspector. */

@@ -1,7 +1,7 @@
 import { GRID } from "@/schematic/geometry"
 import { pinContacts } from "@/schematic/contacts"
 import { getDef } from "@/schematic/registry"
-import { pinKey, type Damage, type Element, type Limits, type NodeRef, type PlacedObject, type Schematic, type Value } from "@/schematic/types"
+import { pinKey, type Damage, type Element, type Limits, type NodeRef, type PlacedObject, type ProtChip, type Schematic, type Value } from "@/schematic/types"
 import { chemistryById, defaultResistance, type Chemistry } from "./battery"
 import { parseValue } from "./units"
 
@@ -53,6 +53,29 @@ export type Resolved =
   | (Base & { kind: "GPIO"; node: number; nodeKey: string; vdd: number; vddNet: number | undefined; keys: [string] | [string, string] })
   /** `index` is the extra unknown (through current, in → out) like a source's. */
   | (Base & { kind: "REG"; in: number; out: number; gnd: number; value: number; dropout: number; imax: number; index: number; keys: [string, string] })
+  | (Base & { kind: "CHG"; in: number; bat: number; gnd: number; progNet: number; chrg: number | undefined; stdby: number | undefined; ce: number | undefined; temp: number | undefined; value: number; index: number; prog: number; keys: string[] })
+  | (Base & { kind: "PROT"; vdd: number; vss: number; cs: number; od: number; oc: number; spec: ProtSpec; keys: string[] })
+  | (Base & { kind: "BOOST"; in: number; out: number; gnd: number; fb: number; vcc: number | undefined; en: number | undefined; vref: number; eff: number; ilim: number; uvlo: number; iq: number; index: number; keys: string[] })
+
+export type ProtSpec = {
+  overcharge: number
+  overchargeRelease: number
+  overchargeDelay: number
+  overdischarge: number
+  overdischargeRelease: number
+  overdischargeDelay: number
+  overcurrent: number
+  overcurrentDelay: number
+  short: number
+  shortDelay: number
+  charger: number
+  releaseR: number
+}
+
+export const PROT_SPECS: Record<ProtChip, ProtSpec> = {
+  dw01a: { overcharge: 4.3, overchargeRelease: 4.1, overchargeDelay: 0.08, overdischarge: 2.4, overdischargeRelease: 3.0, overdischargeDelay: 0.04, overcurrent: 0.15, overcurrentDelay: 0.01, short: 1.35, shortDelay: 5e-6, charger: 0.05, releaseR: 300e3 },
+  dw03: { overcharge: 4.3, overchargeRelease: 4.1, overchargeDelay: 0.128, overdischarge: 2.4, overdischargeRelease: 3.0, overdischargeDelay: 0.04, overcurrent: 0.14, overcurrentDelay: 0.01, short: 0.8, shortDelay: 200e-6, charger: 0.12, releaseR: 20e3 },
+}
 
 /**
  * What an MCU pad presents to the net: the push-pull driver, the weak internal pull, or
@@ -167,6 +190,12 @@ function shortPair(el: Element): [NodeRef, NodeRef] | null {
       return [el.d, el.s]
     case "REG":
       return [el.in, el.out]
+    case "BOOST":
+      return el.out ? [el.in, el.out] : null
+    case "CHG":
+      return [el.in, el.bat]
+    case "PROT":
+      return [el.vdd, el.vss]
     // A pad's blown protection diode ties it to the rail it clamped to; without a rail node
     // there is nothing to short to and the driver is simply gone.
     case "GPIO":
@@ -275,6 +304,15 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         touch(obj, el.in)
         touch(obj, el.out)
         touch(obj, el.gnd)
+        break
+      case "CHG":
+        for (const ref of [el.in, el.bat, el.gnd, el.prog, el.chrg, el.stdby, el.ce, el.temp]) if (ref) touch(obj, ref)
+        break
+      case "PROT":
+        for (const ref of [el.vdd, el.vss, el.cs, el.od, el.oc]) touch(obj, ref)
+        break
+      case "BOOST":
+        for (const ref of [el.in, el.out, el.gnd, el.fb, el.vcc, el.en]) if (ref) touch(obj, ref)
         break
     }
   }
@@ -430,6 +468,77 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         const imax = el.imax === undefined ? Infinity : resolveValue(el.imax, props)
         if (Number.isFinite(value) && value > 0)
           elements.push({ ...base, kind: "REG", in: netOf(obj, el.in), out: netOf(obj, el.out), gnd: netOf(obj, el.gnd), value, dropout: Number.isFinite(dropout) ? Math.max(0, dropout) : 0, imax: imax > 0 ? imax : Infinity, index: sources++, keys: [node(obj, el.in), node(obj, el.out)] })
+        break
+      }
+      case "CHG": {
+        const value = el.value === undefined ? 4.2 : resolveValue(el.value, props)
+        const opt = (ref: NodeRef | undefined) => (ref ? netOf(obj, ref) : undefined)
+        elements.push({
+          ...base,
+          kind: "CHG",
+          in: netOf(obj, el.in),
+          bat: netOf(obj, el.bat),
+          gnd: netOf(obj, el.gnd),
+          progNet: netOf(obj, el.prog),
+          chrg: opt(el.chrg),
+          stdby: opt(el.stdby),
+          ce: opt(el.ce),
+          temp: opt(el.temp),
+          value: Number.isFinite(value) && value > 0 ? value : 4.2,
+          index: sources++,
+          prog: sources++,
+          keys: [el.in, el.bat, el.gnd, el.prog, el.chrg ?? el.gnd, el.stdby ?? el.gnd].map((ref) => node(obj, ref)),
+        })
+        break
+      }
+      case "PROT":
+        elements.push({
+          ...base,
+          kind: "PROT",
+          vdd: netOf(obj, el.vdd),
+          vss: netOf(obj, el.vss),
+          cs: netOf(obj, el.cs),
+          od: netOf(obj, el.od),
+          oc: netOf(obj, el.oc),
+          spec: PROT_SPECS[el.chip],
+          keys: [el.vdd, el.vss, el.cs, el.od, el.oc].map((ref) => node(obj, ref)),
+        })
+        break
+      case "BOOST": {
+        const num = (v: Value | undefined, fallback: number) => {
+          const n = v === undefined ? NaN : resolveValue(v, props)
+          return Number.isFinite(n) && n > 0 ? n : fallback
+        }
+        let outKey = el.out ? node(obj, el.out) : undefined
+        let out = el.out ? netOf(obj, el.out) : undefined
+        if (!el.out) {
+          const sw = uf.find(node(obj, el.in))
+          for (const p of pending) {
+            if (p.el.kind !== "D") continue
+            if (uf.find(node(p.obj, p.el.anode)) !== sw || uf.find(node(p.obj, p.el.cathode)) === sw) continue
+            outKey = node(p.obj, p.el.cathode)
+            out = netOf(p.obj, p.el.cathode)
+            break
+          }
+        }
+        if (out === undefined || outKey === undefined) break
+        elements.push({
+          ...base,
+          kind: "BOOST",
+          in: netOf(obj, el.in),
+          out,
+          vcc: el.vcc ? netOf(obj, el.vcc) : undefined,
+          en: el.en ? netOf(obj, el.en) : undefined,
+          gnd: netOf(obj, el.gnd),
+          fb: netOf(obj, el.fb),
+          vref: num(el.vref, 0.6),
+          eff: Math.min(1, num(el.eff, 0.9)),
+          ilim: num(el.ilim, Infinity),
+          uvlo: num(el.uvlo, 0),
+          iq: el.iq === undefined ? 0 : Math.max(0, resolveValue(el.iq, props) || 0),
+          index: sources++,
+          keys: [node(obj, el.in), outKey, node(obj, el.gnd)],
+        })
         break
       }
     }

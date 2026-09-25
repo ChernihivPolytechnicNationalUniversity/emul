@@ -50,7 +50,45 @@ const REG_REGULATE = 0
 const REG_DROPOUT = 1
 const REG_LIMIT = 2
 const REG_OPEN = 3
+const CHG_VPROG = 1
+const CHG_GAIN = 1200
+const CHG_TRICKLE = 2.9
+const CHG_TRICKLE_HYST = 0.08
+const CHG_TERM = 0.1
+const CHG_TERM_TIME = 1e-3
+const CHG_RECHARGE = 0.15
+const CHG_UVLO = 3.8
+const CHG_UVLO_HYST = 0.2
+const CHG_SLEEP = 0.03
+const CHG_WAKE = 0.1
+const CHG_OD_R = 60
+const CHG_CE = 1.2
+const CHG_TEMP_OFF = 0.1
+const CHG_TEMP_LOW = 0.45
+const CHG_TEMP_HIGH = 0.8
+const CHG_OFF = 0
+const CHG_TRICKLING = 1
+const CHG_CHARGING = 2
+const CHG_DONE = 3
+const PROT_DRIVE_R = 1e3
+const PROT_LOAD = 0.3
+const PROT_CHARGE_OFF = 1
+const PROT_DISCHARGE_OFF = 2
+const PROT_OVERCURRENT_OFF = 4
+const PROT_SHORTED = 8
+const BOOST_MODES = ["regulating", "current limit", "off", "undervoltage"] as const
+const BOOST_REGULATE = 0
+const BOOST_LIMIT = 1
+const BOOST_IDLE = 2
+const BOOST_UVLO = 3
+const BOOST_FOLD = 0.2
+const BOOST_STEP = 0.5
+const BOOST_UVLO_HYST = 0.1
+const BOOST_EN = 1.5
+const BOOST_DROOP = 1e-4
+const TERM_SLOTS = 6
 const MAX_ITER = 60
+const MODE_FREEZE = 20
 const ABS_TOL = 1e-6
 const REL_TOL = 1e-3
 /**
@@ -283,7 +321,6 @@ export class Engine {
   private readonly rVoltage: Float64Array
   private readonly rPower: Float64Array
   private readonly rLoad: Float64Array
-  /** Vbe and Ib of a BJT, and its region as an index into BJT_REGIONS. */
   private readonly rVbe: Float64Array
   private readonly rIb: Float64Array
   private readonly rRegion: Uint8Array
@@ -298,6 +335,8 @@ export class Engine {
   /** Resistance in force for each element: the model's value, or what the pin reader said for a live R. */
   private readonly ohms: Float64Array
   private readonly gpioVolts: Float64Array
+  private readonly ctl: Uint8Array
+  private readonly ctlT: Float64Array
 
   /** Current leaving the net into an element, per terminal node key. */
   private readonly termCurrent: Float64Array
@@ -327,7 +366,7 @@ export class Engine {
   /** Switch/pad hash of the current step, and how many steps in a row ended at a fixed point. */
   private stepMask = 0
   private settledRun = 0
-  private readonly hasBattery: boolean
+  private readonly drifting: boolean
   /** The `dt` and switch states `lu` was factorized for; a change invalidates it. */
   private luDt = 0
   private luSwitches = 0
@@ -352,7 +391,7 @@ export class Engine {
     let linear = true
     for (const el of net.elements) {
       if (el.kind === "V" && el.amplitude > 0 && el.frequency < minFreq) minFreq = el.frequency
-      if (el.kind === "D" || el.kind === "Q" || el.kind === "M" || el.kind === "REG") linear = false
+      if (el.kind === "D" || el.kind === "Q" || el.kind === "M" || el.kind === "REG" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "BOOST") linear = false
     }
     this.ac = minFreq < Infinity
     this.tau = this.ac ? Math.max(RMS_MIN_TAU, RMS_PERIODS / minFreq) : 0
@@ -361,8 +400,8 @@ export class Engine {
     this.padElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) ? [i] : [])))
     this.diodeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "D" ? [i] : [])))
     this.liveElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) ? [i] : [])))
-    this.stateless = !net.elements.some((el) => el.kind === "C" || el.kind === "L" || el.kind === "BAT")
-    this.hasBattery = net.elements.some((el) => el.kind === "BAT")
+    this.stateless = !net.elements.some((el) => el.kind === "C" || el.kind === "L" || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT")
+    this.drifting = net.elements.some((el) => el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT")
 
     this.capV = new Float64Array(m)
     this.capI = new Float64Array(m)
@@ -390,6 +429,8 @@ export class Engine {
     this.prevV = new Float64Array(n)
     this.strikeV = new Float64Array(n)
     this.gpioVolts = new Float64Array(m)
+    this.ctl = new Uint8Array(m)
+    this.ctlT = new Float64Array(m * 3)
     this.ohms = new Float64Array(m)
     this.batSoc = new Float64Array(m * MAX_CELLS)
     this.batR = new Float64Array(m)
@@ -419,7 +460,7 @@ export class Engine {
     // Terminal keys are interned once; the step then accumulates into dense slots.
     this.termIndex = new Map()
     this.termKeys = []
-    this.termOf = new Int32Array(m * 4).fill(-1)
+    this.termOf = new Int32Array(m * TERM_SLOTS).fill(-1)
     this.termAt = new Int32Array(m)
     net.elements.forEach((el, i) => {
       this.termAt[i] = el.keys.length
@@ -430,7 +471,7 @@ export class Engine {
           this.termIndex.set(key, slot)
           this.termKeys.push(key)
         }
-        this.termOf[i * 4 + k] = slot
+        this.termOf[i * TERM_SLOTS + k] = slot
       })
     })
     this.termCurrent = new Float64Array(this.termKeys.length)
@@ -452,6 +493,8 @@ export class Engine {
       this.msP[to] = prev.msP[from]
       this.diodeAvg[to] = prev.diodeAvg[from]
       this.arc[to] = prev.arc[from]
+      this.ctl[to] = prev.ctl[from]
+      for (let k = 0; k < 3; k++) this.ctlT[to * 3 + k] = prev.ctlT[from * 3 + k]
       // A battery keeps draining across an edit — unless the edit was to the battery itself.
       // Its temperature, wear and mismatch may change under it: the charge stays, the cell
       // temperature relaxes to the new air from where it was.
@@ -777,6 +820,36 @@ export class Engine {
           if (withZ && high) this.addI(GROUND, el.node, el.vdd / r)
           break
         }
+        case "CHG": {
+          const r = n + el.prog
+          const tied = el.progNet === el.gnd || this.ctl[i] === CHG_OFF
+          if (withA) {
+            if (tied) A[r * size + r] = 1
+            else {
+              if (el.progNet !== GROUND) {
+                A[el.progNet * size + r] += 1
+                A[r * size + el.progNet] += 1
+              }
+              if (el.gnd !== GROUND) {
+                A[el.gnd * size + r] -= 1
+                A[r * size + el.gnd] -= 1
+              }
+            }
+            const st = this.ctl[i]
+            if ((st === CHG_TRICKLING || st === CHG_CHARGING) && el.chrg !== undefined) this.addG(el.chrg, el.gnd, 1 / CHG_OD_R)
+            if (st === CHG_DONE && el.stdby !== undefined) this.addG(el.stdby, el.gnd, 1 / CHG_OD_R)
+          }
+          if (withZ) z[r] = tied ? 0 : CHG_VPROG
+          break
+        }
+        case "PROT": {
+          if (!withA) break
+          const st = this.ctl[i]
+          this.addG(el.od, st & (PROT_DISCHARGE_OFF | PROT_OVERCURRENT_OFF) ? el.vss : el.vdd, 1 / PROT_DRIVE_R)
+          this.addG(el.oc, st & PROT_CHARGE_OFF ? el.cs : el.vdd, 1 / PROT_DRIVE_R)
+          if (st & PROT_OVERCURRENT_OFF) this.addG(el.cs, el.vss, 1 / el.spec.releaseR)
+          break
+        }
       }
     }
   }
@@ -830,7 +903,7 @@ export class Engine {
    * and the node voltages within tolerance of the step before.
    */
   private settledAfter(dt: number): boolean {
-    if (!this.converged || this.struck || this.ac || this.hasBattery) return false
+    if (!this.converged || this.struck || this.ac || this.drifting) return false
     const n = this.net.nodes
     for (let i = 0; i < n; i++) if (Math.abs(this.v[i] - this.prevV[i]) > SETTLED_DV) return false
     const elements = this.net.elements
@@ -853,6 +926,7 @@ export class Engine {
       else if (el.kind === "GPIO") mask = (mask * 31 + this.gpioState[i]) | 0
       else if (el.kind === "R" && el.live) mask = (mask * 31 + (this.ohms[i] | 0)) | 0
       else if (el.kind === "BAT") mask = (mask * 31 + this.batStep[i]) | 0
+      else if (el.kind === "CHG" || el.kind === "PROT") mask = (mask * 31 + this.ctl[i]) | 0
     }
     return mask
   }
@@ -963,7 +1037,7 @@ export class Engine {
 
   /** One solve of the step from the current state; returns whether Newton settled. */
   private solve(dt: number, parts: PartReader): boolean {
-    const { A, z, x, guess, size } = this
+    const { A, z, x, guess } = this
     const n = this.net.nodes
     const elements = this.net.elements
     // Junction voltages start from the previous solution.
@@ -1019,6 +1093,7 @@ export class Engine {
       converged = this.substitute()
     } else {
       for (let iter = 0; iter < MAX_ITER; iter++) {
+        this.frozen = iter >= MODE_FREEZE
         A.fill(0)
         z.fill(0)
         // Set when junction limiting changed a voltage: the node solution can look stable while
@@ -1085,84 +1160,14 @@ export class Engine {
             this.addTerm(el.e, el.b, el.c, -(g2 + g4))
             if (el.e !== GROUND) z[el.e] += ic0 + ib0
           } else if (el.kind === "REG") {
-            // Piecewise-linear regulator: the row for its through current x[r] depends on the
-            // operating mode, chosen from the previous iterate. A mode change is not convergence.
-            const r = n + el.index
-            const vin = g(el.in) - g(el.gnd)
-            const vout = g(el.out) - g(el.gnd)
-            const iPrev = x[r]
-            const avail = vin - el.dropout
-            const target = Math.min(el.value, avail)
-            const prev = this.rRegion[i]
-            const regOrDrop = avail >= el.value - 1e-9 ? REG_REGULATE : REG_DROPOUT
-            let mode: number
-            // Limiting is left only once the output recovers: its saturating law already gives
-            // nothing when the input collapses, and it must not flip to "off" on the way there.
-            if (prev === REG_LIMIT) mode = vout >= el.value - 1e-3 ? regOrDrop : REG_LIMIT
-            else if (avail <= 0.02) mode = REG_OPEN
-            else if (prev === REG_OPEN) mode = vout < target - 2e-3 ? regOrDrop : REG_OPEN
-            else if (iPrev > el.imax) mode = REG_LIMIT
-            // Sourcing: stay on, picking regulate/dropout by what the input can give. Only a
-            // regulator asked to sink, or one idle under an output held higher, switches off.
-            else if (iPrev > 1e-6) mode = regOrDrop
-            else if (iPrev < -1e-6 || vout > target + 2e-3) mode = REG_OPEN
-            else mode = regOrDrop
-            if (mode !== prev) clamped = true
-            this.rRegion[i] = mode
-            // Through current x[r] leaves `in` and arrives at `out`.
-            if (el.in !== GROUND) A[el.in * size + r] += 1
-            if (el.out !== GROUND) A[el.out * size + r] -= 1
-            switch (mode) {
-              // vout = Vset − R·x (regulating) or vout = vin − dropout − R·x (dropout): a little
-              // sag with load, so two regulators on one rail share instead of fighting.
-              case REG_REGULATE:
-                if (el.out !== GROUND) A[r * size + el.out] += 1
-                if (el.gnd !== GROUND) A[r * size + el.gnd] -= 1
-                A[r * size + r] += R_REG
-                z[r] = el.value
-                break
-              case REG_DROPOUT:
-                if (el.out !== GROUND) A[r * size + el.out] += 1
-                if (el.in !== GROUND) A[r * size + el.in] -= 1
-                A[r * size + r] += R_REG
-                z[r] = -el.dropout
-                break
-              case REG_LIMIT: {
-                // The pass element saturating: x = imax·(1 − e^(−d/vsat)) of the headroom
-                // d = vin − vout, linearized at the previous headroom and stepped at most vsat at
-                // a time, the way junctions are limited. Smooth, so a limiter fed by an upstream
-                // limiter settles on passing what it gets instead of demanding the impossible.
-                const vsat = Math.max(el.dropout, 0.2)
-                let d = vin - vout
-                const dPrev = prev === REG_LIMIT ? this.jA[i] : d
-                if (d > dPrev + vsat) {
-                  d = dPrev + vsat
-                  clamped = true
-                } else if (d < dPrev - vsat) {
-                  d = dPrev - vsat
-                  clamped = true
-                }
-                this.jA[i] = d
-                let f: number
-                let gk: number
-                if (d <= 0) {
-                  f = 0
-                  gk = (el.imax / vsat) * 0.01
-                } else {
-                  const e = Math.exp(-d / vsat)
-                  f = el.imax * (1 - e)
-                  gk = Math.max(1e-6, (el.imax / vsat) * e)
-                }
-                A[r * size + r] = 1
-                if (el.in !== GROUND) A[r * size + el.in] -= gk
-                if (el.out !== GROUND) A[r * size + el.out] += gk
-                z[r] = f - gk * d
-                break
-              }
-              default:
-                A[r * size + r] = 1
-                z[r] = 0
-            }
+            if (this.regulator(i, el.in, el.out, el.gnd, n + el.index, el.value, el.dropout, el.imax, true)) clamped = true
+          } else if (el.kind === "CHG") {
+            const st = this.ctl[i]
+            const set = Math.max(0, -x[n + el.prog]) * CHG_GAIN
+            const imax = st === CHG_TRICKLING ? set * CHG_TERM : set
+            if (this.regulator(i, el.in, el.bat, el.gnd, n + el.index, el.value, 0, imax, st === CHG_TRICKLING || st === CHG_CHARGING)) clamped = true
+          } else if (el.kind === "BOOST") {
+            if (this.boost(i, el)) clamped = true
           } else if (el.kind === "M") {
             const s = el.polarity
             // Below zero Vds the roles of drain and source swap; nothing else changes.
@@ -1219,8 +1224,176 @@ export class Engine {
     return converged
   }
 
+  private regulator(i: number, inN: number, outN: number, gndN: number, r: number, value: number, dropout: number, imax: number, enabled: boolean): boolean {
+    const { A, z, x, size } = this
+    const g = (k: number) => (k === GROUND ? 0 : this.guess[k])
+    let clamped = false
+    const vin = g(inN) - g(gndN)
+    const vout = g(outN) - g(gndN)
+    const iPrev = x[r]
+    const avail = vin - dropout
+    const target = Math.min(value, avail)
+    const prev = this.rRegion[i]
+    const regOrDrop = avail >= value - 1e-9 ? REG_REGULATE : REG_DROPOUT
+    let mode: number
+    if (!enabled) mode = REG_OPEN
+    // Limiting is left only once the output recovers: its saturating law already gives
+    // nothing when the input collapses, and it must not flip to "off" on the way there.
+    else if (prev === REG_LIMIT) mode = vout >= value - 1e-3 ? regOrDrop : REG_LIMIT
+    else if (avail <= 0.02) mode = REG_OPEN
+    else if (prev === REG_OPEN) mode = vout < target - 2e-3 ? regOrDrop : REG_OPEN
+    else if (iPrev > imax) mode = REG_LIMIT
+    // Sourcing: stay on, picking regulate/dropout by what the input can give. Only a
+    // regulator asked to sink, or one idle under an output held higher, switches off.
+    else if (iPrev > 1e-6) mode = regOrDrop
+    else if (iPrev < -1e-6 || vout > target + 2e-3) mode = REG_OPEN
+    else mode = regOrDrop
+    if (this.frozen && enabled) mode = prev
+    if (mode !== prev) clamped = true
+    this.rRegion[i] = mode
+    // Through current x[r] leaves `in` and arrives at `out`.
+    if (inN !== GROUND) A[inN * size + r] += 1
+    if (outN !== GROUND) A[outN * size + r] -= 1
+    switch (mode) {
+      // vout = Vset − R·x (regulating) or vout = vin − dropout − R·x (dropout): a little
+      // sag with load, so two regulators on one rail share instead of fighting.
+      case REG_REGULATE:
+        if (outN !== GROUND) A[r * size + outN] += 1
+        if (gndN !== GROUND) A[r * size + gndN] -= 1
+        A[r * size + r] += R_REG
+        z[r] = value
+        break
+      case REG_DROPOUT:
+        if (outN !== GROUND) A[r * size + outN] += 1
+        if (inN !== GROUND) A[r * size + inN] -= 1
+        A[r * size + r] += R_REG
+        z[r] = -dropout
+        break
+      case REG_LIMIT: {
+        // The pass element saturating: x = imax·(1 − e^(−d/vsat)) of the headroom
+        // d = vin − vout, linearized at the previous headroom and stepped at most vsat at
+        // a time, the way junctions are limited. Smooth, so a limiter fed by an upstream
+        // limiter settles on passing what it gets instead of demanding the impossible.
+        const vsat = Math.max(dropout, 0.2)
+        let d = vin - vout
+        const dPrev = prev === REG_LIMIT ? this.jA[i] : d
+        if (d > dPrev + vsat) {
+          d = dPrev + vsat
+          clamped = true
+        } else if (d < dPrev - vsat) {
+          d = dPrev - vsat
+          clamped = true
+        }
+        this.jA[i] = d
+        let f: number
+        let gk: number
+        if (d <= 0) {
+          f = 0
+          gk = (imax / vsat) * 0.01
+        } else {
+          const e = Math.exp(-d / vsat)
+          f = imax * (1 - e)
+          gk = Math.max(1e-6, (imax / vsat) * e)
+        }
+        A[r * size + r] = 1
+        if (inN !== GROUND) A[r * size + inN] -= gk
+        if (outN !== GROUND) A[r * size + outN] += gk
+        z[r] = f - gk * d
+        break
+      }
+      default:
+        A[r * size + r] = 1
+        z[r] = 0
+    }
+    return clamped
+  }
+
+  private boost(i: number, el: Extract<Resolved, { kind: "BOOST" }>): boolean {
+    const { A, z, x, size } = this
+    const n = this.net.nodes
+    const g = (k: number) => (k === GROUND ? 0 : this.guess[k])
+    const r = n + el.index
+    const prev = this.rRegion[i]
+    const running = prev === BOOST_REGULATE || prev === BOOST_LIMIT
+    let clamped = false
+    const step = (now: number, last: number) => {
+      if (!running || Math.abs(now - last) <= BOOST_STEP) return now
+      clamped = true
+      return last + Math.sign(now - last) * BOOST_STEP
+    }
+    const bal = el.vcc ?? el.in
+    const vi = step(g(bal) - g(el.gnd), this.jA[i])
+    const vo = step(g(el.out) - g(el.gnd), this.jB[i])
+    this.jA[i] = vi
+    this.jB[i] = vo
+    const vfb = g(el.fb) - g(el.gnd)
+    const xPrev = x[r]
+    const viE = Math.max(vi, 0.05)
+    const up = vo > el.eff * viE
+    const iinPrev = (up ? vo / (el.eff * viE) : 1) * xPrev
+    const off = el.en !== undefined && g(el.en) - g(el.gnd) < BOOST_EN
+    const headroom = off ? -1 : vi - el.uvlo
+    const fold = headroom > 0 ? Math.exp(-headroom / BOOST_FOLD) : 1
+    const limit = headroom > 0 ? el.ilim * (1 - fold) : 0
+    let mode: number
+    if (off) mode = BOOST_UVLO
+    else if (prev === BOOST_UVLO) mode = vi < el.uvlo + BOOST_UVLO_HYST ? BOOST_UVLO : vfb < el.vref - 1e-3 ? BOOST_REGULATE : BOOST_IDLE
+    else if (prev === BOOST_LIMIT) mode = vfb >= el.vref - 1e-3 && headroom > 0 ? BOOST_REGULATE : BOOST_LIMIT
+    else if (prev === BOOST_IDLE) mode = vi < el.uvlo ? BOOST_UVLO : vfb < el.vref - 1e-3 ? BOOST_REGULATE : BOOST_IDLE
+    else if (iinPrev > limit || headroom <= 0) mode = BOOST_LIMIT
+    else if (xPrev < -1e-6 || vfb > el.vref + 1e-3) mode = BOOST_IDLE
+    else mode = BOOST_REGULATE
+    if (this.frozen) mode = prev
+    this.rRegion[i] = mode
+    if (mode === BOOST_UVLO || mode === BOOST_IDLE || (mode === BOOST_LIMIT && headroom <= 0)) {
+      A[r * size + r] = 1
+      z[r] = 0
+      if (mode === BOOST_IDLE) this.addI(el.in, el.gnd, el.iq)
+      return mode !== prev || clamped
+    }
+    if (el.out !== GROUND) A[el.out * size + r] -= 1
+    if (el.gnd !== GROUND) A[el.gnd * size + r] += 1
+    let a1 = 0
+    let a2 = 1
+    let a3 = 0
+    if (up) {
+      a1 = xPrev / (el.eff * viE)
+      a2 = vo / (el.eff * viE)
+      a3 = -(vo * xPrev) / (el.eff * viE * viE)
+    }
+    const c = iinPrev - a1 * vo - a2 * xPrev - a3 * vi
+    this.boostInput(el.in, 1, el, r, a1, a2, a3, c + el.iq)
+    this.boostInput(el.gnd, -1, el, r, a1, a2, a3, c + el.iq)
+    if (mode === BOOST_REGULATE) {
+      if (el.fb !== GROUND) A[r * size + el.fb] += 1
+      if (el.gnd !== GROUND) A[r * size + el.gnd] -= 1
+      A[r * size + r] += BOOST_DROOP
+      z[r] = el.vref
+    } else {
+      const slope = (el.ilim / BOOST_FOLD) * fold
+      if (el.out !== GROUND) A[r * size + el.out] += a1
+      if (el.gnd !== GROUND) A[r * size + el.gnd] -= a1 + a3 - slope
+      if (bal !== GROUND) A[r * size + bal] += a3 - slope
+      A[r * size + r] += a2
+      z[r] = limit - slope * vi - c
+    }
+    return mode !== prev || clamped
+  }
+
+  private boostInput(node: number, s: number, el: Extract<Resolved, { kind: "BOOST" }>, r: number, a1: number, a2: number, a3: number, c: number) {
+    if (node === GROUND) return
+    const { A, z, size } = this
+    if (el.out !== GROUND) A[node * size + el.out] += s * a1
+    if (el.gnd !== GROUND) A[node * size + el.gnd] -= s * (a1 + a3)
+    const bal = el.vcc ?? el.in
+    if (bal !== GROUND) A[node * size + bal] += s * a3
+    A[node * size + r] += s * a2
+    z[node] -= s * c
+  }
+
   /** The operating points by switch/pad state, a few of the last distinct ones. */
   private readonly memo = new Map<number, OperatingPoint>()
+  private frozen = false
   private remember(mask: number) {
     const live = this.liveElements
     const point: OperatingPoint = {
@@ -1396,7 +1569,7 @@ export class Engine {
 
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i]
-      const base = i * 4
+      const base = i * TERM_SLOTS
       switch (el.kind) {
         case "R": {
           const vd = this.vol(el.a, this.v) - this.vol(el.b, this.v)
@@ -1549,6 +1722,62 @@ export class Engine {
           this.record(el, i, dt, cur, vout, Math.max(0, (vin - vout) * cur))
           break
         }
+        case "CHG": {
+          const ich = x[n + el.index]
+          const iprog = Math.max(0, -x[n + el.prog])
+          const vin = this.vol(el.in, this.v) - this.vol(el.gnd, this.v)
+          const vb = this.vol(el.bat, this.v) - this.vol(el.gnd, this.v)
+          const st = this.ctl[i]
+          const sink = (pin: number | undefined, on: boolean) => (on && pin !== undefined ? (this.vol(pin, this.v) - this.vol(el.gnd, this.v)) / CHG_OD_R : 0)
+          const ichrg = sink(el.chrg, st === CHG_TRICKLING || st === CHG_CHARGING)
+          const istdby = sink(el.stdby, st === CHG_DONE)
+          tc[this.termOf[base]] += ich
+          tc[this.termOf[base + 1]] -= ich
+          tc[this.termOf[base + 2]] += iprog - ichrg - istdby
+          tc[this.termOf[base + 3]] -= iprog
+          tc[this.termOf[base + 4]] += ichrg
+          tc[this.termOf[base + 5]] += istdby
+          this.rIb[i] = iprog
+          this.record(el, i, dt, ich, vb, Math.max(0, (vin - vb) * ich), vin)
+          if (this.converged) this.charger(el, i, dt, vin, vb, ich, iprog)
+          break
+        }
+        case "PROT": {
+          const vdd = this.vol(el.vdd, this.v)
+          const vss = this.vol(el.vss, this.v)
+          const cs = this.vol(el.cs, this.v)
+          const st = this.ctl[i]
+          const drive = (slot: number, pin: number, rail: number) => {
+            const cur = (this.vol(pin, this.v) - this.vol(rail, this.v)) / PROT_DRIVE_R
+            tc[this.termOf[base + slot]] += cur
+            tc[this.termOf[base + (rail === el.vdd ? 0 : rail === el.vss ? 1 : 2)]] -= cur
+          }
+          drive(3, el.od, st & (PROT_DISCHARGE_OFF | PROT_OVERCURRENT_OFF) ? el.vss : el.vdd)
+          drive(4, el.oc, st & PROT_CHARGE_OFF ? el.cs : el.vdd)
+          if (st & PROT_OVERCURRENT_OFF) {
+            tc[this.termOf[base + 2]] += (cs - vss) / el.spec.releaseR
+            tc[this.termOf[base + 1]] -= (cs - vss) / el.spec.releaseR
+          }
+          this.rVbe[i] = cs - vss
+          this.record(el, i, dt, 0, vdd - vss, 0)
+          if (this.converged) this.protection(el, i, dt, vdd - vss, cs - vss)
+          break
+        }
+        case "BOOST": {
+          const xo = x[n + el.index]
+          const vi = this.vol(el.vcc ?? el.in, this.v) - this.vol(el.gnd, this.v)
+          const vo = this.vol(el.out, this.v) - this.vol(el.gnd, this.v)
+          const mode = this.rRegion[i]
+          const on = mode === BOOST_REGULATE || (mode === BOOST_LIMIT && vi > el.uvlo)
+          const iin = on ? Math.max(vo / (el.eff * Math.max(vi, 0.05)), 1) * xo + el.iq : mode === BOOST_IDLE ? el.iq : 0
+          const out = on ? xo : 0
+          tc[this.termOf[base]] += iin
+          tc[this.termOf[base + 1]] -= out
+          tc[this.termOf[base + 2]] += out - iin
+          this.rIb[i] = iin
+          this.record(el, i, dt, out, vo, Math.max(0, vi * iin - vo * out))
+          break
+        }
         case "D": {
           const vd = this.vol(el.anode, this.v) - this.vol(el.cathode, this.v)
           const nvt = el.n * VT
@@ -1604,6 +1833,54 @@ export class Engine {
         }
       }
     }
+  }
+
+  private charger(el: Extract<Resolved, { kind: "CHG" }>, i: number, dt: number, vin: number, vb: number, ich: number, iprog: number) {
+    const st = this.ctl[i]
+    const at = (pin: number) => this.vol(pin, this.v) - this.vol(el.gnd, this.v)
+    const enabled = el.ce === undefined || at(el.ce) > CHG_CE
+    const temp = el.temp === undefined ? 0 : at(el.temp)
+    const cool = temp < CHG_TEMP_OFF * vin || (temp > CHG_TEMP_LOW * vin && temp < CHG_TEMP_HIGH * vin)
+    const powered = enabled && cool && (st === CHG_OFF ? vin >= CHG_UVLO && vin - vb >= CHG_WAKE : vin >= CHG_UVLO - CHG_UVLO_HYST && vin - vb >= CHG_SLEEP)
+    let next = st
+    if (!powered) next = CHG_OFF
+    else if (st === CHG_OFF) next = vb < CHG_TRICKLE ? CHG_TRICKLING : CHG_CHARGING
+    else if (st === CHG_TRICKLING) {
+      if (vb >= CHG_TRICKLE) next = CHG_CHARGING
+    } else if (st === CHG_CHARGING) {
+      if (vb < CHG_TRICKLE - CHG_TRICKLE_HYST) next = CHG_TRICKLING
+      else if (this.hold(i * 3, this.rRegion[i] === REG_REGULATE && ich < CHG_TERM * CHG_GAIN * iprog, dt, CHG_TERM_TIME)) next = CHG_DONE
+    } else if (vb < el.value - CHG_RECHARGE) next = CHG_CHARGING
+    if (next !== st) {
+      this.ctl[i] = next
+      this.ctlT[i * 3] = 0
+    }
+  }
+
+  private protection(el: Extract<Resolved, { kind: "PROT" }>, i: number, dt: number, vcell: number, vcs: number) {
+    let st = this.ctl[i]
+    const t = i * 3
+    const s = el.spec
+    if (st & PROT_CHARGE_OFF) {
+      if (vcell < s.overchargeRelease || (vcs > PROT_LOAD && vcell <= s.overcharge)) st &= ~PROT_CHARGE_OFF
+    } else if (this.hold(t, vcell > s.overcharge, dt, s.overchargeDelay)) st |= PROT_CHARGE_OFF
+    const charger = vcs < -s.charger
+    if (st & PROT_DISCHARGE_OFF) {
+      if (vcell > s.overdischargeRelease || (charger && vcell > s.overdischarge)) st &= ~PROT_DISCHARGE_OFF
+    } else if (this.hold(t + 1, vcell < s.overdischarge, dt, s.overdischargeDelay)) st |= PROT_DISCHARGE_OFF
+    if (st & PROT_OVERCURRENT_OFF) {
+      if (vcs < s.overcurrent) st &= ~(PROT_OVERCURRENT_OFF | PROT_SHORTED)
+    } else if (st & PROT_DISCHARGE_OFF) this.ctlT[t + 2] = 0
+    else if (vcs > s.short && this.hold(t + 2, true, dt, s.shortDelay)) st |= PROT_OVERCURRENT_OFF | PROT_SHORTED
+    else if (vcs <= s.short && this.hold(t + 2, vcs > s.overcurrent, dt, s.overcurrentDelay)) st |= PROT_OVERCURRENT_OFF
+    this.ctl[i] = st
+  }
+
+  private hold(slot: number, cond: boolean, dt: number, delay: number): boolean {
+    this.ctlT[slot] = Math.max(0, this.ctlT[slot] + (cond ? dt : -dt))
+    if (this.ctlT[slot] < delay) return false
+    this.ctlT[slot] = 0
+    return true
   }
 
   /** Record the operating point and check it against the ratings; records a failure when it breaks. */
@@ -1755,6 +2032,32 @@ export class Engine {
         reading.extra = { state: this.rRegion[i] === 1 ? "closed" : this.rRegion[i] === 2 ? "arcing" : "open" }
       } else if (el.kind === "REG") {
         reading.extra = { mode: REG_MODES[this.rRegion[i]] ?? "off" }
+      } else if (el.kind === "CHG") {
+        const st = this.ctl[i]
+        const vin = this.vol(el.in, this.v) - this.vol(el.gnd, this.v)
+        const state =
+          st === CHG_TRICKLING
+            ? "trickle"
+            : st === CHG_CHARGING
+              ? this.rRegion[i] === REG_LIMIT
+                ? "constant current"
+                : "constant voltage"
+              : st === CHG_DONE
+                ? "charged"
+                : vin < CHG_UVLO
+                  ? "no input"
+                  : "sleep"
+        reading.extra = { State: state, "Set current": formatSI(this.rIb[i] * CHG_GAIN, "A") }
+      } else if (el.kind === "PROT") {
+        const st = this.ctl[i]
+        const off = [
+          st & PROT_SHORTED ? "short circuit" : st & PROT_OVERCURRENT_OFF ? "overcurrent" : "",
+          st & PROT_DISCHARGE_OFF ? "over-discharge" : "",
+          st & PROT_CHARGE_OFF ? "overcharge" : "",
+        ].filter(Boolean)
+        reading.extra = { State: off.length ? off.join(", ") : "normal", "CS drop": formatSI(this.rVbe[i], "V") }
+      } else if (el.kind === "BOOST") {
+        reading.extra = { mode: BOOST_MODES[this.rRegion[i]], "Input current": formatSI(this.rIb[i], "A") }
       } else if (el.kind === "V" && el.amplitude > 0) {
         reading.extra = { Frequency: formatSI(el.frequency, "Hz") }
         if (el.shape === "pulse") reading.extra.Duty = `${Math.round(el.duty * 100)} %`
