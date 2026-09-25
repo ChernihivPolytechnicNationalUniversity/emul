@@ -437,7 +437,7 @@ describe("bench physics", () => {
       let worst = 0
       const snap = start(doc).run(0.3, (s) => (worst = Math.max(worst, peak(s))))
       expect.soft(bridge.some((d) => snap.damage[d.id]), "the inrush into 5000 µF burnt the bridge").toBe(true)
-      for (const obj of after) expect.soft(snap.damage[obj.id]?.reason ?? "", `${obj.props.ref} survives the bridge`).toBe("")
+      for (const obj of after) expect.soft(snap.damage[obj.id]?.reason ?? "", `${obj.props?.ref} survives the bridge`).toBe("")
       expect.soft(worst, "no node ever went past the mains peak (V)").toBeLessThan(330)
     })
 
