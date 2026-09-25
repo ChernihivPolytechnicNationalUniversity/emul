@@ -76,7 +76,10 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   const paint = React.useCallback(
     (v: Viewport, animating = false) => {
       const content = contentRef.current
-      if (content) content.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`
+      if (content) {
+        content.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`
+        content.style.setProperty("--field-scale", String(v.scale))
+      }
       const container = containerRef.current
       if (!container) return
       publishView(v, animating)

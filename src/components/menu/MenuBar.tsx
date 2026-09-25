@@ -20,6 +20,10 @@ import {
 import type { DotFieldHandle, FieldState } from "@/components/field/DotField"
 import { examples, type Example } from "@/schematic/examples"
 import type { ProjectMeta } from "@/project/project-store"
+import type { Identity } from "@/collab/identity"
+import type { LiveStatus } from "@/collab/use-live"
+import { Avatar } from "@/components/share/Avatar"
+import { Button } from "@/components/ui/button"
 import { SPEEDS, formatSpeed } from "@/sim/speeds"
 
 // A desktop menu is compact: small type, one line per command, a check column on the left
@@ -69,6 +73,10 @@ type MenuBarProps = React.ComponentProps<"div"> & {
   onOpenFile: () => void
   onSaveFile: () => void
   onShare: () => void
+  onShareDialog: () => void
+  onLive: () => void
+  people: readonly Identity[]
+  live: LiveStatus
   onExportPng: () => void
   onImportHdl: () => void
   onExample: (example: Example) => void
@@ -91,6 +99,10 @@ export function MenuBar({
   onOpenFile,
   onSaveFile,
   onShare,
+  onShareDialog,
+  onLive,
+  people,
+  live,
   onExportPng,
   onImportHdl,
   onExample,
@@ -137,6 +149,9 @@ export function MenuBar({
             <MenubarItem onClick={onSaveFile} disabled={state.isEmpty}>
               Save to file
               <MenubarShortcut>⌘S</MenubarShortcut>
+            </MenubarItem>
+            <MenubarItem onClick={onLive} disabled={state.isEmpty && live === "off"}>
+              Live session…
             </MenubarItem>
             <MenubarItem onClick={onShare} disabled={state.isEmpty}>
               Copy share link
@@ -318,6 +333,20 @@ export function MenuBar({
           {project}
         </button>
       )}
+      <div className="ml-auto flex items-center gap-2">
+        {live !== "off" && (
+          <button type="button" onClick={onShareDialog} className="flex items-center -space-x-1.5" title="Live session">
+            {live !== "live" && <span className="mr-2.5 size-1.5 animate-pulse rounded-full bg-amber-500" />}
+            {people.slice(0, 5).map((p, i) => (
+              <Avatar key={i} who={p} className="size-5 text-xs" />
+            ))}
+            {people.length > 5 && <span className="pl-2.5 text-xs text-muted-foreground">+{people.length - 5}</span>}
+          </button>
+        )}
+        <Button size="xs" className="h-5" onClick={onShareDialog}>
+          Share
+        </Button>
+      </div>
     </div>
   )
 }

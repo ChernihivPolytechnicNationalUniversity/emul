@@ -28,6 +28,8 @@ export type Projects = {
   list: ProjectMeta[]
   shared: boolean
   keep: (doc: Schematic) => Promise<void>
+  visit: (name: string, doc: Schematic) => Promise<void>
+  ready: boolean
   onChange: (doc: Schematic) => void
   create: (name: string, doc?: Schematic) => Promise<void>
   open: (id: string) => Promise<void>
@@ -220,17 +222,21 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
     })
   })
 
+  const visit = useEvent(async (name: string, doc: Schematic) => {
+    await flush()
+    const now = Date.now()
+    enter({ id: newId(), name, created: now, at: now }, null, doc, false)
+    viewing.current = true
+    setShared(true)
+  })
+
   const view = useEvent(async (id: string) => {
     const got = await readShare(id).catch(() => null)
     if (!got) {
       toast.error("That shared bench could not be opened", { description: "The link may be cut short, or the service is out of reach." })
       return false
     }
-    await flush()
-    const now = Date.now()
-    enter({ id: newId(), name: got.name ?? "Shared bench", created: now, at: now }, null, got.doc, false)
-    viewing.current = true
-    setShared(true)
+    await visit(got.name ?? "Shared bench", got.doc)
     return true
   })
 
@@ -278,7 +284,7 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
       const doc = p && parseSchematic(p.text)
       if (!p || !doc) continue
       enter(p.meta, p.text, doc, true)
-      if (doc.objects.length)
+      if (doc.objects.length && !location.pathname.startsWith("/r/"))
         toast(`“${p.meta.name}” is back`, { description: "Projects are kept in this browser only. File → Save to file keeps a copy on disk." })
       return
     }
@@ -341,5 +347,5 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
     [flush],
   )
 
-  return { current, list, shared, keep, onChange, create, open, rename, duplicate, remove, read }
+  return { current, list, shared, keep, visit, ready: current !== null, onChange, create, open, rename, duplicate, remove, read }
 }
