@@ -1,6 +1,5 @@
 import { objectIndex, objectRect, resolvePinIn, GRID } from "@/schematic/geometry"
 import type { Schematic } from "@/schematic/types"
-import { base64ToBytes, bytesToBase64 } from "@/lib/bytes"
 
 const DB_NAME = "emul"
 const VERSION = 2
@@ -63,42 +62,27 @@ export async function projectFile(name: string, doc: Schematic): Promise<Blob> {
   return new Blob([new Uint8Array(await projectBytes(name, doc))], { type: "application/zstd" })
 }
 
-export const SHARE_KEY = "share"
-const SHARE_LIMIT = 64 * 1024
+const SHARE = /^\/s\/([A-Za-z0-9]{8})\/?$/
 
-function withoutBuilds(doc: Schematic): { doc: Schematic; dropped: number } {
-  let dropped = 0
-  const objects = doc.objects.map((o) => {
-    if (!o.project?.length || !o.props?.firmwareBuild) return o
-    dropped++
-    const { firmware: _f, firmwareData: _d, firmwareBuild: _b, ...props } = o.props
-    return { ...o, props }
+export async function shareLink(name: string, doc: Schematic): Promise<string> {
+  const res = await fetch("/api/shares", {
+    method: "POST",
+    headers: { "content-type": "application/zstd" },
+    body: new Uint8Array(await projectBytes(name, doc)),
   })
-  return { doc: { ...doc, objects }, dropped }
+  const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string }
+  if (!res.ok || !body.id) throw new Error(body.error ?? `${res.status} ${res.statusText}`)
+  return `${location.origin}/s/${body.id}`
 }
 
-export async function shareLink(name: string, doc: Schematic): Promise<{ url: string; dropped: number } | null> {
-  const lean = withoutBuilds(doc)
-  const encoded = bytesToBase64(await projectBytes(name, lean.doc)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
-  if (encoded.length > SHARE_LIMIT) return null
-  const url = new URL(location.href)
-  url.search = ""
-  url.hash = `${SHARE_KEY}=${encoded}`
-  return { url: url.toString(), dropped: lean.dropped }
+export function sharedId(path = location.pathname): string | null {
+  return SHARE.exec(path)?.[1] ?? null
 }
 
-export function sharedFragment(hash = location.hash): string | null {
-  const m = /^#share=([A-Za-z0-9_-]+)$/.exec(hash)
-  return m ? m[1] : null
-}
-
-export async function readShare(fragment: string): Promise<{ name?: string; doc: Schematic } | null> {
-  try {
-    const b64 = fragment.replace(/-/g, "+").replace(/_/g, "/")
-    return readProjectBytes(base64ToBytes(b64 + "=".repeat((4 - (b64.length % 4)) % 4)))
-  } catch {
-    return null
-  }
+export async function readShare(id: string): Promise<{ name?: string; doc: Schematic } | null> {
+  const res = await fetch(`/api/shares/${id}`)
+  if (!res.ok) return null
+  return readProjectBytes(new Uint8Array(await res.arrayBuffer()))
 }
 
 export function fileName(name: string): string {

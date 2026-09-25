@@ -3,8 +3,7 @@
 Features still to build, roughly in the order labs need them. A feature is done when it has a model,
 a firmware or circuit test, and its row in `docs/coverage.md` flipped; then it leaves this list.
 
-- [ ] **Sharing, the rest** — a bench too big for a `#share=` link (an image uploaded without its sources) stored
-  through the API, once sign-in exists so the store is not open to anyone; SVG export next to the PNG one.
+- [ ] **SVG export** — next to the PNG one; the field draws its symbols on a canvas, so this needs a vector path of its own.
 - [ ] **Logic ICs** — 74HC00/04/08/32/86 gates, 74HC74 flip-flop, 74HC595 shift register, 74HC138 decoder,
   4017 counter, with input thresholds and output drivers.
 - [ ] **7-segment indicators** — single digit and 4-digit multiplexed, common anode/cathode.

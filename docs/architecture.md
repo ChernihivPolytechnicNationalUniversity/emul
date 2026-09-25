@@ -20,6 +20,8 @@ each from its own Dockerfile and built in parallel by CI:
 - `api/` — Fastify, on the site's host under `/api`. `POST /api/jobs` takes `{kind, target, files: [{path, content}], options?: {opt}}`, stores the
   project in S3 and enqueues; `GET /api/jobs/:id` reports the state and, once done, the job's files as presigned S3 URLs (15 min) —
   the browser fetches them from the store directly, the bucket stays private. `/healthz` is 503 while Redis is down.
+  `POST /api/shares` takes a zstd `.emul` project (`application/zstd`, 60 per IP an hour), stores it and returns an 8-character id;
+  `GET /api/shares/:id` serves it back. The site opens `/s/<id>` as a read-only view of that project.
 - `worker/` — BullMQ consumer; one handler per job kind in `worker/src/handlers.ts` (`echo` lists the project back, `build` compiles it),
   each leaving files in `out/` and saying whether the project passed; a compile error is a completed job with `ok: false` and a log,
   only the service's own failure fails the job. The worker holds **no store credentials**: each job carries presigned GET URLs for its
@@ -35,6 +37,8 @@ jobs/<id>/input/src/<path>     sources as sent; paths relative, plain characters
 jobs/<id>/out/<name>           firmware.elf, firmware.map, build.log, …
 jobs/<id>/result.json          ok, artifacts, finishedAt, durationMs — kept after Redis forgets the job
 ```
+
+Shared projects sit under `shares/<id>.emul` and are not expired (the lifecycle rule covers `jobs/` only).
 
 Both read `REDIS_URL`; the API also `S3_BUCKET`, `S3_ENDPOINT` (MinIO; unset for AWS), `S3_PUBLIC_ENDPOINT` (the host browsers reach, presigned URLs are signed for it), `S3_REGION`, `S3_FORCE_PATH_STYLE`,
 `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` (unset: the SDK's default chain), and a missing bucket fails it at start; the worker `WORKER_CONCURRENCY`.

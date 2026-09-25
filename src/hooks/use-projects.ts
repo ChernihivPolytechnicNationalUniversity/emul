@@ -8,7 +8,7 @@ import {
   parseSchematic,
   readProject,
   readShare,
-  sharedFragment,
+  sharedId,
   setLastProject,
   thumbnail,
   writeProject,
@@ -124,7 +124,7 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
     if (!viewing.current) return
     viewing.current = false
     setShared(false)
-    if (sharedFragment()) history.replaceState(null, "", location.pathname + location.search)
+    if (sharedId()) history.replaceState(null, "", "/")
   }
 
   const enter = (m: ProjectMeta, text: string | null, doc: Schematic, isStored: boolean) => {
@@ -220,10 +220,10 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
     })
   })
 
-  const view = useEvent(async (fragment: string) => {
-    const got = await readShare(fragment)
+  const view = useEvent(async (id: string) => {
+    const got = await readShare(id).catch(() => null)
     if (!got) {
-      toast.error("That link does not hold a bench", { description: "It may have been cut short when it was sent." })
+      toast.error("That shared bench could not be opened", { description: "The link may be cut short, or the service is out of reach." })
       return false
     }
     await flush()
@@ -269,8 +269,9 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
   const boot = useEvent(async () => {
     const all = await listProjects()
     setList(all)
-    const fragment = sharedFragment()
-    if (fragment && (await view(fragment))) return
+    const shareId = sharedId()
+    if (shareId && (await view(shareId))) return
+    if (shareId) history.replaceState(null, "", "/")
     for (const id of [tabProject(), await lastProject()]) {
       if (!id || !all.some((p) => p.id === id)) continue
       const p = await readProject(id)
@@ -320,11 +321,6 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
       void reload().catch(warn)
     }
     const onHide = () => void flush()
-    const onHash = () => {
-      const fragment = sharedFragment()
-      if (fragment) void view(fragment).catch(warn)
-    }
-    window.addEventListener("hashchange", onHash)
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("pagehide", onHide)
     return () => {
@@ -333,7 +329,6 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
       channel.current = null
       document.removeEventListener("visibilitychange", onVisibility)
       window.removeEventListener("pagehide", onHide)
-      window.removeEventListener("hashchange", onHash)
     }
   }, [boot, flush, refresh, reload, warn, view])
 

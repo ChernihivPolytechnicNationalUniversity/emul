@@ -3,6 +3,7 @@ import { connect, type Redis } from "emul-shared/redis"
 import Fastify from "fastify"
 import { health } from "./routes/health.ts"
 import { jobs } from "./routes/jobs.ts"
+import { shares } from "./routes/shares.ts"
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -24,6 +25,7 @@ export function build() {
   app.register(health)
   // Same host as the site: the ingress sends /api/* here without stripping the prefix.
   app.register(jobs, { prefix: "/api" })
+  app.register(shares, { prefix: "/api" })
   app.setNotFoundHandler((_req, reply) => reply.code(404).send({ ok: false, error: "not found" }))
   return app
 }

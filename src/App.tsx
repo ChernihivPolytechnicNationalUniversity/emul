@@ -70,17 +70,21 @@ export default function App() {
   const share = async () => {
     const doc = field.current?.doc()
     if (!doc) return
-    const link = await shareLink(projects.current?.name ?? "Shared bench", doc)
-    if (!link) {
-      toast.error("Too big for a link", { description: "Send the project as a file instead: File → Save to file." })
-      return
-    }
-    const note = link.dropped ? "Compiled firmware is left out: whoever opens it presses Compile." : "Whoever opens it gets a copy to look at; yours stays as it is."
+    const pending = toast.loading("Making a link…")
+    let url: string
     try {
-      await navigator.clipboard.writeText(link.url)
-      toast.success("Link copied", { description: note })
+      url = await shareLink(projects.current?.name ?? "Shared bench", doc)
+    } catch (e) {
+      toast.error("Could not make a link", { description: (e as Error).message })
+      return
+    } finally {
+      toast.dismiss(pending)
+    }
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success("Link copied", { description: url })
     } catch {
-      toast("Share link", { description: note, action: { label: "Copy", onClick: () => void navigator.clipboard.writeText(link.url) } })
+      toast("Share link", { description: url, action: { label: "Copy", onClick: () => void navigator.clipboard.writeText(url) } })
     }
   }
 
