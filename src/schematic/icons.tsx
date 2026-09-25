@@ -1,33 +1,11 @@
-import * as React from "react"
+import { make } from "./make-icon"
 
 /**
  * Palette icons drawn as the schematic symbols themselves (IEC style, like the components on
  * the field), on the same 24 px box and stroke as the Lucide set so they sit in the sidebar
  * and menus unchanged.
  */
-export type Icon = React.ComponentType<React.SVGProps<SVGSVGElement>>
-
-const make = (name: string, children: React.ReactNode): Icon => {
-  const C = (props: React.SVGProps<SVGSVGElement>) => (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      width={24}
-      height={24}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      {...props}
-    >
-      {children}
-    </svg>
-  )
-  C.displayName = name
-  return C
-}
+export type { Icon } from "./make-icon"
 
 const dot = (cx: number, cy: number, r = 1.6) => <circle cx={cx} cy={cy} r={r} fill="currentColor" stroke="none" />
 
