@@ -1,7 +1,10 @@
 import type { Element, NodeRef, ProtChip } from "./types"
 
 export function tp4056(at: { vcc: NodeRef; bat: NodeRef; gnd: NodeRef; prog: NodeRef; chrg?: NodeRef; stdby?: NodeRef; ce?: NodeRef; temp?: NodeRef }): Element[] {
-  return [{ kind: "CHG", in: at.vcc, bat: at.bat, gnd: at.gnd, prog: at.prog, chrg: at.chrg, stdby: at.stdby, ce: at.ce, temp: at.temp, value: 4.2, limits: { voltage: 8, fail: "short", fatal: false } }]
+  return [
+    { kind: "CHG", in: at.vcc, bat: at.bat, gnd: at.gnd, prog: at.prog, chrg: at.chrg, stdby: at.stdby, ce: at.ce, temp: at.temp, value: 4.2, limits: { voltage: 8, fail: "short", fatal: false } },
+    { kind: "R", a: at.vcc, b: at.gnd, value: 33e3, hidden: true },
+  ]
 }
 
 export function protector(chip: ProtChip, at: { vdd: NodeRef; vss: NodeRef; cs: NodeRef; od: NodeRef; oc: NodeRef }, vddMax?: number): Element[] {

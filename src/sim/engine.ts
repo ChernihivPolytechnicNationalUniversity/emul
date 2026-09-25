@@ -1740,6 +1740,7 @@ export class Engine {
           this.rIb[i] = iprog
           this.record(el, i, dt, ich, vb, Math.max(0, (vin - vb) * ich), vin)
           if (this.converged) this.charger(el, i, dt, vin, vb, ich, iprog)
+          else if (vin < CHG_UVLO - CHG_UVLO_HYST) this.ctl[i] = CHG_OFF
           break
         }
         case "PROT": {

@@ -154,6 +154,33 @@ describe("LX-LCBST: TP4056 + DW03 + MT3608", () => {
     expect.soft(volts(snap, mod.id, "VO+") - volts(snap, mod.id, "VO-"), "output while charging (V)").toBeNear(5, 0.05)
   })
 
+  it("plugging and unplugging the USB leaves every step converged", () => {
+    const { doc, mod } = bench({ soc: "50" }, "100 Ω")
+    const loop = new SimLoop()
+    loop.setDoc(doc)
+    loop.setParts(doc.parts)
+    loop.setRunning(true)
+    let clock = 0
+    loop.advance(0)
+    let stuck = 0
+    const run = (ms: number) => {
+      const end = clock + ms
+      while (clock < end) {
+        clock += 10
+        loop.advance(clock)
+        if (!loop.snapshot()!.converged) stuck++
+      }
+    }
+    for (const ms of [300, 700, 1500, 3000]) {
+      loop.setParts({ ...doc.parts, [partKey(mod.id, "USB")]: { on: true } })
+      run(ms)
+      loop.setParts({ ...doc.parts, [partKey(mod.id, "USB")]: { on: false } })
+      run(300)
+    }
+    expect.soft(stuck, "ticks ending on an unconverged step").toBe(0)
+    expect.soft(kindReading(loop.snapshot()!, mod.id, "CHG").extra?.State).toBe("no input")
+  })
+
   it("12 V on VBUS kills the TP4056", () => {
     const { doc, place, wire } = builder(GRID)
     const mod = place("lx-lcbst", 10, 10)
