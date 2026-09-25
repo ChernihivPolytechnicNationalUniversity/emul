@@ -14,7 +14,7 @@ import { chipById, STM32F429ZI } from "./chip"
 import { CpuHalt } from "./faults"
 import { Stm32, type PadRef } from "./stm32f429"
 import { PanelInstance } from "@/sim/display"
-import { CMD, CMD_BACKUP, CMD_BOOT0, CMD_RESET, CMD_STEPS, CMD_YIELD, CTL, IN_RING, OUT, OUT_HALTED, OUT_LOADED, OUT_RING, OUT_RUNNING, PAD_KEYS, SHM, decodeClock, encodeDrive, statusOf, type FromCore, type ToCore } from "@/sim/core-host"
+import { CMD, CMD_BACKUP, CMD_BOOT0, CMD_RESET, CMD_STEPS, CMD_YIELD, CTL, IN_RING, OUT, OUT_HALTED, OUT_LOADED, OUT_RING, OUT_RUNNING, OUT_STOPPED, PAD_KEYS, SHM, STOP_REASONS, decodeClock, encodeDrive, statusOf, type FromCore, type ToCore } from "@/sim/core-host"
 
 type Port = { post(msg: FromCore, transfer?: ArrayBuffer[]): void; onMessage(cb: (msg: ToCore) => void): void }
 
@@ -115,6 +115,15 @@ p.onMessage((msg) => {
     case "drop":
       panels.delete(msg.object)
       break
+    case "debug":
+      mcu?.debug(msg.cmd)
+      break
+    case "inspect": {
+      // Answered at once: the core is between runs whenever a message is taken.
+      const reply = mcu ? mcu.inspect(msg.req) : { regs: null, memory: [], stop: null, time: 0, halted: "no core" }
+      p.post({ t: "inspected", seq: msg.seq, reply }, reply.memory.map((c) => c.bytes.buffer as ArrayBuffer))
+      break
+    }
   }
 })
 
@@ -125,7 +134,10 @@ function publish(parity: number, running: boolean, idd: number) {
   const m = mcu!
   const out = outBanks[parity]
   out[OUT.TIME] = m.time
-  out[OUT.FLAGS] = (m.firmware ? OUT_LOADED : 0) | (running ? OUT_RUNNING : 0) | (m.cpu.halted ? OUT_HALTED : 0)
+  const stop = m.debugStop
+  out[OUT.FLAGS] = (m.firmware ? OUT_LOADED : 0) | (running ? OUT_RUNNING : 0) | (m.cpu.halted ? OUT_HALTED : 0) | (stop ? OUT_STOPPED : 0)
+  out[OUT.STOP_PC] = stop ? stop.pc : 0
+  out[OUT.STOP_REASON] = stop ? STOP_REASONS.indexOf(stop.reason) : 0
   out[OUT.IDD] = lastIdd = idd
   out[OUT.POR] = m.porThreshold
   const pad: PadRef = { port: 0, pin: 0 }

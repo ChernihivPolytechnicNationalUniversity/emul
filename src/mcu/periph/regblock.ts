@@ -37,6 +37,10 @@ export abstract class RegBlock extends WordPeripheral {
   def(offset: number): RegDef | undefined {
     return this.defs.get(offset)
   }
+  /** The registers, by offset: what the debugger's peripheral view lists when it has no map of its own. */
+  registerList(): RegDef[] {
+    return [...this.defs.values()].sort((a, b) => a.offset - b.offset)
+  }
   regName(offset: number): string {
     return this.defs.get(offset)?.name ?? `+0x${offset.toString(16)}`
   }
@@ -65,6 +69,11 @@ export abstract class RegBlock extends WordPeripheral {
     return this.onRead(d, this.regs[offset >>> 2]) >>> 0
   }
 
+  peekWord(offset: number): number {
+    const d = this.defs.get(offset)
+    return d ? this.peekValue(d, this.regs[offset >>> 2]) >>> 0 : 0
+  }
+
   writeWord(offset: number, value: number): void {
     const d = this.defs.get(offset)
     if (!d) {
@@ -83,6 +92,10 @@ export abstract class RegBlock extends WordPeripheral {
   /** Hook: transform the value software reads. */
   protected onRead(_d: RegDef, current: number): number {
     return current
+  }
+  /** Hook: the value a debugger sees — what `onRead` gives, for the blocks whose reads change nothing. */
+  protected peekValue(d: RegDef, current: number): number {
+    return this.onRead(d, current)
   }
   /** Hook: side effects of a write; may return the value to store instead of `next`. */
   protected onWrite(_d: RegDef, _next: number, _old: number, _written: number): number | void {}

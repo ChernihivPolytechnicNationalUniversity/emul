@@ -1,6 +1,7 @@
 import * as React from "react"
-import type { SourceFile } from "emul-shared/source"
+import { isOptLevel, type SourceFile } from "emul-shared/source"
 import { normalizeFiles } from "@/project/files"
+import { normalizeDebug } from "@/debug/saved"
 import { intersects, objectRect, objectSize, snap, type Point, type Rect } from "./geometry"
 import { getDef } from "./registry"
 import {
@@ -11,10 +12,20 @@ import {
   type PlacedObject,
   type Rotation,
   type Schematic,
+  type BoardDebug,
   type Wire,
 } from "./types"
 import type { WireColorKey } from "./wire-colors"
 import { connectPins, tapWireAt } from "./wiring"
+
+/** A board as a file brings it: its project, build options and debugger settings re-checked. */
+function checked(o: PlacedObject): PlacedObject {
+  if (!o.project && !o.build && !o.debug) return o
+  const { project, build, debug, ...rest } = o
+  const opt = build?.opt
+  const repaired = normalizeDebug(debug)
+  return { ...rest, ...(project && { project: normalizeFiles(project) }), ...(isOptLevel(opt) && { build: { opt } }), ...(repaired && { debug: repaired }) }
+}
 
 function recolor(w: Wire, color: WireColorKey | undefined): Wire {
   const { color: _previous, ...rest } = w
@@ -34,13 +45,17 @@ const HISTORY_LIMIT = 100
 
 type History = { past: Schematic[]; present: Schematic; future: Schematic[] }
 
-/** A history entry made present again, carrying over what is live now (parts, projects). */
+/** A history entry made present again, carrying over what is live now (parts, projects, build and debugger settings). */
 function keepLive(target: Schematic, current: Schematic): Schematic {
-  const projects = new Map(current.objects.map((o) => [o.id, o.project]))
+  const live = new Map(current.objects.map((o) => [o.id, o]))
   return {
     ...target,
     parts: current.parts,
-    objects: target.objects.map((o) => (projects.has(o.id) && projects.get(o.id) !== o.project ? { ...o, project: projects.get(o.id) } : o)),
+    objects: target.objects.map((o) => {
+      const now = live.get(o.id)
+      if (!now || (now.project === o.project && now.build === o.build && now.debug === o.debug)) return o
+      return { ...o, project: now.project, build: now.build, debug: now.debug }
+    }),
   }
 }
 
@@ -147,10 +162,10 @@ export function useSchematic(grid: number) {
     setSelectedWires(new Set())
   }, [setDoc])
 
-  /** Replace the whole document (loading an example or a file; projects in it are re-checked). */
+  /** Replace the whole document (loading an example or a file; the boards' projects, build options and debugger settings are re-checked). */
   const load = React.useCallback(
     (next: Schematic) => {
-      setDoc(() => ({ ...next, objects: next.objects.map((o) => (o.project ? { ...o, project: normalizeFiles(o.project) } : o)) }))
+      setDoc(() => ({ ...next, objects: next.objects.map(checked) }))
       setSelectedObjects(new Set())
       setSelectedWires(new Set())
     },
@@ -232,6 +247,16 @@ export function useSchematic(grid: number) {
   /** Replace a board's firmware sources; typing is not an undo step (see `undo`). */
   const setProject = React.useCallback((id: string, files: SourceFile[]) => {
     setDoc((d) => ({ ...d, objects: d.objects.map((o) => (o.id === id ? { ...o, project: files } : o)) }), { silent: true })
+  }, [setDoc])
+
+  /** A board's build options; not an undo step. */
+  const setBuild = React.useCallback((id: string, build: NonNullable<PlacedObject["build"]>) => {
+    setDoc((d) => ({ ...d, objects: d.objects.map((o) => (o.id === id ? { ...o, build } : o)) }), { silent: true })
+  }, [setDoc])
+
+  /** A board's debugger settings (breakpoints, added sources, watches); not an undo step. */
+  const setDebug = React.useCallback((id: string, fn: (d: BoardDebug) => BoardDebug) => {
+    setDoc((d) => ({ ...d, objects: d.objects.map((o) => (o.id === id ? { ...o, debug: fn(o.debug ?? {}) } : o)) }), { silent: true })
   }, [setDoc])
 
   /** Rotate objects by ±45° around their centers, keeping the centre on the grid. */
@@ -376,6 +401,8 @@ export function useSchematic(grid: number) {
     rotate,
     setProps,
     setProject,
+    setBuild,
+    setDebug,
     addWire,
     tapWire,
     setWirePoints,

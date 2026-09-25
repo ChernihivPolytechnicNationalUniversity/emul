@@ -1,4 +1,5 @@
 import { BatteryMediumIcon, CircleDashedIcon, CpuIcon, NetworkIcon, ZapIcon } from "lucide-react"
+import type { OptLevel } from "emul-shared/source"
 import { builder } from "./builder"
 import { getDef } from "./registry"
 import { systemExam } from "./exam"
@@ -14,8 +15,11 @@ export type Example = {
   icon: Icon
   /** Builds the document; positions are in grid cells and scaled by `grid`. */
   build: (grid: number) => Schematic
-  /** Source projects for the boards with these designators; the student compiles them. */
-  projects?: { ref: string; load: ProjectLoader }[]
+  /**
+   * Source projects for the boards with these designators; the student compiles them. `opt`
+   * for a program that needs its speed: the editor's own default (-O0) is for stepping through.
+   */
+  projects?: { ref: string; load: ProjectLoader; opt?: OptLevel }[]
 }
 
 /**
@@ -281,7 +285,7 @@ export const lcdDemo: Example = {
   name: "Open746I-C: 7\" LCD demo",
   description: "Waveshare's LCD demo on the stand: the 1024×600 panel on the LTDC with the framebuffer in the SDRAM, text drawn through the DMA2D.",
   icon: CpuIcon,
-  projects: [{ ref: "U1", load: lcdProject("display") }],
+  projects: [{ ref: "U1", load: lcdProject("display"), opt: "-O2" }],
   build(grid) {
     const { doc, place } = builder(grid)
     place("open746i-c", 0, 0)
@@ -301,7 +305,7 @@ export const touchDemo: Example = {
   name: "Open746I-C: touch test",
   description: "Waveshare's GT911 test on the stand: press the panel and crosshairs follow; the controller's id goes out on USART1.",
   icon: CpuIcon,
-  projects: [{ ref: "U1", load: lcdProject("touch") }],
+  projects: [{ ref: "U1", load: lcdProject("touch"), opt: "-O2" }],
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("open746i-c", 0, 0)
@@ -325,7 +329,7 @@ export const cubeDemo: Example = {
   name: "Open746I-C: spinning cube",
   description: "A textured cube rotating on the 7\" panel: software rasteriser in C++ into double-buffered SDRAM framebuffers, scanned out by the LTDC.",
   icon: CpuIcon,
-  projects: [{ ref: "U1", load: lcdProject("cube") }],
+  projects: [{ ref: "U1", load: lcdProject("cube"), opt: "-O2" }],
   build(grid) {
     const { doc, place } = builder(grid)
     place("open746i-c", 0, 0)

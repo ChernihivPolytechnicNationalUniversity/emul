@@ -154,6 +154,10 @@ export class Tim extends RegBlock {
     this.sync()
     return super.read(offset, size)
   }
+  peek(offset: number, size: 1 | 2 | 4): number {
+    this.sync()
+    return super.peek(offset, size)
+  }
   write(offset: number, value: number, size: 1 | 2 | 4): void {
     this.sync()
     super.write(offset, value, size)

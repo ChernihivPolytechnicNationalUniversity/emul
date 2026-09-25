@@ -94,8 +94,10 @@ the NVIC. Reported by name in the inspector until then.
 
 ## Phase 3 — Debugging and tooling
 
-- [ ] **3.1 Debugger panel** — run/pause/step, breakpoints by address and by source line (DWARF from the ELF),
-  registers, call stack, memory view, disassembly with symbols.
+- [x] **3.1 Debugger panel** (2026-09-24; no watchpoints or conditional breakpoints) — run/pause/step, breakpoints by address and by source line (DWARF from the ELF),
+  registers, call stack, memory view, disassembly with symbols. In the code editor: the current line, values inline and
+  on hover, watches, peripheral registers; variables, registers and memory set at a stop; sources added for an image
+  built elsewhere, ST's sources from the site; the optimization level per board. A stop freezes the whole bench. Test: `tests/sim/debug.test.ts`.
 - [ ] **3.2 MPU enforcement** — MemManage faults on region violations, so the CubeMX MPU config is real.
 - [ ] **3.3 Performance** — the interpreter runs at ~0.3–0.5× real time at 50–180 MHz; a decoded-block cache or
   a JIT-free threaded dispatch to reach ≥ 1×.

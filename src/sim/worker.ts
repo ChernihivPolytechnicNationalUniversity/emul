@@ -3,6 +3,7 @@ import type { PartState, Schematic } from "@/schematic/types"
 import type { Failure } from "./engine"
 import type { CoreTransport, FromCore } from "./core-host"
 import { SimLoop, type Probe, type Snapshot } from "./loop"
+import type { CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 
 /** How often the worker reports back to the UI. */
 const REPORT_MS = 50
@@ -20,11 +21,22 @@ export type ToWorker =
   | { t: "restart" }
   /** Text typed into a serial terminal. */
   | { t: "serial"; object: string; text: string }
+  /** A debugger command for a board's core (breakpoints, vector catch, resume, a step). */
+  | { t: "debug"; object: string; cmd: CoreDebugCommand }
+  /** Registers and memory of a board's core; answered with `inspected` and the same id. */
+  | { t: "inspect"; id: number; object: string; req: InspectRequest }
+  /** Reset one board's core (the debugger's restart). */
+  | { t: "reset-core"; object: string }
 
 export type FromWorker =
   | { t: "snapshot"; snapshot: Snapshot | null }
   | { t: "failure"; failure: Failure }
   | { t: "started" }
+  /** Cores stopped for the debugger; the bench is paused. */
+  | { t: "debug-stop"; stops: { object: string; stop: DebugStop }[] }
+  /** The bench started or stopped on its own account (a stop, a step): the UI's Run/Pause follows. */
+  | { t: "running"; running: boolean }
+  | { t: "inspected"; id: number; reply: InspectReply | null }
 
 const loop = new SimLoop()
 // Each core in a worker of its own, when the page is cross-origin isolated (SharedArrayBuffer);
@@ -47,6 +59,22 @@ const post = (msg: FromWorker) => {
 
 loop.onFailure = (failure) => post({ t: "failure", failure })
 
+/** The running state the UI was last told, or told us. */
+let reported = false
+/** The bench runs or not as the loop now has it: the timer follows, and the UI hears of a change it did not ask for. */
+function syncRunning() {
+  setTimer(loop.running)
+  if (loop.running === reported) return
+  reported = loop.running
+  post({ t: "running", running: loop.running })
+}
+loop.onDebugStop = (stops) => {
+  // The picture at the stop, then the stop: the UI shows the bench as it was at that instant.
+  post({ t: "snapshot", snapshot: loop.snapshot(true) })
+  post({ t: "debug-stop", stops })
+  syncRunning()
+}
+
 let timer: ReturnType<typeof setInterval> | null = null
 let lastReport = 0
 let announced = false
@@ -58,7 +86,8 @@ function tick() {
     announced = true
     post({ t: "started" })
   }
-  if (now - lastReport < REPORT_MS) return
+  // A debugger stop in this tick has sent its own picture; a paused bench sends none (null means a restart).
+  if (!loop.running || now - lastReport < REPORT_MS) return
   lastReport = now
   post({ t: "snapshot", snapshot: loop.snapshot() })
 }
@@ -92,8 +121,22 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       break
     case "running":
       loop.setRunning(msg.running)
+      reported = msg.running
       // Pausing keeps the last snapshot on screen; only a restart clears it.
       setTimer(msg.running)
+      break
+    case "debug":
+      loop.debug(msg.object, msg.cmd)
+      syncRunning()
+      break
+    case "reset-core":
+      loop.resetCore(msg.object)
+      break
+    case "inspect":
+      void loop.inspect(msg.object, msg.req).then((reply) => {
+        const transfer = reply ? reply.memory.map((c) => c.bytes.buffer as ArrayBuffer) : []
+        ;(self as unknown as DedicatedWorkerGlobalScope).postMessage({ t: "inspected", id: msg.id, reply } satisfies FromWorker, transfer)
+      })
       break
     case "speed":
       loop.speed = msg.speed

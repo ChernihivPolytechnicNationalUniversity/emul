@@ -233,6 +233,25 @@ export class I2c extends RegBlock implements Clocked {
     this.reschedule()
     return v
   }
+  peek(offset: number, size: 1 | 2 | 4): number {
+    this.sync()
+    return super.peek(offset, size)
+  }
+  /** The flags and data as they stand: the SR1-then-SR2 and DR reads that clear them are the firmware's to make. */
+  protected peekValue(d: RegDef, current: number): number {
+    switch (d.name) {
+      case "SR1":
+        return this.sr1
+      case "SR2":
+        return (this.busy ? SR2_BUSY | SR2_MSL : 0) | (this.transmitter && this.busy ? SR2_TRA : 0)
+      case "DR":
+        return this.drData
+      case "RXDR":
+        return this.rxdr
+      default:
+        return this.onRead(d, current)
+    }
+  }
   write(offset: number, value: number, size: 1 | 2 | 4): void {
     this.sync()
     super.write(offset, value, size)

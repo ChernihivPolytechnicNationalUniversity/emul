@@ -11,11 +11,11 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    // Precompressed .br/.gz next to every text asset and firmware ELF, served as-is by nginx
-    // (brotli_static / gzip_static) — best ratio, no CPU spent per request.
+    // Precompressed .br/.gz next to every text asset, firmware ELF and the debugger's ST sources,
+    // served as-is by nginx (brotli_static / gzip_static) — best ratio, no CPU spent per request.
     compression({
       algorithms: ['brotliCompress', 'gzip'],
-      include: /\.(js|css|html|svg|json|elf|wasm)$/,
+      include: /\.(js|css|html|svg|json|elf|wasm|c|h|s)$/,
       threshold: 1024,
     }),
   ],

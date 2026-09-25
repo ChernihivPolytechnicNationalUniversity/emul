@@ -12,10 +12,35 @@ import { decode, jitHelpers, type Instr } from "./decode"
 import { compileBlock, type Compiled } from "./jit"
 import { CpuHalt, EXC, ExceptionRequest } from "./faults"
 import { Scs } from "./scs"
-
-
+import { DBG_STEP_QUIET, DBG_STOP, type CoreDebugger } from "./debugger"
 
 export { CpuHalt, EXC, ExceptionRequest, NUM_EXC, NUM_IRQ } from "./faults"
+
+/**
+ * The addresses the run loop stops at. Blocks never run through one, so a change drops the
+ * decoded blocks (through `onChange`) and they are built again around the new set.
+ */
+export class BreakpointSet extends Set<number> {
+  onChange: (() => void) | null = null
+  add(addr: number) {
+    if (!this.has(addr)) {
+      super.add(addr >>> 0)
+      this.onChange?.()
+    }
+    return this
+  }
+  delete(addr: number) {
+    const had = super.delete(addr >>> 0)
+    if (had) this.onChange?.()
+    return had
+  }
+  clear() {
+    if (this.size) {
+      super.clear()
+      this.onChange?.()
+    }
+  }
+}
 
 /** Thumb condition codes. */
 export const COND = ["eq", "ne", "cs", "cc", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al", "nv"]
@@ -130,8 +155,17 @@ export class Cpu {
   private cachePageNo = -1
   private cachePage: CachePage = emptyPage()
 
-  /** Addresses the run loop stops at before executing. */
-  breakpoints = new Set<number>()
+  /**
+   * Addresses the run loop stops at before executing. Without a debugger (`dbg`) a hit halts
+   * the core, as the scripts use it; with one, the debugger decides (see debugger.ts).
+   */
+  readonly breakpoints = new BreakpointSet()
+  /** The debug unit, once something debugs this core. */
+  dbg: CoreDebugger | null = null
+  /** The debugger asks to see every boundary the run loop passes: a step in progress, a stop to take. */
+  dbgActive = false
+  /** While a line is stepped: whether a block starting at `start` must end before `addr`. */
+  dbgSplit: ((addr: number, start: number) => boolean) | null = null
   /**
    * Cycle count at which a peripheral event is due (a timer overflow or compare); the SoC sets
    * it and handles `onEvent`, so the core pays one compare per instruction for all timers.
@@ -149,6 +183,25 @@ export class Cpu {
     bus.attach(this.scs)
     this.hasFp64 = ((core.mvfr[0] >>> 8) & 0xf) === 2
     this.hasFpv5 = ((core.mvfr[2] >>> 4) & 0xf) !== 0
+    this.breakpoints.onChange = () => this.flushBlocks()
+  }
+
+  /** Forget every decoded instruction and block: they are built again on the way. */
+  flushBlocks() {
+    this.cache.clear()
+    this.cachePageNo = -1
+    this.coldEntry = null
+  }
+
+  /** The instruction at an address, decoded outside the cache and the fetch timing (for the debugger); null when nothing is there. */
+  instrAt(addr: number): Instr | null {
+    try {
+      const hw1 = this.bus.fetch16(addr)
+      const wide = (hw1 & 0xf800) >= 0xe800
+      return decode(hw1, wide ? this.bus.fetch16(addr + 2) : 0, addr, false)
+    } catch {
+      return null
+    }
   }
 
   // --- reset --------------------------------------------------------------------
@@ -322,6 +375,11 @@ export class Cpu {
     return Math.min(highest, this.scs.highestActivePriority())
   }
 
+  /** Whether a pending exception is taken before the next instruction. */
+  exceptionDue(): boolean {
+    return this.scs.pendingCount !== 0 && this.scs.pendingToTake(this.executionPriority()) !== 0
+  }
+
   /** Whether a sleeping core should resume; consumes the event register for WFE. */
   wakeup(): boolean {
     if (this.scs.pendingToTake(this.executionPriority(true)) !== 0) return true
@@ -369,6 +427,7 @@ export class Cpu {
 
   /** Enter `exc` now: push the context frame, switch to Handler mode, fetch the vector. */
   exceptionEntry(exc: number) {
+    if (this.dbg !== null) this.dbg.onException(exc, this.returnAddress(exc), this.r[13], this.ipsr)
     const spsel = this.spsel
     const framePtrAlign = 8
     const fp = (this.control & 4) !== 0
@@ -692,7 +751,12 @@ export class Cpu {
     const addrs: number[] = []
     const instrs: Instr[] = []
     let at = addr
+    const bps = this.breakpoints
+    const split = this.dbgSplit
     for (let i = 0; i < BLOCK_MAX && at < 0x20000000; i++) {
+      // A block ends before a breakpoint (the run loop looks at each one) and, while a line is
+      // being stepped, before another line starts.
+      if (i > 0 && ((bps.size !== 0 && bps.has(at)) || (split !== null && split(at, addr)))) break
       let instr: Instr
       try {
         instr = this.decodeAt(at)
@@ -772,16 +836,18 @@ export class Cpu {
    * with the state the code flushed before the instruction that raised them.
    */
   private runCompiled(block: Block, target: number) {
-    const chain = this.breakpoints.size === 0
+    const bps = this.breakpoints
     try {
       for (;;) {
         block.fn!(this, this.r, this.bus, this.s, block.instrs, jitHelpers, target)
         // A block leaving on a taken branch has not looked at the deadline since its last
         // instruction: what came due is taken now, as the run loop would. Then straight on to
-        // the next block while nothing needs the run loop's attention.
+        // the next block while nothing needs the run loop's attention — a breakpoint where the
+        // next one starts, or a debugger watching every boundary, does.
         this.service()
-        if (!chain || this.cycles >= target || this.stop || this.sleeping || this.itstate !== 0 || this.scs.pendingCount !== 0 || this.bus.flashDirty) return
+        if (this.dbgActive || this.cycles >= target || this.stop || this.sleeping || this.itstate !== 0 || this.scs.pendingCount !== 0 || this.bus.flashDirty) return
         const pc = this.pc
+        if (bps.size !== 0 && bps.has(pc)) return
         let next: Block | null
         if (block.linkPc === pc) next = block.link
         else {
@@ -801,6 +867,12 @@ export class Cpu {
       // address is the instruction after it, as `step` would have set up.
       let i = 0
       while (i < block.n - 1 && block.addrs[i] !== this.pc) i++
+      // A BKPT with a debugger attached is a stop on the instruction, not a halt.
+      if (e instanceof CpuHalt && e.reason === "bkpt" && this.dbg !== null) {
+        this.instructions += i
+        this.dbg.onBkpt(e.detail)
+        return
+      }
       const instr = block.instrs[i]
       if (instr.js !== undefined) this.nextPc = (this.pc + instr.size) >>> 0
       if (e instanceof ExceptionRequest) {
@@ -861,6 +933,11 @@ export class Cpu {
       } else if (e instanceof BusFault) {
         this.scs.recordFault(EXC.BUS_FAULT, e.message, this.pc)
         this.exceptionEntry(this.scs.escalate(EXC.BUS_FAULT))
+      } else if (e instanceof CpuHalt && e.reason === "bkpt" && this.dbg !== null) {
+        // A stop on the BKPT itself: the PC stays on it.
+        this.instructions += i - from
+        this.dbg.onBkpt(e.detail)
+        return
       } else if (e instanceof CpuHalt) {
         this.halted = e
         throw e
@@ -872,16 +949,22 @@ export class Cpu {
     }
   }
 
-  /** Execute one instruction (or take a pending exception). Returns cycles spent. */
-  step(): number {
+  /**
+   * Execute one instruction (or take a pending exception). Returns cycles spent. `quiet`
+   * leaves pending exceptions for later: the debugger's single step, which runs exactly the
+   * instruction at the PC.
+   */
+  step(quiet = false): number {
     const before = this.cycles
     // Pending exceptions are taken between instructions.
-    const pend = this.scs.anyPending() ? this.scs.pendingToTake(this.executionPriority()) : 0
+    const pend = !quiet && this.scs.anyPending() ? this.scs.pendingToTake(this.executionPriority()) : 0
     if (pend !== 0) {
       if (this.sleeping) this.leaveSleep()
       this.nextPc = this.pc
       this.exceptionEntry(pend)
       this.pc = this.nextPc
+      // The debugger (or a breakpoint on it) gets to look at the handler's first instruction before it runs.
+      if (this.dbgActive || (this.breakpoints.size !== 0 && this.breakpoints.has(this.pc))) return this.cycles - before
     }
     if (this.sleeping && this.wakeup()) this.leaveSleep()
     if (this.sleeping) {
@@ -919,6 +1002,11 @@ export class Cpu {
         } else if (e instanceof BusFault) {
           this.scs.recordFault(EXC.BUS_FAULT, e.message, pc)
           this.exceptionEntry(this.scs.escalate(EXC.BUS_FAULT))
+        } else if (e instanceof CpuHalt && e.reason === "bkpt" && this.dbg !== null) {
+          // A stop on the BKPT itself: nothing of it happens, the PC stays on it.
+          this.pc = pc
+          this.dbg.onBkpt(e.detail)
+          return this.cycles - before
         } else if (e instanceof CpuHalt) {
           this.halted = e
           throw e
@@ -938,25 +1026,40 @@ export class Cpu {
     const target = this.cycles + cycles
     const start = this.cycles
     this.stop = false
+    const bps = this.breakpoints
+    const dbg = this.dbg
     while (this.cycles < target && !this.stop) {
       if (this.sleeping) {
         // Nothing to execute until a wake-up event: jump straight to the next timer event
         // (SysTick is stopped along with the rest of the clocks in a deep sleep).
-        if (this.wakeup()) this.leaveSleep()
-        else {
+        if (this.wakeup()) {
+          this.leaveSleep()
+          // Awake: what woke the core goes at once, in this slice, unless the debugger is to
+          // look at the boundary first (a step in progress, a breakpoint on the next instruction).
+          if (dbg === null || !(this.dbgActive || (bps.size !== 0 && bps.has(this.pc)))) this.step()
+        } else {
           const skip = Math.max(1, Math.min(target - this.cycles, this.deep ? Infinity : this.scs.systDue - this.cycles, this.nextEventCycle - this.cycles))
           this.cycles += skip
           this.sleepCycles += skip
           if (!this.deep && this.cycles >= this.scs.systDue) this.scs.sync(this.cycles)
           if (this.cycles >= this.nextEventCycle) this.onEvent()
-          continue
         }
-      } else if (this.breakpoints.size) {
-        if (this.breakpoints.has(this.pc)) {
-          this.halted = new CpuHalt("bkpt", "breakpoint", this.pc)
-          break
+        continue
+      }
+      if (dbg !== null) {
+        if (this.dbgActive || (bps.size !== 0 && bps.has(this.pc))) {
+          const act = dbg.check()
+          if (act === DBG_STOP) break
+          if (act === DBG_STEP_QUIET) {
+            this.step(true)
+            continue
+          }
         }
-      } else if (this.itstate === 0 && this.scs.pendingCount === 0) {
+      } else if (bps.size !== 0 && bps.has(this.pc)) {
+        this.halted = new CpuHalt("bkpt", "breakpoint", this.pc)
+        break
+      }
+      if (this.itstate === 0 && this.scs.pendingCount === 0) {
         // The common case: nothing pending, no IT block — run the straight line as a block.
         if (this.bus.flashDirty) this.fetch(this.pc)
         const block = this.blockAt(this.pc)

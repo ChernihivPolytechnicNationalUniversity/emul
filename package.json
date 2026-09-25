@@ -20,6 +20,8 @@
     "geom-bench": "tsx --tsconfig tsconfig.app.json scripts/geom-bench.ts",
     "mcu-jit": "tsx --tsconfig tsconfig.app.json scripts/mcu-jit.ts",
     "symbols": "tsx --tsconfig tsconfig.app.json scripts/symbols.ts",
+    "st-sources": "tsx --tsconfig tsconfig.app.json scripts/st-sources.ts",
+    "peripherals": "tsx --tsconfig tsconfig.app.json scripts/peripherals.ts",
     "firmware": "make -C firmware all expect && make -C firmware/hal"
   },
   "dependencies": {

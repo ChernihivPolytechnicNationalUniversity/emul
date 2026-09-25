@@ -175,6 +175,11 @@ export class Rtc extends RegBlock implements Clocked {
     else if (this.counting()) this.regs[3] |= ISR_RSF
     return super.read(offset, size)
   }
+  /** The calendar as it stands, without the read that brings RSF back. */
+  peek(offset: number, size: 1 | 2 | 4): number {
+    this.sync()
+    return super.peek(offset, size)
+  }
   write(offset: number, value: number, size: 1 | 2 | 4): void {
     this.sync()
     super.write(offset, value, size)

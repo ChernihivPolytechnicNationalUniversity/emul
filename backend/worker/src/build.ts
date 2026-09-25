@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
-import type { SourceFile, Target } from "emul-shared/source"
+import { DEFAULT_OPT, type BuildOptions, type SourceFile, type Target } from "emul-shared/source"
 
 /**
  * Compile a project for its chip with GCC, the way STM32CubeIDE would: the program's own
@@ -47,7 +47,7 @@ const HEADER = /\.(h|hpp)$/i
 const LINKER = /\.ld$/i
 const HAL_CONF = /^stm32f\dxx_hal_conf\.h$/
 
-export async function build(target: Target, files: SourceFile[]): Promise<BuildOutput> {
+export async function build(target: Target, files: SourceFile[], options: BuildOptions = {}): Promise<BuildOutput> {
   const targetDir = path.join(TARGETS_DIR, target)
   let spec: TargetSpec
   try {
@@ -89,10 +89,11 @@ export async function build(target: Target, files: SourceFile[]): Promise<BuildO
 
     const cxxSources = sources.filter((s) => CXX.test(s))
     const cSources = sources.filter((s) => !CXX.test(s))
+    // -g3 at every level: the debugger reads the line table, the variables and the macros from it.
     const common = [
       ...spec.cpu,
       ...spec.defines,
-      "-O2",
+      options.opt ?? DEFAULT_OPT,
       "-g3",
       "-Wall",
       "-ffunction-sections",
@@ -103,7 +104,7 @@ export async function build(target: Target, files: SourceFile[]): Promise<BuildO
     ]
     const driver = `${GCC}gcc`
     const lines = [
-      `# ${spec.name}`,
+      `# ${spec.name}, ${options.opt ?? DEFAULT_OPT}`,
       `# ${path.basename(driver)} ${sources.join(" ")} + ${batteries.map((b) => path.basename(b)).join(" ")}${ownConf ? " + HAL from source" : " -lhal"}`,
       "",
     ]

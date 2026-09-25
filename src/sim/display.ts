@@ -7,7 +7,7 @@
  * pixel clock the panel can lock to.
  */
 import type { PadRef, Stm32 } from "@/mcu/stm32f429"
-import { parsePad } from "@/mcu/stm32f429"
+import { parsePad } from "@/mcu/pads"
 import type { PanelSignal, PanelSpec } from "@/schematic/types"
 
 /** LTDC pads on the F4/F7 (DS9405 / DS10693 alternate-function tables): signal → pads with their AF. */

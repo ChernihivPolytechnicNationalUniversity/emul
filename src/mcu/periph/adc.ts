@@ -188,6 +188,14 @@ export class Adc extends RegBlock implements Clocked {
     this.sync()
     return super.read(offset, size)
   }
+  peek(offset: number, size: 1 | 2 | 4): number {
+    this.sync()
+    return super.peek(offset, size)
+  }
+  /** DR without clearing EOC. */
+  protected peekValue(d: RegDef, current: number): number {
+    return d.name === "DR" ? this.dr : this.onRead(d, current)
+  }
   write(offset: number, value: number, size: 1 | 2 | 4): void {
     this.sync()
     super.write(offset, value, size)
@@ -434,6 +442,11 @@ export class AdcBlock extends WordPeripheral {
     const i = offset >>> 8
     if (i === 3) return this.common.read(offset & 0xff, this.adcs)
     return this.adcs[i] ? this.adcs[i].read(offset & 0xff, 4) : 0
+  }
+  peekWord(offset: number): number {
+    const i = offset >>> 8
+    if (i === 3) return this.common.read(offset & 0xff, this.adcs)
+    return this.adcs[i] ? this.adcs[i].peek(offset & 0xff, 4) : 0
   }
   writeWord(offset: number, value: number): void {
     const i = offset >>> 8

@@ -1,3 +1,6 @@
+/** Simulation time step. */
+export const DT = 20e-6
+
 /** Presets of simulated seconds per real second. Slow motion is what makes a 50 Hz waveform readable. */
 export const SPEEDS = [
   { value: 0.05, label: "Ultra slow" },

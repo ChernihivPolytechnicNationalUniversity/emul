@@ -34,7 +34,7 @@ export const handlers: Record<JobKind, Handler> = {
   },
   /** Compile the project for its chip; a compile error is `ok: false` with the log. */
   async build(job) {
-    const out = await build(job.data.target, await sources(job))
+    const out = await build(job.data.target, await sources(job), job.data.options)
     const artifacts = [await emit(job, "build.log", out.log, TEXT)]
     if (out.elf) artifacts.push(await emit(job, "firmware.elf", out.elf, "application/octet-stream"))
     if (out.map) artifacts.push(await emit(job, "firmware.map", out.map, TEXT))

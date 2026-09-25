@@ -10,6 +10,19 @@ export type Target = (typeof TARGETS)[number]
 /** A source file as the client sends it: a relative path inside the project and its text. */
 export type SourceFile = { path: string; content: string }
 
+/**
+ * GCC optimization levels a build can ask for. -O0 is a Debug build as STM32CubeIDE makes
+ * it (every line steps, every variable is there); -O2 what the service built before the
+ * choice existed, and still its default.
+ */
+export const OPT_LEVELS = ["-O0", "-Og", "-O1", "-O2", "-O3", "-Os"] as const
+export type OptLevel = (typeof OPT_LEVELS)[number]
+export const DEFAULT_OPT: OptLevel = "-O2"
+export const isOptLevel = (v: unknown): v is OptLevel => typeof v === "string" && (OPT_LEVELS as readonly string[]).includes(v)
+
+/** How a build job compiles; anything left out is the service's default. */
+export type BuildOptions = { opt?: OptLevel }
+
 const SOURCE_EXTENSIONS = new Set([".c", ".h", ".cpp", ".hpp", ".cc", ".s", ".S", ".ld", ".txt", ".md"])
 export const SOURCE_LIMITS = { files: 200, fileBytes: 1024 * 1024 }
 

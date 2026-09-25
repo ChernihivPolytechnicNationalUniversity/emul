@@ -63,6 +63,7 @@ export default function App() {
     for (const p of example.projects ?? []) {
       const board = doc.objects.find((o) => o.props?.ref === p.ref)
       if (!board) continue
+      if (p.opt) board.build = { ...board.build, opt: p.opt }
       try {
         board.project = await p.load()
       } catch (e) {

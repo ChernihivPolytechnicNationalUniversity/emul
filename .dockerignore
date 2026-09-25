@@ -31,3 +31,5 @@ logs
 
 # Generated in the image build from the staged ST sources
 public/symbols
+public/st
+public/peripherals

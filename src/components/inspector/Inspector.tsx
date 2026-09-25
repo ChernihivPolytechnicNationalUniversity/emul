@@ -313,6 +313,7 @@ function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { ob
     const file = e.target.files?.[0]
     e.target.value = ""
     if (!file) return
+    // An image from elsewhere, built from nothing on the board: the debugger asks for its sources.
     onFirmware(object.id, file.name, new Uint8Array(await file.arrayBuffer()))
   }
 
@@ -333,7 +334,7 @@ function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { ob
             {data ? "Replace" : "Load…"}
           </Button>
           {data && (
-            <Button variant="outline" size="icon-xs" aria-label="Remove firmware" onClick={() => onChange(object.id, { firmware: "", firmwareData: "" })}>
+            <Button variant="outline" size="icon-xs" aria-label="Remove firmware" onClick={() => onChange(object.id, { firmware: "", firmwareData: "", firmwareBuild: "" })}>
               <XIcon />
             </Button>
           )}

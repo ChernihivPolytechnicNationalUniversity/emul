@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto"
-import { JOB_KINDS, JOB_URL_TTL, OUTPUTS, SOURCE_LIMITS, TARGETS, jobKeys, newJobId, sourcePath, type JobData, type JobKind, type ProjectManifest, type SourceFile, type Target } from "emul-shared/jobs"
+import { JOB_KINDS, JOB_URL_TTL, OPT_LEVELS, OUTPUTS, SOURCE_LIMITS, TARGETS, jobKeys, newJobId, sourcePath, type BuildOptions, type JobData, type JobKind, type ProjectManifest, type SourceFile, type Target } from "emul-shared/jobs"
 import { presignGet, presignRead, presignWrite, putJson, putObject } from "emul-shared/s3"
 import type { FastifyInstance } from "fastify"
 
-type NewJob = { kind: JobKind; target: Target; files: SourceFile[] }
+type NewJob = { kind: JobKind; target: Target; files: SourceFile[]; options?: BuildOptions }
 
 /** Enqueue a job over a project and poll its state; the worker does the work. */
 export async function jobs(app: FastifyInstance) {
@@ -17,6 +17,7 @@ export async function jobs(app: FastifyInstance) {
           properties: {
             kind: { type: "string", enum: JOB_KINDS },
             target: { type: "string", enum: TARGETS },
+            options: { type: "object", additionalProperties: false, properties: { opt: { type: "string", enum: OPT_LEVELS } } },
             files: {
               type: "array",
               minItems: 1,
@@ -32,10 +33,10 @@ export async function jobs(app: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const { files, kind, target } = req.body
-      // The project goes to S3 under the job's prefix; Redis carries the kind, the target and URLs.
+      const { files, kind, target, options } = req.body
+      // The project goes to S3 under the job's prefix; Redis carries the kind, the target, the options and URLs.
       const seen = new Set<string>()
-      const manifest: ProjectManifest = { target, createdAt: new Date().toISOString(), files: [] }
+      const manifest: ProjectManifest = { target, options, createdAt: new Date().toISOString(), files: [] }
       const sources: SourceFile[] = []
       for (const file of files) {
         const path = sourcePath(file.path)
@@ -54,6 +55,7 @@ export async function jobs(app: FastifyInstance) {
       const data: JobData = {
         kind,
         target,
+        options,
         sources: await Promise.all(sources.map(async (f) => ({ path: f.path, url: await presignRead(keys.source(f.path), JOB_URL_TTL) }))),
         outputs: Object.fromEntries(await Promise.all(OUTPUTS[kind].map(async (name) => [name, await presignWrite(keys.out(name), JOB_URL_TTL)]))),
         result: await presignWrite(keys.result, JOB_URL_TTL),

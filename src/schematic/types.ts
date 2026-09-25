@@ -1,4 +1,5 @@
-import type { SourceFile } from "emul-shared/source"
+import type { OptLevel, SourceFile } from "emul-shared/source"
+import type { BreakpointSpec } from "@/debug/protocol"
 import type { MemoryRegion } from "@/mcu/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import type { Icon } from "./icons"
@@ -378,6 +379,23 @@ export type PlacedObject = {
    * Edited outside the undo history, like part state: ⌘Z on the field never touches the code.
    */
   project?: SourceFile[]
+  /** How the project is compiled. Outside the undo history, like the project. */
+  build?: { opt?: OptLevel }
+  /** What the debugger keeps for the board. Outside the undo history, like the project. */
+  debug?: BoardDebug
+}
+
+/** A board's debugger settings, saved with the schematic. */
+export type BoardDebug = {
+  breakpoints?: BreakpointSpec[]
+  /**
+   * Source files added for the debugger to show (an image built elsewhere, a library's code):
+   * read-only, never compiled; `path` is the path the image names the file by.
+   */
+  sources?: SourceFile[]
+  watches?: string[]
+  /** Stop when a fault exception is entered; on unless turned off. */
+  catchFaults?: boolean
 }
 
 export type Point = { x: number; y: number }

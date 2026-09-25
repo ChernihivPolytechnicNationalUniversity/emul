@@ -1,9 +1,9 @@
 import { Queue } from "bullmq"
 import { ulid } from "ulid"
 import { connect } from "./redis.ts"
-import type { Target } from "./source.ts"
+import type { BuildOptions, Target } from "./source.ts"
 
-export { SOURCE_LIMITS, TARGETS, sourcePath, type SourceFile, type Target } from "./source.ts"
+export { DEFAULT_OPT, OPT_LEVELS, SOURCE_LIMITS, TARGETS, isOptLevel, sourcePath, type BuildOptions, type OptLevel, type SourceFile, type Target } from "./source.ts"
 
 /** The contract between the API (producer) and the worker (consumer). */
 export const QUEUE = "jobs"
@@ -32,6 +32,8 @@ export const OUTPUTS: Record<JobKind, string[]> = {
 export type JobData = {
   kind: JobKind
   target: Target
+  /** How to compile (a `build` job): the optimization level. */
+  options?: BuildOptions
   sources: { path: string; url: string }[]
   /** By output name, e.g. `firmware.elf`. */
   outputs: Record<string, string>
@@ -45,6 +47,7 @@ export const JOB_URL_TTL = 60 * 60
 /** What `input/project.json` records about the project a job was given. */
 export type ProjectManifest = {
   target: Target
+  options?: BuildOptions
   createdAt: string
   files: { path: string; size: number; sha256: string }[]
 }

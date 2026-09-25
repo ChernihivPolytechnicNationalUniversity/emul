@@ -7,8 +7,10 @@ COPY backend/api/package.json backend/api/
 COPY backend/worker/package.json backend/worker/
 RUN pnpm install --frozen-lockfile
 COPY . .
-# The editor's symbol index per chip, from the same pinned ST sources the worker compiles against.
-RUN sh backend/worker/toolchain/stage-st.sh /tmp/st && pnpm symbols /tmp/st public/symbols && rm -rf /tmp/st
+# The editor's symbol index per chip, and the debugger's ST sources and peripheral register maps,
+# from the same pinned ST sources the worker compiles against.
+RUN sh backend/worker/toolchain/stage-st.sh /tmp/st && pnpm symbols /tmp/st public/symbols \
+  && pnpm st-sources /tmp/st public/st && pnpm peripherals /tmp/st public/peripherals && rm -rf /tmp/st
 RUN pnpm build
 
 FROM alpine:3.21
