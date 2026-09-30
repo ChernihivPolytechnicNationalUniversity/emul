@@ -21,8 +21,9 @@ function platesOf(objects: readonly PlacedObject[], selected: ReadonlySet<string
     if (!selected.has(object.id)) continue
     const def = getDef(object.def)
     if (!def) continue
-    const { left, top, w, h, rotation } = placementOf(object, def, grid)
-    plates.push({ id: object.id, outline: selectionOutline(def), transform: `translate(${left} ${top}) rotate(${rotation} ${w / 2} ${h / 2}) scale(${grid})` })
+    const { left, top, w, h, rotation, mirror } = placementOf(object, def, grid)
+    const reflect = mirror ? ` translate(${w} 0) scale(-1 1)` : ""
+    plates.push({ id: object.id, outline: selectionOutline(def), transform: `translate(${left} ${top}) rotate(${rotation} ${w / 2} ${h / 2})${reflect} scale(${grid})` })
   }
   return plates
 }

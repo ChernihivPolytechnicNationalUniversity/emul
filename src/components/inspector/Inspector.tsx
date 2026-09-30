@@ -2,7 +2,7 @@ import type { EepromSnapshot } from "@/sim/digital"
 import type { HdlSnapshot } from "@/sim/hdl"
 import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
-import { CodeIcon, CpuIcon, FlameIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
+import { CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { chipById } from "@/mcu/chip"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider"
 import { getDef, hdlModule } from "@/schematic/registry"
 import { isHdlDef, isModified } from "@/schematic/hdl"
+import type { FlipAxis } from "@/schematic/geometry"
 import type { Damage, PlacedObject, PropField } from "@/schematic/types"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import type { SimReadout } from "@/sim/use-simulation"
@@ -56,10 +57,11 @@ type InspectorProps = Omit<React.ComponentProps<typeof Card>, "onChange"> & {
   onCode?: (id: string) => void
   onHdl?: (defId: string) => void
   onRotate: (delta: 45 | -45) => void
+  onFlip: (axis: FlipAxis) => void
   onDelete: () => void
 }
 
-export function Inspector({ selected, damage, sim, onChange, onFirmware, onSerial, onCode, onHdl, onRotate, onDelete, className, ...props }: InspectorProps) {
+export function Inspector({ selected, damage, sim, onChange, onFirmware, onSerial, onCode, onHdl, onRotate, onFlip, onDelete, className, ...props }: InspectorProps) {
   if (selected.length === 0) return null
   const object = selected.length === 1 ? selected[0] : null
   const def = object && getDef(object.def)
@@ -76,6 +78,12 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
             </Button>
             <Button variant="ghost" size="icon-sm" onClick={() => onRotate(45)} aria-label="Rotate 45° clockwise">
               <RotateCwIcon />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={() => onFlip("horizontal")} aria-label="Mirror horizontally">
+              <FlipHorizontal2Icon />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={() => onFlip("vertical")} aria-label="Mirror vertically">
+              <FlipVertical2Icon />
             </Button>
             <Button variant="ghost" size="icon-sm" onClick={onDelete} aria-label="Delete" className="text-destructive">
               <Trash2Icon />

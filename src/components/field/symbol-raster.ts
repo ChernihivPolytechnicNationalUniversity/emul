@@ -1,5 +1,5 @@
-import { objectRect, objectSize, rotatePin, type Rect } from "@/schematic/geometry"
-import type { ComponentDef, PlacedObject, Rotation } from "@/schematic/types"
+import { objectRect, objectSize, orientPin, placedText, type Orientation, type Rect } from "@/schematic/geometry"
+import type { ComponentDef, PlacedObject } from "@/schematic/types"
 import type { FieldPalette } from "./field-palette"
 import { selectionOutline } from "./selection-geometry"
 import { KNOCKOUT_OPACITY, PIN_LABEL_CELLS, pinLabelGround, pinLabelKnockout, pinLabelOffset, type Box } from "./pin-label"
@@ -30,8 +30,13 @@ export type Symbol = {
   height: number
 }
 
-const key = (def: ComponentDef, rotation: Rotation, theme: string, scale: number) =>
-  `${def.id}|${rotation}|${theme}|${scale}`
+const key = (def: ComponentDef, { rotation, mirror }: Orientation, theme: string, scale: number) =>
+  `${def.id}|${rotation}${mirror ? "m" : ""}|${theme}|${scale}`
+
+function turnInto(context: CanvasRenderingContext2D, { rotation, mirror }: Orientation) {
+  if (rotation) context.rotate((rotation * Math.PI) / 180)
+  if (mirror) context.scale(-1, 1)
+}
 
 function makeCanvas(width: number, height: number) {
   if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(width, height)
@@ -59,19 +64,19 @@ export class SymbolRaster {
     return this.cache.size
   }
 
-  get(def: ComponentDef, rotation: Rotation, grid: number, scale: number): Symbol | null {
+  get(def: ComponentDef, orientation: Orientation, grid: number, scale: number): Symbol | null {
     const palette = this.palette
     if (!palette) return null
-    const id = key(def, rotation, palette.theme, scale)
+    const id = key(def, orientation, palette.theme, scale)
     const cached = this.cache.get(id)
     if (cached) return cached
-    const drawn = this.draw(def, rotation, grid, scale, palette)
+    const drawn = this.draw(def, orientation, grid, scale, palette)
     if (drawn) this.cache.set(id, drawn)
     return drawn
   }
 
-  private draw(def: ComponentDef, rotation: Rotation, grid: number, scale: number, palette: FieldPalette): Symbol | null {
-    const box = objectSize(def, rotation)
+  private draw(def: ComponentDef, orientation: Orientation, grid: number, scale: number, palette: FieldPalette): Symbol | null {
+    const box = objectSize(def, orientation.rotation)
     const worldWidth = box.w * grid
     const worldHeight = box.h * grid
     const width = Math.max(1, Math.ceil(worldWidth * scale) + MARGIN_PX * 2)
@@ -87,7 +92,7 @@ export class SymbolRaster {
     const unrotatedWidth = def.width * grid
     const unrotatedHeight = def.height * grid
     context.translate((worldWidth * scale) / 2, (worldHeight * scale) / 2)
-    if (rotation) context.rotate((rotation * Math.PI) / 180)
+    turnInto(context, orientation)
     context.scale(scale, scale)
     context.translate(-unrotatedWidth / 2, -unrotatedHeight / 2)
     this.paintBody(context, def, grid, scale, palette)
@@ -95,7 +100,7 @@ export class SymbolRaster {
 
     context.save()
     context.scale(scale, scale)
-    this.paintPinMarks(context, def, rotation, grid, palette)
+    this.paintPinMarks(context, def, orientation, grid, palette)
     context.restore()
 
     return { image: canvas, originX: MARGIN_PX, originY: MARGIN_PX, scale, width, height }
@@ -149,10 +154,10 @@ export class SymbolRaster {
     }
   }
 
-  private paintPinMarks(context: CanvasRenderingContext2D, def: ComponentDef, rotation: Rotation, grid: number, palette: FieldPalette) {
+  private paintPinMarks(context: CanvasRenderingContext2D, def: ComponentDef, orientation: Orientation, grid: number, palette: FieldPalette) {
     const r = grid * PIN_MARK_CELLS
     for (const raw of def.pins) {
-      const pin = rotatePin(raw, def, rotation)
+      const pin = orientPin(raw, def, orientation)
       context.fillStyle = palette.pinMark[pin.kind]
       context.fillRect(pin.x * grid - r, pin.y * grid - r, r * 2, r * 2)
     }
@@ -209,30 +214,30 @@ export class TextRaster {
     return this.cache.size
   }
 
-  private fitting(def: ComponentDef, rotation: Rotation, grid: number, scale: number) {
-    const box = objectSize(def, rotation)
+  private fitting(def: ComponentDef, orientation: Orientation, grid: number, scale: number) {
+    const box = objectSize(def, orientation.rotation)
     const world = { w: (box.w + LABEL_MARGIN_CELLS * 2) * grid, h: (box.h + LABEL_MARGIN_CELLS * 2) * grid }
     return Math.min(scale, MAX_SHEET_PX / world.w, MAX_SHEET_PX / world.h, Math.sqrt(MAX_SHEET_AREA / (world.w * world.h)))
   }
 
-  get(def: ComponentDef, rotation: Rotation, grid: number, scale: number, boost: number): Symbol | null {
+  get(def: ComponentDef, orientation: Orientation, grid: number, scale: number, boost: number): Symbol | null {
     const palette = this.palette
     if (!palette) return null
     if (scale !== this.drawnAt) {
       this.drawnAt = scale
       this.cache.clear()
     }
-    const drawAt = this.fitting(def, rotation, grid, scale)
-    const id = `${key(def, rotation, palette.theme, drawAt)}|${boost}`
+    const drawAt = this.fitting(def, orientation, grid, scale)
+    const id = `${key(def, orientation, palette.theme, drawAt)}|${boost}`
     const cached = this.cache.get(id)
     if (cached) return cached
-    const drawn = this.draw(def, rotation, grid, drawAt, boost, palette)
+    const drawn = this.draw(def, orientation, grid, drawAt, boost, palette)
     if (drawn) this.cache.set(id, drawn)
     return drawn
   }
 
-  private draw(def: ComponentDef, rotation: Rotation, grid: number, scale: number, boost: number, palette: FieldPalette): Symbol | null {
-    const box = objectSize(def, rotation)
+  private draw(def: ComponentDef, orientation: Orientation, grid: number, scale: number, boost: number, palette: FieldPalette): Symbol | null {
+    const box = objectSize(def, orientation.rotation)
     const margin = LABEL_MARGIN_CELLS * grid * scale
     const width = Math.max(1, Math.ceil(box.w * grid * scale + margin * 2))
     const height = Math.max(1, Math.ceil(box.h * grid * scale + margin * 2))
@@ -250,7 +255,7 @@ export class TextRaster {
     context.font = `${fontPx}px ${palette.text.mono}`
     for (const raw of def.pins) {
       if (!raw.label) continue
-      const pin = rotatePin(raw, def, rotation)
+      const pin = orientPin(raw, def, orientation)
       const ground = pinLabelGround(def, raw.id)
       const color = ground === "field" ? palette.text.inverse : (palette.body[ground].fill ?? palette.text.inverse)
       const knockout = pinLabelKnockout(pin.label, pin.labelAt, boost, context.measureText(pin.label).width / fontPx / pin.label.length)
@@ -268,7 +273,7 @@ export class TextRaster {
     }
     for (const raw of def.pins) {
       if (!raw.label) continue
-      const pin = rotatePin(raw, def, rotation)
+      const pin = orientPin(raw, def, orientation)
       const label = pinLabelOffset(pin.labelAt)
       context.fillStyle = pin.kind === "nc" ? palette.text.muted : palette.text.plain
       context.textAlign = TEXT_ANCHOR[label.anchor]
@@ -278,19 +283,19 @@ export class TextRaster {
 
     context.save()
     context.translate((box.w * grid * scale) / 2, (box.h * grid * scale) / 2)
-    if (rotation) context.rotate((rotation * Math.PI) / 180)
+    turnInto(context, orientation)
     context.scale(scale, scale)
     context.translate((-def.width * grid) / 2, (-def.height * grid) / 2)
     for (const shape of def.body) {
       if (shape.type !== "text" || !fixedText(shape.text)) continue
-      const x = shape.x * grid
-      const y = shape.y * grid
+      const placed = placedText(shape.anchor ?? "middle", shape.rotate ?? 0, orientation)
       context.save()
-      context.translate(x, y)
-      const turn = (shape.rotate ?? 0) - rotation
+      context.translate(shape.x * grid, shape.y * grid)
+      if (orientation.mirror) context.scale(-1, 1)
+      const turn = placed.angle - orientation.rotation
       if (turn) context.rotate((turn * Math.PI) / 180)
       context.font = `${(shape.size ?? BODY_TEXT_CELLS) * boost * grid}px ${palette.text.sans}`
-      context.textAlign = TEXT_ANCHOR[shape.anchor ?? "middle"]
+      context.textAlign = TEXT_ANCHOR[placed.anchor]
       context.fillStyle = shape.inverse ? palette.text.inverse : shape.muted ? palette.text.muted : palette.text.plain
       context.fillText(shape.text, 0, 0)
       context.restore()

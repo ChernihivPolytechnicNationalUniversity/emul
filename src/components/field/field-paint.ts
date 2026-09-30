@@ -1,4 +1,4 @@
-import { objectRect, toPath, trimRouteEnds, type Rect, type RoutedWire } from "@/schematic/geometry"
+import { objectRect, orientationOf, toPath, trimRouteEnds, type Rect, type RoutedWire } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import type { ComponentDef, PlacedObject } from "@/schematic/types"
 import { wireColorVar, type WireColorKey } from "@/schematic/wire-colors"
@@ -70,6 +70,7 @@ function withObjectFrame(context: CanvasRenderingContext2D, object: PlacedObject
   context.save()
   context.translate(rect.x + rect.w / 2, rect.y + rect.h / 2)
   context.rotate(((object.rotation ?? 0) * Math.PI) / 180)
+  if (object.mirror) context.scale(-1, 1)
   context.scale(grid, grid)
   context.translate(-def.width / 2, -def.height / 2)
   paint()
@@ -131,7 +132,7 @@ export function paintField(context: CanvasRenderingContext2D, host: Element, { o
   for (const object of objects) {
     const def = getDef(object.def)
     if (!def) continue
-    const symbol = raster.get(def, object.rotation ?? 0, grid, pixels)
+    const symbol = raster.get(def, orientationOf(object), grid, pixels)
     if (!symbol) continue
     const rect = objectRect(object, grid)
     context.drawImage(

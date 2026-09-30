@@ -1,4 +1,4 @@
-import { DIR, intersects, objectPins, objectRect, objectSize, resolvePinIn, routeBox, snap, type Point, type Rect, type RoutedWire } from "./geometry"
+import { DIR, intersects, objectPins, objectRect, objectSize, orientationOf, orientOffset, placedText, resolvePinIn, routeBox, snap, type Point, type Rect, type RoutedWire } from "./geometry"
 import { getDef } from "./registry"
 import { pinLabelKnockout } from "@/components/field/pin-label"
 import type { BodyShape, ComponentDef, PinRef, PlacedObject, Wire } from "./types"
@@ -78,15 +78,12 @@ export function bodyBounds(def: ComponentDef): Rect {
 type Quad = { corners: Point[]; box: Rect }
 
 function frameOf(object: PlacedObject, def: ComponentDef, grid: number) {
-  const rotation = ((object.rotation ?? 0) * Math.PI) / 180
-  const cos = Math.cos(rotation)
-  const sin = Math.sin(rotation)
-  const size = objectSize(def, object.rotation ?? 0)
+  const orientation = orientationOf(object)
+  const size = objectSize(def, orientation.rotation)
   const origin = objectRect(object, grid)
   return ({ x, y }: Point): Point => {
-    const dx = x - def.width / 2
-    const dy = y - def.height / 2
-    return { x: origin.x + (dx * cos - dy * sin + size.w / 2) * grid, y: origin.y + (dx * sin + dy * cos + size.h / 2) * grid }
+    const at = orientOffset({ x: x - def.width / 2, y: y - def.height / 2 }, orientation)
+    return { x: origin.x + (at.x + size.w / 2) * grid, y: origin.y + (at.y + size.h / 2) * grid }
   }
 }
 
@@ -109,6 +106,7 @@ function propsOf(def: ComponentDef, object: PlacedObject): Record<string, string
 
 function textRectsOf(object: PlacedObject, def: ComponentDef, grid: number): Rect[] {
   const at = frameOf(object, def, grid)
+  const orientation = orientationOf(object)
   const props = propsOf(def, object)
   const inset = TEXT_INSET_CELLS * grid
   const rects: Rect[] = []
@@ -119,8 +117,15 @@ function textRectsOf(object: PlacedObject, def: ComponentDef, grid: number): Rec
     const size = (shape.size ?? 0.4) * grid
     const w = text.length * TEXT_ADVANCE_EM * size
     const anchor = at({ x: shape.x, y: shape.y })
-    const x = shape.anchor === "start" ? anchor.x : shape.anchor === "end" ? anchor.x - w : anchor.x - w / 2
-    rects.push({ x: x + inset, y: anchor.y - size / 2 + inset, w: w - inset * 2, h: size - inset * 2 })
+    const placed = placedText(shape.anchor ?? "middle", shape.rotate ?? 0, orientation)
+    const start = placed.anchor === "start" ? 0 : placed.anchor === "end" ? -w : -w / 2
+    const along = { x: start + inset, w: w - inset * 2 }
+    const across = { y: -size / 2 + inset, h: size - inset * 2 }
+    rects.push(
+      placed.angle === 0
+        ? { x: anchor.x + along.x, y: anchor.y + across.y, w: along.w, h: across.h }
+        : { x: anchor.x + across.y, y: anchor.y - along.x - along.w, w: across.h, h: along.w },
+    )
   }
   return rects
 }

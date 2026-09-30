@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils"
 import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { getDef } from "@/schematic/registry"
-import { rotatePin } from "@/schematic/geometry"
+import { orientationOf, orientPin } from "@/schematic/geometry"
 import type { PlacedObject } from "@/schematic/types"
 import type { Reading } from "@/sim/engine"
 import type { SimReadout } from "@/sim/use-simulation"
@@ -44,7 +44,7 @@ export function LiveReadings({ object, sim, className, ...props }: LiveReadingsP
   const readings = sim.readings(object.id).filter((r) => !r.hidden && !idle(r))
   const pins = def.pins
     .filter((p) => !(def.hideIdle && p.kind === "gnd"))
-    .map((p) => ({ pin: rotatePin(p, def, object.rotation), v: sim.ac ? sim.pinVoltageRms(object.id, p.id) : sim.pinVoltage(object.id, p.id) }))
+    .map((p) => ({ pin: orientPin(p, def, orientationOf(object)), v: sim.ac ? sim.pinVoltageRms(object.id, p.id) : sim.pinVoltage(object.id, p.id) }))
     .filter((x) => x.v !== undefined)
 
   if (readings.length === 0 && pins.length === 0) {

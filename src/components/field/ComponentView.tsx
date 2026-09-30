@@ -1,9 +1,9 @@
 import * as React from "react"
 import { FlameIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { objectSize } from "@/schematic/geometry"
+import { objectSize, orientationOf, placedText, type Orientation } from "@/schematic/geometry"
 import { getDef, partInitial } from "@/schematic/registry"
-import { partKey, type BodyShape, type ComponentDef, type Damage, type Fill, type PartDef, type PartState, type PlacedObject, type Rotation } from "@/schematic/types"
+import { partKey, type BodyShape, type ComponentDef, type Damage, type Fill, type PartDef, type PartState, type PlacedObject } from "@/schematic/types"
 import { LED_COLORS } from "@/schematic/components/basic"
 import type { DisplayFrame } from "@/sim/use-simulation"
 import { useObjectReadings, useObjectSim, type SimStore } from "@/sim/sim-store"
@@ -28,6 +28,12 @@ const SYMBOL_STROKE = 2
 function HollowBackdrop({ def, grid }: { def: ComponentDef; grid: number }) {
   const { hollow } = selectionOutline(def)
   return hollow ? <path d={hollow} transform={`scale(${grid})`} className="fill-background stroke-none" pointerEvents="none" /> : null
+}
+
+function uprightAt(x: number, y: number, angle: number, { rotation, mirror }: Orientation) {
+  const turn = angle - rotation
+  if (!turn && !mirror) return undefined
+  return `translate(${x} ${y})${mirror ? " scale(-1 1)" : ""}${turn ? ` rotate(${turn})` : ""} translate(${-x} ${-y})`
 }
 
 /** Named LED colours resolve to CSS; anything else is passed through. */
@@ -80,7 +86,10 @@ export const ComponentView = React.memo(function ComponentView({
   const g = (v: number) => v * grid
   const props = { ...def.defaults, ...object.props }
   if (def.derive) Object.assign(props, def.derive(props))
-  const rotation: Rotation = object.rotation ?? 0
+  const orientation = orientationOf(object)
+  const { rotation, mirror } = orientation
+  const levelText = placedText("middle", 0, orientation).angle
+  const partText = (x: number, y: number) => uprightAt(x, y, levelText, orientation)
   const damage: Damage | undefined = live.damage
   // The SVG keeps the unrotated size and is rotated around its center; offset it so the
   // rotated box lands exactly on the object's (rotated) bounds.
@@ -94,7 +103,7 @@ export const ComponentView = React.memo(function ComponentView({
       data-selected={selected || undefined}
       data-damaged={damage ? "" : undefined}
       className="absolute cursor-move overflow-visible select-none"
-      style={{ left, top, width: w, height: h, transform: rotation ? `rotate(${rotation}deg)` : undefined }}
+      style={{ left, top, width: w, height: h, transform: rotation || mirror ? `rotate(${rotation}deg)${mirror ? " scaleX(-1)" : ""}` : undefined }}
       strokeWidth={1}
       viewBox={`0 0 ${w} ${h}`}
       onPointerDown={(e) => onBodyPointerDown(e, object.id)}
@@ -107,7 +116,7 @@ export const ComponentView = React.memo(function ComponentView({
       <g className={cn("body", damage && "opacity-50 saturate-0")}>
         <HollowBackdrop def={def} grid={grid} />
         {def.body.map((s, i) => (
-          <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} boost={detail.textBoost} sheeted={sheeted} props={props} rotation={rotation} />
+          <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} boost={detail.textBoost} sheeted={sheeted} props={props} orientation={orientation} />
         ))}
       </g>
       <g className="parts">
@@ -122,12 +131,14 @@ export const ComponentView = React.memo(function ComponentView({
               state={simulated ?? parts[key] ?? partInitial(def, p.id)}
               level={p.type === "display" ? (live.live ? (p.backlight ? (live.parts[partKey(object.id, p.backlight)]?.level ?? 0) : 1) : 0) : simulated?.level}
               display={p.type === "display" ? live.display : undefined}
+              mirror={mirror}
+              partText={partText}
               onChange={simulated ? undefined : (patch) => onPartChange(object.id, p.id, patch)}
             />
           )
         })}
       </g>
-      {def.meter && detail.labels && <Meter def={def} objectId={object.id} sim={sim} live={live.live} g={g} rotation={rotation} />}
+      {def.meter && detail.labels && <Meter def={def} objectId={object.id} sim={sim} live={live.live} g={g} orientation={orientation} />}
       {damage && (
         <g pointerEvents="none">
           <rect x={0} y={0} width={w} height={h} rx={g(0.6)} className="fill-destructive/15 stroke-destructive" strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeDasharray={`${g(0.25)} ${g(0.25)}`} />
@@ -138,7 +149,7 @@ export const ComponentView = React.memo(function ComponentView({
             height={g(1.2)}
             className="fill-destructive/20 stroke-destructive"
             strokeWidth={1.5}
-            transform={rotation ? `rotate(${-rotation} ${w / 2} ${h / 2})` : undefined}
+            transform={uprightAt(w / 2, h / 2, 0, orientation)}
           />
         </g>
       )}
@@ -157,14 +168,14 @@ function Meter({
   sim,
   live,
   g,
-  rotation,
+  orientation,
 }: {
   def: NonNullable<ReturnType<typeof getDef>>
   objectId: string
   sim: SimStore
   live: boolean
   g: (v: number) => number
-  rotation: Rotation
+  orientation: Orientation
 }) {
   const readings = useObjectReadings(sim, objectId)
   const m = def.meter!
@@ -186,7 +197,7 @@ function Meter({
       textAnchor="middle"
       className="fill-foreground stroke-none font-mono tabular-nums"
       pointerEvents="none"
-      transform={rotation ? `rotate(${-rotation} ${x} ${y})` : undefined}
+      transform={uprightAt(x, y, placedText("middle", 0, orientation).angle, orientation)}
     >
       {text}
     </text>
@@ -201,7 +212,7 @@ function Shape({
   boost,
   sheeted,
   props,
-  rotation,
+  orientation,
 }: {
   shape: BodyShape
   g: (v: number) => number
@@ -210,9 +221,10 @@ function Shape({
   boost: number
   sheeted: boolean
   props: Record<string, string>
-  rotation: Rotation
+  orientation: Orientation
 }) {
   if (shape.type === "text" && (!labels || (sheeted && fixedText(shape.text)))) return null
+  const placed = shape.type === "text" ? placedText(shape.anchor ?? "middle", shape.rotate ?? 0, orientation) : null
   switch (shape.type) {
     case "path":
       return (
@@ -249,10 +261,9 @@ function Shape({
           x={g(shape.x)}
           y={g(shape.y)}
           fontSize={g((shape.size ?? 0.4) * boost)}
-          textAnchor={shape.anchor ?? "middle"}
+          textAnchor={placed?.anchor}
           dominantBaseline="middle"
-          // Counter-rotate so labels stay readable whatever the component's rotation.
-          transform={`rotate(${(shape.rotate ?? 0) - rotation} ${g(shape.x)} ${g(shape.y)})`}
+          transform={uprightAt(g(shape.x), g(shape.y), placed?.angle ?? 0, orientation)}
           className={cn(
             "stroke-none font-sans",
             shape.inverse ? "fill-background" : shape.muted ? "fill-muted-foreground" : "fill-foreground",
@@ -268,7 +279,7 @@ function Shape({
  * A display panel: the frame the simulation composed, drawn on a canvas inside the SVG,
  * scaled by the backlight; the pointer on it is a touch with panel coordinates.
  */
-function DisplayPanel({ part, g, level, display, onChange }: { part: Extract<PartDef, { type: "display" }>; g: (v: number) => number; level: number; display: DisplayFrame | undefined; onChange?: (patch: PartState) => void }) {
+function DisplayPanel({ part, g, level, display, mirror, onChange }: { part: Extract<PartDef, { type: "display" }>; g: (v: number) => number; level: number; display: DisplayFrame | undefined; mirror: boolean; onChange?: (patch: PartState) => void }) {
   const canvas = React.useRef<HTMLCanvasElement>(null)
   const drawn = React.useRef(-1)
   React.useEffect(() => {
@@ -294,11 +305,12 @@ function DisplayPanel({ part, g, level, display, onChange }: { part: Extract<Par
     const vh = svg?.viewBox.baseVal.height || r.height
     const wx = ((e.clientX - r.left) / r.width) * vw
     const wy = ((e.clientY - r.top) / r.height) * vh
-    return { x: ((wx - g(part.x)) / g(part.w)) * part.width, y: ((wy - g(part.y)) / g(part.h)) * part.height }
+    const left = mirror ? vw - g(part.x) - g(part.w) : g(part.x)
+    return { x: ((wx - left) / g(part.w)) * part.width, y: ((wy - g(part.y)) / g(part.h)) * part.height }
   }
   return (
     <foreignObject x={g(part.x)} y={g(part.y)} width={g(part.w)} height={g(part.h)}>
-      <div className="relative h-full w-full bg-black" style={{ cursor: onChange ? "crosshair" : undefined }}>
+      <div className="relative h-full w-full bg-black" style={{ cursor: onChange ? "crosshair" : undefined, transform: mirror ? "scaleX(-1)" : undefined }}>
         <canvas
           ref={canvas}
           width={part.width}
@@ -331,6 +343,8 @@ function Part({
   state,
   level,
   display,
+  mirror,
+  partText,
   onChange,
 }: {
   part: PartDef
@@ -340,6 +354,8 @@ function Part({
   level?: number
   /** The frame a display shows. */
   display?: DisplayFrame
+  mirror: boolean
+  partText: (x: number, y: number) => string | undefined
   /** Undefined while the simulation owns this part. */
   onChange?: (patch: PartState) => void
 }) {
@@ -348,7 +364,7 @@ function Part({
   const stop = (e: React.PointerEvent | React.MouseEvent) => e.stopPropagation()
   const title = `${part.label}${"mcu" in part && part.mcu ? ` · ${part.mcu}` : ""}`
 
-  if (part.type === "display") return <DisplayPanel part={part} g={g} level={level ?? 0} display={display} onChange={onChange} />
+  if (part.type === "display") return <DisplayPanel part={part} g={g} level={level ?? 0} display={display} mirror={mirror} onChange={onChange} />
 
   if (part.type === "led") {
     const glow = level ?? (state.on ? 1 : 0)
@@ -380,7 +396,7 @@ function Part({
           strokeWidth={1}
           vectorEffect="non-scaling-stroke"
         />
-        <text x={cx} y={cy + g(0.65)} fontSize={g(0.28)} textAnchor="middle" className="fill-muted-foreground stroke-none font-mono">
+        <text x={cx} y={cy + g(0.65)} fontSize={g(0.28)} textAnchor="middle" transform={partText(cx, cy + g(0.65))} className="fill-muted-foreground stroke-none font-mono">
           {part.label}
         </text>
       </g>
@@ -460,7 +476,7 @@ function Part({
             />
           </>
         )}
-        <text x={cx} y={cy + h / 2 + g(0.45)} fontSize={g(0.3)} textAnchor="middle" className={cn("stroke-none font-mono", plugged ? "fill-foreground" : "fill-muted-foreground")}>
+        <text x={cx} y={cy + h / 2 + g(0.45)} fontSize={g(0.3)} textAnchor="middle" transform={partText(cx, cy + h / 2 + g(0.45))} className={cn("stroke-none font-mono", plugged ? "fill-foreground" : "fill-muted-foreground")}>
           {plugged ? "USB" : "USB (unplugged)"}
         </text>
         {/* generous hit area */}
@@ -497,6 +513,7 @@ function Part({
           fontSize={g(0.9)}
           textAnchor="middle"
           dominantBaseline="middle"
+          transform={partText(cx, cy + g(0.02))}
           className={cn("pointer-events-none stroke-none font-mono font-semibold", state.on ? "fill-white" : "fill-foreground")}
         >
           {state.on ? "1" : "0"}
@@ -538,7 +555,7 @@ function Part({
         vectorEffect="non-scaling-stroke"
       />
       {part.label && (
-        <text x={cx} y={cy + half + g(0.4)} fontSize={g(0.28)} textAnchor="middle" className="fill-muted-foreground stroke-none font-mono">
+        <text x={cx} y={cy + half + g(0.4)} fontSize={g(0.28)} textAnchor="middle" transform={partText(cx, cy + half + g(0.4))} className="fill-muted-foreground stroke-none font-mono">
           {part.label}
         </text>
       )}

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { intersects, objectRect, type Rect } from "@/schematic/geometry"
+import { intersects, objectRect, orientationOf, type Rect } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject } from "@/schematic/types"
 import { readFieldPalette, useThemeName } from "./field-palette"
@@ -49,7 +49,7 @@ export function TextCanvas({ objects, view, grid, scale, boost, raster }: TextCa
 
     const placed = (object: PlacedObject): (Rect & { sheet: Symbol; stretch: number }) | null => {
       const def = getDef(object.def)
-      const sheet = def && raster.get(def, object.rotation ?? 0, grid, pixels, boost)
+      const sheet = def && raster.get(def, orientationOf(object), grid, pixels, boost)
       if (!sheet) return null
       const stretch = pixels / sheet.scale
       const rect = objectRect(object, grid)

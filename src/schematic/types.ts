@@ -379,6 +379,7 @@ export type PlacedObject = {
   y: number
   /** Clockwise rotation in degrees. */
   rotation?: Rotation
+  mirror?: boolean
   /** ref, value and other per-instance props. */
   props?: Record<string, string>
   /**

@@ -217,6 +217,14 @@ export function MenuBar({
               Rotate 45° counter-clockwise
               <MenubarShortcut>⇧R</MenubarShortcut>
             </MenubarItem>
+            <MenubarItem onClick={act((f) => f.flip("horizontal"))} disabled={!state.hasObjects}>
+              Mirror horizontally
+              <MenubarShortcut>X</MenubarShortcut>
+            </MenubarItem>
+            <MenubarItem onClick={act((f) => f.flip("vertical"))} disabled={!state.hasObjects}>
+              Mirror vertically
+              <MenubarShortcut>Y</MenubarShortcut>
+            </MenubarItem>
             <MenubarItem variant="destructive" onClick={act((f) => f.deleteSelected())} disabled={!state.hasSelection}>
               Delete
               <MenubarShortcut>Del</MenubarShortcut>

@@ -35,6 +35,50 @@ export function rotateSide(side: Direction, rot: Rotation): Direction {
   return DIRECTIONS[(DIRECTIONS.indexOf(side) + rot / 45) % 8]
 }
 
+export type Orientation = { rotation: Rotation; mirror: boolean }
+
+export const UPRIGHT: Orientation = { rotation: 0, mirror: false }
+
+export const orientationOf = (obj: { rotation?: Rotation; mirror?: boolean }): Orientation => ({
+  rotation: obj.rotation ?? 0,
+  mirror: obj.mirror ?? false,
+})
+
+export type FlipAxis = "horizontal" | "vertical"
+
+export function flipped({ rotation, mirror }: Orientation, axis: FlipAxis): Orientation {
+  const turned = axis === "horizontal" ? 360 - rotation : 540 - rotation
+  return { rotation: (turned % 360) as Rotation, mirror: !mirror }
+}
+
+const MIRRORED: Record<Direction, Direction> = {
+  top: "top",
+  bottom: "bottom",
+  left: "right",
+  right: "left",
+  "top-left": "top-right",
+  "top-right": "top-left",
+  "bottom-left": "bottom-right",
+  "bottom-right": "bottom-left",
+}
+
+export function orientSide(side: Direction, { rotation, mirror }: Orientation): Direction {
+  return rotateSide(mirror ? MIRRORED[side] : side, rotation)
+}
+
+export function orientOffset(v: Point, { rotation, mirror }: Orientation): Point {
+  const i = rotation / 45
+  const x = mirror ? -v.x : v.x
+  return { x: x * COS[i] - v.y * SIN[i], y: x * SIN[i] + v.y * COS[i] }
+}
+
+export function unorientOffset(v: Point, { rotation, mirror }: Orientation): Point {
+  const i = rotation / 45
+  const x = v.x * COS[i] + v.y * SIN[i]
+  const y = -v.x * SIN[i] + v.y * COS[i]
+  return { x: mirror ? -x : x, y }
+}
+
 /** Size in cells of the rotated bounding box. On a diagonal it is the axis-aligned hull. */
 export function objectSize(def: ComponentDef, rot: Rotation = 0) {
   const i = rot / 45
@@ -48,20 +92,29 @@ export function objectSize(def: ComponentDef, rot: Rotation = 0) {
  * The pin is rotated about the component's centre, exactly as the rendered SVG is, so the
  * dot a wire attaches to always sits where the symbol draws it — off the grid on a diagonal.
  */
-export function rotatePin(pin: PinDef, def: ComponentDef, rot: Rotation = 0): PlacedPin {
-  const i = rot / 45
-  const cos = COS[i]
-  const sin = SIN[i]
-  const dx = pin.x - def.width / 2
-  const dy = pin.y - def.height / 2
-  const box = objectSize(def, rot)
+export function orientPin(pin: PinDef, def: ComponentDef, orientation: Orientation = UPRIGHT): PlacedPin {
+  const box = objectSize(def, orientation.rotation)
+  const at = orientOffset({ x: pin.x - def.width / 2, y: pin.y - def.height / 2 }, orientation)
   return {
     ...pin,
-    x: dx * cos - dy * sin + box.w / 2,
-    y: dx * sin + dy * cos + box.h / 2,
-    side: rotateSide(pin.side, rot),
-    labelAt: rotateSide(pin.labelAt, rot),
+    x: at.x + box.w / 2,
+    y: at.y + box.h / 2,
+    side: orientSide(pin.side, orientation),
+    labelAt: orientSide(pin.labelAt, orientation),
   }
+}
+
+export type TextAnchor = "start" | "middle" | "end"
+
+export type PlacedText = { angle: 0 | -90; anchor: TextAnchor }
+
+export function placedText(anchor: TextAnchor, angle: number, orientation: Orientation): PlacedText {
+  const turn = (angle * Math.PI) / 180
+  const drawn = orientOffset({ x: Math.cos(turn), y: Math.sin(turn) }, orientation)
+  const onItsSide = Math.abs(drawn.x) < Math.SQRT1_2 - 1e-9
+  const readsBackwards = onItsSide ? drawn.y > 0 : drawn.x < 0
+  const flipped: TextAnchor = anchor === "start" ? "end" : anchor === "end" ? "start" : anchor
+  return { angle: onItsSide ? -90 : 0, anchor: readsBackwards ? flipped : anchor }
 }
 export type Rect = { x: number; y: number; w: number; h: number }
 
@@ -83,7 +136,7 @@ export function objectRect(obj: PlacedObject, grid: number): Rect {
 
 export type ObjectPin = { key: string; pin: PlacedPin; point: Point }
 
-const placementOf = (obj: PlacedObject, grid: number) => `${obj.id}|${obj.def}|${obj.x}|${obj.y}|${obj.rotation ?? 0}|${grid}`
+const placementOf = (obj: PlacedObject, grid: number) => `${obj.id}|${obj.def}|${obj.x}|${obj.y}|${obj.rotation ?? 0}|${obj.mirror ? "m" : ""}|${grid}`
 
 const placedPins = new WeakMap<PlacedObject, { placement: string; pins: readonly ObjectPin[] }>()
 
@@ -96,9 +149,10 @@ export function objectPins(obj: PlacedObject, grid: number): readonly ObjectPin[
   const cached = placedPins.get(obj)
   if (cached && cached.placement === placement) return cached.pins
   const def = getDef(obj.def)
+  const orientation = orientationOf(obj)
   const pins: readonly ObjectPin[] = def
     ? def.pins.map((raw) => {
-        const pin = rotatePin(raw, def, obj.rotation)
+        const pin = orientPin(raw, def, orientation)
         return { key: `${obj.id}:${pin.id}`, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }
       })
     : []
@@ -111,7 +165,7 @@ export function pinPoint(obj: PlacedObject, pinId: string, grid: number): Point 
   const def = getDef(obj.def)
   const raw = def && getPin(def, pinId)
   if (!def || !raw) return null
-  const pin = rotatePin(raw, def, obj.rotation)
+  const pin = orientPin(raw, def, orientationOf(obj))
   return { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid }
 }
 
@@ -567,7 +621,7 @@ export class Router {
         }
         if (o.id === w.from.object || o.id === w.to.object) continue
         avoid.push(rect)
-        signature += `|${o.id}@${o.def},${o.x},${o.y},${o.rotation ?? 0}`
+        signature += `|${o.id}@${o.def},${o.x},${o.y},${o.rotation ?? 0}${o.mirror ? "m" : ""}`
       }
       if (cached && cached.signature === signature) {
         const same = { ...cached, wire: w, deps, area }
@@ -597,7 +651,7 @@ export function resolvePinIn(index: ReadonlyMap<string, PlacedObject>, ref: PinR
   const def = getDef(obj.def)
   const raw = def && getPin(def, ref.pin)
   if (!def || !raw) return null
-  const pin = rotatePin(raw, def, obj.rotation)
+  const pin = orientPin(raw, def, orientationOf(obj))
   return { obj, def, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }
 }
 

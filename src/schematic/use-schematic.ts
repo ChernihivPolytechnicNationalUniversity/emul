@@ -3,7 +3,8 @@ import { isOptLevel, type SourceFile } from "emul-shared/source"
 import { isNetlist } from "emul-shared/hdl"
 import { normalizeFiles } from "@/project/files"
 import { normalizeDebug } from "@/debug/saved"
-import { intersects, objectRect, objectSize, snap, type Point, type Rect } from "./geometry"
+import { intersects, objectRect, snap, type FlipAxis, type Point, type Rect } from "./geometry"
+import { flipSelection, rotateSelection } from "./orient"
 import { getDef } from "./registry"
 import {
   emptySchematic,
@@ -11,7 +12,6 @@ import {
   type PartState,
   type PinRef,
   type PlacedObject,
-  type Rotation,
   type Schematic,
   type BoardDebug,
   type HdlModule,
@@ -320,22 +320,12 @@ export function useSchematic(grid: number) {
 
   /** Rotate objects by ±45° around their centers, keeping the centre on the grid. */
   const rotate = React.useCallback(
-    (ids: ReadonlySet<string>, delta: 45 | -45) => {
-      setDoc((d) => ({
-        ...d,
-        objects: d.objects.map((o) => {
-          if (!ids.has(o.id)) return o
-          const def = getDef(o.def)
-          if (!def) return o
-          const rotation = (((o.rotation ?? 0) + delta + 360) % 360) as Rotation
-          const before = objectSize(def, o.rotation)
-          const after = objectSize(def, rotation)
-          const cx = o.x + (before.w * grid) / 2
-          const cy = o.y + (before.h * grid) / 2
-          return { ...o, rotation, x: snap(cx - (after.w * grid) / 2, grid), y: snap(cy - (after.h * grid) / 2, grid) }
-        }),
-      }))
-    },
+    (ids: ReadonlySet<string>, delta: 45 | -45) => setDoc((d) => rotateSelection(d, ids, delta, grid)),
+    [grid, setDoc],
+  )
+
+  const flip = React.useCallback(
+    (ids: ReadonlySet<string>, axis: FlipAxis) => setDoc((d) => flipSelection(d, ids, axis, grid)),
     [grid, setDoc],
   )
 
@@ -458,6 +448,7 @@ export function useSchematic(grid: number) {
     selectInRect,
     moveTo,
     rotate,
+    flip,
     setProps,
     setProject,
     setBuild,

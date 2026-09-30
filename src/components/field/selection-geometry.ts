@@ -53,5 +53,5 @@ export function placementOf(object: PlacedObject, def: ComponentDef, grid: numbe
   const h = def.height * grid
   const left = object.x + (box.w * grid - w) / 2
   const top = object.y + (box.h * grid - h) / 2
-  return { left, top, w, h, rotation }
+  return { left, top, w, h, rotation, mirror: object.mirror ?? false }
 }

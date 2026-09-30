@@ -1,4 +1,4 @@
-import { objectRect, objectSize, routeBox, type Rect, type RoutedWire } from "@/schematic/geometry"
+import { objectRect, objectSize, orientationOf, orientOffset, placedText, routeBox, type Rect, type RoutedWire } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
@@ -37,24 +37,21 @@ function paintLabels(context: CanvasRenderingContext2D, host: Element, objects: 
     if (!def) continue
     const props: Record<string, string> = { ...def.defaults, ...object.props }
     if (def.derive) Object.assign(props, def.derive(props))
-    const rotation = object.rotation ?? 0
-    const box = objectSize(def, rotation)
+    const orientation = orientationOf(object)
+    const box = objectSize(def, orientation.rotation)
     const cx = object.x + (box.w * grid) / 2
     const cy = object.y + (box.h * grid) / 2
-    const turn = (rotation * Math.PI) / 180
     for (const shape of def.body) {
       if (shape.type !== "text" || fixedText(shape.text)) continue
       const text = shape.text.replace(/\{(\w+)\}/g, (_, k: string) => props[k] ?? "")
       if (!text) continue
-      const dx = shape.x * grid - (def.width * grid) / 2
-      const dy = shape.y * grid - (def.height * grid) / 2
-      const x = cx + dx * Math.cos(turn) - dy * Math.sin(turn)
-      const y = cy + dx * Math.sin(turn) + dy * Math.cos(turn)
+      const placed = placedText(shape.anchor ?? "middle", shape.rotate ?? 0, orientation)
+      const at = orientOffset({ x: shape.x * grid - (def.width * grid) / 2, y: shape.y * grid - (def.height * grid) / 2 }, orientation)
       context.save()
-      context.translate((x - view.x) * pixels, (y - view.y) * pixels)
-      context.rotate(((shape.rotate ?? 0) * Math.PI) / 180)
+      context.translate((cx + at.x - view.x) * pixels, (cy + at.y - view.y) * pixels)
+      context.rotate((placed.angle * Math.PI) / 180)
       context.font = `${(shape.size ?? 0.4) * grid * pixels}px ${family}`
-      context.textAlign = ALIGN[shape.anchor ?? "middle"]
+      context.textAlign = ALIGN[placed.anchor]
       context.fillStyle = shape.inverse ? colors.background : shape.muted ? colors.muted : colors.foreground
       context.fillText(text, 0, 0)
       context.restore()
@@ -91,7 +88,7 @@ export async function exportPng({ host, theme, objects, routes, grid, colorOf, s
   texts.setPalette(readFieldPalette(host, theme))
   for (const object of objects) {
     const def = getDef(object.def)
-    const sheet = def && texts.get(def, object.rotation ?? 0, grid, pixels, 1)
+    const sheet = def && texts.get(def, orientationOf(object), grid, pixels, 1)
     if (!sheet) continue
     const stretch = pixels / sheet.scale
     const rect = objectRect(object, grid)
