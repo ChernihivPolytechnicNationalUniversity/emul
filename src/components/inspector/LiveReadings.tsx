@@ -2,8 +2,9 @@ import { cn } from "@/lib/utils"
 import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { getDef } from "@/schematic/registry"
-import { rotatePin } from "@/schematic/geometry"
-import type { PlacedObject } from "@/schematic/types"
+import { orientationOf, orientPin } from "@/schematic/geometry"
+import { elementTerminals, terminalName } from "@/schematic/terminals"
+import type { PinDef, PlacedObject } from "@/schematic/types"
 import type { Reading } from "@/sim/engine"
 import type { SimReadout } from "@/sim/use-simulation"
 import { formatSI } from "@/sim/units"
@@ -44,7 +45,7 @@ export function LiveReadings({ object, sim, className, ...props }: LiveReadingsP
   const readings = sim.readings(object.id).filter((r) => !r.hidden && !idle(r))
   const pins = def.pins
     .filter((p) => !(def.hideIdle && p.kind === "gnd"))
-    .map((p) => ({ pin: rotatePin(p, def, object.rotation), v: sim.ac ? sim.pinVoltageRms(object.id, p.id) : sim.pinVoltage(object.id, p.id) }))
+    .map((p) => ({ pin: orientPin(p, def, orientationOf(object)), v: sim.ac ? sim.pinVoltageRms(object.id, p.id) : sim.pinVoltage(object.id, p.id) }))
     .filter((x) => x.v !== undefined)
 
   if (readings.length === 0 && pins.length === 0) {
@@ -58,7 +59,7 @@ export function LiveReadings({ object, sim, className, ...props }: LiveReadingsP
   return (
     <div className={cn("flex flex-col gap-3", className)} {...props}>
       {readings.map((r, i) => (
-        <ElementReading key={i} reading={r} title={readings.length > 1 ? `${KIND_LABEL[r.kind]} ${i + 1}` : KIND_LABEL[r.kind]} />
+        <ElementReading key={i} reading={r} terminals={elementTerminals(def, r.element)} title={readings.length > 1 ? `${KIND_LABEL[r.kind]} ${i + 1}` : KIND_LABEL[r.kind]} />
       ))}
       {pins.length > 0 && (
         <div>
@@ -79,7 +80,7 @@ export function LiveReadings({ object, sim, className, ...props }: LiveReadingsP
   )
 }
 
-function ElementReading({ reading: r, title }: { reading: Reading; title: string }) {
+function ElementReading({ reading: r, terminals, title }: { reading: Reading; terminals: readonly [PinDef, PinDef] | null; title: string }) {
   // In AC circuits the instantaneous values swing every sample, so the readings show RMS instead.
   const rms = r.rms
   const iName = r.kind === "Q" ? "Ic" : r.kind === "M" ? "Id" : "Current"
@@ -89,10 +90,15 @@ function ElementReading({ reading: r, title }: { reading: Reading; title: string
         [`${iName} (RMS)`, formatSI(rms.current, "A")],
         [`${vName} (RMS)`, formatSI(rms.voltage, "V")],
       ]
-    : [
-        [iName, formatSI(Math.abs(r.current), "A")],
-        [vName, formatSI(r.voltage, "V")],
-      ]
+    : terminals
+      ? [
+          [`${iName} ${terminalName(terminals[0])} → ${terminalName(terminals[1])}`, formatSI(r.current, "A")],
+          [`${vName} ${terminalName(terminals[0])} − ${terminalName(terminals[1])}`, formatSI(r.voltage, "V")],
+        ]
+      : [
+          [iName, formatSI(Math.abs(r.current), "A")],
+          [vName, formatSI(r.voltage, "V")],
+        ]
   if (r.kind !== "C" && r.kind !== "L") rows.push([rms ? "Power (avg)" : "Power", formatSI(rms ? rms.power : r.power, "W")])
   for (const [k, v] of Object.entries(r.extra ?? {})) rows.push([k, v])
   const charge = r.charge

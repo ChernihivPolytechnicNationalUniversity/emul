@@ -83,6 +83,7 @@ export const chargeBoostModule: ComponentDef = {
   parts,
   model,
   hideIdle: true,
+  pinsAreSockets: true,
   info: {
     Charger: "TP4056, 1 A (R_PROG 1.2 kΩ), 4.2 V ±1 %, trickle 100 mA below 2.9 V, ends at 100 mA, recharges at 4.05 V",
     Protection: "DW03: overcharge 4.3 V, over-discharge 2.4 V, overcurrent 3.5 A, short circuit 20 A, 40 mΩ",

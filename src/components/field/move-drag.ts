@@ -1,7 +1,7 @@
-import { resolvePinIn, routeWire, snap, toPath, type Direction, type Point } from "@/schematic/geometry"
+import { bendReach, closestOnRoute, liesOnRoute, resolvePinIn, routeWire, snap, toPath, trimRouteEnds, type Point, type WireEnd } from "@/schematic/geometry"
 import type { PinRef, PlacedObject, Wire } from "@/schematic/types"
 
-type Terminal = { point: Point; side: Direction; stub: number }
+type Terminal = WireEnd
 
 type ElasticWire = {
   from: Terminal
@@ -9,20 +9,26 @@ type ElasticWire = {
   fromMoves: boolean
   toMoves: boolean
   bends: Point[]
-  paths: SVGPathElement[]
+  paths: WirePaths
 }
 
-type RigidWire = { paths: SVGPathElement[] }
+type WirePaths = { full: SVGPathElement[]; casings: SVGPathElement[] }
+
+type RigidWire = { elements: SVGElement[] }
+
+type Movable = HTMLElement | SVGSVGElement
 
 export type MovePlan = {
   origin: Point
   grid: number
   cornerRadius: number
+  casingTrim: number
   startPositions: ReadonlyMap<string, Point>
-  bodies: HTMLElement[]
-  pinGroups: SVGGElement[]
+  bodies: Movable[]
+  svgGroups: SVGGElement[]
   rigidWires: RigidWire[]
   elasticWires: ElasticWire[]
+  blocked?: (dx: number, dy: number) => boolean
 }
 
 const shifted = (p: Point, dx: number, dy: number): Point => ({ x: p.x + dx, y: p.y + dy })
@@ -39,19 +45,45 @@ function terminalOf(index: ReadonlyMap<string, PlacedObject>, ref: PinRef, grid:
 
 const pathsOf = (el: Element): SVGPathElement[] => (el instanceof SVGPathElement ? [el] : [...el.querySelectorAll("path")])
 
-function wirePaths(root: ParentNode, wireId: string): SVGPathElement[] {
-  return [...root.querySelectorAll(`[data-wire="${CSS.escape(wireId)}"]`)].flatMap(pathsOf)
+function splitCasings(paths: SVGPathElement[]): WirePaths {
+  return { full: paths.filter((p) => !p.hasAttribute("data-casing")), casings: paths.filter((p) => p.hasAttribute("data-casing")) }
 }
 
-function wirePathsById(root: ParentNode): Map<string, SVGPathElement[]> {
-  const byId = new Map<string, SVGPathElement[]>()
+function wirePaths(root: ParentNode, wireId: string): WirePaths {
+  return splitCasings([...root.querySelectorAll(`[data-wire="${CSS.escape(wireId)}"]`)].flatMap(pathsOf))
+}
+
+function setRoute(paths: WirePaths, pts: Point[], cornerRadius: number, casingTrim: number) {
+  const d = toPath(pts, cornerRadius)
+  for (const path of paths.full) path.setAttribute("d", d)
+  if (paths.casings.length) {
+    const casing = toPath(trimRouteEnds(pts, casingTrim), cornerRadius)
+    for (const path of paths.casings) path.setAttribute("d", casing)
+  }
+}
+
+function wireElementsById(root: ParentNode, carried: Element | null): Map<string, SVGElement[]> {
+  const byId = new Map<string, SVGElement[]>()
   for (const el of root.querySelectorAll<SVGElement>("[data-wire]")) {
+    if (carried?.contains(el)) continue
     const id = el.dataset.wire!
-    const paths = byId.get(id)
-    if (paths) paths.push(...pathsOf(el))
-    else byId.set(id, pathsOf(el))
+    const elements = byId.get(id)
+    if (elements) elements.push(el)
+    else byId.set(id, [el])
   }
   return byId
+}
+
+function selectionCarriedWhole(root: ParentNode, moving: ReadonlySet<string>, wires: readonly Wire[]): SVGSVGElement | null {
+  const layer = root.querySelector<SVGSVGElement>("[data-slot=selection]")
+  if (!layer) return null
+  for (const plate of layer.querySelectorAll<SVGElement>("[data-plate]")) if (!moving.has(plate.dataset.plate!)) return null
+  const byId = new Map(wires.map((w) => [w.id, w]))
+  for (const band of layer.querySelectorAll<SVGElement>("[data-wire]")) {
+    const w = byId.get(band.dataset.wire!)
+    if (!w || !moving.has(w.from.object) || !moving.has(w.to.object)) return null
+  }
+  return layer
 }
 
 function handlesById<T extends Element>(root: ParentNode, attribute: string): Map<string, T> {
@@ -68,43 +100,47 @@ export function planMove(
   origin: Point,
   grid: number,
   cornerRadius: number,
+  casingTrim: number,
   layer?: { element: HTMLElement | null; whole: boolean },
 ): MovePlan {
   const index = new Map(objects.map((o) => [o.id, o]))
   const startPositions = new Map<string, Point>()
   for (const o of objects) if (moving.has(o.id)) startPositions.set(o.id, { x: o.x, y: o.y })
-  const bodies: HTMLElement[] = layer?.element ? [layer.element] : []
-  if (layer?.whole) return { origin, grid, cornerRadius, startPositions, bodies, pinGroups: [], rigidWires: [], elasticWires: [] }
+  const bodies: Movable[] = layer?.element ? [layer.element] : []
+  if (layer?.whole) return { origin, grid, cornerRadius, casingTrim, startPositions, bodies, svgGroups: [], rigidWires: [], elasticWires: [] }
 
   const bodyOf = handlesById<HTMLElement>(root, "data-body")
   const pinsOf = handlesById<SVGGElement>(root, "data-pins")
-  const pinGroups: SVGGElement[] = []
+  const svgGroups: SVGGElement[] = []
   for (const id of startPositions.keys()) {
     const body = bodyOf.get(id)
     if (body) bodies.push(body)
     const pins = pinsOf.get(id)
-    if (pins) pinGroups.push(pins)
+    if (pins) svgGroups.push(pins)
   }
+  const selection = selectionCarriedWhole(root, moving, wires)
+  if (selection) bodies.push(selection)
+  else for (const plate of root.querySelectorAll<SVGGElement>("[data-plate]")) if (moving.has(plate.dataset.plate!)) svgGroups.push(plate)
 
-  const wirePathsOf = wirePathsById(root)
+  const wireElementsOf = wireElementsById(root, selection)
   const rigidWires: RigidWire[] = []
   const elasticWires: ElasticWire[] = []
   for (const w of wires) {
     const fromMoves = moving.has(w.from.object)
     const toMoves = moving.has(w.to.object)
     if (!fromMoves && !toMoves) continue
-    const paths = wirePathsOf.get(w.id)
-    if (!paths?.length) continue
+    const elements = wireElementsOf.get(w.id)
+    if (!elements?.length) continue
     if (fromMoves && toMoves) {
-      rigidWires.push({ paths })
+      rigidWires.push({ elements })
       continue
     }
     const from = terminalOf(index, w.from, grid)
     const to = terminalOf(index, w.to, grid)
-    if (from && to) elasticWires.push({ from, to, fromMoves, toMoves, bends: w.points ?? [], paths })
+    if (from && to) elasticWires.push({ from, to, fromMoves, toMoves, bends: w.points ?? [], paths: splitCasings(elements.flatMap(pathsOf)) })
   }
 
-  return { origin, grid, cornerRadius, startPositions, bodies, pinGroups, rigidWires, elasticWires }
+  return { origin, grid, cornerRadius, casingTrim, startPositions, bodies, svgGroups, rigidWires, elasticWires }
 }
 
 export type BendPlan = {
@@ -112,12 +148,14 @@ export type BendPlan = {
   index: number
   points: Point[]
   origin: Point
+  start: Point
   from: Terminal
   to: Terminal
   grid: number
   cornerRadius: number
-  paths: SVGPathElement[]
-  originalPath: string
+  casingTrim: number
+  paths: WirePaths
+  original: ReadonlyMap<SVGPathElement, string>
   handle: SVGGElement | null
 }
 
@@ -128,39 +166,46 @@ export function planBend(
   index: number,
   grid: number,
   cornerRadius: number,
+  casingTrim: number,
 ): BendPlan | null {
   const points = wire.points?.slice()
-  const origin = points?.[index]
-  if (!points || !origin) return null
+  const stored = points?.[index]
+  if (!points || !stored) return null
   const objectIndex = new Map(objects.map((o) => [o.id, o]))
   const from = terminalOf(objectIndex, wire.from, grid)
   const to = terminalOf(objectIndex, wire.to, grid)
   if (!from || !to) return null
   const group = root.querySelector(`[data-wire="${CSS.escape(wire.id)}"] [data-bend="${index}"]`)
+  const drawn = group?.querySelector("circle")
+  const origin = drawn ? { x: Number(drawn.getAttribute("cx")), y: Number(drawn.getAttribute("cy")) } : stored
+  const route = routeWire(from.point, from.side, from.stub, to.point, to.side, to.stub, grid, points).pts
+  const onWire = liesOnRoute(route, stored) ? stored : closestOnRoute(route, stored)
   const paths = wirePaths(root, wire.id)
   return {
     wire: wire.id,
     index,
     points,
     origin,
+    start: { x: snap(onWire.x, grid), y: snap(onWire.y, grid) },
     from,
     to,
     grid,
     cornerRadius,
+    casingTrim,
     paths,
-    originalPath: paths[0]?.getAttribute("d") ?? "",
+    original: new Map([...paths.full, ...paths.casings].map((path) => [path, path.getAttribute("d") ?? ""])),
     handle: group instanceof SVGGElement ? group : null,
   }
 }
 
 function restoreBend(plan: BendPlan) {
   plan.handle?.setAttribute("transform", "")
-  if (plan.originalPath) for (const path of plan.paths) path.setAttribute("d", plan.originalPath)
+  for (const [path, d] of plan.original) path.setAttribute("d", d)
 }
 
 export class BendDrag {
   private plan: BendPlan | null = null
-  private pointer: Point | null = null
+  private reached: Point | null = null
   private moved = false
   private raf = 0
 
@@ -170,13 +215,17 @@ export class BendDrag {
 
   begin(plan: BendPlan | null) {
     this.plan = plan
-    this.pointer = null
+    this.reached = null
     this.moved = false
   }
 
-  track(at: Point) {
-    if (!this.plan) return
-    this.pointer = at
+  track(pointer: Point) {
+    const plan = this.plan
+    if (!plan) return
+    const from = this.reached ?? plan.start
+    const reached = bendReach(plan.from, plan.to, plan.points, plan.index, from, pointer, plan.grid)
+    if (!reached) return
+    this.reached = reached
     if (!this.raf) this.raf = requestAnimationFrame(this.frame)
   }
 
@@ -187,20 +236,20 @@ export class BendDrag {
     }
     if (this.plan && this.moved) restoreBend(this.plan)
     this.plan = null
-    this.pointer = null
+    this.reached = null
     this.moved = false
   }
 
-  preview(at: Point): { wire: string; points: Point[] } | null {
-    if (!this.plan) return null
+  preview(): { wire: string; points: Point[] } | null {
+    if (!this.plan || !this.reached) return null
     const points = this.plan.points.slice()
-    points[this.plan.index] = at
+    points[this.plan.index] = this.reached
     return { wire: this.plan.wire, points }
   }
 
   clearAndFinish(): { wire: string; points: Point[] } | null {
     const plan = this.plan
-    const at = this.pointer
+    const at = this.reached
     this.cancel()
     if (!plan || !at) return null
     const from = plan.points[plan.index]
@@ -213,15 +262,14 @@ export class BendDrag {
   private frame = () => {
     this.raf = 0
     const plan = this.plan
-    const at = this.pointer
+    const at = this.reached
     if (!plan || !at) return
     if (at.x === plan.points[plan.index].x && at.y === plan.points[plan.index].y && !this.moved) return
     this.moved = true
     const points = plan.points.slice()
     points[plan.index] = at
     const route = routeWire(plan.from.point, plan.from.side, plan.from.stub, plan.to.point, plan.to.side, plan.to.stub, plan.grid, points)
-    const d = toPath(route.pts, plan.cornerRadius)
-    for (const path of plan.paths) path.setAttribute("d", d)
+    setRoute(plan.paths, route.pts, plan.cornerRadius, plan.casingTrim)
     plan.handle?.setAttribute("transform", `translate(${at.x - plan.origin.x} ${at.y - plan.origin.y})`)
   }
 }
@@ -285,16 +333,17 @@ export class MoveDrag {
     const cssTranslate = moved ? `translate(${dx}px, ${dy}px)` : ""
     for (const body of plan.bodies) body.style.transform = cssTranslate
     const svgTranslate = moved ? `translate(${dx} ${dy})` : ""
-    for (const group of plan.pinGroups) group.setAttribute("transform", svgTranslate)
+    for (const group of plan.svgGroups) group.setAttribute("transform", svgTranslate)
+    const blocked = moved && (plan.blocked?.(dx, dy) ?? false)
+    for (const element of [...plan.bodies, ...plan.svgGroups]) element.toggleAttribute("data-blocked", blocked)
 
-    for (const wire of plan.rigidWires) for (const path of wire.paths) path.setAttribute("transform", svgTranslate)
+    for (const wire of plan.rigidWires) for (const element of wire.elements) element.setAttribute("transform", svgTranslate)
 
     for (const wire of plan.elasticWires) {
       const from = wire.fromMoves ? shifted(wire.from.point, dx, dy) : wire.from.point
       const to = wire.toMoves ? shifted(wire.to.point, dx, dy) : wire.to.point
       const route = routeWire(from, wire.from.side, wire.from.stub, to, wire.to.side, wire.to.stub, plan.grid, wire.bends)
-      const d = toPath(route.pts, plan.cornerRadius)
-      for (const path of wire.paths) path.setAttribute("d", d)
+      setRoute(wire.paths, route.pts, plan.cornerRadius, plan.casingTrim)
     }
   }
 }

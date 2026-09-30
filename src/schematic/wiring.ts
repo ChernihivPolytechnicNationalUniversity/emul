@@ -1,4 +1,4 @@
-import { nearestSegment, resolvePin, routeObstacles, routeWire, snap, type Point } from "./geometry"
+import { nearestSegment, objectIndex, ownBodies, resolvePin, routeObstacles, routeWire, snap, type Point } from "./geometry"
 import type { PinRef, PlacedObject, Schematic, Wire } from "./types"
 import type { WireColorKey } from "./wire-colors"
 
@@ -40,7 +40,7 @@ export function tapWireAt(
   if (!a || !b) return doc
 
   const bends = w.points ?? []
-  const route = routeWire(a.point, a.pin.side, a.pin.stub ?? 1, b.point, b.pin.side, b.pin.stub ?? 1, grid, bends, routeObstacles(doc.objects, grid, w.from.object, w.to.object))
+  const route = routeWire(a.point, a.pin.side, a.pin.stub ?? 1, b.point, b.pin.side, b.pin.stub ?? 1, grid, bends, routeObstacles(doc.objects, grid, w.from.object, w.to.object), ownBodies(objectIndex(doc.objects), grid, w.from.object, w.to.object))
   const seg = nearestSegment(route.pts, at)
   const on = pointOnSegment(route.pts[seg], route.pts[seg + 1], at, grid)
   if (coincide(on, a.point)) return connectPins(doc, from, w.from, points, color)
