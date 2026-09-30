@@ -4,7 +4,10 @@ import { builder } from "@/schematic/builder"
 import { pinContacts } from "@/schematic/contacts"
 import { examples, lab1Stand } from "@/schematic/examples"
 import {
+  bendReach,
+  bendsOnRoute,
   GRID,
+  liesOnRoute,
   nudgeRoutes,
   objectPins,
   objectRect,
@@ -16,6 +19,7 @@ import {
   toPath,
   type Point,
   type RoutedWire,
+  type WireEnd,
 } from "@/schematic/geometry"
 import { buildNets } from "@/schematic/nets"
 import { autoNetColor, semanticNetColor, WIRE_COLORS } from "@/schematic/wire-colors"
@@ -431,6 +435,59 @@ describe("nudging", () => {
     }
     expect.soft(apart, "every document nudges to the same routes").toBe(0)
     expect.soft(nudgedAnything, "and the corpus does exercise nudging").toBeGreaterThan(0)
+  })
+})
+
+describe("a bend handle never leaves its wire", () => {
+  const c = (v: number) => v * GRID
+  const from: WireEnd = { point: { x: c(2), y: c(15) }, side: "top", stub: 1 }
+  const intoTheLeft: WireEnd = { point: { x: c(51), y: c(12) }, side: "left", stub: 1 }
+  const fromAbove: WireEnd = { point: { x: c(51), y: c(12) }, side: "top", stub: 1 }
+  const route = (to: WireEnd, bends: Point[]) => routeWire(from.point, from.side, from.stub, to.point, to.side, to.stub, GRID, bends).pts
+
+  it("a bend dragged past the corner of a wire into a pin's back would make the wire run out and back, so the route drops it", () => {
+    const beyond = { x: c(53), y: c(3) }
+    expect(liesOnRoute(route(intoTheLeft, [{ x: c(2), y: c(3) }, beyond]), beyond)).toBe(false)
+  })
+
+  it("such a bend's handle is drawn where the wire turns, not out in the field", () => {
+    const bends = [{ x: c(2), y: c(3) }, { x: c(53), y: c(3) }]
+    const pts = route(intoTheLeft, bends)
+    const drawn = bendsOnRoute(pts, bends)
+    expect(drawn[0]).toEqual(bends[0])
+    expect(liesOnRoute(pts, drawn[1])).toBe(true)
+    expect(drawn[1]).toEqual({ x: c(50), y: c(3) })
+  })
+
+  it("dragged past where the wire can follow, the handle stops at the last place the wire still runs through", () => {
+    const bends = [{ x: c(2), y: c(3) }, { x: c(40), y: c(3) }]
+    const reached = bendReach(from, intoTheLeft, bends, 1, bends[1], { x: c(90), y: c(3) }, GRID)!
+    expect(reached.y).toBe(c(3))
+    expect(reached.x).toBeGreaterThanOrEqual(c(50))
+    expect(reached.x).toBeLessThanOrEqual(c(51))
+    const moved = bends.slice()
+    moved[1] = reached
+    expect(liesOnRoute(route(intoTheLeft, moved), reached)).toBe(true)
+  })
+
+  it("where the wire can follow, the handle goes all the way to the pointer", () => {
+    const bends = [{ x: c(2), y: c(3) }, { x: c(40), y: c(3) }]
+    const target = { x: c(56), y: c(3) }
+    expect(bendReach(from, fromAbove, bends, 1, bends[1], target, GRID)).toEqual(target)
+    const moved = bends.slice()
+    moved[1] = target
+    expect(liesOnRoute(route(fromAbove, moved), target)).toBe(true)
+  })
+
+  it("wherever the pointer goes, the bend a drag leaves behind lies on the wire", () => {
+    const bends = [{ x: c(2), y: c(3) }, { x: c(40), y: c(3) }]
+    let at = bends[1]
+    for (const pointer of [{ x: c(70), y: c(3) }, { x: c(70), y: c(-20) }, { x: c(-30), y: c(40) }, { x: c(30), y: c(8) }]) {
+      at = bendReach(from, intoTheLeft, bends, 1, at, pointer, GRID) ?? at
+      const moved = bends.slice()
+      moved[1] = at
+      expect(liesOnRoute(route(intoTheLeft, moved), at), JSON.stringify(pointer)).toBe(true)
+    }
   })
 })
 

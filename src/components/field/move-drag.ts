@@ -1,7 +1,7 @@
-import { resolvePinIn, routeWire, snap, toPath, trimRouteEnds, type Direction, type Point } from "@/schematic/geometry"
+import { bendReach, closestOnRoute, liesOnRoute, resolvePinIn, routeWire, snap, toPath, trimRouteEnds, type Point, type WireEnd } from "@/schematic/geometry"
 import type { PinRef, PlacedObject, Wire } from "@/schematic/types"
 
-type Terminal = { point: Point; side: Direction; stub: number }
+type Terminal = WireEnd
 
 type ElasticWire = {
   from: Terminal
@@ -148,6 +148,7 @@ export type BendPlan = {
   index: number
   points: Point[]
   origin: Point
+  start: Point
   from: Terminal
   to: Terminal
   grid: number
@@ -168,19 +169,24 @@ export function planBend(
   casingTrim: number,
 ): BendPlan | null {
   const points = wire.points?.slice()
-  const origin = points?.[index]
-  if (!points || !origin) return null
+  const stored = points?.[index]
+  if (!points || !stored) return null
   const objectIndex = new Map(objects.map((o) => [o.id, o]))
   const from = terminalOf(objectIndex, wire.from, grid)
   const to = terminalOf(objectIndex, wire.to, grid)
   if (!from || !to) return null
   const group = root.querySelector(`[data-wire="${CSS.escape(wire.id)}"] [data-bend="${index}"]`)
+  const drawn = group?.querySelector("circle")
+  const origin = drawn ? { x: Number(drawn.getAttribute("cx")), y: Number(drawn.getAttribute("cy")) } : stored
+  const route = routeWire(from.point, from.side, from.stub, to.point, to.side, to.stub, grid, points).pts
+  const onWire = liesOnRoute(route, stored) ? stored : closestOnRoute(route, stored)
   const paths = wirePaths(root, wire.id)
   return {
     wire: wire.id,
     index,
     points,
     origin,
+    start: { x: snap(onWire.x, grid), y: snap(onWire.y, grid) },
     from,
     to,
     grid,
@@ -199,7 +205,7 @@ function restoreBend(plan: BendPlan) {
 
 export class BendDrag {
   private plan: BendPlan | null = null
-  private pointer: Point | null = null
+  private reached: Point | null = null
   private moved = false
   private raf = 0
 
@@ -209,13 +215,17 @@ export class BendDrag {
 
   begin(plan: BendPlan | null) {
     this.plan = plan
-    this.pointer = null
+    this.reached = null
     this.moved = false
   }
 
-  track(at: Point) {
-    if (!this.plan) return
-    this.pointer = at
+  track(pointer: Point) {
+    const plan = this.plan
+    if (!plan) return
+    const from = this.reached ?? plan.start
+    const reached = bendReach(plan.from, plan.to, plan.points, plan.index, from, pointer, plan.grid)
+    if (!reached) return
+    this.reached = reached
     if (!this.raf) this.raf = requestAnimationFrame(this.frame)
   }
 
@@ -226,20 +236,20 @@ export class BendDrag {
     }
     if (this.plan && this.moved) restoreBend(this.plan)
     this.plan = null
-    this.pointer = null
+    this.reached = null
     this.moved = false
   }
 
-  preview(at: Point): { wire: string; points: Point[] } | null {
-    if (!this.plan) return null
+  preview(): { wire: string; points: Point[] } | null {
+    if (!this.plan || !this.reached) return null
     const points = this.plan.points.slice()
-    points[this.plan.index] = at
+    points[this.plan.index] = this.reached
     return { wire: this.plan.wire, points }
   }
 
   clearAndFinish(): { wire: string; points: Point[] } | null {
     const plan = this.plan
-    const at = this.pointer
+    const at = this.reached
     this.cancel()
     if (!plan || !at) return null
     const from = plan.points[plan.index]
@@ -252,7 +262,7 @@ export class BendDrag {
   private frame = () => {
     this.raf = 0
     const plan = this.plan
-    const at = this.pointer
+    const at = this.reached
     if (!plan || !at) return
     if (at.x === plan.points[plan.index].x && at.y === plan.points[plan.index].y && !this.moved) return
     this.moved = true

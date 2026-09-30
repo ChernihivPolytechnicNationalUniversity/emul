@@ -805,6 +805,58 @@ function applyOffsets(r: RoutedWire, offsetOf: (segment: number) => number): Rou
 }
 
 /** Index of the polyline segment closest to a point. */
+const ON_ROUTE_TOLERANCE = 1e-6
+
+function closestOnSegment(a: Point, b: Point, p: Point): Point {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const len2 = dx * dx + dy * dy || 1
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2))
+  return { x: a.x + t * dx, y: a.y + t * dy }
+}
+
+export function closestOnRoute(pts: readonly Point[], p: Point): Point {
+  let best = pts[0] ?? p
+  let bestD = Infinity
+  for (let i = 0; i < pts.length - 1; i++) {
+    const q = closestOnSegment(pts[i], pts[i + 1], p)
+    const d = Math.hypot(p.x - q.x, p.y - q.y)
+    if (d < bestD) {
+      bestD = d
+      best = q
+    }
+  }
+  return best
+}
+
+export function liesOnRoute(pts: readonly Point[], p: Point): boolean {
+  const q = closestOnRoute(pts, p)
+  return Math.hypot(p.x - q.x, p.y - q.y) <= ON_ROUTE_TOLERANCE
+}
+
+export type WireEnd = { point: Point; side: Direction; stub: number }
+
+const routeBetween = (from: WireEnd, to: WireEnd, grid: number, bends: Point[]) =>
+  routeWire(from.point, from.side, from.stub, to.point, to.side, to.stub, grid, bends).pts
+
+export function bendReach(from: WireEnd, to: WireEnd, bends: readonly Point[], index: number, start: Point, target: Point, grid: number): Point | null {
+  const followed = (at: Point) => {
+    const moved = bends.slice()
+    moved[index] = at
+    return liesOnRoute(routeBetween(from, to, grid, moved), at)
+  }
+  const steps = Math.max(1, Math.round(Math.max(Math.abs(target.x - start.x), Math.abs(target.y - start.y)) / grid))
+  for (let k = steps; k >= 0; k--) {
+    const at = { x: snap(start.x + ((target.x - start.x) * k) / steps, grid), y: snap(start.y + ((target.y - start.y) * k) / steps, grid) }
+    if (followed(at)) return at
+  }
+  return null
+}
+
+export function bendsOnRoute(route: readonly Point[], bends: readonly Point[]): Point[] {
+  return bends.map((bend) => (liesOnRoute(route, bend) ? bend : closestOnRoute(route, bend)))
+}
+
 export function nearestSegment(pts: Point[], p: Point): number {
   let best = 0
   let bestD = Infinity

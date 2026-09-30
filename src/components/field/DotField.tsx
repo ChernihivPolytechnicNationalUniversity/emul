@@ -15,7 +15,7 @@ import {
 import { Inspector } from "@/components/inspector/Inspector"
 import { WirePalette } from "@/components/inspector/WirePalette"
 import { PALETTE_DRAG_TYPE, paletteGroups } from "@/components/palette/items"
-import { GRID as FIELD_GRID, nudgeRoutes, objectPins, objectRect, resolvePin, routeBox, Router, snap, touches, type FlipAxis, type Point } from "@/schematic/geometry"
+import { bendsOnRoute, GRID as FIELD_GRID, nudgeRoutes, objectPins, objectRect, resolvePin, routeBox, Router, snap, touches, type FlipAxis, type Point } from "@/schematic/geometry"
 import { SpatialIndex } from "@/schematic/spatial"
 import { fieldDetail } from "./detail"
 import { savedTextScale, saveTextScale } from "./text-scale"
@@ -337,7 +337,15 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     },
     [wireById, nets, autoColor],
   )
-  const bendsOf = React.useCallback((wireId: string) => wireById.get(wireId)?.points, [wireById])
+  const routeById = React.useMemo(() => new Map(routes.map((r) => [r.id, r])), [routes])
+  const bendsOf = React.useCallback(
+    (wireId: string) => {
+      const points = wireById.get(wireId)?.points
+      const route = routeById.get(wireId)
+      return points && route ? bendsOnRoute(route.pts, points) : points
+    },
+    [wireById, routeById],
+  )
   const pinNetColor = React.useCallback(
     (key: string) => {
       const net = nets.netOfPin(key)
@@ -768,9 +776,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
   const onBendPointerMove = useEvent((e: React.PointerEvent<SVGGElement>) => {
     if (!bend.active) return
-    const at = snapPoint(toWorld(e.clientX, e.clientY))
-    bend.track(at)
-    const move = bend.preview(at)
+    bend.track(snapPoint(toWorld(e.clientX, e.clientY)))
+    const move = bend.preview()
     const w = move && wireById.get(move.wire)
     if (w && onWirePreview) onWirePreview(bentWirePoints(docObjects, index, w.from, w.to, move.points, grid))
   })
