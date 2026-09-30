@@ -200,18 +200,13 @@ export function useSchematic(grid: number) {
   )
 
   /** Replace the whole document (loading an example or a file; the boards' projects, build options and debugger settings are re-checked). */
-  const load = React.useCallback(
-    (next: Schematic) => {
-      setDoc(() => {
-        const { library, ...rest } = next
-        const modules = checkedLibrary(library)
-        return { ...rest, objects: next.objects.map(checked), ...(modules && { library: modules }) }
-      })
-      setSelectedObjects(new Set())
-      setSelectedWires(new Set())
-    },
-    [setDoc],
-  )
+  const load = React.useCallback((next: Schematic) => {
+    const { library, ...rest } = next
+    const modules = checkedLibrary(library)
+    setHistory({ past: [], present: { ...rest, objects: next.objects.map(checked), ...(modules && { library: modules }) }, future: [] })
+    setSelectedObjects(new Set())
+    setSelectedWires(new Set())
+  }, [])
 
   const selectObject = React.useCallback((id: string, toggle = false) => {
     setSelectedWires(new Set())
