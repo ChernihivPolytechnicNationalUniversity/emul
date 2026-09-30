@@ -96,9 +96,9 @@ async function openField(browser: Browser, doc: Schematic) {
   await page.waitForSelector("[data-slot=dot-field-viewport]")
   const started = Date.now()
   await page.setInputFiles("input[type=file]", {
-    name: `stress-${doc.objects.length}.json`,
-    mimeType: "application/json",
-    buffer: Buffer.from(JSON.stringify(doc)),
+    name: `stress-${doc.objects.length}.emul`,
+    mimeType: "application/octet-stream",
+    buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name: `stress-${doc.objects.length}`, schematic: doc })),
   })
   await waitUntilDrawn(page)
   const mountMs = Date.now() - started
@@ -418,6 +418,18 @@ async function checkCanvasBand(page: Page, doc: Schematic) {
     `${band.nodes} nodes in the field`,
   )
 
+  const canvasImage = () => page.evaluate(() => (document.querySelector("[data-slot=field-canvas]") as HTMLCanvasElement | null)?.toDataURL().length ?? 0)
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(300)
+  const unselected = await canvasImage()
+  await page.keyboard.press("Control+a")
+  await page.waitForTimeout(300)
+  const selected = await canvasImage()
+  check("selection paints a halo in the canvas band", selected !== unselected, `${unselected} → ${selected} bytes`)
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(300)
+  check("deselecting restores the canvas image", await canvasImage() === unselected, `${unselected} bytes`)
+
   const before = await page.evaluate(() => (document.querySelector("[data-slot=field-canvas]") as HTMLCanvasElement | null)?.toDataURL().length ?? 0)
   const grab = await pointOverObject(page, doc)
   if (!grab) {
@@ -477,6 +489,14 @@ async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChe
     if (extra.canvasBand || extra.repeatedDrag) {
       await page.keyboard.press("Escape")
       await page.waitForTimeout(300)
+    }
+
+    if (process.argv.includes("--select-all")) {
+      await page.keyboard.press("Control+a")
+      await page.waitForTimeout(300)
+      const selected = await page.locator("[data-slot=component][data-selected]").count()
+      const visible = await page.locator("[data-slot=component]").count()
+      check("all visible components are selected", selected === visible && visible > 0, `${selected}/${visible}`)
     }
 
     const target = await largestComponentInView(page)
