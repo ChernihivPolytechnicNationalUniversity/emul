@@ -1,12 +1,13 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { objectPins, orientationOf, type Point } from "@/schematic/geometry"
+import { objectPins, orientationOf, type ObjectPin, type Point } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
-import type { PinKind, PlacedObject } from "@/schematic/types"
+import type { ComponentDef, PinKind, PlacedObject } from "@/schematic/types"
 import type { FieldDetail } from "./detail"
 import type { PinPointerHandler } from "./ComponentView"
-import { boxCorners, KNOCKOUT_OPACITY, labelFrame, labelKnockout, labelOrigin, MONO_ADVANCE_EM, pinLabelById, pinLabels, type Box, type KnockoutAxis, type LabelGround, type PinLabel } from "./pin-label"
+import { ARROW_HEAD_CELLS, boxCorners, KNOCKOUT_OPACITY, labelFrame, labelKnockout, labelOrigin, MONO_ADVANCE_EM, numbersItsPins, PIN_NUMBER_SCALE, pinLabelById, pinLabels, pinNumberPlacement, referenceArrow, type Box, type KnockoutAxis, type LabelGround, type PinLabel } from "./pin-label"
 import { hollowMarkerHidden } from "./pin-marker"
+import { referenceTerminals } from "@/schematic/terminals"
 
 const PIN_FILL: Record<PinKind, string> = {
   power: "fill-red-500",
@@ -73,6 +74,30 @@ const KnockoutFades = React.memo(function KnockoutFades() {
 
 type LabelledPin = { label: PinLabel; point: Point }
 
+function ReferenceArrow({ pins, def, grid, size }: { pins: readonly ObjectPin[]; def: ComponentDef; grid: number; size: number }) {
+  const ends = referenceTerminals(def)
+  const from = ends && pins.find(({ pin }) => pin.id === ends[0].id)
+  const to = ends && pins.find(({ pin }) => pin.id === ends[1].id)
+  const arrow = from && to && referenceArrow(from.pin, to.pin, size)
+  if (!from || !arrow) return null
+  const [tail, tip] = arrow.map((p) => ({ x: from.point.x + p.x * grid, y: from.point.y + p.y * grid }))
+  const length = Math.hypot(tip.x - tail.x, tip.y - tail.y)
+  const back = { x: ((tail.x - tip.x) / length) * ARROW_HEAD_CELLS * grid, y: ((tail.y - tip.y) / length) * ARROW_HEAD_CELLS * grid }
+  const barb = (sign: number) => `${tip.x + back.x - sign * back.y * 0.6} ${tip.y + back.y + sign * back.x * 0.6}`
+  return (
+    <path
+      data-reference-arrow=""
+      d={`M${tail.x} ${tail.y}L${tip.x} ${tip.y}M${barb(1)}L${tip.x} ${tip.y}L${barb(-1)}`}
+      fill="none"
+      strokeWidth={1.25}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      vectorEffect="non-scaling-stroke"
+      className="pointer-events-none stroke-muted-foreground"
+    />
+  )
+}
+
 function LabelKnockouts({ pins, grid, size }: { pins: LabelledPin[]; grid: number; size: number }) {
   const advance = monoAdvanceEm()
   const solids = new Map<LabelGround, string[]>()
@@ -110,6 +135,7 @@ type PinLayerProps = {
   connected: (pinKey: string) => boolean
   /** Pins that touch another pin; they are drawn as a junction dot, without a label. */
   contacts: ReadonlyMap<string, string>
+  selected: ReadonlySet<string>
   sheeted?: (object: PlacedObject) => boolean
   netColor?: (pinKey: string) => string | undefined
   onPinPointerDown: PinPointerHandler
@@ -142,6 +168,7 @@ export const PinLayer = React.memo(function PinLayer({
   detail,
   connected,
   contacts,
+  selected,
   sheeted,
   netColor,
   onPinPointerDown,
@@ -169,6 +196,7 @@ export const PinLayer = React.memo(function PinLayer({
         const names = detail.labels && !sheeted?.(object)
         const pins = objectPins(object, grid)
         const labels = names && def ? pinLabelById(pinLabels(def, orientationOf(object))) : undefined
+        const numbered = detail.labels && def !== undefined && selected.has(object.id) && numbersItsPins(def)
         const labelled: LabelledPin[] = []
         if (labels) {
           for (const { key, pin, point } of pins) {
@@ -179,12 +207,15 @@ export const PinLayer = React.memo(function PinLayer({
         return (
         <g key={object.id} data-pins={object.id}>
           {labelled.length > 0 && <LabelKnockouts pins={labelled} grid={grid} size={detail.pinLabelSize} />}
+          {numbered && def && <ReferenceArrow pins={pins} def={def} grid={grid} size={detail.pinLabelSize * PIN_NUMBER_SCALE} />}
           {pins.map(({ key, pin, point }) => {
             const live = connected(key)
             const contact = contacts.has(key)
             const color = live ? netColor?.(key) : undefined
             const label = labels?.get(pin.id)
             const origin = label && labelOrigin(label, detail.pinLabelSize)
+            const numberSize = detail.pinLabelSize * PIN_NUMBER_SCALE
+            const numberAt = numbered && !contact ? labelOrigin(pinNumberPlacement(pin), numberSize) : undefined
             const markerHidden = hollowMarkerHidden(def, pin.kind, live, contact)
 
             return (
@@ -227,6 +258,19 @@ export const PinLayer = React.memo(function PinLayer({
                     )}
                   >
                     {pin.label}
+                  </text>
+                )}
+                {numberAt && (
+                  <text
+                    data-pin-number={pin.id}
+                    x={point.x + g(numberAt.x)}
+                    y={point.y + g(numberAt.y)}
+                    fontSize={g(numberSize)}
+                    textAnchor={pinNumberPlacement(pin).anchor}
+                    dominantBaseline="middle"
+                    className="pointer-events-none fill-muted-foreground stroke-none font-mono"
+                  >
+                    {pin.id}
                   </text>
                 )}
               </g>

@@ -128,6 +128,10 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
                 onChange={(v) => onChange(object.id, { [f.key]: v })}
               />
             ))}
+            <Field data-slot="orientation">
+              <FieldLabel>Orientation</FieldLabel>
+              <FieldDescription className="tabular-nums">{`Rotated ${object.rotation ?? 0}°${object.mirror ? " · mirrored" : ""}`}</FieldDescription>
+            </Field>
           </FieldGroup>
         </CardContent>
       )}

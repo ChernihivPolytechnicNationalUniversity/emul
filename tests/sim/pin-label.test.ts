@@ -7,7 +7,9 @@ import {
   labelKnockout,
   labelOrigin,
   MAX_PIN_LABEL_CELLS,
+  numbersItsPins,
   PIN_LABEL_CELLS,
+  pinNumberPlacement,
   pinLabelById,
   pinLabels,
   type Box,
@@ -198,3 +200,22 @@ describe("names that would run into each other turn to run along their pins", ()
     expect(clashes.slice(0, 20)).toEqual([])
   })
 })
+
+describe("a part whose pins have no names shows their numbers while it is selected, so its orientation can be seen", () => {
+  it("a resistor, a capacitor, a crystal or a transformer numbers its pins; a board, a chip or a one-pin symbol does not", () => {
+    for (const id of ["resistor", "capacitor", "crystal", "transformer"]) expect(numbersItsPins(def(id)), id).toBe(true)
+    for (const id of ["open746i-c", "stm32f746ig", "led", "ground", "supply"]) expect(numbersItsPins(def(id)), id).toBe(false)
+  })
+
+  it("mirrored left to right, pin 1 of a resistor moves from the left end to the right one and its number with it", () => {
+    const resistor = def("resistor")
+    const at = (orientation: Orientation) => {
+      const pin = orientPin(resistor.pins.find((p) => p.id === "1")!, resistor, orientation)
+      const origin = labelOrigin(pinNumberPlacement(pin), PIN_LABEL_CELLS)
+      return pin.x + origin.x
+    }
+    expect(at(UPRIGHT)).toBeLessThan(resistor.width / 2)
+    expect(at(flipped(UPRIGHT, "horizontal"))).toBeGreaterThan(resistor.width / 2)
+  })
+})
+

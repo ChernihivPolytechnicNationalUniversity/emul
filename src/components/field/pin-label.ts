@@ -111,6 +111,30 @@ function across(labelAt: Direction): Placement {
   return { dir: DIR[labelAt], angle: 0, anchor: ACROSS_ANCHOR[labelAt] }
 }
 
+export const PIN_NUMBER_SCALE = 0.75
+
+export const numbersItsPins = (def: ComponentDef) => def.pins.length >= 2 && def.pins.every((pin) => !pin.label && pin.kind !== "node")
+
+export const pinNumberPlacement = (pin: Pick<PlacedPin, "labelAt">): Placement => across(pin.labelAt)
+
+const ARROW_CLEARANCE_CELLS = 0.12
+const ARROW_LENGTH_CELLS = 0.5
+export const ARROW_HEAD_CELLS = 0.14
+
+export function referenceArrow(first: PlacedPin, second: Pick<PlacedPin, "x" | "y">, size: number): readonly [Point, Point] | null {
+  const dx = second.x - first.x
+  const dy = second.y - first.y
+  const length = Math.hypot(dx, dy)
+  const along = { x: dx / length, y: dy / length }
+  const lift = labelOrigin(pinNumberPlacement(first), size)
+  const reach = Math.hypot(lift.x, lift.y)
+  if (!length || !reach || Math.abs(lift.x * along.x + lift.y * along.y) / reach > 0.5) return null
+  const start = (first.id.length * MONO_ADVANCE_EM * size) / 2 + ARROW_CLEARANCE_CELLS
+  if (start + ARROW_LENGTH_CELLS > length / 2) return null
+  const at = (t: number) => ({ x: lift.x + along.x * t, y: lift.y + along.y * t })
+  return [at(start), at(start + ARROW_LENGTH_CELLS)]
+}
+
 function along(labelAt: Direction): Placement {
   const dir = DIR[labelAt]
   const heading = Math.round(Math.atan2(dir.y, dir.x) * DEGREES)

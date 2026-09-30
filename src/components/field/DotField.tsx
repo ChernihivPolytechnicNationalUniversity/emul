@@ -1134,6 +1134,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 detail={detail}
                 connected={nets.connected}
                 contacts={nets.contacts}
+                selected={sch.selectedObjects}
                 sheeted={onSheet}
                 netColor={pinNetColor}
                 onPinPointerDown={onPinPointerDown}
