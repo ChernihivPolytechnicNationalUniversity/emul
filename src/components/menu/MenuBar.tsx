@@ -65,6 +65,7 @@ type MenuBarProps = React.ComponentProps<"div"> & {
   state: FieldState
   sidebarOpen: boolean
   onSidebarToggle: () => void
+  fieldInset: string
   project: string | null
   recent: readonly ProjectMeta[]
   onNew: () => void
@@ -91,6 +92,7 @@ export function MenuBar({
   state,
   sidebarOpen,
   onSidebarToggle,
+  fieldInset,
   project,
   recent,
   onNew,
@@ -118,7 +120,7 @@ export function MenuBar({
   return (
     <div
       data-slot="menu-bar"
-      className={cn("flex h-7 shrink-0 items-center gap-2 border-b bg-background/80 px-2 backdrop-blur-sm", className)}
+      className={cn("relative flex h-7 shrink-0 items-center gap-2 border-b bg-background/80 px-2 backdrop-blur-sm", className)}
       {...props}
     >
       <Logo className="px-1 text-xs" />
@@ -328,7 +330,8 @@ export function MenuBar({
           type="button"
           onClick={onProjects}
           title="Projects"
-          className="mx-auto max-w-80 truncate rounded-sm px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="absolute top-1/2 max-w-80 -translate-x-1/2 -translate-y-1/2 truncate rounded-sm px-2 text-xs text-muted-foreground transition-[left] duration-200 ease-linear hover:bg-accent hover:text-foreground"
+          style={{ left: `calc(50% + ${fieldInset} / 2)` }}
         >
           {project}
         </button>

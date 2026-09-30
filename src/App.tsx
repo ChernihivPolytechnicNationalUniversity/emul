@@ -11,6 +11,7 @@ import type { Example } from "@/schematic/examples"
 import type { Schematic } from "@/schematic/types"
 import { HDL_ACCEPT, readHdlFiles } from "@/components/hdl/files"
 import { useEvent } from "@/hooks/use-event"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { useProjects } from "@/hooks/use-projects"
 import { fileName, nameFromFile, projectFile, readProjectFile, shareLink } from "@/project/project-store"
 import { Button } from "@/components/ui/button"
@@ -21,6 +22,7 @@ import { ShareDialog } from "@/components/share/ShareDialog"
 
 /** Height of the menu bar; the sidebar is fixed, so it has to be told to start below it. */
 const MENU_H = 28
+const SIDEBAR_WIDTH = "16rem"
 
 const emptyState: FieldState = {
   hasSelection: false,
@@ -42,6 +44,7 @@ export default function App() {
   const field = React.useRef<DotFieldHandle>(null)
   const [state, setState] = React.useState<FieldState>(emptyState)
   const [sidebarOpen, setSidebarOpen] = React.useState(true)
+  const isMobile = useIsMobile()
   const fileInput = React.useRef<HTMLInputElement>(null)
   const store = useProjects(React.useCallback((doc: Schematic) => field.current?.load(doc), []))
   const live = useLive(React.useCallback((doc: Schematic) => field.current?.merge(doc), []))
@@ -267,6 +270,7 @@ export default function App() {
           state={state}
           sidebarOpen={sidebarOpen}
           onSidebarToggle={() => setSidebarOpen((v) => !v)}
+          fieldInset={sidebarOpen && !isMobile ? SIDEBAR_WIDTH : "0px"}
           project={projects.current?.name ?? null}
           recent={projects.list.filter((p) => p.id !== projects.current?.id).slice(0, 8)}
           onNew={newProject}
@@ -284,7 +288,7 @@ export default function App() {
           onExample={(example) => void loadExample(example)}
           style={{ height: MENU_H }}
         />
-        <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} style={{ minHeight: 0, flex: 1 }}>
+        <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} style={{ minHeight: 0, flex: 1, "--sidebar-width": SIDEBAR_WIDTH } as React.CSSProperties}>
           <ComponentsSidebar
             onPick={(item) => field.current?.addAtCenter(item.id)}
             onHdlNew={(language) => field.current?.newHdl(language)}
