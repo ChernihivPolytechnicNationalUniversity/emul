@@ -132,13 +132,14 @@ export const ComponentView = React.memo(function ComponentView({
               level={p.type === "display" ? (live.live ? (p.backlight ? (live.parts[partKey(object.id, p.backlight)]?.level ?? 0) : 1) : 0) : simulated?.level}
               display={p.type === "display" ? live.display : undefined}
               mirror={mirror}
+              textScale={detail.textScale}
               partText={partText}
               onChange={simulated ? undefined : (patch) => onPartChange(object.id, p.id, patch)}
             />
           )
         })}
       </g>
-      {def.meter && detail.labels && <Meter def={def} objectId={object.id} sim={sim} live={live.live} g={g} orientation={orientation} />}
+      {def.meter && detail.labels && <Meter def={def} objectId={object.id} sim={sim} live={live.live} g={g} orientation={orientation} textScale={detail.textScale} />}
       {damage && (
         <g pointerEvents="none">
           <rect x={0} y={0} width={w} height={h} rx={g(0.6)} className="fill-destructive/15 stroke-destructive" strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeDasharray={`${g(0.25)} ${g(0.25)}`} />
@@ -169,6 +170,7 @@ function Meter({
   live,
   g,
   orientation,
+  textScale,
 }: {
   def: NonNullable<ReturnType<typeof getDef>>
   objectId: string
@@ -176,6 +178,7 @@ function Meter({
   live: boolean
   g: (v: number) => number
   orientation: Orientation
+  textScale: number
 }) {
   const readings = useObjectReadings(sim, objectId)
   const m = def.meter!
@@ -193,7 +196,7 @@ function Meter({
     <text
       x={x}
       y={y}
-      fontSize={g(m.size ?? 0.4)}
+      fontSize={g((m.size ?? 0.4) * textScale)}
       textAnchor="middle"
       className="fill-foreground stroke-none font-mono tabular-nums"
       pointerEvents="none"
@@ -344,6 +347,7 @@ function Part({
   level,
   display,
   mirror,
+  textScale,
   partText,
   onChange,
 }: {
@@ -355,6 +359,7 @@ function Part({
   /** The frame a display shows. */
   display?: DisplayFrame
   mirror: boolean
+  textScale: number
   partText: (x: number, y: number) => string | undefined
   /** Undefined while the simulation owns this part. */
   onChange?: (patch: PartState) => void
@@ -396,7 +401,7 @@ function Part({
           strokeWidth={1}
           vectorEffect="non-scaling-stroke"
         />
-        <text x={cx} y={cy + g(0.65)} fontSize={g(0.28)} textAnchor="middle" transform={partText(cx, cy + g(0.65))} className="fill-muted-foreground stroke-none font-mono">
+        <text x={cx} y={cy + g(0.65)} fontSize={g(0.28 * textScale)} textAnchor="middle" transform={partText(cx, cy + g(0.65))} className="fill-muted-foreground stroke-none font-mono">
           {part.label}
         </text>
       </g>
@@ -476,7 +481,7 @@ function Part({
             />
           </>
         )}
-        <text x={cx} y={cy + h / 2 + g(0.45)} fontSize={g(0.3)} textAnchor="middle" transform={partText(cx, cy + h / 2 + g(0.45))} className={cn("stroke-none font-mono", plugged ? "fill-foreground" : "fill-muted-foreground")}>
+        <text x={cx} y={cy + h / 2 + g(0.45)} fontSize={g(0.3 * textScale)} textAnchor="middle" transform={partText(cx, cy + h / 2 + g(0.45))} className={cn("stroke-none font-mono", plugged ? "fill-foreground" : "fill-muted-foreground")}>
           {plugged ? "USB" : "USB (unplugged)"}
         </text>
         {/* generous hit area */}
@@ -555,7 +560,7 @@ function Part({
         vectorEffect="non-scaling-stroke"
       />
       {part.label && (
-        <text x={cx} y={cy + half + g(0.4)} fontSize={g(0.28)} textAnchor="middle" transform={partText(cx, cy + half + g(0.4))} className="fill-muted-foreground stroke-none font-mono">
+        <text x={cx} y={cy + half + g(0.4)} fontSize={g(0.28 * textScale)} textAnchor="middle" transform={partText(cx, cy + half + g(0.4))} className="fill-muted-foreground stroke-none font-mono">
           {part.label}
         </text>
       )}

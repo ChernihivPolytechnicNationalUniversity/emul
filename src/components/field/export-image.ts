@@ -4,6 +4,7 @@ import type { PlacedObject } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
 import { cssColor, paintField } from "./field-paint"
 import { readFieldPalette } from "./field-palette"
+import { MAX_PIN_LABEL_CELLS, PIN_LABEL_CELLS } from "./pin-label"
 import { fixedText, type SymbolRaster, type TextRaster } from "./symbol-raster"
 
 const MAX_PIXELS = 2
@@ -20,11 +21,12 @@ type ExportImage = {
   colorOf: (wireId: string) => WireColorKey
   symbols: SymbolRaster
   texts: TextRaster
+  textScale: number
 }
 
 const ALIGN = { start: "left", middle: "center", end: "right" } as const
 
-function paintLabels(context: CanvasRenderingContext2D, host: Element, objects: readonly PlacedObject[], view: Rect, grid: number, pixels: number) {
+function paintLabels(context: CanvasRenderingContext2D, host: Element, objects: readonly PlacedObject[], view: Rect, grid: number, pixels: number, textScale: number) {
   const colors = {
     foreground: cssColor(host, "var(--foreground)"),
     muted: cssColor(host, "var(--muted-foreground)"),
@@ -50,7 +52,7 @@ function paintLabels(context: CanvasRenderingContext2D, host: Element, objects: 
       context.save()
       context.translate((cx + at.x - view.x) * pixels, (cy + at.y - view.y) * pixels)
       context.rotate((placed.angle * Math.PI) / 180)
-      context.font = `${(shape.size ?? 0.4) * grid * pixels}px ${family}`
+      context.font = `${(shape.size ?? 0.4) * textScale * grid * pixels}px ${family}`
       context.textAlign = ALIGN[placed.anchor]
       context.fillStyle = shape.inverse ? colors.background : shape.muted ? colors.muted : colors.foreground
       context.fillText(text, 0, 0)
@@ -69,7 +71,7 @@ function bounds(objects: readonly PlacedObject[], routes: readonly RoutedWire[],
   return { x, y, w, h }
 }
 
-export async function exportPng({ host, theme, objects, routes, grid, colorOf, symbols, texts }: ExportImage): Promise<Blob | null> {
+export async function exportPng({ host, theme, objects, routes, grid, colorOf, symbols, texts, textScale }: ExportImage): Promise<Blob | null> {
   const view = bounds(objects, routes, grid)
   if (!view) return null
   await document.fonts?.ready
@@ -86,9 +88,10 @@ export async function exportPng({ host, theme, objects, routes, grid, colorOf, s
   paintField(context, host, { objects, routes, view, grid, pixels, device: pixels, theme, colorOf, raster: symbols })
 
   texts.setPalette(readFieldPalette(host, theme))
+  const sheetText = { boost: textScale, pinSize: Math.min(MAX_PIN_LABEL_CELLS, PIN_LABEL_CELLS * textScale) }
   for (const object of objects) {
     const def = getDef(object.def)
-    const sheet = def && texts.get(def, orientationOf(object), grid, pixels, 1)
+    const sheet = def && texts.get(def, orientationOf(object), grid, pixels, sheetText)
     if (!sheet) continue
     const stretch = pixels / sheet.scale
     const rect = objectRect(object, grid)
@@ -100,6 +103,6 @@ export async function exportPng({ host, theme, objects, routes, grid, colorOf, s
       sheet.height * stretch,
     )
   }
-  paintLabels(context, host, objects, view, grid, pixels)
+  paintLabels(context, host, objects, view, grid, pixels, textScale)
   return new Promise((resolve) => canvas.toBlob(resolve, "image/png"))
 }

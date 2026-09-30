@@ -1,6 +1,7 @@
 import * as React from "react"
 import { toast } from "sonner"
 import { DotField, type DotFieldHandle, type FieldState } from "@/components/field/DotField"
+import { DEFAULT_TEXT_SCALE } from "@/components/field/text-scale"
 import { MenuBar } from "@/components/menu/MenuBar"
 import { GRID } from "@/schematic/geometry"
 import { ComponentsSidebar } from "@/components/palette/ComponentsSidebar"
@@ -34,6 +35,7 @@ const emptyState: FieldState = {
   running: false,
   started: false,
   speed: 1,
+  textScale: DEFAULT_TEXT_SCALE,
   probing: false,
   scope: false,
   logic: false,

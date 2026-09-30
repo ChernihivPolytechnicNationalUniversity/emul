@@ -1,11 +1,11 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { objectPins, type PlacedPin, type Point } from "@/schematic/geometry"
+import { objectPins, orientationOf, type Point } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
-import type { ComponentDef, PinKind, PlacedObject } from "@/schematic/types"
+import type { PinKind, PlacedObject } from "@/schematic/types"
 import type { FieldDetail } from "./detail"
 import type { PinPointerHandler } from "./ComponentView"
-import { KNOCKOUT_OPACITY, MONO_ADVANCE_EM, PIN_LABEL_CELLS, pinLabelGround, pinLabelKnockout, pinLabelOffset, type Box, type KnockoutAxis, type LabelGround } from "./pin-label"
+import { boxCorners, KNOCKOUT_OPACITY, labelFrame, labelKnockout, labelOrigin, MONO_ADVANCE_EM, pinLabelById, pinLabels, type Box, type KnockoutAxis, type LabelGround, type PinLabel } from "./pin-label"
 import { hollowMarkerHidden } from "./pin-marker"
 
 const PIN_FILL: Record<PinKind, string> = {
@@ -71,24 +71,26 @@ const KnockoutFades = React.memo(function KnockoutFades() {
   )
 })
 
-type LabelledPin = { pin: PlacedPin; point: Point }
+type LabelledPin = { label: PinLabel; point: Point }
 
-function LabelKnockouts({ def, pins, grid, boost }: { def: ComponentDef; pins: LabelledPin[]; grid: number; boost: number }) {
+function LabelKnockouts({ pins, grid, size }: { pins: LabelledPin[]; grid: number; size: number }) {
   const advance = monoAdvanceEm()
   const solids = new Map<LabelGround, string[]>()
   const fades: React.ReactNode[] = []
-  for (const { pin, point } of pins) {
-    const knockout = pinLabelKnockout(pin.label, pin.labelAt, boost, advance)
-    const ground = pinLabelGround(def, pin.id)
-    const at = (box: Box) => ({ x: point.x + box.x * grid, y: point.y + box.y * grid, width: box.w * grid, height: box.h * grid })
-    const solid = at(knockout.solid)
-    const rects = solids.get(ground)
-    const rect = `M${solid.x} ${solid.y}h${solid.width}v${solid.height}h${-solid.width}z`
+  for (const { label, point } of pins) {
+    const knockout = labelKnockout(label.text, label.anchor, size, advance)
+    const onField = (p: Point) => ({ x: point.x + p.x * grid, y: point.y + p.y * grid })
+    const corners = boxCorners(knockout.solid, labelFrame(label, size)).map(onField)
+    const rects = solids.get(label.ground)
+    const rect = `M${corners.map((c) => `${c.x} ${c.y}`).join("L")}z`
     if (rects) rects.push(rect)
-    else solids.set(ground, [rect])
+    else solids.set(label.ground, [rect])
+    const anchor = onField(labelOrigin(label, size))
+    const transform = label.angle ? `rotate(${label.angle} ${anchor.x} ${anchor.y})` : undefined
+    const at = (box: Box) => ({ x: anchor.x + box.x * grid, y: anchor.y + box.y * grid, width: box.w * grid, height: box.h * grid, transform })
     fades.push(
-      <rect key={`${pin.id}:rise`} {...at(knockout.rise)} fill={`url(#${fadeId(ground, knockout.axis, true)})`} />,
-      <rect key={`${pin.id}:fall`} {...at(knockout.fall)} fill={`url(#${fadeId(ground, knockout.axis, false)})`} />,
+      <rect key={`${label.id}:rise`} {...at(knockout.rise)} fill={`url(#${fadeId(label.ground, knockout.axis, true)})`} />,
+      <rect key={`${label.id}:fall`} {...at(knockout.fall)} fill={`url(#${fadeId(label.ground, knockout.axis, false)})`} />,
     )
   }
   return (
@@ -166,15 +168,23 @@ export const PinLayer = React.memo(function PinLayer({
         const def = getDef(object.def)
         const names = detail.labels && !sheeted?.(object)
         const pins = objectPins(object, grid)
-        const labelled = names && def ? pins.filter(({ key, pin }) => pin.label && !contacts.has(key) && (pin.labelAt === pin.side || connected(key))) : []
+        const labels = names && def ? pinLabelById(pinLabels(def, orientationOf(object))) : undefined
+        const labelled: LabelledPin[] = []
+        if (labels) {
+          for (const { key, pin, point } of pins) {
+            const label = labels.get(pin.id)
+            if (label && !contacts.has(key) && (pin.labelAt === pin.side || connected(key))) labelled.push({ label, point })
+          }
+        }
         return (
         <g key={object.id} data-pins={object.id}>
-          {def && labelled.length > 0 && <LabelKnockouts def={def} pins={labelled} grid={grid} boost={detail.textBoost} />}
+          {labelled.length > 0 && <LabelKnockouts pins={labelled} grid={grid} size={detail.pinLabelSize} />}
           {pins.map(({ key, pin, point }) => {
             const live = connected(key)
             const contact = contacts.has(key)
             const color = live ? netColor?.(key) : undefined
-            const label = pinLabelOffset(pin.labelAt)
+            const label = labels?.get(pin.id)
+            const origin = label && labelOrigin(label, detail.pinLabelSize)
             const markerHidden = hollowMarkerHidden(def, pin.kind, live, contact)
 
             return (
@@ -203,13 +213,14 @@ export const PinLayer = React.memo(function PinLayer({
                   strokeWidth={live ? 2 : 1}
                   vectorEffect="non-scaling-stroke"
                 />}
-                {!contact && names && (
+                {!contact && label && origin && (
                   <text
-                    x={point.x + g(label.x)}
-                    y={point.y + g(label.y)}
-                    fontSize={g(PIN_LABEL_CELLS * detail.textBoost)}
+                    x={point.x + g(origin.x)}
+                    y={point.y + g(origin.y)}
+                    fontSize={g(detail.pinLabelSize)}
                     textAnchor={label.anchor}
                     dominantBaseline="middle"
+                    transform={label.angle ? `rotate(${label.angle} ${point.x + g(origin.x)} ${point.y + g(origin.y)})` : undefined}
                     className={cn(
                       "pointer-events-none stroke-none font-mono",
                       pin.kind === "nc" ? "fill-muted-foreground" : "fill-foreground",

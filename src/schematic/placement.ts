@@ -1,6 +1,6 @@
 import { DIR, intersects, objectPins, objectRect, objectSize, orientationOf, orientOffset, placedText, resolvePinIn, routeBox, snap, type Point, type Rect, type RoutedWire } from "./geometry"
 import { getDef } from "./registry"
-import { pinLabelKnockout } from "@/components/field/pin-label"
+import { boundsOf, boxCorners, labelFrame, labelKnockout, PIN_LABEL_CELLS, pinLabelById, pinLabels } from "@/components/field/pin-label"
 import type { BodyShape, ComponentDef, PinRef, PlacedObject, Wire } from "./types"
 
 const CLEARANCE_CELLS = 0.1
@@ -130,13 +130,17 @@ function textRectsOf(object: PlacedObject, def: ComponentDef, grid: number): Rec
   return rects
 }
 
-function pinNameRects(object: PlacedObject, grid: number): Rect[] {
-  const inset = TEXT_INSET_CELLS * grid
+function pinNameRects(object: PlacedObject, def: ComponentDef, grid: number): Rect[] {
+  const inset = TEXT_INSET_CELLS
+  const labels = pinLabelById(pinLabels(def, orientationOf(object)))
   const rects: Rect[] = []
   for (const { pin, point } of objectPins(object, grid)) {
-    if (!pin.label) continue
-    const box = pinLabelKnockout(pin.label, pin.labelAt, 1).text
-    rects.push({ x: point.x + box.x * grid + inset, y: point.y + box.y * grid + inset, w: box.w * grid - inset * 2, h: box.h * grid - inset * 2 })
+    const label = labels.get(pin.id)
+    if (!label) continue
+    const { text } = labelKnockout(label.text, label.anchor, PIN_LABEL_CELLS)
+    const inner = { x: text.x + inset, y: text.y + inset, w: text.w - inset * 2, h: text.h - inset * 2 }
+    const box = boundsOf(boxCorners(inner, labelFrame(label, PIN_LABEL_CELLS)))
+    rects.push({ x: point.x + box.x * grid, y: point.y + box.y * grid, w: box.w * grid, h: box.h * grid })
   }
   return rects
 }
@@ -161,7 +165,7 @@ export function footprints(object: PlacedObject, grid: number): { body: Quad; la
   const body = footprint(object, grid)
   const def = getDef(object.def)
   if (!body || !def || body.box.w <= 0 || body.box.h <= 0) return null
-  const labels = [...designatorRects(object, grid), ...outsideBody(object, pinNameRects(object, grid), grid)]
+  const labels = [...designatorRects(object, grid), ...outsideBody(object, pinNameRects(object, def, grid), grid)]
   return { body, labels: labels.map(rectQuad) }
 }
 

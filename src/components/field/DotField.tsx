@@ -18,6 +18,7 @@ import { PALETTE_DRAG_TYPE, paletteGroups } from "@/components/palette/items"
 import { GRID as FIELD_GRID, nudgeRoutes, objectPins, objectRect, resolvePin, routeBox, Router, snap, touches, type FlipAxis, type Point } from "@/schematic/geometry"
 import { SpatialIndex } from "@/schematic/spatial"
 import { fieldDetail } from "./detail"
+import { savedTextScale, saveTextScale } from "./text-scale"
 import { buildNets } from "@/schematic/nets"
 import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, WIRE_COLOR_BY_CODE, type WireColorKey } from "@/schematic/wire-colors"
 import { partKey, pinKey, type PinRef, type PlacedObject, type Schematic } from "@/schematic/types"
@@ -99,6 +100,7 @@ export type DotFieldHandle = {
   toggleRun: () => void
   restart: () => void
   setSpeed: (speed: number) => void
+  setTextScale: (scale: number) => void
   toggleProbe: () => void
   toggleScope: () => void
   toggleLogic: () => void
@@ -123,6 +125,7 @@ export type FieldState = {
   /** False before the first solver step: there is nothing to start over from. */
   started: boolean
   speed: number
+  textScale: number
   probing: boolean
   scope: boolean
   logic: boolean
@@ -180,6 +183,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   )
   // Simulated seconds per real second; 1 is real time.
   const [speed, setSpeed] = React.useState(1)
+  const [textScale, setTextScale] = React.useState(savedTextScale)
+  React.useEffect(() => void saveTextScale(textScale), [textScale])
 
   // --- oscilloscope -----------------------------------------------------------
   const [scopeOpen, setScopeOpen] = React.useState(false)
@@ -280,7 +285,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   const visibleObjects = React.useMemo(() => (view.w > 0 ? index.query(view) : docObjects), [index, view, docObjects])
   const visibleRoutes = React.useMemo(() => (view.w > 0 ? routes.filter((r) => touches(routeBox(r), view)) : routes), [routes, view])
-  const detail = React.useMemo(() => fieldDetail(grid, scale, visibleObjects.length), [grid, scale, visibleObjects])
+  const detail = React.useMemo(() => fieldDetail(grid, scale, visibleObjects.length, textScale), [grid, scale, visibleObjects, textScale])
+  const sheetText = React.useMemo(() => ({ boost: detail.textBoost, pinSize: detail.pinLabelSize }), [detail.textBoost, detail.pinLabelSize])
 
   const dragLayerRef = React.useRef<HTMLDivElement>(null)
   const [lifted, setLifted] = React.useState<ReadonlySet<string>>(() => new Set())
@@ -413,12 +419,13 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         running: simRunning,
         started,
         speed,
+        textScale,
         probing: measure.active,
         scope: scopeOpen,
         logic: logicOpen,
         code: codeOpen,
       }),
-    [onStateChange, hasSelection, hasObjects, isEmpty, sch.canUndo, sch.canRedo, clip, simRunning, started, speed, measure.active, scopeOpen, logicOpen, codeOpen],
+    [onStateChange, hasSelection, hasObjects, isEmpty, sch.canUndo, sch.canRedo, clip, simRunning, started, speed, textScale, measure.active, scopeOpen, logicOpen, codeOpen],
   )
 
   /** World point under the last right-click, used by the "Add" submenu. */
@@ -434,7 +441,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const exportImage = useEvent(async () => {
     const host = containerRef.current
     if (!host) return null
-    return exportPng({ host, theme, objects: docObjects, routes, grid, colorOf, symbols: symbolRaster, texts: textRaster })
+    return exportPng({ host, theme, objects: docObjects, routes, grid, colorOf, symbols: symbolRaster, texts: textRaster, textScale })
   })
 
   const { load } = sch
@@ -493,6 +500,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         setSimRunning(true)
       },
       setSpeed,
+      setTextScale,
       toggleProbe: measure.toggle,
       toggleScope: () => setScopeOpen((o) => !o),
       toggleLogic: () => setLogicOpen((o) => !o),
@@ -1084,7 +1092,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 <>
                   {objectViews}
                   <div ref={dragLayerRef} data-slot="field-drag-layer" className="pointer-events-none absolute top-0 left-0">
-                    {liftedArea && <TextCanvas objects={liftedLabels} view={liftedArea} grid={grid} scale={scale} boost={detail.textBoost} raster={textRaster} />}
+                    {liftedArea && <TextCanvas objects={liftedLabels} view={liftedArea} grid={grid} scale={scale} text={sheetText} raster={textRaster} />}
                   </div>
                 </>
               )}
@@ -1110,7 +1118,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 onBendPointerUp={onBendPointerUp}
               />
               )}
-              {labelsOnCanvas && <TextCanvas objects={labelledObjects} view={view} grid={grid} scale={scale} boost={detail.textBoost} raster={textRaster} />}
+              {labelsOnCanvas && <TextCanvas objects={labelledObjects} view={view} grid={grid} scale={scale} text={sheetText} raster={textRaster} />}
               <PendingWireLayer objects={docObjects} index={index} pending={pending} grid={grid} scale={scale} part="route" />
               {/* Above the wires: a pin on a wire has to stay visible and clickable. */}
               <PinLayer

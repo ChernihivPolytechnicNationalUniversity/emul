@@ -2,7 +2,7 @@ import { objectRect, objectSize, orientPin, placedText, type Orientation, type R
 import type { ComponentDef, PlacedObject } from "@/schematic/types"
 import type { FieldPalette } from "./field-palette"
 import { selectionOutline } from "./selection-geometry"
-import { KNOCKOUT_OPACITY, PIN_LABEL_CELLS, pinLabelGround, pinLabelKnockout, pinLabelOffset, type Box } from "./pin-label"
+import { KNOCKOUT_OPACITY, labelKnockout, labelOrigin, pinLabels, type Box, type PinLabel } from "./pin-label"
 
 const SYMBOL_STROKE_PX = 2
 const HAIRLINE_PX = 1
@@ -191,6 +191,8 @@ export const fixedText = (text: string) => !text.includes("{")
 
 const TEXT_ANCHOR: Record<"start" | "middle" | "end", CanvasTextAlign> = { start: "start", middle: "center", end: "end" }
 
+export type SheetText = { boost: number; pinSize: number }
+
 const UNSEEN = 0.001
 
 const faded = (color: string, opacity: number) => `color-mix(in srgb, ${color} ${opacity * 100}%, transparent)`
@@ -220,7 +222,7 @@ export class TextRaster {
     return Math.min(scale, MAX_SHEET_PX / world.w, MAX_SHEET_PX / world.h, Math.sqrt(MAX_SHEET_AREA / (world.w * world.h)))
   }
 
-  get(def: ComponentDef, orientation: Orientation, grid: number, scale: number, boost: number): Symbol | null {
+  get(def: ComponentDef, orientation: Orientation, grid: number, scale: number, text: SheetText): Symbol | null {
     const palette = this.palette
     if (!palette) return null
     if (scale !== this.drawnAt) {
@@ -228,15 +230,15 @@ export class TextRaster {
       this.cache.clear()
     }
     const drawAt = this.fitting(def, orientation, grid, scale)
-    const id = `${key(def, orientation, palette.theme, drawAt)}|${boost}`
+    const id = `${key(def, orientation, palette.theme, drawAt)}|${text.boost}|${text.pinSize}`
     const cached = this.cache.get(id)
     if (cached) return cached
-    const drawn = this.draw(def, orientation, grid, drawAt, boost, palette)
+    const drawn = this.draw(def, orientation, grid, drawAt, text, palette)
     if (drawn) this.cache.set(id, drawn)
     return drawn
   }
 
-  private draw(def: ComponentDef, orientation: Orientation, grid: number, scale: number, boost: number, palette: FieldPalette): Symbol | null {
+  private draw(def: ComponentDef, orientation: Orientation, grid: number, scale: number, text: SheetText, palette: FieldPalette): Symbol | null {
     const box = objectSize(def, orientation.rotation)
     const margin = LABEL_MARGIN_CELLS * grid * scale
     const width = Math.max(1, Math.ceil(box.w * grid * scale + margin * 2))
@@ -251,33 +253,46 @@ export class TextRaster {
 
     context.save()
     context.scale(scale, scale)
-    const fontPx = PIN_LABEL_CELLS * boost * grid
+    const fontPx = text.pinSize * grid
     context.font = `${fontPx}px ${palette.text.mono}`
-    for (const raw of def.pins) {
-      if (!raw.label) continue
-      const pin = orientPin(raw, def, orientation)
-      const ground = pinLabelGround(def, raw.id)
-      const color = ground === "field" ? palette.text.inverse : (palette.body[ground].fill ?? palette.text.inverse)
-      const knockout = pinLabelKnockout(pin.label, pin.labelAt, boost, context.measureText(pin.label).width / fontPx / pin.label.length)
-      const at = (box: Box) => [(pin.x + box.x) * grid, (pin.y + box.y) * grid, box.w * grid, box.h * grid] as const
-      context.fillStyle = faded(color, KNOCKOUT_OPACITY)
-      context.fillRect(...at(knockout.solid))
-      for (const [box, rising] of [[knockout.rise, true], [knockout.fall, false]] as const) {
-        const [x, y, w, h] = at(box)
-        const ramp = knockout.axis === "x" ? context.createLinearGradient(x, 0, x + w, 0) : context.createLinearGradient(0, y, 0, y + h)
-        ramp.addColorStop(0, faded(color, rising ? UNSEEN : KNOCKOUT_OPACITY))
-        ramp.addColorStop(1, faded(color, rising ? KNOCKOUT_OPACITY : UNSEEN))
-        context.fillStyle = ramp
-        context.fillRect(x, y, w, h)
-      }
+    const advance = context.measureText("0").width / fontPx
+    const byId = new Map(def.pins.map((pin) => [pin.id, pin]))
+    const labelled = pinLabels(def, orientation).flatMap((label) => {
+      const raw = byId.get(label.id)
+      return raw ? [{ label, pin: orientPin(raw, def, orientation) }] : []
+    })
+    const atLabel = (pin: { x: number; y: number }, label: PinLabel, paint: () => void) => {
+      const origin = labelOrigin(label, text.pinSize)
+      context.save()
+      context.translate((pin.x + origin.x) * grid, (pin.y + origin.y) * grid)
+      if (label.angle) context.rotate((label.angle * Math.PI) / 180)
+      paint()
+      context.restore()
     }
-    for (const raw of def.pins) {
-      if (!raw.label) continue
-      const pin = orientPin(raw, def, orientation)
-      const label = pinLabelOffset(pin.labelAt)
-      context.fillStyle = pin.kind === "nc" ? palette.text.muted : palette.text.plain
-      context.textAlign = TEXT_ANCHOR[label.anchor]
-      context.fillText(pin.label, (pin.x + label.x) * grid, (pin.y + label.y) * grid)
+    for (const { label, pin } of labelled) {
+      const ground = label.ground
+      const color = ground === "field" ? palette.text.inverse : (palette.body[ground].fill ?? palette.text.inverse)
+      const knockout = labelKnockout(label.text, label.anchor, text.pinSize, advance)
+      const at = (box: Box) => [box.x * grid, box.y * grid, box.w * grid, box.h * grid] as const
+      atLabel(pin, label, () => {
+        context.fillStyle = faded(color, KNOCKOUT_OPACITY)
+        context.fillRect(...at(knockout.solid))
+        for (const [box, rising] of [[knockout.rise, true], [knockout.fall, false]] as const) {
+          const [x, y, w, h] = at(box)
+          const ramp = knockout.axis === "x" ? context.createLinearGradient(x, 0, x + w, 0) : context.createLinearGradient(0, y, 0, y + h)
+          ramp.addColorStop(0, faded(color, rising ? UNSEEN : KNOCKOUT_OPACITY))
+          ramp.addColorStop(1, faded(color, rising ? KNOCKOUT_OPACITY : UNSEEN))
+          context.fillStyle = ramp
+          context.fillRect(x, y, w, h)
+        }
+      })
+    }
+    for (const { label, pin } of labelled) {
+      atLabel(pin, label, () => {
+        context.fillStyle = pin.kind === "nc" ? palette.text.muted : palette.text.plain
+        context.textAlign = TEXT_ANCHOR[label.anchor]
+        context.fillText(label.text, 0, 0)
+      })
     }
     context.restore()
 
@@ -294,7 +309,7 @@ export class TextRaster {
       if (orientation.mirror) context.scale(-1, 1)
       const turn = placed.angle - orientation.rotation
       if (turn) context.rotate((turn * Math.PI) / 180)
-      context.font = `${(shape.size ?? BODY_TEXT_CELLS) * boost * grid}px ${palette.text.sans}`
+      context.font = `${(shape.size ?? BODY_TEXT_CELLS) * text.boost * grid}px ${palette.text.sans}`
       context.textAlign = TEXT_ANCHOR[placed.anchor]
       context.fillStyle = shape.inverse ? palette.text.inverse : shape.muted ? palette.text.muted : palette.text.plain
       context.fillText(shape.text, 0, 0)

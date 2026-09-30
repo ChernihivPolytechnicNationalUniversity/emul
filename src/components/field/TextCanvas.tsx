@@ -3,20 +3,20 @@ import { intersects, objectRect, orientationOf, type Rect } from "@/schematic/ge
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject } from "@/schematic/types"
 import { readFieldPalette, useThemeName } from "./field-palette"
-import { deviceScale, MAX_CANVAS_PX, TextRaster, type Symbol } from "./symbol-raster"
+import { deviceScale, MAX_CANVAS_PX, TextRaster, type SheetText, type Symbol } from "./symbol-raster"
 
 type TextCanvasProps = {
   objects: readonly PlacedObject[]
   view: Rect
   grid: number
   scale: number
-  boost: number
+  text: SheetText
   raster: TextRaster
 }
 
 type Drawn = { surface: string; objects: readonly PlacedObject[] }
 
-export function TextCanvas({ objects, view, grid, scale, boost, raster }: TextCanvasProps) {
+export function TextCanvas({ objects, view, grid, scale, text, raster }: TextCanvasProps) {
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const drawn = React.useRef<Drawn | null>(null)
   const theme = useThemeName()
@@ -49,7 +49,7 @@ export function TextCanvas({ objects, view, grid, scale, boost, raster }: TextCa
 
     const placed = (object: PlacedObject): (Rect & { sheet: Symbol; stretch: number }) | null => {
       const def = getDef(object.def)
-      const sheet = def && raster.get(def, orientationOf(object), grid, pixels, boost)
+      const sheet = def && raster.get(def, orientationOf(object), grid, pixels, text)
       if (!sheet) return null
       const stretch = pixels / sheet.scale
       const rect = objectRect(object, grid)
@@ -67,7 +67,7 @@ export function TextCanvas({ objects, view, grid, scale, boost, raster }: TextCa
       if (at) context.drawImage(at.sheet.image, at.x, at.y, at.w, at.h)
     }
 
-    const surface = `${width}x${height}|${view.x},${view.y}|${pixels}|${boost}|${theme}`
+    const surface = `${width}x${height}|${view.x},${view.y}|${pixels}|${text.boost}|${text.pinSize}|${theme}`
     const before = drawn.current
     const patch = before?.surface === surface ? changedArea(before.objects, objects, placed) : "everything"
     drawn.current = { surface, objects }
@@ -91,7 +91,7 @@ export function TextCanvas({ objects, view, grid, scale, boost, raster }: TextCa
     canvas.height = height
     context.clearRect(0, 0, width, height)
     for (const object of objects) blit(object)
-  }, [objects, view, grid, scale, boost, theme, fonts, raster])
+  }, [objects, view, grid, scale, text, theme, fonts, raster])
 
   if (view.w <= 0) return null
   return (

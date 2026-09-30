@@ -25,6 +25,7 @@ import type { LiveStatus } from "@/collab/use-live"
 import { Avatar } from "@/components/share/Avatar"
 import { Button } from "@/components/ui/button"
 import { SPEEDS, formatSpeed } from "@/sim/speeds"
+import { TEXT_SCALES } from "@/components/field/text-scale"
 
 // A desktop menu is compact: small type, one line per command, a check column on the left
 // that every row shares so labels line up, and a shortcut column on the right. The generated
@@ -265,6 +266,19 @@ export function MenuBar({
               Reset view
               <MenubarShortcut>⌘0</MenubarShortcut>
             </MenubarItem>
+            <MenubarSeparator />
+            <MenubarSub>
+              <MenubarSubTrigger>Schematic text size</MenubarSubTrigger>
+              <MenubarSubContent>
+                <MenubarRadioGroup value={String(state.textScale)}>
+                  {TEXT_SCALES.map((scale) => (
+                    <MenubarRadioItem key={scale} value={String(scale)} onClick={act((f) => f.setTextScale(scale))}>
+                      <span className="tabular-nums">{Math.round(scale * 100)}%</span>
+                    </MenubarRadioItem>
+                  ))}
+                </MenubarRadioGroup>
+              </MenubarSubContent>
+            </MenubarSub>
           </MenubarContent>
         </MenubarMenu>
 
