@@ -1,6 +1,8 @@
-import { DIR, objectRect, objectSize, rotatePin, type Direction, type Rect } from "@/schematic/geometry"
+import { objectRect, objectSize, rotatePin, type Rect } from "@/schematic/geometry"
 import type { ComponentDef, PlacedObject, Rotation } from "@/schematic/types"
 import type { FieldPalette } from "./field-palette"
+import { selectionOutline } from "./selection-geometry"
+import { KNOCKOUT_OPACITY, PIN_LABEL_CELLS, pinLabelGround, pinLabelKnockout, pinLabelOffset, type Box } from "./pin-label"
 
 const SYMBOL_STROKE_PX = 2
 const HAIRLINE_PX = 1
@@ -100,6 +102,13 @@ export class SymbolRaster {
   }
 
   private paintBody(context: CanvasRenderingContext2D, def: ComponentDef, grid: number, scale: number, palette: FieldPalette) {
+    const { hollow } = selectionOutline(def)
+    if (hollow) {
+      const backdrop = new Path2D()
+      backdrop.addPath(new Path2D(hollow), new DOMMatrix().scale(grid, grid))
+      context.fillStyle = palette.text.inverse
+      context.fill(backdrop)
+    }
     for (const shape of def.body) {
       if (shape.type === "text") continue
       const paint = palette.body[shape.fill ?? "none"]
@@ -150,8 +159,6 @@ export class SymbolRaster {
   }
 }
 
-const LABEL_OFFSET_CELLS = 0.45
-const LABEL_CELLS = 0.3
 const LABEL_MARGIN_CELLS = 6
 const MAX_SHEET_PX = 8192
 const MAX_SHEET_AREA = 8e6
@@ -179,16 +186,9 @@ export const fixedText = (text: string) => !text.includes("{")
 
 const TEXT_ANCHOR: Record<"start" | "middle" | "end", CanvasTextAlign> = { start: "start", middle: "center", end: "end" }
 
-const ALIGN: Record<Direction, CanvasTextAlign> = {
-  left: "right",
-  right: "left",
-  top: "center",
-  bottom: "center",
-  "top-left": "right",
-  "bottom-left": "right",
-  "top-right": "left",
-  "bottom-right": "left",
-}
+const UNSEEN = 0.001
+
+const faded = (color: string, opacity: number) => `color-mix(in srgb, ${color} ${opacity * 100}%, transparent)`
 
 export class TextRaster {
   private cache = new Map<string, Symbol>()
@@ -246,14 +246,33 @@ export class TextRaster {
 
     context.save()
     context.scale(scale, scale)
-    context.font = `${LABEL_CELLS * boost * grid}px ${palette.text.mono}`
+    const fontPx = PIN_LABEL_CELLS * boost * grid
+    context.font = `${fontPx}px ${palette.text.mono}`
     for (const raw of def.pins) {
       if (!raw.label) continue
       const pin = rotatePin(raw, def, rotation)
-      const dir = DIR[pin.labelAt]
+      const ground = pinLabelGround(def, raw.id)
+      const color = ground === "field" ? palette.text.inverse : (palette.body[ground].fill ?? palette.text.inverse)
+      const knockout = pinLabelKnockout(pin.label, pin.labelAt, boost, context.measureText(pin.label).width / fontPx / pin.label.length)
+      const at = (box: Box) => [(pin.x + box.x) * grid, (pin.y + box.y) * grid, box.w * grid, box.h * grid] as const
+      context.fillStyle = faded(color, KNOCKOUT_OPACITY)
+      context.fillRect(...at(knockout.solid))
+      for (const [box, rising] of [[knockout.rise, true], [knockout.fall, false]] as const) {
+        const [x, y, w, h] = at(box)
+        const ramp = knockout.axis === "x" ? context.createLinearGradient(x, 0, x + w, 0) : context.createLinearGradient(0, y, 0, y + h)
+        ramp.addColorStop(0, faded(color, rising ? UNSEEN : KNOCKOUT_OPACITY))
+        ramp.addColorStop(1, faded(color, rising ? KNOCKOUT_OPACITY : UNSEEN))
+        context.fillStyle = ramp
+        context.fillRect(x, y, w, h)
+      }
+    }
+    for (const raw of def.pins) {
+      if (!raw.label) continue
+      const pin = rotatePin(raw, def, rotation)
+      const label = pinLabelOffset(pin.labelAt)
       context.fillStyle = pin.kind === "nc" ? palette.text.muted : palette.text.plain
-      context.textAlign = ALIGN[pin.labelAt]
-      context.fillText(pin.label, (pin.x + dir.x * LABEL_OFFSET_CELLS) * grid, (pin.y + dir.y * LABEL_OFFSET_CELLS) * grid)
+      context.textAlign = TEXT_ANCHOR[label.anchor]
+      context.fillText(pin.label, (pin.x + label.x) * grid, (pin.y + label.y) * grid)
     }
     context.restore()
 

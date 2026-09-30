@@ -296,6 +296,7 @@ export type ComponentDef = {
   model?: Element[]
   /** Inspector hides internal elements that carry no current: boards have dozens of them. */
   hideIdle?: boolean
+  pinsAreSockets?: boolean
   /** Emulated MCU on this component: a chip profile id from `src/mcu/chip.ts`. */
   chip?: string
   /** Pin whose voltage powers the on-board MCU; the core holds in reset while it is low. */

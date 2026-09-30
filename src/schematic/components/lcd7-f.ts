@@ -115,6 +115,7 @@ export const lcd7f: ComponentDef = {
   ],
   model,
   hideIdle: true,
+  pinsAreSockets: true,
   panel: { part: "PANEL", width: 1024, height: 600, signals, pixelHz: [25e6, 75e6], power: V33 },
   info: {
     Panel: "1024 × 600, 24-bit parallel RGB (DE mode; HS/VS/DE polarity not checked), pixel clock 25–75 MHz",

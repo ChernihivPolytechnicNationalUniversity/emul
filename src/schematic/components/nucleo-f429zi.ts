@@ -167,8 +167,8 @@ function header(
       note,
     }))
   return left
-    ? [...col(outer, X.leftOuter, "left", 3), ...col(inner, X.leftInner, "right", 4)]
-    : [...col(outer, X.rightOuter, "right", 3), ...col(inner, X.rightInner, "left", 4)]
+    ? [...col(outer, X.leftOuter, "left", 2), ...col(inner, X.leftInner, "right", 3)]
+    : [...col(outer, X.rightOuter, "right", 2), ...col(inner, X.rightInner, "left", 3)]
 }
 
 const pins: PinDef[] = [
@@ -282,6 +282,7 @@ export const nucleoF429zi: ComponentDef = {
   parts,
   model,
   hideIdle: true,
+  pinsAreSockets: true,
   chip: STM32F429ZI.id,
   mcuPower: V3V3,
   mcuReset: NRST,

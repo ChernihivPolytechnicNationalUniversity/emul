@@ -3,13 +3,14 @@ import { FlameIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { objectSize } from "@/schematic/geometry"
 import { getDef, partInitial } from "@/schematic/registry"
-import { partKey, type BodyShape, type Damage, type Fill, type PartDef, type PartState, type PlacedObject, type Rotation } from "@/schematic/types"
+import { partKey, type BodyShape, type ComponentDef, type Damage, type Fill, type PartDef, type PartState, type PlacedObject, type Rotation } from "@/schematic/types"
 import { LED_COLORS } from "@/schematic/components/basic"
 import type { DisplayFrame } from "@/sim/use-simulation"
 import { useObjectReadings, useObjectSim, type SimStore } from "@/sim/sim-store"
 import type { FieldDetail } from "./detail"
 import { formatSI } from "@/sim/units"
 import { fixedText } from "./symbol-raster"
+import { selectionOutline } from "./selection-geometry"
 
 const FILL: Record<Fill, string> = {
   board: "fill-card stroke-border",
@@ -23,6 +24,11 @@ const FILL: Record<Fill, string> = {
 
 /** Stroke width of symbol paths in world px (stays visible at 50%). */
 const SYMBOL_STROKE = 2
+
+function HollowBackdrop({ def, grid }: { def: ComponentDef; grid: number }) {
+  const { hollow } = selectionOutline(def)
+  return hollow ? <path d={hollow} transform={`scale(${grid})`} className="fill-background stroke-none" pointerEvents="none" /> : null
+}
 
 /** Named LED colours resolve to CSS; anything else is passed through. */
 const resolveColor = (c: string) => LED_COLORS[c]?.css ?? c
@@ -87,10 +93,7 @@ export const ComponentView = React.memo(function ComponentView({
       data-slot="component"
       data-selected={selected || undefined}
       data-damaged={damage ? "" : undefined}
-      className={cn(
-        "absolute cursor-move overflow-visible select-none",
-        "[&>.body]:data-selected:drop-shadow-[0_0_0_2px_var(--primary)]",
-      )}
+      className="absolute cursor-move overflow-visible select-none"
       style={{ left, top, width: w, height: h, transform: rotation ? `rotate(${rotation}deg)` : undefined }}
       strokeWidth={1}
       viewBox={`0 0 ${w} ${h}`}
@@ -102,23 +105,11 @@ export const ComponentView = React.memo(function ComponentView({
     >
       {damage && <title>{`${props.ref ?? def.name} burnt: ${damage.reason}`}</title>}
       <g className={cn("body", damage && "opacity-50 saturate-0")}>
+        <HollowBackdrop def={def} grid={grid} />
         {def.body.map((s, i) => (
           <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} boost={detail.textBoost} sheeted={sheeted} props={props} rotation={rotation} />
         ))}
       </g>
-      {selected && (
-        <rect
-          x={0}
-          y={0}
-          width={w}
-          height={h}
-          rx={g(0.6)}
-          className="fill-primary/5 stroke-primary"
-          strokeWidth={2}
-          vectorEffect="non-scaling-stroke"
-          pointerEvents="none"
-        />
-      )}
       <g className="parts">
         {detail.pins && def.parts.map((p) => {
           const key = partKey(object.id, p.id)

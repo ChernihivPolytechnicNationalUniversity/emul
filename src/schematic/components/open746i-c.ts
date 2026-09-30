@@ -222,23 +222,25 @@ function strip(connector: string, rows: Row[], at: { x: number; y: number; dir: 
 }
 
 // Edge headers sit 4 cells in from the edge so their outward names stay on the board.
+const OUTER_STUB = 2
+const INNER_STUB = 3
 const L = { outer: 4, inner: 5 }
 const R = { outer: WIDTH - 4, inner: WIDTH - 5 }
 const T = { outer: 3, inner: 4 }
 const B = { outer: HEIGHT - 3, inner: HEIGHT - 4 }
 const left = (connector: string, rows: Row[], y: number, inner = false): PinDef[] =>
-  strip(connector, rows, { x: inner ? L.inner : L.outer, y, dir: "down", side: "left", labelAt: inner ? "right" : "left", stub: inner ? L.inner : L.outer })
+  strip(connector, rows, { x: inner ? L.inner : L.outer, y, dir: "down", side: "left", labelAt: inner ? "right" : "left", stub: inner ? INNER_STUB : OUTER_STUB })
 const right = (connector: string, rows: Row[], y: number, inner = false): PinDef[] =>
-  strip(connector, rows, { x: inner ? R.inner : R.outer, y, dir: "down", side: "right", labelAt: inner ? "left" : "right", stub: inner ? L.inner : L.outer })
+  strip(connector, rows, { x: inner ? R.inner : R.outer, y, dir: "down", side: "right", labelAt: inner ? "left" : "right", stub: inner ? INNER_STUB : OUTER_STUB })
 const top = (connector: string, rows: Row[], x: number, inner = false): PinDef[] =>
-  strip(connector, rows, { x, y: inner ? T.inner : T.outer, dir: "right", side: "top", labelAt: inner ? "bottom" : "top", stub: inner ? T.inner : T.outer })
+  strip(connector, rows, { x, y: inner ? T.inner : T.outer, dir: "right", side: "top", labelAt: inner ? "bottom" : "top", stub: inner ? INNER_STUB : OUTER_STUB })
 const bottom = (connector: string, rows: Row[], x: number, inner = false): PinDef[] =>
-  strip(connector, rows, { x, y: inner ? B.inner : B.outer, dir: "right", side: "bottom", labelAt: inner ? "top" : "bottom", stub: inner ? T.inner : T.outer })
+  strip(connector, rows, { x, y: inner ? B.inner : B.outer, dir: "right", side: "bottom", labelAt: inner ? "top" : "bottom", stub: inner ? INNER_STUB : OUTER_STUB })
 
 /** P22–P24: the three 4-pin power rows on the top edge (5 V, GND, 3.3 V), one name per row. */
 function rail(connector: string, label: string, kind: PinKind, y: number): PinDef[] {
   shroud("P22-P24", 38.5 - (0.45 + 0.19 * 3 + 0.35), y - 0.5, 42.5, y + 0.5)
-  return [1, 2, 3, 4].map((pin) => ({ id: `${connector}-${pin}`, label: pin === 1 ? label : "", x: 38 + pin, y, side: "top", labelAt: "left", kind, stub: y, connector, connectorPin: pin, note: `${label} rail` }))
+  return [1, 2, 3, 4].map((pin) => ({ id: `${connector}-${pin}`, label: pin === 1 ? label : "", x: 38 + pin, y, side: "top", labelAt: "left", kind, stub: y - T.outer + OUTER_STUB, connector, connectorPin: pin, note: `${label} rail` }))
 }
 
 /** P15 pins in two rows of twenty on the bottom edge like the other 2-row headers: 1–20 above 21–40. */
@@ -249,18 +251,18 @@ const FFC_X = 35
 
 const pins: PinDef[] = [
   // Power: the 5 V jack on the top edge (S2 picks it or the USART1 USB) and the P22–P24 rails.
-  { id: "5VDC", label: "5VDC", x: 13, y: T.outer, side: "top", labelAt: "bottom", kind: "power", stub: T.outer, connector: "DC jack", note: "5 V in; S2 picks this or the USART1 USB as 5Vin, and the module takes 5Vin with SW1 off" },
+  { id: "5VDC", label: "5VDC", x: 13, y: T.outer, side: "top", labelAt: "bottom", kind: "power", stub: OUTER_STUB, connector: "DC jack", note: "5 V in; S2 picks this or the USART1 USB as 5Vin, and the module takes 5Vin with SW1 off" },
   ...rail("P22", "5V", "power", 3),
   ...rail("P24", "GND", "gnd", 4),
   ...rail("P23", "3V3", "power", 5),
   // USART1 through the CP2102: the USB-to-serial bridge, as two pins either side of its micro-USB.
-  { id: "VCP-TX", label: "TX", x: 46, y: T.outer, side: "top", labelAt: "bottom", kind: "digital", stub: T.outer, mcu: "PA9", signal: "USART1_TX", fn: "USART1_TX", connector: "JMP2", connectorPin: 1, note: "MCU → CP2102 → host; connect to a terminal's RX" },
-  { id: "VCP-RX", label: "RX", x: 52, y: T.outer, side: "top", labelAt: "bottom", kind: "digital", stub: T.outer, mcu: "PA10", signal: "USART1_RX", fn: "USART1_RX", connector: "JMP2", connectorPin: 3, note: "Host → CP2102 → MCU; connect to a terminal's TX" },
+  { id: "VCP-TX", label: "TX", x: 46, y: T.outer, side: "top", labelAt: "bottom", kind: "digital", stub: OUTER_STUB, mcu: "PA9", signal: "USART1_TX", fn: "USART1_TX", connector: "JMP2", connectorPin: 1, note: "MCU → CP2102 → host; connect to a terminal's RX" },
+  { id: "VCP-RX", label: "RX", x: 52, y: T.outer, side: "top", labelAt: "bottom", kind: "digital", stub: OUTER_STUB, mcu: "PA10", signal: "USART1_RX", fn: "USART1_RX", connector: "JMP2", connectorPin: 3, note: "Host → CP2102 → MCU; connect to a terminal's TX" },
   ...top("P6", SDMMC, 17),
   ...top("P3", QSPI, 28),
   // I2S sits inside the top edge, right of USART1; its wires leave upward.
-  ...strip("P5", I2S3, { x: 55, y: 6, dir: "right", side: "top", labelAt: "top", stub: 6 }),
-  ...strip("P5", I2S2, { x: 55, y: 7, dir: "right", side: "top", labelAt: "bottom", stub: 7 }),
+  ...strip("P5", I2S3, { x: 55, y: 6, dir: "right", side: "top", labelAt: "top", stub: OUTER_STUB }),
+  ...strip("P5", I2S2, { x: 55, y: 7, dir: "right", side: "top", labelAt: "bottom", stub: INNER_STUB }),
   ...left("P2", USART3, 6),
   ...left("P8", CAN2, 16),
   ...left("P7", CAN1, 23),
@@ -525,6 +527,7 @@ export const open746ic: ComponentDef = {
   parts,
   model,
   hideIdle: true,
+  pinsAreSockets: true,
   chip: STM32F746IG.id,
   mcuPower: V3V3,
   mcuReset: NRST,

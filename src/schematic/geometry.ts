@@ -395,6 +395,19 @@ export function toPath(pts: Point[], radius = 0): string {
   return out.join(" ")
 }
 
+export function trimRouteEnds(pts: readonly Point[], by: number): Point[] {
+  if (pts.length < 2 || by <= 0) return [...pts]
+  const cut = (end: Point, toward: Point) => {
+    const len = Math.hypot(toward.x - end.x, toward.y - end.y)
+    const t = len ? Math.min(by, len / 2) / len : 0
+    return { x: end.x + (toward.x - end.x) * t, y: end.y + (toward.y - end.y) * t }
+  }
+  const out = [...pts]
+  out[0] = cut(pts[0], pts[1])
+  out[out.length - 1] = cut(pts[pts.length - 1], pts[pts.length - 2])
+  return out
+}
+
 function dedupe(pts: Point[]): Point[] {
   return pts.filter((p, i) => i === 0 || p.x !== pts[i - 1].x || p.y !== pts[i - 1].y)
 }
@@ -481,10 +494,17 @@ type CachedRoute = {
 
 const NOTHING_MOVED: ReadonlySet<string> = new Set()
 
+export type LabelRects = (object: PlacedObject, grid: number) => readonly Rect[]
+
 export class Router {
+  private readonly labels: LabelRects | null
   private routes = new Map<string, CachedRoute>()
   private objects: readonly PlacedObject[] | null = null
   private grid = 0
+
+  constructor(labels: LabelRects | null = null) {
+    this.labels = labels
+  }
 
   private movedSinceLastCall(objects: readonly PlacedObject[], grid: number): ReadonlySet<string> | null {
     const previous = this.objects
@@ -540,6 +560,11 @@ export class Router {
         const rect = objectRect(o, grid)
         if (!intersects(rect, area)) continue
         deps.push(o.id)
+        for (const label of this.labels?.(o, grid) ?? []) {
+          if (!intersects(label, area)) continue
+          avoid.push(label)
+          signature += `|${o.id}#${label.x},${label.y},${label.w},${label.h}`
+        }
         if (o.id === w.from.object || o.id === w.to.object) continue
         avoid.push(rect)
         signature += `|${o.id}@${o.def},${o.x},${o.y},${o.rotation ?? 0}`

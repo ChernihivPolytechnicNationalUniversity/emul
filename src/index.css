@@ -34,6 +34,7 @@
     --color-secondary: var(--secondary);
     --color-primary-foreground: var(--primary-foreground);
     --color-primary: var(--primary);
+    --color-selection: var(--selection);
     --color-popover-foreground: var(--popover-foreground);
     --color-popover: var(--popover);
     --color-card-foreground: var(--card-foreground);
@@ -57,6 +58,11 @@
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.145 0 0);
     --primary: oklch(0.205 0 0);
+    --selection: oklch(0.205 0 0);
+    --selection-plate-opacity: 0.09;
+    --selection-feather: color-mix(in srgb, var(--selection) 50%, var(--background));
+    --selection-tint: color-mix(in srgb, var(--selection) 9%, var(--background));
+    --selection-tint-feather: color-mix(in srgb, var(--selection) 4.5%, var(--background));
     --primary-foreground: oklch(0.985 0 0);
     --secondary: oklch(0.97 0 0);
     --secondary-foreground: oklch(0.205 0 0);
@@ -118,6 +124,10 @@
     --popover: oklch(0.205 0 0);
     --popover-foreground: oklch(0.985 0 0);
     --primary: oklch(0.922 0 0);
+    --selection: oklch(0.922 0 0);
+    --selection-plate-opacity: 0.17;
+    --selection-tint: color-mix(in srgb, var(--selection) 17%, var(--background));
+    --selection-tint-feather: color-mix(in srgb, var(--selection) 8.5%, var(--background));
     --primary-foreground: oklch(0.205 0 0);
     --secondary: oklch(0.269 0 0);
     --secondary-foreground: oklch(0.985 0 0);
@@ -234,4 +244,12 @@
   color: #6b7280;
   font-style: italic;
   opacity: 0.9;
+}
+[data-slot="dot-field-content"] [data-blocked] {
+  --selection: var(--destructive);
+  --selection-feather: color-mix(in srgb, var(--destructive) 50%, var(--background));
+  --selection-plate-opacity: 0.16;
+}
+[data-slot="field-drag-layer"][data-blocked]:has([data-slot="field-canvas"]) {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--destructive) 55%, transparent));
 }

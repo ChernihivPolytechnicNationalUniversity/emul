@@ -3,23 +3,20 @@ import { cn } from "@/lib/utils"
 import {
   nearestSegment,
   toPath,
+  trimRouteEnds,
   type Point,
   type RoutedWire,
 } from "@/schematic/geometry"
 import type { SpatialIndex } from "@/schematic/spatial"
 import type { PlacedObject } from "@/schematic/types"
 import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
-import { wireCornerRadius } from "./wire-style"
+import { CASING_PX, casingTrim, SELECTED_WIRE_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
 import { pendingPoints, type PendingWire } from "./pending-wire"
 import type { WireFlow } from "./wire-flow"
 
 export type { PendingWire }
 
 
-const WIRE_PX = 2
-const CASING_PX = 3
-const SELECTED_EXTRA_PX = 1
-const HALO_PX = 7
 const HIT_PX = 14
 const HANDLE_CELLS = 0.15
 const HANDLE_MIN_PX = 2.5
@@ -84,7 +81,10 @@ export const WireLayer = React.memo(function WireLayer({
   const groups = React.useMemo(() => groupByNet(routes, netOfWire), [routes, netOfWire])
   const paths = React.useMemo(() => new Map(routes.map((r) => [r.id, toPath(r.pts, radius)])), [routes, radius])
   const pathOf = (id: string) => paths.get(id) ?? ""
-  const widthOf = (id: string) => WIRE_PX + (selected.has(id) ? SELECTED_EXTRA_PX : 0)
+  const trim = casingTrim(grid)
+  const casings = React.useMemo(() => new Map(routes.map((r) => [r.id, toPath(trimRouteEnds(r.pts, trim), radius)])), [routes, radius, trim])
+  const casingOf = (id: string) => casings.get(id) ?? ""
+  const widthOf = (id: string) => (selected.has(id) ? SELECTED_WIRE_PX : WIRE_PX)
 
   return (
     <svg data-slot="wires" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
@@ -97,34 +97,21 @@ export const WireLayer = React.memo(function WireLayer({
         >
           {wires.map(
             (route) =>
-              selected.has(route.id) && (
+              !selected.has(route.id) && (
                 <path
                   key={route.id}
                   data-wire={route.id}
-                  d={pathOf(route.id)}
+                  data-casing=""
+                  d={casingOf(route.id)}
                   fill="none"
-                  stroke="var(--primary)"
-                  strokeOpacity={0.22}
-                  strokeWidth={HALO_PX}
+                  stroke="var(--background)"
+                  strokeWidth={WIRE_PX + CASING_PX}
                   strokeLinejoin="round"
-                  strokeLinecap="round"
+                  strokeLinecap="butt"
                   vectorEffect="non-scaling-stroke"
                 />
               ),
           )}
-          {wires.map((route) => (
-            <path
-              key={route.id}
-              data-wire={route.id}
-              d={pathOf(route.id)}
-              fill="none"
-              stroke="var(--background)"
-              strokeWidth={widthOf(route.id) + CASING_PX}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
           {wires.map((route) => {
             const d = pathOf(route.id)
             const width = widthOf(route.id)
@@ -207,11 +194,13 @@ export const WireLayer = React.memo(function WireLayer({
   )
 })
 
-export function PendingWireLayer({ objects, index, pending, grid, scale }: { objects: readonly PlacedObject[]; index: SpatialIndex; pending: PendingWire | null; grid: number; scale: number }) {
+type PendingPart = "route" | "marks"
+
+export function PendingWireLayer({ objects, index, pending, grid, scale, part }: { objects: readonly PlacedObject[]; index: SpatialIndex; pending: PendingWire | null; grid: number; scale: number; part: PendingPart }) {
   if (!pending) return null
   return (
-    <svg data-slot="pending-wire" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
-      <Pending objects={objects} index={index} pending={pending} grid={grid} radius={wireCornerRadius(grid)} handleR={handleRadius(grid, scale)} />
+    <svg data-slot={`pending-wire-${part}`} className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
+      <Pending objects={objects} index={index} pending={pending} grid={grid} radius={wireCornerRadius(grid)} handleR={handleRadius(grid, scale)} part={part} />
     </svg>
   )
 }
@@ -231,15 +220,25 @@ function handleRadius(grid: number, scale: number) {
   return Math.min(Math.max(HANDLE_CELLS * grid, HANDLE_MIN_PX / scale), HANDLE_MAX_PX / scale)
 }
 
-function Pending({ objects, index, pending, grid, radius, handleR }: { objects: readonly PlacedObject[]; index: SpatialIndex; pending: PendingWire; grid: number; radius: number; handleR: number }) {
+function Pending({ objects, index, pending, grid, radius, handleR, part }: { objects: readonly PlacedObject[]; index: SpatialIndex; pending: PendingWire; grid: number; radius: number; handleR: number; part: PendingPart }) {
   const pts = pendingPoints(objects, index, pending, grid)
   if (!pts) return null
   const d = toPath(pts, radius)
   const color = wireColorVar(pending.color)
   const end = pts[pts.length - 1]
+  if (part === "marks") {
+    return (
+      <g pointerEvents="none">
+        {pending.points.map((p, idx) => (
+          <circle key={idx} cx={p.x} cy={p.y} r={handleR} fill={color} stroke="var(--background)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+        ))}
+        <circle cx={end.x} cy={end.y} r={pending.target ? handleR * 1.4 : handleR} fill={pending.target ? color : "var(--background)"} stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+      </g>
+    )
+  }
   return (
     <g pointerEvents="none">
-      <path d={d} fill="none" stroke="var(--background)" strokeWidth={WIRE_PX + CASING_PX} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      <path d={toPath(trimRouteEnds(pts, casingTrim(grid)), radius)} fill="none" stroke="var(--background)" strokeWidth={WIRE_PX + CASING_PX} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
       <path
         d={d}
         fill="none"
@@ -250,10 +249,6 @@ function Pending({ objects, index, pending, grid, radius, handleR }: { objects: 
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
       />
-      {pending.points.map((p, idx) => (
-        <circle key={idx} cx={p.x} cy={p.y} r={handleR} fill={color} stroke="var(--background)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-      ))}
-      <circle cx={end.x} cy={end.y} r={pending.target ? handleR * 1.4 : handleR} fill={pending.target ? color : "var(--background)"} stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
     </g>
   )
 }
