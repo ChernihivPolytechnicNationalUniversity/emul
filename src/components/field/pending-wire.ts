@@ -1,4 +1,4 @@
-import { objectRect, resolvePin, routeArea, routeToPoint, routeWire, type Point } from "@/schematic/geometry"
+import { objectIndex, objectRect, ownBodies, resolvePin, routeArea, routeToPoint, routeWire, type Point } from "@/schematic/geometry"
 import type { SpatialIndex } from "@/schematic/spatial"
 import type { PinRef, PlacedObject } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
@@ -26,7 +26,7 @@ export function pendingPoints(objects: readonly PlacedObject[], index: SpatialIn
       .query(routeArea(a.point, aStub, target.point, bStub, p.points, grid))
       .filter((o) => o.id !== p.from.object && o.id !== p.target!.object)
       .map((o) => objectRect(o, grid))
-    return routeWire(a.point, a.pin.side, aStub, target.point, target.pin.side, bStub, grid, p.points, avoid).pts
+    return routeWire(a.point, a.pin.side, aStub, target.point, target.pin.side, bStub, grid, p.points, avoid, ownBodies(objectIndex(objects), grid, p.from.object, p.target.object)).pts
   }
   return routeToPoint(a.point, a.pin.side, a.pin.stub ?? 1, p.cursor, grid, p.points)
 }
@@ -41,5 +41,5 @@ export function bentWirePoints(objects: readonly PlacedObject[], index: SpatialI
     .query(routeArea(a.point, aStub, b.point, bStub, points, grid))
     .filter((o) => o.id !== from.object && o.id !== to.object)
     .map((o) => objectRect(o, grid))
-  return routeWire(a.point, a.pin.side, aStub, b.point, b.pin.side, bStub, grid, points, avoid).pts
+  return routeWire(a.point, a.pin.side, aStub, b.point, b.pin.side, bStub, grid, points, avoid, ownBodies(objectIndex(objects), grid, from.object, to.object)).pts
 }

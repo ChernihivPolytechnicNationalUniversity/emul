@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { flipped, GRID, objectRect, objectSize, orientationOf, orientPin, pinPoint, placedText, UPRIGHT, type Orientation } from "@/schematic/geometry"
+import { DIR, flipped, GRID, objectPins, objectRect, objectSize, orientationOf, orientPin, pinPoint, placedText, routeAll, UPRIGHT, type Orientation, type Point } from "@/schematic/geometry"
 import { examples } from "@/schematic/examples"
-import { flipSelection } from "@/schematic/orient"
+import { flipSelection, rotateSelection } from "@/schematic/orient"
 import { footprint } from "@/schematic/placement"
 import { getDef, registry } from "@/schematic/registry"
 import type { PlacedObject, Rotation } from "@/schematic/types"
@@ -140,6 +140,72 @@ describe("a selection mirrors as one block, the way schematic editors mirror a b
     expect(doc.wires[0].points![0].y).not.toBe(GRID * 5)
     const back = flipSelection(doc, everything, "vertical", GRID)
     expect(back.objects.every((o) => o.mirror === undefined)).toBe(true)
+  })
+})
+
+describe("a part turned or mirrored in place keeps its wires out of its own body", () => {
+  const crossesBody = (p: Point, q: Point, r: { x: number; y: number; w: number; h: number }) => {
+    const [x0, x1, y0, y1] = [r.x + 0.5, r.x + r.w - 0.5, r.y + 0.5, r.y + r.h - 0.5]
+    if (p.y === q.y) return p.y > y0 && p.y < y1 && Math.max(p.x, q.x) > x0 && Math.min(p.x, q.x) < x1
+    return p.x === q.x && p.x > x0 && p.x < x1 && Math.max(p.y, q.y) > y0 && Math.min(p.y, q.y) < y1
+  }
+  const turnsBack = (a: Point, b: Point, c: Point) => {
+    const dot = (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
+    return dot < 0 && Math.abs(cross) < 1e-6
+  }
+
+  it("the wires into a turned part lose the bends drawn for the old way round; the rest keep theirs", () => {
+    const doc = examples.find((e) => e.id === "bridge")!.build(GRID)
+    const r5 = doc.objects.find((o) => o.props?.ref === "R5")!
+    const into = (w: (typeof doc.wires)[number]) => w.from.object === r5.id || w.to.object === r5.id
+    expect(doc.wires.filter(into).some((w) => w.points)).toBe(true)
+    for (const after of [flipSelection(doc, new Set([r5.id]), "horizontal", GRID), rotateSelection(doc, new Set([r5.id]), 45, GRID)]) {
+      expect(after.wires.filter(into).every((w) => !w.points)).toBe(true)
+      expect(after.wires.filter((w) => !into(w))).toEqual(doc.wires.filter((w) => !into(w)))
+    }
+  })
+
+  const cornered = new Map([
+    ["system-exam R9", "in series with L1 pin to pin, so its far end can only reach L1 back along its own body"],
+    ["system-exam L1", "in series with R9 pin to pin, so its far end can only reach R9 back along its own body"],
+    ["charge-boost A1", "flipped, the way round the module runs through BT1 and SW1, and crossing another part costs more"],
+  ])
+
+  it("in every example, no wire of a mirrored or half-turned part runs back through the part, doubles back or meets a pin from the side, but where the way round is blocked", () => {
+    const issues: string[] = []
+    for (const example of examples) {
+      const doc = example.build(GRID)
+      for (const part of doc.objects) {
+        const def = getDef(part.def)
+        if (!def || def.pins.length > 8 || (part.rotation ?? 0) % 90 !== 0) continue
+        const ids = new Set([part.id])
+        for (const [how, after] of [
+          ["mirrored", flipSelection(doc, ids, "horizontal", GRID)],
+          ["flipped", flipSelection(doc, ids, "vertical", GRID)],
+          ["half-turned", rotateSelection(rotateSelection(rotateSelection(rotateSelection(doc, ids, 45, GRID), ids, 45, GRID), ids, 45, GRID), ids, 45, GRID)],
+        ] as const) {
+          const moved = after.objects.find((o) => o.id === part.id)!
+          const wires = after.wires.filter((w) => w.from.object === part.id || w.to.object === part.id)
+          const body = footprint(moved, GRID)!.box
+          for (const route of routeAll(after.objects, wires, GRID)) {
+            const pts = route.pts
+            const name = `${example.id} ${part.props?.ref ?? part.def} ${how}`
+            const known = cornered.has(`${example.id} ${part.props?.ref}`)
+            for (let i = 2; i < pts.length - 1; i++) if (!known && crossesBody(pts[i - 1], pts[i], body)) issues.push(`${name}: through its body`)
+            for (let i = 1; i + 1 < pts.length; i++) if (turnsBack(pts[i - 1], pts[i], pts[i + 1])) issues.push(`${name}: doubles back`)
+            const w = wires.find((x) => x.id === route.id)!
+            if (pts.length < 2) continue
+            for (const [ref, from, to] of [[w.from, pts[0], pts[1]], [w.to, pts[pts.length - 1], pts[pts.length - 2]]] as const) {
+              const pin = objectPins(after.objects.find((o) => o.id === ref.object)!, GRID).find((p) => p.pin.id === ref.pin)!.pin
+              const d = DIR[pin.side]
+              if ((pin.stub ?? 1) > 0 && (Math.sign(to.x - from.x) !== Math.sign(d.x) || Math.sign(to.y - from.y) !== Math.sign(d.y))) issues.push(`${name}: meets ${ref.pin} from the side`)
+            }
+          }
+        }
+      }
+    }
+    expect([...new Set(issues)].slice(0, 30)).toEqual([])
   })
 })
 

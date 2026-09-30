@@ -9,8 +9,10 @@ import {
   GRID,
   liesOnRoute,
   nudgeRoutes,
+  objectIndex,
   objectPins,
   objectRect,
+  ownBodies,
   resolvePin,
   routeAll,
   routeObstacles,
@@ -647,6 +649,7 @@ describe("caching", () => {
             GRID,
             w.points ?? [],
             routeObstacles(doc.objects, GRID, w.from.object, w.to.object),
+            ownBodies(objectIndex(doc.objects), GRID, w.from.object, w.to.object),
           )
           return [trace(w.id, route.pts)]
         })

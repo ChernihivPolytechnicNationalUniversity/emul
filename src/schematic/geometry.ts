@@ -1,3 +1,4 @@
+import { bodyBounds } from "./body"
 import { getDef, getPin } from "./registry"
 import { SpatialIndex } from "./spatial"
 import type { ComponentDef, PinDef, PinRef, PlacedObject, Point, Rotation, Side, Wire } from "./types"
@@ -245,6 +246,7 @@ export function routeWire(
   grid: number,
   points: Point[] = [],
   avoid: Rect[] = [],
+  own: Rect[] = [],
 ): Route {
   const a1 = stubEnd(a, aSide, aStub, grid)
   const b1 = stubEnd(b, bSide, bStub, grid)
@@ -253,7 +255,7 @@ export function routeWire(
   let horizontal = isHorizontal(aSide, a1, points[0] ?? b1)
 
   if (points.length === 0) {
-    for (const m of autoRoute(a, a1, aSide, b, b1, bSide, grid, avoid)) {
+    for (const m of autoRoute(a, a1, aSide, b, b1, bSide, grid, avoid, own)) {
       pts.push(m)
       owner.push(0)
     }
@@ -320,18 +322,24 @@ const arrivesFromBehind = (pts: readonly Point[], bSide: Direction) => {
   return n > 1 && Math.sign(pts[n - 1].x - pts[n - 2].x) * DIR[bSide].x + Math.sign(pts[n - 1].y - pts[n - 2].y) * DIR[bSide].y > 0 ? 1 : 0
 }
 
+const runsAlong = (from: Point, to: Point, side: Direction) =>
+  Math.sign(to.x - from.x) === Math.sign(DIR[side].x) && Math.sign(to.y - from.y) === Math.sign(DIR[side].y)
+
 /**
  * Interior points of the automatic route between two stub ends: a centred Z when both stubs
  * point the same way, an L otherwise. When that path runs over another component's body, the
  * mid line is moved — first between the ends, then past them — to the nearest position that
  * clears every body, or the one crossing fewest if none does.
  */
-function autoRoute(a: Point, a1: Point, aSide: Direction, b: Point, b1: Point, bSide: Direction, grid: number, avoid: Rect[]): Point[] {
+function autoRoute(a: Point, a1: Point, aSide: Direction, b: Point, b1: Point, bSide: Direction, grid: number, avoid: Rect[], own: Rect[]): Point[] {
   const ah = isHorizontal(aSide, a1, b1)
   const bh = isHorizontal(bSide, b1, a1)
+  const ownClear = own.filter((r) => !strictlyInside(a1, r) && !strictlyInside(b1, r))
   const cost = (mid: Point[]) => {
     const pts = collapsed([a, a1, ...mid, b1, b])
-    const throughBody = leavesThroughBody(pts, aSide) + arrivesFromBehind(pts, bSide)
+    const n = pts.length
+    const skipsStub = n < 2 ? 0 : (samePoint(a, a1) || runsAlong(pts[0], pts[1], aSide) ? 0 : 1) + (samePoint(b, b1) || runsAlong(pts[n - 1], pts[n - 2], bSide) ? 0 : 1)
+    const throughBody = leavesThroughBody(pts, aSide) + arrivesFromBehind(pts, bSide) + skipsStub + crossings(a1, mid, b1, ownClear)
     return crossings(a1, mid, b1, avoid) * BODY_CROSSING_COST + throughBody * THROUGH_BODY_COST + pathLength(pts)
   }
   const zx = (mx: number): Point[] => [
@@ -358,6 +366,7 @@ function autoRoute(a: Point, a1: Point, aSide: Direction, b: Point, b1: Point, b
   const candidates: Point[][] = [{ x: b1.x, y: a1.y }, { x: a1.x, y: b1.y }].map((p) => [p])
   for (const mx of lines(a1.x, b1.x)) candidates.push(zx(mx))
   for (const my of lines(a1.y, b1.y)) candidates.push(zy(my))
+  const shortest = pathLength([a, a1]) + Math.abs(b1.x - a1.x) + Math.abs(b1.y - a1.y) + pathLength([b1, b])
   let best = preferred
   let bestCost = preferredCost
   for (const c of candidates) {
@@ -365,6 +374,7 @@ function autoRoute(a: Point, a1: Point, aSide: Direction, b: Point, b1: Point, b
     if (candidateCost < bestCost) {
       best = c
       bestCost = candidateCost
+      if (candidateCost <= shortest + 1e-6) break
     }
   }
   return best
@@ -393,6 +403,47 @@ function crossings(a1: Point, mid: Point[], b1: Point, avoid: Rect[]) {
     }
   }
   return n
+}
+
+const strictlyInside = (p: Point, r: Rect) => p.x > r.x + 0.5 && p.x < r.x + r.w - 0.5 && p.y > r.y + 0.5 && p.y < r.y + r.h - 0.5
+
+const ownBodyCache = new WeakMap<PlacedObject, { grid: number; body: Rect | null }>()
+
+function ownBody(obj: PlacedObject, grid: number): Rect | null {
+  const cached = ownBodyCache.get(obj)
+  if (cached && cached.grid === grid) return cached.body
+  const body = measureOwnBody(obj, grid)
+  ownBodyCache.set(obj, { grid, body })
+  return body
+}
+
+function measureOwnBody(obj: PlacedObject, grid: number): Rect | null {
+  const def = getDef(obj.def)
+  if (!def) return null
+  const orientation = orientationOf(obj)
+  const box = objectSize(def, orientation.rotation)
+  const b = bodyBounds(def)
+  const corners = [
+    { x: b.x, y: b.y },
+    { x: b.x + b.w, y: b.y },
+    { x: b.x + b.w, y: b.y + b.h },
+    { x: b.x, y: b.y + b.h },
+  ].map((p) => orientOffset({ x: p.x - def.width / 2, y: p.y - def.height / 2 }, orientation))
+  const xs = corners.map((p) => p.x)
+  const ys = corners.map((p) => p.y)
+  const x = Math.min(...xs)
+  const y = Math.min(...ys)
+  return { x: obj.x + (x + box.w / 2) * grid, y: obj.y + (y + box.h / 2) * grid, w: (Math.max(...xs) - x) * grid, h: (Math.max(...ys) - y) * grid }
+}
+
+export function ownBodies(objects: ReadonlyMap<string, PlacedObject>, grid: number, from: string, to: string): Rect[] {
+  const out: Rect[] = []
+  for (const id of from === to ? [from] : [from, to]) {
+    const obj = objects.get(id)
+    const body = obj && ownBody(obj, grid)
+    if (body) out.push(body)
+  }
+  return out
 }
 
 /** Body rectangles a wire between two objects must stay out of: everyone else's. */
@@ -629,7 +680,7 @@ export class Router {
         out.push(cached.route)
         continue
       }
-      const { pts, owner } = routeWire(a.point, a.pin.side, aStub, b.point, b.pin.side, bStub, grid, bends, avoid)
+      const { pts, owner } = routeWire(a.point, a.pin.side, aStub, b.point, b.pin.side, bStub, grid, bends, avoid, ownBodies(byId, grid, w.from.object, w.to.object))
       const route: RoutedWire = { id: w.id, pts, owner }
       kept.set(w.id, { signature, route, wire: w, deps, area })
       out.push(route)
