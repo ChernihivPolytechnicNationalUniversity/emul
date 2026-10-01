@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { hollowMarkerHidden } from "@/components/field/pin-marker"
+import { hollowMarkerHidden, pinMarker } from "@/components/field/pin-marker"
 import { selectionOutline } from "@/components/field/selection-geometry"
 import { trimRouteEnds } from "@/schematic/geometry"
 import { getDef, registry } from "@/schematic/registry"
@@ -79,6 +79,17 @@ describe("a connected pin keeps its marker only where it is a socket", () => {
     expect(hollowMarkerHidden(resistor, "digital", false, false)).toBe(false)
     expect(hollowMarkerHidden(resistor, "digital", true, true)).toBe(false)
     for (const kind of ["power", "gnd", "analog", "node", "nc"] as const) expect(hollowMarkerHidden(resistor, kind, true, false)).toBe(false)
+  })
+
+  it("a contact is one filled dot, bigger than a pin's own marker, in the net's colour when it has one", () => {
+    const socket = def("lcd7-f")
+    const contact = pinMarker(socket, "digital", true, true, undefined)!
+    const free = pinMarker(socket, "digital", false, false, undefined)!
+    expect.soft(contact.radiusCells, "the dot is bigger").toBeGreaterThan(free.radiusCells)
+    expect.soft(contact.className, "…and filled with ink").toContain("fill-foreground")
+    expect.soft(free.className, "a free digital pin is hollow").toContain("fill-background")
+    expect.soft(pinMarker(socket, "digital", true, true, "var(--wire-red)")!.fill, "a wired contact takes its net's colour").toBe("var(--wire-red)")
+    expect.soft(pinMarker(def("resistor"), "digital", true, false, "var(--wire-red)"), "a wired lead of a part has no marker").toBeNull()
   })
 
   it("every board is a socket board", () => {

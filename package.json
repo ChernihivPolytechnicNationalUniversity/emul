@@ -18,6 +18,7 @@
     "preview": "vite preview",
     "bench": "tsx --tsconfig tsconfig.app.json scripts/bench.ts",
     "field-bench": "tsx --tsconfig tsconfig.app.json scripts/field-bench.ts",
+    "field-drag": "tsx --tsconfig tsconfig.app.json scripts/field-drag.ts",
     "geom-bench": "tsx --tsconfig tsconfig.app.json scripts/geom-bench.ts",
     "mcu-jit": "tsx --tsconfig tsconfig.app.json scripts/mcu-jit.ts",
     "symbols": "tsx --tsconfig tsconfig.app.json scripts/symbols.ts",

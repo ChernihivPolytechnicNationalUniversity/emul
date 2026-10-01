@@ -19,6 +19,7 @@ type RigidWire = { elements: SVGElement[] }
 type Movable = HTMLElement | SVGSVGElement
 
 export type MovePlan = {
+  root: ParentNode
   origin: Point
   grid: number
   cornerRadius: number
@@ -29,9 +30,22 @@ export type MovePlan = {
   rigidWires: RigidWire[]
   elasticWires: ElasticWire[]
   blocked?: (dx: number, dy: number) => boolean
+  contacts?: { show: (dx: number, dy: number) => void }
 }
 
 const shifted = (p: Point, dx: number, dy: number): Point => ({ x: p.x + dx, y: p.y + dy })
+
+const HANDLE_ATTRIBUTES = ["data-pins", "data-plate"] as const
+
+function reattach(plan: MovePlan) {
+  for (let i = 0; i < plan.svgGroups.length; i++) {
+    const group = plan.svgGroups[i]
+    if (group.isConnected) continue
+    const handle = HANDLE_ATTRIBUTES.find((name) => group.hasAttribute(name))
+    const fresh = handle && plan.root.querySelector<SVGGElement>(`[${handle}="${CSS.escape(group.getAttribute(handle)!)}"]`)
+    if (fresh) plan.svgGroups[i] = fresh
+  }
+}
 
 const snappedOffset = (plan: MovePlan, at: Point): Point => ({
   x: snap(at.x - plan.origin.x, plan.grid),
@@ -107,7 +121,7 @@ export function planMove(
   const startPositions = new Map<string, Point>()
   for (const o of objects) if (moving.has(o.id)) startPositions.set(o.id, { x: o.x, y: o.y })
   const bodies: Movable[] = layer?.element ? [layer.element] : []
-  if (layer?.whole) return { origin, grid, cornerRadius, casingTrim, startPositions, bodies, svgGroups: [], rigidWires: [], elasticWires: [] }
+  if (layer?.whole) return { root, origin, grid, cornerRadius, casingTrim, startPositions, bodies, svgGroups: [], rigidWires: [], elasticWires: [] }
 
   const bodyOf = handlesById<HTMLElement>(root, "data-body")
   const pinsOf = handlesById<SVGGElement>(root, "data-pins")
@@ -140,7 +154,7 @@ export function planMove(
     if (from && to) elasticWires.push({ from, to, fromMoves, toMoves, bends: w.points ?? [], paths: splitCasings(elements.flatMap(pathsOf)) })
   }
 
-  return { origin, grid, cornerRadius, casingTrim, startPositions, bodies, svgGroups, rigidWires, elasticWires }
+  return { root, origin, grid, cornerRadius, casingTrim, startPositions, bodies, svgGroups, rigidWires, elasticWires }
 }
 
 export type BendPlan = {
@@ -333,9 +347,11 @@ export class MoveDrag {
     const cssTranslate = moved ? `translate(${dx}px, ${dy}px)` : ""
     for (const body of plan.bodies) body.style.transform = cssTranslate
     const svgTranslate = moved ? `translate(${dx} ${dy})` : ""
+    reattach(plan)
     for (const group of plan.svgGroups) group.setAttribute("transform", svgTranslate)
     const blocked = moved && (plan.blocked?.(dx, dy) ?? false)
     for (const element of [...plan.bodies, ...plan.svgGroups]) element.toggleAttribute("data-blocked", blocked)
+    plan.contacts?.show(dx, dy)
 
     for (const wire of plan.rigidWires) for (const element of wire.elements) element.setAttribute("transform", svgTranslate)
 
