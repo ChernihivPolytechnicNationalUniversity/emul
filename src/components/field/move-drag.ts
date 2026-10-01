@@ -29,6 +29,7 @@ export type MovePlan = {
   rigidWires: RigidWire[]
   elasticWires: ElasticWire[]
   blocked?: (dx: number, dy: number) => boolean
+  contacts?: { show: (dx: number, dy: number) => void }
 }
 
 const shifted = (p: Point, dx: number, dy: number): Point => ({ x: p.x + dx, y: p.y + dy })
@@ -336,6 +337,7 @@ export class MoveDrag {
     for (const group of plan.svgGroups) group.setAttribute("transform", svgTranslate)
     const blocked = moved && (plan.blocked?.(dx, dy) ?? false)
     for (const element of [...plan.bodies, ...plan.svgGroups]) element.toggleAttribute("data-blocked", blocked)
+    plan.contacts?.show(dx, dy)
 
     for (const wire of plan.rigidWires) for (const element of wire.elements) element.setAttribute("transform", svgTranslate)
 

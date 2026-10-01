@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { builder } from "@/schematic/builder"
-import { pinContacts } from "@/schematic/contacts"
+import { ContactIndex, contactsAfterMove, pinContacts } from "@/schematic/contacts"
+import { SpatialIndex } from "@/schematic/spatial"
 import { examples, lab1Stand } from "@/schematic/examples"
 import {
   bendReach,
@@ -571,6 +572,160 @@ describe("tapping a wire", () => {
     loop.setParts({ [partKey(byRef("SA2").id, "SW")]: { pressed: false } })
     run(0.05)
     expect.soft(Math.min(v("PG2"), v("PG3")), "released: both back high").toBeNear(3.3, 0.05)
+  })
+})
+
+describe("contacts follow a drag before it lands", () => {
+  const movedBy = (objects: readonly PlacedObject[], moving: ReadonlySet<string>, dx: number, dy: number) =>
+    objects.map((o) => (moving.has(o.id) ? { ...o, x: o.x + dx, y: o.y + dy } : o))
+  const touching = (objects: readonly PlacedObject[]) => new Set(new ContactIndex().of(objects, GRID).groups.keys())
+  const committedChanges = (objects: readonly PlacedObject[], moving: ReadonlySet<string>, dx: number, dy: number) => {
+    const before = touching(objects)
+    const after = touching(movedBy(objects, moving, dx, dy))
+    return [...new Set([...before, ...after])].filter((key) => before.has(key) !== after.has(key)).map((key) => `${key}=${after.has(key)}`).sort()
+  }
+  const previewed = (changes: ReadonlyMap<string, { contact: boolean }>) => [...changes].map(([key, c]) => `${key}=${c.contact}`).sort()
+
+  it("the 7-inch LCD lifted off P15 parts every pin it had docked, and lands back on them", () => {
+    const doc = examples.find((e) => e.id === "open746-lcd")!.build(GRID)
+    const lcd = doc.objects.find((o) => o.def === "lcd7-f")!
+    const moving = new Set([lcd.id])
+    const docked = [...pinContacts(doc.objects, GRID).groups.keys()]
+    const changes = contactsAfterMove(doc.objects, moving, GRID)
+    const lifted = changes(0, 3 * GRID)
+    expect.soft(docked.length, "the panel starts docked on its pins").toBeGreaterThanOrEqual(80)
+    expect.soft([...lifted.keys()].sort(), "three cells down, every docked pin on both sides parts").toEqual(docked.sort())
+    expect.soft(changes(0, GRID).size, "one cell down, the top row sits on P15's bottom row: only half part").toBe(docked.length / 2)
+    expect.soft([...lifted.values()].every((c) => !c.contact), "…and none of them is in contact").toBe(true)
+    expect.soft(changes(0, 0).size, "back where it was, nothing differs").toBe(0)
+    expect.soft(changes(GRID * 40, GRID * 40).size, "far away, the same pins as three cells off").toBe(docked.length)
+  })
+
+  it("a resistor slid onto another's lead meets it, and slides off again", () => {
+    const { doc, place } = builder(GRID)
+    const r1 = place("resistor", 0, 0)
+    const r2 = place("resistor", 6, 0)
+    const changes = contactsAfterMove(doc.objects, new Set([r2.id]), GRID)
+    expect.soft(previewed(changes(-2 * GRID, 0)), "R2.1 lands on R1.2").toEqual([`${pinKey(r1.id, "2")}=true`, `${pinKey(r2.id, "1")}=true`].sort())
+    expect.soft(changes(-GRID, 0).size, "a cell short of it, no contact").toBe(0)
+  })
+
+  it("a pin that sticks out past its part's box is still seen through the spatial index, across a bucket edge", () => {
+    const lcd: PlacedObject = { id: "lcd", def: "lcd7-f", x: 0, y: 33 * GRID }
+    const pin1 = objectPins(lcd, GRID).find(({ pin }) => pin.id === "1")!.point
+    const probe = objectPins({ id: "probe", def: "resistor", x: 0, y: 0 }, GRID).find(({ pin }) => pin.id === "2")!.point
+    const r: PlacedObject = { id: "r", def: "resistor", x: pin1.x - probe.x, y: pin1.y - probe.y }
+    const objects = [lcd, r]
+    expect.soft(Math.floor(objectRect(r, GRID).y / (32 * GRID)), "the resistor sits a spatial bucket above the LCD's box").toBeLessThan(Math.floor(objectRect(lcd, GRID).y / (32 * GRID)))
+    expect.soft(pinContacts(objects, GRID).groups.has(pinKey("r", "2")), "the resistor touches LCD pin 1").toBe(true)
+    const index = new SpatialIndex(objects, GRID)
+    const changes = contactsAfterMove(objects, new Set(["lcd"]), GRID, (area) => index.query(area))(0, GRID)
+    expect.soft(previewed(changes), "a cell down, both part").toEqual(committedChanges(objects, new Set(["lcd"]), 0, GRID))
+    expect.soft(changes.size, "…and there is something to part").toBe(2)
+    const fromTheResistor = contactsAfterMove(objects, new Set(["r"]), GRID, (area) => index.query(area))(0, -GRID)
+    expect.soft(previewed(fromTheResistor), "the resistor carried a cell up off the still LCD parts too").toEqual(committedChanges(objects, new Set(["r"]), 0, -GRID))
+    expect.soft(fromTheResistor.size, "…both pins").toBe(2)
+  })
+
+  it("pins either side of a pixel's edge, 0.006 px apart, meet for the preview as for the commit", () => {
+    const objects: PlacedObject[] = [
+      { id: "a", def: "resistor", x: 0.497, y: 0 },
+      { id: "b", def: "resistor", x: 96.503, y: 0 },
+    ]
+    const [aEnd] = objectPins(objects[0], GRID).filter(({ pin }) => pin.id === "2").map(({ point }) => point.x)
+    const [bEnd] = objectPins(objects[1], GRID).filter(({ pin }) => pin.id === "1").map(({ point }) => point.x)
+    expect.soft(Math.round(aEnd) !== Math.round(bEnd), "the two pins round to different pixels").toBe(true)
+    expect.soft(pinContacts(objects, GRID).groups.size, "the commit joins them").toBe(2)
+    expect.soft(previewed(contactsAfterMove(objects, new Set(["b"]), GRID)(0, GRID)), "a cell down they part").toEqual(committedChanges(objects, new Set(["b"]), 0, GRID))
+  })
+
+  it("a contact the drag makes knows the pins it meets, so the dot can take their net's colour", () => {
+    const { doc, place } = builder(GRID)
+    const r1 = place("resistor", 0, 0)
+    const r2 = place("resistor", 6, 0)
+    const meeting = contactsAfterMove(doc.objects, new Set([r2.id]), GRID)(-2 * GRID, 0)
+    expect.soft(meeting.get(pinKey(r2.id, "1"))?.touching, "R2.1 meets R1.2").toEqual([pinKey(r1.id, "2")])
+    expect.soft(meeting.get(pinKey(r1.id, "2"))?.touching, "…and R1.2 meets R2.1").toEqual([pinKey(r2.id, "1")])
+  })
+
+  it("pins a few thousandths of a pixel apart are in contact for the preview exactly as for the commit", () => {
+    const objects: PlacedObject[] = [
+      { id: "a", def: "resistor", x: 0, y: 0 },
+      { id: "b", def: "resistor", x: 96.005, y: 0 },
+    ]
+    expect.soft(pinContacts(objects, GRID).groups.size, "the commit joins them").toBe(2)
+    expect.soft(previewed(contactsAfterMove(objects, new Set(["b"]), GRID)(0, GRID)), "a cell down they part").toEqual(committedChanges(objects, new Set(["b"]), 0, GRID))
+  })
+
+  it("two parts carried from opposite corners of a big sheet look only around themselves", () => {
+    const tiles: PlacedObject[] = []
+    for (let row = 0; row < 20; row++) for (let col = 0; col < 20; col++) tiles.push({ id: `t${row}-${col}`, def: "resistor", x: col * 10 * GRID, y: row * 10 * GRID })
+    const index = new SpatialIndex(tiles, GRID)
+    const seen = new Set<string>()
+    const near = (area: { x: number; y: number; w: number; h: number }) => {
+      const found = index.query(area)
+      for (const o of found) seen.add(o.id)
+      return found
+    }
+    contactsAfterMove(tiles, new Set(["t0-0", "t19-19"]), GRID, near)(GRID, 0)
+    expect(seen.size, "a handful of neighbours, not the 400 parts between them").toBeLessThan(40)
+  })
+
+  it("only pins touching across the move change: two parts carried together keep their own contact", () => {
+    const { doc, place } = builder(GRID)
+    const r1 = place("resistor", 0, 0)
+    const r2 = place("resistor", 4, 0)
+    const r3 = place("resistor", 8, 0)
+    const changes = contactsAfterMove(doc.objects, new Set([r1.id, r2.id]), GRID)
+    expect.soft(previewed(changes(0, GRID)), "R2–R3 parts, R1–R2 stays").toEqual([`${pinKey(r2.id, "2")}=false`, `${pinKey(r3.id, "1")}=false`].sort())
+  })
+
+  const offsets = [
+    [1, 0],
+    [0, -1],
+    [-2, 0],
+    [3, 2],
+    [0, 4],
+  ] as const
+  it.each(examples.map((e) => [e.id, e] as const))("matches what the commit would find on %s", (_, example) => {
+    const { objects } = example.build(GRID)
+    const mismatches: string[] = []
+    for (const o of objects) {
+      const moving = new Set([o.id])
+      const changes = contactsAfterMove(objects, moving, GRID)
+      for (const [cx, cy] of offsets) {
+        const got = previewed(changes(cx * GRID, cy * GRID)).join(" ")
+        const want = committedChanges(objects, moving, cx * GRID, cy * GRID).join(" ")
+        if (got !== want) mismatches.push(`${o.props?.ref ?? o.def} by (${cx}, ${cy}): ${got} ≠ ${want}`)
+      }
+    }
+    expect(mismatches).toEqual([])
+  })
+
+  it("matches the commit on 400 objects piled on 25×25 cells, a block of them at a time", () => {
+    let seed = 20261001
+    const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+    const jumbled: PlacedObject[] = []
+    for (let i = 0; i < 400; i++) {
+      jumbled.push({
+        id: `j${i}`,
+        def: ["resistor", "led", "ground", "pushbutton"][Math.floor(random() * 4)],
+        x: Math.round(random() * 24) * GRID,
+        y: Math.round(random() * 24) * GRID,
+        rotation: ([0, 45, 90, 135, 180, 225, 270, 315] as const)[Math.floor(random() * 8)],
+      })
+    }
+    let seen = 0
+    for (let start = 0; start < 400; start += 40) {
+      const moving = new Set(jumbled.slice(start, start + 7).map((o) => o.id))
+      const changes = contactsAfterMove(jumbled, moving, GRID)
+      for (const [cx, cy] of offsets) {
+        const got = previewed(changes(cx * GRID, cy * GRID))
+        seen += got.length
+        expect.soft(got, `block at ${start} by (${cx}, ${cy})`).toEqual(committedChanges(jumbled, moving, cx * GRID, cy * GRID))
+      }
+    }
+    expect.soft(seen, "…and the moves did make and break contacts").toBeGreaterThan(0)
   })
 })
 

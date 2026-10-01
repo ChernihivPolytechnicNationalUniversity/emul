@@ -1,5 +1,6 @@
-import { objectPins, type ObjectPin } from "./geometry"
-import type { PinKind, PlacedObject } from "./types"
+import { objectPins, objectRect, unionOf, type ObjectPin, type PlacedPin, type Rect } from "./geometry"
+import { getDef } from "./registry"
+import type { ComponentDef, PinKind, PlacedObject } from "./types"
 
 const EPS = 0.01
 
@@ -184,4 +185,122 @@ const defaultContacts = new ContactIndex()
 
 export function pinContacts(objects: readonly PlacedObject[], grid: number): Contacts {
   return defaultContacts.of(objects, grid)
+}
+
+export type ContactChange = { object: PlacedObject; pin: PlacedPin; contact: boolean; touching: readonly string[] }
+
+type SpotPin = { object: PlacedObject; key: string; pin: PlacedPin; x: number; y: number }
+
+const NO_CHANGES: ReadonlyMap<string, ContactChange> = new Map()
+
+export class PointGrid<T extends { x: number; y: number }> {
+  private readonly cells = new Map<number, T[]>()
+
+  add(pins: readonly T[]) {
+    for (const p of pins) {
+      const key = cellKey(Math.round(p.x), Math.round(p.y))
+      const cell = this.cells.get(key)
+      if (cell) cell.push(p)
+      else this.cells.set(key, [p])
+    }
+  }
+
+  at(x: number, y: number): T[] {
+    const cx = Math.round(x)
+    const cy = Math.round(y)
+    const sx = straddles(x - cx)
+    const sy = straddles(y - cy)
+    const found: T[] = []
+    for (let dx = Math.min(sx, 0); dx <= Math.max(sx, 0); dx++) {
+      for (let dy = Math.min(sy, 0); dy <= Math.max(sy, 0); dy++) {
+        for (const p of this.cells.get(cellKey(cx + dx, cy + dy)) ?? []) if (Math.abs(p.x - x) < EPS && Math.abs(p.y - y) < EPS) found.push(p)
+      }
+    }
+    return found
+  }
+
+  has(x: number, y: number) {
+    return this.at(x, y).length > 0
+  }
+}
+
+const touchesAnother = (grid: PointGrid<SpotPin>, p: SpotPin) => grid.at(p.x, p.y).some((q) => q.key !== p.key)
+
+function spotPins(object: PlacedObject, grid: number): SpotPin[] {
+  const pins: SpotPin[] = []
+  for (const { key, pin, point } of objectPins(object, grid)) if (pin.kind !== "nc") pins.push({ object, key, pin, x: point.x, y: point.y })
+  return pins
+}
+
+const overhangOf = new WeakMap<ComponentDef, number>()
+
+function pinOverhangCells(def: ComponentDef | undefined): number {
+  if (!def) return 0
+  let overhang = overhangOf.get(def)
+  if (overhang === undefined) {
+    overhang = 0
+    for (const pin of def.pins) overhang = Math.max(overhang, -pin.x, pin.x - def.width, -pin.y, pin.y - def.height)
+    overhangOf.set(def, overhang)
+  }
+  return overhang
+}
+
+export function contactsAfterMove(
+  objects: readonly PlacedObject[],
+  moving: ReadonlySet<string>,
+  grid: number,
+  near: (area: Rect) => readonly PlacedObject[] = () => objects,
+): (dx: number, dy: number) => ReadonlyMap<string, ContactChange> {
+  const carried = objects.filter((o) => moving.has(o.id))
+  const movingPins = carried.flatMap((o) => spotPins(o, grid))
+  if (!movingPins.length) return () => NO_CHANGES
+  const carriedGrid = new PointGrid<SpotPin>()
+  carriedGrid.add(movingPins)
+  const touchingEachOther = new Set(movingPins.filter((p) => touchesAnother(carriedGrid, p)).map((p) => p.key))
+  let overhang = 0
+  for (const def of new Set(objects.map((o) => getDef(o.def)))) overhang = Math.max(overhang, pinOverhangCells(def))
+  const margin = (overhang + 1) * grid
+  const areas = carried.map((o) => {
+    const own = unionOf([objectRect(o, grid), ...objectPins(o, grid).map(({ point }) => ({ x: point.x, y: point.y, w: 0, h: 0 }))])
+    return { x: own.x - margin, y: own.y - margin, w: own.w + margin * 2, h: own.h + margin * 2 }
+  })
+
+  const fixedGrid = new PointGrid<SpotPin>()
+  const indexed = new Set<string>()
+  const underMove = (dx: number, dy: number) => {
+    for (const area of areas) {
+      for (const o of near({ x: area.x + dx, y: area.y + dy, w: area.w, h: area.h })) {
+        if (moving.has(o.id) || indexed.has(o.id)) continue
+        indexed.add(o.id)
+        fixedGrid.add(spotPins(o, grid))
+      }
+    }
+    const met = new Map<string, { pin: SpotPin; touching: string[] }>()
+    const meet = (p: SpotPin, other: SpotPin) => {
+      const known = met.get(p.key)
+      if (known) known.touching.push(other.key)
+      else met.set(p.key, { pin: p, touching: [other.key] })
+    }
+    for (const p of movingPins) {
+      for (const f of fixedGrid.at(p.x + dx, p.y + dy)) {
+        meet(p, f)
+        meet(f, p)
+      }
+    }
+    return met
+  }
+  const touchesOwnSide = (p: SpotPin) => (moving.has(p.object.id) ? touchingEachOther.has(p.key) : touchesAnother(fixedGrid, p))
+  const atRest = underMove(0, 0)
+
+  return (dx, dy) => {
+    if (!dx && !dy) return NO_CHANGES
+    const met = underMove(dx, dy)
+    let changes: Map<string, ContactChange> | null = null
+    for (const { pin: p } of [...atRest.values(), ...met.values()]) {
+      if (changes?.has(p.key) || touchesOwnSide(p)) continue
+      const now = met.get(p.key)
+      if (!!now !== atRest.has(p.key)) (changes ??= new Map()).set(p.key, { object: p.object, pin: p.pin, contact: !!now, touching: now?.touching ?? [] })
+    }
+    return changes ?? NO_CHANGES
+  }
 }

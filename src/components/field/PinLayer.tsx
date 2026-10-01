@@ -6,17 +6,8 @@ import type { ComponentDef, PinKind, PlacedObject } from "@/schematic/types"
 import type { FieldDetail } from "./detail"
 import type { PinPointerHandler } from "./ComponentView"
 import { ARROW_HEAD_CELLS, boxCorners, KNOCKOUT_OPACITY, labelFrame, labelKnockout, labelOrigin, MONO_ADVANCE_EM, numbersItsPins, PIN_NUMBER_SCALE, pinLabelById, pinLabels, pinNumberPlacement, referenceArrow, type Box, type KnockoutAxis, type LabelGround, type PinLabel } from "./pin-label"
-import { hollowMarkerHidden } from "./pin-marker"
+import { pinMarker } from "./pin-marker"
 import { referenceTerminals } from "@/schematic/terminals"
-
-const PIN_FILL: Record<PinKind, string> = {
-  power: "fill-red-500",
-  gnd: "fill-neutral-700 dark:fill-neutral-300",
-  analog: "fill-amber-500",
-  digital: "fill-background",
-  node: "fill-foreground",
-  nc: "fill-muted",
-}
 
 const PIN_MARK: Record<PinKind, string> = {
   power: "fill-red-500",
@@ -216,7 +207,7 @@ export const PinLayer = React.memo(function PinLayer({
             const origin = label && labelOrigin(label, detail.pinLabelSize)
             const numberSize = detail.pinLabelSize * PIN_NUMBER_SCALE
             const numberAt = numbered && !contact ? labelOrigin(pinNumberPlacement(pin), numberSize) : undefined
-            const markerHidden = hollowMarkerHidden(def, pin.kind, live, contact)
+            const marker = pinMarker(def, pin.kind, live, contact, color)
 
             return (
               <g
@@ -229,19 +220,15 @@ export const PinLayer = React.memo(function PinLayer({
                 onPointerUp={(e) => onPinPointerUp(e, object.id, pin.id)}
               >
                 <circle cx={point.x} cy={point.y} r={g(pin.stub === 0 ? 0.22 : 0.45)} className="fill-transparent stroke-none" />
-                {!markerHidden && <circle
+                {marker && <circle
+                  data-marker=""
                   cx={point.x}
                   cy={point.y}
-                  r={g(contact ? 0.26 : pin.kind === "nc" ? 0.14 : 0.2)}
-                  fill={color && (contact || pin.kind === "node") ? color : undefined}
-                  stroke={color}
-                  className={cn(
-                    "transition-[r] group-hover/pin:stroke-primary",
-                    !color && "stroke-foreground/60",
-                    !color && live && !contact && "stroke-primary",
-                    !(color && (contact || pin.kind === "node")) && (contact ? "fill-foreground" : PIN_FILL[pin.kind]),
-                  )}
-                  strokeWidth={live ? 2 : 1}
+                  r={g(marker.radiusCells)}
+                  fill={marker.fill}
+                  stroke={marker.stroke}
+                  className={marker.className}
+                  strokeWidth={marker.strokeWidth}
                   vectorEffect="non-scaling-stroke"
                 />}
                 {!contact && label && origin && (

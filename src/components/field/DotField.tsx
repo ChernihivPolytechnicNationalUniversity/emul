@@ -64,6 +64,8 @@ import { bentWirePoints, pendingPoints } from "./pending-wire"
 import { GhostLayer, type Ghost } from "./GhostLayer"
 import { casingTrim, wireCornerRadius } from "./wire-style"
 import { BendDrag, MoveDrag, planBend, planMove } from "./move-drag"
+import { ContactPreview } from "./contact-preview"
+import { contactsAfterMove } from "@/schematic/contacts"
 import { WireFlow } from "./wire-flow"
 import { ZoomControls } from "./ZoomControls"
 import { useMeasure, MAX_HELD, PROBE_ID, type ProbePoint } from "./use-measure"
@@ -552,12 +554,14 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (!content) return
     const moving = sch.selectedObjects.has(id) ? sch.selectedObjects : new Set([id])
     if (detail.canvas || labelsOnCanvas) setLifted(moving)
+    const pinsDrawn = detail.pins && !detail.canvas
     drag.begin({
       ...planMove(content, docObjects, docWires, moving, toWorld(e.clientX, e.clientY), grid, wireCornerRadius(grid), casingTrim(grid), {
         element: detail.canvas || labelsOnCanvas ? dragLayerRef.current : null,
         whole: detail.canvas,
       }),
       blocked: placementCheck(scene(), docObjects.filter((o) => moving.has(o.id))),
+      contacts: pinsDrawn ? new ContactPreview(content, contactsAfterMove(docObjects, moving, grid, (area) => index.query(area)), { grid, wires: docWires, netColor: pinNetColor }) : undefined,
     })
   })
 
