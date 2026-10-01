@@ -1,5 +1,6 @@
-import { DIR, intersects, objectPins, objectRect, objectSize, orientationOf, orientOffset, placedText, resolvePinIn, routeBox, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
+import { DIR, intersects, objectPins, objectRect, objectSize, orientationOf, orientOffset, placedText, resolvePinIn, routeBox, touches, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
 import { getDef } from "./registry"
+import { BoxIndex, BUCKET_CELLS } from "./spatial"
 import { PointGrid } from "./contacts"
 import { bodyBounds } from "./body"
 import { boundsOf, boxCorners, labelFrame, labelKnockout, PIN_LABEL_CELLS, pinLabelById, pinLabels } from "@/components/field/pin-label"
@@ -122,12 +123,10 @@ export function footprint(object: PlacedObject, grid: number): Quad | null {
 }
 
 function boxOf(points: readonly Point[]): Rect {
-  const xs = points.map((p) => p.x)
-  const ys = points.map((p) => p.y)
-  const x = Math.min(...xs)
-  const y = Math.min(...ys)
-  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y }
+  return unionOf(points.map((p) => ({ x: p.x, y: p.y, w: 0, h: 0 })))
 }
+
+const shiftedRect = (r: Rect, dx: number, dy: number): Rect => ({ x: r.x + dx, y: r.y + dy, w: r.w, h: r.h })
 
 const moved = (q: Quad, dx: number, dy: number): Quad => ({ corners: q.corners.map((p) => ({ x: p.x + dx, y: p.y + dy })), box: { x: q.box.x + dx, y: q.box.y + dy, w: q.box.w, h: q.box.h } })
 
@@ -168,11 +167,6 @@ function strictlyInside(corners: readonly Point[], p: Point) {
   return true
 }
 
-function touchingPins(a: PlacedObject, b: PlacedObject, grid: number) {
-  const pins = objectPins(b, grid)
-  return objectPins(a, grid).some(({ point }) => pins.some((other) => Math.abs(other.point.x - point.x) < EPSILON && Math.abs(other.point.y - point.y) < EPSILON))
-}
-
 export type PlacementScene = {
   objects: readonly PlacedObject[]
   wires: readonly Wire[]
@@ -187,13 +181,15 @@ const isJunction = (object: PlacedObject) => {
   return pins.length > 0 && pins.every((pin) => pin.kind === "node")
 }
 
-function reachOf(segments: readonly Point[][], dx: number, dy: number): Rect {
-  if (!segments.length) return { x: 0, y: 0, w: 0, h: 0 }
-  const b = boxOf(segments.flat())
-  return { x: b.x + dx - 1, y: b.y + dy - 1, w: b.w + 2, h: b.h + 2 }
+const pinGridOf = (objects: Iterable<PlacedObject>, grid: number) => {
+  const pins = new PointGrid<Point>()
+  for (const o of objects) pins.add(objectPins(o, grid).map(({ point }) => point))
+  return pins
 }
 
 type Socket = Point & { connector?: string }
+
+const segmentBox = ([p, q]: readonly Point[]): Rect => ({ x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) })
 
 export function placementCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
   const ids = new Set(moving.map((o) => o.id))
@@ -233,6 +229,9 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
   }
   if (!movers.length || (!others.length && !routes.length && !anchored.length)) return () => false
   const area = unionOf(movers.map((m) => m.box))
+  const nearby = new BoxIndex(others, (o) => o.box, BUCKET_CELLS * scene.grid)
+  const carriedBox = carried.length ? boxOf(carried.flatMap((c) => c.segment)) : null
+  const carriedReach = carriedBox && { x: carriedBox.x - 1, y: carriedBox.y - 1, w: carriedBox.w + 2, h: carriedBox.h + 2 }
   const hit = (a: Quad, b: Quad) => intersects(a.box, b.box) && overlap(a.corners, b.corners)
   const hitsAny = (a: Quad, list: readonly Quad[]) => list.some((b) => hit(a, b))
   const sockets = new Map<string, { pins: readonly Socket[]; grid: PointGrid<Socket> }>()
@@ -245,6 +244,10 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
       sockets.set(object.id, (found = { pins, grid }))
     }
     return found
+  }
+  const touchingAt = (m: PlacedObject, o: PlacedObject, dx: number, dy: number) => {
+    const fixed = socketsOf(o).grid
+    return socketsOf(m).pins.some((p) => fixed.has(p.x + dx, p.y + dy))
   }
   const plugsInto = (plug: PlacedObject, plugAt: Point, socket: PlacedObject, socketAt: Point, socketBody: Quad) => {
     const plugs = socketsOf(plug)
@@ -265,54 +268,58 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
     return whollyPlugged && whollyFilled
   }
   return (dx, dy) => {
-    const reach = { x: area.x + dx, y: area.y + dy, w: area.w, h: area.h }
-    const placed = movers.map((m) => ({
-      object: { ...m.object, x: m.object.x + dx, y: m.object.y + dy },
-      body: moved(m.body, dx, dy),
-      labels: m.labels.map((q) => moved(q, dx, dy)),
-      box: { x: m.box.x + dx, y: m.box.y + dy, w: m.box.w, h: m.box.h },
-    }))
+    const reach = shiftedRect(area, dx, dy)
+    const bodies: Quad[] = []
+    const bodyAt = (i: number) => (bodies[i] ??= moved(movers[i].body, dx, dy))
+    const labelOn = (i: number, hits: (label: Quad) => boolean, box: Rect) =>
+      movers[i].labels.some((q) => touches(shiftedRect(q.box, dx, dy), box) && hits(moved(q, dx, dy)))
+    const labelOnBody = (i: number, body: Quad) => labelOn(i, (label) => overlap(label.corners, body.corners), body.box)
+    const segmentOnMover = (i: number, segment: Point[]) => {
+      const box = segmentBox(segment)
+      return (touches(box, shiftedRect(movers[i].body.box, dx, dy)) && overlap(segment, bodyAt(i).corners)) || labelOn(i, (label) => overlap(segment, label.corners), box)
+    }
     const docked = (i: number, o: Placed) => {
+      const m = movers[i].object
       const offset = { x: dx, y: dy }
       const rest = { x: 0, y: 0 }
-      return plugsInto(movers[i].object, offset, o.object, rest, o.body) || plugsInto(o.object, rest, movers[i].object, offset, placed[i].body)
+      return plugsInto(m, offset, o.object, rest, o.body) || plugsInto(o.object, rest, m, offset, bodyAt(i))
     }
-    for (const other of others) {
-      if (!intersects(other.box, reach)) continue
-      for (let i = 0; i < placed.length; i++) {
-        const m = placed[i]
-        if (!intersects(m.box, other.box)) continue
-        if (hit(m.body, other.body)) {
-          if (!bothSocketed(m.object, other.object) || !docked(i, other)) return true
-          continue
-        }
-        if (!hitsAny(m.body, other.labels) && !hitsAny(other.body, m.labels)) continue
-        if (!touchingPins(m.object, other.object, scene.grid)) return true
-      }
+    const collides = (i: number, other: Placed) => {
+      const m = movers[i]
+      const box = shiftedRect(m.box, dx, dy)
+      if (!intersects(box, other.box)) return false
+      if (hit(bodyAt(i), other.body)) return !bothSocketed(m.object, other.object) || !docked(i, other)
+      if (!hitsAny(bodyAt(i), other.labels) && !labelOnBody(i, other.body)) return false
+      return !touchingAt(m.object, other.object, dx, dy)
     }
-    for (const other of others) {
-      if (!intersects(other.box, reachOf(carried.map((c) => c.segment), dx, dy))) continue
-      for (const { segment: [p, q], target } of carried) {
-        const segment = [
-          { x: p.x + dx, y: p.y + dy },
-          { x: q.x + dx, y: q.y + dy },
-        ]
-        if (other.labels.some((l) => overlap(segment, l.corners))) return true
-        if (target !== other.object.id && overlap(segment, other.body.corners)) return true
-      }
+    for (let i = 0; i < movers.length; i++) if (nearby.some(shiftedRect(movers[i].box, dx, dy), (other) => collides(i, other))) return true
+    if (carriedReach) {
+      const crosses = (other: Placed) =>
+        carried.some(({ segment: [p, q], target }) => {
+          const segment = [
+            { x: p.x + dx, y: p.y + dy },
+            { x: q.x + dx, y: q.y + dy },
+          ]
+          const box = segmentBox(segment)
+          return (
+            other.labels.some((l) => touches(box, l.box) && overlap(segment, l.corners)) ||
+            (target !== other.object.id && touches(box, other.body.box) && overlap(segment, other.body.corners))
+          )
+        })
+      if (nearby.some(shiftedRect(carriedReach, dx, dy), crosses)) return true
     }
     for (const segment of anchored) {
-      for (const m of placed) {
-        if (m.labels.some((l) => overlap(segment, l.corners))) return true
+      const box = segmentBox(segment)
+      for (let i = 0; i < movers.length; i++) {
+        if (labelOn(i, (label) => overlap(segment, label.corners), box)) return true
       }
     }
     for (const { route, box } of routes) {
       if (!intersects(box, reach)) continue
-      for (const m of placed) {
-        if (!intersects(box, m.box)) continue
-        for (let i = 1; i < route.pts.length; i++) {
-          const segment = [route.pts[i - 1], route.pts[i]]
-          if (overlap(segment, m.body.corners) || m.labels.some((q) => overlap(segment, q.corners))) return true
+      for (let i = 0; i < movers.length; i++) {
+        if (!intersects(box, shiftedRect(movers[i].box, dx, dy))) continue
+        for (let j = 1; j < route.pts.length; j++) {
+          if (segmentOnMover(i, [route.pts[j - 1], route.pts[j]])) return true
         }
       }
     }
@@ -320,14 +327,11 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
   }
 }
 
-const pinKey = (x: number, y: number) => `${Math.round(x * 1000)},${Math.round(y * 1000)}`
-
 export function contactCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
   const ids = new Set(moving.map((o) => o.id))
-  const fixed = new Set<string>()
-  for (const o of scene.objects) if (!ids.has(o.id)) for (const { point } of objectPins(o, scene.grid)) fixed.add(pinKey(point.x, point.y))
+  const fixed = pinGridOf(scene.objects.filter((o) => !ids.has(o.id)), scene.grid)
   const pins = moving.flatMap((o) => objectPins(o, scene.grid).map(({ point }) => point))
-  return (dx, dy) => pins.some((p) => fixed.has(pinKey(p.x + dx, p.y + dy)))
+  return (dx, dy) => pins.some((p) => fixed.has(p.x + dx, p.y + dy))
 }
 
 type Refuse = (dx: number, dy: number) => boolean

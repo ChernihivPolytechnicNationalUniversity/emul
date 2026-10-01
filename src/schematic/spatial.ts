@@ -78,3 +78,49 @@ export class SpatialIndex {
     return ++this.visits
   }
 }
+
+export class BoxIndex<T> {
+  private readonly bucket: number
+  private readonly items: readonly T[]
+  private readonly cells = new Map<number, number[]>()
+  private readonly visitedOn: Int32Array
+  private visits = 0
+
+  constructor(items: readonly T[], boxOf: (item: T) => Rect, bucket: number) {
+    this.bucket = bucket
+    this.items = items
+    this.visitedOn = new Int32Array(items.length)
+    for (let i = 0; i < items.length; i++) {
+      const r = boxOf(items[i])
+      for (let cx = Math.floor(r.x / bucket); cx <= Math.floor((r.x + r.w) / bucket); cx++) {
+        for (let cy = Math.floor(r.y / bucket); cy <= Math.floor((r.y + r.h) / bucket); cy++) {
+          const key = bucketKey(cx, cy)
+          const list = this.cells.get(key)
+          if (list) list.push(i)
+          else this.cells.set(key, [i])
+        }
+      }
+    }
+  }
+
+  some(rect: Rect, test: (item: T) => boolean): boolean {
+    if (this.visits === LAST_VISIT) {
+      this.visitedOn.fill(0)
+      this.visits = 0
+    }
+    const at = ++this.visits
+    for (let cx = Math.floor(rect.x / this.bucket); cx <= Math.floor((rect.x + rect.w) / this.bucket); cx++) {
+      for (let cy = Math.floor(rect.y / this.bucket); cy <= Math.floor((rect.y + rect.h) / this.bucket); cy++) {
+        const list = this.cells.get(bucketKey(cx, cy))
+        if (!list) continue
+        for (const i of list) {
+          if (this.visitedOn[i] === at) continue
+          this.visitedOn[i] = at
+          if (test(this.items[i])) return true
+        }
+      }
+    }
+    return false
+  }
+}
+

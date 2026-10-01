@@ -186,6 +186,17 @@ describe("parts do not pile onto each other", () => {
     expect.soft(landingOffset(refuse, c(10), 0, GRID), "two cells back towards home beats two cells on").toEqual({ x: c(8), y: 0 })
   })
 
+  it("duplicating a 5 × 5 block of boards lands the copy beside it at once", () => {
+    const [doc] = boardDocuments([25])
+    const s = scene(doc.objects, doc.wires)
+    const copy = doc.objects.map((o) => ({ ...o, id: `paste:${o.id}` }))
+    const t0 = performance.now()
+    const at = freeSpot(s, copy, { x: GRID, y: GRID })
+    const ms = performance.now() - t0
+    expect.soft(placementCheck(s, copy)(at.x, at.y) || contactCheck(s, copy)(at.x, at.y), "the copy lands free").toBe(false)
+    expect.soft(ms, "…in well under a second (it took 10 s before the far search was bounded)").toBeLessThan(2000)
+  })
+
   it("bounding the search over a 1 700-board selection does not overflow the call stack", () => {
     const [doc] = boardDocuments([1700])
     const anchor = part("anchor", "resistor", -1000, 0)
