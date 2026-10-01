@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { examples } from "@/schematic/examples"
-import { GRID, intersects, objectRect, routeAll, Router, snap } from "@/schematic/geometry"
+import { GRID, intersects, objectPins, objectRect, routeAll, Router, snap } from "@/schematic/geometry"
 import { bodyBounds, contactCheck, designatorRects, freeOffset, freeSpot, landingOffset, nearestFreeWithin, placementCheck, ringsToClear, type PlacementScene } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject, Wire } from "@/schematic/types"
@@ -54,6 +54,42 @@ describe("parts do not pile onto each other", () => {
     const doc = example.build(GRID)
     const lcd = doc.objects.find((o) => o.def === "lcd7-f")!
     expect(placementCheck(scene(doc.objects, doc.wires), [lcd])(0, 0)).toBe(false)
+  })
+
+  it("a crystal cannot be plugged into a board's header pins, however well its leads line up", () => {
+    const doc = examples.find((e) => e.id === "lab1-running-light")!.build(GRID)
+    const placed = doc.objects.find((o) => o.def === "open746i-c")!
+    const board = objectRect(placed, GRID)
+    const pins = objectPins(placed, GRID)
+    const pair = pins.flatMap((a) => pins.filter((b) => b.point.y === a.point.y && b.point.x - a.point.x === c(4)).map((b) => [a, b] as const)).filter(([a]) => a.point.y - board.y >= 4 * GRID && board.y + board.h - a.point.y >= 4 * GRID && a.point.x - board.x >= 4 * GRID && board.x + board.w - a.point.x >= 8 * GRID)[0]
+    expect(pair, "two header pins four cells apart on a row, well inside the board").toBeDefined()
+    const [left] = pair!
+    const q = part("q", "crystal", (left.point.x - 0) / GRID, (left.point.y - c(1)) / GRID)
+    const s = scene([...doc.objects, q], doc.wires)
+    expect.soft(contactCheck(s, [q])(0, 0), "both of its leads sit on header pins").toBe(true)
+    expect.soft(placementCheck(s, [q])(0, 0), "…and it is still refused").toBe(true)
+  })
+
+  it("a module docks only with every pin over the board in a socket: the 7-inch LCD a row off P15 is refused", () => {
+    const doc = examples.find((e) => e.id === "open746-lcd")!.build(GRID)
+    const lcd = doc.objects.find((o) => o.def === "lcd7-f")!
+    const check = placementCheck(scene(doc.objects, doc.wires), [lcd])
+    expect.soft(check(0, 0), "docked").toBe(false)
+    expect.soft(check(0, c(1)), "one row down, half its pins on the wrong ones").toBe(true)
+    expect.soft(check(c(1), 0), "one pin to the right").toBe(true)
+    const board = doc.objects.find((o) => o.def === "open746i-c")!
+    expect.soft(placementCheck(scene(doc.objects, doc.wires), [board])(0, 0), "the board can be the one that docks").toBe(false)
+  })
+
+  it("a socket part docks only by whole connectors: a Nucleo with two stray pins on the board's pins is refused", () => {
+    const board = part("board", "open746i-c", 0, 0)
+    const nucleo = part("nucleo", "nucleo-f429zi", 4, 43)
+    const s = scene([board, nucleo])
+    const over = objectPins(nucleo, GRID).filter(({ point }) => point.y > c(1) && point.y < c(55) && point.x > c(1) && point.x < c(75))
+    const boardPins = new Set(objectPins(board, GRID).map(({ point }) => `${point.x},${point.y}`))
+    expect.soft(over.length, "two Nucleo pins over the board").toBe(2)
+    expect.soft(over.every(({ point }) => boardPins.has(`${point.x},${point.y}`)), "…both on board pins").toBe(true)
+    expect.soft(placementCheck(s, [nucleo])(0, 0), "…and the rest of its connector is not, so it is refused").toBe(true)
   })
 
   it("pins landing on pins are no excuse to stack two parts that are not sockets", () => {

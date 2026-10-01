@@ -1,5 +1,6 @@
 import { DIR, intersects, objectPins, objectRect, objectSize, orientationOf, orientOffset, placedText, resolvePinIn, routeBox, snap, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
 import { getDef } from "./registry"
+import { PointGrid } from "./contacts"
 import { bodyBounds } from "./body"
 import { boundsOf, boxCorners, labelFrame, labelKnockout, PIN_LABEL_CELLS, pinLabelById, pinLabels } from "@/components/field/pin-label"
 import type { ComponentDef, PinRef, PlacedObject, Wire } from "./types"
@@ -152,7 +153,20 @@ function separated(a: readonly Point[], b: readonly Point[]) {
 
 const overlap = (a: readonly Point[], b: readonly Point[]) => !separated(a, b)
 
-const socketed = (a: PlacedObject, b: PlacedObject) => !!(getDef(a.def)?.pinsAreSockets || getDef(b.def)?.pinsAreSockets)
+const bothSocketed = (a: PlacedObject, b: PlacedObject) => !!(getDef(a.def)?.pinsAreSockets && getDef(b.def)?.pinsAreSockets)
+
+function strictlyInside(corners: readonly Point[], p: Point) {
+  let side = 0
+  for (let i = 0; i < corners.length; i++) {
+    const a = corners[i]
+    const b = corners[(i + 1) % corners.length]
+    const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
+    if (Math.abs(cross) < EPSILON) return false
+    if (side && Math.sign(cross) !== side) return false
+    side = Math.sign(cross)
+  }
+  return true
+}
 
 function touchingPins(a: PlacedObject, b: PlacedObject, grid: number) {
   const pins = objectPins(b, grid)
@@ -178,6 +192,8 @@ function reachOf(segments: readonly Point[][], dx: number, dy: number): Rect {
   const b = boxOf(segments.flat())
   return { x: b.x + dx - 1, y: b.y + dy - 1, w: b.w + 2, h: b.h + 2 }
 }
+
+type Socket = Point & { connector?: string }
 
 export function placementCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
   const ids = new Set(moving.map((o) => o.id))
@@ -219,8 +235,35 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
   const area = unionOf(movers.map((m) => m.box))
   const hit = (a: Quad, b: Quad) => intersects(a.box, b.box) && overlap(a.corners, b.corners)
   const hitsAny = (a: Quad, list: readonly Quad[]) => list.some((b) => hit(a, b))
-  const collide = (m: Placed, o: Placed, touching: boolean) =>
-    hit(m.body, o.body) || (!touching && (hitsAny(m.body, o.labels) || hitsAny(o.body, m.labels)))
+  const sockets = new Map<string, { pins: readonly Socket[]; grid: PointGrid<Socket> }>()
+  const socketsOf = (object: PlacedObject) => {
+    let found = sockets.get(object.id)
+    if (!found) {
+      const pins = objectPins(object, scene.grid).map(({ pin, point }) => ({ x: point.x, y: point.y, connector: pin.connector }))
+      const grid = new PointGrid<Socket>()
+      grid.add(pins)
+      sockets.set(object.id, (found = { pins, grid }))
+    }
+    return found
+  }
+  const plugsInto = (plug: PlacedObject, plugAt: Point, socket: PlacedObject, socketAt: Point, socketBody: Quad) => {
+    const plugs = socketsOf(plug)
+    const holes = socketsOf(socket)
+    const holesUnder = (p: Socket) => holes.grid.at(p.x + plugAt.x - socketAt.x, p.y + plugAt.y - socketAt.y)
+    const pluggedConnectors = new Set<string>()
+    const filledConnectors = new Set<string>()
+    for (const p of plugs.pins) {
+      if (!strictlyInside(socketBody.corners, { x: p.x + plugAt.x, y: p.y + plugAt.y })) continue
+      const under = holesUnder(p)
+      if (!p.connector || !under.length || under.some((h) => !h.connector)) return false
+      pluggedConnectors.add(p.connector)
+      for (const h of under) filledConnectors.add(h.connector!)
+    }
+    if (!pluggedConnectors.size) return false
+    const whollyPlugged = plugs.pins.every((p) => !pluggedConnectors.has(p.connector!) || (strictlyInside(socketBody.corners, { x: p.x + plugAt.x, y: p.y + plugAt.y }) && holesUnder(p).length > 0))
+    const whollyFilled = holes.pins.every((h) => !filledConnectors.has(h.connector!) || plugs.grid.has(h.x + socketAt.x - plugAt.x, h.y + socketAt.y - plugAt.y))
+    return whollyPlugged && whollyFilled
+  }
   return (dx, dy) => {
     const reach = { x: area.x + dx, y: area.y + dy, w: area.w, h: area.h }
     const placed = movers.map((m) => ({
@@ -229,13 +272,22 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
       labels: m.labels.map((q) => moved(q, dx, dy)),
       box: { x: m.box.x + dx, y: m.box.y + dy, w: m.box.w, h: m.box.h },
     }))
+    const docked = (i: number, o: Placed) => {
+      const offset = { x: dx, y: dy }
+      const rest = { x: 0, y: 0 }
+      return plugsInto(movers[i].object, offset, o.object, rest, o.body) || plugsInto(o.object, rest, movers[i].object, offset, placed[i].body)
+    }
     for (const other of others) {
       if (!intersects(other.box, reach)) continue
-      for (const m of placed) {
+      for (let i = 0; i < placed.length; i++) {
+        const m = placed[i]
         if (!intersects(m.box, other.box)) continue
-        const touching = touchingPins(m.object, other.object, scene.grid)
-        if (!collide(m, other, touching)) continue
-        if (!touching || !socketed(m.object, other.object)) return true
+        if (hit(m.body, other.body)) {
+          if (!bothSocketed(m.object, other.object) || !docked(i, other)) return true
+          continue
+        }
+        if (!hitsAny(m.body, other.labels) && !hitsAny(other.body, m.labels)) continue
+        if (!touchingPins(m.object, other.object, scene.grid)) return true
       }
     }
     for (const other of others) {
