@@ -586,8 +586,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const done = drag.clearAndFinish()
     if (!done || (!done.dx && !done.dy)) return
     const blocked = done.plan.blocked
-    const at = blocked?.(done.dx, done.dy) ? landingOffset([blocked, contactCheck(scene(), docObjects.filter((o) => done.plan.startPositions.has(o.id)))], done.dx, done.dy, grid) : { x: done.dx, y: done.dy }
-    if (at && (at.x || at.y)) sch.moveTo(done.plan.startPositions, at.x, at.y)
+    const landNearest = (refuse: (dx: number, dy: number) => boolean) =>
+      landingOffset([refuse, contactCheck(scene(), docObjects.filter((o) => done.plan.startPositions.has(o.id)))], done.dx, done.dy, grid)
+    const at = blocked?.(done.dx, done.dy) ? landNearest(blocked) : { x: done.dx, y: done.dy }
+    if (at.x || at.y) sch.moveTo(done.plan.startPositions, at.x, at.y)
   })
 
   const onBodyPointerDown = useEvent((e: React.PointerEvent<SVGSVGElement>, id: string) => {

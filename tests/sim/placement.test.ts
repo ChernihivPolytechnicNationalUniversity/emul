@@ -171,6 +171,21 @@ describe("parts do not pile onto each other", () => {
     expect.soft(nearestFreeWithin(refuse, GRID, { x: 0, y: 0 }, () => 50), "(30, 7) at 30.8 cells beats (0, 40) on an axis").toEqual({ x: c(30), y: c(7) })
   })
 
+  it("a drop far from home into a packed sheet sweeps instead of visiting every ring", () => {
+    const free = new Set([`${c(150 + 130)},${c(150 + 20)}`])
+    const refuse = [(dx: number, dy: number) => !free.has(`${dx},${dy}`)]
+    let checks = 0
+    const counted = [(dx: number, dy: number) => (checks++, refuse[0](dx, dy))]
+    expect.soft(landingOffset(counted, c(150), c(150), GRID), "the one free spot nearer than home is off the eight directions and past the exhaustive rings: home").toEqual({ x: 0, y: 0 })
+    expect.soft(checks, "…after a bounded number of checks, not the 85 000 of every ring out to home").toBeLessThan(45_000)
+  })
+
+  it("of two equally near landings the one nearer to where the drag started wins", () => {
+    const free = new Set([`${c(10)},${c(-2)}`, `${c(10)},${c(2)}`, `${c(8)},0`, `${c(12)},0`])
+    const refuse = [(dx: number, dy: number) => !free.has(`${dx},${dy}`)]
+    expect.soft(landingOffset(refuse, c(10), 0, GRID), "two cells back towards home beats two cells on").toEqual({ x: c(8), y: 0 })
+  })
+
   it("bounding the search over a 1 700-board selection does not overflow the call stack", () => {
     const [doc] = boardDocuments([1700])
     const anchor = part("anchor", "resistor", -1000, 0)
@@ -183,19 +198,78 @@ describe("parts do not pile onto each other", () => {
     expect(placementCheck(scene([a, j]), [j])(0, 0)).toBe(false)
   })
 
-  it("a part dropped onto another stops beside it, on the side it came from, without touching its pins", () => {
+  const refusals = (s: PlacementScene, moving: PlacedObject[]) => [placementCheck(s, moving), contactCheck(s, moving)]
+
+  it("a part dropped onto another lands on the free spot nearest to where it was let go, touching none of its pins", () => {
     const a = part("a", "resistor", 10, 0)
     const b = part("b", "resistor", 0, 0)
-    const refuse = (s: PlacementScene, m: PlacedObject) => [placementCheck(s, [m]), contactCheck(s, [m])]
-    expect(landingOffset(refuse(scene([a, b]), b), c(10), 0, GRID)).toEqual({ x: c(5), y: 0 })
-    const d = part("d", "resistor", 20, 0)
-    expect(landingOffset(refuse(scene([a, d]), d), c(-10), 0, GRID)).toEqual({ x: c(-5), y: 0 })
+    const refuse = refusals(scene([a, b]), [b])
+    const at = landingOffset(refuse, c(10), 0, GRID)
+    expect.soft(refuse.some((r) => r(at.x, at.y)), "the spot is free").toBe(false)
+    expect.soft(Math.hypot(at.x - c(10), at.y) / GRID, "…two rows off the drop, not five cells back the way it came").toBe(2)
+  })
+
+  it("a freed slot in a crowded block takes a part dropped half on its neighbour, instead of sending it home", () => {
+    const pitch = { x: 5, y: 4 }
+    const block: PlacedObject[] = []
+    const crystal = (id: string, x: number, y: number, ref: string) => ({ ...part(id, "crystal", x, y), props: { ref } })
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) if (row !== 1 || col !== 1) block.push(crystal(`q${row}${col}`, col * pitch.x, row * pitch.y, `ZQ${block.length + 1}`))
+    const carried = crystal("carried", 40, 20, "ZQ9")
+    const s = scene([...block, carried])
+    const refuse = refusals(s, [carried])
+    const slot = { x: c(pitch.x - 40), y: c(pitch.y - 20) }
+    expect.soft(refuse.some((r) => r(slot.x, slot.y)), "the freed slot fits a crystal").toBe(false)
+    const dropped = { x: slot.x + c(2), y: slot.y + c(1) }
+    expect.soft(refuse.some((r) => r(dropped.x, dropped.y)), "dropped two cells right and one down, it sits on a neighbour").toBe(true)
+    const at = landingOffset(refuse, dropped.x, dropped.y, GRID)
+    expect.soft(refuse.some((r) => r(at.x, at.y)), "it lands free").toBe(false)
+    expect.soft(Math.max(Math.abs(at.x - slot.x), Math.abs(at.y - slot.y)) / GRID, "…in the slot, not 40 cells away at home").toBeLessThanOrEqual(2)
+  })
+
+  it("with no free spot nearer than where it started, a part goes home", () => {
+    const a = part("a", "resistor", 0, 0)
+    const b = part("b", "resistor", 0, 2)
+    expect.soft(landingOffset(refusals(scene([a, b]), [b]), 0, c(-1), GRID), "a cell up, onto its neighbour's words").toEqual({ x: 0, y: 0 })
+    const doc = examples.find((e) => e.id === "lab1-running-light")!.build(GRID)
+    const board = objectRect(doc.objects.find((o) => o.def === "open746i-c")!, GRID)
+    const below = part("q", "crystal", 30, (board.y + board.h) / GRID)
+    const s = scene([...doc.objects, below], doc.wires)
+    const clear = Array.from({ length: 6 }, (_, k) => k).find((k) => !placementCheck(s, [below])(0, c(k)))!
+    expect.soft(clear, "a crystal fits just under the board").toBeDefined()
+    const q = { ...below, y: below.y + c(clear) }
+    const t = scene([...doc.objects, q], doc.wires)
+    expect.soft(landingOffset(refusals(t, [q]), 0, c(-5), GRID), "as close under the board as it fits, dragged five cells up onto it, it comes back").toEqual({ x: 0, y: 0 })
   })
 
   it("a free drop lands where it was dropped", () => {
     const a = part("a", "resistor", 10, 0)
     const b = part("b", "resistor", 0, 0)
     expect(landingOffset([placementCheck(scene([a, b]), [b])], 0, c(3), GRID)).toEqual({ x: 0, y: c(3) })
+  })
+
+  it("a landing is always home or a free spot nearer to the drop than home, on every example", () => {
+    let seed = 20261001
+    const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+    const wrong: string[] = []
+    let moved = 0
+    for (const example of examples) {
+      const doc = example.build(GRID)
+      const s = scene(doc.objects, doc.wires)
+      for (const o of doc.objects.slice(0, 6)) {
+        const refuse = refusals(s, [o])
+        for (let i = 0; i < 4; i++) {
+          const dx = c(Math.round((random() - 0.5) * 60))
+          const dy = c(Math.round((random() - 0.5) * 60))
+          const at = landingOffset(refuse, dx, dy, GRID)
+          const home = at.x === 0 && at.y === 0
+          if (!home) moved++
+          const nearer = Math.hypot(at.x - dx, at.y - dy) < Math.hypot(dx, dy) || (at.x === dx && at.y === dy)
+          if (!home && (refuse.some((r) => r(at.x, at.y)) || !nearer)) wrong.push(`${example.id}: ${o.props?.ref ?? o.def} by (${dx / GRID}, ${dy / GRID}) → (${at.x / GRID}, ${at.y / GRID})`)
+        }
+      }
+    }
+    expect.soft(wrong).toEqual([])
+    expect.soft(moved, "…and most drops did move something").toBeGreaterThan(50)
   })
 
   it("no shipped example already breaks the rule", () => {

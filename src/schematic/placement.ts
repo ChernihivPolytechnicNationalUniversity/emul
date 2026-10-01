@@ -1,4 +1,4 @@
-import { DIR, intersects, objectPins, objectRect, objectSize, orientationOf, orientOffset, placedText, resolvePinIn, routeBox, snap, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
+import { DIR, intersects, objectPins, objectRect, objectSize, orientationOf, orientOffset, placedText, resolvePinIn, routeBox, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
 import { getDef } from "./registry"
 import { PointGrid } from "./contacts"
 import { bodyBounds } from "./body"
@@ -379,6 +379,7 @@ const SWEEP_DIRECTIONS = [
 ] as const
 
 const EXHAUSTIVE_RING_CANDIDATES = 40_000
+const EXHAUSTIVE_RINGS = Math.floor((Math.sqrt(1 + EXHAUSTIVE_RING_CANDIDATES) - 1) / 2)
 
 const ringCandidates = (firstRing: number, lastRing: number) => 4 * (lastRing * (lastRing + 1) - (firstRing - 1) * firstRing)
 
@@ -407,17 +408,16 @@ export function nearestFreeWithin(refuse: readonly Refuse[], grid: number, from:
   return nearestFree(refuse, grid, from, { rings: sweptRing, firstRing: SEARCH_RINGS + 1, closerThanSquaredCells: swept.squaredCells }) ?? swept.at
 }
 
-export function landingOffset(refuse: readonly Refuse[], dx: number, dy: number, grid: number): Point | null {
-  if (!refused(refuse, dx, dy)) return { x: dx, y: dy }
-  const steps = Math.ceil(Math.hypot(dx, dy) / (grid / 2))
-  let previous: Point | null = null
-  for (let i = steps - 1; i >= 0; i--) {
-    const at = { x: snap((dx * i) / steps, grid), y: snap((dy * i) / steps, grid) }
-    if (previous && previous.x === at.x && previous.y === at.y) continue
-    previous = at
-    if (!refused(refuse, at.x, at.y)) return at
-  }
-  return freeOffset(refuse, grid, { x: dx, y: dy })
+export function landingOffset(refuse: readonly Refuse[], dx: number, dy: number, grid: number): Point {
+  const home = { x: 0, y: 0 }
+  const drop = { x: dx, y: dy }
+  if (!refused(refuse, dx, dy)) return drop
+  const homeSquaredCells = Math.round(dx / grid) ** 2 + Math.round(dy / grid) ** 2
+  const homeRing = Math.ceil(Math.sqrt(homeSquaredCells))
+  const exact = nearestFree(refuse, grid, drop, { rings: Math.min(homeRing, EXHAUSTIVE_RINGS), closerThanSquaredCells: homeSquaredCells, preferNear: home })
+  if (exact || homeRing <= EXHAUSTIVE_RINGS) return exact ?? home
+  const swept = sweptFree(refuse, grid, drop, EXHAUSTIVE_RINGS + 1, homeRing)
+  return swept && swept.squaredCells < homeSquaredCells ? swept.at : home
 }
 
 function claimed(object: PlacedObject, grid: number): Rect[] {
