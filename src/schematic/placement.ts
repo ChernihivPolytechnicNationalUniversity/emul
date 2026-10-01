@@ -1,4 +1,4 @@
-import { DIR, intersects, objectPins, objectRect, objectSize, orientationOf, orientOffset, placedText, resolvePinIn, routeBox, snap, type Point, type Rect, type RoutedWire } from "./geometry"
+import { DIR, intersects, objectPins, objectRect, objectSize, orientationOf, orientOffset, placedText, resolvePinIn, routeBox, snap, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
 import { getDef } from "./registry"
 import { bodyBounds } from "./body"
 import { boundsOf, boxCorners, labelFrame, labelKnockout, PIN_LABEL_CELLS, pinLabelById, pinLabels } from "@/components/field/pin-label"
@@ -173,12 +173,6 @@ const isJunction = (object: PlacedObject) => {
   return pins.length > 0 && pins.every((pin) => pin.kind === "node")
 }
 
-function union(rects: readonly Rect[]): Rect {
-  const x = Math.min(...rects.map((r) => r.x))
-  const y = Math.min(...rects.map((r) => r.y))
-  return { x, y, w: Math.max(...rects.map((r) => r.x + r.w)) - x, h: Math.max(...rects.map((r) => r.y + r.h)) - y }
-}
-
 function reachOf(segments: readonly Point[][], dx: number, dy: number): Rect {
   if (!segments.length) return { x: 0, y: 0, w: 0, h: 0 }
   const b = boxOf(segments.flat())
@@ -190,7 +184,7 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
   const place = (object: PlacedObject): Placed | null => {
     if (isJunction(object)) return null
     const f = footprints(object, scene.grid)
-    return f ? { object, ...f, box: union([f.body.box, ...f.labels.map((q) => q.box)]) } : null
+    return f ? { object, ...f, box: unionOf([f.body.box, ...f.labels.map((q) => q.box)]) } : null
   }
   const movers = moving.map(place).filter((p): p is Placed => p !== null)
   const others = scene.objects.filter((o) => !ids.has(o.id)).map(place).filter((p): p is Placed => p !== null)
@@ -222,7 +216,7 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
     }
   }
   if (!movers.length || (!others.length && !routes.length && !anchored.length)) return () => false
-  const area = union(movers.map((m) => m.box))
+  const area = unionOf(movers.map((m) => m.box))
   const hit = (a: Quad, b: Quad) => intersects(a.box, b.box) && overlap(a.corners, b.corners)
   const hitsAny = (a: Quad, list: readonly Quad[]) => list.some((b) => hit(a, b))
   const collide = (m: Placed, o: Placed, touching: boolean) =>
@@ -288,24 +282,77 @@ type Refuse = (dx: number, dy: number) => boolean
 
 const refused = (refuse: readonly Refuse[], dx: number, dy: number) => refuse.some((r) => r(dx, dy))
 
-export function freeOffset(refuse: readonly Refuse[], grid: number, from: Point = { x: 0, y: 0 }): Point | null {
-  if (!refused(refuse, from.x, from.y)) return from
-  for (let ring = 1; ring <= SEARCH_RINGS; ring++) {
-    const found: Point[] = []
-    for (let i = -ring; i <= ring; i++) {
-      for (const [cx, cy] of [
-        [i, -ring],
-        [i, ring],
-        [-ring, i],
-        [ring, i],
-      ]) {
-        const at = { x: from.x + cx * grid, y: from.y + cy * grid }
-        if (!refused(refuse, at.x, at.y)) found.push(at)
-      }
-    }
-    if (found.length) return found.reduce((best, p) => (Math.hypot(p.x - from.x, p.y - from.y) < Math.hypot(best.x - from.x, best.y - from.y) ? p : best))
+function* ringCells(ring: number): Generator<readonly [number, number]> {
+  for (let i = -ring; i <= ring; i++) {
+    yield [i, -ring]
+    yield [i, ring]
   }
-  return null
+  for (let i = -ring + 1; i < ring; i++) {
+    yield [-ring, i]
+    yield [ring, i]
+  }
+}
+
+type Search = { rings: number; firstRing?: number; closerThanSquaredCells?: number; preferNear?: Point }
+
+function nearestFree(refuse: readonly Refuse[], grid: number, from: Point, { rings, firstRing = 1, closerThanSquaredCells = Infinity, preferNear = from }: Search): Point | null {
+  let best: { at: Point; squaredCells: number; fromPreferred: number } | null = null
+  const worthARing = (ring: number) => ring * ring < closerThanSquaredCells && (best ? ring * ring <= best.squaredCells : ring <= rings)
+  for (let ring = firstRing; worthARing(ring); ring++) {
+    for (const [cx, cy] of ringCells(ring)) {
+      const squaredCells = cx * cx + cy * cy
+      if (squaredCells >= closerThanSquaredCells || (best && squaredCells > best.squaredCells)) continue
+      const at = { x: from.x + cx * grid, y: from.y + cy * grid }
+      const fromPreferred = Math.hypot(at.x - preferNear.x, at.y - preferNear.y)
+      if (best && squaredCells === best.squaredCells && fromPreferred >= best.fromPreferred) continue
+      if (!refused(refuse, at.x, at.y)) best = { at, squaredCells, fromPreferred }
+    }
+  }
+  return best?.at ?? null
+}
+
+export function freeOffset(refuse: readonly Refuse[], grid: number, from: Point = { x: 0, y: 0 }, rings = SEARCH_RINGS, firstRing = 1): Point | null {
+  return refused(refuse, from.x, from.y) ? nearestFree(refuse, grid, from, { rings, firstRing }) : from
+}
+
+const SWEEP_DIRECTIONS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [1, -1],
+  [-1, 1],
+  [-1, -1],
+] as const
+
+const EXHAUSTIVE_RING_CANDIDATES = 40_000
+
+const ringCandidates = (firstRing: number, lastRing: number) => 4 * (lastRing * (lastRing + 1) - (firstRing - 1) * firstRing)
+
+function sweptFree(refuse: readonly Refuse[], grid: number, from: Point, firstStep: number, lastStep: number): { at: Point; squaredCells: number } | null {
+  let best: { at: Point; squaredCells: number } | null = null
+  for (const [ux, uy] of SWEEP_DIRECTIONS) {
+    for (let k = firstStep; k <= lastStep; k++) {
+      const squaredCells = k * k * (ux * ux + uy * uy)
+      if (best && squaredCells >= best.squaredCells) break
+      const at = { x: from.x + ux * k * grid, y: from.y + uy * k * grid }
+      if (refused(refuse, at.x, at.y)) continue
+      best = { at, squaredCells }
+      break
+    }
+  }
+  return best
+}
+
+export function nearestFreeWithin(refuse: readonly Refuse[], grid: number, from: Point, reach: () => number): Point | null {
+  const near = freeOffset(refuse, grid, from)
+  if (near) return near
+  const swept = sweptFree(refuse, grid, from, SEARCH_RINGS + 1, reach())
+  if (!swept) return null
+  const sweptRing = Math.ceil(Math.sqrt(swept.squaredCells))
+  if (ringCandidates(SEARCH_RINGS + 1, sweptRing) > EXHAUSTIVE_RING_CANDIDATES) return swept.at
+  return nearestFree(refuse, grid, from, { rings: sweptRing, firstRing: SEARCH_RINGS + 1, closerThanSquaredCells: swept.squaredCells }) ?? swept.at
 }
 
 export function landingOffset(refuse: readonly Refuse[], dx: number, dy: number, grid: number): Point | null {
@@ -319,4 +366,32 @@ export function landingOffset(refuse: readonly Refuse[], dx: number, dy: number,
     if (!refused(refuse, at.x, at.y)) return at
   }
   return freeOffset(refuse, grid, { x: dx, y: dy })
+}
+
+function claimed(object: PlacedObject, grid: number): Rect[] {
+  const f = footprints(object, grid)
+  return [objectRect(object, grid), ...(f ? [f.body.box, ...f.labels.map((q) => q.box)] : [])]
+}
+
+export function ringsToClear(scene: PlacementScene, moving: readonly PlacedObject[], from: Point = { x: 0, y: 0 }): number {
+  const ids = new Set(moving.map((o) => o.id))
+  const taken = [...scene.objects.filter((o) => !ids.has(o.id)).flatMap((o) => claimed(o, scene.grid)), ...scene.routes.map(routeBox)]
+  const carried = moving.flatMap((o) => claimed(o, scene.grid))
+  if (!taken.length || !carried.length) return 0
+  const bounds = unionOf(taken)
+  const area = unionOf(carried)
+  let longestStub = 1
+  for (const o of moving) for (const { pin } of objectPins(o, scene.grid)) longestStub = Math.max(longestStub, pin.stub ?? 1)
+  const stub = longestStub * scene.grid
+  const x = area.x + from.x - stub
+  const y = area.y + from.y - stub
+  const w = area.w + stub * 2
+  const h = area.h + stub * 2
+  const cells = Math.min(bounds.x + bounds.w - x, x + w - bounds.x, bounds.y + bounds.h - y, y + h - bounds.y) / scene.grid
+  return Math.max(0, Math.floor(cells)) + 1
+}
+
+export function freeSpot(scene: PlacementScene, moving: readonly PlacedObject[], from: Point = { x: 0, y: 0 }): Point {
+  const refuse = [placementCheck(scene, moving), contactCheck(scene, moving)]
+  return nearestFreeWithin(refuse, scene.grid, from, () => ringsToClear(scene, moving, from)) ?? from
 }

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { examples } from "@/schematic/examples"
-import { GRID, routeAll, Router } from "@/schematic/geometry"
-import { bodyBounds, contactCheck, designatorRects, freeOffset, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
+import { GRID, intersects, objectRect, routeAll, Router, snap } from "@/schematic/geometry"
+import { bodyBounds, contactCheck, designatorRects, freeOffset, freeSpot, landingOffset, nearestFreeWithin, placementCheck, ringsToClear, type PlacementScene } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject, Wire } from "@/schematic/types"
+import { boardDocuments } from "../../scripts/lib/stress"
 
 const c = (v: number) => v * GRID
 const part = (id: string, def: string, x: number, y: number): PlacedObject => ({ id, def, x: c(x), y: c(y) })
@@ -85,6 +86,59 @@ describe("parts do not pile onto each other", () => {
     expect(at).not.toBeNull()
     expect(placementCheck(scene([a]), [probe])(at.x, at.y)).toBe(false)
     expect(Math.hypot(at.x, at.y)).toBeLessThanOrEqual(c(2))
+  })
+
+  it("a part added in the middle of a board too big to search around lands beside the board, not on it", () => {
+    const doc = examples.find((e) => e.id === "lab1-running-light")!.build(GRID)
+    const s = scene(doc.objects, doc.wires)
+    const board = objectRect(doc.objects.find((o) => o.def === "open746i-c")!, GRID)
+    const def = getDef("crystal")!
+    const centre = { x: board.x + board.w / 2, y: board.y + board.h / 2 }
+    const probe = part("new", "crystal", snap(centre.x - (def.width * GRID) / 2, GRID) / GRID, snap(centre.y - (def.height * GRID) / 2, GRID) / GRID)
+    const refuse = [placementCheck(s, [probe]), contactCheck(s, [probe])]
+    expect.soft(freeOffset(refuse, GRID), "a search of 24 rings finds no room inside the board").toBeNull()
+    const at = freeSpot(s, [probe])
+    const landed = objectRect({ ...probe, x: probe.x + at.x, y: probe.y + at.y }, GRID)
+    expect.soft(refuse.some((r) => r(at.x, at.y)), "the spot found is free").toBe(false)
+    expect.soft(intersects(landed, board), "…and off the board").toBe(false)
+    expect.soft(Math.hypot(at.x, at.y) / GRID, "…the nearest way out, past the board's near edge").toBeLessThan(board.h / 2 / GRID + def.height + 2)
+  })
+
+  it("a paste always finds room, however far it has to go", () => {
+    const doc = examples.find((e) => e.id === "open746-lcd")!.build(GRID)
+    const s = scene(doc.objects, doc.wires)
+    const board = objectRect(doc.objects.find((o) => o.def === "open746i-c")!, GRID)
+    const clip = [part("p1", "resistor", 30, 25), part("p2", "led", 30, 28)]
+    const at = freeSpot(s, clip)
+    expect.soft(placementCheck(s, clip)(at.x, at.y) || contactCheck(s, clip)(at.x, at.y), "the spot is free").toBe(false)
+    expect.soft(clip.some((o) => intersects(objectRect({ ...o, x: o.x + at.x, y: o.y + at.y }, GRID), board)), "…and none of the clip is left on the board").toBe(false)
+  })
+
+  it("the search is bounded by the document: past its edge every spot is free", () => {
+    const a = part("a", "resistor", 0, 0)
+    const probe = part("new", "resistor", 0, 0)
+    const rings = ringsToClear(scene([a]), [probe])
+    expect.soft(rings, "a resistor clears another in a few cells").toBeLessThanOrEqual(4)
+    expect.soft(placementCheck(scene([a]), [probe])(0, c(rings)), "…and that many cells down it is clear").toBe(false)
+    expect.soft(ringsToClear(scene([]), [probe]), "an empty field needs no search").toBe(0)
+  })
+
+  it("the search returns the truly nearest spot, even when it lies past the ring the first find was on", () => {
+    const free = new Set([`${c(18)},${c(18)}`, `${c(25)},0`])
+    const refuse = [(dx: number, dy: number) => !free.has(`${dx},${dy}`)]
+    expect.soft(freeOffset(refuse, GRID), "(25, 0) is nearer than the corner of ring 18").toEqual({ x: c(25), y: 0 })
+  })
+
+  it("past ring 24 the sweep's find is refined to the truly nearest spot off its eight directions", () => {
+    const free = new Set([`${c(30)},${c(7)}`, `0,${c(40)}`])
+    const refuse = [(dx: number, dy: number) => !free.has(`${dx},${dy}`)]
+    expect.soft(nearestFreeWithin(refuse, GRID, { x: 0, y: 0 }, () => 50), "(30, 7) at 30.8 cells beats (0, 40) on an axis").toEqual({ x: c(30), y: c(7) })
+  })
+
+  it("bounding the search over a 1 700-board selection does not overflow the call stack", () => {
+    const [doc] = boardDocuments([1700])
+    const anchor = part("anchor", "resistor", -1000, 0)
+    expect(() => ringsToClear({ objects: [...doc.objects, anchor], wires: [], routes: [], grid: GRID }, doc.objects)).not.toThrow()
   })
 
   it("a junction is a point on a net, not a part, and goes where its wires meet", () => {

@@ -185,6 +185,25 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     },
     [animateTo, measure],
   )
+  const reveal = React.useCallback(
+    (r: Rect, margin: number) => {
+      const { width, height } = measure()
+      if (!width || !height) return
+      const t = target.current
+      const along = (start: number, length: number, offset: number, screen: number) => {
+        const from = start * t.scale + offset
+        const to = (start + length) * t.scale + offset
+        if (to - from > screen - 2 * margin) return screen / 2 - (from + to) / 2
+        if (from < margin) return margin - from
+        if (to > screen - margin) return screen - margin - to
+        return 0
+      }
+      const dx = along(r.x, r.w, t.x, width)
+      const dy = along(r.y, r.h, t.y, height)
+      if (dx || dy) animateTo({ ...t, x: t.x + dx, y: t.y + dy })
+    },
+    [animateTo, measure],
+  )
   const panBy = React.useCallback(
     (dx: number, dy: number) => setNow((v) => ({ ...v, x: v.x + dx, y: v.y + dy })),
     [setNow],
@@ -310,6 +329,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     zoomOut,
     reset,
     fitTo,
+    reveal,
     toWorld,
     isPanStart,
     startPan,

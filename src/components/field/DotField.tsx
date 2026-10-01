@@ -15,7 +15,7 @@ import {
 import { Inspector } from "@/components/inspector/Inspector"
 import { WirePalette } from "@/components/inspector/WirePalette"
 import { PALETTE_DRAG_TYPE, paletteGroups } from "@/components/palette/items"
-import { bendsOnRoute, GRID as FIELD_GRID, nudgeRoutes, objectPins, objectRect, resolvePin, routeBox, Router, snap, touches, type FlipAxis, type Point } from "@/schematic/geometry"
+import { bendsOnRoute, GRID as FIELD_GRID, nudgeRoutes, objectPins, objectRect, resolvePin, routeBox, Router, snap, touches, unionOf, type FlipAxis, type Point } from "@/schematic/geometry"
 import { SpatialIndex } from "@/schematic/spatial"
 import { fieldDetail } from "./detail"
 import { savedTextScale, saveTextScale } from "./text-scale"
@@ -30,7 +30,7 @@ import type { SourceFile } from "emul-shared/source"
 import { bytesToBase64 } from "@/lib/bytes"
 import { useEvent } from "@/hooks/use-event"
 import { useSchematic, type Clip } from "@/schematic/use-schematic"
-import { contactCheck, designatorRects, freeOffset, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
+import { contactCheck, designatorRects, freeSpot, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
 import { toast } from "sonner"
 import { DT } from "@/sim/speeds"
 import { useSimulation } from "@/sim/use-simulation"
@@ -150,6 +150,8 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
 
 const EMPTY_IDS: ReadonlySet<string> = new Set()
 
+const CLEAR_OF_CONTROLS_PX = 80
+
 const PINS_WORTH_RASTERISING = 1200
 const PINS_WORTH_KEEPING_RASTERISED = 800
 
@@ -169,7 +171,7 @@ function pinAt(clientX: number, clientY: number): PinRef | null {
 }
 
 export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, children, ...props }: DotFieldProps) {
-  const { containerRef, contentRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, toWorld, isPanStart, startPan, movePan, endPan } = useViewport(grid)
+  const { containerRef, contentRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, toWorld, isPanStart, startPan, movePan, endPan } = useViewport(grid)
   const marquee = useSelection(toWorld, worldPerPixel, grid)
   const { boxRef: marqueeRef } = marquee
   const sch = useSchematic(grid)
@@ -377,17 +379,24 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   const { copySelected, paste: pasteClip } = sch
   const scene = useEvent((): PlacementScene => ({ objects: docObjects, wires: docWires, routes, grid }))
+  const revealPlaced = (objects: readonly PlacedObject[], dx: number, dy: number) => {
+    const landed = objects.map((o) => ({ ...o, x: o.x + dx, y: o.y + dy }))
+    if (landed.length) reveal(unionOf(landed.flatMap((o) => [objectRect(o, grid), ...designatorRects(o, grid)])), CLEAR_OF_CONTROLS_PX)
+  }
   const pasteFree = useEvent((c: Clip, dx: number, dy: number) => {
     const probes = c.objects.map((o) => ({ ...o, id: `paste:${o.id}` }))
-    const at = freeOffset([placementCheck(scene(), probes), contactCheck(scene(), probes)], grid, { x: dx, y: dy }) ?? { x: dx, y: dy }
+    const at = freeSpot(scene(), probes, { x: dx, y: dy })
     pasteClip(c, at.x, at.y)
+    revealPlaced(probes, snap(at.x, grid), snap(at.y, grid))
   })
   const addFree = useEvent((defId: string, center: Point) => {
     const def = getDef(defId)
     if (!def) return sch.add(defId, center)
     const probe: PlacedObject = { id: "placing", def: defId, x: snap(center.x - (def.width * grid) / 2, grid), y: snap(center.y - (def.height * grid) / 2, grid) }
-    const at = freeOffset([placementCheck(scene(), [probe]), contactCheck(scene(), [probe])], grid) ?? { x: 0, y: 0 }
-    return sch.add(defId, { x: center.x + at.x, y: center.y + at.y })
+    const at = freeSpot(scene(), [probe])
+    const added = sch.add(defId, { x: center.x + at.x, y: center.y + at.y })
+    if (added) revealPlaced([added], 0, 0)
+    return added
   })
   const copy = React.useCallback(() => {
     const c = copySelected()
