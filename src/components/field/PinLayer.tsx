@@ -1,13 +1,12 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { objectPins, orientationOf, type ObjectPin, type Point } from "@/schematic/geometry"
+import { objectPins, orientationOf, type Point } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
-import type { ComponentDef, PinKind, PlacedObject } from "@/schematic/types"
+import type { PinKind, PlacedObject } from "@/schematic/types"
 import type { FieldDetail } from "./detail"
 import type { PinPointerHandler } from "./ComponentView"
-import { ARROW_HEAD_CELLS, boxCorners, KNOCKOUT_OPACITY, labelFrame, labelKnockout, labelOrigin, MONO_ADVANCE_EM, numbersItsPins, PIN_NUMBER_SCALE, pinLabelById, pinLabels, pinNumberPlacement, referenceArrow, type Box, type KnockoutAxis, type LabelGround, type PinLabel } from "./pin-label"
+import { boxCorners, KNOCKOUT_OPACITY, labelFrame, labelKnockout, labelOrigin, MONO_ADVANCE_EM, numbersItsPins, PIN_NUMBER_SCALE, pinLabelById, pinLabels, pinNumberPlacement, type Box, type KnockoutAxis, type LabelGround, type PinLabel } from "./pin-label"
 import { pinMarker } from "./pin-marker"
-import { referenceTerminals } from "@/schematic/terminals"
 
 const PIN_MARK: Record<PinKind, string> = {
   power: "fill-red-500",
@@ -64,30 +63,6 @@ const KnockoutFades = React.memo(function KnockoutFades() {
 })
 
 type LabelledPin = { label: PinLabel; point: Point }
-
-function ReferenceArrow({ pins, def, grid, size }: { pins: readonly ObjectPin[]; def: ComponentDef; grid: number; size: number }) {
-  const ends = referenceTerminals(def)
-  const from = ends && pins.find(({ pin }) => pin.id === ends[0].id)
-  const to = ends && pins.find(({ pin }) => pin.id === ends[1].id)
-  const arrow = from && to && referenceArrow(from.pin, to.pin, size)
-  if (!from || !arrow) return null
-  const [tail, tip] = arrow.map((p) => ({ x: from.point.x + p.x * grid, y: from.point.y + p.y * grid }))
-  const length = Math.hypot(tip.x - tail.x, tip.y - tail.y)
-  const back = { x: ((tail.x - tip.x) / length) * ARROW_HEAD_CELLS * grid, y: ((tail.y - tip.y) / length) * ARROW_HEAD_CELLS * grid }
-  const barb = (sign: number) => `${tip.x + back.x - sign * back.y * 0.6} ${tip.y + back.y + sign * back.x * 0.6}`
-  return (
-    <path
-      data-reference-arrow=""
-      d={`M${tail.x} ${tail.y}L${tip.x} ${tip.y}M${barb(1)}L${tip.x} ${tip.y}L${barb(-1)}`}
-      fill="none"
-      strokeWidth={1.25}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      vectorEffect="non-scaling-stroke"
-      className="pointer-events-none stroke-muted-foreground"
-    />
-  )
-}
 
 function LabelKnockouts({ pins, grid, size }: { pins: LabelledPin[]; grid: number; size: number }) {
   const advance = monoAdvanceEm()
@@ -198,7 +173,6 @@ export const PinLayer = React.memo(function PinLayer({
         return (
         <g key={object.id} data-pins={object.id}>
           {labelled.length > 0 && <LabelKnockouts pins={labelled} grid={grid} size={detail.pinLabelSize} />}
-          {numbered && def && <ReferenceArrow pins={pins} def={def} grid={grid} size={detail.pinLabelSize * PIN_NUMBER_SCALE} />}
           {pins.map(({ key, pin, point }) => {
             const live = connected(key)
             const contact = contacts.has(key)
