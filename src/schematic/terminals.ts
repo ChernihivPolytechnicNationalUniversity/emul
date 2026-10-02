@@ -23,8 +23,4 @@ export function elementTerminals(def: ComponentDef, element: number): readonly [
   return from && to ? [from, to] : null
 }
 
-export function referenceTerminals(def: ComponentDef): readonly [PinDef, PinDef] | null {
-  return def.pins.length === 2 && def.model?.length === 1 ? elementTerminals(def, 0) : null
-}
-
 export const terminalName = (pin: PinDef) => pin.label || pin.id
