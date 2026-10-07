@@ -22,7 +22,7 @@ import { savedTextScale, saveTextScale } from "./text-scale"
 import { buildNets } from "@/schematic/nets"
 import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, WIRE_COLOR_BY_CODE, type WireColorKey } from "@/schematic/wire-colors"
 import { partKey, pinKey, type PinRef, type PlacedObject, type Schematic } from "@/schematic/types"
-import { getDef, notifyLibrary, pinName, setLibrary } from "@/schematic/registry"
+import { getDef, notifyLibrary, partInitial, pinName, setLibrary } from "@/schematic/registry"
 import { newModuleId, TEMPLATES } from "@/schematic/hdl"
 import type { HdlLanguage } from "emul-shared/hdl"
 import { languageOf } from "emul-shared/hdl"
@@ -238,10 +238,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   // for one from elsewhere, whose sources the debugger then asks for).
   const onFirmware = useEvent((id: string, name: string, bytes: Uint8Array, build?: BuildRecord) => {
     const obj = sch.doc.objects.find((o) => o.id === id)
-    const boot = obj && getDef(obj.def)?.mcuProgramBoot
-    if (boot && !sch.doc.parts[partKey(id, boot)]?.on) {
+    const def = obj && getDef(obj.def)
+    const boot = def?.mcuProgramBoot
+    if (def && boot && !(sch.doc.parts[partKey(id, boot)] ?? partInitial(def, boot)).on) {
       toast.error(`${obj.props?.ref || getDef(obj.def)?.name} not programmed`, {
-        description: "The board takes new firmware only through the ST bootloader: set BOOT to SYSTEM and flash again. Set it back to FLASH before the next RESET.",
+        description: "Flashing goes through the ST bootloader. Set BOOT to SYSTEM and compile again.",
       })
       return false
     }
