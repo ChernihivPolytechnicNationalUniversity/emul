@@ -200,12 +200,12 @@ export default function App() {
   }
 
   const openCubeProject = async (entries: Promise<ProjectEntry[]>) => {
-    const pending = toast.loading("Reading the project…")
+    const pending = toast.loading("Reading project…")
     let project
     try {
       project = await readCubeProject(await entries)
     } catch (e) {
-      toast.error("Could not open that project", { description: (e as Error).message })
+      toast.error("Cannot open project", { description: (e as Error).message })
       return
     } finally {
       toast.dismiss(pending)
@@ -215,7 +215,7 @@ export default function App() {
     const { doc, board } = cubeBench({ ...project, target }, GRID)
     await projects.create(project.name, doc)
     field.current?.openCode(board.props!.ref!)
-    toast.success(`Opened ${project.name}: ${project.files.length} files`, { description: [...importNotes(project, target), "Compile builds it for the board."].join(" ") })
+    toast.success(`Opened ${project.name}`, { description: [`${project.files.length} files.`, ...importNotes(project, target)].join(" ") })
   }
 
   const openCubeFolder = async () => {
@@ -227,7 +227,7 @@ export default function App() {
     if (isZip(file)) return openCubeProject(filesEntries([file]))
     const read = await readProjectFile(file)
     if (!read) {
-      toast.error("Could not open that file", { description: `${file.name} is not an emul project or a zipped STM32 project.` })
+      toast.error("Cannot open file", { description: `${file.name}: not an .emul project or a zipped STM32 project.` })
       return
     }
     await projects.create(read.name ?? nameFromFile(file.name), read.doc)
@@ -245,7 +245,7 @@ export default function App() {
     if (project) return openFile(project)
     const hdl = await readHdlFiles(list)
     if (hdl.length) return field.current?.importHdl(hdl)
-    toast.error("Nothing to open", { description: "Drop an .emul project, an STM32 project folder or its .zip, or .vhd / .v files." })
+    toast.error("Nothing to open", { description: "Drop an .emul file, an STM32 project folder or .zip, or .vhd/.v files." })
   })
 
   const onDropProject = useEvent((entries: Promise<ProjectEntry[]>) => openCubeProject(entries))

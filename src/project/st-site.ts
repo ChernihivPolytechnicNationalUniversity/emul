@@ -1,6 +1,6 @@
 import type { StSite } from "./cubeide"
 
-const NOT_ON_SITE = "this site has no copy of ST's drivers to pack (run pnpm st-sources)"
+const NOT_ON_SITE = "ST drivers are missing on this site (run pnpm st-sources)."
 
 export async function stSite(): Promise<StSite> {
   const res = await fetch("/st/index.json")

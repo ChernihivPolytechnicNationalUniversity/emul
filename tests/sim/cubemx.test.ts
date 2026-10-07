@@ -34,7 +34,7 @@ describe("a CubeMX project opened in the editor", () => {
       expect(paths.filter((p) => !/\.(c|cpp|h|s|ld)$/.test(p))).toEqual(["Lab1.ioc"])
       expect(project.vendorFiles).toBe(4)
       expect(project.refused).toEqual([])
-      expect(importNotes(project, "stm32f746ig")).toEqual(["ST's HAL and CMSIS (4 files) stay out: the build service compiles its own."])
+      expect(importNotes(project, "stm32f746ig")).toEqual(["Skipped ST HAL and CMSIS (4 files); the build service has its own."])
     })
 
     it("turns Windows line endings into the editor's", () => {
@@ -96,7 +96,7 @@ describe("a CubeMX project opened in the editor", () => {
     const project = await readCubeProject(cubeIdeFolder("Disco", "STM32F746NGHx"))
     expect(project.target).toBe("stm32f746ig")
     expect(importNotes(project, "stm32f746ig")[0]).toBe(
-      "Generated for STM32F746NGHx; it runs on the board's STM32F746IGT6: the same core and peripherals, but a pin the STM32F746IGT6 does not have does nothing.",
+      "Project is for STM32F746NGHx, runs on the STM32F746IGT6. Pins missing on the STM32F746IGT6 do nothing.",
     )
   })
 
@@ -104,8 +104,8 @@ describe("a CubeMX project opened in the editor", () => {
     const project = await readCubeProject(cubeIdeFolder("STM32F767ZI_ADC", "STM32F767ZITx"))
     expect(project.target).toBeNull()
     expect(unsupportedChip(project)).toEqual({
-      title: "STM32F767ZITx is not emulated",
-      description: "εmul runs the STM32F429ZIT6 (Nucleo-144) and the STM32F746IGT6 (Open746I-C).",
+      title: "STM32F767ZITx not supported",
+      description: "Supported: STM32F429ZIT6 (Nucleo-144), STM32F746IGT6 (Open746I-C).",
     })
   })
 
@@ -121,25 +121,25 @@ describe("a CubeMX project opened in the editor", () => {
     expect(project.files.map((f) => f.path)).toEqual(["Core/Src/main.c", "p.ioc"])
     expect(project.refused).toEqual([
       { path: "a/b/c/d/e/f/g/h/deep.c", why: "more than 8 folders deep" },
-      { path: "Core/Inc/LEGACY.H", why: "a name of other than letters, digits, . _ - or a source extension" },
+      { path: "Core/Inc/LEGACY.H", why: "name must be letters, digits, . _ - with a source extension" },
       { path: "Core/Src/font.c", why: "over 1 MB" },
-      { path: "Core/Src/main - Copy.c", why: "a name of other than letters, digits, . _ - or a source extension" },
+      { path: "Core/Src/main - Copy.c", why: "name must be letters, digits, . _ - with a source extension" },
     ])
     expect(importNotes(project, "stm32f746ig")).toEqual([
-      "Not imported: a/b/c/d/e/f/g/h/deep.c (more than 8 folders deep); Core/Inc/LEGACY.H (a name of other than letters, digits, . _ - or a source extension); Core/Src/font.c (over 1 MB); 1 more.",
+      "Not imported: a/b/c/d/e/f/g/h/deep.c (more than 8 folders deep); Core/Inc/LEGACY.H (name must be letters, digits, . _ - with a source extension); Core/Src/font.c (over 1 MB); 1 more.",
     ])
   })
 
   it("refuses a project over the file limit, and a folder with nothing to build", async () => {
     const many = Array.from({ length: SOURCE_LIMITS.files + 1 }, (_, i) => entry(`big/Core/Src/f${i}.c`, `int f${i};`))
     await expect(readCubeProject([entry("big/big.ioc", ioc("big", "STM32F746IGTx")), ...many])).rejects.toThrow(
-      `big has ${SOURCE_LIMITS.files + 1} source files besides ST's drivers; a project holds at most ${SOURCE_LIMITS.files}`,
+      `big has ${SOURCE_LIMITS.files + 1} source files; the limit is ${SOURCE_LIMITS.files}.`,
     )
     await expect(readCubeProject([entry("d/d.ioc", ioc("d", "STM32F746IGTx")), entry("d/Drivers/CMSIS/Include/core_cm7.h")])).rejects.toThrow(
-      "d has only ST's drivers, no sources of its own",
+      "d has no sources besides ST drivers.",
     )
-    await expect(readCubeProject([entry("docs/readme.pdf"), entry("docs/notes.docx")])).rejects.toThrow("No C or C++ sources here")
-    await expect(readCubeProject([])).rejects.toThrow("The folder is empty")
+    await expect(readCubeProject([entry("docs/readme.pdf"), entry("docs/notes.docx")])).rejects.toThrow("No C or C++ sources. Open the folder that contains the .ioc.")
+    await expect(readCubeProject([])).rejects.toThrow("Folder is empty.")
   })
 
   it("reads the .ioc as CubeMX writes it: escapes, comments, CRLF", () => {
@@ -203,17 +203,17 @@ describe("a CubeMX project opened in the editor", () => {
     it("refuses an entry that inflates past the size the archive gives it", async () => {
       const archive = zip([{ path: "p/Core/Src/main.c", content: "x".repeat(10_000), deflate: true }])
       new DataView(archive.buffer).setUint32(archive.length - 22 - 46 - "p/Core/Src/main.c".length + 24, 10, true)
-      await expect(readZip(archive)[0]!.read()).rejects.toThrow("holds more than the archive says")
+      await expect(readZip(archive)[0]!.read()).rejects.toThrow("size mismatch, archive is damaged")
     })
 
     it("refuses an entry whose contents do not match its checksum", async () => {
       const archive = zip([{ path: "p/Core/Src/main.c", content: "int x = 0;" }])
       archive[30 + "p/Core/Src/main.c".length + 8] = "9".charCodeAt(0)
-      await expect(readZip(archive)[0]!.read()).rejects.toThrow("does not match its checksum")
+      await expect(readZip(archive)[0]!.read()).rejects.toThrow("checksum mismatch, archive is damaged")
     })
 
     it("refuses what is not a zip", () => {
-      expect(() => readZip(new TextEncoder().encode("not an archive at all, just some text"))).toThrow("not a zip archive")
+      expect(() => readZip(new TextEncoder().encode("not an archive at all, just some text"))).toThrow("Not a zip archive.")
     })
   })
 
@@ -251,7 +251,7 @@ describe("a CubeMX project opened in the editor", () => {
     })
 
     it("refuses a folder that holds several projects side by side, and takes the .ioc named after its folder when one holds two", async () => {
-      await expect(readCubeProject([...core("Alpha"), ...core("Beta")])).rejects.toThrow("There are 2 STM32 projects here (Alpha, Beta): pick the folder of one of them")
+      await expect(readCubeProject([...core("Alpha"), ...core("Beta")])).rejects.toThrow("Folder holds 2 projects (Alpha, Beta). Open one of them.")
       const two = await readCubeProject([entry("Lab1/Lab1_old.ioc", ioc("Lab1_old", "STM32F429ZITx")), ...core("Lab1")])
       expect([two.name, two.mcu]).toEqual(["Lab1", "STM32F746IGTx"])
     })
@@ -291,13 +291,13 @@ describe("a CubeMX project opened in the editor", () => {
         "Tests/test_main.c",
       ])
       expect(importNotes(project, "stm32f746ig")[0]).toBe(
-        "Left out, as the STM32CubeIDE project does not build them: Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_1.c, Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_2.c, Tests/test_main.c.",
+        "Skipped, not built by the CubeIDE project: Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_1.c, Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_2.c, Tests/test_main.c.",
       )
     })
 
     it("refuses an .ioc over the size of a source before reading it", async () => {
       const huge = { path: "big/big.ioc", size: 50 * 1024 * 1024, read: async () => { throw new Error("read") } }
-      await expect(readCubeProject([huge, entry("big/Core/Src/main.c", "int main;")])).rejects.toThrow("big/big.ioc is over 1 MB")
+      await expect(readCubeProject([huge, entry("big/Core/Src/main.c", "int main;")])).rejects.toThrow("big/big.ioc is over 1 MB.")
     })
   })
 })

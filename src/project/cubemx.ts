@@ -30,7 +30,7 @@ const OTHER_TOOLCHAIN = /^(EWARM|MDK-ARM)\//i
 const VENDOR = /^Drivers\/(CMSIS|STM32[^/]*_HAL_Driver)\//i
 const RAM_LINKER = /_RAM\.ld$/i
 const IOC = /\.ioc$/i
-const NOT_A_SOURCE_NAME = "a name of other than letters, digits, . _ - or a source extension"
+const NOT_A_SOURCE_NAME = "name must be letters, digits, . _ - with a source extension"
 const PART_IN_FILE_NAME = /(?:^|\/)(?:startup_)?(stm32[a-z]\d{3}[a-z0-9]*?)(?:x+)?(?:_flash)?\.(?:s|ld)$/i
 
 const dirOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "")
@@ -81,7 +81,7 @@ function projectRoot(paths: string[]): { root: string; ioc: string | null; neste
   if (!ioc) return { root: commonDir(paths), ioc, nested: [] }
   const root = dirOf(ioc)
   const siblings = [...new Set(iocs.filter((p) => depth(p) === depth(ioc)).map(dirOf))]
-  if (siblings.length > 1) throw new Error(`There are ${siblings.length} STM32 projects here (${siblings.map(baseName).join(", ")}): pick the folder of one of them`)
+  if (siblings.length > 1) throw new Error(`Folder holds ${siblings.length} projects (${siblings.map(baseName).join(", ")}). Open one of them.`)
   const nested = iocs.map(dirOf).filter((dir) => dir !== root && under(dir, root)).map((dir) => relative(dir, root))
   return { root, ioc, nested }
 }
@@ -120,14 +120,14 @@ export function cubeIdeBuilds(cproject: string): ((path: string) => boolean) | n
 }
 
 async function readSmall(entry: ProjectEntry, path: string): Promise<string> {
-  if (entry.size > SOURCE_LIMITS.fileBytes) throw new Error(`${path} is over ${SOURCE_LIMITS.fileBytes / 1024 / 1024} MB`)
+  if (entry.size > SOURCE_LIMITS.fileBytes) throw new Error(`${path} is over ${SOURCE_LIMITS.fileBytes / 1024 / 1024} MB.`)
   return decodeSource(await entry.read())
 }
 
 export async function readCubeProject(entries: ProjectEntry[]): Promise<CubeProject> {
   const normalized = entries.map((e) => ({ ...e, path: e.path.replace(/\\/g, "/").replace(/^\/+/, "") }))
   const all = normalized.filter((e) => !JUNK.test(e.path))
-  if (!all.length) throw new Error("The folder is empty")
+  if (!all.length) throw new Error("Folder is empty.")
   const { root, ioc, nested } = projectRoot(all.map((e) => e.path))
   const ownIoc = ioc ? all.find((e) => e.path === ioc) : undefined
   const iocText = ownIoc ? await readSmall(ownIoc, ioc!) : null
@@ -161,10 +161,10 @@ export async function readCubeProject(entries: ProjectEntry[]): Promise<CubeProj
 
   const name = settings.get("ProjectManager.ProjectName") || (ioc ? baseName(ioc).replace(IOC, "") : baseName(root)) || "STM32 project"
   if (!kept.length) {
-    throw new Error(vendorFiles ? `${name} has only ST's drivers, no sources of its own` : "No C or C++ sources here: pick the folder with the .ioc in it")
+    throw new Error(vendorFiles ? `${name} has no sources besides ST drivers.` : "No C or C++ sources. Open the folder that contains the .ioc.")
   }
   if (kept.length + (ownIoc ? 1 : 0) > SOURCE_LIMITS.files) {
-    throw new Error(`${name} has ${kept.length} source files besides ST's drivers; a project holds at most ${SOURCE_LIMITS.files}`)
+    throw new Error(`${name} has ${kept.length} source files; the limit is ${SOURCE_LIMITS.files}.`)
   }
 
   const sources = await Promise.all(kept.map(async (e) => ({ path: e.path, content: decodeSource(await e.read()) })))
@@ -194,13 +194,13 @@ export function cubeBench(project: CubeProject & { target: Target }, grid: numbe
 export function importNotes(project: CubeProject, target: Target): string[] {
   const notes: string[] = []
   if (project.mcu && !couldBePart(project.mcu, target)) {
-    notes.push(`Generated for ${project.mcu}; it runs on the board's ${partOf(target)}: the same core and peripherals, but a pin the ${partOf(target)} does not have does nothing.`)
+    notes.push(`Project is for ${project.mcu}, runs on the ${partOf(target)}. Pins missing on the ${partOf(target)} do nothing.`)
   }
   if (project.notBuilt.length) {
     const shown = project.notBuilt.slice(0, 3)
-    notes.push(`Left out, as the STM32CubeIDE project does not build them: ${shown.join(", ")}${project.notBuilt.length > shown.length ? ` and ${project.notBuilt.length - shown.length} more` : ""}.`)
+    notes.push(`Skipped, not built by the CubeIDE project: ${shown.join(", ")}${project.notBuilt.length > shown.length ? ` and ${project.notBuilt.length - shown.length} more` : ""}.`)
   }
-  if (project.vendorFiles) notes.push(`ST's HAL and CMSIS (${project.vendorFiles} files) stay out: the build service compiles its own.`)
+  if (project.vendorFiles) notes.push(`Skipped ST HAL and CMSIS (${project.vendorFiles} files); the build service has its own.`)
   if (project.refused.length) {
     const shown = project.refused.slice(0, 3).map((r) => `${r.path} (${r.why})`)
     const more = project.refused.length - shown.length
@@ -210,8 +210,8 @@ export function importNotes(project: CubeProject, target: Target): string[] {
 }
 
 export function unsupportedChip(project: CubeProject): { title: string; description: string } {
-  const boards = TARGETS.map((t) => `${partOf(t)} (${boardName(t)})`).join(" and the ")
+  const boards = TARGETS.map((t) => `${partOf(t)} (${boardName(t)})`).join(", ")
   return project.mcu
-    ? { title: `${project.mcu} is not emulated`, description: `εmul runs the ${boards}.` }
-    : { title: `Which chip is ${project.name} for?`, description: "There is no .ioc and no startup file to tell. Open the folder with the .ioc in it." }
+    ? { title: `${project.mcu} not supported`, description: `Supported: ${boards}.` }
+    : { title: "Unknown chip", description: `${project.name} has no .ioc or startup file. Open the folder that contains the .ioc.` }
 }

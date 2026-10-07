@@ -401,26 +401,26 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
     try {
       imported = await readCubeProject(await entries)
     } catch (e) {
-      toast.error("Could not import that project", { description: (e as Error).message })
+      toast.error("Cannot import project", { description: (e as Error).message })
       return
     }
     if (!imported.target && imported.mcu) return void toast.error(unsupportedChip(imported).title, { description: unsupportedChip(imported).description })
     if (imported.target && imported.target !== chip) {
       const fits = boards.find((b) => getDef(b.def)?.chip === imported.target)
-      toast.error(`${imported.name} is for the ${imported.mcu}`, {
-        description: `${boardName(board)} has an ${chipById(chip)!.name}. ${fits ? `${boardName(fits)} has the right chip: select it and import there.` : "Open the project on a bench of its own with File › Open STM32 project."}`,
+      toast.error(`${imported.name}: wrong chip`, {
+        description: `Project is for ${imported.mcu}, ${boardName(board)} has ${chipById(chip)!.name}. ${fits ? `Select ${boardName(fits)} and import there.` : "Open it as a new bench: File › Open STM32 project."}`,
       })
       return
     }
     if (currentBoard()?.id !== id || currentBoard()?.project !== was) {
-      toast.error("Not imported", { description: `${boardName(board)} changed while ${imported.name} was being read. Import it again.` })
+      toast.error("Import cancelled", { description: `${boardName(board)} changed during the import. Try again.` })
       return
     }
     const before = { files: project, open, active }
     onFiles(id, imported.files, was)
     setTab({ open: [], active: null })
-    toast.success(`${imported.name} imported into ${boardName(board)}: ${imported.files.length} files`, {
-      description: importNotes(imported, chip).join(" ") || undefined,
+    toast.success(`Imported ${imported.name} into ${boardName(board)}`, {
+      description: [`${imported.files.length} files.`, ...importNotes(imported, chip)].join(" "),
       duration: 20_000,
       action: {
         label: "Undo",
@@ -439,16 +439,16 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
 
   const exportCubeIde = async () => {
     if (!chip || !board) return
-    const packing = toast.loading("Packing an STM32CubeIDE project…")
+    const packing = toast.loading("Packing project…")
     try {
       const exported = await cubeIdeProject({ name: projectName || boardName(board), target: chip, files: project, opt, site: await stSite() })
       downloadBlob(new Blob([await writeZip(exported.entries)], { type: "application/zip" }), `${exported.name}.zip`)
-      toast.success(`${exported.name}.zip`, {
-        description: `In STM32CubeIDE: File › Import › Existing Projects into Workspace › Select archive file.${exported.cubeMxVersion ? ` The .ioc opens in STM32CubeMX ${exported.cubeMxVersion} or newer; building and flashing do not need it.` : ""}`,
+      toast.success(`Saved ${exported.name}.zip`, {
+        description: `Open in STM32CubeIDE: File › Import › Existing Projects into Workspace › Select archive file.${exported.cubeMxVersion ? ` The .ioc needs STM32CubeMX ${exported.cubeMxVersion} or newer. Build and flash work without it.` : ""}`,
         duration: 20_000,
       })
     } catch (e) {
-      toast.error("Could not export the project", { description: (e as Error).message })
+      toast.error("Cannot export project", { description: (e as Error).message })
     } finally {
       toast.dismiss(packing)
     }

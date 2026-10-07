@@ -198,7 +198,7 @@ export async function cubeIdeProject(options: { name: string; target: Target; fi
   const ownIoc = options.files.find((f) => IOC.test(f.path))
   const name = eclipseName(ownIoc ? (iocValue(ownIoc.content, "ProjectManager.ProjectName") ?? ownIoc.path.replace(/\.ioc$/i, "")) : options.name)
   const specPath = `targets/${target}/target.json`
-  if (!site.files.includes(specPath)) throw new Error("this site has no copy of ST's drivers and the build service's files to pack (run pnpm st-sources)")
+  if (!site.files.includes(specPath)) throw new Error("ST drivers are missing on this site (run pnpm st-sources).")
   const spec = JSON.parse(new TextDecoder().decode(await site.read(specPath))) as TargetSpec
   const familyDir = `STM32${spec.family.toUpperCase()}xx`
 
@@ -227,7 +227,7 @@ export async function cubeIdeProject(options: { name: string; target: Target; fi
 
   const paths = [...project.map((f) => f.path), ...added.map((f) => f.path), ...drivers.map((f) => f.path)]
   const linker = paths.find((p) => FLASH_LINKER.test(p)) ?? paths.find((p) => LINKER.test(p))
-  if (!linker) throw new Error("no linker script to build with")
+  if (!linker) throw new Error("No linker script found.")
   const headerDirs = [...new Set(paths.filter((p) => HEADER.test(p) && !ST_DRIVERS.test(p)).map(dirOf))].sort()
   const includes = [
     ...headerDirs.map((d) => (d ? `../${d}` : "..")),

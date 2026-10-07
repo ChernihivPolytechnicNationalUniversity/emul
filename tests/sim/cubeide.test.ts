@@ -203,7 +203,7 @@ describe("a board's code exported as an STM32CubeIDE project", () => {
 
   it("says so when the site has no copy of ST's drivers to pack", async () => {
     await expect(cubeIdeProject({ name: "x", target: "stm32f746ig", files: template("stm32f746ig"), opt: "-O0", site: { files: [], read: async () => new Uint8Array() } })).rejects.toThrow(
-      "this site has no copy of ST's drivers",
+      "ST drivers are missing on this site",
     )
   })
 })

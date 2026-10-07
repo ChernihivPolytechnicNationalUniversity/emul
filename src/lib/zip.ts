@@ -13,13 +13,13 @@ const DEFLATED = 8
 export function readZip(bytes: Uint8Array<ArrayBuffer>): ZipEntry[] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const end = findEndOfDirectory(view)
-  if (end < 0) throw new Error("not a zip archive")
+  if (end < 0) throw new Error("Not a zip archive.")
   const count = view.getUint16(end + 10, true)
   let at = view.getUint32(end + 16, true)
-  if (at === ZIP64_MARK) throw new Error("ZIP64 archives are not supported: zip the project folder alone")
+  if (at === ZIP64_MARK) throw new Error("ZIP64 is not supported. Zip only the project folder.")
   const entries: ZipEntry[] = []
   for (let n = 0; n < count; n++) {
-    if (at + 46 > bytes.length || view.getUint32(at, true) !== DIRECTORY_ENTRY) throw new Error("the archive's directory is damaged")
+    if (at + 46 > bytes.length || view.getUint32(at, true) !== DIRECTORY_ENTRY) throw new Error("Archive is damaged.")
     const flags = view.getUint16(at + 8, true)
     const method = view.getUint16(at + 10, true)
     const checksum = view.getUint32(at + 16, true)
@@ -36,17 +36,17 @@ export function readZip(bytes: Uint8Array<ArrayBuffer>): ZipEntry[] {
       path,
       size,
       read: async () => {
-        if (flags & ENCRYPTED) throw new Error(`${path} is encrypted`)
+        if (flags & ENCRYPTED) throw new Error(`${path}: encrypted entries are not supported.`)
         const start = dataStart(view, localHeader, path)
         const data = bytes.subarray(start, start + compressedSize)
         const checked = (bytes: Uint8Array) => {
-          if (crc32(bytes) !== checksum) throw new Error(`${path} does not match its checksum: the archive is damaged`)
+          if (crc32(bytes) !== checksum) throw new Error(`${path}: checksum mismatch, archive is damaged.`)
           return bytes
         }
         if (method === STORED && data.length === size) return checked(data.slice())
         if (method === DEFLATED) return checked(await inflate(data, size, path))
-        if (method === STORED) throw new Error(`${path}: the archive is damaged`)
-        throw new Error(`${path} is compressed with method ${method}; only stored and deflated entries can be read`)
+        if (method === STORED) throw new Error(`${path}: archive is damaged.`)
+        throw new Error(`${path}: compression method ${method} is not supported.`)
       },
     })
   }
@@ -62,7 +62,7 @@ function findEndOfDirectory(view: DataView): number {
 }
 
 function dataStart(view: DataView, localHeader: number, path: string): number {
-  if (view.getUint32(localHeader, true) !== LOCAL_HEADER) throw new Error(`${path}: the archive is damaged`)
+  if (view.getUint32(localHeader, true) !== LOCAL_HEADER) throw new Error(`${path}: archive is damaged.`)
   return localHeader + 30 + view.getUint16(localHeader + 26, true) + view.getUint16(localHeader + 28, true)
 }
 
@@ -75,12 +75,12 @@ async function inflate(data: Uint8Array<ArrayBuffer>, size: number, path: string
     if (done) break
     if (at + value.length > size) {
       await reader.cancel()
-      throw new Error(`${path} holds more than the archive says: the archive is damaged`)
+      throw new Error(`${path}: size mismatch, archive is damaged.`)
     }
     out.set(value, at)
     at += value.length
   }
-  if (at !== size) throw new Error(`${path}: the archive is damaged`)
+  if (at !== size) throw new Error(`${path}: archive is damaged.`)
   return out
 }
 
