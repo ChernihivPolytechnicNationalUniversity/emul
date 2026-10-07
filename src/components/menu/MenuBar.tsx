@@ -73,6 +73,7 @@ type MenuBarProps = React.ComponentProps<"div"> & {
   onProjects: () => void
   onOpenProject: (id: string) => void
   onOpenFile: () => void
+  onOpenCube: () => void
   onSaveFile: () => void
   onShare: () => void
   onShareDialog: () => void
@@ -100,6 +101,7 @@ export function MenuBar({
   onProjects,
   onOpenProject,
   onOpenFile,
+  onOpenCube,
   onSaveFile,
   onShare,
   onShareDialog,
@@ -149,6 +151,7 @@ export function MenuBar({
               Open file…
               <MenubarShortcut>⌘O</MenubarShortcut>
             </MenubarItem>
+            <MenubarItem onClick={onOpenCube}>Open STM32 project…</MenubarItem>
             <MenubarItem onClick={onSaveFile} disabled={state.isEmpty}>
               Save to file
               <MenubarShortcut>⌘S</MenubarShortcut>

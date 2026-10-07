@@ -15,6 +15,9 @@ import { useEvent } from "@/hooks/use-event"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useProjects } from "@/hooks/use-projects"
 import { fileName, nameFromFile, projectFile, readProjectFile, shareLink } from "@/project/project-store"
+import { cubeBench, importNotes, readCubeProject, unsupportedChip, type ProjectEntry } from "@/project/cubemx"
+import { dropEntries, filesEntries, isProjectDrop, isZip, pickFolder } from "@/project/entries"
+import { downloadBlob } from "@/lib/download"
 import { Button } from "@/components/ui/button"
 import { ProjectsSheet } from "@/components/projects/ProjectsSheet"
 import { hostedRoom, roomFromPath, useLive } from "@/collab/use-live"
@@ -133,15 +136,6 @@ export default function App() {
     field.current?.importHdl(files)
   }
 
-  const downloadBlob = (blob: Blob, name: string) => {
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = name
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
   const download = async (name: string, doc: Schematic) => downloadBlob(await projectFile(name, doc), fileName(name))
 
   const share = async () => {
@@ -205,10 +199,35 @@ export default function App() {
     if (example.projects?.length) field.current?.openCode(example.projects[0]!.ref)
   }
 
+  const openCubeProject = async (entries: Promise<ProjectEntry[]>) => {
+    const pending = toast.loading("Reading project…")
+    let project
+    try {
+      project = await readCubeProject(await entries)
+    } catch (e) {
+      toast.error("Cannot open project", { description: (e as Error).message })
+      return
+    } finally {
+      toast.dismiss(pending)
+    }
+    const { target } = project
+    if (!target) return void toast.error(unsupportedChip(project).title, { description: unsupportedChip(project).description })
+    const { doc, board } = cubeBench({ ...project, target }, GRID)
+    await projects.create(project.name, doc)
+    field.current?.openCode(board.props!.ref!)
+    toast.success(`Opened ${project.name}`, { description: [`${project.files.length} files.`, ...importNotes(project, target)].join(" ") })
+  }
+
+  const openCubeFolder = async () => {
+    const files = await pickFolder()
+    if (files.length) await openCubeProject(filesEntries(files))
+  }
+
   const openFile = async (file: File) => {
+    if (isZip(file)) return openCubeProject(filesEntries([file]))
     const read = await readProjectFile(file)
     if (!read) {
-      toast.error("Could not open that file", { description: `${file.name} is not an emul project.` })
+      toast.error("Cannot open file", { description: `${file.name}: not an .emul project or a zipped STM32 project.` })
       return
     }
     await projects.create(read.name ?? nameFromFile(file.name), read.doc)
@@ -226,8 +245,10 @@ export default function App() {
     if (project) return openFile(project)
     const hdl = await readHdlFiles(list)
     if (hdl.length) return field.current?.importHdl(hdl)
-    toast.error("Nothing to open", { description: "Drop an .emul project or .vhd / .v files." })
+    toast.error("Nothing to open", { description: "Drop an .emul file, an STM32 project folder or .zip, or .vhd/.v files." })
   })
+
+  const onDropProject = useEvent((entries: Promise<ProjectEntry[]>) => openCubeProject(entries))
 
   React.useEffect(() => {
     const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes("Files")
@@ -239,7 +260,8 @@ export default function App() {
     const onDrop = (e: DragEvent) => {
       if (!hasFiles(e)) return
       e.preventDefault()
-      void onDropFiles(Array.from(e.dataTransfer!.files))
+      if (isProjectDrop(e.dataTransfer!)) void onDropProject(dropEntries(e.dataTransfer!))
+      else void onDropFiles(Array.from(e.dataTransfer!.files))
     }
     window.addEventListener("dragover", onOver)
     window.addEventListener("drop", onDrop)
@@ -247,7 +269,7 @@ export default function App() {
       window.removeEventListener("dragover", onOver)
       window.removeEventListener("drop", onDrop)
     }
-  }, [onDropFiles])
+  }, [onDropFiles, onDropProject])
 
   // ⌘S and ⌘O belong to the browser until we take them.
   const onKey = useEvent((e: KeyboardEvent) => {
@@ -279,6 +301,7 @@ export default function App() {
           onProjects={() => setProjectsOpen(true)}
           onOpenProject={(id) => void projects.open(id)}
           onOpenFile={open}
+          onOpenCube={() => void openCubeFolder()}
           onSaveFile={save}
           onShare={() => void share()}
           onShareDialog={() => setShareOpen(true)}
@@ -314,6 +337,7 @@ export default function App() {
               onMovePreview={live.onMove}
               onWirePreview={live.onWire}
               ghosts={ghosts}
+              projectName={projects.current?.name}
             >
               <LiveCursors peers={live.peers} />
             </DotField>
@@ -330,7 +354,7 @@ export default function App() {
         onExportPng={() => void exportImage()}
       />
       <ProjectsSheet open={projectsOpen} onOpenChange={setProjectsOpen} projects={projects} onNew={newProject} onDownload={(id) => void downloadProject(id)} />
-      <input ref={fileInput} type="file" accept=".emul" className="hidden" onChange={onFile} />
+      <input ref={fileInput} type="file" accept=".emul,.zip" className="hidden" onChange={onFile} />
       <input ref={hdlInput} type="file" multiple accept={HDL_ACCEPT} className="hidden" onChange={onHdlFiles} />
       <Toaster position="bottom-center" richColors />
     </TooltipProvider>

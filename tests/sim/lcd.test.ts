@@ -114,7 +114,7 @@ describe("display demo: SDRAM, DMA2D clear, text through the LTDC", () => {
     })
 
     it("restarts the demo when plugged back", () => {
-      s.loop.setParts({ [partKey(s.u.id, "MUSB")]: { on: true } })
+      s.loop.setParts({ [partKey(s.u.id, "MUSB")]: { on: true }, [partKey(s.u.id, "BOOT")]: { on: false } })
       const snap = s.run(0.4)
       expect.soft(snap.displays[s.lcd.id].status, "panel").toBe("ok")
       expect.soft(colours(s.frame(), 1024, 600)[0][0], "background").toBe("255,0,0")

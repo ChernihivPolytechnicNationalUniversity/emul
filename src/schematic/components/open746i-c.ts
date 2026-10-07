@@ -393,7 +393,7 @@ const parts: PartDef[] = [
   ...(["PB6", "PB7", "PH4", "PI8"] as const).map((mcu, i): PartDef => ({ type: "switch", id: `JMP3_${i + 1}`, label: `JMP3: LED${i + 1} ↔ ${mcu}`, x: 66, y: 9 + i * 2, span: 1, initial: { on: true } })),
   ...(["A PG2", "B PG3", "C PD4", "D PD5", "centre PI11"] as const).map((what, i): PartDef => ({ type: "switch", id: `JMP4_${i + 1}`, label: `JMP4: joystick ${what}`, x: 70, y: 47 + i * 1.5, span: 1, initial: { on: true } })),
   { type: "switch", id: "JMP6", label: "JMP6: WAKEUP button ↔ PA0", x: 57.5, y: 49.8, span: 1, initial: { on: true } },
-  { type: "switch", id: "BOOT", label: "BOOT: off = FLASH (user firmware), on = SYSTEM (ST bootloader, not modelled)", x: 20.2, y: 33.5, span: 1.6, pin: "BOOT0" },
+  { type: "switch", id: "BOOT", label: "BOOT: on = SYSTEM (ST bootloader, for flashing; the board starts here), off = FLASH (user firmware from reset)", x: 20.2, y: 33.5, span: 1.6, pin: "BOOT0", initial: { on: true } },
   // The LED column top right: PWR, the CP2102's RX/TX, the four USER LEDs.
   { type: "led", id: "PWR", label: "PWR", x: 71, y: 3, color: "#ef4444" },
   { type: "led", id: "RXLED", label: "RX", x: 71, y: 5, color: "#ef4444" },
@@ -548,7 +548,7 @@ export const open746ic: ComponentDef = {
     VBAT: "Jumper closed: from the 3.3 V rail, so a power cut clears the RTC and backup registers; open it and wire a battery to the VBAT pin to keep them counting through the cut",
     "LCD 7inch (P15)": "24-bit RGB on the LTDC, backlight PA3, GT911 touch on PD13/PD12 (I2C4), RST PD11, INT PD7",
     "USB OTG (Core746I)": "Its VBUS powers the module with SW1 at USB (5Vin from the board's S2 otherwise); the data lines DM PA11, DP PA12, ID PA10, VBUS PA9 are not modelled",
-    "BOOT switch": "FLASH grounds BOOT0, SYSTEM lifts it to 3.3 V: the core then starts in system memory, where ST's bootloader is not modelled (it idles; the firmware does not run)",
+    "BOOT switch": "Starts on SYSTEM, as the board is left for flashing through ST's bootloader: Compile programs the board and starts the program, as STM32CubeProgrammer does after a download. SYSTEM lifts BOOT0 to 3.3 V, so a RESET or a power cycle starts the core in system memory, where the bootloader is not modelled (it idles); FLASH grounds BOOT0 and the firmware runs from reset",
     "Not fitted here": "JTAG/SWD (no debugger), the 2×40 pin ports P16–P21 (every I/O; use the peripheral headers), the 4.3\" LCD header P14 (RGB as P15 + XPT2046 touch on PF7/PF8/PF9, CS PF6, IRQ PD7), the USB OTG data lines and VBUS LED, JMP2 (USART1 always on the CP2102), JMP5 (A4/A5 always PF7/PF6), the OTG and VREF+ jumpers (always closed)",
     Source: "Waveshare Open746I-C and Core746I schematics",
   },

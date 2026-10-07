@@ -5,8 +5,15 @@ import { OPT_LEVELS, SOURCE_LIMITS, type OptLevel, type SourceFile, type Target 
 import { Button } from "@/components/ui/button"
 import { fetchArtifact, fetchText, submitBuild, waitForJob } from "@/project/api"
 import { parseDiagnostic, parseDiagnostics, type Diagnostic } from "@/project/diagnostics"
-import { createFile, removeFile, renameFile, renameFolder, writeFile } from "@/project/files"
-import { TEMPLATE_MAIN, template } from "@/project/template"
+import { createFile, mainFile, removeFile, renameFile, renameFolder, writeFile } from "@/project/files"
+import { template } from "@/project/template"
+import { importNotes, readCubeProject, unsupportedChip, type CubeProject, type ProjectEntry } from "@/project/cubemx"
+import { filesEntries, pickFolder } from "@/project/entries"
+import { cubeIdeProject } from "@/project/cubeide"
+import { stSite } from "@/project/st-site"
+import { downloadBlob } from "@/lib/download"
+import { writeZip } from "@/lib/zip"
+import { chipById } from "@/mcu/chip"
 import { getDef } from "@/schematic/registry"
 import type { BoardDebug, PlacedObject } from "@/schematic/types"
 import { formatSI } from "@/sim/units"
@@ -41,7 +48,7 @@ provideAnalysis({ parseFirmware, MemorySnapshot, DebugInfo, unwind, evaluateExpr
 const MIN_WIDTH = 420
 const MAX_WIDTH = 0.7
 const DEFAULT_WIDTH = 640
-const EXPLORER_WIDTH = 176
+const EXPLORER_WIDTH = 200
 /** What a board compiles at until its project says otherwise: a Debug build, as CubeIDE starts one. */
 export const DEFAULT_BUILD_OPT: OptLevel = "-O0"
 /** What each level is for, in the select's tooltip. */
@@ -56,13 +63,14 @@ type CodePanelProps = Omit<React.ComponentProps<"div">, "ref"> & {
   /** Every object on the schematic that can hold code, for the picker. */
   boards: PlacedObject[]
   onPick: (id: string) => void
-  onFiles: (id: string, files: SourceFile[]) => void
+  onFiles: (id: string, files: SourceFile[], expected?: SourceFile[]) => void
   /** A build produced an image: load it on the board as the inspector's "Load…" would, with what it was built from; false when the board did not take it. */
   onFirmware: (id: string, name: string, bytes: Uint8Array, build?: BuildRecord) => boolean
   onBuild: (id: string, build: NonNullable<PlacedObject["build"]>) => void
   onDebug: (id: string, fn: (d: BoardDebug) => BoardDebug) => void
   debug: DebugController
   onClose: () => void
+  projectName?: string
 }
 
 /** Tabs are the editor's, not the schematic's: kept here per board, lost with the page. */
@@ -88,7 +96,7 @@ const keyOfTab = (tab: string | null) => (!tab || tab === DISASM ? null : tab.st
  * under the pointer, the disassembly, and the views of the panel below. Keys and pointer
  * events stop here so the field behind it does not act on them.
  */
-export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onBuild, onDebug, debug, onClose, className, style, ...props }: CodePanelProps) {
+export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onBuild, onDebug, debug, onClose, projectName, className, style, ...props }: CodePanelProps) {
   const [width, setWidth] = React.useState(DEFAULT_WIDTH)
   const editor = React.useRef<EditorHandle | null>(null)
   // The field's Undo/Redo reach the editor through this panel; the editor may not be mounted (no board).
@@ -150,7 +158,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
 
   const tab: TabState = (id ? tabs[id] : undefined) ?? { open: [], active: null }
   // No tabs yet: start on main.c (the template's) or the first file, as an IDE opens a project.
-  const first = project.find((f) => f.path === TEMPLATE_MAIN)?.path ?? project[0]?.path ?? null
+  const first = mainFile(project)
   const active = tab.active ?? (tab.open.length === 0 ? first : null)
   const open = tab.open.length === 0 && first ? [first] : tab.open
 
@@ -385,6 +393,67 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
       },
     })
   }
+  const currentBoard = useEvent(() => board)
+  const importProject = async (entries: Promise<ProjectEntry[]>) => {
+    if (!id || !chip || !board) return
+    const was = board.project
+    let imported: CubeProject
+    try {
+      imported = await readCubeProject(await entries)
+    } catch (e) {
+      toast.error("Cannot import project", { description: (e as Error).message })
+      return
+    }
+    if (!imported.target && imported.mcu) return void toast.error(unsupportedChip(imported).title, { description: unsupportedChip(imported).description })
+    if (imported.target && imported.target !== chip) {
+      const fits = boards.find((b) => getDef(b.def)?.chip === imported.target)
+      toast.error(`${imported.name}: wrong chip`, {
+        description: `Project is for ${imported.mcu}, ${boardName(board)} has ${chipById(chip)!.name}. ${fits ? `Select ${boardName(fits)} and import there.` : "Open it as a new bench: File › Open STM32 project."}`,
+      })
+      return
+    }
+    if (currentBoard()?.id !== id || currentBoard()?.project !== was) {
+      toast.error("Import cancelled", { description: `${boardName(board)} changed during the import. Try again.` })
+      return
+    }
+    const before = { files: project, open, active }
+    onFiles(id, imported.files, was)
+    setTab({ open: [], active: null })
+    toast.success(`Imported ${imported.name} into ${boardName(board)}`, {
+      description: [`${imported.files.length} files.`, ...importNotes(imported, chip)].join(" "),
+      duration: 20_000,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          if (currentBoard()?.id !== id || currentBoard()?.project !== imported.files) return
+          onFiles(id, was ?? before.files, imported.files)
+          setTab(before)
+        },
+      },
+    })
+  }
+  const importFolder = async () => {
+    const picked = await pickFolder()
+    if (picked.length) await importProject(filesEntries(picked))
+  }
+
+  const exportCubeIde = async () => {
+    if (!chip || !board) return
+    const packing = toast.loading("Packing project…")
+    try {
+      const exported = await cubeIdeProject({ name: projectName || boardName(board), target: chip, files: project, opt, site: await stSite() })
+      downloadBlob(new Blob([await writeZip(exported.entries)], { type: "application/zip" }), `${exported.name}.zip`)
+      toast.success(`Saved ${exported.name}.zip`, {
+        description: `Open in STM32CubeIDE: File › Import › Existing Projects into Workspace › Select archive file.${exported.cubeMxVersion ? ` The .ioc needs STM32CubeMX ${exported.cubeMxVersion} or newer. Build and flash work without it.` : ""}`,
+        duration: 20_000,
+      })
+    } catch (e) {
+      toast.error("Cannot export project", { description: (e as Error).message })
+    } finally {
+      toast.dismiss(packing)
+    }
+  }
+
   const write = React.useCallback(
     (path: string, content: string) => {
       if (!id || !files) return
@@ -487,7 +556,18 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
       {board && id ? (
         <>
           <div className="flex min-h-0 shrink-0 flex-col border-r" style={{ width: EXPLORER_WIDTH }}>
-            <Explorer className="min-h-0 flex-1" files={project} active={active} onOpen={openFile} onCreate={create} onRename={rename} onRemove={remove} />
+            <Explorer
+              className="min-h-0 flex-1"
+              files={project}
+              active={active}
+              onOpen={openFile}
+              onCreate={create}
+              onRename={rename}
+              onRemove={remove}
+              onImport={() => void importFolder()}
+              onExport={() => void exportCubeIde()}
+              onImportDrop={(entries) => void importProject(entries)}
+            />
             {info && (programSources.length > 0 || !dboard?.project) && (
               <ProgramSources className="max-h-[45%]" sources={programSources} active={active} tabOf={tabOfRef} onOpen={(r) => openSource(r.image)} onAdd={(f) => void addSources(f)} />
             )}

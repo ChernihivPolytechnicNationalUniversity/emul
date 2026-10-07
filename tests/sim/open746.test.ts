@@ -33,8 +33,9 @@ describe("Open746I-C running lab 1", () => {
   const ledOn = (s: Snapshot, id: string) => s.parts[partKey(u.id, id)]?.on ?? false
   const ledStr = (s: Snapshot) => LEDS.map((l) => (ledOn(s, l) ? "●" : "○")).join("")
   const v = (s: Snapshot, pin: string) => s.pinVoltage[pinKey(u.id, pin)]
-  const press = (part: string, pressed: boolean) => loop.setParts({ [partKey(u.id, part)]: { pressed } })
   const BOOT = partKey(u.id, "BOOT")
+  const FLASH = { [BOOT]: { on: false } }
+  const press = (part: string, pressed: boolean) => loop.setParts({ ...FLASH, [partKey(u.id, part)]: { pressed } })
   const RESET = partKey(u.id, "RESET")
 
   describe("boot on the module's USB (SW1 at USB), the USART1 USB plugged for the serial port", () => {
@@ -157,12 +158,37 @@ describe("Open746I-C running lab 1", () => {
     })
 
     it("runs the firmware again after a reset at FLASH", () => {
-      loop.setParts({ [RESET]: { pressed: true } })
+      loop.setParts({ ...FLASH, [RESET]: { pressed: true } })
       run(0.05)
-      loop.setParts({})
+      loop.setParts(FLASH)
       const snap = run(0.1)
       expect.soft(v(snap, "BOOT0"), "BOOT0").toBeNear(0, 0.05)
       expect.soft(ledStr(snap), "LEDs").toBe("●○○○")
+    })
+  })
+
+  describe("as it comes, BOOT at SYSTEM for flashing", () => {
+    it("runs the image it was given, and lands in the loader on a RESET", () => {
+      const fresh = new SimLoop()
+      let at = 0
+      const step = (seconds: number) => {
+        const end = at + seconds * 1000
+        while (at < end) {
+          at = Math.min(end, at + 30)
+          fresh.advance(at)
+        }
+        return fresh.snapshot()!
+      }
+      fresh.setDoc(doc)
+      fresh.setParts(doc.parts)
+      fresh.setRunning(true)
+      expect.soft(ledStr(step(0.2)), "started by the loader's Go").toBe("●○○○")
+      fresh.setParts({ [RESET]: { pressed: true } })
+      step(0.05)
+      fresh.setParts({})
+      const snap = step(0.2)
+      expect.soft(v(snap, "BOOT0"), "BOOT0 high").toBeNear(2.64, 0.05)
+      expect.soft(ledStr(snap), "in the loader after the RESET").toBe("○○○○")
     })
   })
 
@@ -183,9 +209,9 @@ describe("Open746I-C running lab 1", () => {
     })
 
     it("runs the image again on a RESET at FLASH", () => {
-      loop.setParts({ [RESET]: { pressed: true } })
+      loop.setParts({ ...FLASH, [RESET]: { pressed: true } })
       run(0.05)
-      loop.setParts({})
+      loop.setParts(FLASH)
       expect(ledStr(run(0.1))).toBe("●○○○")
     })
   })

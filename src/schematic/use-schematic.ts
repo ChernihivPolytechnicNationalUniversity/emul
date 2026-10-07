@@ -281,8 +281,9 @@ export function useSchematic(grid: number) {
   }, [setDoc])
 
   /** Replace a board's firmware sources; typing is not an undo step (see `undo`). */
-  const setProject = React.useCallback((id: string, files: SourceFile[]) => {
-    setDoc((d) => ({ ...d, objects: d.objects.map((o) => (o.id === id ? { ...o, project: files } : o)) }), { silent: true })
+  const setProject = React.useCallback((id: string, files: SourceFile[], expected?: SourceFile[]) => {
+    const replace = (o: PlacedObject) => o.id === id && (expected === undefined || o.project === expected)
+    setDoc((d) => ({ ...d, objects: d.objects.map((o) => (replace(o) ? { ...o, project: files } : o)) }), { silent: true })
   }, [setDoc])
 
   /** A board's build options; not an undo step. */
