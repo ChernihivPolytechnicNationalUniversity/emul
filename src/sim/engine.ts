@@ -163,7 +163,7 @@ const MOS_REGIONS = ["off", "ohmic", "reverse", "saturation"] as const
 export type PartReader = (key: string) => PartState
 
 /** Whether a switch element conducts given its part's state. */
-function switchClosed(closed: "on" | "pressed" | "off", st: PartState): boolean {
+export function switchClosed(closed: "on" | "pressed" | "off", st: PartState): boolean {
   return closed === "on" ? !!st.on : closed === "off" ? !st.on : !!st.pressed
 }
 /** What an MCU pad (object, model node) drives right now. */
