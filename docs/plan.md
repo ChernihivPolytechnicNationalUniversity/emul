@@ -20,9 +20,7 @@ a firmware or circuit test, and its row in `docs/coverage.md` flipped; then it l
   - the accessory boards from the box as components: DP83848 Ethernet, USB3300 ULPI, WM8960 audio, Micro SD, OV2640
     camera, W25QXX flash, 10 DOF IMU, SN65HVD230 CAN, Analog Test Board — each with its firmware and a scenario;
   - the 2×40 pin ports P16–P21 as pins (an I/O that is only there cannot be wired today);
-  - JMP2 (USART1 ↔ CP2102) and JMP5 (A4/A5 ↔ PB9/PB8) as switches: a switch joins nets only in the analog solver, the
-    digital edge path does not cross it, so a serial or I²C line through an open-able jumper needs the netlist to merge
-    nets through closed switches first;
+  - JMP2 (USART1 ↔ CP2102) and JMP5 (A4/A5 ↔ PB9/PB8) as switches (a closed switch now carries the exact-time path);
   - USB OTG data lines (device/host, MIC2075 VBUS switch on PE2/PE3, VBUS LED); CP2102 CTS/RTS and flow control;
   - the 4.3" LCD with XPT2046 touch on P14; VREF+ jumper (external ADC reference); JTAG/SWD.
 - [ ] **MCU long tail** — CAN, USB OTG, Ethernet, SDIO/SDMMC, SAI, QSPI, CRC, RNG, as a lab needs one: register model
