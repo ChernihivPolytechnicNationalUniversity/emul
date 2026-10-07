@@ -233,6 +233,8 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
         const notch = Math.abs(e.deltaY) >= 50
         const factor = notch ? (e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP) : Math.exp(-e.deltaY * 0.01)
         zoomAt(factor, e.clientX - r.left, e.clientY - r.top)
+      } else if (e.shiftKey && !e.deltaX) {
+        panBy(-e.deltaY, 0)
       } else {
         panBy(-e.deltaX, -e.deltaY)
       }
@@ -274,6 +276,8 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
 
   const startPan = React.useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault()
+    if (e.button === 1 && document.activeElement instanceof HTMLElement && !containerRef.current?.contains(document.activeElement))
+      document.activeElement.blur()
     e.currentTarget.setPointerCapture(e.pointerId)
     last.current = { x: e.clientX, y: e.clientY }
     setPanning(true)
@@ -291,6 +295,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
 
   const endPan = React.useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!last.current) return false
+    if (e.button === 1) e.preventDefault()
     last.current = null
     setPanning(false)
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {

@@ -5,7 +5,7 @@ import type { ClockSource } from "@/mcu/periph/rcc"
 import { crystalStartup } from "@/schematic/components/clock"
 import { parseValue } from "./units"
 import { DT } from "./speeds"
-import { Engine, type Failure, type PartReader, type PinReader, type ProbeReading, type Reading, type TraceChunk } from "./engine"
+import { Engine, switchClosed, type Failure, type PartReader, type PinReader, type ProbeReading, type Reading, type TraceChunk } from "./engine"
 import { wireCurrents } from "./flow"
 import { buildNetlist, GROUND, type GpioState } from "./netlist"
 import { UartDecoder, uartFrameEdges, uartFrameSeconds, type Edge } from "./serial"
@@ -78,7 +78,7 @@ class DigitalNet {
    * high wins over a part pulling low — as a bit-banged master's STOP does against a slave still
    * holding a data bit, which the touch demo relies on.
    */
-  readonly drivers = new Map<string, { level: boolean | null; strong: boolean }>()
+  readonly drivers = new Map<string, { level: boolean | null; strong: boolean; node: number }>()
   level = true
   /** Level when nobody drives: a pull-up (true), a pull-down (false), or nothing — the line keeps its charge (null). */
   released: boolean | null = null
@@ -264,6 +264,7 @@ function decodeBase64(text: string): ArrayBuffer {
 const STEPS_PER_TICK = 1500
 /** What a part with no state set reads as. */
 const NO_STATE: PartState = {}
+const LINK_OHMS = 1
 /** Most steps a core runs ahead of the solver in one go (`quietSteps`). */
 const QUIET_STEPS = 500
 /** Runs a remote core stays in step with the loop after traffic with a digital part (~2 ms of steps). */
@@ -364,6 +365,9 @@ export class SimLoop {
   spawnCore: (() => CoreTransport) | null = (globalThis as { __emulSpawnCore?: () => CoreTransport }).__emulSpawnCore ?? null
   /** Nets on the exact-time path, by net index. */
   private digitalNets = new Map<number, DigitalNet>()
+  private joined = new Map<number, number>()
+  private links: { a: number; b: number; key: string; closed: "on" | "pressed" | "off" }[] = []
+  private linkState = ""
   /**
    * Wire currents are linear in the element terminal currents, so the distribution over the
    * wire graph is solved once per rebuild as coefficients, and every step just sums. Means
@@ -568,7 +572,7 @@ export class SimLoop {
   }
 
   /** Bind each MCU pad to the matrix node of its GPIO element, if that node is solved. */
-  private mapInputs() {
+  private mapInputs(relink = false) {
     const engine = this.engine
     for (const inst of this.mcus.values()) {
       inst.inputs = []
@@ -596,13 +600,20 @@ export class SimLoop {
         }
       }
     }
+    const was = this.joined
+    const before = (node: number) => this.digitalNets.get(was.get(node) ?? node)
+    if (engine) this.joinNets(engine)
+    const root = (node: number) => this.joined.get(node) ?? node
+    const members = new Map<number, number[]>()
+    for (const [node, r] of this.joined) members.set(r, [...(members.get(r) ?? []), node])
     // Nets on the digital path: shared by two cores, at a terminal, or at a digital part.
     const nets = new Map<number, DigitalNet>()
     const netFor = (node: number) => {
       let n = nets.get(node)
       if (!n) {
         n = new DigitalNet(node)
-        const prev = this.digitalNets.get(node)
+        let prev = before(node)
+        for (const m of members.get(node) ?? []) prev ??= before(m)
         if (prev) {
           n.level = prev.level
           n.released = prev.released
@@ -613,15 +624,15 @@ export class SimLoop {
     }
     const padsByNet = new Map<number, { inst: McuInstance; pad: PadRef }[]>()
     for (const inst of this.mcus.values())
-      for (const { pad, node } of inst.inputs) padsByNet.set(node, [...(padsByNet.get(node) ?? []), { inst, pad }])
+      for (const { pad, node } of inst.inputs) padsByNet.set(root(node), [...(padsByNet.get(root(node)) ?? []), { inst, pad }])
     const shared = new Set<number>()
     for (const [node, pads] of padsByNet) if (new Set(pads.map((p) => p.inst)).size > 1) shared.add(node)
     for (const node of shared) netFor(node)
     for (const t of this.terminals.values()) {
       t.rxNet = engine?.net.pinNet.get(pinKey(t.object, "RX"))
       t.txNet = engine?.net.pinNet.get(pinKey(t.object, "TX"))
-      if (t.txNet !== undefined) netFor(t.txNet).terminal = true
-      if (t.rxNet !== undefined) netFor(t.rxNet).rx.push(t)
+      if (t.txNet !== undefined) netFor(root(t.txNet)).terminal = true
+      if (t.rxNet !== undefined) netFor(root(t.rxNet)).rx.push(t)
     }
     // The analyser's probes: their nets travel exactly too. A net with nothing digital on it
     // (an analog source, a gate's output) is thresholded from the solution each step.
@@ -630,7 +641,7 @@ export class SimLoop {
       this.probes.forEach((p, i) => {
         const node = engine.net.pinNet.get(p.a)
         if (node === undefined || node === GROUND) return
-        netFor(node).logic.push(i)
+        netFor(root(node)).logic.push(i)
       })
     // Panels: which MCU pad sits on each signal pin's net.
     for (const panel of this.panels.values()) {
@@ -638,7 +649,7 @@ export class SimLoop {
       for (const [pin, signal] of Object.entries(panel.spec.signals)) {
         const node = engine?.net.pinNet.get(pinKey(panel.object, pin))
         if (node === undefined) continue
-        const pad = padsByNet.get(node)?.[0]
+        const pad = padsByNet.get(root(node))?.[0]
         if (pad) panel.wired.set(signal, { host: pad.inst.mcu, pad: pad.pad })
       }
     }
@@ -647,20 +658,24 @@ export class SimLoop {
       for (const pin of part.pins) {
         const node = engine?.net.pinNet.get(pinKey(part.object, pin))
         if (node === undefined) continue
-        netFor(node).parts.push({ part, pin })
-        partNets.add(node)
+        netFor(root(node)).parts.push({ part, pin })
+        partNets.add(root(node))
       }
     for (const [node, n] of nets) {
       n.pads = padsByNet.get(node) ?? []
       if (engine)
         for (const el of engine.net.elements) {
-          if (el.kind !== "R") continue
-          if (el.a === node) n.pulls.push(el.b)
-          else if (el.b === node) n.pulls.push(el.a)
+          if (el.kind !== "R" || root(el.a) === root(el.b)) continue
+          if (root(el.a) === node) n.pulls.push(el.b)
+          else if (root(el.b) === node) n.pulls.push(el.a)
         }
       // A net already on the digital path has a level, a terminal's TX idles high; any other
       // net gets its level from the first thing seen on it.
       if (this.digitalNets.has(node) || n.terminal) for (const probe of n.logic) this.logicLevel[probe] = probe * 2 + (n.terminal || n.level ? 1 : 0)
+    }
+    if (relink && engine) {
+      for (const old of this.digitalNets.values())
+        for (const [id, d] of old.drivers) nets.get(root(d.node))?.drivers.set(id, d)
     }
     this.digitalNets = nets
     if (this.freshParts.size && engine) {
@@ -685,12 +700,12 @@ export class SimLoop {
       inst.partPads.clear()
       const watch: number[] = []
       for (const i of inst.inputs) {
-        i.digital = nets.has(i.node)
+        i.digital = nets.has(root(i.node))
         // Plain GPIO edges on those nets travel exactly too (a bit-banged chip select, a
         // bit-banged UART into the terminal), so they keep their order against the serial ones.
         if (i.digital) watch.push(i.pad.port * 16 + i.pad.pin)
-        if (shared.has(i.node)) inst.coupled = true
-        if (partNets.has(i.node)) inst.partPads.add(i.pad.port * 16 + i.pad.pin)
+        if (shared.has(root(i.node))) inst.coupled = true
+        if (partNets.has(root(i.node))) inst.partPads.add(i.pad.port * 16 + i.pad.pin)
       }
       // Cores in lockstep with a peer run in this thread: a worker cannot yield per edge to another worker.
       if (inst.coupled) inst.relocate()
@@ -702,8 +717,16 @@ export class SimLoop {
     // A relocated core is a new host: the panels wired to it must point at the new one.
     for (const panel of this.panels.values())
       for (const [signal, w] of panel.wired) {
-        const inst = padsByNet.get(engine!.net.pinNet.get(pinKey(panel.object, Object.entries(panel.spec.signals).find(([, s]) => s === signal)![0]))!)?.[0]
+        const inst = padsByNet.get(root(engine!.net.pinNet.get(pinKey(panel.object, Object.entries(panel.spec.signals).find(([, s]) => s === signal)![0]))!))?.[0]
         if (inst && inst.inst.mcu !== w.host) panel.wired.set(signal, { host: inst.inst.mcu, pad: w.pad })
+      }
+    if (relink && engine)
+      for (const n of nets.values()) {
+        if (!n.drivers.size) continue
+        const level = n.resolve()
+        if (level === n.level) continue
+        n.level = level
+        this.deliverLevel(n, level, engine.time)
       }
   }
 
@@ -723,6 +746,40 @@ export class SimLoop {
   private dither() {
     this.ditherState = (Math.imul(this.ditherState, 1664525) + 1013904223) >>> 0
     return this.ditherState / 4294967296
+  }
+
+  private digitalNet(node: number | undefined) {
+    return node === undefined ? undefined : this.digitalNets.get(this.joined.get(node) ?? node)
+  }
+
+  private readPart = (key: string) => this.parts[key] ?? this.partDefaults[key] ?? NO_STATE
+
+  private linkKey() {
+    let key = ""
+    for (const l of this.links) key += switchClosed(l.closed, this.readPart(l.key)) ? "1" : "0"
+    return key
+  }
+
+  private joinNets(engine: Engine) {
+    const up = new Map<number, number>()
+    const find = (n: number): number => {
+      while (up.has(n)) n = up.get(n)!
+      return n
+    }
+    const join = (a: number, b: number) => {
+      if (a === GROUND || b === GROUND) return
+      const x = find(a)
+      const y = find(b)
+      if (x !== y) up.set(Math.max(x, y), Math.min(x, y))
+    }
+    this.links = []
+    for (const el of engine.net.elements) {
+      if (el.kind === "SW") this.links.push({ a: el.a, b: el.b, key: partKey(el.object, el.part), closed: el.closed })
+      else if (el.kind === "R" && !el.live && el.value <= LINK_OHMS) join(el.a, el.b)
+    }
+    for (const l of this.links) if (switchClosed(l.closed, this.readPart(l.key))) join(l.a, l.b)
+    this.linkState = this.linkKey()
+    this.joined = new Map([...up.keys()].map((n) => [n, find(n)]))
   }
 
   /**
@@ -757,8 +814,8 @@ export class SimLoop {
   }
 
   /** One driver on a net changed: re-resolve, and tell everyone if the level moved. */
-  private setDriver(net: DigitalNet, driver: string, level: boolean | null, time: number, strong: boolean) {
-    net.drivers.set(driver, { level, strong })
+  private setDriver(net: DigitalNet, driver: string, level: boolean | null, time: number, strong: boolean, node: number) {
+    net.drivers.set(driver, { level, strong, node })
     const resolved = net.resolve()
     if (resolved === net.level) return
     net.level = resolved
@@ -788,8 +845,8 @@ export class SimLoop {
       const edges = part.out.splice(0, part.out.length)
       for (const e of edges) {
         const node = engine.net.pinNet.get(pinKey(part.object, e.pin))
-        const net = node === undefined ? undefined : this.digitalNets.get(node)
-        if (net) this.setDriver(net, `${part.object}/${e.pin}`, e.level, e.time, false)
+        const net = this.digitalNet(node)
+        if (net) this.setDriver(net, `${part.object}/${e.pin}`, e.level, e.time, false, node!)
       }
     }
   }
@@ -803,8 +860,8 @@ export class SimLoop {
       // Traffic with a part: a remote core answers in step until it is over.
       if (inst.partPads.has(key)) inst.keepInStep()
       const node = inst.padNode.get(key)
-      const net = node === undefined ? undefined : this.digitalNets.get(node)
-      if (net) this.setDriver(net, `${inst.object}/${key}`, e.level, e.time + inst.offset, true)
+      const net = this.digitalNet(node)
+      if (net) this.setDriver(net, `${inst.object}/${key}`, e.level, e.time + inst.offset, true, node!)
     }
     return true
   }
@@ -854,7 +911,7 @@ export class SimLoop {
       const edges = uartFrameEdges(byte, at, t.baud)
       t.txEdges.push(...edges)
       // The terminal is the only driver of its TX net: the edges are the levels, ahead of time.
-      const net = t.txNet === undefined ? undefined : this.digitalNets.get(t.txNet)
+      const net = this.digitalNet(t.txNet)
       if (net) for (const e of edges) for (const p of net.pads) p.inst.drive(p.pad, e.level, e.time - p.inst.offset)
       at += uartFrameSeconds(t.baud)
     }
@@ -868,7 +925,7 @@ export class SimLoop {
         this.padsDirty = true
         const e = t.txEdges.shift()!
         t.txLevel = e.level
-        const net = t.txNet === undefined ? undefined : this.digitalNets.get(t.txNet)
+        const net = this.digitalNet(t.txNet)
         if (net) {
           for (const probe of net.logic) this.logEdge(probe, e.level, e.time)
           if (net.parts.length) {
@@ -1326,11 +1383,12 @@ export class SimLoop {
     // What this tick actually delivered against the wall clock, blended in by how long it took.
     const achieved = (steps * DT) / wall
     this.rate = this.rate === null ? achieved : this.rate + (achieved - this.rate) * (1 - Math.exp(-wall / RATE_TAU))
-    const read = (key: string) => this.parts[key] ?? this.partDefaults[key] ?? NO_STATE
+    const read = this.readPart
     const mcus = [...this.mcus.values()].filter((m) => m.mcu.loaded)
     for (let i = 0; i < steps; i++) {
       if (this.heldReleases.size) this.releaseHeld(engine.time)
       if (this.bouncing.size) this.applyBounce(engine.time)
+      if (this.links.length && this.linkKey() !== this.linkState) this.mapInputs(true)
       // The cores run ahead of the solver by one step, then the step sees their pads. A core
       // whose VDD is below the power-on threshold sits in reset until the rail comes back.
       const active: McuInstance[] = []

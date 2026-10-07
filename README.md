@@ -31,4 +31,6 @@ pnpm test                    # bench physics, batteries, wires, reflash
 
 **Docs:** [what is modelled, and what is not](docs/coverage.md) · [architecture](docs/architecture.md) · [tests](docs/tests.md) · [roadmap](docs/plan.md)
 
+**Thanks for the reports:** [@pygnty](https://github.com/pygnty) ([#32](https://github.com/ChernihivPolytechnicNationalUniversity/emul/issues/32), [#33](https://github.com/ChernihivPolytechnicNationalUniversity/emul/issues/33))
+
 Apache-2.0 · Copyright 2026 Bohdan Nahornyi, Denys Lysenok, Andrii Savenko · [third-party notices](THIRD_PARTY_NOTICES.md)
