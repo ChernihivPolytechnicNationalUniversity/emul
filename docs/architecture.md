@@ -7,7 +7,7 @@
 - `src/schematic/` — component definitions (`components/*`), examples, geometry, `mcu-model.ts`; wiring in `nets.ts` (the net map), `wiring.ts` (connect, tap), `wire-colors.ts` (palette, shortcuts, the automatic rule)
 - `src/debug/` — the debugger's reading of an image: `dwarf/*` (DWARF 2–5: units, line programs, range and location lists, call frame information, expressions, macros), `lines.ts` (the line table, shared by the core and the editor), `info.ts`, `unwind.ts`, `values.ts` and `eval.ts` (values and C expressions over a stop's memory), `disasm.ts`, `sources.ts` (where a file the image names comes from); `session.ts` is the UI's controller for the whole bench
 - `src/components/` — the React UI; `code/` is the editor panel (Monaco, explorer, tabs, build output), `debug/` its debugger toolbar and panes
-- `src/project/` — a board's firmware project: file operations that mirror the API's rules, the template, the build-service client
+- `src/project/` — a board's firmware project: file operations that mirror the API's rules, the template, the build-service client, and the STM32 project import and export (`cubemx.ts` reads the `.ioc` and decides what to keep; `entries.ts` turns a picked folder, a drop or a `.zip` into files, `.zip`s through `src/lib/zip.ts`; `cubeide.ts` makes an STM32CubeIDE project from a board's code, its `.cproject` and `.project` from the templates in `cubeide/`, the drivers and the build service's files from the site's `/st/` through `st-sources`' index)
 - `firmware/` — test firmware and HAL apps (`hal/Src/main.c` blink, `square.c`, `pwm.c`, `uart.c`, `spi.c`, `spi-slave.c`, `i2c.c`, `dma.c`, `adc.c`, `wdg.c`), the lab's CubeIDE project (`lab1/`), the Open746I-C demos (`lcd/`), and their built images in `examples/` for the test scripts; the site bundles the sources as the examples' projects (`src/schematic/projects.ts`)
 - `scripts/` — the test drivers above
 - `backend/` — the services below: `api/`, `worker/` (firmware builds, and HDL synthesis in a second image), `shared/`
@@ -50,7 +50,7 @@ Both read `REDIS_URL`; the API also `S3_BUCKET`, `S3_ENDPOINT` (MinIO; unset for
 Locally: `pnpm api`, `pnpm worker`; the Vite dev server proxies `/api` to the API. The editor's completions come from
 `public/symbols/<chip>.json` (`scripts/symbols.ts` over the staged ST sources: `sh backend/worker/toolchain/stage-st.sh /tmp/st && pnpm symbols /tmp/st public/symbols`);
 the site image does this at build time, a dev checkout without it has the project's own symbols only. The debugger's ST
-sources (`public/st/`, the files the images name as `/opt/st/…`, and the build service's startup files) and peripheral register maps
+sources (`public/st/`, the files the images name as `/opt/st/…`, the build service's own files with its linker scripts and `target.json`, and an `index.json` listing them, which the STM32CubeIDE export packs from) and peripheral register maps
 (`public/peripherals/<chip>.json`, from the CMSIS device headers) come the same way: `pnpm st-sources /tmp/st public/st && pnpm peripherals /tmp/st public/peripherals`.
 
 ## The build
@@ -62,7 +62,8 @@ the project's `.c`/`.cpp`/`.s` files, every folder holding a header on the inclu
 `firmware.map`. `-g3` at every level keeps the macros for the debugger's expressions. What a CubeMX project has and a
 bare one does not — the "batteries" — comes from `worker/targets/<chip>/`: the linker script, `startup_*.s`, `system_*.c`, `*_it.c`,
 `*_hal_msp.c`, `*_hal_conf.h` (every module on) and, for all chips, `targets/common/syscalls.c` (weak `_write`, `_sbrk`, …). A project
-file with the same name replaces the battery, so a CubeIDE export drops in as is (`firmware/lab1` is one). The HAL is compiled once
+file with the same name replaces the battery, so a CubeIDE export drops in as is (`firmware/lab1` is one); a project's own `startup_*.s` replaces the
+battery's whatever it is called (CubeIDE names it after the part, `Core/Startup/startup_stm32f746igtx.s`), and of several linker scripts the `_FLASH` one links. The HAL is compiled once
 per chip into `libhal.a` when the image is built (`worker/toolchain/`: ST's repos at pinned tags; `-O2` whatever the project asks), so a build takes about a second;
 a project with its own `stm32fNxx_hal_conf.h` gets the HAL compiled from source against it instead (~10 s). 120 s and 4 MB of log
 are the limits. `targets/<chip>/target.json` names the chip, CPU flags, defines and linker script; adding a chip is adding a folder

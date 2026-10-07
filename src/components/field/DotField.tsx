@@ -146,6 +146,7 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
   onMovePreview?: (move: { ids: string[]; dx: number; dy: number } | null) => void
   onWirePreview?: (points: Point[] | null) => void
   ghosts?: readonly Ghost[]
+  projectName?: string
 }
 
 const EMPTY_IDS: ReadonlySet<string> = new Set()
@@ -170,7 +171,7 @@ function pinAt(clientX: number, clientY: number): PinRef | null {
   return target?.kind === "pin" ? target.ref : null
 }
 
-export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, children, ...props }: DotFieldProps) {
+export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, projectName, children, ...props }: DotFieldProps) {
   const { containerRef, contentRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, toWorld, isPanStart, startPan, movePan, endPan } = useViewport(grid)
   const marquee = useSelection(toWorld, worldPerPixel, grid)
   const { boxRef: marqueeRef } = marquee
@@ -1385,6 +1386,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onDebug={sch.setDebug}
             debug={debug}
             onClose={() => setCodeOpen(false)}
+            projectName={projectName}
           />
         </React.Suspense>
       )}

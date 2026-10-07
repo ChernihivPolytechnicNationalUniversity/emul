@@ -1,4 +1,5 @@
 import { SOURCE_LIMITS, sourcePath, type SourceFile } from "emul-shared/source"
+import { TEMPLATE_MAIN } from "./template"
 
 /**
  * Edits on a board's firmware sources, each returning a new list (the object on the schematic
@@ -68,4 +69,10 @@ export function removeFile(files: SourceFile[], path: string): SourceFile[] {
 export function writeFile(files: SourceFile[], path: string, content: string): SourceFile[] | null {
   if (content.length > SOURCE_LIMITS.fileBytes) return null
   return files.map((f) => (f.path === path ? { ...f, content } : f))
+}
+
+const MAIN = /(^|\/)main\.(c|cpp|cc)$/
+
+export function mainFile(files: SourceFile[]): string | null {
+  return (files.find((f) => f.path === TEMPLATE_MAIN) ?? files.find((f) => MAIN.test(f.path)) ?? files[0])?.path ?? null
 }

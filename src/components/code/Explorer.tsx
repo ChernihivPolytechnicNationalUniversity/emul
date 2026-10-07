@@ -1,7 +1,9 @@
 import * as React from "react"
 import { toast } from "sonner"
-import { ChevronRightIcon, CopyMinusIcon, FileCodeIcon, FileIcon, FilePlusIcon, FolderIcon, FolderOpenIcon, FolderPlusIcon } from "lucide-react"
+import { ChevronRightIcon, CopyMinusIcon, FileCodeIcon, FileIcon, FilePlusIcon, FolderIcon, FolderInputIcon, FolderOpenIcon, FolderOutputIcon, FolderPlusIcon } from "lucide-react"
 import type { SourceFile } from "emul-shared/source"
+import type { ProjectEntry } from "@/project/cubemx"
+import { dropEntries, isProjectDrop } from "@/project/entries"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
@@ -14,6 +16,9 @@ type ExplorerProps = React.ComponentProps<"div"> & {
   onCreate: (rawPath: string) => void
   onRename: (path: string, rawTo: string, folder: boolean) => void
   onRemove: (path: string) => void
+  onImport: () => void
+  onExport: () => void
+  onImportDrop: (entries: Promise<ProjectEntry[]>) => void
 }
 
 /** A row of the tree; folders are implied by the paths, so one with children is a folder. */
@@ -78,7 +83,7 @@ type Dragged = { path: string; folder: boolean }
  * right-click for the rest. Folders exist only as path prefixes: an empty one made here lives
  * until a file lands in it or the board changes.
  */
-export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, className, ...props }: ExplorerProps) {
+export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, onImport, onExport, onImportDrop, className, ...props }: ExplorerProps) {
   const [emptyFolders, setEmptyFolders] = React.useState<Set<string>>(() => new Set())
   const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set())
   const [editing, setEditing] = React.useState<Editing | null>(null)
@@ -191,6 +196,14 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
     }
   }
 
+  const dropProject = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes(DRAG_TYPE) || !isProjectDrop(e.dataTransfer)) return
+    e.preventDefault()
+    e.stopPropagation()
+    setDropDir(null)
+    onImportDrop(dropEntries(e.dataTransfer))
+  }
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (editing) return
     const i = rows.findIndex((n) => n.path === cursor)
@@ -272,6 +285,7 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
             setDropDir(dropTarget)
           }}
           onDrop={(e) => {
+            dropProject(e)
             e.preventDefault()
             e.stopPropagation()
             setDropDir(null)
@@ -303,13 +317,19 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
 
   return (
     <div data-slot="explorer" className={cn("flex min-h-0 flex-col bg-sidebar text-sidebar-foreground", className)} {...props}>
-      <div className="flex h-8 shrink-0 items-center gap-0.5 pr-1 pl-3">
+      <div className="flex h-8 shrink-0 items-center pr-1 pl-3">
         <span className="flex-1 truncate text-[0.6875rem] font-medium tracking-wider text-muted-foreground uppercase">Explorer</span>
         <Button variant="ghost" size="icon-xs" aria-label="New file" title="New file" onClick={() => startNew("new-file", cursorDir)}>
           <FilePlusIcon />
         </Button>
         <Button variant="ghost" size="icon-xs" aria-label="New folder" title="New folder" onClick={() => startNew("new-folder", cursorDir)}>
           <FolderPlusIcon />
+        </Button>
+        <Button variant="ghost" size="icon-xs" aria-label="Import STM32 project" title="Import an STM32 project folder: STM32CubeMX, STM32CubeIDE, Makefile or CMake (or drop it here)" onClick={onImport}>
+          <FolderInputIcon />
+        </Button>
+        <Button variant="ghost" size="icon-xs" aria-label="Export to STM32CubeIDE" title="Download this code as an STM32CubeIDE project (.zip), to build and flash the real board" onClick={onExport}>
+          <FolderOutputIcon />
         </Button>
         <Button variant="ghost" size="icon-xs" aria-label="Collapse all" title="Collapse all" onClick={collapseAll}>
           <CopyMinusIcon />
@@ -331,12 +351,13 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
           }}
           onKeyDown={onKeyDown}
           onDragOver={(e) => {
-            if (!e.dataTransfer.types.includes(DRAG_TYPE)) return
+            if (!e.dataTransfer.types.includes(DRAG_TYPE) && !e.dataTransfer.types.includes("Files")) return
             e.preventDefault()
             setDropDir("")
           }}
           onDragLeave={(e) => e.target === e.currentTarget && setDropDir(null)}
           onDrop={(e) => {
+            dropProject(e)
             e.preventDefault()
             setDropDir(null)
             const d = dragged(e)
@@ -385,6 +406,14 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
             </>
           )}
           <ContextMenuSeparator />
+          <ContextMenuItem onClick={onImport}>
+            <FolderInputIcon />
+            Import STM32 project…
+          </ContextMenuItem>
+          <ContextMenuItem onClick={onExport}>
+            <FolderOutputIcon />
+            Export to STM32CubeIDE (.zip)
+          </ContextMenuItem>
           <ContextMenuItem onClick={collapseAll}>
             <CopyMinusIcon />
             Collapse all

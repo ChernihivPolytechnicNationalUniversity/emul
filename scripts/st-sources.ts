@@ -10,7 +10,7 @@
  *   pnpm st-sources <st root> <out dir>      e.g. pnpm st-sources /tmp/st public/st
  */
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
-import { dirname, join, relative } from "node:path"
+import { dirname, join, relative, sep } from "node:path"
 
 const st = process.argv[2]
 const out = process.argv[3]
@@ -21,13 +21,13 @@ if (!st || !out) {
 
 const targetsDir = join(import.meta.dirname, "..", "backend", "worker", "targets")
 const SOURCE = /\.(c|h|s|S|inc)$/
-let files = 0
+const files: string[] = []
 let bytes = 0
 
 function copy(from: string, to: string) {
   mkdirSync(dirname(to), { recursive: true })
   copyFileSync(from, to)
-  files++
+  files.push(relative(out!, to).split(sep).join("/"))
   bytes += statSync(from).size
 }
 
@@ -64,9 +64,8 @@ for (const family of families) {
   const keep = (n: string) => /^stm32f\dxx\.h$/.test(n) || /^system_stm32f\dxx\.h$/.test(n) || devices.has(`${family}:${n}`)
   tree(include, join(out, family, "cmsis", "Include"), keep)
 }
-// The build service's own files: linker scripts are not sources, the rest is.
-tree(targetsDir, join(out, "targets"))
+tree(targetsDir, join(out, "targets"), (n) => SOURCE.test(n) || n.endsWith(".ld") || n === "target.json")
 
-const index = { files, bytes, families: [...families], devices: [...devices].map((d) => d.split(":")[1]) }
+const index = { files: files.sort(), bytes, families: [...families], devices: [...devices].map((d) => d.split(":")[1]) }
 writeFileSync(join(out, "index.json"), JSON.stringify(index, null, 2))
-console.log(`${files} files, ${(bytes / 1e6).toFixed(1)} MB into ${relative(process.cwd(), out) || out}`)
+console.log(`${files.length} files, ${(bytes / 1e6).toFixed(1)} MB into ${relative(process.cwd(), out) || out}`)
