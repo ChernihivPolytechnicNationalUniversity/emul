@@ -45,6 +45,8 @@ const CXX = /\.(cpp|cc)$/i
 const ASM = /\.s$/i
 const HEADER = /\.(h|hpp)$/i
 const LINKER = /\.ld$/i
+const FLASH_LINKER = /_FLASH\.ld$/i
+const STARTUP = /^startup_.*\.s$/i
 const HAL_CONF = /^stm32f\dxx_hal_conf\.h$/
 
 export async function build(target: Target, files: SourceFile[], options: BuildOptions = {}): Promise<BuildOutput> {
@@ -69,14 +71,18 @@ export async function build(target: Target, files: SourceFile[], options: BuildO
     const own = new Set(files.map((f) => path.basename(f.path)))
     const sources = files.filter((f) => C.test(f.path) || CXX.test(f.path) || ASM.test(f.path)).map((f) => f.path)
     const includes = [...new Set(files.filter((f) => HEADER.test(f.path)).map((f) => path.dirname(f.path)))]
-    const linker = files.find((f) => LINKER.test(f.path))?.path ?? path.join(targetDir, spec.linker)
+    const linkers = files.filter((f) => LINKER.test(f.path))
+    const linker = (linkers.find((f) => FLASH_LINKER.test(f.path)) ?? linkers[0])?.path ?? path.join(targetDir, spec.linker)
+    const ownStartup = files.some((f) => STARTUP.test(path.basename(f.path)))
     const ownConf = files.some((f) => HAL_CONF.test(path.basename(f.path)))
 
     // The batteries the project did not bring.
     const batteries: string[] = []
     for (const dir of [targetDir, path.join(TARGETS_DIR, "common")]) {
       for (const name of await readdir(dir)) {
-        if ((C.test(name) || ASM.test(name)) && !own.has(name)) batteries.push(path.join(dir, name))
+        if (!(C.test(name) || ASM.test(name)) || own.has(name)) continue
+        if (ownStartup && STARTUP.test(name)) continue
+        batteries.push(path.join(dir, name))
       }
     }
     // The HAL: prebuilt against our hal_conf.h, or from source against the project's.
@@ -103,9 +109,10 @@ export async function build(target: Target, files: SourceFile[], options: BuildO
       ...[...includes, targetDir, path.join(family, "hal", "Inc"), path.join(family, "cmsis", "Include"), path.join(ST_ROOT, "core", "Include")].map((i) => `-I${i}`),
     ]
     const driver = `${GCC}gcc`
+    const batteryNames = batteries.map((b) => path.basename(b)).join(" ")
     const lines = [
       `# ${spec.name}, ${options.opt ?? DEFAULT_OPT}`,
-      `# ${path.basename(driver)} ${sources.join(" ")} + ${batteries.map((b) => path.basename(b)).join(" ")}${ownConf ? " + HAL from source" : " -lhal"}`,
+      `# ${path.basename(driver)} ${sources.join(" ")}${batteryNames ? ` + ${batteryNames}` : ""}${ownConf ? " + HAL from source" : " -lhal"}`,
       "",
     ]
 
