@@ -316,8 +316,17 @@ export class Tim extends RegBlock {
     if (this.pscCnt < div) return
     const ticks = Math.floor(this.pscCnt / div)
     this.pscCnt -= ticks * div
-    this.advance(ticks)
+    // The core may hand the cycles over late (it checks for due events between instructions):
+    // the counter's last tick was this long before the present.
+    this.advance(ticks, (this.pscCnt + this.acc / hclk) / this.timHz)
+    this.eventLag = 0
   }
+
+  /**
+   * While events are taken: how long before the present (the core's cycle count) the one at
+   * hand happened, s. Outputs it changes are stamped with their own time, not the catch-up's.
+   */
+  eventLag = 0
 
   /** Core clocks until the next counter event, for sleep skipping. */
   cyclesUntilEvent(): number {
@@ -344,10 +353,12 @@ export class Tim extends RegBlock {
     return d
   }
 
-  /** Move the counter `ticks` ticks, taking every event on the way. */
-  private advance(ticks: number) {
+  /** Move the counter `ticks` ticks, taking every event on the way; the last tick was `tail` seconds ago. */
+  private advance(ticks: number, tail: number) {
+    const tickTime = (this.pscShadow + 1) / this.timHz
     while (ticks > 0 && this.running) {
       const d = this.ticksToEvent()
+      this.eventLag = d <= ticks ? tail + (ticks - d) * tickTime : 0
       const cr1 = this.regs[0]
       const down = (cr1 & CR1_DIR) !== 0
       if (ticks < d) {
