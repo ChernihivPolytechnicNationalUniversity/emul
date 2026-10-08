@@ -355,6 +355,8 @@ export class SimLoop {
   private mcus = new Map<string, McuInstance>()
   private terminals = new Map<string, TerminalInstance>()
   private digitalParts = new Map<string, DigitalPart>()
+  /** Solved nodes of the pins each sensing part reads, refreshed with the digital nets. */
+  private senseNodes = new Map<DigitalPart, Map<string, number>>()
   private freshParts = new Set<DigitalPart>()
   /** RGB panels, by object id: their wiring to cores, and an instance of our own for one no core drives. */
   private panels = new Map<string, PanelWiring & { own: PanelInstance }>()
@@ -456,7 +458,7 @@ export class SimLoop {
     for (const obj of this.doc.objects) {
       const props = obj.props ?? {}
       let part = this.digitalParts.get(obj.id)
-      if (!part || part.outdated?.()) {
+      if (!part || part.outdated?.(props)) {
         const made = createDigitalPart(obj.def, obj.id, props)
         if (!made) continue
         part = made
@@ -653,14 +655,26 @@ export class SimLoop {
         if (pad) panel.wired.set(signal, { host: pad.inst.mcu, pad: pad.pad })
       }
     }
+    // Nets a part may answer on: a core feeding only a part's listen-only pins (a pixel's DIN)
+    // need not stop at every edge it makes, the part takes them in order after the run.
     const partNets = new Set<number>()
-    for (const part of this.digitalParts.values())
+    this.senseNodes.clear()
+    for (const part of this.digitalParts.values()) {
       for (const pin of part.pins) {
         const node = engine?.net.pinNet.get(pinKey(part.object, pin))
         if (node === undefined) continue
         netFor(root(node)).parts.push({ part, pin })
-        partNets.add(root(node))
+        if (!part.outputs || part.outputs.includes(pin)) partNets.add(root(node))
       }
+      if (part.sense && part.senses && engine) {
+        const nodes = new Map<string, number>()
+        for (const pin of part.senses) {
+          const node = engine.net.pinNet.get(pinKey(part.object, pin))
+          if (node !== undefined) nodes.set(pin, node)
+        }
+        this.senseNodes.set(part, nodes)
+      }
+    }
     for (const [node, n] of nets) {
       n.pads = padsByNet.get(node) ?? []
       if (engine)
@@ -988,6 +1002,7 @@ export class SimLoop {
     if (term) return node === "TX" ? () => (term.txLevel ? "high" : "low") : node === "RX" ? () => "pullup" : () => null
     const part = this.digitalParts.get(object)
     if (part) {
+      if (part.analog?.(node) !== undefined) return () => part.analog!(node) ?? null
       return () => {
         const d = part.drive(node)
         return d === null ? null : d ? "high" : "low"
@@ -1186,6 +1201,8 @@ export class SimLoop {
     this.rate = null
     // Every run starts with intact parts.
     if (running && Object.keys(this.damage).length) {
+      // A burnt chip comes back as a new one.
+      for (const id of Object.keys(this.damage)) if (this.damage[id].fatal) this.digitalParts.get(id)?.reset()
       this.damage = {}
       this.stale = true
       for (const inst of this.mcus.values())
@@ -1497,12 +1514,13 @@ export class SimLoop {
       this.serviceTerminals(engine.time + DT)
       for (const part of this.digitalParts.values())
         if (part.tick) {
-          part.tick(engine.time + DT)
+          if (part.tick(engine.time + DT)) this.padsDirty = true
           if (part.out.length) this.drainPart(part)
         }
       engine.step(DT, read, this.pinState, refresh || this.padsDirty)
       this.accumulateFlow(engine, DT)
       if (mcus.length) this.sampleInputs(engine)
+      this.senseParts(engine)
       if (engine.failures.length) {
         // Everything that broke in this step goes at once; the circuit is then re-solved.
         for (const f of engine.failures) {
@@ -1511,11 +1529,15 @@ export class SimLoop {
             // A dead part cannot break further; one still working can lose another element.
             if (had.fatal || had.element === f.damage.element || had.also?.some((d) => d.element === f.damage.element)) continue
             had.also = [...(had.also ?? []), { element: f.damage.element, fail: f.damage.fail, reason: f.damage.reason }]
-            if (f.damage.fatal) had.fatal = true
+            if (f.damage.fatal) {
+              had.fatal = true
+              this.digitalParts.get(f.object)?.burn?.()
+            }
             this.onFailure?.(f)
             continue
           }
           this.damage[f.object] = f.damage
+          if (f.damage.fatal) this.digitalParts.get(f.object)?.burn?.()
           // A burnt MCU is dead silicon: the core stops and its pads leave the circuit.
           const inst = this.mcus.get(f.object)
           if (inst?.mcu.loaded) {
@@ -1595,9 +1617,19 @@ export class SimLoop {
   /** A step the core has already run with nothing changing: the rest of the step as `advance` takes it. */
   private quietStep(engine: Engine, read: PartReader) {
     this.serviceTerminals(engine.time + DT)
-    for (const part of this.digitalParts.values()) part.tick?.(engine.time + DT)
-    engine.step(DT, read, this.pinState, false)
+    let changed = false
+    for (const part of this.digitalParts.values()) if (part.tick?.(engine.time + DT)) changed = true
+    engine.step(DT, read, this.pinState, changed)
     this.accumulateFlow(engine, DT)
+    this.senseParts(engine)
+  }
+
+  /** Parts that watch voltages (a pixel's supply and data level) read them off the step just solved. */
+  private senseParts(engine: Engine) {
+    for (const [part, nodes] of this.senseNodes) part.sense!((pin) => {
+      const node = nodes.get(pin)
+      return node === undefined || node === GROUND ? 0 : engine.v[node]
+    }, engine.time)
   }
 
   /** What a panel shows: composed by the core that drives its pixel clock, or by our own instance when none does. */

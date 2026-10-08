@@ -130,6 +130,20 @@ export type PartDef =
       backlight?: string
     }
   | {
+      /**
+       * An addressable LED (a WS2812B's 5050 package, one pixel of a strip): lit in the colour
+       * the component's digital model latched for chip `index` of its chain.
+       */
+      type: "pixel"
+      id: string
+      label: string
+      x: number
+      y: number
+      index: number
+      /** Package edge in cells (default 0.8). */
+      size?: number
+    }
+  | {
       /** A USB cable into a connector: plugged while `on`. Click to plug/unplug. */
       type: "usb"
       id: string
@@ -277,6 +291,8 @@ export type ComponentDef = {
   description?: string
   /** Palette group. */
   category: string
+  /** More names the palette search finds the component by (the part numbers it can be). */
+  keywords?: string[]
   icon: Icon
   /** Size in grid cells. */
   width: number

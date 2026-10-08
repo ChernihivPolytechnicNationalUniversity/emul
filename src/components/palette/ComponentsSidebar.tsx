@@ -33,7 +33,7 @@ export function ComponentsSidebar({ onPick, onHdlNew, onHdlImport, onHdlOpen, ..
 
   const hdl = library.filter((e) => !q || e.module.name.toLowerCase().includes(q))
   const groups = paletteGroups
-    .map((g) => ({ ...g, items: g.items.filter((i) => !q || i.name.toLowerCase().includes(q)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => !q || i.name.toLowerCase().includes(q) || i.keywords?.some((k) => k.toLowerCase().includes(q))) }))
     .filter((g) => g.items.length > 0)
 
   return (
@@ -122,6 +122,7 @@ export function ComponentsSidebar({ onPick, onHdlNew, onHdlImport, onHdlOpen, ..
                         e.dataTransfer.effectAllowed = "copy"
                       }}
                       onClick={() => onPick?.(item)}
+                      title={item.description}
                       className="cursor-grab active:cursor-grabbing [&>svg]:size-5"
                     >
                       <item.icon />

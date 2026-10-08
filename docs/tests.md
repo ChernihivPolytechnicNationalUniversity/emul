@@ -29,6 +29,11 @@
 | `tests/sim/nucleo-spi.test.ts` | two Nucleos over SPI1 through the wires: master and slave logs agree, no HAL errors |
 | `tests/firmware/mcu-i2c.test.ts` | I2C1 master on the bare SoC against the 24C02 model: HAL page writes, acknowledge polling, read-back, 100 kHz |
 | `tests/sim/nucleo-i2c.test.ts` | I²C through the field: pull-ups from a rail, EEPROM contents in the snapshot, counter survives a restart |
+| `tests/sim/addressable.test.ts` | the addressable-LED chain on synthetic edges: GRB words MSB first, the cascade past the chain's own chips with the pulse widths kept, a cut word keeping the old colour, timing faults, data below VIH ignored (3.3 V at 5 V) and taken at 4.5 V, power-off, LED supply current, the BIN switch-over and staying on DIN when it carries data, sink gating per PWM duty, WS2801 shift, relay and latch |
+| `tests/sim/nucleo-ws2812.test.ts` | HAL firmware (TIM1 PWM + DMA) lights an 8-LED stick with the colours it sent, timing within the WS2812B-V5's windows; the stick's current on the board's +5V; the same 3.3 V data ignored by a 2013 WS2812B |
+| `tests/sim/addressable-bench.test.ts` | a WS2818B from 12 V through 3.3 kΩ sinking 16 mA through three red LEDs; a WS2815B chain riding over a dead pixel on BIN, and going dark without the backup line; a 5 V stick burnt by 7 V; quiescent current on 5 V; WS2801 current set by RFB; WS2815's own VCC; a 6-pin WS2812 needing VCC; a WS2818B on 24 V through 7.5 kΩ and burnt by 24 V direct |
+| `tests/sim/addressable-variants.test.ts` | 16-bit words, the WS291x gain header read by every chip and passed on once, WS2914's OUTW2, SET's 400 kHz timing and unmodelled mode, POL inversion, the bidirectional WS2812B-V6, BO repeating the input, a part swap |
+| `tests/sim/addressable-symbols.test.ts` | no pin name runs into a pixel at any text size or orientation; every part number is found by the palette search |
 | `tests/sim/mcu-i2c-v2.test.ts` | the F7 I²C register map at register level: AUTOEND write, repeated-START read, NACK handling |
 | `tests/firmware/mcu-dma.test.ts` | DMA: memory-to-memory, USART3 TX/RX through the HAL's DMA interrupt chain, TIM3-paced circular stream toggling a pin |
 | `tests/firmware/mcu-adc.test.ts` | ADC1 polling with a scripted pad voltage → PWM duty, VREFINT, clipping; DAC1 sine by TIM6 TRGO + DMA |
