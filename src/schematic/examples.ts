@@ -618,6 +618,31 @@ export const nucleoI2c: Example = {
 }
 
 /**
+ * Addressable LEDs: firmware/hal/Src/ws2812.c sends 8 pixels every 20 ms with TIM1 CH1 PWM on D6
+ * (PE9) and its compare DMA loading each bit's pulse width. The stick runs from the board's
+ * +5V; its WS2812B-V5s take the 3.3 V data (VIH 2.7 V). Switch the part to the 2013 WS2812B
+ * (VIH 0.7 × 5 V = 3.5 V) and the inspector shows the data ignored — the classic level-shift trap.
+ */
+export const nucleoWs2812: Example = {
+  id: "nucleo-ws2812",
+  name: "Nucleo WS2812 stick",
+  description: "TIM1 PWM + DMA sends GRB frames to an 8-LED WS2812B-V5 stick on D6; try the 2013 WS2812B to see 3.3 V data fall short of VIH.",
+  icon: CpuIcon,
+  projects: [{ ref: "U1", load: nucleoApp("ws2812") }],
+  build(grid) {
+    const { doc, place, wire } = builder(grid)
+    const u = place("nucleo-f429zi", 0, 0)
+    // D6 (CN10-4) ends at (28,25); the stick's DIN sits at (33,25), its 5V on top at (39,23),
+    // GND below at (39,27). +5V is CN8-9 on the far side, (0,17).
+    const stick = place("led-stick-8", 32, 23, { value: "WS2812B-V5" })
+    wire(u, "CN10-4", stick, "DIN")
+    wire(u, "CN8-9", stick, "VDD", [[-2, 17], [-2, -3], [39, -3]])
+    wire(u, "CN10-22", stick, "GND", [[39, 34]])
+    return doc
+  },
+}
+
+/**
  * ADC and DAC: firmware/hal/Src/adc.c reads a potentiometer on A0 every 10 ms and sets LD1's
  * PWM duty from it; DAC1 on D24 plays a 50 Hz sine from a table through TIM6 + DMA into a
  * red LED (probe D24 with the scope to see the wave).
@@ -649,4 +674,4 @@ export const nucleoAdc: Example = {
   },
 }
 
-export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoAdc, lab1Board, lab1RunningLight, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, chargeBoost, chargeBoostChips, systemExam, transistorLogic, lissajous, bridge]
+export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoWs2812, nucleoAdc, lab1Board, lab1RunningLight, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, chargeBoost, chargeBoostChips, systemExam, transistorLogic, lissajous, bridge]

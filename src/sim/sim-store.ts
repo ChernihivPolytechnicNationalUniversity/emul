@@ -10,11 +10,26 @@ export type ObjectSim = {
   parts: Record<string, LivePart>
   damage: Damage | undefined
   display: DisplayFrame | undefined
+  /** Colours (0xRRGGBB) of the pixels an addressable-LED model shows, by chip. */
+  pixels: readonly number[] | undefined
 }
 
 const NO_PARTS: Record<string, LivePart> = {}
 const NO_READINGS: readonly Reading[] = []
-const IDLE: ObjectSim = { live: false, parts: NO_PARTS, damage: undefined, display: undefined }
+const IDLE: ObjectSim = { live: false, parts: NO_PARTS, damage: undefined, display: undefined, pixels: undefined }
+
+function samePixels(a: readonly number[] | undefined, b: readonly number[] | undefined) {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+/** The pixel colours in a digital part's snapshot, if it has any. */
+function pixelsOf(snapshot: unknown): readonly number[] | undefined {
+  const colors = (snapshot as { colors?: unknown } | undefined)?.colors
+  return Array.isArray(colors) && colors.length ? (colors as number[]) : undefined
+}
 
 function samePart(a: LivePart, b: LivePart) {
   return a.level === b.level && a.on === b.on && a.pressed === b.pressed && a.x === b.x && a.y === b.y
@@ -32,7 +47,7 @@ function sameParts(a: Record<string, LivePart>, b: Record<string, LivePart>) {
 }
 
 const sameView = (a: ObjectSim, b: ObjectSim) =>
-  a.live === b.live && a.damage === b.damage && a.display === b.display && sameParts(a.parts, b.parts)
+  a.live === b.live && a.damage === b.damage && a.display === b.display && samePixels(a.pixels, b.pixels) && sameParts(a.parts, b.parts)
 
 const sameReading = (a: Reading, b: Reading) =>
   a.element === b.element &&
@@ -149,6 +164,7 @@ export class SimStore {
       parts: this.partsByObject.get(objectId) ?? NO_PARTS,
       damage: readout.damage[objectId],
       display: readout.display(objectId),
+      pixels: pixelsOf(readout.digital(objectId)),
     }
   }
 }

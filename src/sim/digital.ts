@@ -10,6 +10,8 @@ import type { PartState } from "@/schematic/types"
 import { hdlModule } from "@/schematic/registry"
 import { isHdlDef } from "@/schematic/hdl"
 import { HdlPart } from "./hdl"
+import { chainFor } from "./addressable/chain"
+import { chipCount, partOf, productById } from "./addressable/products"
 
 export type DigitalEdge = { pin: string; level: boolean | null; time: number }
 
@@ -29,13 +31,29 @@ export interface DigitalPart {
   configure(props: Record<string, string>): void
   /** A part of the component was touched on the field (a display's panel): its state, by part id, at loop time `time`. */
   interact?(part: string, state: PartState, time: number): void
-  /** Time passes (called every solver step): for parts with a clock of their own (a scan period). */
-  tick?(time: number): void
+  /**
+   * Time passes (called before every solver step, with the step's end): for parts with a clock
+   * of their own (a scan period). True when what `analog` answers changed.
+   */
+  tick?(time: number): boolean | void
+  /** Pins the part can drive; absent, any of `pins`. A core that only feeds listen-only pins need not hand its edges over one by one. */
+  readonly outputs?: readonly string[]
+  /** Pins whose voltage the part reads after every solver step (its supply, an input's high level). */
+  readonly senses?: readonly string[]
+  sense?(volts: (pin: string) => number, time: number): void
+  /**
+   * A model element's value the part sets itself, by node or `live` key: volts for a GPIO
+   * node it sources as a voltage, ohms for a live resistor; undefined for a key it does not own.
+   */
+  analog?(key: string): number | undefined
+  /** The component burnt out: the die is dead. */
+  burn?(): void
   /** Until when `tick` drives nothing, as long as no input or interaction comes (a part with a `tick` and without this is never skipped over). */
   quietUntil?(): number
   /** What the UI shows about the part, if anything. Plain data: it crosses the worker boundary. */
   snapshot(): unknown
-  outdated?(): boolean
+  /** The part as built no longer matches the object's props (another part number): build a new one. */
+  outdated?(props: Record<string, string>): boolean
   prime?(levels: Map<string, boolean>, time: number): void
 }
 
@@ -635,6 +653,12 @@ export function createDigitalPart(def: string, object: string, props: Record<str
     case "lcd7-f":
       return new Gt911(object, { sda: "37", scl: "38", rst: "39", int: "40" })
     default: {
+      const product = productById(def)
+      if (product) {
+        const chain = chainFor(object, partOf(product, props), chipCount(product.shape))
+        chain.configure(props)
+        return chain
+      }
       const module = isHdlDef(def) ? hdlModule(def) : undefined
       return module?.netlist ? new HdlPart(object, def, module.netlist, module.built) : null
     }
