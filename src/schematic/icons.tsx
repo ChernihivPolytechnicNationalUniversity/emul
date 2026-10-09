@@ -247,6 +247,8 @@ export const BoardIcon = make(
 )
 
 
+export const BuzzerIcon = make("BuzzerIcon", <path d="M4 8h16M5 8a7 7 0 0 0 14 0M9 14.3V21M15 14.3V21M3.5 18h3M5 16.5v3M9.5 4.6a4 4 0 0 1 5 0" />)
+
 export const TimerIcon = make(
   "TimerIcon",
   <>

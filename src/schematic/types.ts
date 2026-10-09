@@ -156,6 +156,13 @@ export type PartDef =
       /** State before the user touches it (a board ships plugged in). */
       initial?: PartState
     }
+  | {
+      type: "sound"
+      id: string
+      label: string
+      x: number
+      y: number
+    }
 
 // --- electrical model ---------------------------------------------------------
 

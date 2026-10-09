@@ -12,10 +12,11 @@ import { chargeBoostModule } from "./components/charge-boost"
 import { powerIcs } from "./components/power-ics"
 import { ne555 } from "./components/ne555"
 import { hc595 } from "./components/hc595"
+import { buzzers } from "./components/buzzer"
 import { addressableComponents } from "./components/addressable"
 
 /** Every component the palette can place. Add a definition file and list it here. */
-export const registry: ComponentDef[] = [open746ic, nucleoF429zi, stm32f746ig, stm32f429zi, crystal, oscillator, eeprom24c, hc595, ne555, lcd7f, ...addressableComponents, chargeBoostModule, ...powerIcs, ...meterComponents, ...basicComponents]
+export const registry: ComponentDef[] = [open746ic, nucleoF429zi, stm32f746ig, stm32f429zi, crystal, oscillator, eeprom24c, hc595, ne555, lcd7f, ...buzzers, ...addressableComponents, chargeBoostModule, ...powerIcs, ...meterComponents, ...basicComponents]
 
 const byId = new Map(registry.map((d) => [d.id, d]))
 

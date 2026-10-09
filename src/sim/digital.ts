@@ -13,6 +13,7 @@ import { HdlPart } from "./hdl"
 import { chainFor } from "./addressable/chain"
 import { chipCount, partOf, productById } from "./addressable/products"
 import { ShiftRegister595 } from "./hc595"
+import { Buzzer, buzzerOfDef } from "./buzzer"
 
 export type DigitalEdge = { pin: string; level: boolean | null; time: number }
 
@@ -47,6 +48,9 @@ export interface DigitalPart {
    * node it sources as a voltage, ohms for a live resistor; undefined for a key it does not own.
    */
   analog?(key: string): number | undefined
+  parts?(): Record<string, { on: boolean; level: number }>
+  pressure?(): number
+  pitch?(): number | null
   /** The component burnt out: the die is dead. */
   burn?(): void
   /** Until when `tick` drives nothing, as long as no input or interaction comes (a part with a `tick` and without this is never skipped over). */
@@ -659,6 +663,8 @@ export function createDigitalPart(def: string, object: string, props: Record<str
     case "hc595":
       return new ShiftRegister595(object, props)
     default: {
+      const buzzer = buzzerOfDef(def)
+      if (buzzer) return new Buzzer(object, buzzer, props)
       const product = productById(def)
       if (product) {
         const chain = chainFor(object, partOf(product, props), chipCount(product.shape))

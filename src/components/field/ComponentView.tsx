@@ -366,6 +366,23 @@ function DisplayPanel({ part, g, level, display, mirror, onChange }: { part: Ext
   )
 }
 
+const SOUND_ARC_RADII = [0.5, 0.85]
+
+function SoundArcs({ cx, cy, g, level }: { cx: number; cy: number; g: (v: number) => number; level: number }) {
+  const arc = (r: number) => `M${cx - 0.866 * r} ${cy - 0.5 * r} A${r} ${r} 0 0 1 ${cx + 0.866 * r} ${cy - 0.5 * r}`
+  return (
+    <path
+      d={SOUND_ARC_RADII.map((r) => arc(g(r))).join(" ")}
+      className="fill-none stroke-foreground"
+      opacity={0.25 + 0.75 * level}
+      strokeWidth={SYMBOL_STROKE}
+      strokeLinecap="round"
+      vectorEffect="non-scaling-stroke"
+      pointerEvents="none"
+    />
+  )
+}
+
 function Part({
   part,
   g,
@@ -401,6 +418,8 @@ function Part({
   if (part.type === "pixel") return <Pixel part={part} g={g} color={pixel} />
 
   if (part.type === "display") return <DisplayPanel part={part} g={g} level={level ?? 0} display={display} mirror={mirror} onChange={onChange} />
+
+  if (part.type === "sound") return level ? <SoundArcs cx={cx} cy={cy} g={g} level={level} /> : null
 
   if (part.type === "led") {
     const glow = level ?? (state.on ? 1 : 0)

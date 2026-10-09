@@ -130,6 +130,97 @@ delayed output reaches the other. Edges an MCU makes a few nanoseconds apart are
 with whatever its parts answer, so a part's reply can overtake a second MCU edge less than its propagation delay
 behind the first.
 
+## Buzzers
+
+Every preset in `BUZZER_PRESETS` (`src/sim/buzzer.ts`, with the physics) is a datasheet and a
+palette entry of its own: `src/schematic/components/buzzer.ts` builds one `ComponentDef` per
+preset, id `buzzer-<preset id>`, carrying only its kind's model elements and inspector fields (the
+four kinds' circuits have nothing in common), with the preset's values as the fields' placeholders.
+`buzzerSpec(preset, props)` lays the overrides over the preset; `createDigitalPart` finds the preset
+from the def id (`buzzerOfDef`). The symbol is 4 × 5 cells with both pins at the bottom; the
+reference and, under it, the preset's `badge` (muted) sit above the bowl, on the side away from the
+pins, so no wire runs through them in any rotation, and `+` is text, so it stays upright.
+
+Every number a preset carries is read off its manufacturer's datasheet, and where a datasheet gives
+both, the typical value rather than the guaranteed minimum or maximum: a simulated part should do
+what a real one on the bench does. The sources, the readings and what is inferred are listed per
+preset in the coursework's knowledge base (`docs/emul-buzzer/research/preset-verification.md` and
+`sheets/`). Each preset also says whether its rated level is A-weighted (`ratedWeighting`), as its
+datasheet measured it.
+
+- **Passive magnetic**: the coil's resistance (rated for the power a 50 % square at the top of the
+  operating range puts into it, heating with a 3 s time constant, failing open) in series with its
+  inductance. No manufacturer publishes the inductance; it is the value that makes a coil switched
+  at the rated voltage and frequency through a freewheeling diode draw the datasheet's mean current
+  (1.65 mH for the CEM-1203(42), 2.48 mH for the AT-1224, 0.28 mH for the CMT-0904).
+- **Passive piezo**: C0 between the pins and a Butterworth–Van Dyke motional branch through two
+  hidden nodes: Cm a tenth of C0 (audible sounders' resonance and anti-resonance put the ratio at
+  0.1–0.17), Lm resonating with Cm at the part's resonance, Rm setting its Q. The datasheet's
+  capacitance is what a meter reads at its measuring frequency (1 kHz for the PKM13, 120 Hz for the
+  PKM17), where the motional branch adds Cm / (1 − (f/f0)²), so C0 is solved for that reading to come
+  out exact (4.97 nF for the PKM13's 5.5 nF). The datasheet's maximum input is a drive rating: over
+  it, judged on the drive's amplitude (Vo-p, as the sheet defines it) rather than an instantaneous
+  peak, the part warns; the ceramic depolarises, and C0 fails open, only at twice it, an inference
+  from PZT's coercive field over a thin disc, since no maker publishes a destruction voltage.
+  Operating-range warnings, here and for the other kinds, allow 2 % so that a part on exactly its
+  limit through a switch's few millivolts does not warn.
+- **Active** (magnetic or piezo): one resistor whose value the part answers live (`$osc`). Its
+  oscillator starts at 0.8 × the bottom of the operating range and stops 10 % lower — no datasheet
+  states either — and then switches the load between V / (2·I(V)) and 100 kΩ at the tone, half a
+  period each, so the supply sees the ripple a blocking oscillator makes and its mean current is the
+  datasheet's at whatever voltage it is on. Level, tone and current follow the datasheet's curves
+  against the supply (`supply` on the preset, points read off the curves): an SDC1610M5-01 goes from
+  89.3 dB(A), 2468 Hz and 15.9 mA at 4 V to 91.8 dB(A), 2340 Hz and 24.5 mA at 7 V, as TDK draws it.
+  A part whose maker publishes no curves borrows the shape of the nearest one that does, scaled to
+  its own rated point. Reversed it is 1 MΩ, and beside it runs a hidden reverse path from
+  pin 2 to pin 1, the way a blocking oscillator (an NPN with the coil in its collector) conducts
+  reversed: a 7 V zener (the transistor's emitter–base breakdown, typical for a small NPN), a diode
+  (its base–collector junction, forward) and the oscillator's on-resistance standing for the coil.
+  Up to 7 V reversed it draws nothing. Past that it clamps: a passive coil's kick on a shared rail
+  (the "Buzzers on DC" example, where releasing SW1 drove the node to −8.5 V and an instant
+  `reverse` rating used to kill the TMB12A05) now stops near −8 V and puts µJ into the junction.
+  The zener is rated 0.15 W with the coil's 3 s heating time constant, so a sustained reverse is a
+  matter of power and time: a stiff 12 V reversed drives 42 mA, 0.3 W, and the part dies in about
+  2 s; the threshold for the TMB12A05 is about 9.9 V. An active piezo's driver IC gets the same
+  path for want of its schematic (its 375 Ω on-resistance puts its threshold near 16 V).
+
+The `Buzzer` digital part (`createDigitalPart`) runs beside the circuit. Each step it reads the
+drive off the solved nodes (`senses` may name an internal node: the loop falls back to the netlist's
+`nodeNet`): the coil current (V(1) − V($m)) / R, or the voltage across a piezo, or for an active
+part its supply, from which its own oscillator makes a square at the tone, each step sampled as
+the share of the step it is high. The drive goes through the sounder's response as a force, and
+the pressure that comes out is both what the inspector reads and what the speaker plays. Each
+resonance is the acceleration of a driven mass on a spring, s² / (s² + s·ω/Q + ω²); a part has one
+or several (`frequency`/`q` and `modes`, relative to the first), and an enclosed sounder may add a
+cavity high-pass of the same form (`cavity`), which gives the steeper fall below resonance its
+Helmholtz cavity makes. Several modes are summed in power, Σ g²·|r_k|², because a coherent sum puts
+notches between them that no datasheet curve shows (13 dB deep at 3.6 kHz for the CEM-1203(42)).
+That magnitude is realised as one causal, minimum-phase filter: its zeros are the left-half-plane
+square roots of the roots of Σ g_k² Π_{j≠k} D_j(s)D_j(−s), a polynomial in s² found by
+Durand–Kerner in frequency normalised to the first mode (`src/sim/polynomial.ts`). Every pole and
+zero is carried to the 20 µs step by z = e^{sT} and the gain matched at the first mode; that keeps
+the response within 0.1 dB of the analog fit up to 12 kHz for every preset, where per-section
+prewarped bilinear biquads were 0.4–1.9 dB out. The modes are fitted to each part's published
+frequency response: a magnetic part's to its square-wave sweep, through the coil current a square
+makes in R–L with a freewheeling diode, with the rated point held exact; a piezo's to its
+square-wave sweep the same way where the maker publishes a consistent one (the PKM13, 0.9 dB rms),
+otherwise to its sine sweep (the transfer function itself), peak by peak, with the half-power width
+for Q (the fits and the digitized curves are kept in the coursework's knowledge base,
+`docs/emul-buzzer/`). The peaks a
+square drive makes at f1/3 and f1/5 come out by themselves. When the part is configured, a quarter of a second of its
+datasheet's rated drive is run through the same filters and the scale set so that it reads the
+rated level, A-weighted or flat as the datasheet measured it. An active part's oscillator drive is
+scaled so that the level, through the same filters, lands on its datasheet's level-against-supply
+curve at the tone it is then making. A magnetic part's force is its coil current (the magnet's bias
+makes it linear), so a part driven under its operating range is quieter in proportion and nothing
+more; no datasheet gives a steeper fall. The level is an A-weighted mean square over 5 ms (a 52 ms beep reads its level, and its tail is gone within 30 ms); the drive's
+frequency comes from its rising crossings. The snapshot holds the level and tone of the last beep
+for 1.5 s, and warns — after 50 ms, or 0.5 s for DC — about DC through a coil or across a piezo, a
+drive outside the operating range, an active part below its start voltage, reversed (past its breakdown: the current it conducts and
+whether that kills it), over its maximum, or switched on and off more than 50 times a second (it can only gate its own tone). The sound
+arcs on the symbol (`PartDef` `sound`) take the level, 50 dB(A) dark to 100 dB(A) full, in tenths, so
+the field re-renders only when they visibly change.
+
 The palette's MOSFETs avalanche: the body diode breaks down at 1.2 × the rated Vds (V(BR)DSS is a
 minimum; parts break down above it), and its heating time constant is EAS / Pmax, so a pulse
 shorter than that fails it once its energy passes the datasheet's single-pulse avalanche energy,
