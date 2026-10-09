@@ -10,6 +10,7 @@ import type { PartState } from "@/schematic/types"
 import { hdlModule } from "@/schematic/registry"
 import { isHdlDef } from "@/schematic/hdl"
 import { HdlPart } from "./hdl"
+import { ShiftRegister595 } from "./hc595"
 
 export type DigitalEdge = { pin: string; level: boolean | null; time: number }
 
@@ -37,6 +38,9 @@ export interface DigitalPart {
   snapshot(): unknown
   outdated?(): boolean
   prime?(levels: Map<string, boolean>, time: number): void
+  readonly supply?: { vcc: string; gnd: string }
+  sense?(vcc: number, read: (pin: string) => number, time: number): void
+  thresholds?(): [falling: number, rising: number]
 }
 
 // --- 24Cxx I²C EEPROM ------------------------------------------------------------------------
@@ -634,6 +638,8 @@ export function createDigitalPart(def: string, object: string, props: Record<str
       return new Eeprom24(object, props)
     case "lcd7-f":
       return new Gt911(object, { sda: "37", scl: "38", rst: "39", int: "40" })
+    case "hc595":
+      return new ShiftRegister595(object, props)
     default: {
       const module = isHdlDef(def) ? hdlModule(def) : undefined
       return module?.netlist ? new HdlPart(object, def, module.netlist, module.built) : null

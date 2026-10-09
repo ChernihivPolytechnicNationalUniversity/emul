@@ -1,5 +1,7 @@
 import type { EepromSnapshot } from "@/sim/digital"
 import type { HdlSnapshot } from "@/sim/hdl"
+import { HC595_OUTPUTS, type ShiftRegisterSnapshot } from "@/sim/hc595"
+import { HC595_LINKS } from "@/schematic/components/hc595"
 import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
 import { CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
@@ -70,8 +72,8 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
     <Card data-slot="inspector" className={cn("max-h-[calc(100%-1.5rem)] w-72 gap-4 overflow-y-auto py-4 shadow-md", className)} {...props}>
       <CardHeader className="px-4">
         <CardTitle className="text-sm">{def ? def.name : `${selected.length} components`}</CardTitle>
-        {def?.description && <CardDescription>{def.description}</CardDescription>}
-        <CardAction>
+        {def?.description && <CardDescription className="col-span-2">{def.description}</CardDescription>}
+        <CardAction className="row-span-1">
           <ButtonGroup>
             <Button variant="ghost" size="icon-sm" onClick={() => onRotate(-45)} aria-label="Rotate 45° counter-clockwise">
               <RotateCcwIcon />
@@ -110,6 +112,7 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
           {def.chip && <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? "STM32"} sim={sim} onChange={onChange} onFirmware={onFirmware} onCode={onCode} />}
           {def.id === "serial-terminal" && <TerminalPanel object={object} sim={sim} onSend={(text) => onSerial?.(object.id, text)} />}
           {def.id === "eeprom-24c" && <EepromPanel object={object} sim={sim} />}
+          {def.id === "hc595" && <ShiftRegisterPanel object={object} sim={sim} />}
           {isHdlDef(def.id) && <HdlInfo defId={def.id} sim={sim} objectId={object.id} onHdl={onHdl} />}
           {sim.live && !damage[object.id]?.fatal && <LiveReadings object={object} sim={sim} />}
           <FieldGroup className="gap-4">
@@ -314,6 +317,54 @@ function EepromPanel({ object, sim }: { object: PlacedObject; sim: SimReadout })
       <pre className="h-48 overflow-auto rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-[10.5px] leading-snug">
         {rows.length ? rows.join("\n") : <span className="text-muted-foreground">Run the simulation to see the contents.</span>}
       </pre>
+    </div>
+  )
+}
+
+const VCC_GND_RATING = 0.07
+
+function ShiftRegisterPanel({ object, sim }: { object: PlacedObject; sim: SimReadout }) {
+  const snap = sim.digital(object.id) as ShiftRegisterSnapshot | undefined
+  if (!sim.live || !snap) return <div className="text-xs text-muted-foreground">Run the simulation to see the registers.</div>
+  const supply = Math.max(0, ...sim.readings(object.id).filter((r) => r.kind === "R" && (r.element === HC595_LINKS.vcc || r.element === HC595_LINKS.gnd)).map((r) => Math.abs(r.current)))
+  const row = (name: string, value: number, dim: boolean) => (
+    <div className="contents">
+      <span className="text-muted-foreground">{name}</span>
+      {HC595_OUTPUTS.map((q, k) => (
+        <span key={q} className={cn("rounded-sm text-center font-mono tabular-nums", (value >> k) & 1 ? "bg-foreground text-background" : "bg-muted", dim && "opacity-50")}>
+          {(value >> k) & 1}
+        </span>
+      ))}
+    </div>
+  )
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-xs text-muted-foreground">
+        {snap.part} · VCC {formatSI(snap.vcc, "V")} · {!snap.powered ? "unpowered" : snap.enabled ? "outputs on" : "outputs off (/OE high)"}
+      </div>
+      <div className="grid grid-cols-[auto_repeat(8,minmax(0,1fr))] gap-x-1 gap-y-1 text-[10.5px]">
+        <span />
+        {HC595_OUTPUTS.map((q) => (
+          <span key={q} className="text-center text-muted-foreground">
+            {q}
+          </span>
+        ))}
+        {row("Shift", snap.shift, !snap.powered)}
+        {row("Latch", snap.storage, !snap.powered || !snap.enabled)}
+      </div>
+      {supply > VCC_GND_RATING && (
+        <Alert variant="destructive">
+          <TriangleAlertIcon />
+          <AlertTitle>Over the package rating</AlertTitle>
+          <AlertDescription>{`${formatSI(supply, "A")} through VCC or GND; the datasheet allows ${formatSI(VCC_GND_RATING, "A")} for all outputs together.`}</AlertDescription>
+        </Alert>
+      )}
+      {snap.warnings.map((w) => (
+        <Alert key={w}>
+          <TriangleAlertIcon />
+          <AlertDescription>{w}</AlertDescription>
+        </Alert>
+      ))}
     </div>
   )
 }

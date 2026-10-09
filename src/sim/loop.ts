@@ -36,6 +36,7 @@ const OSC_VCC_MIN = 2.0
 const FLOW_MIN = 1e-5
 const FLOW_SPEED = 40
 const FLOW_MAX_SPEED = 220
+const FLOW_SPEED_REUSE = 1e-3
 
 /** Schmitt thresholds of an STM32 input, as a fraction of VDD (DS9405: VIL 0.3 VDD, VIH 0.7 VDD). */
 const VIH = 0.7 * 3.3
@@ -288,6 +289,7 @@ export type LogicChunk = { count: number; times: Float64Array; codes: Uint8Array
 const LOGIC_CHUNK = 1 << 17
 /** A probe's level before anything has been seen on its net. */
 const LOGIC_UNKNOWN = 0xff
+const MAX_PART_EDGES = 10000
 
 /** Everything the UI needs after a batch of steps. Plain data: it crosses a worker boundary. */
 export type Snapshot = {
@@ -356,6 +358,11 @@ export class SimLoop {
   private terminals = new Map<string, TerminalInstance>()
   private digitalParts = new Map<string, DigitalPart>()
   private freshParts = new Set<DigitalPart>()
+  private sensed: { part: DigitalPart; read: (pin: string) => number; supply: () => number; ground: () => number }[] = []
+  private sensedBy = new Map<DigitalPart, { ground: () => number }>()
+  private partLevels = new Map<string, boolean>()
+  private pendingEdges: { time: number; apply: () => void }[] = []
+  private dispatching = 0
   /** RGB panels, by object id: their wiring to cores, and an instance of our own for one no core drives. */
   private panels = new Map<string, PanelWiring & { own: PanelInstance }>()
   /**
@@ -377,6 +384,8 @@ export class SimLoop {
   private flow: { id: string; slots: Int32Array; coefs: Float64Array }[] = []
   private flowSigned = new Float64Array(0)
   private flowAbs = new Float64Array(0)
+  private flowSpeedAmps = new Float64Array(0)
+  private flowSpeedCached = new Float64Array(0)
   private flowPhase = new Float64Array(0)
   private flowPhaseIds: string[] = []
   private flowSeconds = 0
@@ -661,6 +670,7 @@ export class SimLoop {
         netFor(root(node)).parts.push({ part, pin })
         partNets.add(root(node))
       }
+    this.senseWiring(engine)
     for (const [node, n] of nets) {
       n.pads = padsByNet.get(node) ?? []
       if (engine)
@@ -730,6 +740,64 @@ export class SimLoop {
       }
   }
 
+  private senseWiring(engine: Engine | null) {
+    this.sensed = []
+    this.sensedBy.clear()
+    if (!engine) return
+    const { pinNet, nodeNet } = engine.net
+    const owners = new Map<number, Set<string>>()
+    for (const el of engine.net.elements)
+      for (const key of el.keys) {
+        const net = pinNet.get(key) ?? nodeNet.get(key)
+        if (net === undefined) continue
+        let set = owners.get(net)
+        if (!set) owners.set(net, (set = new Set()))
+        set.add(key.slice(0, key.indexOf(":")))
+      }
+    const volts = (net: number | undefined) => (net === undefined || net === GROUND ? 0 : engine.v[net])
+    for (const part of this.digitalParts.values()) {
+      if (!part.supply || !part.sense) continue
+      const at = (ref: string) => nodeNet.get(pinKey(part.object, ref)) ?? pinNet.get(pinKey(part.object, ref))
+      const vcc = at(part.supply.vcc)
+      const gnd = at(part.supply.gnd)
+      const pins = new Map<string, number | null>()
+      for (const pin of part.pins) {
+        const net = pinNet.get(pinKey(part.object, pin))
+        const wired = net === GROUND || (net !== undefined && [...(owners.get(net) ?? [])].some((o) => o !== part.object))
+        pins.set(pin, wired ? net! : null)
+      }
+      const ground = () => volts(gnd)
+      const read = (pin: string) => {
+        const net = pins.get(pin)
+        return net === null || net === undefined ? NaN : volts(net) - volts(gnd)
+      }
+      this.sensed.push({ part, read, supply: () => volts(vcc) - volts(gnd), ground })
+      this.sensedBy.set(part, { ground })
+    }
+  }
+
+  private senseParts(time: number) {
+    this.dispatching++
+    for (const s of this.sensed) {
+      s.part.sense!(s.supply(), s.read, time)
+      if (s.part.out.length) this.drainPart(s.part)
+    }
+    this.dispatching--
+    this.flushPartEdges()
+  }
+
+  private thresholdInput(part: DigitalPart, pin: string, volts: number, time: number) {
+    const [falling, rising] = part.thresholds!()
+    const v = volts - (this.sensedBy.get(part)?.ground() ?? 0)
+    const key = `${part.object}/${pin}`
+    const last = this.partLevels.get(key)
+    const level = v > rising ? true : v < falling ? false : (last ?? v > (falling + rising) / 2)
+    if (level === last) return
+    this.partLevels.set(key, level)
+    part.input(pin, level, time)
+    this.drainPart(part)
+  }
+
   // --- serial: the digital fast path ---------------------------------------------------------
   //
   // Bits between an MCU and a terminal (or another MCU) travel as timestamped edges, so a
@@ -788,6 +856,7 @@ export class SimLoop {
    * transfer) the level itself, from the analog solution.
    */
   private refreshReleased(engine: Engine, time: number) {
+    this.dispatching++
     for (const n of this.digitalNets.values()) {
       let up = false
       let down = false
@@ -807,10 +876,13 @@ export class SimLoop {
         const level = v > VIH ? true : v < VIL ? false : n.level
         if (level !== n.level) {
           n.level = level
-          this.deliverLevel(n, level, time)
+          this.deliverLevel(n, level, time, true)
         }
+        for (const { part, pin } of n.parts) if (part.thresholds) this.thresholdInput(part, pin, v, time)
       }
     }
+    this.dispatching--
+    this.flushPartEdges()
   }
 
   /** One driver on a net changed: re-resolve, and tell everyone if the level moved. */
@@ -823,7 +895,8 @@ export class SimLoop {
   }
 
   /** A net's resolved level at `time` goes to every pad, part and terminal on it. */
-  private deliverLevel(net: DigitalNet, level: boolean, time: number) {
+  private deliverLevel(net: DigitalNet, level: boolean, time: number, analog = false) {
+    this.dispatching++
     for (const probe of net.logic) this.logEdge(probe, level, time)
     for (const p of net.pads) {
       if (net.parts.length) p.inst.keepInStep()
@@ -831,9 +904,15 @@ export class SimLoop {
     }
     for (const t of net.rx) t.decoder.edge({ time, level })
     for (const { part, pin } of net.parts) {
+      if (part.thresholds) {
+        if (analog) continue
+        this.partLevels.set(`${part.object}/${pin}`, level)
+      }
       part.input(pin, level, time)
       this.drainPart(part)
     }
+    this.dispatching--
+    if (!this.dispatching) this.flushPartEdges()
   }
 
   /** Drives a part produced go onto their nets (which may cascade, briefly). */
@@ -841,28 +920,42 @@ export class SimLoop {
     const engine = this.engine
     if (!engine) return
     this.padsDirty = true
-    for (let round = 0; part.out.length && round < 16; round++) {
-      const edges = part.out.splice(0, part.out.length)
-      for (const e of edges) {
-        const node = engine.net.pinNet.get(pinKey(part.object, e.pin))
-        const net = this.digitalNet(node)
-        if (net) this.setDriver(net, `${part.object}/${e.pin}`, e.level, e.time, false, node!)
-      }
+    for (const edge of part.out.splice(0, part.out.length)) {
+      const node = engine.net.pinNet.get(pinKey(part.object, edge.pin))
+      const net = this.digitalNet(node)
+      if (net) this.queueEdge(edge.time, () => this.setDriver(net, `${part.object}/${edge.pin}`, edge.level, edge.time, false, node!))
     }
+    if (!this.dispatching) this.flushPartEdges()
+  }
+
+  private queueEdge(time: number, apply: () => void) {
+    let k = this.pendingEdges.length
+    while (k > 0 && this.pendingEdges[k - 1].time > time) k--
+    this.pendingEdges.splice(k, 0, { time, apply })
+  }
+
+  private flushPartEdges() {
+    this.dispatching++
+    for (let n = 0; this.pendingEdges.length && n < MAX_PART_EDGES; n++) this.pendingEdges.shift()!.apply()
+    this.dispatching--
   }
 
   /** Edges a core made in the run just done: onto their nets, to terminals, parts and other cores. */
   private deliverDigital(inst: McuInstance): boolean {
     const out = inst.mcu.drainEdges()
     if (!out.length) return false
+    this.dispatching++
     for (const e of out) {
       const key = e.pad.port * 16 + e.pad.pin
       // Traffic with a part: a remote core answers in step until it is over.
       if (inst.partPads.has(key)) inst.keepInStep()
       const node = inst.padNode.get(key)
       const net = this.digitalNet(node)
-      if (net) this.setDriver(net, `${inst.object}/${key}`, e.level, e.time + inst.offset, true, node!)
+      const time = e.time + inst.offset
+      if (net) this.queueEdge(time, () => this.setDriver(net, `${inst.object}/${key}`, e.level, time, true, node!))
     }
+    this.dispatching--
+    if (!this.dispatching) this.flushPartEdges()
     return true
   }
 
@@ -1281,6 +1374,8 @@ export class SimLoop {
       inst.base = 0
     }
     for (const part of this.digitalParts.values()) part.reset()
+    this.partLevels.clear()
+    this.pendingEdges.length = 0
     for (const t of this.terminals.values()) {
       t.text = ""
       t.decoder = new UartDecoder(t.baud)
@@ -1293,6 +1388,7 @@ export class SimLoop {
 
   private rebuild(adopt: boolean) {
     this.padsDirty = true
+    this.pendingEdges.length = 0
     this.pinReaders = []
     const prev = this.engine
     const next = new Engine(buildNetlist({ ...this.doc, parts: {} }, this.damage, undefined, this.probeKeys()))
@@ -1331,6 +1427,8 @@ export class SimLoop {
     })
     this.flowSigned = new Float64Array(this.flow.length)
     this.flowAbs = new Float64Array(this.flow.length)
+    this.flowSpeedAmps = new Float64Array(this.flow.length)
+    this.flowSpeedCached = new Float64Array(this.flow.length)
     // Marker positions survive a rebuild so the dashes do not jump when a part is edited.
     const phase = new Float64Array(this.flow.length)
     if (this.flowPhaseIds.length) {
@@ -1347,6 +1445,14 @@ export class SimLoop {
     return Math.min(FLOW_MAX_SPEED, FLOW_SPEED * Math.log10(1 + amps / 1e-4))
   }
 
+  private cachedFlowSpeed(i: number, amps: number) {
+    if (Math.abs(amps - this.flowSpeedAmps[i]) > FLOW_SPEED_REUSE * amps) {
+      this.flowSpeedAmps[i] = amps
+      this.flowSpeedCached[i] = SimLoop.flowSpeed(amps)
+    }
+    return this.flowSpeedCached[i]
+  }
+
   /** Accumulate every wire's current over a step just taken. */
   private accumulateFlow(engine: Engine, dt: number) {
     const tc = engine.terminalSlots.current
@@ -1357,8 +1463,7 @@ export class SimLoop {
       for (let k = 0; k < slots.length; k++) amps += coefs[k] * tc[slots[k]]
       this.flowSigned[i] += amps * dt
       this.flowAbs[i] += Math.abs(amps) * dt
-      if (amps > FLOW_MIN) this.flowPhase[i] += SimLoop.flowSpeed(amps) * dt
-      else if (amps < -FLOW_MIN) this.flowPhase[i] -= SimLoop.flowSpeed(-amps) * dt
+      if (amps > FLOW_MIN || amps < -FLOW_MIN) this.flowPhase[i] += Math.sign(amps) * this.cachedFlowSpeed(i, Math.abs(amps)) * dt
     }
     this.flowSeconds += dt
   }
@@ -1437,6 +1542,8 @@ export class SimLoop {
         inst.offset = inst.base
         if (inst.mcu.running) active.push(inst)
       }
+      if (this.pendingEdges.length && !this.dispatching) this.flushPartEdges()
+      if (this.sensed.length) this.senseParts(engine.time)
       if (this.digitalNets.size) this.refreshReleased(engine, engine.time)
       const coupled = active.filter((i) => i.coupled)
       // A lone core on a circuit at rest runs ahead over the steps where nothing it drives

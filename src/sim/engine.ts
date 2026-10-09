@@ -13,6 +13,8 @@ import {
   thermalResistance,
 } from "./battery"
 import { GROUND, type GpioState, type Netlist, type Resolved } from "./netlist"
+import { bias, dischargeSink, nextLatch, NE555, outputSink, outputSource, quiescent, supplyShare } from "./ne555"
+import { SparseLU } from "./sparse-lu"
 import { formatSI } from "./units"
 
 const VT = 0.025852
@@ -86,7 +88,23 @@ const BOOST_STEP = 0.5
 const BOOST_UVLO_HYST = 0.1
 const BOOST_EN = 1.5
 const BOOST_DROOP = 1e-4
-const TERM_SLOTS = 6
+const TERM_SLOTS = 8
+const TMR_HIGH = 1
+const TMR_POWERED = 2
+const TMR_MAX_EVENTS = 16
+const TMR_CAPPED_STEPS = 3
+const TMR_REFINE = 3
+const TMR_TOLERANCE = 1e-6
+const TMR_MIN_STEP = 1e-12
+const TMR_RESTART = 0.02
+const TMR_KICK = 0.05
+const TMR_CONTROLLED_STEPS = 3
+const TMR_INPUT_MARGIN = 0.5
+const TMR_MARGINS = 4
+const TMR_SOURCE_VT = 0.05
+const TMR_SOURCE_KNEE = 1.25
+const CMOS_VT = 1
+const CMOS_STEP = Math.log(1.01)
 const MAX_ITER = 60
 const MODE_FREEZE = 20
 const ABS_TOL = 1e-6
@@ -102,6 +120,11 @@ const SETTLED_DRIFT = 1e-3
 /** Operating points remembered by switch/pad state (see `solve`). */
 const MEMO_POINTS = 64
 type OperatingPoint = { v: Float64Array; x: Float64Array; region: Uint8Array; jA: Float64Array; jB: Float64Array; live: Float64Array }
+type Timer = Extract<Resolved, { kind: "TMR" }>
+type Pad = Extract<Resolved, { kind: "GPIO" }>
+const NONLINEAR_KINDS = new Set<Resolved["kind"]>(["D", "Q", "REG", "CHG", "BOOST", "TMR", "M"])
+const switchesMask = (el: Resolved) =>
+  el.kind === "SW" || el.kind === "GPIO" || (el.kind === "R" && el.live) || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR"
 const SURGE = 20
 /** Averaging window for RMS readings in AC circuits: at least this long, and a few periods of the slowest source. */
 const RMS_MIN_TAU = 0.05
@@ -245,9 +268,7 @@ export class Engine {
   private readonly A: Float64Array
   private readonly z: Float64Array
   private readonly x: Float64Array
-  /** LU factors of `A` with the pivot order that produced them. */
-  private readonly lu: Float64Array
-  private readonly pivot: Int32Array
+  private readonly lu: SparseLU
   /** Newton iterate, reused between steps. */
   private readonly guess: Float64Array
   /** Closest solution seen while iterating, kept in case the iteration runs out of steps. */
@@ -334,6 +355,30 @@ export class Engine {
   private readonly gpioVolts: Float64Array
   private readonly ctl: Uint8Array
   private readonly ctlT: Float64Array
+  private readonly subV: Float64Array
+  private readonly timers: Int32Array
+  private readonly burst: Uint8Array
+  private readonly burstSeen: Uint8Array
+  private readonly capped: Uint8Array
+  private readonly scaledPads: Int32Array
+  private readonly padSteps: Int32Array
+  private readonly branchOut = new Float64Array(2)
+  private readonly marginsStart = new Float64Array(TMR_MARGINS)
+  private readonly marginsEnd = new Float64Array(TMR_MARGINS)
+  private readonly marginsAt = new Float64Array(TMR_MARGINS)
+  private eventTimer = -1
+  private eventMargin = -1
+  private eventFraction = 0
+  private eventFrom = 0
+  private eventTo = 0
+  private eventful = false
+  private theta = THETA
+  private subSpan = 0
+  private subBackward = false
+  private switchedAt = 0
+  private readonly arcStart: Uint8Array
+  private readonly capacitors: Int32Array
+  onTimer?: (object: string, high: boolean, time: number) => void
 
   /** Current leaving the net into an element, per terminal node key. */
   private readonly termCurrent: Float64Array
@@ -358,6 +403,14 @@ export class Engine {
   /** Diodes (their eye average moves every step) and, after each full update, the parts under load or still hot. */
   private readonly diodeElements: Int32Array
   private loadedElements: number[] = []
+  private readonly strikeElements: Int32Array
+  private readonly limitsOf: (Resolved["limits"] | undefined)[]
+  private readonly isDiode: Uint8Array
+  private readonly heatDt: Float64Array
+  private readonly heatShare: Float64Array
+  private readonly junctionElements: Int32Array
+  private readonly nonlinearElements: Int32Array
+  private readonly maskElements: Int32Array
   /** RMS averaging time constant, seconds. */
   private readonly tau: number
   /** Switch/pad hash of the current step, and how many steps in a row ended at a fixed point. */
@@ -381,14 +434,13 @@ export class Engine {
     this.A = new Float64Array(this.size * this.size)
     this.z = new Float64Array(this.size)
     this.x = new Float64Array(this.size)
-    this.lu = new Float64Array(this.size * this.size)
-    this.pivot = new Int32Array(this.size)
+    this.lu = new SparseLU(this.size)
 
     let minFreq = Infinity
     let linear = true
     for (const el of net.elements) {
       if (el.kind === "V" && el.amplitude > 0 && el.frequency < minFreq) minFreq = el.frequency
-      if (el.kind === "D" || el.kind === "Q" || el.kind === "M" || el.kind === "REG" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "BOOST") linear = false
+      if (el.kind === "D" || el.kind === "Q" || el.kind === "M" || el.kind === "REG" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "BOOST" || el.kind === "TMR") linear = false
     }
     this.ac = minFreq < Infinity
     this.tau = this.ac ? Math.max(RMS_MIN_TAU, RMS_PERIODS / minFreq) : 0
@@ -396,8 +448,16 @@ export class Engine {
     this.partKeys = net.elements.map((el) => (el.kind === "SW" ? partKey(el.object, el.part) : ""))
     this.padElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) ? [i] : [])))
     this.diodeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "D" ? [i] : [])))
+    this.limitsOf = net.elements.map((el) => el.limits)
+    this.isDiode = Uint8Array.from(net.elements, (el) => (el.kind === "D" ? 1 : 0))
+    this.heatDt = new Float64Array(net.elements.length)
+    this.heatShare = new Float64Array(net.elements.length)
+    this.junctionElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "D" || el.kind === "Q" || el.kind === "TMR" ? [i] : [])))
+    this.nonlinearElements = Int32Array.from(net.elements.flatMap((el, i) => (NONLINEAR_KINDS.has(el.kind) ? [i] : [])))
+    this.strikeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "SW" && el.strike !== Infinity ? [i] : [])))
+    this.maskElements = Int32Array.from(net.elements.flatMap((el, i) => (switchesMask(el) ? [i] : [])))
     this.liveElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) ? [i] : [])))
-    this.stateless = !net.elements.some((el) => el.kind === "C" || el.kind === "L" || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT")
+    this.stateless = !net.elements.some((el) => el.kind === "C" || el.kind === "L" || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR")
     this.drifting = net.elements.some((el) => el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT")
 
     this.capV = new Float64Array(m)
@@ -428,6 +488,16 @@ export class Engine {
     this.gpioVolts = new Float64Array(m)
     this.ctl = new Uint8Array(m)
     this.ctlT = new Float64Array(m * 3)
+    this.subV = new Float64Array(n)
+    this.timers = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "TMR" ? [i] : [])))
+    this.burst = new Uint8Array(m)
+    this.burstSeen = new Uint8Array(m)
+    this.capped = new Uint8Array(m)
+    this.scaledPads = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" && el.ohms > 0 && el.ohmsAt > 0 && el.vddNet !== undefined ? [i] : [])))
+    this.padSteps = new Int32Array(m)
+    this.arcStart = new Uint8Array(m)
+    this.capacitors = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "C" ? [i] : [])))
+    for (const i of this.timers) this.ctlT.fill(NaN, i * 3, i * 3 + 3)
     this.ohms = new Float64Array(m)
     this.batSoc = new Float64Array(m * MAX_CELLS)
     this.batR = new Float64Array(m)
@@ -446,6 +516,7 @@ export class Engine {
     for (let i = 0; i < m; i++) {
       const el = net.elements[i]
       if (el.kind === "R") this.ohms[i] = el.value
+      else if (el.kind === "GPIO") this.ohms[i] = el.ohms || R_GPIO
       else if (el.kind === "BAT") {
         for (let k = 0; k < el.cells; k++) this.batSoc[i * MAX_CELLS + k] = el.soc0
         this.batT[i] = el.temp
@@ -683,12 +754,12 @@ export class Engine {
 
   /** Conductance between two nodes. */
   private addG(a: number, b: number, val: number) {
-    const { A, size } = this
-    if (a !== GROUND) A[a * size + a] += val
-    if (b !== GROUND) A[b * size + b] += val
+    const { A } = this
+    if (a !== GROUND) A[this.cell(a, a)] += val
+    if (b !== GROUND) A[this.cell(b, b)] += val
     if (a !== GROUND && b !== GROUND) {
-      A[a * size + b] -= val
-      A[b * size + a] -= val
+      A[this.cell(a, b)] -= val
+      A[this.cell(b, a)] -= val
     }
   }
 
@@ -701,10 +772,10 @@ export class Engine {
 
   /** One term of a linearized terminal current: g·(V[p] − V[q]) leaving node `at`. */
   private addTerm(at: number, p: number, q: number, gk: number) {
-    const { A, size } = this
+    const { A } = this
     if (at === GROUND) return
-    if (p !== GROUND) A[at * size + p] += gk
-    if (q !== GROUND) A[at * size + q] -= gk
+    if (p !== GROUND) A[this.cell(at, p)] += gk
+    if (q !== GROUND) A[this.cell(at, q)] -= gk
   }
 
   private vol(i: number, from: Float64Array) {
@@ -716,9 +787,9 @@ export class Engine {
    * fills the right-hand side; a reused factorization needs the right-hand side alone.
    */
   private stampLinear(dt: number, parts: PartReader, withA: boolean, withZ: boolean) {
-    const { A, z, size } = this
+    const { A, z } = this
     const n = this.net.nodes
-    if (withA) for (let i = 0; i < n; i++) A[i * size + i] += GMIN
+    if (withA) for (let i = 0; i < n; i++) A[this.cell(i, i)] += GMIN
     const elements = this.net.elements
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i]
@@ -729,25 +800,25 @@ export class Engine {
         // θ-method companions: i = C/(θ dt) · (v − v₀) − (1−θ)/θ · i₀ for a capacitor,
         // i = i₀ + dt/L · (θ v + (1−θ) v₀) for an inductor.
         case "C": {
-          const geq = el.value / (THETA * dt)
+          const geq = el.value / (this.theta * dt)
           if (withA) this.addG(el.a, el.b, geq)
-          if (withZ) this.addI(el.a, el.b, -geq * this.capV[i] - ((1 - THETA) / THETA) * this.capI[i])
+          if (withZ) this.addI(el.a, el.b, -geq * this.capV[i] - ((1 - this.theta) / this.theta) * this.capI[i])
           break
         }
         case "L":
-          if (withA) this.addG(el.a, el.b, (THETA * dt) / el.value)
-          if (withZ) this.addI(el.a, el.b, this.indI[i] + (((1 - THETA) * dt) / el.value) * this.indV[i])
+          if (withA) this.addG(el.a, el.b, (this.theta * dt) / el.value)
+          if (withZ) this.addI(el.a, el.b, this.indI[i] + (((1 - this.theta) * dt) / el.value) * this.indV[i])
           break
         case "V": {
           const r = n + el.index
           if (withA) {
             if (el.plus !== GROUND) {
-              A[el.plus * size + r] += 1
-              A[r * size + el.plus] += 1
+              A[this.cell(el.plus, r)] += 1
+              A[this.cell(r, el.plus)] += 1
             }
             if (el.minus !== GROUND) {
-              A[el.minus * size + r] -= 1
-              A[r * size + el.minus] -= 1
+              A[this.cell(el.minus, r)] -= 1
+              A[this.cell(r, el.minus)] -= 1
             }
           }
           if (withZ) z[r] = this.sourceVoltage(el, this.time + dt)
@@ -759,14 +830,14 @@ export class Engine {
           const r = n + el.index
           if (withA) {
             if (el.plus !== GROUND) {
-              A[el.plus * size + r] += 1
-              A[r * size + el.plus] += 1
+              A[this.cell(el.plus, r)] += 1
+              A[this.cell(r, el.plus)] += 1
             }
             if (el.minus !== GROUND) {
-              A[el.minus * size + r] -= 1
-              A[r * size + el.minus] -= 1
+              A[this.cell(el.minus, r)] -= 1
+              A[this.cell(r, el.minus)] -= 1
             }
-            A[r * size + r] -= this.batR[i]
+            A[this.cell(r, r)] -= this.batR[i]
           }
           // The diffusion voltages sit in series with the open-circuit voltage.
           if (withZ) z[r] = this.batOcv[i] - this.batV1[i] - this.batV2[i]
@@ -779,8 +850,8 @@ export class Engine {
           const r = n + el.index
           const couple = (node: number, val: number) => {
             if (node === GROUND) return
-            A[node * size + r] += val
-            A[r * size + node] += val
+            A[this.cell(node, r)] += val
+            A[this.cell(r, node)] += val
           }
           couple(el.s1, 1)
           couple(el.s2, -1)
@@ -809,13 +880,13 @@ export class Engine {
             if (withZ) this.addI(GROUND, el.node, this.gpioVolts[i] / R_DAC)
             break
           }
-          const r = st <= 2 ? R_GPIO : R_PULL
+          const r = st <= 2 ? this.ohms[i] : R_PULL
           const high = st === 1 || st === 3
           if (high && el.vddNet !== undefined) {
             if (withA) this.addG(el.node, el.vddNet, 1 / r)
             break
           }
-          if (withA) this.addG(el.node, GROUND, 1 / r)
+          if (withA) this.addG(el.node, el.gndNet ?? GROUND, 1 / r)
           if (withZ && high) this.addI(GROUND, el.node, el.vdd / r)
           break
         }
@@ -823,15 +894,15 @@ export class Engine {
           const r = n + el.prog
           const tied = el.progNet === el.gnd || this.ctl[i] === CHG_OFF
           if (withA) {
-            if (tied) A[r * size + r] = 1
+            if (tied) A[this.cell(r, r)] = 1
             else {
               if (el.progNet !== GROUND) {
-                A[el.progNet * size + r] += 1
-                A[r * size + el.progNet] += 1
+                A[this.cell(el.progNet, r)] += 1
+                A[this.cell(r, el.progNet)] += 1
               }
               if (el.gnd !== GROUND) {
-                A[el.gnd * size + r] -= 1
-                A[r * size + el.gnd] -= 1
+                A[this.cell(el.gnd, r)] -= 1
+                A[this.cell(r, el.gnd)] -= 1
               }
             }
             const st = this.ctl[i]
@@ -907,7 +978,7 @@ export class Engine {
    * and the node voltages within tolerance of the step before.
    */
   private settledAfter(dt: number): boolean {
-    if (!this.converged || this.struck || this.ac || this.drifting) return false
+    if (!this.converged || this.struck || this.ac || this.drifting || this.eventful) return false
     const n = this.net.nodes
     for (let i = 0; i < n; i++) if (Math.abs(this.v[i] - this.prevV[i]) > SETTLED_DV) return false
     const elements = this.net.elements
@@ -924,13 +995,15 @@ export class Engine {
   private switchMask(parts: PartReader) {
     let mask = 0
     const elements = this.net.elements
-    for (let i = 0; i < elements.length; i++) {
+    const masked = this.maskElements
+    for (let k = 0; k < masked.length; k++) {
+      const i = masked[k]
       const el = elements[i]
       if (el.kind === "SW") mask = (mask * 31 + (switchClosed(el.closed, parts(this.partKeys[i])) ? 1 : this.arc[i] ? 2 : 0)) | 0
-      else if (el.kind === "GPIO") mask = (mask * 31 + this.gpioState[i]) | 0
+      else if (el.kind === "GPIO") mask = (mask * 31 + this.gpioState[i] + 7 * this.padSteps[i]) | 0
       else if (el.kind === "R" && el.live) mask = (mask * 31 + (this.ohms[i] | 0)) | 0
       else if (el.kind === "BAT") mask = (mask * 31 + this.batStep[i]) | 0
-      else if (el.kind === "CHG" || el.kind === "PROT") mask = (mask * 31 + this.ctl[i]) | 0
+      else if (el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR") mask = (mask * 31 + this.ctl[i]) | 0
     }
     return mask
   }
@@ -967,6 +1040,7 @@ export class Engine {
         this.ohms[i] = ohms
       }
     }
+    if (this.scaledPads.length && this.scalePads()) disturbed = true
     const mask = this.switchMask(parts)
     if (mask !== this.stepMask) disturbed = true
     this.stepMask = mask
@@ -984,18 +1058,60 @@ export class Engine {
     }
 
     this.struck = false
+    this.eventful = false
+    this.failures.length = 0
     this.prevV.set(this.v)
-    // A gap that strikes changes the circuit within the step: solve the step again, from the
-    // same start, with the arc in.
-    for (let strike = 0; strike <= MAX_STRIKES; strike++) {
-      if (strike > 0) this.v.set(this.prevV)
-      this.converged = this.solve(dt, parts)
-      if (strike === MAX_STRIKES || !this.checkStrikes(parts)) break
-      // The arc is a switch state too: the next solve must not reuse the gap's factorization.
+    for (let k = 0; k < this.timers.length; k++) this.burst[this.timers[k]] = 0
+    let left = dt
+    for (let events = 0; ; ) {
+      const controlled = this.subSpan > 0
+      const span = controlled ? Math.min(left, this.subSpan) : left
+      this.theta = controlled && this.subBackward ? 1 : THETA
+      this.subV.set(this.v)
+      if (this.timers.length) this.arcStart.set(this.arc)
+      const wasStruck: boolean = this.struck
+      this.solveFrom(span, parts)
+      if (events >= TMR_MAX_EVENTS * this.timers.length || !this.converged || !this.findTimerEvent()) {
+        if (span === left) break
+        this.updateState(span, parts)
+        this.time += span
+        left -= span
+        this.subSpan = this.nextSubSpan(span, dt)
+        continue
+      }
+      events++
+      this.eventful = true
+      const timer = this.eventTimer
+      this.arc.set(this.arcStart)
+      this.struck = wasStruck
+      if (this.eventFraction * span > TMR_MIN_STEP) {
+        const sub = this.settleEvent(span, parts) * span
+        this.updateState(sub, parts)
+        this.time += sub
+        left -= sub
+      } else this.v.set(this.subV)
+      this.switchTimer(timer, this.time)
       this.stepMask = this.switchMask(parts)
+      this.subSpan = TMR_RESTART * dt
+      this.subBackward = true
+      this.switchedAt = this.time
+      if (left <= TMR_MIN_STEP) {
+        left = 0
+        break
+      }
     }
-
-    this.updateState(dt, parts)
+    if (left > 0) {
+      const controlled = this.subSpan > 0
+      this.updateState(left, parts)
+      this.time += left
+      if (controlled) this.subSpan = this.nextSubSpan(left, dt)
+    }
+    this.theta = THETA
+    for (let k = 0; k < this.timers.length; k++) {
+      const i = this.timers[k]
+      this.capped[i] = this.burst[i] >= TMR_MAX_EVENTS && this.timerPending(i) ? Math.min(255, this.capped[i] + 1) : 0
+      if (this.capped[i] >= TMR_CAPPED_STEPS) this.burstSeen[i] = 1
+    }
     this.updateProbes(dt)
     this.settledRun = this.settledAfter(dt) ? this.settledRun + 1 : 0
     if (this.settledRun >= SETTLED_STEPS) {
@@ -1007,7 +1123,161 @@ export class Engine {
       for (let i = 0; i < n; i++) this.v2[i] = this.msPrimed ? this.ema(this.v2[i], this.v[i] * this.v[i], dt) : this.v[i] * this.v[i]
     }
     this.msPrimed = true
-    this.time += dt
+  }
+
+  private nextSubSpan(span: number, dt: number): number {
+    const next = 2 * span
+    const elements = this.net.elements
+    const { A, size } = this
+    const companion = (c: number) => c / (this.theta * span)
+    const load = (node: number, c: number) => (node === GROUND ? Infinity : Math.max(A[node * size + node] - companion(c), GMIN))
+    let stiff = false
+    for (let k = 0; k < this.capacitors.length && !stiff; k++) {
+      const i = this.capacitors[k]
+      const el = elements[i] as Extract<Resolved, { kind: "R" | "C" | "L" }>
+      const settle = el.value / Math.min(load(el.a, el.value), load(el.b, el.value))
+      const kick = ((1 - THETA) / THETA) * Math.abs(this.capI[i]) * (next / el.value)
+      stiff = settle < next && kick > TMR_KICK
+    }
+    this.subBackward = stiff
+    if (next >= dt || this.time - this.switchedAt > TMR_CONTROLLED_STEPS * dt) {
+      this.subBackward = false
+      return 0
+    }
+    return next
+  }
+
+  private solveFrom(dt: number, parts: PartReader) {
+    for (let strike = 0; strike <= MAX_STRIKES; strike++) {
+      if (strike > 0) this.v.set(this.subV)
+      this.converged = this.solve(dt, parts)
+      if (strike === MAX_STRIKES || !this.checkStrikes(parts)) break
+      this.stepMask = this.switchMask(parts)
+    }
+  }
+
+  private scalePads(): boolean {
+    let changed = false
+    const elements = this.net.elements
+    for (let k = 0; k < this.scaledPads.length; k++) {
+      const i = this.scaledPads[k]
+      const el = elements[i] as Pad
+      const supply = this.vol(el.vddNet!, this.v) - (el.gndNet === undefined ? 0 : this.vol(el.gndNet, this.v))
+      const scale = (el.ohmsAt - CMOS_VT) / Math.max(supply - CMOS_VT, 0.2)
+      const steps = Math.round(Math.log(scale) / CMOS_STEP)
+      if (steps === this.padSteps[i]) continue
+      this.padSteps[i] = steps
+      this.ohms[i] = el.ohms * Math.exp(steps * CMOS_STEP)
+      changed = true
+    }
+    return changed
+  }
+
+  private timerMargins(el: Timer, v: Float64Array, out: Float64Array) {
+    const gnd = this.vol(el.gnd, v)
+    out[0] = this.vol(el.vcc, v) - gnd - NE555.operating
+    out[1] = NE555.resetThreshold - (this.vol(el.reset, v) - gnd)
+    out[2] = this.vol(el.lo, v) - this.vol(el.trig, v)
+    out[3] = this.vol(el.thres, v) - this.vol(el.ctrl, v)
+  }
+
+  private timerState(st: number, m: Float64Array): number {
+    if (m[0] <= 0) return 0
+    const high = st & TMR_POWERED ? (st & TMR_HIGH) !== 0 : false
+    return TMR_POWERED | (nextLatch(high, m[1] > 0, m[2] > 0, m[3] > 0) ? TMR_HIGH : 0)
+  }
+
+  private timerPending(i: number): boolean {
+    this.timerMargins(this.net.elements[i] as Timer, this.v, this.marginsAt)
+    return this.timerState(this.ctl[i], this.marginsAt) !== this.ctl[i]
+  }
+
+  private findTimerEvent(): boolean {
+    const elements = this.net.elements
+    const start = this.marginsStart
+    const end = this.marginsEnd
+    const at = this.marginsAt
+    let best = Infinity
+    for (let t = 0; t < this.timers.length; t++) {
+      const i = this.timers[t]
+      if (this.burst[i] >= TMR_MAX_EVENTS) continue
+      const el = elements[i] as Timer
+      const st = this.ctl[i]
+      this.timerMargins(el, this.subV, start)
+      if (this.timerState(st, start) !== st) {
+        if (best > 0) {
+          best = 0
+          this.eventTimer = i
+          this.eventMargin = -1
+        }
+        continue
+      }
+      this.timerMargins(el, this.v, end)
+      for (let k = 0; k < TMR_MARGINS; k++) {
+        if (start[k] > 0 === end[k] > 0) continue
+        const f = start[k] / (start[k] - end[k])
+        if (f >= best) continue
+        for (let j = 0; j < TMR_MARGINS; j++) at[j] = j === k ? end[j] : start[j] + (end[j] - start[j]) * f
+        if (this.timerState(st, at) === st) continue
+        best = f
+        this.eventTimer = i
+        this.eventMargin = k
+        this.eventFrom = start[k]
+        this.eventTo = end[k]
+      }
+    }
+    this.eventFraction = best
+    return best < Infinity
+  }
+
+  private settleEvent(left: number, parts: PartReader): number {
+    const el = this.net.elements[this.eventTimer] as Timer
+    const k = this.eventMargin
+    let lo = 0
+    let hi = 1
+    let mLo = this.eventFrom
+    let mHi = this.eventTo
+    const crossed = (m: number) => m > 0 === mHi > 0
+    let f = this.eventFraction
+    for (let round = 0; ; round++) {
+      this.v.set(this.subV)
+      this.arc.set(this.arcStart)
+      this.solveFrom(f * left, parts)
+      this.timerMargins(el, this.v, this.marginsAt)
+      const m = this.marginsAt[k]
+      if (crossed(m)) {
+        if (Math.abs(m) <= TMR_TOLERANCE || round >= TMR_REFINE) return f
+        hi = f
+        mHi = m
+      } else {
+        lo = f
+        mLo = m
+        if (round >= TMR_REFINE) {
+          this.v.set(this.subV)
+          this.arc.set(this.arcStart)
+          this.solveFrom(hi * left, parts)
+          return hi
+        }
+      }
+      f = lo + (hi - lo) * (mLo / (mLo - mHi))
+      if (!(f > lo && f < hi)) f = (lo + hi) / 2
+    }
+  }
+
+  private switchTimer(i: number, time: number) {
+    const el = this.net.elements[i] as Timer
+    this.timerMargins(el, this.v, this.marginsAt)
+    const st = this.ctl[i]
+    const next = this.timerState(st, this.marginsAt)
+    if (next === st) return
+    const t = i * 3
+    if (!(st & TMR_HIGH) && next & TMR_HIGH) {
+      this.ctlT[t] = this.ctlT[t + 1]
+      this.ctlT[t + 1] = time
+    } else if (st & TMR_HIGH && !(next & TMR_HIGH)) this.ctlT[t + 2] = time
+    this.ctl[i] = next
+    if ((st ^ next) & TMR_HIGH) this.onTimer?.(el.object, (next & TMR_HIGH) !== 0, time)
+    this.burst[i]++
   }
 
   /**
@@ -1018,11 +1288,13 @@ export class Engine {
    */
   private checkStrikes(parts: PartReader): boolean {
     const elements = this.net.elements
+    const strikable = this.strikeElements
     let struck = false
     let worst = 1
-    for (let i = 0; i < elements.length; i++) {
+    for (let k = 0; k < strikable.length; k++) {
+      const i = strikable[k]
       const el = elements[i]
-      if (el.kind !== "SW" || this.arc[i] || el.strike === Infinity) continue
+      if (el.kind !== "SW" || this.arc[i]) continue
       if (switchClosed(el.closed, parts(this.partKeys[i]))) continue
       const vd = Math.abs(this.vol(el.a, this.v) - this.vol(el.b, this.v))
       if (vd < el.strike) continue
@@ -1034,7 +1306,7 @@ export class Engine {
     }
     if (!struck) return false
     const n = this.net.nodes
-    for (let k = 0; k < n; k++) this.strikeV[k] = this.prevV[k] + (this.v[k] - this.prevV[k]) * worst
+    for (let k = 0; k < n; k++) this.strikeV[k] = this.subV[k] + (this.v[k] - this.subV[k]) * worst
     this.struck = true
     return true
   }
@@ -1045,8 +1317,10 @@ export class Engine {
     const n = this.net.nodes
     const elements = this.net.elements
     // Junction voltages start from the previous solution.
+    const junctions = this.junctionElements
     if (!this.linear) {
-      for (let i = 0; i < elements.length; i++) {
+      for (let k = 0; k < junctions.length; k++) {
+        const i = junctions[k]
         const el = elements[i]
         if (el.kind === "D") {
           const nvt = el.n * VT
@@ -1057,7 +1331,7 @@ export class Engine {
           const s = el.polarity
           this.jA[i] = Math.min(Q_VCRIT, s * (this.vol(el.b, this.v) - this.vol(el.e, this.v)))
           this.jB[i] = Math.min(Q_VCRIT, s * (this.vol(el.b, this.v) - this.vol(el.c, this.v)))
-        }
+        } else if (el.kind === "TMR") this.jA[i] = this.vol(el.vcc, this.v) - this.vol(el.out, this.v)
       }
     }
     let converged = false
@@ -1082,14 +1356,15 @@ export class Engine {
         return true
       }
       this.v.set(memo.v)
-      for (let i = 0; i < elements.length; i++) {
+      for (let k = 0; k < junctions.length; k++) {
+        const i = junctions[k]
         const el = elements[i]
         if (el.kind === "D") this.jA[i] = this.vol(el.anode, this.v) - this.vol(el.cathode, this.v)
         else if (el.kind === "Q") {
           const sg = el.polarity
           this.jA[i] = sg * (this.vol(el.b, this.v) - this.vol(el.e, this.v))
           this.jB[i] = sg * (this.vol(el.b, this.v) - this.vol(el.c, this.v))
-        }
+        } else if (el.kind === "TMR") this.jA[i] = this.vol(el.vcc, this.v) - this.vol(el.out, this.v)
       }
     }
     guess.set(this.v)
@@ -1114,7 +1389,9 @@ export class Engine {
 
         this.stampLinear(dt, parts, true, true)
 
-        for (let i = 0; i < elements.length; i++) {
+        const nonlinear = this.nonlinearElements
+        for (let k = 0; k < nonlinear.length; k++) {
+          const i = nonlinear[k]
           const el = elements[i]
           if (el.kind === "D") {
             const nvt = el.n * VT
@@ -1173,6 +1450,8 @@ export class Engine {
             if (this.regulator(i, el.in, el.bat, el.gnd, n + el.index, el.value, 0, imax, st === CHG_TRICKLING || st === CHG_CHARGING)) clamped = true
           } else if (el.kind === "BOOST") {
             if (this.boost(i, el)) clamped = true
+          } else if (el.kind === "TMR") {
+            if (this.timer(el, i)) clamped = true
           } else if (el.kind === "M") {
             const s = el.polarity
             // Below zero Vds the roles of drain and source swap; nothing else changes.
@@ -1229,8 +1508,53 @@ export class Engine {
     return converged
   }
 
+  private addBranch(a: number, b: number, v: number, out: Float64Array) {
+    this.addG(a, b, out[1])
+    this.addI(a, b, out[0] - out[1] * v)
+  }
+
+  private timer(el: Timer, i: number): boolean {
+    const g = (k: number) => (k === GROUND ? 0 : this.guess[k])
+    const out = this.branchOut
+    const st = this.ctl[i]
+    const high = (st & TMR_HIGH) !== 0
+    const vcc = g(el.vcc)
+    const gnd = g(el.gnd)
+    const supply = vcc - gnd
+    quiescent(supply, high, out)
+    this.addBranch(el.vcc, el.gnd, supply, out)
+    if (!(st & TMR_POWERED)) return false
+    let clamped = false
+    if (high) {
+      const raw = vcc - g(el.out)
+      const drop = pnjlim(raw, this.jA[i], TMR_SOURCE_VT, TMR_SOURCE_KNEE)
+      if (Math.abs(drop - raw) > ABS_TOL) clamped = true
+      this.jA[i] = drop
+      outputSource(drop, out)
+      this.addBranch(el.vcc, el.out, drop, out)
+    } else {
+      const vo = g(el.out) - gnd
+      outputSink(vo, supply, out)
+      this.addBranch(el.out, el.gnd, vo, out)
+      const vd = g(el.dis) - gnd
+      dischargeSink(vd, supply, out)
+      this.addBranch(el.dis, el.gnd, vd, out)
+    }
+    const trig = vcc - g(el.trig)
+    bias(NE555.triggerBias * supplyShare(supply), trig, out)
+    this.addBranch(el.vcc, el.trig, trig, out)
+    const thres = g(el.thres) - gnd
+    bias(NE555.thresholdBias * supplyShare(supply), thres, out)
+    this.addBranch(el.thres, el.gnd, thres, out)
+    const gr = (NE555.resetGrounded + NE555.resetAtSupply) / supply
+    this.addI(el.vcc, el.reset, NE555.resetGrounded)
+    this.addTerm(el.reset, el.reset, el.gnd, gr)
+    this.addTerm(el.vcc, el.reset, el.gnd, -gr)
+    return clamped
+  }
+
   private regulator(i: number, inN: number, outN: number, gndN: number, r: number, value: number, dropout: number, imax: number, enabled: boolean): boolean {
-    const { A, z, x, size } = this
+    const { A, z, x } = this
     const g = (k: number) => (k === GROUND ? 0 : this.guess[k])
     let clamped = false
     const vin = g(inN) - g(gndN)
@@ -1257,21 +1581,21 @@ export class Engine {
     if (mode !== prev) clamped = true
     this.rRegion[i] = mode
     // Through current x[r] leaves `in` and arrives at `out`.
-    if (inN !== GROUND) A[inN * size + r] += 1
-    if (outN !== GROUND) A[outN * size + r] -= 1
+    if (inN !== GROUND) A[this.cell(inN, r)] += 1
+    if (outN !== GROUND) A[this.cell(outN, r)] -= 1
     switch (mode) {
       // vout = Vset − R·x (regulating) or vout = vin − dropout − R·x (dropout): a little
       // sag with load, so two regulators on one rail share instead of fighting.
       case REG_REGULATE:
-        if (outN !== GROUND) A[r * size + outN] += 1
-        if (gndN !== GROUND) A[r * size + gndN] -= 1
-        A[r * size + r] += R_REG
+        if (outN !== GROUND) A[this.cell(r, outN)] += 1
+        if (gndN !== GROUND) A[this.cell(r, gndN)] -= 1
+        A[this.cell(r, r)] += R_REG
         z[r] = value
         break
       case REG_DROPOUT:
-        if (outN !== GROUND) A[r * size + outN] += 1
-        if (inN !== GROUND) A[r * size + inN] -= 1
-        A[r * size + r] += R_REG
+        if (outN !== GROUND) A[this.cell(r, outN)] += 1
+        if (inN !== GROUND) A[this.cell(r, inN)] -= 1
+        A[this.cell(r, r)] += R_REG
         z[r] = -dropout
         break
       case REG_LIMIT: {
@@ -1300,21 +1624,21 @@ export class Engine {
           f = imax * (1 - e)
           gk = Math.max(1e-6, (imax / vsat) * e)
         }
-        A[r * size + r] = 1
-        if (inN !== GROUND) A[r * size + inN] -= gk
-        if (outN !== GROUND) A[r * size + outN] += gk
+        A[this.cell(r, r)] = 1
+        if (inN !== GROUND) A[this.cell(r, inN)] -= gk
+        if (outN !== GROUND) A[this.cell(r, outN)] += gk
         z[r] = f - gk * d
         break
       }
       default:
-        A[r * size + r] = 1
+        A[this.cell(r, r)] = 1
         z[r] = 0
     }
     return clamped
   }
 
   private boost(i: number, el: Extract<Resolved, { kind: "BOOST" }>): boolean {
-    const { A, z, x, size } = this
+    const { A, z, x } = this
     const n = this.net.nodes
     const g = (k: number) => (k === GROUND ? 0 : this.guess[k])
     const r = n + el.index
@@ -1351,13 +1675,13 @@ export class Engine {
     if (this.frozen) mode = prev
     this.rRegion[i] = mode
     if (mode === BOOST_UVLO || mode === BOOST_IDLE || (mode === BOOST_LIMIT && headroom <= 0)) {
-      A[r * size + r] = 1
+      A[this.cell(r, r)] = 1
       z[r] = 0
       if (mode === BOOST_IDLE) this.addI(el.in, el.gnd, el.iq)
       return mode !== prev || clamped
     }
-    if (el.out !== GROUND) A[el.out * size + r] -= 1
-    if (el.gnd !== GROUND) A[el.gnd * size + r] += 1
+    if (el.out !== GROUND) A[this.cell(el.out, r)] -= 1
+    if (el.gnd !== GROUND) A[this.cell(el.gnd, r)] += 1
     let a1 = 0
     let a2 = 1
     let a3 = 0
@@ -1370,16 +1694,16 @@ export class Engine {
     this.boostInput(el.in, 1, el, r, a1, a2, a3, c + el.iq)
     this.boostInput(el.gnd, -1, el, r, a1, a2, a3, c + el.iq)
     if (mode === BOOST_REGULATE) {
-      if (el.fb !== GROUND) A[r * size + el.fb] += 1
-      if (el.gnd !== GROUND) A[r * size + el.gnd] -= 1
-      A[r * size + r] += BOOST_DROOP
+      if (el.fb !== GROUND) A[this.cell(r, el.fb)] += 1
+      if (el.gnd !== GROUND) A[this.cell(r, el.gnd)] -= 1
+      A[this.cell(r, r)] += BOOST_DROOP
       z[r] = el.vref
     } else {
       const slope = (el.ilim / BOOST_FOLD) * fold
-      if (el.out !== GROUND) A[r * size + el.out] += a1
-      if (el.gnd !== GROUND) A[r * size + el.gnd] -= a1 + a3 - slope
-      if (bal !== GROUND) A[r * size + bal] += a3 - slope
-      A[r * size + r] += a2
+      if (el.out !== GROUND) A[this.cell(r, el.out)] += a1
+      if (el.gnd !== GROUND) A[this.cell(r, el.gnd)] -= a1 + a3 - slope
+      if (bal !== GROUND) A[this.cell(r, bal)] += a3 - slope
+      A[this.cell(r, r)] += a2
       z[r] = limit - slope * vi - c
     }
     return mode !== prev || clamped
@@ -1387,12 +1711,12 @@ export class Engine {
 
   private boostInput(node: number, s: number, el: Extract<Resolved, { kind: "BOOST" }>, r: number, a1: number, a2: number, a3: number, c: number) {
     if (node === GROUND) return
-    const { A, z, size } = this
-    if (el.out !== GROUND) A[node * size + el.out] += s * a1
-    if (el.gnd !== GROUND) A[node * size + el.gnd] -= s * (a1 + a3)
+    const { A, z } = this
+    if (el.out !== GROUND) A[this.cell(node, el.out)] += s * a1
+    if (el.gnd !== GROUND) A[this.cell(node, el.gnd)] -= s * (a1 + a3)
     const bal = el.vcc ?? el.in
-    if (bal !== GROUND) A[node * size + bal] += s * a3
-    A[node * size + r] += s * a2
+    if (bal !== GROUND) A[this.cell(node, bal)] += s * a3
+    A[this.cell(node, r)] += s * a2
     z[node] -= s * c
   }
 
@@ -1401,14 +1725,20 @@ export class Engine {
   private frozen = false
   private remember(mask: number) {
     const live = this.liveElements
-    const point: OperatingPoint = {
-      v: Float64Array.from(this.v),
-      x: Float64Array.from(this.x),
-      region: Uint8Array.from(this.rRegion),
-      jA: Float64Array.from(this.jA),
-      jB: Float64Array.from(this.jB),
-      live: Float64Array.from(live, (i) => (this.net.elements[i].kind === "GPIO" ? this.gpioVolts[i] : this.ohms[i])),
+    const point = this.memo.get(mask) ?? {
+      v: new Float64Array(this.v.length),
+      x: new Float64Array(this.x.length),
+      region: new Uint8Array(this.rRegion.length),
+      jA: new Float64Array(this.jA.length),
+      jB: new Float64Array(this.jB.length),
+      live: new Float64Array(live.length),
     }
+    point.v.set(this.v)
+    point.x.set(this.x)
+    point.region.set(this.rRegion)
+    point.jA.set(this.jA)
+    point.jB.set(this.jB)
+    for (let k = 0; k < live.length; k++) point.live[k] = this.liveValue(live[k])
     this.memo.delete(mask)
     this.memo.set(mask, point)
     if (this.memo.size > MEMO_POINTS) this.memo.delete(this.memo.keys().next().value!)
@@ -1416,12 +1746,12 @@ export class Engine {
   /** The mask rounds live resistances and leaves DAC voltages out: those must match exactly. */
   private memoMatches(point: OperatingPoint): boolean {
     const live = this.liveElements
-    for (let k = 0; k < live.length; k++) {
-      const i = live[k]
-      const now = this.net.elements[i].kind === "GPIO" ? this.gpioVolts[i] : this.ohms[i]
-      if (point.live[k] !== now) return false
-    }
+    for (let k = 0; k < live.length; k++) if (point.live[k] !== this.liveValue(live[k])) return false
     return true
+  }
+
+  private liveValue(i: number): number {
+    return this.net.elements[i].kind === "GPIO" ? this.gpioVolts[i] : this.ohms[i]
   }
 
   /**
@@ -1569,7 +1899,6 @@ export class Engine {
     const elements = this.net.elements
     const tc = this.termCurrent
     tc.fill(0)
-    this.failures.length = 0
     if (this.struck) this.strikeRatings()
 
     for (let i = 0; i < elements.length; i++) {
@@ -1586,7 +1915,7 @@ export class Engine {
         }
         case "C": {
           const vNow = this.vol(el.a, this.v) - this.vol(el.b, this.v)
-          const cur = (el.value / (THETA * dt)) * (vNow - this.capV[i]) - ((1 - THETA) / THETA) * this.capI[i]
+          const cur = (el.value / (this.theta * dt)) * (vNow - this.capV[i]) - ((1 - this.theta) / this.theta) * this.capI[i]
           tc[this.termOf[base]] += cur
           tc[this.termOf[base + 1]] -= cur
           this.capV[i] = vNow
@@ -1596,7 +1925,7 @@ export class Engine {
         }
         case "L": {
           const vd = this.vol(el.a, this.v) - this.vol(el.b, this.v)
-          const cur = this.indI[i] + (dt / el.value) * (THETA * vd + (1 - THETA) * this.indV[i])
+          const cur = this.indI[i] + (dt / el.value) * (this.theta * vd + (1 - this.theta) * this.indV[i])
           this.indI[i] = cur
           this.indV[i] = vd
           tc[this.termOf[base]] += cur
@@ -1699,23 +2028,25 @@ export class Engine {
         case "GPIO": {
           const st = this.gpioState[i]
           const vn = this.vol(el.node, this.v)
+          const rated = el.gndNet === undefined ? vn : vn - this.vol(el.gndNet, this.v)
           if (st === 0) {
-            this.record(el, i, dt, 0, vn, 0)
+            this.record(el, i, dt, 0, vn, 0, rated)
             break
           }
           if (st === GPIO_VOLTS) {
             const cur = (vn - this.gpioVolts[i]) / R_DAC
             tc[this.termOf[base]] += cur
-            this.record(el, i, dt, cur, vn, Math.abs(cur * cur * R_DAC))
+            this.record(el, i, dt, cur, vn, Math.abs(cur * cur * R_DAC), rated)
             break
           }
-          const r = st <= 2 ? R_GPIO : R_PULL
+          const r = st <= 2 ? this.ohms[i] : R_PULL
           const high = st === 1 || st === 3
-          const vdd = high ? (el.vddNet !== undefined ? this.vol(el.vddNet, this.v) : el.vdd) : 0
-          const cur = (vn - vdd) / r
+          const rail = high ? (el.vddNet !== undefined ? this.vol(el.vddNet, this.v) : el.vdd) : el.gndNet !== undefined ? this.vol(el.gndNet, this.v) : 0
+          const cur = (vn - rail) / r
           tc[this.termOf[base]] += cur
           if (high && el.vddNet !== undefined) tc[this.termOf[base + 1]] -= cur
-          this.record(el, i, dt, cur, vn, Math.abs(cur * cur * r))
+          if (!high && el.gndNet !== undefined) tc[this.termOf[base + 2]] -= cur
+          this.record(el, i, dt, cur, vn, Math.abs(cur * cur * r), rated)
           break
         }
         case "REG": {
@@ -1784,6 +2115,9 @@ export class Engine {
           this.record(el, i, dt, out, vo, Math.max(0, vi * iin - vo * out))
           break
         }
+        case "TMR":
+          this.timerState555(el, i, dt, base)
+          break
         case "D": {
           const vd = this.vol(el.anode, this.v) - this.vol(el.cathode, this.v)
           const nvt = el.n * VT
@@ -1839,6 +2173,55 @@ export class Engine {
         }
       }
     }
+  }
+
+  private timerState555(el: Timer, i: number, dt: number, base: number) {
+    const tc = this.termCurrent
+    const out = this.branchOut
+    const st = this.ctl[i]
+    const high = (st & TMR_HIGH) !== 0
+    const v = this.v
+    const vcc = this.vol(el.vcc, v)
+    const gnd = this.vol(el.gnd, v)
+    const supply = vcc - gnd
+    quiescent(supply, high, out)
+    const iq = out[0]
+    const vo = this.vol(el.out, v) - gnd
+    const vd = this.vol(el.dis, v) - gnd
+    const vtrig = this.vol(el.trig, v)
+    const vthres = this.vol(el.thres, v) - gnd
+    const vreset = this.vol(el.reset, v) - gnd
+    let source = 0
+    let sink = 0
+    let discharge = 0
+    let trig = 0
+    let thres = 0
+    let reset = 0
+    if (st & TMR_POWERED) {
+      if (high) {
+        outputSource(supply - vo, out)
+        source = out[0]
+      } else {
+        outputSink(vo, supply, out)
+        sink = out[0]
+        dischargeSink(vd, supply, out)
+        discharge = out[0]
+      }
+      bias(NE555.triggerBias * supplyShare(supply), vcc - vtrig, out)
+      trig = out[0]
+      bias(NE555.thresholdBias * supplyShare(supply), vthres, out)
+      thres = out[0]
+      reset = NE555.resetGrounded - ((NE555.resetGrounded + NE555.resetAtSupply) / supply) * vreset
+    }
+    tc[this.termOf[base]] += iq + source + trig + reset
+    tc[this.termOf[base + 1]] -= iq + sink + discharge + thres
+    tc[this.termOf[base + 2]] += sink - source
+    tc[this.termOf[base + 3]] += discharge
+    tc[this.termOf[base + 4]] -= trig
+    tc[this.termOf[base + 5]] += thres
+    tc[this.termOf[base + 6]] -= reset
+    const power = iq * supply + source * (supply - vo) + sink * vo + discharge * vd + trig * (vcc - vtrig) + thres * vthres + reset * (supply - vreset)
+    this.record(el, i, dt, source - sink, supply, power)
   }
 
   private charger(el: Extract<Resolved, { kind: "CHG" }>, i: number, dt: number, vin: number, vb: number, ich: number, iprog: number) {
@@ -1913,7 +2296,7 @@ export class Engine {
       iLoad = Math.sqrt(this.msI[i])
       pLoad = this.msP[i]
     }
-    const lim = el.limits
+    const lim = this.limitsOf[i]
     if (!lim) {
       this.rLoad[i] = -1
       this.rRatio[i] = 0
@@ -1939,7 +2322,7 @@ export class Engine {
       if (lim.surge !== undefined ? Math.abs(cur) > lim.surge : iLoad > SURGE * lim.current)
         return lim.surge !== undefined ? this.fail(el, lim.fail, "surge current", Math.abs(cur), lim.surge, "A") : this.fail(el, lim.fail, "current", iLoad, lim.current, "A")
       const r = Math.abs(cur) / lim.current
-      heating = el.kind === "D" ? r : r * r
+      heating = this.isDiode[i] ? r : r * r
       actual = iLoad
       rated = lim.current
     }
@@ -1953,7 +2336,11 @@ export class Engine {
         unit = "W"
       }
     }
-    const heat = this.stress[i] + (heating - this.stress[i]) * -Math.expm1(-dt / lim.tau)
+    if (this.heatDt[i] !== dt) {
+      this.heatDt[i] = dt
+      this.heatShare[i] = -Math.expm1(-dt / lim.tau)
+    }
+    const heat = this.stress[i] + (heating - this.stress[i]) * this.heatShare[i]
     this.stress[i] = heat
     this.rRatio[i] = heating
     if (heat > 1) this.fail(el, lim.fail, what, actual, rated, unit)
@@ -2001,7 +2388,7 @@ export class Engine {
           mag = Math.abs(this.vol(el.d, v) - this.vol(el.s, v))
           break
         case "GPIO":
-          mag = Math.abs(this.vol(el.node, v))
+          mag = Math.abs(this.vol(el.node, v) - (el.gndNet === undefined ? 0 : this.vol(el.gndNet, v)))
           break
         default:
           continue
@@ -2065,6 +2452,8 @@ export class Engine {
         reading.extra = { State: off.length ? off.join(", ") : "normal", "CS drop": formatSI(this.rVbe[i], "V") }
       } else if (el.kind === "BOOST") {
         reading.extra = { mode: BOOST_MODES[this.rRegion[i]], "Input current": formatSI(this.rIb[i], "A") }
+      } else if (el.kind === "TMR") {
+        reading.extra = this.timerReadout(el, i)
       } else if (el.kind === "V" && el.amplitude > 0) {
         reading.extra = { Frequency: formatSI(el.frequency, "Hz") }
         if (el.shape === "pulse") reading.extra.Duty = `${Math.round(el.duty * 100)} %`
@@ -2104,6 +2493,40 @@ export class Engine {
     })
   }
 
+  private timerReadout(el: Timer, i: number): Record<string, string> {
+    const st = this.ctl[i]
+    const gnd = this.vol(el.gnd, this.v)
+    const supply = this.vol(el.vcc, this.v) - gnd
+    const extra: Record<string, string> = {
+      Output: !(st & TMR_POWERED) ? "off" : st & TMR_HIGH ? "high" : "low",
+      Discharge: st & TMR_POWERED && !(st & TMR_HIGH) ? "on" : "off",
+      Thresholds: `${formatSI(this.vol(el.lo, this.v) - gnd, "V")} / ${formatSI(this.vol(el.ctrl, this.v) - gnd, "V")}`,
+    }
+    const t = i * 3
+    const [rise0, rise1, fall] = [this.ctlT[t], this.ctlT[t + 1], this.ctlT[t + 2]]
+    const period = rise1 - rise0
+    if (period > 0 && this.time - rise1 < 3 * period) {
+      const high = fall > rise0 && fall < rise1 ? fall - rise0 : fall > rise1 ? fall - rise1 : NaN
+      extra.Frequency = formatSI(1 / period, "Hz")
+      extra.Period = formatSI(period, "s")
+      if (high > 0) extra.Duty = `${((high / period) * 100).toFixed(1)} %`
+    } else if (fall > rise1) extra["Last pulse"] = formatSI(fall - rise1, "s")
+    if (st & TMR_POWERED && supply < NE555.minimum) extra.Supply = `below the ${formatSI(NE555.minimum, "V")} minimum`
+    else if (supply > NE555.maximum) extra.Supply = `above the ${formatSI(NE555.maximum, "V")} maximum`
+    const outside = (
+      [
+        ["TRIG", el.trig],
+        ["THRES", el.thres],
+        ["RESET", el.reset],
+        ["CONT", el.ctrl],
+      ] as const
+    ).filter(([, node]) => this.vol(node, this.v) - gnd > supply + TMR_INPUT_MARGIN || this.vol(node, this.v) - gnd < -TMR_INPUT_MARGIN)
+    if (outside.length) extra.Inputs = `${outside.map(([name]) => name).join(", ")} outside 0 V…VCC, the absolute maximum`
+    if (this.burstSeen[i]) extra.Timing = "too fast for the solver: transitions were deferred"
+    this.burstSeen[i] = 0
+    return extra
+  }
+
   /** Current leaving the net into an element, per terminal node key. */
   terminalCurrents(): Map<string, number> {
     const out = new Map<string, number>()
@@ -2116,71 +2539,19 @@ export class Engine {
     return { current: this.termCurrent, index: this.termIndex, keys: this.termKeys }
   }
 
-  // --- dense linear algebra ---
-
-  /** LU factorization of `A` with partial pivoting, into `lu`. False if singular. */
-  private factorize(): boolean {
-    const { A, lu, pivot, size: N } = this
-    lu.set(A)
-    for (let col = 0; col < N; col++) {
-      let piv = col
-      let best = Math.abs(lu[col * N + col])
-      for (let r = col + 1; r < N; r++) {
-        const val = Math.abs(lu[r * N + col])
-        if (val > best) {
-          best = val
-          piv = r
-        }
-      }
-      if (best < 1e-18) {
-        this.luValid = false
-        return false
-      }
-      pivot[col] = piv
-      if (piv !== col) {
-        for (let c = 0; c < N; c++) {
-          const t = lu[col * N + c]
-          lu[col * N + c] = lu[piv * N + c]
-          lu[piv * N + c] = t
-        }
-      }
-      const d = lu[col * N + col]
-      for (let r = col + 1; r < N; r++) {
-        const f = lu[r * N + col] / d
-        // Stored in the eliminated slot: the multiplier the right-hand side needs later.
-        lu[r * N + col] = f
-        if (f === 0) continue
-        for (let c = col + 1; c < N; c++) lu[r * N + c] -= f * lu[col * N + c]
-      }
-    }
-    this.luValid = true
-    return true
+  private cell(row: number, col: number): number {
+    const at = row * this.size + col
+    this.lu.touch(at)
+    return at
   }
 
-  /** Forward and back substitution of `z` through the stored factors, into `x`. */
+  private factorize(): boolean {
+    this.luValid = this.lu.factorize(this.A)
+    return this.luValid
+  }
+
   private substitute(): boolean {
-    const { lu, pivot, z, x, size: N } = this
-    if (!this.luValid) return false
-    // Every interchange first: the stored multipliers sit in their final, permuted rows,
-    // so eliminating before the later swaps would mix rows that no longer belong together.
-    for (let col = 0; col < N; col++) {
-      const piv = pivot[col]
-      if (piv !== col) {
-        const t = z[col]
-        z[col] = z[piv]
-        z[piv] = t
-      }
-    }
-    for (let col = 0; col < N; col++) {
-      const b = z[col]
-      for (let r = col + 1; r < N; r++) z[r] -= lu[r * N + col] * b
-    }
-    for (let r = N - 1; r >= 0; r--) {
-      let s = z[r]
-      for (let c = r + 1; c < N; c++) s -= lu[r * N + c] * x[c]
-      x[r] = s / lu[r * N + r]
-    }
-    return true
+    return this.luValid && this.lu.solve(this.z, this.x)
   }
 }
 

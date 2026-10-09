@@ -34,6 +34,7 @@ export type PinDef = {
   /** Physical connector and pin number. */
   connector?: string
   connectorPin?: number
+  inverted?: boolean
   note?: string
 }
 
@@ -217,7 +218,7 @@ export type Element =
   /** Ideal transformer: V(s1, s2) = ratio · V(p1, p2), no losses or magnetising current. */
   | { kind: "XFMR"; p1: NodeRef; p2: NodeRef; s1: NodeRef; s2: NodeRef; ratio: Value; limits?: Limits }
   /** Shockley diode. `vf` is the forward drop at 10 mA; `zener` the reverse breakdown voltage. */
-  | { kind: "D"; anode: NodeRef; cathode: NodeRef; vf?: Value; zener?: Value; part?: string; limits?: Limits }
+  | { kind: "D"; anode: NodeRef; cathode: NodeRef; vf?: Value; zener?: Value; part?: string; hidden?: boolean; limits?: Limits }
   /**
    * `limits.voltage` is Vce max, `current` Ic max, `power` total dissipation. `rc` is the ohmic
    * collector resistance in series with the junction model, which sets Vce(sat) above the
@@ -247,6 +248,8 @@ export type Element =
       /** Supply the driver and pulls switch to: a rail node (follows the real supply), else a fixed voltage. */
       vddNode?: NodeRef
       vdd?: number
+      gndNode?: NodeRef
+      drive?: CmosDrive
       limits?: Limits
     }
   /**
@@ -258,10 +261,13 @@ export type Element =
   | { kind: "CHG"; in: NodeRef; bat: NodeRef; gnd: NodeRef; prog: NodeRef; chrg?: NodeRef; stdby?: NodeRef; ce?: NodeRef; temp?: NodeRef; value?: Value; limits?: Limits }
   | { kind: "PROT"; vdd: NodeRef; vss: NodeRef; cs: NodeRef; od: NodeRef; oc: NodeRef; chip: ProtChip; limits?: Limits }
   | { kind: "BOOST"; in: NodeRef; out?: NodeRef; gnd: NodeRef; fb: NodeRef; vcc?: NodeRef; en?: NodeRef; vref?: Value; eff?: Value; ilim?: Value; uvlo?: Value; iq?: Value; limits?: Limits }
+  | { kind: "TMR"; vcc: NodeRef; gnd: NodeRef; trig: NodeRef; thres: NodeRef; ctrl: NodeRef; lo: NodeRef; reset: NodeRef; out: NodeRef; dis: NodeRef; limits?: Limits }
   /** Nodes that are the same conductor inside the component (a ground rail). */
   | { kind: "SHORT"; nodes: NodeRef[] }
 
 export type ProtChip = "dw01a" | "dw03"
+
+export type CmosDrive = { ohms: Value; at: Value }
 
 /** An editable per-instance property shown in the inspector. */
 export type PropField =

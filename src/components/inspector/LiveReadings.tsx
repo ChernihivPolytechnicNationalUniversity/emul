@@ -30,6 +30,7 @@ const KIND_LABEL: Record<Reading["kind"], string> = {
   CHG: "Charger",
   PROT: "Protection",
   BOOST: "Boost converter",
+  TMR: "Timer",
 }
 
 /** Below this an element on a board counts as idle and is left out of the inspector. */
