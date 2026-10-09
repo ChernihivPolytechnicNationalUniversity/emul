@@ -14,6 +14,18 @@ export type Direction = Side | "top-right" | "bottom-right" | "bottom-left" | "t
 /** A pin as it sits on the field: rotated coordinates, and a direction that may be diagonal. */
 export type PlacedPin = Omit<PinDef, "side" | "labelAt"> & { side: Direction; labelAt: Direction }
 
+export type Facing = Direction | "any"
+
+export const facingOf = (pin: Pick<PlacedPin, "side" | "kind">): Facing => (pin.kind === "node" ? "any" : pin.side)
+
+function heading(facing: Facing, from: Point, to: Point): Direction {
+  if (facing !== "any") return facing
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  if (Math.abs(dx) >= Math.abs(dy)) return dx < 0 ? "left" : "right"
+  return dy < 0 ? "top" : "bottom"
+}
+
 const DIRECTIONS: Direction[] = [
   "top",
   "top-right",
@@ -216,7 +228,7 @@ export const DIR: Record<Direction, Point> = {
  * Which axis a wire continues along after leaving the pin. A diagonal pin has no axis of its
  * own, so it follows whichever way the other end lies: `to` is the point it is heading for.
  */
-function isHorizontal(s: Direction, from?: Point, to?: Point) {
+function isHorizontal(s: Facing, from?: Point, to?: Point) {
   if (s === "left" || s === "right") return true
   if (s === "top" || s === "bottom") return false
   if (!from || !to) return true
@@ -252,21 +264,22 @@ const stubEnd = (p: Point, side: Direction, stub: number, grid: number): Point =
  */
 export function routeWire(
   a: Point,
-  aSide: Direction,
+  aSide: Facing,
   aStub: number,
   b: Point,
-  bSide: Direction,
+  bSide: Facing,
   bStub: number,
   grid: number,
   points: Point[] = [],
   avoid: Rect[] = [],
   own: Rect[] = [],
 ): Route {
-  const a1 = stubEnd(a, aSide, aStub, grid)
-  const b1 = stubEnd(b, bSide, bStub, grid)
+  const aDir = heading(aSide, a, points[0] ?? b)
+  const a1 = stubEnd(a, aDir, aStub, grid)
+  const b1 = stubEnd(b, heading(bSide, b, points[points.length - 1] ?? a1), bStub, grid)
   const pts: Point[] = [a, a1]
   const owner: number[] = [0]
-  let horizontal = isHorizontal(aSide, a1, points[0] ?? b1)
+  let horizontal = isHorizontal(aDir, a1, points[0] ?? b1)
 
   if (points.length === 0) {
     for (const m of autoRoute(a, a1, aSide, b, b1, bSide, grid, avoid, own)) {
@@ -279,7 +292,7 @@ export function routeWire(
   } else {
     const anchors = [...points, b1]
     // Incoming direction; the first leg of each L keeps it unless that would double back.
-    let dir: Point = DIR[aSide]
+    let dir: Point = DIR[aDir]
     for (let i = 0; i < anchors.length; i++) {
       const q = anchors[i]
       const p = pts[pts.length - 1]
@@ -319,6 +332,7 @@ const MID_LINE_STEPS_FROM_CENTRE = 6
 const MID_LINE_STEPS_PAST_END = 4
 const BODY_CROSSING_COST = 1e6
 const THROUGH_BODY_COST = 1e4
+const JUNCTION_OFF_AXIS_CELLS = 0.5
 
 const collapsed = (pts: readonly Point[]) => dedupeRoute([...pts], new Array<number>(Math.max(0, pts.length - 1)).fill(0)).pts
 
@@ -328,16 +342,16 @@ function pathLength(pts: readonly Point[]) {
   return sum
 }
 
-const leavesThroughBody = (pts: readonly Point[], aSide: Direction) =>
-  pts.length > 1 && Math.sign(pts[1].x - pts[0].x) * DIR[aSide].x + Math.sign(pts[1].y - pts[0].y) * DIR[aSide].y < 0 ? 1 : 0
+const leavesThroughBody = (pts: readonly Point[], aSide: Facing) =>
+  aSide !== "any" && pts.length > 1 && Math.sign(pts[1].x - pts[0].x) * DIR[aSide].x + Math.sign(pts[1].y - pts[0].y) * DIR[aSide].y < 0 ? 1 : 0
 
-const arrivesFromBehind = (pts: readonly Point[], bSide: Direction) => {
+const arrivesFromBehind = (pts: readonly Point[], bSide: Facing) => {
   const n = pts.length
-  return n > 1 && Math.sign(pts[n - 1].x - pts[n - 2].x) * DIR[bSide].x + Math.sign(pts[n - 1].y - pts[n - 2].y) * DIR[bSide].y > 0 ? 1 : 0
+  return bSide !== "any" && n > 1 && Math.sign(pts[n - 1].x - pts[n - 2].x) * DIR[bSide].x + Math.sign(pts[n - 1].y - pts[n - 2].y) * DIR[bSide].y > 0 ? 1 : 0
 }
 
-const runsAlong = (from: Point, to: Point, side: Direction) =>
-  Math.sign(to.x - from.x) === Math.sign(DIR[side].x) && Math.sign(to.y - from.y) === Math.sign(DIR[side].y)
+const runsAlong = (from: Point, to: Point, side: Facing) =>
+  side === "any" || (Math.sign(to.x - from.x) === Math.sign(DIR[side].x) && Math.sign(to.y - from.y) === Math.sign(DIR[side].y))
 
 /**
  * Interior points of the automatic route between two stub ends: a centred Z when both stubs
@@ -345,16 +359,19 @@ const runsAlong = (from: Point, to: Point, side: Direction) =>
  * mid line is moved — first between the ends, then past them — to the nearest position that
  * clears every body, or the one crossing fewest if none does.
  */
-function autoRoute(a: Point, a1: Point, aSide: Direction, b: Point, b1: Point, bSide: Direction, grid: number, avoid: Rect[], own: Rect[]): Point[] {
+function autoRoute(a: Point, a1: Point, aSide: Facing, b: Point, b1: Point, bSide: Facing, grid: number, avoid: Rect[], own: Rect[]): Point[] {
   const ah = isHorizontal(aSide, a1, b1)
   const bh = isHorizontal(bSide, b1, a1)
   const ownClear = own.filter((r) => !strictlyInside(a1, r) && !strictlyInside(b1, r))
+  const aAxis = heading(aSide, a1, b1)
+  const bAxis = heading(bSide, b1, a1)
   const cost = (mid: Point[]) => {
     const pts = collapsed([a, a1, ...mid, b1, b])
     const n = pts.length
     const skipsStub = n < 2 ? 0 : (samePoint(a, a1) || runsAlong(pts[0], pts[1], aSide) ? 0 : 1) + (samePoint(b, b1) || runsAlong(pts[n - 1], pts[n - 2], bSide) ? 0 : 1)
     const throughBody = leavesThroughBody(pts, aSide) + arrivesFromBehind(pts, bSide) + skipsStub + crossings(a1, mid, b1, ownClear)
-    return crossings(a1, mid, b1, avoid) * BODY_CROSSING_COST + throughBody * THROUGH_BODY_COST + pathLength(pts)
+    const offAxis = n < 2 ? 0 : (aSide === "any" && !runsAlong(pts[0], pts[1], aAxis) ? 1 : 0) + (bSide === "any" && !runsAlong(pts[n - 1], pts[n - 2], bAxis) ? 1 : 0)
+    return crossings(a1, mid, b1, avoid) * BODY_CROSSING_COST + throughBody * THROUGH_BODY_COST + pathLength(pts) + offAxis * JUNCTION_OFF_AXIS_CELLS * grid
   }
   const zx = (mx: number): Point[] => [
     { x: mx, y: a1.y },
@@ -468,11 +485,12 @@ export function routeObstacles(objects: readonly PlacedObject[], grid: number, f
 }
 
 /** Route from a pin through bend points to a free cursor position (while placing a wire). */
-export function routeToPoint(a: Point, aSide: Direction, aStub: number, p: Point, grid: number, points: Point[] = []): Point[] {
-  const a1 = stubEnd(a, aSide, aStub, grid)
+export function routeToPoint(a: Point, aSide: Facing, aStub: number, p: Point, grid: number, points: Point[] = []): Point[] {
+  const aDir = heading(aSide, a, points[0] ?? p)
+  const a1 = stubEnd(a, aDir, aStub, grid)
   const pts: Point[] = [a, a1]
-  let horizontal = isHorizontal(aSide, a1, points[0] ?? p)
-  let dir: Point = DIR[aSide]
+  let horizontal = isHorizontal(aDir, a1, points[0] ?? p)
+  let dir: Point = DIR[aDir]
   for (const q of [...points, p]) {
     const last = pts[pts.length - 1]
     if (last.x !== q.x && last.y !== q.y) {
@@ -694,7 +712,7 @@ export class Router {
         out.push(cached.route)
         continue
       }
-      const { pts, owner } = routeWire(a.point, a.pin.side, aStub, b.point, b.pin.side, bStub, grid, bends, avoid, ownBodies(byId, grid, w.from.object, w.to.object))
+      const { pts, owner } = routeWire(a.point, facingOf(a.pin), aStub, b.point, facingOf(b.pin), bStub, grid, bends, avoid, ownBodies(byId, grid, w.from.object, w.to.object))
       const route: RoutedWire = { id: w.id, pts, owner }
       kept.set(w.id, { signature, route, wire: w, deps, area })
       out.push(route)
@@ -899,7 +917,7 @@ export function liesOnRoute(pts: readonly Point[], p: Point): boolean {
   return Math.hypot(p.x - q.x, p.y - q.y) <= ON_ROUTE_TOLERANCE
 }
 
-export type WireEnd = { point: Point; side: Direction; stub: number }
+export type WireEnd = { point: Point; side: Facing; stub: number }
 
 const routeBetween = (from: WireEnd, to: WireEnd, grid: number, bends: Point[]) =>
   routeWire(from.point, from.side, from.stub, to.point, to.side, to.stub, grid, bends).pts

@@ -1,4 +1,4 @@
-import { objectIndex, objectRect, ownBodies, resolvePin, routeArea, routeToPoint, routeWire, type Point } from "@/schematic/geometry"
+import { facingOf, objectIndex, objectRect, ownBodies, resolvePin, routeArea, routeToPoint, routeWire, type Point } from "@/schematic/geometry"
 import type { SpatialIndex } from "@/schematic/spatial"
 import type { PinRef, PlacedObject } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
@@ -26,9 +26,9 @@ export function pendingPoints(objects: readonly PlacedObject[], index: SpatialIn
       .query(routeArea(a.point, aStub, target.point, bStub, p.points, grid))
       .filter((o) => o.id !== p.from.object && o.id !== p.target!.object)
       .map((o) => objectRect(o, grid))
-    return routeWire(a.point, a.pin.side, aStub, target.point, target.pin.side, bStub, grid, p.points, avoid, ownBodies(objectIndex(objects), grid, p.from.object, p.target.object)).pts
+    return routeWire(a.point, facingOf(a.pin), aStub, target.point, facingOf(target.pin), bStub, grid, p.points, avoid, ownBodies(objectIndex(objects), grid, p.from.object, p.target.object)).pts
   }
-  return routeToPoint(a.point, a.pin.side, a.pin.stub ?? 1, p.cursor, grid, p.points)
+  return routeToPoint(a.point, facingOf(a.pin), a.pin.stub ?? 1, p.cursor, grid, p.points)
 }
 
 export function bentWirePoints(objects: readonly PlacedObject[], index: SpatialIndex, from: PinRef, to: PinRef, points: Point[], grid: number): Point[] | null {
@@ -41,5 +41,5 @@ export function bentWirePoints(objects: readonly PlacedObject[], index: SpatialI
     .query(routeArea(a.point, aStub, b.point, bStub, points, grid))
     .filter((o) => o.id !== from.object && o.id !== to.object)
     .map((o) => objectRect(o, grid))
-  return routeWire(a.point, a.pin.side, aStub, b.point, b.pin.side, bStub, grid, points, avoid, ownBodies(objectIndex(objects), grid, from.object, to.object)).pts
+  return routeWire(a.point, facingOf(a.pin), aStub, b.point, facingOf(b.pin), bStub, grid, points, avoid, ownBodies(objectIndex(objects), grid, from.object, to.object)).pts
 }

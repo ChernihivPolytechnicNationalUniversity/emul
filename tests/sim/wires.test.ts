@@ -7,6 +7,7 @@ import { examples, lab1Stand } from "@/schematic/examples"
 import {
   bendReach,
   bendsOnRoute,
+  facingOf,
   GRID,
   liesOnRoute,
   nudgeRoutes,
@@ -524,6 +525,35 @@ describe("tapping a wire", () => {
     expect.soft(atPin.wires[1].to.object === r1.id && atPin.wires[1].to.pin === "2", "…to that pin").toBe(true)
   })
 
+  it("leaves both halves of a tapped wire straight and meets the junction along the tap's own axis", () => {
+    const { doc, place, wire } = builder(GRID)
+    const r1 = place("resistor", 0, 0)
+    const r2 = place("resistor", 16, 0)
+    const r3 = place("resistor", 8, 6)
+    const w = wire(r1, "2", r2, "1")
+    const tapped = tapWireAt(doc, w.id, { x: 9 * GRID + 5, y: 1 * GRID + 7 }, { object: r3.id, pin: "1" }, GRID)
+    const junction = tapped.objects.find((o) => o.def === "junction")!
+    const routes = routeAll(tapped.objects, tapped.wires, GRID)
+    const routeOf = (from: string, to: string) => routes.find((r) => {
+      const x = tapped.wires.find((q) => q.id === r.id)!
+      return x.from.object === from && x.to.object === to
+    })!
+    for (const half of [routeOf(r1.id, junction.id), routeOf(junction.id, r2.id)])
+      expect.soft(half.pts.every((p) => p.y === GRID), `a half stays on the wire's row: ${JSON.stringify(half.pts)}`).toBe(true)
+    const tap = routeOf(r3.id, junction.id).pts
+    const [before, end] = tap.slice(-2)
+    expect.soft(before.x === end.x && before.y > end.y, `the tap comes up into the junction rather than along the wire: ${JSON.stringify(tap)}`).toBe(true)
+  })
+
+  it("routes a junction-to-junction wire on one row straight, either way round", () => {
+    const { doc, place, wire } = builder(GRID)
+    const left = place("junction", 0, 0)
+    const right = place("junction", 10, 0)
+    wire(left, "J", right, "J")
+    wire(right, "J", left, "J")
+    for (const route of routeAll(doc.objects, doc.wires, GRID)) expect.soft(route.pts.every((p) => p.y === GRID), JSON.stringify(route.pts)).toBe(true)
+  })
+
   it("ties two MCU pins through a junction to one button (the PG2/PG3 stand)", () => {
     const doc = lab1Stand.build(GRID)
     const dd = doc.objects.find((o) => o.def === "stm32f746ig")!
@@ -796,10 +826,10 @@ describe("caching", () => {
           if (!a || !b) return []
           const route = routeWire(
             a.point,
-            a.pin.side,
+            facingOf(a.pin),
             a.pin.stub ?? 1,
             b.point,
-            b.pin.side,
+            facingOf(b.pin),
             b.pin.stub ?? 1,
             GRID,
             w.points ?? [],
