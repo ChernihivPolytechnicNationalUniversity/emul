@@ -39,6 +39,8 @@ export type AddressableSnapshot = {
   /** Bits passed on at DO in the frame so far or the last one. */
   passed: number
   vdd: number
+  /** The supply the die needs to run (the datasheet minimum), V. */
+  supplyMin: number
   powered: boolean
   burnt: boolean
   /** Supply current averaged over the PWM period, A. */
@@ -305,6 +307,7 @@ export abstract class AddressableChain implements DigitalPart {
       lastBits: this.lastBits,
       passed: this.passed,
       vdd: this.vdd,
+      supplyMin: this.spec.supply.min,
       powered: this.powered,
       burnt: this.burnt,
       current: light.averageCurrent(),

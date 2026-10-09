@@ -77,6 +77,11 @@ after the core's run instead, so a WS2812 stream does not stop the core 1.6 mill
 Timer outputs carry the time of the compare or update that made them, even when the core catches
 the timer up late (after an interrupt's entry, a long block): a PWM edge is never stamped late.
 
+**Series resistors on that path.** A resistor of up to 1 kΩ between two digital pins (an MCU
+pad, a part's data pin, a terminal) — the 33–470 Ω series resistor LED datasheets put before DIN,
+a current limiter between two boards — joins their nets as well: the level crosses it in
+nanoseconds, so the bits stay exact. A resistor to a rail or to an LED keeps the nets apart.
+
 **Switches on that path.** A closed switch, a button held down, a welded contact or anything of 1 Ω
 or less (an ammeter) joins the nets on either side into one, as Verilog's `tran` does: a serial
 line through a switch arrives as exact-time edges, and opening it splits the net again, each side
