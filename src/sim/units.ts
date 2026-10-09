@@ -56,11 +56,19 @@ export function formatSI(v: number, unit: string, digits = 2): string {
   // Below a hundredth of a nanounit is solver noise, not a reading: show it as the zero it is.
   if (a < 1e-11 || !Number.isFinite(v)) return `0 ${unit}`
   if (a >= 1e12) return `${v.toExponential(1)} ${unit}`
-  if (a >= 1e9) return `${(v / 1e9).toFixed(digits)} G${unit}`
-  if (a >= 1e6) return `${(v / 1e6).toFixed(digits)} M${unit}`
-  if (a >= 1e3) return `${(v / 1e3).toFixed(digits)} k${unit}`
-  if (a >= 1) return `${v.toFixed(digits)} ${unit}`
-  if (a >= 1e-3) return `${(v * 1e3).toFixed(digits)} m${unit}`
-  if (a >= 1e-6) return `${(v * 1e6).toFixed(digits)} µ${unit}`
-  return `${(v * 1e9).toFixed(digits)} n${unit}`
+  let k = DISPLAY_PREFIXES.findIndex(([scale]) => a >= scale)
+  if (k < 0) k = DISPLAY_PREFIXES.length - 1
+  if (k > 0 && Number((a / DISPLAY_PREFIXES[k][0]).toFixed(digits)) >= 1000) k--
+  const [scale, prefix] = DISPLAY_PREFIXES[k]
+  return `${(v / scale).toFixed(digits)} ${prefix}${unit}`
 }
+
+const DISPLAY_PREFIXES = [
+  [1e9, "G"],
+  [1e6, "M"],
+  [1e3, "k"],
+  [1, ""],
+  [1e-3, "m"],
+  [1e-6, "µ"],
+  [1e-9, "n"],
+] as const

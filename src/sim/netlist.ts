@@ -52,12 +52,13 @@ export type Resolved =
   /** `ron` is the contact resistance; `strike` the voltage the open gap arcs over at (Infinity for an ideal switch). */
   | (Base & { kind: "SW"; a: number; b: number; part: string; closed: "on" | "pressed" | "off"; ron: number; strike: number; keys: [string, string] })
   /** MCU pad; what it drives is read live from the pin reader on every step. `vddNet` is the rail it switches to, when it has one. */
-  | (Base & { kind: "GPIO"; node: number; nodeKey: string; vdd: number; vddNet: number | undefined; keys: [string] | [string, string] })
+  | (Base & { kind: "GPIO"; node: number; nodeKey: string; vdd: number; vddNet: number | undefined; gndNet: number | undefined; ohms: number; ohmsAt: number; keys: string[] })
   /** `index` is the extra unknown (through current, in → out) like a source's. */
   | (Base & { kind: "REG"; in: number; out: number; gnd: number; value: number; dropout: number; imax: number; index: number; keys: [string, string] })
   | (Base & { kind: "CHG"; in: number; bat: number; gnd: number; progNet: number; chrg: number | undefined; stdby: number | undefined; ce: number | undefined; temp: number | undefined; value: number; index: number; prog: number; keys: string[] })
   | (Base & { kind: "PROT"; vdd: number; vss: number; cs: number; od: number; oc: number; spec: ProtSpec; keys: string[] })
   | (Base & { kind: "BOOST"; in: number; out: number; gnd: number; fb: number; vcc: number | undefined; en: number | undefined; vref: number; eff: number; ilim: number; uvlo: number; iq: number; index: number; keys: string[] })
+  | (Base & { kind: "TMR"; vcc: number; gnd: number; trig: number; thres: number; ctrl: number; lo: number; reset: number; out: number; dis: number; keys: string[] })
 
 export type ProtSpec = {
   overcharge: number
@@ -199,6 +200,8 @@ function shortPair(el: Element): [NodeRef, NodeRef] | null {
       return [el.in, el.bat]
     case "PROT":
       return [el.vdd, el.vss]
+    case "TMR":
+      return [el.vcc, el.gnd]
     // A pad's blown protection diode ties it to the rail it clamped to; without a rail node
     // there is nothing to short to and the driver is simply gone.
     case "GPIO":
@@ -312,6 +315,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
       case "GPIO":
         gpios.push(p)
         if (el.vddNode) touch(obj, el.vddNode)
+        if (el.gndNode) touch(obj, el.gndNode)
         break
       case "REG":
         touch(obj, el.in)
@@ -326,6 +330,9 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         break
       case "BOOST":
         for (const ref of [el.in, el.out, el.gnd, el.fb, el.vcc, el.en]) if (ref) touch(obj, ref)
+        break
+      case "TMR":
+        for (const ref of [el.vcc, el.gnd, el.trig, el.thres, el.ctrl, el.lo, el.reset, el.out, el.dis]) touch(obj, ref)
         break
     }
   }
@@ -436,7 +443,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         const n = zener ? 1.5 : 1.8
         const vf = el.vf !== undefined ? resolveValue(el.vf, props) : 0.7
         const is = saturationCurrent(Number.isFinite(vf) && vf > 0 ? vf : 0.7, n)
-        elements.push({ ...base, kind: "D", anode: netOf(obj, el.anode), cathode: netOf(obj, el.cathode), is, n, zener: zener && Number.isFinite(zener) ? zenerOffset(zener, is, n) : undefined, part: el.part, keys: [node(obj, el.anode), node(obj, el.cathode)] })
+        elements.push({ ...base, kind: "D", anode: netOf(obj, el.anode), cathode: netOf(obj, el.cathode), is, n, zener: zener && Number.isFinite(zener) ? zenerOffset(zener, is, n) : undefined, part: el.part, hidden: el.hidden, keys: [node(obj, el.anode), node(obj, el.cathode)] })
         break
       }
       case "Q": {
@@ -473,8 +480,22 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
       }
       case "GPIO": {
         if (!active.has(uf.find(node(obj, el.node)))) break
-        const keys: [string] | [string, string] = el.vddNode ? [node(obj, el.node), node(obj, el.vddNode)] : [node(obj, el.node)]
-        elements.push({ ...base, kind: "GPIO", node: netOf(obj, el.node), nodeKey: el.node, vdd: el.vdd ?? 3.3, vddNet: el.vddNode ? netOf(obj, el.vddNode) : undefined, keys })
+        const pin = node(obj, el.node)
+        const keys = [pin, el.vddNode ? node(obj, el.vddNode) : pin, el.gndNode ? node(obj, el.gndNode) : pin]
+        const ohms = el.drive ? resolveValue(el.drive.ohms, props) : NaN
+        const at = el.drive ? resolveValue(el.drive.at, props) : NaN
+        elements.push({
+          ...base,
+          kind: "GPIO",
+          node: netOf(obj, el.node),
+          nodeKey: el.node,
+          vdd: el.vdd ?? 3.3,
+          vddNet: el.vddNode ? netOf(obj, el.vddNode) : undefined,
+          gndNet: el.gndNode ? netOf(obj, el.gndNode) : undefined,
+          ohms: Number.isFinite(ohms) && ohms > 0 ? ohms : 0,
+          ohmsAt: Number.isFinite(at) && at > 0 ? at : 0,
+          keys,
+        })
         break
       }
       case "REG": {
@@ -556,6 +577,22 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         })
         break
       }
+      case "TMR":
+        elements.push({
+          ...base,
+          kind: "TMR",
+          vcc: netOf(obj, el.vcc),
+          gnd: netOf(obj, el.gnd),
+          trig: netOf(obj, el.trig),
+          thres: netOf(obj, el.thres),
+          ctrl: netOf(obj, el.ctrl),
+          lo: netOf(obj, el.lo),
+          reset: netOf(obj, el.reset),
+          out: netOf(obj, el.out),
+          dis: netOf(obj, el.dis),
+          keys: [el.vcc, el.gnd, el.out, el.dis, el.trig, el.thres, el.reset].map((ref) => node(obj, ref)),
+        })
+        break
     }
   }
 

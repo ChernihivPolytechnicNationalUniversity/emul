@@ -78,6 +78,26 @@ export function labelKnockout(text: string, anchor: LabelAnchor, size: number, a
   }
 }
 
+const OVERBAR_LIFT_EM = 0.5
+const OVERBAR_INSET_EM = 0.06
+export const OVERBAR_WEIGHT_EM = 0.075
+
+export function overbarSpan(text: string, anchor: LabelAnchor, size: number, advanceEm = MONO_ADVANCE_EM): [Point, Point] {
+  const { text: box } = labelKnockout(text, anchor, size, advanceEm)
+  const y = -OVERBAR_LIFT_EM * size
+  const inset = OVERBAR_INSET_EM * size
+  return [
+    { x: box.x + inset, y },
+    { x: box.x + box.w - inset, y },
+  ]
+}
+
+export function overbar(label: Placement, text: string, size: number, advanceEm = MONO_ADVANCE_EM): [Point, Point] {
+  const frame = labelFrame(label, size)
+  const [from, to] = overbarSpan(text, label.anchor, size, advanceEm)
+  return [frame(from), frame(to)]
+}
+
 export function labelOrigin(label: Placement, size: number): Point {
   const reach = label.anchor === "middle" ? Math.max(LABEL_OFFSET_CELLS, MARKER_CLEARANCE_CELLS + KNOCKOUT_HALF_HEIGHT_EM * size) : LABEL_OFFSET_CELLS
   return { x: label.dir.x * reach, y: label.dir.y * reach }

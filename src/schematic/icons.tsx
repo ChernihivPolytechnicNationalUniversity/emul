@@ -247,6 +247,22 @@ export const BoardIcon = make(
 )
 
 
+export const TimerIcon = make(
+  "TimerIcon",
+  <>
+    <rect x={5} y={5} width={14} height={14} rx={1} />
+    <path d="M9 5V2M15 5V2M9 22v-3M15 22v-3M8 14h2.5v-4h3v4H16" />
+  </>,
+)
+
+export const ShiftRegisterIcon = make(
+  "ShiftRegisterIcon",
+  <>
+    <rect x={6} y={3} width={12} height={18} rx={1} />
+    <path d="M6 7H3M6 12H3M18 6h3M18 9h3M18 12h3M18 15h3M18 18h3M9 12h4M11.5 10l2 2-2 2" />
+  </>,
+)
+
 export const PixelIcon = make(
   "PixelIcon",
   <>

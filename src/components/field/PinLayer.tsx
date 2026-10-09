@@ -5,7 +5,7 @@ import { getDef } from "@/schematic/registry"
 import type { PinKind, PlacedObject } from "@/schematic/types"
 import type { FieldDetail } from "./detail"
 import type { PinPointerHandler } from "./ComponentView"
-import { boxCorners, KNOCKOUT_OPACITY, labelFrame, labelKnockout, labelOrigin, MONO_ADVANCE_EM, numbersItsPins, PIN_NUMBER_SCALE, pinLabelById, pinLabels, pinNumberPlacement, type Box, type KnockoutAxis, type LabelGround, type PinLabel } from "./pin-label"
+import { boxCorners, KNOCKOUT_OPACITY, labelFrame, labelKnockout, labelOrigin, MONO_ADVANCE_EM, numbersItsPins, OVERBAR_WEIGHT_EM, overbar, PIN_NUMBER_SCALE, pinLabelById, pinLabels, pinNumberPlacement, type Box, type KnockoutAxis, type LabelGround, type PinLabel } from "./pin-label"
 import { pinMarker } from "./pin-marker"
 
 const PIN_MARK: Record<PinKind, string> = {
@@ -182,6 +182,7 @@ export const PinLayer = React.memo(function PinLayer({
             const numberSize = detail.pinLabelSize * PIN_NUMBER_SCALE
             const numberAt = numbered && !contact ? labelOrigin(pinNumberPlacement(pin), numberSize) : undefined
             const marker = pinMarker(def, pin.kind, live, contact, color)
+            const bar = !contact && label && pin.inverted ? overbar(label, label.text, detail.pinLabelSize, monoAdvanceEm()) : undefined
 
             return (
               <g
@@ -220,6 +221,17 @@ export const PinLayer = React.memo(function PinLayer({
                   >
                     {pin.label}
                   </text>
+                )}
+                {bar && (
+                  <line
+                    data-overbar={pin.id}
+                    x1={point.x + g(bar[0].x)}
+                    y1={point.y + g(bar[0].y)}
+                    x2={point.x + g(bar[1].x)}
+                    y2={point.y + g(bar[1].y)}
+                    strokeWidth={g(detail.pinLabelSize * OVERBAR_WEIGHT_EM)}
+                    className="pointer-events-none stroke-foreground"
+                  />
                 )}
                 {numberAt && (
                   <text

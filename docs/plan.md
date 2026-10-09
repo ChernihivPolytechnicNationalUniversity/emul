@@ -4,13 +4,14 @@ Features still to build, roughly in the order labs need them. A feature is done 
 a firmware or circuit test, and its row in `docs/coverage.md` flipped; then it leaves this list.
 
 - [ ] **SVG export** — next to the PNG one; the field draws its symbols on a canvas, so this needs a vector path of its own.
-- [ ] **Logic ICs** — 74HC00/04/08/32/86 gates, 74HC74 flip-flop, 74HC595 shift register, 74HC138 decoder,
-  4017 counter, with input thresholds and output drivers.
+- [ ] **Logic ICs** — 74HC00/04/08/32/86 gates, 74HC74 flip-flop, 74HC138 decoder, 4017 counter, with input
+  thresholds and output drivers on the 74HC595's pattern (`src/sim/hc595.ts`: a digital part with VCC-referenced
+  thresholds, timing checks and the pins as GPIO elements with a scaled CMOS drive).
 - [ ] **7-segment indicators** — single digit and 4-digit multiplexed, common anode/cathode.
 - [ ] **HD44780 character LCD** — 16×2 / 20×4 in 4- and 8-bit mode, drawn on the field. Parallel bus only.
 - [ ] **SSD1306 OLED** — I²C and SPI variants, 128×64 framebuffer drawn on the field.
 - [ ] **Keypad / button matrix** — 4×4 matrix.
-- [ ] **Op-amp, comparator, 555** — ideal op-amp with rails, LM393-style comparator, NE555 as a macro model.
+- [ ] **Op-amp, comparator** — ideal op-amp with rails, LM393-style comparator; a CMOS 555 (TLC555) beside the NE555.
 - [ ] **Relay, buzzer, DC motor, servo** — relay coil + contacts, buzzer as a load with sound indication,
   motor as R+L+back-EMF with an RPM readout, servo decoding 50 Hz PWM to an angle.
 - [ ] **Sensors** — potentiometer exists; add LDR/thermistor (parameter-driven resistors), DHT11/22 (one-wire

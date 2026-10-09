@@ -12,6 +12,7 @@ import { isHdlDef } from "@/schematic/hdl"
 import { HdlPart } from "./hdl"
 import { chainFor } from "./addressable/chain"
 import { chipCount, partOf, productById } from "./addressable/products"
+import { ShiftRegister595 } from "./hc595"
 
 export type DigitalEdge = { pin: string; level: boolean | null; time: number }
 
@@ -55,6 +56,9 @@ export interface DigitalPart {
   /** The part as built no longer matches the object's props (another part number): build a new one. */
   outdated?(props: Record<string, string>): boolean
   prime?(levels: Map<string, boolean>, time: number): void
+  readonly supply?: { vcc: string; gnd: string }
+  senseSupply?(vcc: number, read: (pin: string) => number, time: number): void
+  thresholds?(): [falling: number, rising: number]
 }
 
 // --- 24Cxx I²C EEPROM ------------------------------------------------------------------------
@@ -652,6 +656,8 @@ export function createDigitalPart(def: string, object: string, props: Record<str
       return new Eeprom24(object, props)
     case "lcd7-f":
       return new Gt911(object, { sda: "37", scl: "38", rst: "39", int: "40" })
+    case "hc595":
+      return new ShiftRegister595(object, props)
     default: {
       const product = productById(def)
       if (product) {

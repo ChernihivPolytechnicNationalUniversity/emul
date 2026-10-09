@@ -20,7 +20,7 @@ const glob = (load: () => Raw): Raw => {
   }
 }
 
-const halApps = glob(() => import.meta.glob("../../firmware/hal/Src/{main,square,pwm,uart,i2c,adc,spi,spi-slave,ws2812}.c", { query: "?raw", import: "default" }) as Raw)
+const halApps = glob(() => import.meta.glob("../../firmware/hal/Src/{main,square,pwm,uart,i2c,adc,spi,spi-slave,shift,ws2812}.c", { query: "?raw", import: "default" }) as Raw)
 const lab1 = glob(() => import.meta.glob("../../firmware/lab1/Core/{Inc,Src}/*.{c,h}", { query: "?raw", import: "default" }) as Raw)
 const lab1RunningLightFiles = glob(() => import.meta.glob("../../firmware/lab1-running-light/{Core,App}/{Inc,Src}/*.{c,cpp,h}", { query: "?raw", import: "default" }) as Raw)
 const lcd = glob(() => import.meta.glob("../../firmware/lcd/{display,touch,cube}/{Src,Inc,BSP,Fonts}/*.{c,cpp,h}", { query: "?raw", import: "default" }) as Raw)

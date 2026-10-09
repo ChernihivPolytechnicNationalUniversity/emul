@@ -2,7 +2,7 @@ import { objectRect, objectSize, orientPin, placedText, type Orientation, type R
 import type { ComponentDef, PlacedObject } from "@/schematic/types"
 import type { FieldPalette } from "./field-palette"
 import { selectionOutline } from "./selection-geometry"
-import { KNOCKOUT_OPACITY, labelKnockout, labelOrigin, pinLabels, type Box, type PinLabel } from "./pin-label"
+import { KNOCKOUT_OPACITY, labelKnockout, labelOrigin, OVERBAR_WEIGHT_EM, overbarSpan, pinLabels, type Box, type PinLabel } from "./pin-label"
 
 const SYMBOL_STROKE_PX = 2
 const HAIRLINE_PX = 1
@@ -292,6 +292,14 @@ export class TextRaster {
         context.fillStyle = pin.kind === "nc" ? palette.text.muted : palette.text.plain
         context.textAlign = TEXT_ANCHOR[label.anchor]
         context.fillText(label.text, 0, 0)
+        if (!pin.inverted) return
+        const [from, to] = overbarSpan(label.text, label.anchor, text.pinSize, advance)
+        context.strokeStyle = context.fillStyle
+        context.lineWidth = OVERBAR_WEIGHT_EM * text.pinSize * grid
+        context.beginPath()
+        context.moveTo(from.x * grid, from.y * grid)
+        context.lineTo(to.x * grid, to.y * grid)
+        context.stroke()
       })
     }
     context.restore()

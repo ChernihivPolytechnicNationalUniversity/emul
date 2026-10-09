@@ -1,4 +1,4 @@
-import { bendReach, closestOnRoute, liesOnRoute, resolvePinIn, routeWire, snap, toPath, trimRouteEnds, type Point, type WireEnd } from "@/schematic/geometry"
+import { bendReach, closestOnRoute, facingOf, liesOnRoute, resolvePinIn, routeWire, snap, toPath, trimRouteEnds, type Point, type WireEnd } from "@/schematic/geometry"
 import type { PinRef, PlacedObject, Wire } from "@/schematic/types"
 
 type Terminal = WireEnd
@@ -54,7 +54,7 @@ const snappedOffset = (plan: MovePlan, at: Point): Point => ({
 
 function terminalOf(index: ReadonlyMap<string, PlacedObject>, ref: PinRef, grid: number): Terminal | null {
   const found = resolvePinIn(index, ref, grid)
-  return found && { point: found.point, side: found.pin.side, stub: found.pin.stub ?? 1 }
+  return found && { point: found.point, side: facingOf(found.pin), stub: found.pin.stub ?? 1 }
 }
 
 const pathsOf = (el: Element): SVGPathElement[] => (el instanceof SVGPathElement ? [el] : [...el.querySelectorAll("path")])
