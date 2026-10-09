@@ -265,6 +265,14 @@ const STEPS_PER_TICK = 1500
 /** What a part with no state set reads as. */
 const NO_STATE: PartState = {}
 const LINK_OHMS = 1
+/**
+ * A resistor up to this between two digital pins (a pad, a part's data pin, a terminal) is a
+ * series resistor in a signal line — the 33–470 Ω the LED datasheets put before DIN, a
+ * current limiter between two boards: the level crosses it at once (15 pF behind 1 kΩ is
+ * 15 ns), so the line stays one exact-time net. A resistor to anything else (a rail, an LED)
+ * keeps the nets apart.
+ */
+const SERIES_OHMS = 1000
 /** Most steps a core runs ahead of the solver in one go (`quietSteps`). */
 const QUIET_STEPS = 500
 /** Runs a remote core stays in step with the loop after traffic with a digital part (~2 ms of steps). */
@@ -792,6 +800,22 @@ export class SimLoop {
       else if (el.kind === "R" && !el.live && el.value <= LINK_OHMS) join(el.a, el.b)
     }
     for (const l of this.links) if (switchClosed(l.closed, this.readPart(l.key))) join(l.a, l.b)
+    // Series resistors between digital pins, once the wires and switches have made the nets.
+    const pins = new Set<number>()
+    for (const inst of this.mcus.values()) for (const i of inst.inputs) pins.add(i.node)
+    for (const part of this.digitalParts.values())
+      for (const pin of part.pins) {
+        const node = engine.net.pinNet.get(pinKey(part.object, pin))
+        if (node !== undefined) pins.add(node)
+      }
+    for (const t of this.terminals.values())
+      for (const pin of ["RX", "TX"]) {
+        const node = engine.net.pinNet.get(pinKey(t.object, pin))
+        if (node !== undefined) pins.add(node)
+      }
+    const digital = new Set([...pins].filter((n) => n !== GROUND).map(find))
+    const series = engine.net.elements.filter((el) => el.kind === "R" && !el.live && el.value > LINK_OHMS && el.value <= SERIES_OHMS) as { a: number; b: number }[]
+    for (const el of series) if (digital.has(find(el.a)) && digital.has(find(el.b))) join(el.a, el.b)
     this.linkState = this.linkKey()
     this.joined = new Map([...up.keys()].map((n) => [n, find(n)]))
   }

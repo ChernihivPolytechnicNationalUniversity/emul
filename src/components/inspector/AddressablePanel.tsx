@@ -29,6 +29,16 @@ export function AddressablePanel({ objectId, sim }: { objectId: string; sim: Sim
           {snap.frames} · last {snap.lastBits} bits{snap.passed ? ` · ${snap.passed} passed on` : ""}
         </dd>
       </dl>
+      {!snap.powered && !snap.burnt && (
+        <Alert variant="destructive">
+          <TriangleAlertIcon />
+          <AlertTitle>Supply too low</AlertTitle>
+          <AlertDescription>
+            The {snap.part} gets {formatSI(snap.vdd, "V", 3)} and needs at least {formatSI(snap.supplyMin, "V", 3)} (its datasheet minimum): the chip is off, takes no data and lights
+            nothing.
+          </AlertDescription>
+        </Alert>
+      )}
       {low && (
         <Alert variant="destructive">
           <TriangleAlertIcon />
