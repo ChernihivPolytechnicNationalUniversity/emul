@@ -94,6 +94,64 @@ and one from an MCU pin exactly. A rebuild replaces the part on the running benc
 the levels its nets have now. Cost is per clock edge and grows with the flip-flop count: about 3 µs for a UART, 9 µs for a small
 8-bit CPU, 1.3 ms for a 2 KB RAM (53 000 cells).
 
+## Switching inside a step
+
+The analog step is fixed at 20 µs, which is fine for an RC network and far too coarse for a latch: a 555 at
+4.8 kHz switching only on step boundaries would be off by tens of per cent. A latched element (`TMR`, the
+NE555) therefore switches where its comparator actually crosses. `Engine.step` solves the step with the states
+it starts with, finds the earliest crossing of any timer by interpolating each comparator's margin across the
+step (`findTimerEvent`), re-solves up to that instant and refines it by regula falsi until the margin is within
+1 µV (`settleEvent`), commits that part of the step, flips the latch and solves the rest — repeating for every
+crossing, up to sixteen per timer a step. Trial solves are transactional: an arc a discarded trial struck is put
+back before the step is solved again. After a flip the step goes on in controlled sub-steps, each twice the last:
+the first, 2 % of the step, by backward Euler so the capacitor current from before the switch does not leak into
+the step after it; the next ones by the θ-method, except while some capacitor would settle faster than the next
+sub-step (its capacitance over the conductance its nodes see on the last Jacobian) and its present current would
+give the trapezoidal rule a kick over 50 mV — then backward Euler again, because the trapezoidal rule integrating
+a node that has already settled from the current it had while settling throws it past the supply (1 nF on a 555's
+output read 5.3 V on 5 V, 100 nF 26 V). Control ends once a sub-step would reach the whole step or three steps
+after the switch. The control carries over into the next step when a switch lands at the
+end of one. The latch states are part of the switch mask, so the operating-point memo and the settled path see a
+flip as a change of circuit. `onTimer` reports every output transition with its exact time.
+
+Digital parts with a supply of their own (the 74HC595) declare its model nodes (`supply`) and get `sense` called
+each step with their VCC and their pin voltages: power-on and power-off, VCC out of range, an input sitting
+between VIL and VIH. On a net nothing drives digitally, such a part reads the voltage against its own
+`thresholds` instead of the 3.3 V STM32 levels the loop uses for everything else; on a net an MCU or another part
+drives, it gets the exact-time edges like any digital part — unless the voltage there, held for two steps, says
+the opposite of what the driver claims (a 2 V chip's high on a 6 V chip's input), in which case it takes the
+voltage and warns. Its pins are GPIO elements switching to its internal VCC and GND rails, with a drive resistance
+that scales with its supply, rated against its own ground.
+
+Edges digital parts produce carry their propagation delay, so they are dispatched in time order: while a level is
+being delivered (and while the loop thresholds analog nets or senses supplies), a part's new edges wait in a queue
+sorted by time and go out once the delivery is over. A clock shared by two chips reaches both before either one's
+delayed output reaches the other. Edges an MCU makes a few nanoseconds apart are still delivered one by one, each
+with whatever its parts answer, so a part's reply can overtake a second MCU edge less than its propagation delay
+behind the first.
+
+## The linear solve
+
+Each Newton iteration factors the MNA matrix and substitutes through it (`src/sim/sparse-lu.ts`). The matrix is
+stamped dense, but every stamp goes through `Engine.cell`, which marks the entry in the factor's structural
+pattern, so the pattern is every entry any stamp has touched, zero or not, as SPICE's `spGetElement` allocates
+it. The first factorization orders the pivots the way Sparse 1.3 does in ngspice (`spOrderAndFactor` with
+`DIAGONAL_PIVOTING`): the smallest Markowitz product (r − 1)(c − 1) among the diagonal entries that pass the
+threshold, the whole matrix only when none does, a pivot accepted when it is at least 10⁻³ of the largest entry
+left in its column (ngspice's `PIVREL`) and above 10⁻¹⁸. It records the fill-in, and every later factorization
+walks only that pattern in that order. The order is redone when a stamp lands outside the pattern or when a
+reused pivot falls under the threshold against its column, a stricter test than ngspice's `spFactor`, which
+reuses the order until a pivot is exactly zero; KLU's guide recommends a check of this kind after `klu_refactor`.
+On the examples the order is redone one to seven times in two simulated seconds.
+
+The dense factorization this replaced cost O(n³) every step. On the metronome (53 unknowns, 115 elements) a 20 µs
+step took 113 µs in Node, 46 of them in the factorization; it now takes about 45. Measured in headless
+Chromium on the same machine, the metronome ran at 0.12× real time and now runs at 0.62×, the NE555 flasher at
+1.3× and now 3.8×, the charge-and-boost board at 1.2× and now 3.4×. The rest of that gain came from walking
+per-kind index lists instead of every element (strike checks, the switch mask, the Newton stamps), reusing the
+operating-point memo's arrays, caching each part's heating factor per step length, and caching a wire's marker
+speed while its current holds within 0.1 %.
+
 ## Threads
 
 The UI thread draws; the simulation worker runs the analog solver, the digital parts and the
