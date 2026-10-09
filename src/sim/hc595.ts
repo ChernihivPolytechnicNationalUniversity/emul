@@ -153,7 +153,7 @@ export class ShiftRegister595 implements DigitalPart {
     return { part: this.name, powered: this.powered, vcc: this.vcc, shift: this.shift, storage: this.storage, enabled: !this.level.OE, warnings }
   }
 
-  sense(vcc: number, read: (pin: string) => number, time: number) {
+  senseSupply(vcc: number, read: (pin: string) => number, time: number) {
     this.time = time
     this.vcc = vcc
     if (!this.powered && vcc >= POWER_ON) this.powerUp(time)

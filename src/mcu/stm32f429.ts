@@ -314,7 +314,7 @@ export class Stm32 {
       t.sync = () => this.sync(t)
       t.reschedule = () => this.schedule()
       t.onRunning = (on) => this.setActive(t, on)
-      t.onOutput = (index, level) => this.driveTimOutput(pads, index, level)
+      t.onOutput = (index, level) => this.driveTimOutput(pads, index, level, t.eventLag)
       for (const p of pads) {
         if (p.complementary) continue
         const key = p.port * 16 + p.pin
@@ -1063,9 +1063,9 @@ export class Stm32 {
    * Log an edge on the digital fast path, stamped with the exact time of its cause. An
    * open-drain pad never drives high: its "high" is a release (null), and the bus decides.
    */
-  private emit(pad: PadRef, level: boolean | null) {
+  private emit(pad: PadRef, level: boolean | null, time = this.eventTime ?? this.now) {
     if (level && this.gpio[pad.port].openDrain(pad.pin)) level = null
-    this.digitalOut.push({ pad, level, time: this.eventTime ?? this.now })
+    this.digitalOut.push({ pad, level, time })
     if (this.yieldOnOutput) this.cpu.stop = true
   }
 
@@ -1186,7 +1186,7 @@ export class Stm32 {
   }
 
   /** A timer channel output changed: drive every pad that is configured for it. */
-  private driveTimOutput(pads: TimPad[], index: number, level: boolean | null) {
+  private driveTimOutput(pads: TimPad[], index: number, level: boolean | null, lag: number) {
     const channel = index >> 1
     const complementary = (index & 1) === 1
     for (const p of pads) {
@@ -1200,7 +1200,8 @@ export class Stm32 {
         const key = p.port * 16 + p.pin
         if (this.digitalWatch.has(key) && this.digitalLevel.get(key) !== level) {
           this.digitalLevel.set(key, level)
-          this.emit({ port: p.port, pin: p.pin }, level)
+          // The compare or update happened `lag` before the core's present (a late catch-up).
+          this.emit({ port: p.port, pin: p.pin }, level, this.now - lag)
         }
       }
     }

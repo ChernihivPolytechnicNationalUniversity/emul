@@ -21,7 +21,7 @@ HAL_SRC = stm32f4xx_hal.c stm32f4xx_hal_cortex.c stm32f4xx_hal_rcc.c stm32f4xx_h
           stm32f4xx_hal_exti.c stm32f4xx_hal_flash.c stm32f4xx_hal_flash_ex.c stm32f4xx_hal_flash_ramfunc.c stm32f4xx_hal_adc.c stm32f4xx_hal_adc_ex.c stm32f4xx_hal_dac.c stm32f4xx_hal_dac_ex.c stm32f4xx_hal_i2c.c stm32f4xx_hal_iwdg.c stm32f4xx_hal_wwdg.c stm32f4xx_hal_rtc.c stm32f4xx_hal_rtc_ex.c stm32f4xx_hal_spi.c stm32f4xx_hal_tim.c stm32f4xx_hal_tim_ex.c stm32f4xx_hal_uart.c
 COMMON = Src/stm32f4xx_it.c Src/stm32f4xx_hal_msp.c Src/system_stm32f4xx.c $(addprefix $(HAL)/Src/,$(HAL_SRC))
 # One program per Src/<app>.c that defines main(); `main.c` is the blink.
-APPS = blink square spi spi-slave shift pwm uart i2c dma adc wdg lowpower flash
+APPS = blink square spi spi-slave shift pwm uart i2c dma adc wdg lowpower flash ws2812
 
 $(shell mkdir -p build)
 

@@ -262,3 +262,40 @@ export const ShiftRegisterIcon = make(
     <path d="M6 7H3M6 12H3M18 6h3M18 9h3M18 12h3M18 15h3M18 18h3M9 12h4M11.5 10l2 2-2 2" />
   </>,
 )
+
+export const PixelIcon = make(
+  "PixelIcon",
+  <>
+    <rect x={5} y={5} width={14} height={14} rx={1.5} />
+    <circle cx={12} cy={12} r={3.5} />
+    <path d="M2 9h3M19 15h3" />
+  </>,
+)
+
+export const PixelRingIcon = make(
+  "PixelRingIcon",
+  <>
+    <circle cx={12} cy={12} r={8} />
+    {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => (
+      <circle key={a} cx={12 + 8 * Math.cos((a * Math.PI) / 180)} cy={12 + 8 * Math.sin((a * Math.PI) / 180)} r={1.4} fill="currentColor" stroke="none" />
+    ))}
+  </>,
+)
+
+export const PixelMatrixIcon = make(
+  "PixelMatrixIcon",
+  <>
+    <rect x={3} y={3} width={18} height={18} rx={1.5} />
+    {[7, 12, 17].flatMap((y) => [7, 12, 17].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r={1.4} fill="currentColor" stroke="none" />))}
+  </>,
+)
+
+export const PixelStickIcon = make(
+  "PixelStickIcon",
+  <>
+    <rect x={2} y={8} width={20} height={8} rx={1.5} />
+    {[5, 9.5, 14.5, 19].map((x) => (
+      <circle key={x} cx={x} cy={12} r={1.4} fill="currentColor" stroke="none" />
+    ))}
+  </>,
+)

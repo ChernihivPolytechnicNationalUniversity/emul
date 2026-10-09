@@ -306,6 +306,12 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         touch(obj, el.c)
         touch(obj, el.e)
         break
+      // A MOSFET's gate may be a node only its driver sees (a chip's internal sink): it needs a row too.
+      case "M":
+        touch(obj, el.g)
+        touch(obj, el.d)
+        touch(obj, el.s)
+        break
       case "GPIO":
         gpios.push(p)
         if (el.vddNode) touch(obj, el.vddNode)

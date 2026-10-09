@@ -13,7 +13,7 @@ function chip(part = "74HC595", vcc = 5) {
   const c = new ShiftRegister595("u1", { value: part })
   const levels: Record<string, boolean> = { SER: false, SRCLK: false, RCLK: false, SRCLR: true, OE: false }
   for (const [pin, level] of Object.entries(levels)) c.input(pin, level, 0)
-  c.sense(vcc, () => (vcc ? 0 : NaN), 0)
+  c.senseSupply(vcc, () => (vcc ? 0 : NaN), 0)
   c.input("SRCLR", false, 1e-6)
   c.input("SRCLR", true, 2e-6)
   let t = 10e-6
@@ -30,7 +30,7 @@ function chip(part = "74HC595", vcc = 5) {
   const outputs = () => OUTPUTS.map((q) => c.drive(q))
   const snap = () => c.snapshot()
   const at = () => (t += 1e-6)
-  return { c, clock, shiftIn, outputs, snap, at, sense: (v: number, read: (pin: string) => number = () => 0) => c.sense(v, read, at()) }
+  return { c, clock, shiftIn, outputs, snap, at, sense: (v: number, read: (pin: string) => number = () => 0) => c.senseSupply(v, read, at()) }
 }
 
 describe("74HC595 logic (TI SCLS041J function table)", () => {
@@ -117,7 +117,7 @@ describe("74HC595 logic (TI SCLS041J function table)", () => {
     for (let n = 0; n < 6; n++) {
       const c = new ShiftRegister595(`chip-${n}`, {})
       c.input("SRCLR", true, 0)
-      c.sense(5, () => 0, 0)
+      c.senseSupply(5, () => 0, 0)
       seen.add(c.snapshot().storage)
     }
     expect.soft(seen.size, "different chips, different contents").toBeGreaterThan(2)
@@ -131,7 +131,7 @@ describe("74HC595 logic (TI SCLS041J function table)", () => {
   it("powers up cleared while /SRCLR is held low", () => {
     const c = new ShiftRegister595("held", {})
     c.input("SRCLR", false, 0)
-    c.sense(5, () => 0, 0)
+    c.senseSupply(5, () => 0, 0)
     expect.soft(c.snapshot().shift).toBe(0)
   })
 })

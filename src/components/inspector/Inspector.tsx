@@ -36,6 +36,8 @@ function powerLabel(p: PowerStatus): string {
   }
 }
 import { LiveReadings } from "./LiveReadings"
+import { AddressablePanel } from "./AddressablePanel"
+import { isAddressableDef } from "@/schematic/components/addressable"
 
 /** "PLL ← HSE 8 MHz clock", "HSI": the system clock source and what feeds the oscillator it hangs on. */
 function clockLabel(c: ClockStatus): string {
@@ -113,6 +115,7 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
           {def.id === "serial-terminal" && <TerminalPanel object={object} sim={sim} onSend={(text) => onSerial?.(object.id, text)} />}
           {def.id === "eeprom-24c" && <EepromPanel object={object} sim={sim} />}
           {def.id === "hc595" && <ShiftRegisterPanel object={object} sim={sim} />}
+          {isAddressableDef(def.id) && <AddressablePanel objectId={object.id} sim={sim} />}
           {isHdlDef(def.id) && <HdlInfo defId={def.id} sim={sim} objectId={object.id} onHdl={onHdl} />}
           {sim.live && !damage[object.id]?.fatal && <LiveReadings object={object} sim={sim} />}
           <FieldGroup className="gap-4">

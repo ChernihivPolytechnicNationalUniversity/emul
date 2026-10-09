@@ -131,6 +131,7 @@ export const ComponentView = React.memo(function ComponentView({
               state={simulated ?? parts[key] ?? partInitial(def, p.id)}
               level={p.type === "display" ? (live.live ? (p.backlight ? (live.parts[partKey(object.id, p.backlight)]?.level ?? 0) : 1) : 0) : simulated?.level}
               display={p.type === "display" ? live.display : undefined}
+              pixel={p.type === "pixel" ? (live.pixels?.[p.index] ?? (live.live ? 0 : undefined)) : undefined}
               mirror={mirror}
               textScale={detail.textScale}
               partText={partText}
@@ -282,6 +283,31 @@ function Shape({
  * A display panel: the frame the simulation composed, drawn on a canvas inside the SVG,
  * scaled by the backlight; the pointer on it is a touch with panel coordinates.
  */
+/**
+ * An addressable LED: a square package with a round lens that takes the latched colour,
+ * scaled up so a dim pixel still reads, with a halo as bright as its brightest channel.
+ */
+function Pixel({ part, g, color }: { part: Extract<PartDef, { type: "pixel" }>; g: (v: number) => number; color: number | undefined }) {
+  const cx = g(part.x)
+  const cy = g(part.y)
+  const s = g(part.size ?? 0.8)
+  const r = (color ?? 0) >> 16
+  const gr = ((color ?? 0) >> 8) & 0xff
+  const b = (color ?? 0) & 0xff
+  const peak = Math.max(r, gr, b)
+  // The eye sees a 10 % pixel as clearly lit: show the hue at a readable level, the halo by peak.
+  const k = peak ? Math.min(255 / peak, Math.max(1, 96 / peak)) : 0
+  const lens = peak ? `rgb(${Math.round(r * k)} ${Math.round(gr * k)} ${Math.round(b * k)})` : undefined
+  return (
+    <g pointerEvents="none">
+      <title>{`${part.label} · #${(color ?? 0).toString(16).padStart(6, "0")}`}</title>
+      {peak > 0 && <circle cx={cx} cy={cy} r={s * 0.9} fill={lens} opacity={0.12 + 0.4 * (peak / 255)} stroke="none" />}
+      <rect x={cx - s / 2} y={cy - s / 2} width={s} height={s} rx={s * 0.08} className="fill-card stroke-foreground/60" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+      <circle cx={cx} cy={cy} r={s * 0.36} fill={lens} className={cn(!lens && "fill-muted", "stroke-foreground/30")} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+    </g>
+  )
+}
+
 function DisplayPanel({ part, g, level, display, mirror, onChange }: { part: Extract<PartDef, { type: "display" }>; g: (v: number) => number; level: number; display: DisplayFrame | undefined; mirror: boolean; onChange?: (patch: PartState) => void }) {
   const canvas = React.useRef<HTMLCanvasElement>(null)
   const drawn = React.useRef(-1)
@@ -346,6 +372,7 @@ function Part({
   state,
   level,
   display,
+  pixel,
   mirror,
   textScale,
   partText,
@@ -358,6 +385,8 @@ function Part({
   level?: number
   /** The frame a display shows. */
   display?: DisplayFrame
+  /** The colour an addressable pixel shows (0xRRGGBB, 0 dark); undefined when not simulated. */
+  pixel?: number
   mirror: boolean
   textScale: number
   partText: (x: number, y: number) => string | undefined
@@ -368,6 +397,8 @@ function Part({
   const cy = g(part.y)
   const stop = (e: React.PointerEvent | React.MouseEvent) => e.stopPropagation()
   const title = `${part.label}${"mcu" in part && part.mcu ? ` · ${part.mcu}` : ""}`
+
+  if (part.type === "pixel") return <Pixel part={part} g={g} color={pixel} />
 
   if (part.type === "display") return <DisplayPanel part={part} g={g} level={level ?? 0} display={display} mirror={mirror} onChange={onChange} />
 

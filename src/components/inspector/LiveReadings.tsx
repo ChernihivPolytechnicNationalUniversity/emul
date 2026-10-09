@@ -33,6 +33,9 @@ const KIND_LABEL: Record<Reading["kind"], string> = {
   TMR: "Timer",
 }
 
+/** A resistor whose value the simulation sets each step is a chip's supply load, not a resistor on the board. */
+const kindLabel = (def: { model?: { kind: string; live?: string }[] }, r: Reading) => (r.kind === "R" && def.model?.[r.element]?.live ? "Supply load" : KIND_LABEL[r.kind])
+
 /** Below this an element on a board counts as idle and is left out of the inspector. */
 const IDLE_CURRENT = 1e-6
 
@@ -60,7 +63,7 @@ export function LiveReadings({ object, sim, className, ...props }: LiveReadingsP
   return (
     <div className={cn("flex flex-col gap-3", className)} {...props}>
       {readings.map((r, i) => (
-        <ElementReading key={i} reading={r} terminals={elementTerminals(def, r.element)} title={readings.length > 1 ? `${KIND_LABEL[r.kind]} ${i + 1}` : KIND_LABEL[r.kind]} />
+        <ElementReading key={i} reading={r} terminals={elementTerminals(def, r.element)} title={readings.length > 1 ? `${kindLabel(def, r)} ${i + 1}` : kindLabel(def, r)} />
       ))}
       {pins.length > 0 && (
         <div>
