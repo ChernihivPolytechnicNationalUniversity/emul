@@ -1,7 +1,7 @@
 /**
  * Bench physics: the things that happen on a real stand and are not a single part's readout.
  * A coil let go by a switch arcs across the contacts; a transistor switching a relay without a
- * flyback diode dies of the spike and lives with one; an electrolytic the wrong way round
+ * flyback diode avalanches, and dies when the coil holds more than its EAS; an electrolytic the wrong way round
  * vents; junctions fail short and contacts weld rather than open; a rail trips, a meter's fuse
  * blows, a transformer on a battery burns its primary; an MCU pin fed 12 V takes the chip and
  * shorts its supply.
@@ -112,12 +112,34 @@ describe("bench physics", () => {
       snap = t.run(0.005)
       if (withDiode) {
         expect.soft(snap.probes.drain.max, "drain never rose past 12 V + Vf").toBeLessThan(13.5)
-        expect.soft(snap.damage[q.id], "the MOSFET survives").toBeFalsy()
       } else {
-        expect.soft(snap.probes.drain.max, "drain spiked past the 55 V rating").toBeGreaterThan(55)
-        expect.soft(snap.damage[q.id], "the MOSFET is dead").toBeTruthy()
-        expect.soft(snap.damage[q.id]?.fail ?? "?", "and failed drain-to-source short").toBe("short")
+        expect.soft(snap.probes.drain.max, "the drain avalanches 20 % past the 55 V rating (V)").toBeNear(66, 4)
+        expect.soft(Math.abs(reading(snap, coil.id).current) * 1e3, "the body diode took the coil's current (mA)").toBeNear(0, 0.5)
       }
+      expect.soft(snap.damage[q.id], "the IRLZ44N lives: ½·50 mH·(0.2 A)² is 1 mJ against its 210 mJ EAS").toBeFalsy()
+    })
+
+    it("a solenoid holding more than the EAS kills it: 10 mH at 10 A", () => {
+      const { doc, place, wire } = builder(GRID)
+      const rail = place("supply", 12, -6, { value: "+12V", voltage: "12 V", imax: "20 A" })
+      const coil = place("inductor", 12, 0, { value: "10 mH", imax: "15 A" }, 90)
+      const rcoil = place("resistor", 12, 6, { value: "1.2 Ω", power: "200" }, 90)
+      const q = place("nmos", 12, 12, { value: "IRLZ44N", vth: "2 V", rdson: "22 mΩ", idmax: "47 A", vdsmax: "55 V", pmax: "110 W", eas: "210 mJ" })
+      const drive = place("logic-state", 4, 14, { vdd: "5 V" })
+      const gnd = place("ground", 15, 20)
+      wire(rail, "V", coil, "1")
+      wire(coil, "2", rcoil, "1")
+      wire(rcoil, "2", q, "D")
+      wire(q, "S", gnd, "GND")
+      wire(drive, "OUT", q, "G")
+      doc.parts[partKey(drive.id, "S")] = { on: true }
+      const t = start(doc)
+      let snap = t.run(0.1)
+      expect.soft(Math.abs(reading(snap, coil.id).current), "coil current on, the coil and the supply losing a little (A)").toBeNear(9.5, 0.3)
+      t.parts({ [partKey(drive.id, "S")]: { on: false } })
+      snap = t.run(0.01)
+      expect.soft(snap.damage[q.id], "0.5 J dumped in about 2 ms is far past the 210 mJ EAS: dead").toBeTruthy()
+      expect.soft(snap.damage[q.id]?.fail ?? "?", "and failed drain-to-source short").toBe("short")
     })
   })
 
@@ -352,9 +374,9 @@ describe("bench physics", () => {
   it("the oscilloscope keeps the spike that killed the part, across the rebuild the failure causes", () => {
     const { doc, place, wire } = builder(GRID)
     const rail = place("supply", 12, -6, { value: "+12V", voltage: "12 V", imax: "2 A" })
-    const coil = place("inductor", 12, 0, { value: "50 mH", imax: "1 A" }, 90)
-    const rcoil = place("resistor", 12, 6, { value: "60 Ω", power: "5" }, 90)
-    const q = place("nmos", 12, 12, { value: "IRLZ44N", vth: "2 V", rdson: "22 mΩ", idmax: "47 A", vdsmax: "55 V", pmax: "110 W" })
+    const coil = place("inductor", 12, 0, { value: "200 mH", imax: "1 A" }, 90)
+    const rcoil = place("resistor", 12, 6, { value: "120 Ω", power: "5" }, 90)
+    const q = place("nmos", 12, 12, { value: "2N7000", vth: "2.1 V", rdson: "1.8 Ω", idmax: "200 mA", vdsmax: "60 V", pmax: "400 mW", eas: "" })
     const drive = place("logic-state", 4, 14, { vdd: "5 V" })
     const gnd = place("ground", 15, 20)
     wire(rail, "V", coil, "1")

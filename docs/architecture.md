@@ -130,6 +130,13 @@ delayed output reaches the other. Edges an MCU makes a few nanoseconds apart are
 with whatever its parts answer, so a part's reply can overtake a second MCU edge less than its propagation delay
 behind the first.
 
+The palette's MOSFETs avalanche: the body diode breaks down at 1.2 × the rated Vds (V(BR)DSS is a
+minimum; parts break down above it), and its heating time constant is EAS / Pmax, so a pulse
+shorter than that fails it once its energy passes the datasheet's single-pulse avalanche energy,
+and a longer one is held against Pmax. A coil let go without a flyback diode is clamped instead of
+killing the part on its Vds rating. A buzzer coil's kick lasts L·I / (V(BR) − Vdd) ≈ 2 µs, inside
+one step: the step's share of it is what the solver sees.
+
 ## The linear solve
 
 Each Newton iteration factors the MNA matrix and substitutes through it (`src/sim/sparse-lu.ts`). The matrix is

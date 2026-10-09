@@ -23,6 +23,7 @@ export const UNIT_PREFIXES: Record<string, readonly SiPrefix[]> = {
   W: ["m", "", "k"],
   F: ["p", "n", "µ", "m"],
   H: ["n", "µ", "m", ""],
+  J: ["µ", "m", ""],
   Hz: ["", "k", "M"],
   Ah: ["m", ""],
   VA: ["", "k"],

@@ -312,7 +312,16 @@ const MOSFET_BODY: BodyShape[] = [
   { type: "text", x: 0.9, y: 3.7, text: "{value}", size: 0.3, anchor: "start", muted: true },
 ]
 /** A MOSFET that avalanches or overheats fails drain-to-source short. */
-const M_LIMITS = { current: "{idmax}", voltage: "{vdsmax}", power: "{pmax}", fail: "short" } as const
+const M_LIMITS = { current: "{idmax}", power: "{pmax}", fail: "short" } as const
+const AVALANCHE_OVER_RATED_VDS = 1.2
+const UNRATED_AVALANCHE_SECONDS = 1e-3
+const totalDissipation = (p: Record<string, string>) => parseValue(p.pmax) || 1
+const avalancheEnergy = (p: Record<string, string>) => {
+  const rated = parseValue(p.eas)
+  return Number.isFinite(rated) && rated > 0 ? rated : totalDissipation(p) * UNRATED_AVALANCHE_SECONDS
+}
+const BODY_DIODE_LIMITS = { current: "{idmax}", power: totalDissipation, tau: (p: Record<string, string>) => avalancheEnergy(p) / totalDissipation(p), fail: "short" } as const
+const avalancheVolts = (p: Record<string, string>) => AVALANCHE_OVER_RATED_VDS * (parseValue(p.vdsmax) || 60)
 const MOSFET_FIELDS: PropField[] = [
   { key: "value", label: "Part", type: "text", placeholder: "e.g. IRLZ44N" },
   { key: "vth", label: "Gate threshold |Vgs(th)|", type: "quantity", unit: "V" },
@@ -320,6 +329,7 @@ const MOSFET_FIELDS: PropField[] = [
   { key: "idmax", label: "Max drain current", type: "quantity", unit: "A" },
   { key: "vdsmax", label: "Max Vds", type: "quantity", unit: "V" },
   { key: "pmax", label: "Max dissipation", type: "quantity", unit: "W" },
+  { key: "eas", label: "Avalanche energy, single pulse (EAS)", type: "quantity", unit: "J", placeholder: "not rated: Pmax × 1 ms" },
 ]
 /** Transconductance parameter from the datasheet's Rds(on): in deep triode R = 1 / (2k(Vgs − Vth)). */
 const mosK = (p: Record<string, string>) => {
@@ -331,11 +341,11 @@ const mosK = (p: Record<string, string>) => {
 export const nmos: ComponentDef = {
   id: "nmos",
   name: "N-channel MOSFET",
-  description: "Enhancement mode, with its body diode. Set by threshold and Rds(on) off the datasheet.",
+  description: "Enhancement mode, with its body diode. Set by threshold and Rds(on) off the datasheet; past its rated Vds it avalanches and survives a pulse up to its EAS.",
   category: "Semiconductors",
   icon: NmosIcon,
   prefix: "Q",
-  defaults: { value: "IRLZ44N", vth: "2 V", rdson: "22 mΩ", idmax: "47 A", vdsmax: "55 V", pmax: "110 W" },
+  defaults: { value: "IRLZ44N", vth: "2 V", rdson: "22 mΩ", idmax: "47 A", vdsmax: "55 V", pmax: "110 W", eas: "210 mJ" },
   fields: MOSFET_FIELDS,
   width: 4,
   height: 4,
@@ -344,18 +354,18 @@ export const nmos: ComponentDef = {
   body: [...MOSFET_BODY, { type: "path", d: "M1.85 2 L2.4 1.75 V2.25 Z", fill: "foreground" }],
   model: [
     { kind: "M", polarity: "nmos", g: "G", d: "D", s: "S", vth: "{vth}", k: mosK, limits: M_LIMITS },
-    { kind: "D", anode: "S", cathode: "D", vf: 0.8, limits: { current: "{idmax}", fail: "short" } },
+    { kind: "D", anode: "S", cathode: "D", vf: 0.8, zener: avalancheVolts, label: "Body diode", limits: BODY_DIODE_LIMITS },
   ],
 }
 
 export const pmos: ComponentDef = {
   id: "pmos",
   name: "P-channel MOSFET",
-  description: "Enhancement mode, with its body diode. Set by threshold and Rds(on) off the datasheet.",
+  description: "Enhancement mode, with its body diode. Set by threshold and Rds(on) off the datasheet; past its rated Vds it avalanches and survives a pulse up to its EAS.",
   category: "Semiconductors",
   icon: PmosIcon,
   prefix: "Q",
-  defaults: { value: "IRF9540N", vth: "3.7 V", rdson: "117 mΩ", idmax: "23 A", vdsmax: "100 V", pmax: "140 W" },
+  defaults: { value: "IRF9540N", vth: "3.7 V", rdson: "117 mΩ", idmax: "23 A", vdsmax: "100 V", pmax: "140 W", eas: "430 mJ" },
   fields: MOSFET_FIELDS,
   width: 4,
   height: 4,
@@ -368,7 +378,7 @@ export const pmos: ComponentDef = {
   ],
   model: [
     { kind: "M", polarity: "pmos", g: "G", d: "D", s: "S", vth: "{vth}", k: mosK, limits: M_LIMITS },
-    { kind: "D", anode: "D", cathode: "S", vf: 0.8, limits: { current: "{idmax}", fail: "short" } },
+    { kind: "D", anode: "D", cathode: "S", vf: 0.8, zener: avalancheVolts, label: "Body diode", limits: BODY_DIODE_LIMITS },
   ],
 }
 

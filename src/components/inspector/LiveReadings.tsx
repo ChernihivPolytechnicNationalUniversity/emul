@@ -34,7 +34,8 @@ const KIND_LABEL: Record<Reading["kind"], string> = {
 }
 
 /** A resistor whose value the simulation sets each step is a chip's supply load, not a resistor on the board. */
-const kindLabel = (def: { model?: { kind: string; live?: string }[] }, r: Reading) => (r.kind === "R" && def.model?.[r.element]?.live ? "Supply load" : KIND_LABEL[r.kind])
+const kindLabel = (def: { model?: { kind: string; live?: string; label?: string }[] }, r: Reading) =>
+  def.model?.[r.element]?.label ?? (r.kind === "R" && def.model?.[r.element]?.live ? "Supply load" : KIND_LABEL[r.kind])
 
 /** Below this an element on a board counts as idle and is left out of the inspector. */
 const IDLE_CURRENT = 1e-6
