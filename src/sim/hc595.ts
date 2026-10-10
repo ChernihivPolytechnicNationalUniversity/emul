@@ -32,7 +32,7 @@ export type Family = {
   hold: number
 }
 
-export const FAMILIES: Record<string, Family> = {
+export const FAMILIES = {
   "74HC595": {
     rising: [1.2, 2.4, 3.2],
     falling: [0.8, 2.1, 2.8],
@@ -69,7 +69,13 @@ export const FAMILIES: Record<string, Family> = {
     recovery: [10e-9, 10e-9, 10e-9],
     hold: 3e-9,
   },
-}
+} satisfies Record<string, Family>
+
+export type ShiftRegisterPart = keyof typeof FAMILIES
+
+export const SHIFT_REGISTER_DEFS = { hc595: "74HC595", hct595: "74HCT595" } as const satisfies Record<string, ShiftRegisterPart>
+
+export const shiftRegisterOfDef = (def: string): ShiftRegisterPart | undefined => (Object.hasOwn(SHIFT_REGISTER_DEFS, def) ? SHIFT_REGISTER_DEFS[def as keyof typeof SHIFT_REGISTER_DEFS] : undefined)
 
 const POWER_ON = 1.2
 const POWER_OFF = 0.8
@@ -95,8 +101,8 @@ export class ShiftRegister595 implements DigitalPart {
   readonly pins = [...HC595_INPUTS, ...DRIVEN]
   readonly supply = { vcc: "$vcc", gnd: "$gnd" }
   readonly out: DigitalEdge[] = []
-  private family: Family = FAMILIES["74HC595"]
-  private name = "74HC595"
+  private readonly part: ShiftRegisterPart
+  private readonly family: Family
   private powered = false
   private vcc = 0
   private shift = 0
@@ -113,15 +119,13 @@ export class ShiftRegister595 implements DigitalPart {
   private readonly warnings = new Map<string, { text: string; at: number }>()
   private time = 0
 
-  constructor(object: string, props: Record<string, string>) {
+  constructor(object: string, part: ShiftRegisterPart = "74HC595") {
     this.object = object
-    this.configure(props)
+    this.part = part
+    this.family = FAMILIES[part]
   }
 
-  configure(props: Record<string, string>) {
-    this.name = FAMILIES[props.value] ? props.value : "74HC595"
-    this.family = FAMILIES[this.name]
-  }
+  configure() {}
 
   reset() {
     this.powered = false
@@ -150,7 +154,7 @@ export class ShiftRegister595 implements DigitalPart {
   snapshot(): ShiftRegisterSnapshot {
     const warnings: string[] = []
     for (const { text, at } of this.warnings.values()) if (this.time - at <= WARNING_HOLD) warnings.push(text)
-    return { part: this.name, powered: this.powered, vcc: this.vcc, shift: this.shift, storage: this.storage, enabled: !this.level.OE, warnings }
+    return { part: this.part, powered: this.powered, vcc: this.vcc, shift: this.shift, storage: this.storage, enabled: !this.level.OE, warnings }
   }
 
   senseSupply(vcc: number, read: (pin: string) => number, time: number) {

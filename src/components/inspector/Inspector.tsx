@@ -2,7 +2,7 @@ import type { EepromSnapshot } from "@/sim/digital"
 import type { HdlSnapshot } from "@/sim/hdl"
 import { HC595_OUTPUTS, type ShiftRegisterSnapshot } from "@/sim/hc595"
 import { BUZZER_KINDS, type BuzzerSnapshot } from "@/sim/buzzer"
-import { HC595_LINKS } from "@/schematic/components/hc595"
+import { HC595_LINKS, isShiftRegisterDef } from "@/schematic/components/hc595"
 import { isBuzzerDef } from "@/schematic/components/buzzer"
 import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
@@ -116,7 +116,7 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
           {def.chip && <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? "STM32"} sim={sim} onChange={onChange} onFirmware={onFirmware} onCode={onCode} />}
           {def.id === "serial-terminal" && <TerminalPanel object={object} sim={sim} onSend={(text) => onSerial?.(object.id, text)} />}
           {def.id === "eeprom-24c" && <EepromPanel object={object} sim={sim} />}
-          {def.id === "hc595" && <ShiftRegisterPanel object={object} sim={sim} />}
+          {isShiftRegisterDef(def.id) && <ShiftRegisterPanel object={object} sim={sim} />}
           {isBuzzerDef(def.id) && <BuzzerPanel object={object} sim={sim} />}
           {isAddressableDef(def.id) && <AddressablePanel objectId={object.id} sim={sim} />}
           {isHdlDef(def.id) && <HdlInfo defId={def.id} sim={sim} objectId={object.id} onHdl={onHdl} />}

@@ -12,7 +12,7 @@ import { isHdlDef } from "@/schematic/hdl"
 import { HdlPart } from "./hdl"
 import { chainFor } from "./addressable/chain"
 import { chipCount, partOf, productById } from "./addressable/products"
-import { ShiftRegister595 } from "./hc595"
+import { ShiftRegister595, shiftRegisterOfDef } from "./hc595"
 import { Buzzer, buzzerOfDef } from "./buzzer"
 
 export type DigitalEdge = { pin: string; level: boolean | null; time: number }
@@ -660,9 +660,9 @@ export function createDigitalPart(def: string, object: string, props: Record<str
       return new Eeprom24(object, props)
     case "lcd7-f":
       return new Gt911(object, { sda: "37", scl: "38", rst: "39", int: "40" })
-    case "hc595":
-      return new ShiftRegister595(object, props)
     default: {
+      const shiftRegister = shiftRegisterOfDef(def)
+      if (shiftRegister) return new ShiftRegister595(object, shiftRegister)
       const buzzer = buzzerOfDef(def)
       if (buzzer) return new Buzzer(object, buzzer, props)
       const product = productById(def)
