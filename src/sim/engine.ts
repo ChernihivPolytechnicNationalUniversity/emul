@@ -1044,7 +1044,10 @@ export class Engine {
     const mask = this.switchMask(parts)
     if (mask !== this.stepMask) disturbed = true
     this.stepMask = mask
-    if (disturbed) this.settledRun = 0
+    if (disturbed) {
+      this.settledRun = 0
+      this.restartStiffCapacitors(dt)
+    }
 
     if (this.settledRun >= SETTLED_STEPS) {
       // At a fixed point of the circuit with nothing driving it anywhere else, this step's
@@ -1123,6 +1126,21 @@ export class Engine {
       for (let i = 0; i < n; i++) this.v2[i] = this.msPrimed ? this.ema(this.v2[i], this.v[i] * this.v[i], dt) : this.v[i] * this.v[i]
     }
     this.msPrimed = true
+  }
+
+  private restartStiffCapacitors(dt: number) {
+    const elements = this.net.elements
+    for (let k = 0; k < this.capacitors.length; k++) {
+      const i = this.capacitors[k]
+      const el = elements[i] as Extract<Resolved, { kind: "R" | "C" | "L" }>
+      const companion = el.value / (THETA * dt)
+      const seen = Math.min(this.conductanceBeside(el.a, companion), this.conductanceBeside(el.b, companion))
+      if (el.value / seen < dt) this.capI[i] = 0
+    }
+  }
+
+  private conductanceBeside(node: number, companion: number) {
+    return node === GROUND ? Infinity : Math.max(this.A[node * this.size + node] - companion, GMIN)
   }
 
   private nextSubSpan(span: number, dt: number): number {
@@ -2313,13 +2331,20 @@ export class Engine {
     // Polarity: an electrolytic the wrong way round breaks down long before its rating.
     if (lim.reverse !== undefined && -ratedV > lim.reverse)
       return this.fail(el, lim.fail, "reverse voltage", -ratedV, lim.reverse, "V")
+    if (el.kind === "SW") {
+      const weldCurrent = lim.surge ?? Infinity
+      const melt = Math.abs(cur) / weldCurrent
+      if (this.warm(i, dt, melt * melt, lim.tau) > 1) this.weld(el, lim.fail, Math.abs(cur), weldCurrent)
+      return
+    }
+    const heatsThroughItsBody = el.kind === "R" || el.kind === "L"
     let heating = 0
     let what = "current"
     let actual = 0
     let rated = 0
     let unit = "A"
     if (lim.current !== undefined) {
-      if (lim.surge !== undefined ? Math.abs(cur) > lim.surge : iLoad > SURGE * lim.current)
+      if (lim.surge !== undefined ? Math.abs(cur) > lim.surge : !heatsThroughItsBody && iLoad > SURGE * lim.current)
         return lim.surge !== undefined ? this.fail(el, lim.fail, "surge current", Math.abs(cur), lim.surge, "A") : this.fail(el, lim.fail, "current", iLoad, lim.current, "A")
       const r = Math.abs(cur) / lim.current
       heating = this.isDiode[i] ? r : r * r
@@ -2327,7 +2352,7 @@ export class Engine {
       rated = lim.current
     }
     if (lim.power !== undefined) {
-      if (pLoad > SURGE * lim.power) return this.fail(el, lim.fail, "power", pLoad, lim.power, "W")
+      if (!heatsThroughItsBody && pLoad > SURGE * lim.power) return this.fail(el, lim.fail, "power", pLoad, lim.power, "W")
       if (Math.abs(p) / lim.power > heating) {
         heating = Math.abs(p) / lim.power
         what = "power"
@@ -2336,14 +2361,22 @@ export class Engine {
         unit = "W"
       }
     }
+    if (this.warm(i, dt, heating, lim.tau) > 1) this.fail(el, lim.fail, what, actual, rated, unit)
+  }
+
+  private warm(i: number, dt: number, heating: number, tau: number): number {
     if (this.heatDt[i] !== dt) {
       this.heatDt[i] = dt
-      this.heatShare[i] = -Math.expm1(-dt / lim.tau)
+      this.heatShare[i] = -Math.expm1(-dt / tau)
     }
     const heat = this.stress[i] + (heating - this.stress[i]) * this.heatShare[i]
     this.stress[i] = heat
     this.rRatio[i] = heating
-    if (heat > 1) this.fail(el, lim.fail, what, actual, rated, unit)
+    return heat
+  }
+
+  private weld(el: Extract<Resolved, { kind: "SW" }>, how: "open" | "short", cur: number, weldCurrent: number) {
+    this.failWith(el, how, `contacts welded: ${formatSI(cur, "A")} puts ${formatSI(cur * el.ron, "V")} across them, past the ${formatSI(weldCurrent * el.ron, "V")} that melts the contact spot`)
   }
 
   private fail(el: Resolved, how: "open" | "short", what: string, actual: number, rated: number, unit: string) {

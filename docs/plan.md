@@ -12,8 +12,8 @@ a firmware or circuit test, and its row in `docs/coverage.md` flipped; then it l
 - [ ] **SSD1306 OLED** — I²C and SPI variants, 128×64 framebuffer drawn on the field.
 - [ ] **Keypad / button matrix** — 4×4 matrix.
 - [ ] **Op-amp, comparator** — ideal op-amp with rails, LM393-style comparator; a CMOS 555 (TLC555) beside the NE555.
-- [ ] **Relay, buzzer, DC motor, servo** — relay coil + contacts, buzzer as a load with sound indication,
-  motor as R+L+back-EMF with an RPM readout, servo decoding 50 Hz PWM to an angle.
+- [ ] **Relay, DC motor, servo** — relay coil + contacts, motor as R+L+back-EMF with an RPM readout, servo
+  decoding 50 Hz PWM to an angle.
 - [ ] **Sensors** — potentiometer exists; add LDR/thermistor (parameter-driven resistors), DHT11/22 (one-wire
   protocol), HC-SR04 (trigger/echo timing), DS18B20 (1-Wire).
 - [ ] **SPI flash** — 25Qxx.

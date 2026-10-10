@@ -1015,7 +1015,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
   }, [onKey, onCopy, onCut, onPaste])
 
-  const cursor = panning ? "cursor-grabbing" : spaceHeld ? "cursor-grab" : "cursor-crosshair"
+  const cursor = panning ? "cursor-grabbing" : spaceHeld ? "cursor-grab" : "cursor-precise"
   const probeReading = sim.probe(PROBE_ID)
   const { selectedObjects, selectedWires, doc: schDoc, setPart } = sch
   const selectedObjectList = React.useMemo(

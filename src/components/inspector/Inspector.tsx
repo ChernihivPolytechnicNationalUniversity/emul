@@ -1,7 +1,9 @@
 import type { EepromSnapshot } from "@/sim/digital"
 import type { HdlSnapshot } from "@/sim/hdl"
 import { HC595_OUTPUTS, type ShiftRegisterSnapshot } from "@/sim/hc595"
-import { HC595_LINKS } from "@/schematic/components/hc595"
+import { BUZZER_KINDS, type BuzzerSnapshot } from "@/sim/buzzer"
+import { HC595_LINKS, isShiftRegisterDef } from "@/schematic/components/hc595"
+import { isBuzzerDef } from "@/schematic/components/buzzer"
 import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
 import { CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
@@ -114,7 +116,8 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
           {def.chip && <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? "STM32"} sim={sim} onChange={onChange} onFirmware={onFirmware} onCode={onCode} />}
           {def.id === "serial-terminal" && <TerminalPanel object={object} sim={sim} onSend={(text) => onSerial?.(object.id, text)} />}
           {def.id === "eeprom-24c" && <EepromPanel object={object} sim={sim} />}
-          {def.id === "hc595" && <ShiftRegisterPanel object={object} sim={sim} />}
+          {isShiftRegisterDef(def.id) && <ShiftRegisterPanel object={object} sim={sim} />}
+          {isBuzzerDef(def.id) && <BuzzerPanel object={object} sim={sim} />}
           {isAddressableDef(def.id) && <AddressablePanel objectId={object.id} sim={sim} />}
           {isHdlDef(def.id) && <HdlInfo defId={def.id} sim={sim} objectId={object.id} onHdl={onHdl} />}
           {sim.live && !damage[object.id]?.fatal && <LiveReadings object={object} sim={sim} />}
@@ -362,6 +365,39 @@ function ShiftRegisterPanel({ object, sim }: { object: PlacedObject; sim: SimRea
           <AlertDescription>{`${formatSI(supply, "A")} through VCC or GND; the datasheet allows ${formatSI(VCC_GND_RATING, "A")} for all outputs together.`}</AlertDescription>
         </Alert>
       )}
+      {snap.warnings.map((w) => (
+        <Alert key={w}>
+          <TriangleAlertIcon />
+          <AlertDescription>{w}</AlertDescription>
+        </Alert>
+      ))}
+    </div>
+  )
+}
+
+const decibels = (db: number) => `${db.toFixed(1)} dB(A)`
+const hertz = (hz: number | null) => (hz === null ? "no steady tone" : formatSI(hz, "Hz", 3))
+
+function BuzzerPanel({ object, sim }: { object: PlacedObject; sim: SimReadout }) {
+  const snap = sim.digital(object.id) as BuzzerSnapshot | undefined
+  if (!sim.live || !snap) return <div className="text-xs text-muted-foreground">Run the simulation to hear it.</div>
+  const rows: [string, string][] = [["State", snap.state]]
+  if (snap.level !== null) rows.push(["Level at 10 cm", decibels(snap.level)], ["Tone", hertz(snap.tone)])
+  else if (snap.heard) rows.push(["Last heard", `${hertz(snap.heard.tone)}, ${decibels(snap.heard.level)}`])
+  rows.push([snap.kind === "magnetic" ? "Coil voltage" : snap.kind === "piezo" ? "Drive, peak to peak" : "Supply", formatSI(snap.drive, "V", 3)])
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-xs text-muted-foreground">
+        {snap.name} · {BUZZER_KINDS[snap.kind]}
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+        {rows.map(([name, value]) => (
+          <div key={name} className="contents">
+            <dt className="text-muted-foreground">{name}</dt>
+            <dd className="tabular-nums">{value}</dd>
+          </div>
+        ))}
+      </dl>
       {snap.warnings.map((w) => (
         <Alert key={w}>
           <TriangleAlertIcon />

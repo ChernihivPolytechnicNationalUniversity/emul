@@ -2,6 +2,8 @@ import * as React from "react"
 import { SimStore } from "./sim-store"
 import { pinKey, type Damage, type PartState, type Schematic } from "@/schematic/types"
 import { TopologyGate } from "./topology"
+import { benchAudio } from "./audio"
+import { getDef } from "@/schematic/registry"
 import type { Failure, ProbeReading, Reading, TraceChunk } from "./engine"
 import type { LogicChunk, McuStatus, Probe, Snapshot } from "./loop"
 import type { FromWorker, ToWorker } from "./worker"
@@ -249,6 +251,18 @@ export function useSimulation(
     workerRunning.current = running
     send({ t: "running", running })
   }, [send, running])
+
+  const sounding = React.useMemo(() => doc.objects.some((o) => getDef(o.def)?.parts.some((p) => p.type === "sound")), [doc.objects])
+  const soundLinked = React.useRef(false)
+  React.useEffect(() => {
+    if (!running || !sounding) return
+    benchAudio.wake()
+    if (soundLinked.current) return
+    soundLinked.current = true
+    void benchAudio.connect().then((port) => {
+      if (port) workerRef.current?.postMessage({ t: "audio", port } satisfies ToWorker, [port])
+    })
+  }, [running, sounding])
 
   const debug = React.useMemo<DebugBridge>(
     () => ({

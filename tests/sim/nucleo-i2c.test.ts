@@ -9,6 +9,7 @@ import { nucleoI2c } from "@/schematic/examples"
 import { partKey, pinKey } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
 import type { EepromSnapshot } from "@/sim/digital"
+import { buildNetlist } from "@/sim/netlist"
 import { exampleBase64 } from "../lib/firmware"
 
 type Core = { mcu: { bus: { read32: (a: number) => number }; firmware: { symbols: { name: string; value: number }[] } } }
@@ -77,5 +78,39 @@ describe("Nucleo I²C EEPROM", () => {
     expect.soft(eeprom().bytes[0x40], "counter continued from the stored value").toBeGreaterThan(before)
     expect.soft(word("errors"), "no HAL errors after restart").toBe(0)
     expect.soft(snap.mcus[u.id].unmodelled.length, "nothing unmodelled").toBe(0)
+  })
+
+  it("RESET tapped through transfers never has the open-drain SDA drive high against the EEPROM's acknowledge", () => {
+    const bench = nucleoI2c.build(GRID)
+    const board = bench.objects.find((o) => o.def === "nucleo-f429zi")!
+    board.props = { ...board.props, firmware: "nucleo-i2c.elf", firmwareData: exampleBase64("nucleo-i2c.elf") }
+    const sda = buildNetlist(bench).elements.find((e) => e.object === board.id && e.kind === "GPIO" && e.nodeKey === "CN7-4")!.element
+    const tapped = new SimLoop()
+    tapped.setDoc(bench)
+    tapped.setParts(bench.parts)
+    tapped.setRunning(true)
+    let at = 0
+    let worst = 0
+    tapped.advance(at)
+    const fine = (ms: number) => {
+      const end = at + ms
+      while (at < end) {
+        tapped.advance((at += 0.2))
+        const pad = tapped.snapshot()!.readings.find((r) => r.object === board.id && r.element === sda)
+        worst = Math.max(worst, Math.abs(pad?.current ?? 0))
+      }
+    }
+    fine(300)
+    const reset = partKey(board.id, "RESET")
+    for (let k = 0; k < 20; k++) {
+      tapped.setParts({ [reset]: { pressed: true } })
+      fine(2 + ((k * 7) % 30))
+      tapped.setParts({ [reset]: { pressed: false } })
+      fine(2 + ((k * 13) % 40))
+    }
+    const after = tapped.snapshot()!
+    expect.soft(worst * 1e3, "SDA's pad only ever sinks what the 4.7 kΩ pull-up gives (mA)").toBeLessThan(1)
+    expect.soft(Object.values(after.damage).map((d) => d.reason), "nothing burnt").toEqual([])
+    expect.soft(after.mcus[board.id].running, "the core runs on").toBe(true)
   })
 })

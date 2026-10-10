@@ -1,5 +1,6 @@
 import * as React from "react"
-import { FileUpIcon, PencilIcon, PlusIcon, SearchIcon } from "lucide-react"
+import { ChevronDownIcon, FileUpIcon, PencilIcon, PlusIcon, SearchIcon } from "lucide-react"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Sidebar,
   SidebarContent,
@@ -14,6 +15,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { PALETTE_DRAG_TYPE, paletteGroups, useLibrary } from "./items"
+import { useGroupsOpen } from "./collapsed-groups"
 import type { ComponentDef } from "@/schematic/types"
 import type { HdlLanguage } from "emul-shared/hdl"
 import { HdlIcon } from "@/schematic/icons"
@@ -26,10 +28,29 @@ type ComponentsSidebarProps = React.ComponentProps<typeof Sidebar> & {
   onHdlOpen?: (id: string) => void
 }
 
+function PaletteSection({ label, open, onOpenChange, children }: { label: string; open: boolean; onOpenChange: (open: boolean) => void; children: React.ReactNode }) {
+  return (
+    <Collapsible open={open} onOpenChange={onOpenChange} className="group/collapsible">
+      <SidebarGroup>
+        <SidebarGroupLabel render={<CollapsibleTrigger />} className="w-full hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
+          {label}
+          <ChevronDownIcon className="ml-auto transition-transform duration-200 ease-out group-data-open/collapsible:rotate-180 motion-reduce:transition-none" />
+        </SidebarGroupLabel>
+        <CollapsibleContent className="-m-0.5 h-(--collapsible-panel-height) overflow-hidden p-0.5 transition-[height,padding] duration-200 ease-out data-ending-style:h-0 data-ending-style:py-0 data-starting-style:h-0 data-starting-style:py-0 motion-reduce:transition-none">
+          <SidebarGroupContent>{children}</SidebarGroupContent>
+        </CollapsibleContent>
+      </SidebarGroup>
+    </Collapsible>
+  )
+}
+
+const HDL_GROUP = "hdl"
+
 export function ComponentsSidebar({ onPick, onHdlNew, onHdlImport, onHdlOpen, ...props }: ComponentsSidebarProps) {
   const library = useLibrary()
   const [query, setQuery] = React.useState("")
   const q = query.trim().toLowerCase()
+  const groupsOpen = useGroupsOpen(q)
 
   const hdl = library.filter((e) => !q || e.module.name.toLowerCase().includes(q))
   const groups = paletteGroups
@@ -57,9 +78,7 @@ export function ComponentsSidebar({ onPick, onHdlNew, onHdlImport, onHdlOpen, ..
           </div>
         )}
         {(!q || hdl.length > 0) && (
-        <SidebarGroup>
-          <SidebarGroupLabel>HDL · VHDL / Verilog</SidebarGroupLabel>
-          <SidebarGroupContent>
+          <PaletteSection label="HDL · VHDL / Verilog" open={groupsOpen.isOpen(HDL_GROUP)} onOpenChange={(open) => groupsOpen.setOpen(HDL_GROUP, open)}>
             <SidebarMenu>
               {hdl.map(({ module, def }) => (
                 <SidebarMenuItem key={module.id}>
@@ -105,34 +124,30 @@ export function ComponentsSidebar({ onPick, onHdlNew, onHdlImport, onHdlOpen, ..
                 </>
               )}
             </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+          </PaletteSection>
         )}
         {groups.map((group) => (
-          <SidebarGroup key={group.id}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {group.items.map((item) => (
-                  <SidebarMenuItem key={item.id}>
-                    <SidebarMenuButton
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData(PALETTE_DRAG_TYPE, item.id)
-                        e.dataTransfer.effectAllowed = "copy"
-                      }}
-                      onClick={() => onPick?.(item)}
-                      title={item.description}
-                      className="cursor-grab active:cursor-grabbing [&>svg]:size-5"
-                    >
-                      <item.icon />
-                      <span>{item.name}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          <PaletteSection key={group.id} label={group.label} open={groupsOpen.isOpen(group.id)} onOpenChange={(open) => groupsOpen.setOpen(group.id, open)}>
+            <SidebarMenu>
+              {group.items.map((item) => (
+                <SidebarMenuItem key={item.id}>
+                  <SidebarMenuButton
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData(PALETTE_DRAG_TYPE, item.id)
+                      e.dataTransfer.effectAllowed = "copy"
+                    }}
+                    onClick={() => onPick?.(item)}
+                    title={item.description}
+                    className="cursor-grab active:cursor-grabbing [&>svg]:size-5"
+                  >
+                    <item.icon />
+                    <span>{item.name}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </PaletteSection>
         ))}
       </SidebarContent>
     </Sidebar>

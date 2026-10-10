@@ -48,6 +48,8 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+    --cursor-precise: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' shape-rendering='crispEdges'><path d='M12.5 1v23M1 12.5h23' stroke='white' stroke-width='3'/><path d='M12.5 2v21M2 12.5h21' stroke='black'/></svg>") 12 12, crosshair;
+    --cursor-ibeam: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' shape-rendering='crispEdges'><path d='M9 3.5h7M9 20.5h7M12.5 3.5v17' stroke='white' stroke-width='3'/><path d='M9.5 3.5h6M9.5 20.5h6M12.5 4v16' stroke='black'/></svg>") 12 12, text;
 }
 
 :root {
@@ -190,7 +192,16 @@
   html {
     @apply font-sans;
     }
+  input:is(:not([type]), [type="text"], [type="search"], [type="number"], [type="email"], [type="password"], [type="url"], [type="tel"]),
+  textarea,
+  [contenteditable="true"] {
+    cursor: var(--cursor-ibeam);
+  }
 }
+.monaco-editor .monaco-mouse-cursor-text {
+  cursor: var(--cursor-ibeam);
+}
+
 /*
  * The debugger's marks in the code editor (components/code/Editor.tsx): breakpoints in the
  * glyph margin — set, set where the program has no code, turned off, and the hint where the

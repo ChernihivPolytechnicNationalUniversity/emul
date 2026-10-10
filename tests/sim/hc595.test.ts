@@ -2,15 +2,19 @@ import { describe, expect, it } from "vitest"
 import { builder } from "@/schematic/builder"
 import { GRID } from "@/schematic/geometry"
 import { partKey, pinKey, type PlacedObject, type Schematic } from "@/schematic/types"
-import { ShiftRegister595, type ShiftRegisterSnapshot } from "@/sim/hc595"
+import { ShiftRegister595, type ShiftRegisterPart, type ShiftRegisterSnapshot } from "@/sim/hc595"
+import { migrated } from "@/schematic/migrate"
+import { getDef } from "@/schematic/registry"
 import { SimLoop, type Snapshot } from "@/sim/loop"
 import { exampleBase64 as fw } from "../lib/firmware"
 import { nucleoShiftRegister } from "@/schematic/timers"
 
 const OUTPUTS = ["QA", "QB", "QC", "QD", "QE", "QF", "QG", "QH"]
 
-function chip(part = "74HC595", vcc = 5) {
-  const c = new ShiftRegister595("u1", { value: part })
+const DEF_OF: Record<ShiftRegisterPart, string> = { "74HC595": "hc595", "74HCT595": "hct595" }
+
+function chip(part: ShiftRegisterPart = "74HC595", vcc = 5) {
+  const c = new ShiftRegister595("u1", part)
   const levels: Record<string, boolean> = { SER: false, SRCLK: false, RCLK: false, SRCLR: true, OE: false }
   for (const [pin, level] of Object.entries(levels)) c.input(pin, level, 0)
   c.senseSupply(vcc, () => (vcc ? 0 : NaN), 0)
@@ -115,7 +119,7 @@ describe("74HC595 logic (TI SCLS041J function table)", () => {
   it("comes up with whatever it powers up with, and nothing driven without power", () => {
     const seen = new Set<number>()
     for (let n = 0; n < 6; n++) {
-      const c = new ShiftRegister595(`chip-${n}`, {})
+      const c = new ShiftRegister595(`chip-${n}`)
       c.input("SRCLR", true, 0)
       c.senseSupply(5, () => 0, 0)
       seen.add(c.snapshot().storage)
@@ -129,7 +133,7 @@ describe("74HC595 logic (TI SCLS041J function table)", () => {
   })
 
   it("powers up cleared while /SRCLR is held low", () => {
-    const c = new ShiftRegister595("held", {})
+    const c = new ShiftRegister595("held")
     c.input("SRCLR", false, 0)
     c.senseSupply(5, () => 0, 0)
     expect.soft(c.snapshot().shift).toBe(0)
@@ -228,9 +232,9 @@ function start(doc: Schematic): Run {
   }
 }
 
-function bench(vcc: number, part = "74HC595") {
+function bench(vcc: number, part: ShiftRegisterPart = "74HC595") {
   const b = builder(GRID)
-  const u = b.place("hc595", 20, 10, { value: part })
+  const u = b.place(DEF_OF[part], 20, 10)
   const supply = b.place("dc-source", 0, 10, { value: `${vcc} V`, rint: "10 mΩ", imax: "5 A" })
   const gnd = b.place("ground", 0, 40)
   b.wire(supply, "+", u, "VCC")
@@ -261,7 +265,7 @@ function bench(vcc: number, part = "74HC595") {
 const shiftSnap = (s: Snapshot, u: PlacedObject) => s.digital[u.id] as ShiftRegisterSnapshot
 const volts = (s: Snapshot, u: PlacedObject, pin: string) => s.pinVoltage[pinKey(u.id, pin)] ?? 0
 
-function filled(vcc: number, ser: "VCC" | "GND", part = "74HC595", oe: "VCC" | "GND" = "GND") {
+function filled(vcc: number, ser: "VCC" | "GND", part: ShiftRegisterPart = "74HC595", oe: "VCC" | "GND" = "GND") {
   const b = bench(vcc, part)
   b.wire(b.u, "SER", ser === "VCC" ? b.u : b.gnd, ser)
   b.wire(b.u, "SRCLR", b.u, "VCC")
@@ -604,5 +608,32 @@ describe("the Nucleo + 74HC595 example", () => {
     for (let k = 1; k < order.length; k++) expect.soft(order[k], `step ${k}`).toBe((order[k - 1] + 1) % 8)
     const s = t.run(0.01)
     expect.soft(shiftSnap(s, u).warnings, "3.3 V logic on a 3.3 V chip").toEqual([])
+  })
+})
+
+describe("74HC595 and 74HCT595 are two palette entries", () => {
+  it("a document saved when the HCT was a Part select on hc595 opens as an hct595, and runs as one", () => {
+    const b = bench(5)
+    b.u.props = { ...b.u.props, value: "74HCT595" }
+    const plain = b.place("hc595", 20, 40, { value: "74HC595", ref: "U2" })
+    b.source(3.3, [b.u, "SER"])
+    b.wire(b.u, "SRCLR", b.u, "VCC")
+    b.wire(b.u, "OE", b.gnd, "GND")
+    b.clock("1 kHz", ["SRCLK", "RCLK"], 3.3)
+    const doc = { ...b.doc, objects: b.doc.objects.map(migrated) }
+    const u = doc.objects.find((o) => o.id === b.u.id)!
+    expect.soft(u.def, "the HCT gets its own definition").toBe("hct595")
+    expect.soft(u.props, "and keeps everything but the old select").toEqual({ ref: b.u.props?.ref })
+    expect.soft(doc.objects.find((o) => o.id === plain.id), "an HC is left alone").toBe(plain)
+    const snap = shiftSnap(start(doc).run(0.05), u)
+    expect.soft(snap.part, "simulated as").toBe("74HCT595")
+    expect.soft(snap.storage, "3.3 V logic reads high on its TTL inputs").toBe(0xff)
+    expect.soft(snap.warnings, "nothing to say about 3.3 V logic").toEqual([])
+  })
+
+  it("names the part on the chip itself", () => {
+    const b = bench(5, "74HCT595")
+    expect.soft(getDef(b.u.def)?.body.some((s) => s.type === "text" && s.text === "74HCT595")).toBe(true)
+    expect.soft(getDef("hc595")?.body.some((s) => s.type === "text" && s.text === "74HC595")).toBe(true)
   })
 })

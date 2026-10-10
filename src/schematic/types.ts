@@ -156,6 +156,13 @@ export type PartDef =
       /** State before the user touches it (a board ships plugged in). */
       initial?: PartState
     }
+  | {
+      type: "sound"
+      id: string
+      label: string
+      x: number
+      y: number
+    }
 
 // --- electrical model ---------------------------------------------------------
 
@@ -291,6 +298,8 @@ export type PropField =
   | { key: string; label: string; type: "select"; options: { value: string; label: string }[] }
   | { key: string; label: string; type: "range"; min: number; max: number; step: number; /** Shown after the value. */ unit?: string }
 
+export type ModelElement = Element & { label?: string }
+
 export type ComponentDef = {
   id: string
   name: string
@@ -315,7 +324,7 @@ export type ComponentDef = {
   pins: PinDef[]
   parts: PartDef[]
   /** Electrical model; components without one are drawn but do not conduct. */
-  model?: Element[]
+  model?: ModelElement[]
   /** Inspector hides internal elements that carry no current: boards have dozens of them. */
   hideIdle?: boolean
   pinsAreSockets?: boolean

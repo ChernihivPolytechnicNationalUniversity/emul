@@ -298,6 +298,7 @@ const LOGIC_CHUNK = 1 << 17
 /** A probe's level before anything has been seen on its net. */
 const LOGIC_UNKNOWN = 0xff
 const MAX_PART_EDGES = 10000
+const AUDIO_CHUNK = 4096
 
 /** Everything the UI needs after a batch of steps. Plain data: it crosses a worker boundary. */
 export type Snapshot = {
@@ -367,6 +368,11 @@ export class SimLoop {
   private digitalParts = new Map<string, DigitalPart>()
   /** Solved nodes of the pins each sensing part reads, refreshed with the digital nets. */
   private senseNodes = new Map<DigitalPart, Map<string, number>>()
+  private soundParts: DigitalPart[] = []
+  private audioOn = false
+  private audioBuffer = new Float32Array(AUDIO_CHUNK)
+  private audioFill = 0
+  private audioFull: Float32Array[] = []
   private freshParts = new Set<DigitalPart>()
   private sensed: { part: DigitalPart; read: (pin: string) => number; supply: () => number; ground: () => number }[] = []
   private sensedBy = new Map<DigitalPart, { ground: () => number }>()
@@ -485,6 +491,44 @@ export class SimLoop {
       seen.add(obj.id)
     }
     for (const id of [...this.digitalParts.keys()]) if (!seen.has(id)) this.digitalParts.delete(id)
+    this.soundParts = [...this.digitalParts.values()].filter((part) => part.pressure)
+  }
+
+  setAudio(on: boolean) {
+    this.audioOn = on
+    this.audioFill = 0
+    this.audioFull = []
+  }
+
+  private collectAudio() {
+    if (!this.audioOn || this.soundParts.length === 0) return
+    let pressure = 0
+    for (let k = 0; k < this.soundParts.length; k++) pressure += this.soundParts[k].pressure!()
+    this.audioBuffer[this.audioFill++] = pressure
+    if (this.audioFill === this.audioBuffer.length) {
+      this.audioFull.push(this.audioBuffer)
+      this.audioBuffer = new Float32Array(AUDIO_CHUNK)
+      this.audioFill = 0
+    }
+  }
+
+  drainAudio(): { samples: Float32Array; pitch: number } | null {
+    const total = this.audioFull.length * AUDIO_CHUNK + this.audioFill
+    if (total === 0) return null
+    const samples = new Float32Array(total)
+    this.audioFull.forEach((chunk, k) => samples.set(chunk, k * AUDIO_CHUNK))
+    samples.set(this.audioBuffer.subarray(0, this.audioFill), this.audioFull.length * AUDIO_CHUNK)
+    this.audioFull = []
+    this.audioFill = 0
+    let pitch = 0
+    for (const part of this.soundParts) {
+      const hz = part.pitch?.()
+      if (hz) {
+        pitch = hz
+        break
+      }
+    }
+    return { samples, pitch }
   }
 
   /** Terminal instances follow the document; a baud change re-arms the decoder. */
@@ -686,7 +730,7 @@ export class SimLoop {
       if (part.sense && part.senses && engine) {
         const nodes = new Map<string, number>()
         for (const pin of part.senses) {
-          const node = engine.net.pinNet.get(pinKey(part.object, pin))
+          const node = engine.net.pinNet.get(pinKey(part.object, pin)) ?? engine.net.nodeNet.get(pinKey(part.object, pin))
           if (node !== undefined) nodes.set(pin, node)
         }
         this.senseNodes.set(part, nodes)
@@ -1652,6 +1696,7 @@ export class SimLoop {
       this.accumulateFlow(engine, DT)
       if (mcus.length) this.sampleInputs(engine)
       this.senseParts(engine)
+      this.collectAudio()
       if (engine.failures.length) {
         // Everything that broke in this step goes at once; the circuit is then re-solved.
         for (const f of engine.failures) {
@@ -1753,6 +1798,7 @@ export class SimLoop {
     engine.step(DT, read, this.pinState, changed)
     this.accumulateFlow(engine, DT)
     this.senseParts(engine)
+    this.collectAudio()
   }
 
   /** Parts that watch voltages (a pixel's supply and data level) read them off the step just solved. */
@@ -1792,6 +1838,10 @@ export class SimLoop {
       const level = i < LED_DARK ? 0 : Math.min(1, i / LED_FULL)
       parts[partKey(el.object, el.part)] = { on: level > 0.05, level }
     })
+    for (const part of this.digitalParts.values()) {
+      const lit = part.parts?.()
+      if (lit) for (const id in lit) parts[partKey(part.object, id)] = lit[id]
+    }
     const terminals = engine.terminalCurrents()
     const wireCurrent: Record<string, number> = {}
     const wireCurrentAbs: Record<string, number> = {}

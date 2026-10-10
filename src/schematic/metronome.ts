@@ -286,20 +286,20 @@ export function buildMetronome(grid: number, opts: { tempo?: string; pitch?: str
   join(low(38), [dec3, "1"])
   join([dec3, "2"], gnd(38, 99))
 
-  const vr3 = vert("potentiometer", 41, 105, { value: "10 kΩ", ref: "VR3", pos: opts.volume ?? "0.8" })
+  const vr3 = flip(vert("potentiometer", 41, 105, { value: "10 kΩ", ref: "VR3", pos: opts.volume ?? "0.8" }))
   const rGate = place("resistor", 47, 106, { value: "1 kΩ" })
   const gateDown = R(52, 109, "100 kΩ")
-  const q5 = place("nmos", 55, 105, { value: "2N7000", ref: "Q5", vth: "2.1 V", rdson: "1.8 Ω", idmax: "200 mA", vdsmax: "60 V", pmax: "400 mW" })
-  const limit = R(57, 93, "100 Ω")
-  const buzzer = vert("resistor", 57, 99, { value: "41.5 Ω", power: "0.5", ref: "BZ1" })
-  const dBuzz = up("diode", 60, 99, diode)
+  const q5 = place("nmos", 55, 105, { value: "2N7000", ref: "Q5", vth: "2.1 V", rdson: "1.8 Ω", idmax: "200 mA", vdsmax: "60 V", pmax: "400 mW", eas: "" })
+  const limit = R(57, 92, "100 Ω")
+  const buzzer = vert("buzzer-cem-1203-42", 58, 97, { coil: "41.5 Ω", ref: "BZ1" })
+  const dBuzz = up("diode", 64, 98, diode)
   const gate = node(53, 107)
-  const pos = node(58, 98)
+  const pos = node(58, 97)
   const neg = node(58, 104)
-  const posClamp = node(61, 98)
-  const negClamp = node(61, 104)
-  via(j(tone), [vr3, "1"], [42, 102])
-  join([vr3, "2"], gnd(42, 112))
+  const posClamp = node(65, 97)
+  const negClamp = node(65, 104)
+  via(j(tone), [vr3, "2"], [42, 102])
+  join([vr3, "1"], gnd(42, 112))
   join([vr3, "W"], [rGate, "1"])
   join([rGate, "2"], j(gate), [q5, "G"])
   join(j(gate), [gateDown, "1"])
@@ -318,7 +318,7 @@ export const metronome: Example = {
   id: "metronome",
   name: "Metronome: three NE555s and a 74HC595",
   description:
-    "U1 beats 60–180 times a minute (VR1); each beat clocks the 74HC595 ring LED1 → LED4, fires U2's 52 ms pulse and lets U3 sound VR2's pitch through Q5. Q2 clears the register at power-on, Q3 seeds the first step. BZ1 is a 41.5 Ω stand-in for the passive buzzer.",
+    "U1 beats 60–180 times a minute (VR1); each beat clocks the 74HC595 ring LED1 → LED4, fires U2's 52 ms pulse and lets U3 sound VR2's pitch through Q5. Q2 clears the register at power-on, Q3 seeds the first step. BZ1 is a passive 12 mm magnetic buzzer (CEM-1203(42) with the schematic's 41.5 Ω coil): select it while running for the tone and how loud it is; VR2 near 0.8 puts the tone on its 2 kHz resonance.",
   icon: TimerIcon,
   build: (grid) => buildMetronome(grid).doc,
 }

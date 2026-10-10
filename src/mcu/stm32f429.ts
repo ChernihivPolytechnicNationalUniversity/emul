@@ -1087,6 +1087,10 @@ export class Stm32 {
   /** Note a peripheral-driven pad level for the duty accounting. */
   private trackAf(port: number, pin: number, level: boolean | null) {
     const key = port * 16 + pin
+    if (this.gpio[port].openDrain(pin)) {
+      this.afHigh.delete(key)
+      return
+    }
     const now = this.now
     const t = this.afHigh.get(key)
     if (!t) {

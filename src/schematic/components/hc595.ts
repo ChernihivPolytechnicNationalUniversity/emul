@@ -1,4 +1,4 @@
-import { HC595_INPUTS, HC595_OUTPUTS } from "@/sim/hc595"
+import { HC595_INPUTS, HC595_OUTPUTS, SHIFT_REGISTER_DEFS, shiftRegisterOfDef, type ShiftRegisterPart } from "@/sim/hc595"
 import { ShiftRegisterIcon } from "../icons"
 import { pinNumbers } from "../pin-numbers"
 import type { ComponentDef, Element, PinDef } from "../types"
@@ -23,10 +23,10 @@ const OUTPUT_PINS: PinDef[] = [
   { id: "QHS", label: "QH'", x: W - 1, y: 11, side: "right", labelAt: "left", kind: "digital", connector: "PDIP-16", connectorPin: 9, note: "Serial out from the last shift stage, for the next chip's SER; never 3-state" },
 ]
 
-const PINS: PinDef[] = [
+const pinsOf = (supply: string): PinDef[] => [
   ...INPUT_PINS,
   ...OUTPUT_PINS,
-  { id: "VCC", label: "VCC", x: 4, y: 1, side: "top", labelAt: "bottom", kind: "power", connector: "PDIP-16", connectorPin: 16, note: "2–6 V (HCT 4.5–5.5 V), 7 V absolute; ±70 mA through VCC and GND" },
+  { id: "VCC", label: "VCC", x: 4, y: 1, side: "top", labelAt: "bottom", kind: "power", connector: "PDIP-16", connectorPin: 16, note: `${supply}, 7 V absolute; ±70 mA through VCC and GND` },
   { id: "GND", label: "GND", x: 4, y: H - 1, side: "bottom", labelAt: "top", kind: "gnd", connector: "PDIP-16", connectorPin: 8 },
 ]
 
@@ -49,39 +49,51 @@ const model: Element[] = [
   ]),
 ]
 
-export const hc595: ComponentDef = {
-  id: "hc595",
-  name: "74HC595",
-  description:
-    "8-bit serial-in, parallel-out shift register with a 3-state output register, PDIP-16 (TI SN74HC595): SER shifts in on SRCLK, RCLK latches QA–QH, SRCLR clears the shift register, OE floats the outputs, QH' feeds the next chip. 17 ns at 4.5 V, ±6 mA rated drive (±35 mA absolute). Part: 74HC595 for 2–6 V with CMOS inputs; 74HCT595 for 4.5–5.5 V with TTL inputs a 3.3 V MCU can drive.",
-  category: "Logic ICs",
-  icon: ShiftRegisterIcon,
-  prefix: "U",
-  defaults: { value: "74HC595" },
-  fields: [
-    {
-      key: "value",
-      label: "Part",
-      type: "select",
-      options: [
-        { value: "74HC595", label: "74HC595 · 2–6 V, CMOS inputs" },
-        { value: "74HCT595", label: "74HCT595 · 5 V, TTL inputs" },
-      ],
-    },
-  ],
-  width: W,
-  height: H,
-  pins: [
-    ...PINS,
-  ],
-  body: [
-    { type: "rect", x: 1, y: 1, w: W - 2, h: H - 2, rx: 0.2, fill: "board" },
-    { type: "text", x: 1.5, y: 10, text: "{value}", size: 0.36, anchor: "start" },
-    { type: "text", x: 1.5, y: 10.65, text: "shift register", size: 0.22, muted: true, anchor: "start" },
-    { type: "text", x: W - 1.4, y: 1.3, text: "{ref}", size: 0.26, muted: true, anchor: "end" },
-    ...pinNumbers(PINS),
-  ],
-  parts: [],
-  model,
-  info: { Package: "PDIP-16", Source: "TI SN74HC595 (SCLS041J), Nexperia 74HC_HCT595 (rev. 12)" },
+const FUNCTION =
+  "8-bit serial-in, parallel-out shift register with a 3-state output register, PDIP-16: SER shifts in on SRCLK, RCLK latches QA–QH, SRCLR clears the shift register, OE floats the outputs, QH' feeds the next chip."
+
+type Variant = { id: keyof typeof SHIFT_REGISTER_DEFS; supply: string; description: string; source: string }
+
+function shiftRegister({ id, supply, description, source }: Variant): ComponentDef {
+  const part: ShiftRegisterPart = SHIFT_REGISTER_DEFS[id]
+  const pins = pinsOf(supply)
+  return {
+    id,
+    name: part,
+    description: `${FUNCTION} ${description}`,
+    category: "Logic ICs",
+    keywords: ["595", "shift register", "serial to parallel", "SIPO"],
+    icon: ShiftRegisterIcon,
+    prefix: "U",
+    width: W,
+    height: H,
+    pins,
+    body: [
+      { type: "rect", x: 1, y: 1, w: W - 2, h: H - 2, rx: 0.2, fill: "board" },
+      { type: "text", x: 1.5, y: 10, text: part, size: 0.36, anchor: "start" },
+      { type: "text", x: 1.5, y: 10.65, text: "shift register", size: 0.22, muted: true, anchor: "start" },
+      { type: "text", x: W - 1.4, y: 1.3, text: "{ref}", size: 0.26, muted: true, anchor: "end" },
+      ...pinNumbers(pins),
+    ],
+    parts: [],
+    model,
+    info: { Package: "PDIP-16", Source: source },
+  }
 }
+
+export const hc595 = shiftRegister({
+  id: "hc595",
+  supply: "2–6 V",
+  description:
+    "TI SN74HC595: 2–6 V with CMOS inputs (a high is 0.7 × VCC, so a 3.3 V MCU does not reliably drive one at 5 V), 17 ns at 4.5 V, ±6 mA rated drive (±35 mA absolute).",
+  source: "TI SN74HC595 (SCLS041J), Nexperia 74HC_HCT595 (rev. 12)",
+})
+
+export const hct595 = shiftRegister({
+  id: "hct595",
+  supply: "4.5–5.5 V",
+  description: "Nexperia 74HCT595: 5 V only, with TTL inputs (a high is 2 V) that a 3.3 V MCU drives, 25 ns, ±6 mA rated drive (±35 mA absolute).",
+  source: "Nexperia 74HC_HCT595 (rev. 12)",
+})
+
+export const isShiftRegisterDef = (defId: string) => shiftRegisterOfDef(defId) !== undefined

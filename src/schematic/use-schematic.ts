@@ -6,6 +6,7 @@ import { normalizeDebug } from "@/debug/saved"
 import { intersects, objectRect, snap, type FlipAxis, type Point, type Rect } from "./geometry"
 import { flipSelection, rotateSelection } from "./orient"
 import { getDef } from "./registry"
+import { migrated } from "./migrate"
 import {
   emptySchematic,
   partKey,
@@ -22,7 +23,8 @@ import type { WireColorKey } from "./wire-colors"
 import { connectPins, tapWireAt } from "./wiring"
 
 /** A board as a file brings it: its project, build options and debugger settings re-checked. */
-function checked(o: PlacedObject): PlacedObject {
+function checked(saved: PlacedObject): PlacedObject {
+  const o = migrated(saved)
   if (!o.project && !o.build && !o.debug) return o
   const { project, build, debug, ...rest } = o
   const opt = build?.opt
