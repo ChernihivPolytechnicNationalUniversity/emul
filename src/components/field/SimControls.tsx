@@ -1,10 +1,11 @@
-import { CrosshairIcon, GaugeIcon, PauseIcon, PlayIcon, RotateCcwIcon, TriangleAlertIcon } from "lucide-react"
+import { CrosshairIcon, GaugeIcon, PauseIcon, PlayIcon, RotateCcwIcon, TriangleAlertIcon, Volume2Icon, VolumeXIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -15,6 +16,7 @@ import { Slider } from "@/components/ui/slider"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { SimReadout } from "@/sim/use-simulation"
 import { SPEEDS, formatSpeed as format } from "@/sim/speeds"
+import { benchAudio, useSoundSettings } from "@/sim/audio"
 
 /** Slider range; wider than the presets and logarithmic, so every decade gets the same travel. */
 const MIN_SPEED = 0.01
@@ -105,6 +107,7 @@ export function SimControls({ sim, speed, started, probing, onProbeToggle, onTog
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+        {benchAudio.available && <SoundControl />}
         <ButtonGroupSeparator />
         <Tooltip>
           <TooltipTrigger render={<Button variant={probing ? "default" : "outline"} size="icon-sm" onClick={onProbeToggle} aria-pressed={probing} />}>
@@ -128,5 +131,35 @@ export function SimControls({ sim, speed, started, probing, onProbeToggle, onTog
         </Tooltip>
       )}
     </div>
+  )
+}
+
+function SoundControl() {
+  const sound = useSoundSettings()
+  const silent = sound.muted || sound.volume === 0
+  const percent = Math.round(sound.volume * 100)
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger render={<Button variant="outline" size="icon-sm" aria-label={silent ? "Sound: muted" : `Sound: ${percent}%`} />}>
+              {silent ? <VolumeXIcon /> : <Volume2Icon />}
+            </DropdownMenuTrigger>
+          }
+        />
+        <TooltipContent>{silent ? "Buzzers are muted" : "Buzzers' sound"}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent side="top" align="start" className="w-48">
+        <div className="flex items-center gap-2 px-1.5 py-1.5">
+          <span className="w-10 shrink-0 text-xs tabular-nums text-muted-foreground">{percent}%</span>
+          <Slider aria-label="Volume" min={0} max={100} step={1} value={percent} onValueChange={(v) => benchAudio.set({ volume: (Array.isArray(v) ? v[0] : v) / 100, muted: false })} />
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuCheckboxItem checked={sound.muted} onCheckedChange={(muted) => benchAudio.set({ muted })}>
+          Mute
+        </DropdownMenuCheckboxItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

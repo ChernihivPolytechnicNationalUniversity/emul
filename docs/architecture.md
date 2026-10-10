@@ -221,6 +221,19 @@ whether that kills it), over its maximum, or switched on and off more than 50 ti
 arcs on the symbol (`PartDef` `sound`) take the level, 50 dB(A) dark to 100 dB(A) full, in tenths, so
 the field re-renders only when they visibly change.
 
+**Sound.** With a sounding part on the bench, the first Run creates an `AudioContext` (a user's
+click, so the browser lets it play) and an AudioWorklet (`src/sim/audio-worklet.ts`), and hands the
+simulation worker one end of a `MessageChannel` whose other end is the worklet's: the samples never
+pass through the page. The loop adds up the parts' `pressure()` after every step and the worker sends
+them each tick with the loudest part's pitch. `SoundStream` (`src/sim/sound-stream.ts`) keeps them in
+a ring, low-passes them below the output's Nyquist and reads them out at the context's rate with
+cubic interpolation, aiming at 60 ms of backlog: under 25 ms it jumps back, over 150 ms forward, by
+whole periods of the pitch, crossfaded over 4 ms. A tone therefore plays at its true pitch whatever
+the simulation's speed; only its duration follows the speed, as the toolbar's rate already says
+(a pitch that followed the speed would make the metronome's PITCH knob lie). 90 dB SPL at 10 cm is
+full scale (a 12 mm buzzer at its rating is louder still, and a `tanh` softens it); pausing fades out over 20 ms. The toolbar's
+speaker sets a volume (squared, as loudness goes) and mute, kept per browser in `localStorage`.
+
 The palette's MOSFETs avalanche: the body diode breaks down at 1.2 × the rated Vds (V(BR)DSS is a
 minimum; parts break down above it), and its heating time constant is EAS / Pmax, so a pulse
 shorter than that fails it once its energy passes the datasheet's single-pulse avalanche energy,

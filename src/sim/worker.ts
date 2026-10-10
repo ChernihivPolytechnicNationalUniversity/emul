@@ -3,6 +3,7 @@ import type { PartState, Schematic } from "@/schematic/types"
 import type { Failure } from "./engine"
 import type { CoreTransport, FromCore } from "./core-host"
 import { SimLoop, type Probe, type Snapshot } from "./loop"
+import type { SoundMessage } from "./sound-stream"
 import type { CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 
 /** How often the worker reports back to the UI. */
@@ -27,6 +28,7 @@ export type ToWorker =
   | { t: "inspect"; id: number; object: string; req: InspectRequest }
   /** Reset one board's core (the debugger's restart). */
   | { t: "reset-core"; object: string }
+  | { t: "audio"; port: MessagePort | null }
 
 export type FromWorker =
   | { t: "snapshot"; snapshot: Snapshot | null }
@@ -64,6 +66,7 @@ let reported = false
 /** The bench runs or not as the loop now has it: the timer follows, and the UI hears of a change it did not ask for. */
 function syncRunning() {
   setTimer(loop.running)
+  if (!loop.running) sound({ t: "pause" })
   if (loop.running === reported) return
   reported = loop.running
   post({ t: "running", running: loop.running })
@@ -75,6 +78,9 @@ loop.onDebugStop = (stops) => {
   syncRunning()
 }
 
+let audio: MessagePort | null = null
+const sound = (message: SoundMessage, transfer: Transferable[] = []) => audio?.postMessage(message, transfer)
+
 let timer: ReturnType<typeof setInterval> | null = null
 let lastReport = 0
 let announced = false
@@ -82,6 +88,8 @@ let announced = false
 function tick() {
   const now = performance.now()
   const steps = loop.advance(now)
+  const chunk = audio && loop.drainAudio()
+  if (chunk) sound({ t: "samples", ...chunk }, [chunk.samples.buffer])
   if (steps > 0 && !announced) {
     announced = true
     post({ t: "started" })
@@ -121,6 +129,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       break
     case "running":
       loop.setRunning(msg.running)
+      if (!msg.running) sound({ t: "pause" })
       reported = msg.running
       // Pausing keeps the last snapshot on screen; only a restart clears it.
       setTimer(msg.running)
@@ -144,8 +153,15 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     case "serial":
       loop.sendSerial(msg.object, msg.text)
       break
+    case "audio":
+      audio?.close()
+      audio = msg.port
+      loop.setAudio(audio !== null)
+      break
     case "restart":
       loop.restart()
+      loop.setAudio(audio !== null)
+      sound({ t: "reset" })
       announced = false
       post({ t: "snapshot", snapshot: null })
       break
