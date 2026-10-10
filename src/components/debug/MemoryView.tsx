@@ -119,7 +119,7 @@ export function MemoryView({ debug, boardId, view, at }: { debug: DebugControlle
         ) : (
           <span
             key={k}
-            className={cn("tabular-nums", changed && "rounded-sm bg-amber-200/60 dark:bg-amber-500/30", !b && "text-muted-foreground", b && "cursor-text")}
+            className={cn("tabular-nums", changed && "rounded-sm bg-amber-200/60 dark:bg-amber-500/30", !b && "text-muted-foreground", b && "cursor-ibeam")}
             onDoubleClick={b ? () => setEditing({ addr: at, text: hex(v, group * 2) }) : undefined}
           >
             {b ? hex(v, group * 2) : "??".repeat(group)}

@@ -259,8 +259,8 @@ const cursorOnTheEmptyField = (page: Page) =>
     return null
   })
 
-async function crosshairOverARunningBench(page: Page) {
-  console.log("\nthe crosshair over a running bench")
+async function cursorsOverARunningBench(page: Page) {
+  console.log("\nthe crosshair and the text cursor over a running bench")
   await open(page, "open746-touch")
   await page.getByRole("button", { name: "Run" }).click()
   await page.waitForTimeout(1500)
@@ -273,8 +273,14 @@ async function crosshairOverARunningBench(page: Page) {
   await page.keyboard.press("o")
   await page.waitForTimeout(800)
   cursors["the oscilloscope"] = await cursorOnTheFirstVisible(page, "[data-slot=scope] canvas")
+  cursors["the palette's search box"] = await cursorOnTheFirstVisible(page, 'input[placeholder="Search…"]')
+  await page.keyboard.press("o")
+  await page.getByRole("button", { name: "New VHDL component" }).click()
+  await page.locator(".monaco-editor .view-lines").first().waitFor({ timeout: 20000 })
+  await page.waitForTimeout(1000)
+  cursors["the code editor"] = await cursorOnTheFirstVisible(page, ".monaco-editor .view-lines")
   for (const [where, cursor] of Object.entries(cursors))
-    expect(`over ${where}, a crosshair picture of our own, not the system one Windows draws by inverting`, cursor?.startsWith("url(") ? "ours" : cursor, "ours")
+    expect(`over ${where}, a cursor picture of our own, not the system one Windows draws by inverting`, cursor?.startsWith("url(") ? "ours" : cursor, "ours")
 }
 
 try {
@@ -292,7 +298,7 @@ try {
   await noPluggingIntoHeaders(page)
   await freedSlotTakesTheDrop(page)
   await addingLandsInView(page)
-  await crosshairOverARunningBench(page)
+  await cursorsOverARunningBench(page)
 } finally {
   await browser.close()
 }
