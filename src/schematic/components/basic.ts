@@ -29,16 +29,20 @@ import { formatSI, parseValue } from "@/sim/units"
 import type { BodyShape, ComponentDef, PinDef, PinKind, PropField } from "../types"
 
 const POWER_RATINGS = ["0.125", "0.25", "0.5", "1", "2", "5"].map((w) => ({ value: w, label: `${w} W` }))
+const FILM_RESISTOR_TAU = 40
+const WIPER_CURRENT_CEILING = 0.1
+const wiperCurrent = (p: Record<string, string>) => Math.min(WIPER_CURRENT_CEILING, Math.sqrt(parseValue(p.power) / parseValue(p.value)))
+const TRACK_LIMITS = { current: wiperCurrent, fatal: false } as const
 /** A junction that overheats or avalanches melts through: the die fails short, not open. */
 const Q_LIMITS = { current: "{icmax}", voltage: "{vcemax}", power: "{pmax}", fail: "short" } as const
 
 /** LED colours: CSS colour and typical forward voltage. */
-export const LED_COLORS: Record<string, { css: string; vf: number }> = {
-  red: { css: "#ef4444", vf: 1.9 },
-  green: { css: "#22c55e", vf: 2.1 },
-  blue: { css: "#3b82f6", vf: 3.0 },
-  yellow: { css: "#eab308", vf: 2.0 },
-  white: { css: "#f5f5f5", vf: 3.0 },
+export const LED_COLORS: Record<string, { css: string; vf: number; vr: number }> = {
+  red: { css: "#ef4444", vf: 1.9, vr: 15 },
+  green: { css: "#22c55e", vf: 2.1, vr: 15 },
+  blue: { css: "#3b82f6", vf: 3.0, vr: 5 },
+  yellow: { css: "#eab308", vf: 2.0, vr: 15 },
+  white: { css: "#f5f5f5", vf: 3.0, vr: 5 },
 }
 
 /**
@@ -85,7 +89,7 @@ export const resistor = base({
     { key: "power", label: "Power rating", type: "select", options: POWER_RATINGS },
   ],
   body: [{ type: "path", d: `${LEADS} M1 0.6 H3 V1.4 H1 Z` }, ...labels()],
-  model: [{ kind: "R", a: "1", b: "2", value: "{value}", limits: { power: "{power}" } }],
+  model: [{ kind: "R", a: "1", b: "2", value: "{value}", limits: { power: "{power}", tau: FILM_RESISTOR_TAU } }],
 })
 
 export const potentiometer = base({
@@ -101,9 +105,8 @@ export const potentiometer = base({
     { key: "power", label: "Power rating", type: "select", options: POWER_RATINGS },
   ],
   model: [
-    // One side of the track can burn through while the other still conducts.
-    { kind: "R", a: "1", b: "W", value: (p) => Math.max(1e-3, parseValue(p.value) * Number(p.pos)), limits: { power: "{power}", fatal: false } },
-    { kind: "R", a: "W", b: "2", value: (p) => Math.max(1e-3, parseValue(p.value) * (1 - Number(p.pos))), limits: { power: "{power}", fatal: false } },
+    { kind: "R", a: "1", b: "W", value: (p) => Math.max(1e-3, parseValue(p.value) * Number(p.pos)), limits: TRACK_LIMITS },
+    { kind: "R", a: "W", b: "2", value: (p) => Math.max(1e-3, parseValue(p.value) * (1 - Number(p.pos))), limits: TRACK_LIMITS },
   ],
   pins: [
     ...twoPin(),
@@ -229,7 +232,7 @@ export const led = base({
     ...labels(1.5, "end"),
   ],
   parts: [{ type: "led", id: "LED", label: "", x: 2, y: 1, color: "{value}", style: "glow" }],
-  model: [{ kind: "D", anode: "1", cathode: "2", vf: (p) => LED_COLORS[p.value]?.vf ?? 2, part: "LED", limits: { current: "{imax}", voltage: 5 } }],
+  model: [{ kind: "D", anode: "1", cathode: "2", vf: (p) => LED_COLORS[p.value]?.vf ?? 2, part: "LED", limits: { current: "{imax}", voltage: (p) => LED_COLORS[p.value]?.vr ?? 5 } }],
 })
 
 const TRANSISTOR_PINS: PinDef[] = [
@@ -382,6 +385,11 @@ export const pmos: ComponentDef = {
   ],
 }
 
+const SILVER_MELTING_VOLTS = 0.37
+const CONTACT_SPOT_TAU = 1e-3
+const contactWeldCurrent = (p: Record<string, string>) => SILVER_MELTING_VOLTS / parseValue(p.rcontact)
+const CONTACT_LIMITS = { current: "{imax}", surge: contactWeldCurrent, tau: CONTACT_SPOT_TAU, fail: "short" } as const
+
 const BOUNCE_FIELDS: PropField[] = [
   { key: "bounce", label: "Contact bounce", type: "select", options: [{ value: "off", label: "Off" }, { value: "on", label: "On" }] },
   { key: "tbounce", label: "Bounce time", type: "quantity", unit: "s" },
@@ -409,8 +417,7 @@ export const pushbutton = base({
     { type: "text", x: 2, y: 1.78, text: "{value}", size: 0.3, muted: true },
   ],
   parts: [{ type: "button", id: "SW", label: "", x: 2, y: 0.25, size: 0.6 }],
-  // Contacts pushed past their rating weld: the button stays closed.
-  model: [{ kind: "SW", a: "1", b: "2", part: "SW", closed: "pressed", ron: "{rcontact}", limits: { current: "{imax}", fail: "short" } }],
+  model: [{ kind: "SW", a: "1", b: "2", part: "SW", closed: "pressed", ron: "{rcontact}", limits: CONTACT_LIMITS }],
 })
 
 export const toggleSwitch = base({
@@ -419,7 +426,7 @@ export const toggleSwitch = base({
   category: "Switches",
   icon: SwitchIcon,
   prefix: "SW",
-  defaults: { value: "SPST", imax: "3 A", rcontact: "50 mΩ", bounce: "off", tbounce: "10 ms" },
+  defaults: { value: "SPST", imax: "3 A", rcontact: "10 mΩ", bounce: "off", tbounce: "10 ms" },
   fields: [
     { key: "value", label: "Type", type: "text", placeholder: "e.g. SPST" },
     { key: "imax", label: "Contact rating", type: "quantity", unit: "A" },
@@ -428,8 +435,7 @@ export const toggleSwitch = base({
   ],
   body: [{ type: "path", d: LEADS }, ...labels(3.6)],
   parts: [{ type: "switch", id: "SW", label: "", x: 1, y: 1, span: 2 }],
-  // Contacts pushed past their rating weld: the switch stays closed.
-  model: [{ kind: "SW", a: "1", b: "2", part: "SW", closed: "on", ron: "{rcontact}", limits: { current: "{imax}", fail: "short" } }],
+  model: [{ kind: "SW", a: "1", b: "2", part: "SW", closed: "on", ron: "{rcontact}", limits: CONTACT_LIMITS }],
 })
 
 /** A battery's nameplate: "3.7 V Li-ion", "9 V alkaline". */

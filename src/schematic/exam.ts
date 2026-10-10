@@ -173,7 +173,8 @@ export function buildExam(grid: number): ExamBench {
   })()
 
   // --- 7. Overload: 100 Ω rated ¼ W straight across 12 V dissipates 1.44 W.
-  //     Expect it to burn open within a few milliseconds and the current to stop.
+  //     Expect it to ride out the first seconds, as IEC 60115-1's short-time overload allows,
+  //     then burn open at about 8 s and the current to stop.
   const overload = (() => {
     const ox = 48
     const v = rail(ox + 2, 0)

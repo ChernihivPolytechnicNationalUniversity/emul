@@ -68,7 +68,7 @@ describe("system exam", () => {
     const rth = (47e3 * 10e3) / 57e3
     const ib = (vth - 0.66) / (rth + 201 * 1e3)
     const ic = 200 * ib
-    expect.soft(q.current, "collector current").toBeNearRel(ic, 0.05)
+    expect.soft(q.rms?.current ?? NaN, "collector current, RMS over the signal (the bias, 0.1 mA of signal adds 0.3 %)").toBeNearRel(ic, 0.05)
     expect.soft(probe(P.ampC).avg, "collector voltage").toBeNearRel(12 - ic * 2.2e3, 0.05)
     expect.soft(probe(P.ampE).avg, "emitter voltage").toBeNearRel(201 * ib * 1e3, 0.05)
     const vin = probe(P.ampIn)
@@ -104,9 +104,11 @@ describe("system exam", () => {
 
   it("overload", () => {
     const r = parts.overload.r
-    // A burnt-open part leaves the netlist altogether, so it has no reading and no current.
-    expect.soft(snap.damage[r.id], "¼ W resistor at 1.44 W fails").toBeTruthy()
-    expect.soft(snap.readings.find((x) => x.object === r.id)?.current ?? 0, "current after failure").toBeNear(0, 1e-9)
+    expect.soft(snap.damage[r.id], "¼ W resistor at 1.44 W (5.8 ×) rides out the first second, inside IEC 60115-1's 6.25 × for 5 s").toBeFalsy()
+    run(9)
+    const later = loop.snapshot()!
+    expect.soft(later.damage[r.id]?.fail ?? "fine", "and has burnt open by 10 s").toBe("open")
+    expect.soft(later.readings.find((x) => x.object === r.id)?.current ?? 0, "current after failure").toBeNear(0, 1e-9)
   })
 
   it("current mirror", () => {

@@ -226,24 +226,72 @@ describe("bench physics", () => {
     expect.soft(t.run(15).damage[tr.id]?.fail ?? "fine", "the winding burnt open by 20 s").toBe("open")
   })
 
-  it("contacts weld: a tactile button (50 mA) on 3 V into 1 Ω stays closed after", () => {
-    const { doc, place, wire } = builder(GRID)
-    const bat = place("dc-source", 0, 0, { value: "3 V", imax: "10 A" })
-    const sw = place("pushbutton", 6, 0)
-    const r = place("resistor", 12, 0, { value: "1 Ω", power: "5" })
-    const gnd = place("ground", 3, 6)
-    wire(bat, "+", sw, "1")
-    wire(sw, "2", r, "1")
-    wire(r, "2", gnd, "GND")
-    wire(bat, "-", gnd, "GND")
-    const t = start(doc)
-    t.run(0.01)
-    t.parts({ [partKey(sw.id, "SW")]: { pressed: true } })
-    let snap = t.run(0.1)
-    expect.soft(snap.damage[sw.id]?.fail ?? "fine", "the button welded").toBe("short")
-    t.parts({ [partKey(sw.id, "SW")]: { pressed: false } })
-    snap = t.run(0.05)
-    expect.soft(Math.abs(reading(snap, r.id).current), "released, the current still flows (A)").toBeNear(3 / 1.51, 0.05)
+  describe("switch contacts: the rating is a switching rating, a weld needs the contact spot to melt", () => {
+    const circuit = (def: "pushbutton" | "switch", supply: Record<string, string>, load: Record<string, string>) => {
+      const { doc, place, wire } = builder(GRID)
+      const bat = place("dc-source", 0, 0, supply)
+      const sw = place(def, 6, 0)
+      const r = place("resistor", 12, 0, load)
+      const gnd = place("ground", 3, 6)
+      wire(bat, "+", sw, "1")
+      wire(sw, "2", r, "1")
+      wire(r, "2", gnd, "GND")
+      wire(bat, "-", gnd, "GND")
+      return { doc, sw, r, close: def === "pushbutton" ? { pressed: true } : { on: true }, open: def === "pushbutton" ? { pressed: false } : { on: false } }
+    }
+
+    it.each([
+      ["pushbutton", "twice its 50 mA from 4.5 V", { value: "4.5 V" }, { value: "45 Ω", power: "1" }, 0.1],
+      ["pushbutton", "1 A from 5 V, 20 × its rating", { value: "5 V" }, { value: "4.4 Ω", power: "5" }, 1],
+      ["switch", "5 A from 12 V, past its 3 A", { value: "12 V", rint: "0.05 Ω", imax: "10 A" }, { value: "2.3 Ω", power: "100" }, 5],
+    ] as const)("a %s carrying %s opens again when let go", (def, _, supply, load, amps) => {
+      const { doc, sw, r, close, open } = circuit(def, supply, load)
+      const t = start(doc)
+      t.run(0.01)
+      t.parts({ [partKey(sw.id, "SW")]: close })
+      let snap = t.run(2)
+      expect.soft(Math.abs(reading(snap, r.id).current), "the load current (A)").toBeNearRel(amps, 0.1)
+      expect.soft(reading(snap, sw.id).load ?? 0, "the inspector shows it over its rating").toBeGreaterThan(1)
+      t.parts({ [partKey(sw.id, "SW")]: open })
+      snap = t.run(0.05)
+      expect.soft(failures(snap), "nothing welded").toBe("")
+      expect.soft(Math.abs(reading(snap, r.id).current), "released, the current stops (A)").toBeNear(0, 1e-6)
+    })
+
+    it("a toggle closing three AA cells onto 100 µF rides out the 8 A inrush: the contact spot needs milliseconds to melt", () => {
+      const { doc, place, wire } = builder(GRID)
+      const bat = place("battery", 0, 0, { chem: "alkaline", cells: "3", capacity: "2.5 Ah" })
+      const sw = place("switch", 6, 0)
+      const c = place("capacitor-polarized", 12, 0, { value: "100 µF", vmax: "16 V" })
+      const gnd = place("ground", 3, 6)
+      wire(bat, "+", sw, "1")
+      wire(sw, "2", c, "1")
+      wire(c, "2", gnd, "GND")
+      wire(bat, "-", gnd, "GND")
+      const t = start(doc)
+      t.run(0.01)
+      t.parts({ [partKey(sw.id, "SW")]: { on: true } })
+      expect.soft(Math.abs(reading(t.run(3e-5), sw.id).current), "the first step's inrush (A)").toBeGreaterThan(5)
+      expect.soft(failures(t.run(0.1)), "nothing welded").toBe("")
+      t.parts({ [partKey(sw.id, "SW")]: { on: false } })
+      expect.soft(reading(t.run(0.01), sw.id).extra?.state ?? "?", "it opens again").toBe("open")
+    })
+
+    it.each([
+      ["pushbutton", { value: "5 V", rint: "0.05 Ω", imax: "100 A" }],
+      ["switch", { value: "12 V", rint: "0.01 Ω", imax: "500 A" }],
+    ] as const)("a %s shorting a stiff supply welds and stays closed", (def, supply) => {
+      const { doc, sw, r, close, open } = circuit(def, supply, { value: "0.05 Ω", power: "1000" })
+      const t = start(doc)
+      t.run(0.01)
+      t.parts({ [partKey(sw.id, "SW")]: close })
+      let snap = t.run(0.01)
+      expect.soft(snap.damage[sw.id]?.fail ?? "fine", "welded").toBe("short")
+      expect.soft(snap.damage[sw.id]?.reason ?? "", "past the melting voltage of the contact spot").toMatch(/^contacts welded: .* past the 370(\.\d+)? mV/)
+      t.parts({ [partKey(sw.id, "SW")]: open })
+      snap = t.run(0.05)
+      expect.soft(Math.abs(reading(snap, r.id).current), "released, the current still flows (A)").toBeGreaterThan(1)
+    })
   })
 
   it("a transistor saturates a realistic Vce: 9 V, 10 kΩ base, 1 kΩ collector", () => {
@@ -357,6 +405,109 @@ describe("bench physics", () => {
     expect.soft(snap.damage[pot.id], "the 2 Ω end of the track burnt").toBeTruthy()
     expect.soft(snap.damage[pot.id]?.fatal, "but not the whole part").toBeFalsy()
     expect.soft(reading(snap, pot.id, 1), "the other half still reads").toBeTruthy()
+  })
+
+  describe("a ¼ W film resistor heats through its body", () => {
+    const across = (source: string, value: string, rint = "0.01 Ω") => {
+      const { doc, place, wire } = builder(GRID)
+      const bat = place(source === "mains" ? "ac-source" : "dc-source", 0, 0, source === "mains" ? {} : { value: source, rint, imax: "100 A" })
+      const r = place("resistor", 6, 0, { value, power: "0.25" })
+      const gnd = place("ground", 3, 6)
+      wire(bat, "+", r, "1")
+      wire(r, "2", gnd, "GND")
+      wire(bat, "-", gnd, "GND")
+      return { doc, r }
+    }
+
+    it("rides out IEC 60115-1's short-time overload, 2.5 × its rated voltage for 5 s, and burns open if it is kept there", () => {
+      const { doc, r } = across("12.5 V", "100 Ω")
+      const t = start(doc)
+      let snap = t.run(5)
+      expect.soft(reading(snap, r.id).power, "6.25 × its rated power (W)").toBeNearRel(1.5625, 0.01)
+      expect.soft(snap.damage[r.id], "intact after 5 s").toBeFalsy()
+      snap = t.run(5)
+      expect.soft(snap.damage[r.id]?.fail ?? "fine", "burnt open by 10 s").toBe("open")
+    })
+
+    it("takes a 100 ms pulse of 13 × its rating, inside Vishay's single-pulse curve for the 0207 body", () => {
+      const { doc, place, wire } = builder(GRID)
+      const bat = place("dc-source", 0, 0, { value: "18 V", rint: "0.01 Ω", imax: "100 A" })
+      const sw = place("switch", 6, 0)
+      const r = place("resistor", 12, 0, { value: "100 Ω", power: "0.25" })
+      const gnd = place("ground", 3, 6)
+      wire(bat, "+", sw, "1")
+      wire(sw, "2", r, "1")
+      wire(r, "2", gnd, "GND")
+      wire(bat, "-", gnd, "GND")
+      const t = start(doc)
+      t.parts({ [partKey(sw.id, "SW")]: { on: true } })
+      t.run(0.1)
+      t.parts({ [partKey(sw.id, "SW")]: { on: false } })
+      expect.soft(failures(t.run(1)), "nothing burnt").toBe("")
+    })
+
+    it("across the mains it is gone in milliseconds", () => {
+      const { doc, r } = across("mains", "100 Ω")
+      const snap = start(doc).run(0.1)
+      expect.soft(snap.damage[r.id]?.fail ?? "fine", "burnt open").toBe("open")
+    })
+  })
+
+  describe("a potentiometer is rated by its wiper current, √(P / R) wherever the wiper sits (Bourns)", () => {
+    const rheostat = (pos: string, series: string) => {
+      const { doc, place, wire } = builder(GRID)
+      const bat = place("dc-source", 0, 0, { value: "5 V" })
+      const pot = place("potentiometer", 6, 0, { value: "10 kΩ", pos, power: "0.25" })
+      const r = place("resistor", 12, 0, { value: series, power: "1" })
+      const gnd = place("ground", 3, 6)
+      wire(bat, "+", pot, "1")
+      wire(pot, "W", r, "1")
+      wire(r, "2", gnd, "GND")
+      wire(bat, "-", gnd, "GND")
+      return { doc, pot }
+    }
+
+    it("4 mA through 1 % of a 10 kΩ ¼ W track is inside its 5 mA", () => {
+      const { doc, pot } = rheostat("0.01", "1.1 kΩ")
+      const snap = start(doc).run(2)
+      expect.soft(Math.abs(reading(snap, pot.id).current) * 1e3, "wiper current (mA)").toBeNear(4, 0.2)
+      expect.soft(snap.damage[pot.id], "intact").toBeFalsy()
+    })
+
+    it("10 mA through the same 1 % burns that end of the track, though it dissipates only 10 mW", () => {
+      const { doc, pot } = rheostat("0.01", "390 Ω")
+      const snap = start(doc).run(2)
+      expect.soft(snap.damage[pot.id], "the end of the track burnt").toBeTruthy()
+      expect.soft(snap.damage[pot.id]?.fatal, "but not the other half").toBeFalsy()
+    })
+  })
+
+  describe("an LED wired backwards", () => {
+    const backwards = (color: string, volts: string) => {
+      const { doc, place, wire } = builder(GRID)
+      const bat = place("dc-source", 0, 0, { value: volts })
+      const r = place("resistor", 6, 0, { value: "1 kΩ" })
+      const led = place("led", 12, 0, { value: color })
+      const gnd = place("ground", 3, 6)
+      wire(bat, "+", r, "1")
+      wire(r, "2", led, "2")
+      wire(led, "1", gnd, "GND")
+      wire(bat, "-", gnd, "GND")
+      return { doc, led }
+    }
+
+    it("a red one on 12 V stays dark and intact: 5 V is the leakage test voltage, it breaks down at 15 V typical", () => {
+      const { doc, led } = backwards("red", "12 V")
+      const snap = start(doc).run(1)
+      expect.soft(snap.damage[led.id], "intact").toBeFalsy()
+      expect.soft(snap.parts[partKey(led.id, "LED")]?.on ?? false, "dark").toBe(false)
+    })
+
+    it("a red one on 24 V is past its breakdown and dies", () => {
+      const { doc, led } = backwards("red", "24 V")
+      const snap = start(doc).run(0.1)
+      expect.soft(snap.damage[led.id]?.reason ?? "", "by reverse voltage").toMatch(/^voltage 24(\.\d+)? V exceeds the 15(\.\d+)? V rating/)
+    })
   })
 
   it("12 V on a Nucleo pin: the chip dies and its supply shorts", () => {
