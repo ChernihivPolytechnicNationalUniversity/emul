@@ -6,6 +6,7 @@ import { systemExam } from "./exam"
 import { transistorLogic } from "./logic"
 import { ne555Flasher, nucleoShiftRegister } from "./timers"
 import { metronome } from "./metronome"
+import { buzzerExamples } from "./buzzers"
 import type { Icon } from "./icons"
 import type { Schematic } from "./types"
 import { lab1Project, lab1RunningLightProject, lcdProject, nucleoApp, type ProjectLoader } from "./projects"
@@ -676,4 +677,4 @@ export const nucleoAdc: Example = {
   },
 }
 
-export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoShiftRegister, nucleoWs2812, nucleoAdc, lab1Board, lab1RunningLight, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, chargeBoost, chargeBoostChips, ne555Flasher, metronome, systemExam, transistorLogic, lissajous, bridge]
+export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoShiftRegister, nucleoWs2812, nucleoAdc, lab1Board, lab1RunningLight, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, chargeBoost, chargeBoostChips, ne555Flasher, metronome, ...buzzerExamples, systemExam, transistorLogic, lissajous, bridge]

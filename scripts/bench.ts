@@ -32,6 +32,7 @@ const FIRMWARE: Record<string, Record<string, string>> = {
   "nucleo-spi": { U1: "nucleo-spi-master.elf", U2: "nucleo-spi-slave.elf" },
   "nucleo-i2c": { U1: "nucleo-i2c.elf" },
   "nucleo-adc": { U1: "nucleo-adc.elf" },
+  "nucleo-melody": { U1: "nucleo-melody.elf" },
 }
 
 for (const ex of examples) {
