@@ -189,7 +189,7 @@ export const PinLayer = React.memo(function PinLayer({
                 key={key}
                 data-object={object.id}
                 data-pin={pin.id}
-                className="group/pin pointer-events-auto cursor-crosshair"
+                className="group/pin pointer-events-auto cursor-precise"
                 onPointerDown={(e) => onPinPointerDown(e, object.id, pin.id)}
                 onPointerMove={(e) => onPinPointerMove(e, object.id, pin.id)}
                 onPointerUp={(e) => onPinPointerUp(e, object.id, pin.id)}

@@ -856,7 +856,7 @@ export function Scope({
       <div className="relative min-h-0 flex-1">
         <canvas
           ref={canvas}
-          className="block h-full w-full cursor-crosshair bg-card text-foreground"
+          className="block h-full w-full cursor-precise bg-card text-foreground"
           onPointerMove={(e) => {
             const r = e.currentTarget.getBoundingClientRect()
             hover.current = { x: e.clientX - r.left, y: e.clientY - r.top }

@@ -240,6 +240,43 @@ async function freedSlotTakesTheDrop(page: Page) {
   await shoot(page, "freed-slot")
 }
 
+const cursorOnTheFirstVisible = (page: Page, selector: string) =>
+  page.evaluate((s) => {
+    for (const target of document.querySelectorAll(s)) {
+      const r = target.getBoundingClientRect()
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+      if (hit && target.contains(hit)) return getComputedStyle(hit).cursor
+    }
+    return null
+  }, selector)
+
+const cursorOnTheEmptyField = (page: Page) =>
+  page.evaluate(() => {
+    const viewport = document.querySelector("[data-slot=dot-field-viewport]")!
+    const r = viewport.getBoundingClientRect()
+    for (let y = r.top + 20; y < r.bottom; y += 17)
+      for (let x = r.left + 20; x < r.right; x += 17) if (document.elementFromPoint(x, y) === viewport) return getComputedStyle(viewport).cursor
+    return null
+  })
+
+async function crosshairOverARunningBench(page: Page) {
+  console.log("\nthe crosshair over a running bench")
+  await open(page, "open746-touch")
+  await page.getByRole("button", { name: "Run" }).click()
+  await page.waitForTimeout(1500)
+  expect("the bench is running", await page.getByRole("button", { name: "Pause" }).count(), 1)
+  const cursors: Record<string, string | null> = {
+    "the empty field": await cursorOnTheEmptyField(page),
+    "a pin": await cursorOnTheFirstVisible(page, "[data-slot=pins] [data-pin] circle"),
+    "the touch panel": await cursorOnTheFirstVisible(page, "[data-slot=component] foreignObject"),
+  }
+  await page.keyboard.press("o")
+  await page.waitForTimeout(800)
+  cursors["the oscilloscope"] = await cursorOnTheFirstVisible(page, "[data-slot=scope] canvas")
+  for (const [where, cursor] of Object.entries(cursors))
+    expect(`over ${where}, a crosshair picture of our own, not the system one Windows draws by inverting`, cursor?.startsWith("url(") ? "ours" : cursor, "ours")
+}
+
 try {
   await fetch(DEV_SERVER, { signal: AbortSignal.timeout(3000) })
 } catch {
@@ -255,6 +292,7 @@ try {
   await noPluggingIntoHeaders(page)
   await freedSlotTakesTheDrop(page)
   await addingLandsInView(page)
+  await crosshairOverARunningBench(page)
 } finally {
   await browser.close()
 }

@@ -339,7 +339,7 @@ function DisplayPanel({ part, g, level, display, mirror, onChange }: { part: Ext
   }
   return (
     <foreignObject x={g(part.x)} y={g(part.y)} width={g(part.w)} height={g(part.h)}>
-      <div className="relative h-full w-full bg-black" style={{ cursor: onChange ? "crosshair" : undefined, transform: mirror ? "scaleX(-1)" : undefined }}>
+      <div className={cn("relative h-full w-full bg-black", onChange && "cursor-precise")} style={{ transform: mirror ? "scaleX(-1)" : undefined }}>
         <canvas
           ref={canvas}
           width={part.width}
