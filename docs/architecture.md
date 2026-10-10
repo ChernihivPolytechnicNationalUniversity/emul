@@ -114,6 +114,14 @@ after the switch. The control carries over into the next step when a switch land
 end of one. The latch states are part of the switch mask, so the operating-point memo and the settled path see a
 flip as a change of circuit. `onTimer` reports every output transition with its exact time.
 
+A pad or a switch changing state between steps is the same kind of edge, and the step after it starts every
+capacitor that settled faster than a step under the old drive (its capacitance over what its nodes see on the last
+matrix, as above) from its charge alone: its remembered current is dropped (`restartStiffCapacitors`). The
+θ-method carries the last step's current into the next, and a capacitor a 25 Ω pad has just charged carries a
+large one; when the pad lets go the next step — a reset, a power-up — that memory has nothing to flow into but
+the capacitor and throws the node: a piezo's 5 nF on a Nucleo pin, charged as the USB came back and released by
+the reset, jumped to 6.2 V and burnt the pin. Capacitors in a resonance are not stiff and keep their history (`tests/sim/physics.test.ts`, a capacitor on a PWM pin through USB replugs).
+
 Digital parts with a supply of their own (the 74HC595) declare its model nodes (`supply`) and get `sense` called
 each step with their VCC and their pin voltages: power-on and power-off, VCC out of range, an input sitting
 between VIL and VIH. On a net nothing drives digitally, such a part reads the voltage against its own

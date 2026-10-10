@@ -1044,7 +1044,10 @@ export class Engine {
     const mask = this.switchMask(parts)
     if (mask !== this.stepMask) disturbed = true
     this.stepMask = mask
-    if (disturbed) this.settledRun = 0
+    if (disturbed) {
+      this.settledRun = 0
+      this.restartStiffCapacitors(dt)
+    }
 
     if (this.settledRun >= SETTLED_STEPS) {
       // At a fixed point of the circuit with nothing driving it anywhere else, this step's
@@ -1123,6 +1126,21 @@ export class Engine {
       for (let i = 0; i < n; i++) this.v2[i] = this.msPrimed ? this.ema(this.v2[i], this.v[i] * this.v[i], dt) : this.v[i] * this.v[i]
     }
     this.msPrimed = true
+  }
+
+  private restartStiffCapacitors(dt: number) {
+    const elements = this.net.elements
+    for (let k = 0; k < this.capacitors.length; k++) {
+      const i = this.capacitors[k]
+      const el = elements[i] as Extract<Resolved, { kind: "R" | "C" | "L" }>
+      const companion = el.value / (THETA * dt)
+      const seen = Math.min(this.conductanceBeside(el.a, companion), this.conductanceBeside(el.b, companion))
+      if (el.value / seen < dt) this.capI[i] = 0
+    }
+  }
+
+  private conductanceBeside(node: number, companion: number) {
+    return node === GROUND ? Infinity : Math.max(this.A[node * this.size + node] - companion, GMIN)
   }
 
   private nextSubSpan(span: number, dt: number): number {

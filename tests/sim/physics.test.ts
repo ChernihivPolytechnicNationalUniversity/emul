@@ -11,6 +11,7 @@ import { builder } from "@/schematic/builder"
 import { GRID } from "@/schematic/geometry"
 import { partKey, pinKey, type PartState, type Schematic } from "@/schematic/types"
 import { SimLoop, type Probe, type Snapshot } from "@/sim/loop"
+import { exampleBase64 } from "../lib/firmware"
 
 type Run = { loop: SimLoop; snap: Snapshot; clock: number; run: (seconds: number, each?: (snap: Snapshot) => void) => Snapshot; parts: (p: Record<string, PartState>) => void }
 /** Start a document running and hand back a way to advance it in simulated seconds. */
@@ -369,6 +370,29 @@ describe("bench physics", () => {
     expect.soft(snap.damage[u.id]?.fatal, "the pin's failure is fatal").toBeTruthy()
     // The blown pin clamps to the 3.3 V rail and the dead die shorts that rail: 12 V into ~0.5 Ω.
     expect.soft(snap.damage[bat.id], "the battery then feeds the short through the dead die and burns").toBeTruthy()
+  })
+
+  it("a capacitor on a Nucleo's PWM pin through USB unplugs and replugs: the pad the reset lets go of is not kicked", () => {
+    const { doc, place, wire } = builder(GRID)
+    const u = place("nucleo-f429zi", 0, 0, { firmware: "nucleo-pwm.elf", firmwareData: exampleBase64("nucleo-pwm.elf") })
+    const c = place("capacitor", 34, 24, { value: "4.7 nF" })
+    const gnd = place("ground", 40, 30)
+    wire(u, "CN10-4", c, "1")
+    wire(c, "2", gnd, "GND")
+    wire(u, "CN10-5", gnd, "GND")
+    const d6: Probe = { id: "d6", a: pinKey(u.id, "CN10-4"), b: null }
+    const t = start(doc, [d6])
+    t.run(0.3)
+    let worst = 0
+    const watch = (snap: Snapshot) => (worst = Math.max(worst, snap.probes.d6.max))
+    for (let k = 0; k < 30; k++) {
+      t.parts({ [partKey(u.id, "USB")]: { on: false } })
+      t.run((5 + ((k * 7) % 50)) / 1000, watch)
+      t.parts({ [partKey(u.id, "USB")]: { on: true } })
+      t.run((30 + ((k * 13) % 200)) / 1000, watch)
+    }
+    expect.soft(worst, "D6 never past its rail (V)").toBeLessThan(3.5)
+    expect.soft(failures(t.snap), "nothing burnt").toBe("")
   })
 
   it("the oscilloscope keeps the spike that killed the part, across the rebuild the failure causes", () => {
