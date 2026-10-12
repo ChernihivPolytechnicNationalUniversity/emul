@@ -80,10 +80,21 @@ export function readFieldPalette(host: Element, theme: string): FieldPalette {
 const readTheme = (): "dark" | "light" => (document.documentElement.classList.contains("dark") ? "dark" : "light")
 const serverTheme = (): "dark" | "light" => "light"
 
+const themeListeners = new Set<() => void>()
+let themeObserver: MutationObserver | null = null
+
 function watchTheme(listener: () => void) {
-  const observer = new MutationObserver(listener)
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
-  return () => observer.disconnect()
+  themeListeners.add(listener)
+  if (!themeObserver) {
+    themeObserver = new MutationObserver(() => themeListeners.forEach((notify) => notify()))
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
+  }
+  return () => {
+    themeListeners.delete(listener)
+    if (themeListeners.size) return
+    themeObserver?.disconnect()
+    themeObserver = null
+  }
 }
 
 export function useThemeName() {

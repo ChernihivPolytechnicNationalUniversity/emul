@@ -1,11 +1,12 @@
-import { objectRect, objectSize, orientPin, placedText, type Orientation, type Rect } from "@/schematic/geometry"
-import type { ComponentDef, PlacedObject } from "@/schematic/types"
+import { objectRect, objectSize, orientPin, placedText, type Orientation, type Point, type Rect } from "@/schematic/geometry"
+import type { BodyShape, ComponentDef, PlacedObject } from "@/schematic/types"
+import { paintShape, SOON_BADGE, soonBadge, textBoost, textColor, textFont } from "./body-paint"
 import type { FieldPalette } from "./field-palette"
 import { selectionOutline } from "./selection-geometry"
-import { KNOCKOUT_OPACITY, labelKnockout, labelOrigin, OVERBAR_WEIGHT_EM, overbarSpan, pinLabels, type Box, type PinLabel } from "./pin-label"
+import { boxCorners, KNOCKOUT_OPACITY, labelKnockout, labelOrigin, OVERBAR_WEIGHT_EM, overbarSpan, pinLabels, type Box, type LabelGround, type LabelKnockout, type PinLabel } from "./pin-label"
+import { printedNames } from "./printed-names"
+import { grownAt, printedGrowth } from "@/schematic/printed-text"
 
-const SYMBOL_STROKE_PX = 2
-const HAIRLINE_PX = 1
 const PIN_MARK_CELLS = 0.16
 const MARGIN_PX = 4
 const MAX_SYMBOL_PX = 4096
@@ -114,44 +115,7 @@ export class SymbolRaster {
       context.fillStyle = palette.text.inverse
       context.fill(backdrop)
     }
-    for (const shape of def.body) {
-      if (shape.type === "text") continue
-      const paint = palette.body[shape.fill ?? "none"]
-      if (shape.type === "path") {
-        const path = new Path2D(shape.d)
-        const scaled = new Path2D()
-        scaled.addPath(path, new DOMMatrix().scale(grid, grid))
-        if (shape.fill && paint.fill) {
-          context.fillStyle = paint.fill
-          context.fill(scaled)
-        }
-        const stroke = shape.muted ? palette.mutedStroke : palette.symbolStroke
-        if (stroke) {
-          context.strokeStyle = stroke
-          context.lineWidth = SYMBOL_STROKE_PX / scale
-          context.lineCap = "round"
-          context.lineJoin = "round"
-          context.stroke(scaled)
-        }
-        continue
-      }
-      context.beginPath()
-      if (shape.type === "rect") {
-        const radius = (shape.rx ?? 0) * grid
-        context.roundRect(shape.x * grid, shape.y * grid, shape.w * grid, shape.h * grid, radius)
-      } else {
-        context.arc(shape.cx * grid, shape.cy * grid, shape.r * grid, 0, Math.PI * 2)
-      }
-      if (paint.fill) {
-        context.fillStyle = paint.fill
-        context.fill()
-      }
-      if (paint.stroke) {
-        context.strokeStyle = paint.stroke
-        context.lineWidth = HAIRLINE_PX / scale
-        context.stroke()
-      }
-    }
+    for (const shape of def.body) paintShape(context, shape, grid, scale, palette)
   }
 
   private paintPinMarks(context: CanvasRenderingContext2D, def: ComponentDef, orientation: Orientation, grid: number, palette: FieldPalette) {
@@ -189,13 +153,48 @@ const BODY_TEXT_CELLS = 0.4
 
 export const fixedText = (text: string) => !text.includes("{")
 
+type BodyText = Extract<BodyShape, { type: "text" }>
+
+const sheetTextCache = new WeakMap<ComponentDef, readonly BodyText[]>()
+
+export const soonBadgeText = (shape: Extract<BodyShape, { type: "soon" }>): BodyText => {
+  const badge = soonBadge(shape)
+  return { type: "text", x: badge.textX, y: badge.textY, text: SOON_BADGE.text, size: SOON_BADGE.textSize, printed: true }
+}
+
+export function sheetTexts(def: ComponentDef): readonly BodyText[] {
+  const cached = sheetTextCache.get(def)
+  if (cached) return cached
+  const texts = def.body.flatMap((shape): BodyText[] => (shape.type === "text" && fixedText(shape.text) ? [shape] : shape.type === "soon" ? [soonBadgeText(shape)] : []))
+  sheetTextCache.set(def, texts)
+  return texts
+}
+
 const TEXT_ANCHOR: Record<"start" | "middle" | "end", CanvasTextAlign> = { start: "start", middle: "center", end: "end" }
 
 export type SheetText = { boost: number; pinSize: number }
 
+const NOTHING_HIDDEN: ReadonlySet<BodyText> = new Set()
+
 const UNSEEN = 0.001
 
 const faded = (color: string, opacity: number) => `color-mix(in srgb, ${color} ${opacity * 100}%, transparent)`
+
+const groundColor = (ground: LabelGround, palette: FieldPalette) => (ground === "field" ? palette.text.inverse : (palette.body[ground].fill ?? palette.text.inverse))
+
+function paintKnockout(context: CanvasRenderingContext2D, knockout: LabelKnockout, color: string, grid: number) {
+  const at = (box: Box) => [box.x * grid, box.y * grid, box.w * grid, box.h * grid] as const
+  context.fillStyle = faded(color, KNOCKOUT_OPACITY)
+  context.fillRect(...at(knockout.solid))
+  for (const [box, rising] of [[knockout.rise, true], [knockout.fall, false]] as const) {
+    const [x, y, w, h] = at(box)
+    const ramp = knockout.axis === "x" ? context.createLinearGradient(x, 0, x + w, 0) : context.createLinearGradient(0, y, 0, y + h)
+    ramp.addColorStop(0, faded(color, rising ? UNSEEN : KNOCKOUT_OPACITY))
+    ramp.addColorStop(1, faded(color, rising ? KNOCKOUT_OPACITY : UNSEEN))
+    context.fillStyle = ramp
+    context.fillRect(x, y, w, h)
+  }
+}
 
 export class TextRaster {
   private cache = new Map<string, Symbol>()
@@ -222,7 +221,7 @@ export class TextRaster {
     return Math.min(scale, MAX_SHEET_PX / world.w, MAX_SHEET_PX / world.h, Math.sqrt(MAX_SHEET_AREA / (world.w * world.h)))
   }
 
-  get(def: ComponentDef, orientation: Orientation, grid: number, scale: number, text: SheetText): Symbol | null {
+  get(def: ComponentDef, orientation: Orientation, grid: number, scale: number, text: SheetText, hidden = NOTHING_HIDDEN): Symbol | null {
     const palette = this.palette
     if (!palette) return null
     if (scale !== this.drawnAt) {
@@ -230,6 +229,7 @@ export class TextRaster {
       this.cache.clear()
     }
     const drawAt = this.fitting(def, orientation, grid, scale)
+    if (hidden.size) return this.draw(def, orientation, grid, drawAt, text, palette, hidden)
     const id = `${key(def, orientation, palette.theme, drawAt)}|${text.boost}|${text.pinSize}`
     const cached = this.cache.get(id)
     if (cached) return cached
@@ -238,7 +238,7 @@ export class TextRaster {
     return drawn
   }
 
-  private draw(def: ComponentDef, orientation: Orientation, grid: number, scale: number, text: SheetText, palette: FieldPalette): Symbol | null {
+  private draw(def: ComponentDef, orientation: Orientation, grid: number, scale: number, text: SheetText, palette: FieldPalette, hidden = NOTHING_HIDDEN): Symbol | null {
     const box = objectSize(def, orientation.rotation)
     const margin = LABEL_MARGIN_CELLS * grid * scale
     const width = Math.max(1, Math.ceil(box.w * grid * scale + margin * 2))
@@ -270,22 +270,8 @@ export class TextRaster {
       context.restore()
     }
     for (const { label, pin } of labelled) {
-      const ground = label.ground
-      const color = ground === "field" ? palette.text.inverse : (palette.body[ground].fill ?? palette.text.inverse)
       const knockout = labelKnockout(label.text, label.anchor, text.pinSize, advance)
-      const at = (box: Box) => [box.x * grid, box.y * grid, box.w * grid, box.h * grid] as const
-      atLabel(pin, label, () => {
-        context.fillStyle = faded(color, KNOCKOUT_OPACITY)
-        context.fillRect(...at(knockout.solid))
-        for (const [box, rising] of [[knockout.rise, true], [knockout.fall, false]] as const) {
-          const [x, y, w, h] = at(box)
-          const ramp = knockout.axis === "x" ? context.createLinearGradient(x, 0, x + w, 0) : context.createLinearGradient(0, y, 0, y + h)
-          ramp.addColorStop(0, faded(color, rising ? UNSEEN : KNOCKOUT_OPACITY))
-          ramp.addColorStop(1, faded(color, rising ? KNOCKOUT_OPACITY : UNSEEN))
-          context.fillStyle = ramp
-          context.fillRect(x, y, w, h)
-        }
-      })
+      atLabel(pin, label, () => paintKnockout(context, knockout, groundColor(label.ground, palette), grid))
     }
     for (const { label, pin } of labelled) {
       atLabel(pin, label, () => {
@@ -309,17 +295,49 @@ export class TextRaster {
     turnInto(context, orientation)
     context.scale(scale, scale)
     context.translate((-def.width * grid) / 2, (-def.height * grid) / 2)
-    for (const shape of def.body) {
-      if (shape.type !== "text" || !fixedText(shape.text)) continue
+    const upright = (shape: BodyText, factor: number) => {
       const placed = placedText(shape.anchor ?? "middle", shape.rotate ?? 0, orientation)
-      context.save()
-      context.translate(shape.x * grid, shape.y * grid)
+      const at = grownAt(shape, factor)
+      context.translate(at.x * grid, at.y * grid)
       if (orientation.mirror) context.scale(-1, 1)
       const turn = placed.angle - orientation.rotation
       if (turn) context.rotate((turn * Math.PI) / 180)
-      context.font = `${(shape.size ?? BODY_TEXT_CELLS) * text.boost * grid}px ${palette.text.sans}`
+      return placed
+    }
+    const growth = printedGrowth(def)
+    const plates = new Map<LabelGround, Point[][]>()
+    for (const { shape, ground } of printedNames(def)) {
+      if (hidden.has(shape)) continue
+      const placed = placedText(shape.anchor ?? "middle", shape.rotate ?? 0, orientation)
+      const turn = ((placed.angle - orientation.rotation) * Math.PI) / 180
+      const factor = textBoost(shape, text.boost, growth.get(shape))
+      const { solid } = labelKnockout(shape.text, placed.anchor, (shape.size ?? BODY_TEXT_CELLS) * factor, advance)
+      const at = grownAt(shape, factor)
+      const onSheet = ({ x, y }: Point): Point => {
+        const turned = { x: x * Math.cos(turn) - y * Math.sin(turn), y: x * Math.sin(turn) + y * Math.cos(turn) }
+        return { x: at.x * grid + (orientation.mirror ? -turned.x : turned.x) * grid, y: at.y * grid + turned.y * grid }
+      }
+      const quad = boxCorners(solid, onSheet)
+      plates.set(ground, [...(plates.get(ground) ?? []), quad])
+    }
+    for (const [ground, quads] of plates) {
+      context.beginPath()
+      for (const quad of quads) {
+        context.moveTo(quad[0].x, quad[0].y)
+        for (const corner of quad.slice(1)) context.lineTo(corner.x, corner.y)
+        context.closePath()
+      }
+      context.fillStyle = faded(groundColor(ground, palette), KNOCKOUT_OPACITY)
+      context.fill()
+    }
+    for (const shape of sheetTexts(def)) {
+      if (hidden.has(shape)) continue
+      context.save()
+      const factor = textBoost(shape, text.boost, growth.get(shape))
+      const placed = upright(shape, factor)
+      context.font = `${(shape.size ?? BODY_TEXT_CELLS) * factor * grid}px ${textFont(shape, palette)}`
       context.textAlign = TEXT_ANCHOR[placed.anchor]
-      context.fillStyle = shape.inverse ? palette.text.inverse : shape.muted ? palette.text.muted : palette.text.plain
+      context.fillStyle = textColor(shape, palette)
       context.fillText(shape.text, 0, 0)
       context.restore()
     }

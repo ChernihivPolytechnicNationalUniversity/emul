@@ -3,8 +3,11 @@ const MIN_DOT_PX = 16
 const dotLayer = (radius: number, alpha: number) =>
   `radial-gradient(color-mix(in oklch, var(--muted-foreground) ${Math.round(35 * alpha)}%, transparent) ${radius}px, transparent ${radius}px)`
 
+const NO_DOTS = { backgroundImage: "none", backgroundSize: "auto" }
+
 export function dotGridStyle(grid: number, scale: number) {
   const cellPx = grid * scale
+  if (!(cellPx > 0 && cellPx < Infinity)) return NO_DOTS
   let level = 1
   while (cellPx * level < MIN_DOT_PX) level *= 2
   const step = cellPx * level

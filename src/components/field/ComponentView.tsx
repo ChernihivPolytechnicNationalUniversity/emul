@@ -5,12 +5,17 @@ import { objectSize, orientationOf, placedText, type Orientation } from "@/schem
 import { getDef, partInitial } from "@/schematic/registry"
 import { partKey, type BodyShape, type ComponentDef, type Damage, type Fill, type PartDef, type PartState, type PlacedObject } from "@/schematic/types"
 import { LED_COLORS } from "@/schematic/components/basic"
+import { grownAt, isPrintedName, printedGrowth } from "@/schematic/printed-text"
+import { ambientOf, rgbLedGlow } from "@/schematic/components/rgb-led"
 import type { DisplayFrame } from "@/sim/use-simulation"
 import { useObjectReadings, useObjectSim, type SimStore } from "@/sim/sim-store"
 import type { FieldDetail } from "./detail"
 import { formatSI } from "@/sim/units"
-import { fixedText } from "./symbol-raster"
+import { fixedText, soonBadgeText } from "./symbol-raster"
 import { selectionOutline } from "./selection-geometry"
+import { LUCIDE_CLOCK, SOON_BADGE, soonBadge, soonImage, textBoost } from "./body-paint"
+import { readFieldPalette, useThemeName, type FieldPalette } from "./field-palette"
+import { SWITCH_CONTACT_CELLS } from "./pin-marker"
 
 const FILL: Record<Fill, string> = {
   board: "fill-card stroke-border",
@@ -86,6 +91,7 @@ export const ComponentView = React.memo(function ComponentView({
   const g = (v: number) => v * grid
   const props = { ...def.defaults, ...object.props }
   if (def.derive) Object.assign(props, def.derive(props))
+  const growth = printedGrowth(def)
   const orientation = orientationOf(object)
   const { rotation, mirror } = orientation
   const levelText = placedText("middle", 0, orientation).angle
@@ -116,17 +122,18 @@ export const ComponentView = React.memo(function ComponentView({
       <g className={cn("body", damage && "opacity-50 saturate-0")}>
         <HollowBackdrop def={def} grid={grid} />
         {def.body.map((s, i) => (
-          <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} boost={detail.textBoost} sheeted={sheeted} props={props} orientation={orientation} />
+          <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} boost={detail.textBoost} growth={growth.get(s)} sheeted={sheeted} props={props} orientation={orientation} />
         ))}
       </g>
       <g className="parts">
         {detail.pins && def.parts.map((p) => {
           const key = partKey(object.id, p.id)
-          const simulated = live.parts[key]
+          const mixed = p.type === "led" && p.mix ? rgbLedGlow(p.mix.map((id) => live.parts[partKey(object.id, id)]), ambientOf(props)) : undefined
+          const simulated = mixed ? { on: true, level: mixed.level } : live.parts[key]
           return (
             <Part
               key={p.id}
-              part={p.type === "led" ? { ...p, color: resolveColor(template(p.color, props)) } : p}
+              part={p.type === "led" ? { ...p, color: mixed?.color ?? resolveColor(template(p.color, props)) } : p}
               g={g}
               state={simulated ?? parts[key] ?? partInitial(def, p.id)}
               level={p.type === "display" ? (live.live ? (p.backlight ? (live.parts[partKey(object.id, p.backlight)]?.level ?? 0) : 1) : 0) : simulated?.level}
@@ -214,6 +221,7 @@ function Shape({
   grid,
   labels,
   boost,
+  growth,
   sheeted,
   props,
   orientation,
@@ -223,13 +231,25 @@ function Shape({
   grid: number
   labels: boolean
   boost: number
+  growth?: number
   sheeted: boolean
   props: Record<string, string>
   orientation: Orientation
 }) {
-  if (shape.type === "text" && (!labels || (sheeted && fixedText(shape.text)))) return null
+  if (shape.type === "text" && (!labels || isPrintedName(shape) || (sheeted && fixedText(shape.text)))) return null
   const placed = shape.type === "text" ? placedText(shape.anchor ?? "middle", shape.rotate ?? 0, orientation) : null
   switch (shape.type) {
+    case "art":
+      return (
+        <path
+          d={shape.d}
+          transform={`scale(${grid})`}
+          vectorEffect="non-scaling-stroke"
+          className={shape.fill ? FILL[shape.fill] : shape.muted ? "fill-muted-foreground stroke-none" : "fill-foreground stroke-none"}
+        />
+      )
+    case "soon":
+      return <SoonShape shape={shape} g={g} labels={labels} boost={boost} sheeted={sheeted} orientation={orientation} />
     case "path":
       return (
         <path
@@ -259,24 +279,86 @@ function Shape({
       )
     case "circle":
       return <circle cx={g(shape.cx)} cy={g(shape.cy)} r={g(shape.r)} vectorEffect="non-scaling-stroke" className={FILL[shape.fill ?? "none"]} />
-    case "text":
+    case "text": {
+      const factor = textBoost(shape, boost, growth)
+      const at = grownAt(shape, factor)
       return (
         <text
-          x={g(shape.x)}
-          y={g(shape.y)}
-          fontSize={g((shape.size ?? 0.4) * boost)}
+          x={g(at.x)}
+          y={g(at.y)}
+          fontSize={g((shape.size ?? 0.4) * factor)}
           textAnchor={placed?.anchor}
           dominantBaseline="middle"
-          transform={uprightAt(g(shape.x), g(shape.y), placed?.angle ?? 0, orientation)}
+          textRendering={shape.printed ? "geometricPrecision" : undefined}
+          transform={uprightAt(g(at.x), g(at.y), placed?.angle ?? 0, orientation)}
           className={cn(
-            "stroke-none font-sans",
+            "stroke-none",
+            shape.mono ? "font-mono" : "font-sans",
             shape.inverse ? "fill-background" : shape.muted ? "fill-muted-foreground" : "fill-foreground",
           )}
         >
           {template(shape.text, props)}
         </text>
       )
+    }
   }
+}
+
+const documentPalettes = new Map<string, FieldPalette>()
+
+function documentPalette(theme: string) {
+  const cached = documentPalettes.get(theme)
+  if (cached) return cached
+  const palette = readFieldPalette(document.documentElement, theme)
+  documentPalettes.set(theme, palette)
+  return palette
+}
+
+export function SoonShape({
+  shape,
+  g,
+  labels,
+  boost,
+  sheeted,
+  orientation,
+}: {
+  shape: Extract<BodyShape, { type: "soon" }>
+  g: (v: number) => number
+  labels: boolean
+  boost: number
+  sheeted: boolean
+  orientation: Orientation
+}) {
+  const theme = useThemeName()
+  const image = soonImage(shape, documentPalette(theme))
+  const badge = soonBadge(shape)
+  const text = soonBadgeText(shape)
+  const placed = placedText("middle", 0, orientation)
+  const unit = g(SOON_BADGE.icon) / LUCIDE_CLOCK.box
+  return (
+    <g>
+      <title>{`${shape.label}: drawn, not modelled yet`}</title>
+      {image?.url && <image href={image.url} x={g(shape.x)} y={g(shape.y)} width={g(shape.w)} height={g(shape.h)} preserveAspectRatio="none" />}
+      <rect x={g(badge.x)} y={g(badge.y)} width={g(badge.w)} height={g(badge.h)} rx={g(badge.h / 2)} vectorEffect="non-scaling-stroke" className="fill-background stroke-border" />
+      <g transform={`translate(${g(badge.iconX)} ${g(badge.iconY)}) scale(${unit})`} className="fill-none stroke-foreground" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <circle cx={LUCIDE_CLOCK.circle.cx} cy={LUCIDE_CLOCK.circle.cy} r={LUCIDE_CLOCK.circle.r} />
+        <path d={LUCIDE_CLOCK.hands} />
+      </g>
+      {labels && !sheeted && (
+        <text
+          x={g(text.x)}
+          y={g(text.y)}
+          fontSize={g((text.size ?? 0.4) * textBoost(text, boost))}
+          textAnchor={placed.anchor}
+          dominantBaseline="middle"
+          transform={uprightAt(g(text.x), g(text.y), placed.angle, orientation)}
+          className="fill-foreground stroke-none font-sans"
+        >
+          {text.text}
+        </text>
+      )}
+    </g>
+  )
 }
 
 /**
@@ -366,6 +448,60 @@ function DisplayPanel({ part, g, level, display, mirror, onChange }: { part: Ext
   )
 }
 
+const CHANGEOVER_REACH_CELLS = 0.4
+
+const degreesTo = (from: { x: number; y: number }, to: { x: number; y: number }) => (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI
+
+function Changeover({
+  part,
+  throws,
+  g,
+  on,
+  title,
+  onChange,
+}: {
+  part: Extract<PartDef, { type: "switch" }>
+  throws: { on: { x: number; y: number }; off: { x: number; y: number } }
+  g: (v: number) => number
+  on: boolean
+  title: string
+  onChange?: (patch: PartState) => void
+}) {
+  const pivot = { x: g(part.x), y: g(part.y) }
+  const ends = { on: { x: g(throws.on.x), y: g(throws.on.y) }, off: { x: g(throws.off.x), y: g(throws.off.y) } }
+  const reach = Math.hypot(ends.on.x - pivot.x, ends.on.y - pivot.y)
+  const angle = degreesTo(pivot, on ? ends.on : ends.off)
+  const xs = [pivot.x, ends.on.x, ends.off.x]
+  const ys = [pivot.y, ends.on.y, ends.off.y]
+  const margin = g(CHANGEOVER_REACH_CELLS)
+  return (
+    <g
+      className="cursor-pointer"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation()
+        onChange?.({ on: !on })
+      }}
+    >
+      <title>{title}</title>
+      {[pivot, ends.on, ends.off].map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r={g(SWITCH_CONTACT_CELLS)} className="fill-foreground stroke-none" />
+      ))}
+      <line
+        x1={pivot.x}
+        y1={pivot.y}
+        x2={pivot.x + reach}
+        y2={pivot.y}
+        transform={`rotate(${angle} ${pivot.x} ${pivot.y})`}
+        className="stroke-foreground transition-transform"
+        strokeWidth={SYMBOL_STROKE}
+        strokeLinecap="round"
+      />
+      <rect x={Math.min(...xs) - margin} y={Math.min(...ys) - margin} width={Math.max(...xs) - Math.min(...xs) + margin * 2} height={Math.max(...ys) - Math.min(...ys) + margin * 2} className="fill-transparent stroke-none" />
+    </g>
+  )
+}
+
 const SOUND_ARC_RADII = [0.5, 0.85]
 
 function SoundArcs({ cx, cy, g, level }: { cx: number; cy: number; g: (v: number) => number; level: number }) {
@@ -421,6 +557,14 @@ function Part({
 
   if (part.type === "sound") return level ? <SoundArcs cx={cx} cy={cy} g={g} level={level} /> : null
 
+  if (part.type === "link")
+    return (
+      <g data-link={part.id} onPointerDown={stop}>
+        <title>{title}</title>
+        <rect x={cx - g(part.w / 2)} y={cy - g(part.h / 2)} width={g(part.w)} height={g(part.h)} className="fill-transparent stroke-none" />
+      </g>
+    )
+
   if (part.type === "led") {
     const glow = level ?? (state.on ? 1 : 0)
     if (part.style === "glow") {
@@ -451,40 +595,45 @@ function Part({
           strokeWidth={1}
           vectorEffect="non-scaling-stroke"
         />
-        <text x={cx} y={cy + g(0.65)} fontSize={g(0.28 * textScale)} textAnchor="middle" transform={partText(cx, cy + g(0.65))} className="fill-muted-foreground stroke-none font-mono">
-          {part.label}
-        </text>
+        {!part.printed && (
+          <text x={cx} y={cy + g(0.65)} fontSize={g(0.28 * textScale)} textAnchor="middle" transform={partText(cx, cy + g(0.65))} className="fill-muted-foreground stroke-none font-mono">
+            {part.label}
+          </text>
+        )}
       </g>
     )
   }
 
+  if (part.type === "switch" && part.throws) return <Changeover part={part} throws={part.throws} g={g} on={!!state.on} title={title} onChange={onChange} />
+
   if (part.type === "switch") {
-    const x2 = cx + g(part.span)
+    const span = g(part.span)
+    const x2 = part.vertical ? cx : cx + span
+    const y2 = part.vertical ? cy + span : cy
+    const toggle = (e: React.MouseEvent) => {
+      stop(e)
+      onChange?.({ on: !state.on })
+    }
+    const hit = part.vertical
+      ? { x: cx - g(0.6), y: Math.min(cy, y2) - g(0.3), width: g(1.2), height: Math.abs(span) + g(0.6) }
+      : { x: Math.min(cx, x2) - g(0.3), y: cy - g(1), width: Math.abs(span) + g(0.6), height: g(1.3) }
     const angle = state.on ? 0 : -28
     return (
-      <g
-        className="cursor-pointer"
-        onPointerDown={stop}
-        onClick={(e) => {
-          stop(e)
-          onChange?.({ on: !state.on })
-        }}
-      >
+      <g className="cursor-pointer" onPointerDown={stop} onClick={toggle}>
         <title>{title}</title>
-        <circle cx={cx} cy={cy} r={g(0.12)} className="fill-foreground stroke-none" />
-        <circle cx={x2} cy={cy} r={g(0.12)} className="fill-foreground stroke-none" />
+        <circle cx={cx} cy={cy} r={g(SWITCH_CONTACT_CELLS)} className="fill-foreground stroke-none" />
+        <circle cx={x2} cy={y2} r={g(SWITCH_CONTACT_CELLS)} className="fill-foreground stroke-none" />
         <line
           x1={cx}
           y1={cy}
           x2={x2}
-          y2={cy}
+          y2={y2}
           transform={`rotate(${angle} ${cx} ${cy})`}
           className="stroke-foreground transition-transform"
           strokeWidth={SYMBOL_STROKE}
           strokeLinecap="round"
         />
-        {/* hit area */}
-        <rect x={cx - g(0.3)} y={cy - g(1)} width={g(part.span) + g(0.6)} height={g(1.3)} className="fill-transparent stroke-none" />
+        <rect {...hit} className="fill-transparent stroke-none" />
       </g>
     )
   }
@@ -609,7 +758,7 @@ function Part({
         strokeWidth={1}
         vectorEffect="non-scaling-stroke"
       />
-      {part.label && (
+      {part.label && !part.printed && (
         <text x={cx} y={cy + half + g(0.4)} fontSize={g(0.28 * textScale)} textAnchor="middle" transform={partText(cx, cy + half + g(0.4))} className="fill-muted-foreground stroke-none font-mono">
           {part.label}
         </text>

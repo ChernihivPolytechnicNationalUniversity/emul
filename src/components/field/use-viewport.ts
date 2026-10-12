@@ -1,6 +1,7 @@
 import * as React from "react"
 import type { Rect } from "@/schematic/geometry"
 import { dotGridStyle } from "./dot-grid"
+import { easeFactor, frameClock } from "./easing"
 
 export type Viewport = { x: number; y: number; scale: number }
 export type Point = { x: number; y: number }
@@ -18,6 +19,24 @@ const EMPTY_VIEW: Rect = { x: 0, y: 0, w: 0, h: 0 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
+export function followTarget(view: { current: Viewport }, target: { current: Viewport }, show: (view: Viewport, settled: boolean) => void) {
+  const sinceLastFrame = frameClock()
+  return (now: number) => {
+    const k = easeFactor(sinceLastFrame(now), TAU_MS)
+    const c = view.current
+    const t = target.current
+    const next: Viewport = {
+      x: c.x + (t.x - c.x) * k,
+      y: c.y + (t.y - c.y) * k,
+      scale: c.scale + (t.scale - c.scale) * k,
+    }
+    const settled = Math.abs(t.scale - next.scale) < 1e-4 && Math.abs(t.x - next.x) < 0.1 && Math.abs(t.y - next.y) < 0.1
+    view.current = settled ? t : next
+    show(view.current, settled)
+    return settled
+  }
+}
+
 /**
  * Pan / zoom state for the field.
  * - wheel: pan; ctrl/meta + wheel (and trackpad pinch): zoom to cursor
@@ -27,6 +46,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scale: 0.5 }) {
   const containerRef = React.useRef<HTMLDivElement>(null)
   const contentRef = React.useRef<HTMLDivElement>(null)
+  const overlayRef = React.useRef<HTMLDivElement>(null)
   const [publishedScale, setPublishedScale] = React.useState(initial.scale)
   const [view, setView] = React.useState<Rect>(EMPTY_VIEW)
   const viewPublishedAt = React.useRef<Viewport | null>(null)
@@ -40,7 +60,6 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   const target = React.useRef<Viewport>(initial)
   const current = React.useRef<Viewport>(initial)
   const raf = React.useRef(0)
-  const lastFrame = React.useRef(0)
   const paintedScale = React.useRef(NaN)
   React.useEffect(() => () => cancelAnimationFrame(raf.current), [])
 
@@ -76,10 +95,8 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   const paint = React.useCallback(
     (v: Viewport, animating = false) => {
       const content = contentRef.current
-      if (content) {
-        content.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`
-        content.style.setProperty("--field-scale", String(v.scale))
-      }
+      if (content) content.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`
+      overlayRef.current?.style.setProperty("--field-scale", String(v.scale))
       const container = containerRef.current
       if (!container) return
       publishView(v, animating)
@@ -109,23 +126,12 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
 
   const follow = React.useCallback(() => {
     if (raf.current) return
-    lastFrame.current = performance.now()
+    const step = followTarget(current, target, (view, settled) => {
+      paint(view, !settled)
+      if (settled) publish(view.scale)
+    })
     const frame = (now: number) => {
-      const dt = now - lastFrame.current
-      lastFrame.current = now
-      const k = 1 - Math.exp(-dt / TAU_MS)
-      const c = current.current
-      const t = target.current
-      const next: Viewport = {
-        x: c.x + (t.x - c.x) * k,
-        y: c.y + (t.y - c.y) * k,
-        scale: c.scale + (t.scale - c.scale) * k,
-      }
-      const done = Math.abs(t.scale - next.scale) < 1e-4 && Math.abs(t.x - next.x) < 0.1 && Math.abs(t.y - next.y) < 0.1
-      current.current = done ? t : next
-      paint(current.current, !done)
-      if (done) publish(current.current.scale)
-      raf.current = done ? 0 : requestAnimationFrame(frame)
+      raf.current = step(now) ? 0 : requestAnimationFrame(frame)
     }
     raf.current = requestAnimationFrame(frame)
   }, [paint, publish])
@@ -325,6 +331,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   return {
     containerRef,
     contentRef,
+    overlayRef,
     scale: publishedScale,
     view,
     worldPerPixel,

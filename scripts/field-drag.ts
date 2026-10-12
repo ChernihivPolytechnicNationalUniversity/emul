@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { chromium, type Page } from "playwright-core"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, objectRect, type Point } from "@/schematic/geometry"
+import { bodyBounds, contourOf } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 
@@ -77,7 +78,14 @@ async function dragBy(page: Page, from: Point, to: Point, release = true) {
 
 const crystal = (id: string, x: number, y: number, ref: string): PlacedObject => ({ id, def: "crystal", x: x * GRID, y: y * GRID, props: { ref } })
 const crystalMiddle = (q: PlacedObject) => ({ x: q.x + 2 * GRID, y: q.y + GRID })
-const overlapping = (a: { x: number; y: number; width: number; height: number }, b: typeof a) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+type ScreenBox = { x: number; y: number; width: number; height: number }
+const overlapping = (a: ScreenBox, b: ScreenBox) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+const drawn = (box: ScreenBox, defId: string): ScreenBox[] => {
+  const def = getDef(defId)!
+  const cell = box.width / def.width
+  return (defId === "open746i-c" ? contourOf(def) : [bodyBounds(def)]).map((r) => ({ x: box.x + r.x * cell, y: box.y + r.y * cell, width: r.w * cell, height: r.h * cell }))
+}
+const onTheBoard = (crystalBox: ScreenBox, board: ScreenBox) => drawn(crystalBox, "crystal").some((body) => drawn(board, "open746i-c").some((piece) => overlapping(body, piece)))
 
 const dots = (page: Page, id: string) =>
   page.evaluate((objectId) => {
@@ -132,7 +140,9 @@ async function contactsFollowTheDrag(page: Page) {
   await shoot(page, "lcd-lifted")
   expect("3 cells down, before release: no LCD dot is left", (await dots(page, lcd.id)).contact, 0)
   expect("…nor on P15", (await dots(page, board.id)).contact, before.board.contact - before.lcd.contact)
-  expect("…and the plate is red there (it is on the board, pins in no socket)", await blockedNow(page, lcd.id), true)
+  await to(0, 2)
+  expect("2 cells down, its FFC tail over the board's: the plate is red (on the board, pins in no socket)", await blockedNow(page, lcd.id), true)
+  await to(0, 3)
   await zoomAcrossPinDetail(page)
   await to(0, 4)
   expect("zoomed out past the pin dots and back mid-drag, a cell further: still no P15 dot", (await dots(page, board.id)).contact, before.board.contact - before.lcd.contact)
@@ -185,8 +195,7 @@ async function addingLandsInView(page: Page) {
   const q = await box(page, added[0])
   const b = await box(page, board.id)
   const view = (await page.locator("[data-slot=dot-field-viewport]").boundingBox())!
-  const overlaps = q.x < b.x + b.width && q.x + q.width > b.x && q.y < b.y + b.height && q.y + q.height > b.y
-  expect("the crystal is not on the board", overlaps, false)
+  expect("the crystal is not on the board, its outline or its P15 tab", onTheBoard(q, b), false)
   const inside = q.x >= view.x && q.y >= view.y && q.x + q.width <= view.x + view.width && q.y + q.height <= view.y + view.height
   expect("…and the view came round to it: it is on screen", inside, true)
   expect("…selected", await page.evaluate((id) => !!document.querySelector(`[data-slot=selection] [data-plate="${CSS.escape(id)}"]`), added[0]), true)
@@ -214,7 +223,7 @@ async function noPluggingIntoHeaders(page: Page) {
   const landed = await frame.worldOf(q.id)
   console.log(`  aimed at (${target.x / GRID}, ${target.y / GRID}) cells, landed at (${landed.x / GRID}, ${landed.y / GRID})`)
   expect("released: it did not stay on the header", Math.hypot(landed.x - target.x, landed.y - target.y) > GRID / 2, true)
-  expect("…it is off the board", overlapping(await box(page, q.id), await box(page, board.id)), false)
+  expect("…it is off the board, its outline and its P15 tab", onTheBoard(await box(page, q.id), await box(page, board.id)), false)
   expect("…and nothing of it is plugged in", (await dots(page, q.id)).contact, 0)
   expect("…nor sent home: the board's edge is nearer to the drop", Math.hypot(landed.x - q.x, landed.y - q.y) > GRID / 2, true)
 }

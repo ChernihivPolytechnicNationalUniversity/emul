@@ -3,6 +3,7 @@ import { getDef } from "./registry"
 import { BoxIndex, BUCKET_CELLS } from "./spatial"
 import { PointGrid } from "./contacts"
 import { bodyBounds } from "./body"
+import { blocksOf } from "./printed-text"
 import { boundsOf, boxCorners, labelFrame, labelKnockout, PIN_LABEL_CELLS, pinLabelById, pinLabels } from "@/components/field/pin-label"
 import type { ComponentDef, PinRef, PlacedObject, Wire } from "./types"
 
@@ -100,18 +101,32 @@ export function designatorRects(object: PlacedObject, grid: number): readonly Re
   return rects
 }
 
-export function footprints(object: PlacedObject, grid: number): { body: Quad; labels: Quad[] } | null {
+export function footprints(object: PlacedObject, grid: number): { body: Quad; contour: Quad[]; labels: Quad[] } | null {
   const body = footprint(object, grid)
   const def = getDef(object.def)
   if (!body || !def || body.box.w <= 0 || body.box.h <= 0) return null
   const labels = [...designatorRects(object, grid), ...outsideBody(object, pinNameRects(object, def, grid), grid)]
-  return { body, labels: labels.map(rectQuad) }
+  return { body, contour: contourOf(def).map((r) => quadOf(object, def, r, grid)), labels: labels.map(rectQuad) }
 }
 
-export function footprint(object: PlacedObject, grid: number): Quad | null {
-  const def = getDef(object.def)
-  if (!def) return null
-  const b = bodyBounds(def)
+const holds = (outer: Rect, inner: Rect) =>
+  inner.x >= outer.x - CLEARANCE_CELLS && inner.y >= outer.y - CLEARANCE_CELLS && inner.x + inner.w <= outer.x + outer.w + CLEARANCE_CELLS && inner.y + inner.h <= outer.y + outer.h + CLEARANCE_CELLS
+
+const contours = new WeakMap<ComponentDef, readonly Rect[]>()
+
+export function contourOf(def: ComponentDef): readonly Rect[] {
+  const cached = contours.get(def)
+  if (cached) return cached
+  const housings = def.body.flatMap((shape): Rect[] => (shape.type === "rect" && shape.fill === "board" ? [{ x: shape.x, y: shape.y, w: shape.w, h: shape.h }] : []))
+  const tabs = blocksOf(def.body).map((block) => block.box).filter((box) => !housings.some((h) => holds(h, box)))
+  const pieces = [...housings, ...tabs]
+  const everyPinOnAPiece = def.pins.every((pin) => pieces.some((r) => holds(r, { x: pin.x, y: pin.y, w: 0, h: 0 })))
+  const contour = housings.length && everyPinOnAPiece ? pieces : [bodyBounds(def)]
+  contours.set(def, contour)
+  return contour
+}
+
+function quadOf(object: PlacedObject, def: ComponentDef, b: Rect, grid: number): Quad {
   const inset = Math.min(CLEARANCE_CELLS, b.w / 2, b.h / 2)
   const corners = [
     { x: b.x + inset, y: b.y + inset },
@@ -120,6 +135,11 @@ export function footprint(object: PlacedObject, grid: number): Quad | null {
     { x: b.x + inset, y: b.y + b.h - inset },
   ].map(frameOf(object, def, grid))
   return { corners, box: boxOf(corners) }
+}
+
+export function footprint(object: PlacedObject, grid: number): Quad | null {
+  const def = getDef(object.def)
+  return def ? quadOf(object, def, bodyBounds(def), grid) : null
 }
 
 function boxOf(points: readonly Point[]): Rect {
@@ -174,7 +194,7 @@ export type PlacementScene = {
   grid: number
 }
 
-type Placed = { object: PlacedObject; body: Quad; labels: Quad[]; box: Rect }
+type Placed = { object: PlacedObject; body: Quad; contour: Quad[]; labels: Quad[]; box: Rect }
 
 const isJunction = (object: PlacedObject) => {
   const pins = getDef(object.def)?.pins ?? []
@@ -233,7 +253,8 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
   const carriedBox = carried.length ? boxOf(carried.flatMap((c) => c.segment)) : null
   const carriedReach = carriedBox && { x: carriedBox.x - 1, y: carriedBox.y - 1, w: carriedBox.w + 2, h: carriedBox.h + 2 }
   const hit = (a: Quad, b: Quad) => intersects(a.box, b.box) && overlap(a.corners, b.corners)
-  const hitsAny = (a: Quad, list: readonly Quad[]) => list.some((b) => hit(a, b))
+  const hitsAny = (a: readonly Quad[], list: readonly Quad[]) => a.some((q) => list.some((b) => hit(q, b)))
+  const insideAny = (contour: readonly Quad[], p: Point) => contour.some((q) => strictlyInside(q.corners, p))
   const sockets = new Map<string, { pins: readonly Socket[]; grid: PointGrid<Socket> }>()
   const socketsOf = (object: PlacedObject) => {
     let found = sockets.get(object.id)
@@ -249,47 +270,47 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
     const fixed = socketsOf(o).grid
     return socketsOf(m).pins.some((p) => fixed.has(p.x + dx, p.y + dy))
   }
-  const plugsInto = (plug: PlacedObject, plugAt: Point, socket: PlacedObject, socketAt: Point, socketBody: Quad) => {
+  const plugsInto = (plug: PlacedObject, plugAt: Point, socket: PlacedObject, socketAt: Point, socketBody: readonly Quad[]) => {
     const plugs = socketsOf(plug)
     const holes = socketsOf(socket)
     const holesUnder = (p: Socket) => holes.grid.at(p.x + plugAt.x - socketAt.x, p.y + plugAt.y - socketAt.y)
     const pluggedConnectors = new Set<string>()
     const filledConnectors = new Set<string>()
     for (const p of plugs.pins) {
-      if (!strictlyInside(socketBody.corners, { x: p.x + plugAt.x, y: p.y + plugAt.y })) continue
+      if (!insideAny(socketBody, { x: p.x + plugAt.x, y: p.y + plugAt.y })) continue
       const under = holesUnder(p)
       if (!p.connector || !under.length || under.some((h) => !h.connector)) return false
       pluggedConnectors.add(p.connector)
       for (const h of under) filledConnectors.add(h.connector!)
     }
     if (!pluggedConnectors.size) return false
-    const whollyPlugged = plugs.pins.every((p) => !pluggedConnectors.has(p.connector!) || (strictlyInside(socketBody.corners, { x: p.x + plugAt.x, y: p.y + plugAt.y }) && holesUnder(p).length > 0))
+    const whollyPlugged = plugs.pins.every((p) => !pluggedConnectors.has(p.connector!) || (insideAny(socketBody, { x: p.x + plugAt.x, y: p.y + plugAt.y }) && holesUnder(p).length > 0))
     const whollyFilled = holes.pins.every((h) => !filledConnectors.has(h.connector!) || plugs.grid.has(h.x + socketAt.x - plugAt.x, h.y + socketAt.y - plugAt.y))
     return whollyPlugged && whollyFilled
   }
   return (dx, dy) => {
     const reach = shiftedRect(area, dx, dy)
-    const bodies: Quad[] = []
-    const bodyAt = (i: number) => (bodies[i] ??= moved(movers[i].body, dx, dy))
+    const bodies: Quad[][] = []
+    const bodyAt = (i: number) => (bodies[i] ??= movers[i].contour.map((q) => moved(q, dx, dy)))
     const labelOn = (i: number, hits: (label: Quad) => boolean, box: Rect) =>
       movers[i].labels.some((q) => touches(shiftedRect(q.box, dx, dy), box) && hits(moved(q, dx, dy)))
-    const labelOnBody = (i: number, body: Quad) => labelOn(i, (label) => overlap(label.corners, body.corners), body.box)
+    const labelOnBody = (i: number, contour: readonly Quad[]) => contour.some((body) => labelOn(i, (label) => overlap(label.corners, body.corners), body.box))
     const segmentOnMover = (i: number, segment: Point[]) => {
       const box = segmentBox(segment)
-      return (touches(box, shiftedRect(movers[i].body.box, dx, dy)) && overlap(segment, bodyAt(i).corners)) || labelOn(i, (label) => overlap(segment, label.corners), box)
+      return (touches(box, shiftedRect(movers[i].body.box, dx, dy)) && bodyAt(i).some((q) => touches(box, q.box) && overlap(segment, q.corners))) || labelOn(i, (label) => overlap(segment, label.corners), box)
     }
     const docked = (i: number, o: Placed) => {
       const m = movers[i].object
       const offset = { x: dx, y: dy }
       const rest = { x: 0, y: 0 }
-      return plugsInto(m, offset, o.object, rest, o.body) || plugsInto(o.object, rest, m, offset, bodyAt(i))
+      return plugsInto(m, offset, o.object, rest, o.contour) || plugsInto(o.object, rest, m, offset, bodyAt(i))
     }
     const collides = (i: number, other: Placed) => {
       const m = movers[i]
       const box = shiftedRect(m.box, dx, dy)
       if (!intersects(box, other.box)) return false
-      if (hit(bodyAt(i), other.body)) return !bothSocketed(m.object, other.object) || !docked(i, other)
-      if (!hitsAny(bodyAt(i), other.labels) && !labelOnBody(i, other.body)) return false
+      if (hitsAny(bodyAt(i), other.contour)) return !bothSocketed(m.object, other.object) || !docked(i, other)
+      if (!hitsAny(bodyAt(i), other.labels) && !labelOnBody(i, other.contour)) return false
       return !touchingAt(m.object, other.object, dx, dy)
     }
     for (let i = 0; i < movers.length; i++) if (nearby.some(shiftedRect(movers[i].box, dx, dy), (other) => collides(i, other))) return true
@@ -303,7 +324,7 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
           const box = segmentBox(segment)
           return (
             other.labels.some((l) => touches(box, l.box) && overlap(segment, l.corners)) ||
-            (target !== other.object.id && touches(box, other.body.box) && overlap(segment, other.body.corners))
+            (target !== other.object.id && other.contour.some((q) => touches(box, q.box) && overlap(segment, q.corners)))
           )
         })
       if (nearby.some(shiftedRect(carriedReach, dx, dy), crosses)) return true

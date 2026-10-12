@@ -1,12 +1,13 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { objectPins, orientationOf, type Point } from "@/schematic/geometry"
+import { objectPins, objectSize, orientationOf, routeBox, touches, type Point, type Rect, type RoutedWire } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import type { PinKind, PlacedObject } from "@/schematic/types"
 import type { FieldDetail } from "./detail"
 import type { PinPointerHandler } from "./ComponentView"
-import { boxCorners, KNOCKOUT_OPACITY, labelFrame, labelKnockout, labelOrigin, MONO_ADVANCE_EM, numbersItsPins, OVERBAR_WEIGHT_EM, overbar, PIN_NUMBER_SCALE, pinLabelById, pinLabels, pinNumberPlacement, type Box, type KnockoutAxis, type LabelGround, type PinLabel } from "./pin-label"
-import { pinMarker } from "./pin-marker"
+import { boxCorners, KNOCKOUT_OPACITY, labelKnockout, labelOrigin, numbersItsPins, OVERBAR_WEIGHT_EM, overbar, PIN_NUMBER_SCALE, pinLabelById, pinLabels, pinNumberPlacement, type Box, type KnockoutAxis, type LabelAnchor, type LabelGround } from "./pin-label"
+import { pinMarker, pinsOnSwitchContacts, SWITCH_CONTACT_CELLS } from "./pin-marker"
+import { crossedBy, monoAdvanceEm, namesUnderDocked, printedNameAt, printedNameLayout, printedNameOnField, printedNameSize } from "./printed-names"
 
 const PIN_MARK: Record<PinKind, string> = {
   power: "fill-red-500",
@@ -33,18 +34,6 @@ const AXES: readonly KnockoutAxis[] = ["x", "y"]
 
 const fadeId = (ground: LabelGround, axis: KnockoutAxis, rising: boolean) => `pin-knockout-${ground}-${axis}-${rising ? "rise" : "fall"}`
 
-let measuredAdvanceEm: number | undefined
-
-function monoAdvanceEm() {
-  if (measuredAdvanceEm !== undefined) return measuredAdvanceEm
-  const family = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim()
-  const context = document.createElement("canvas").getContext("2d")
-  if (!family || !context) return MONO_ADVANCE_EM
-  context.font = `100px ${family}`
-  measuredAdvanceEm = context.measureText("0").width / 100 || MONO_ADVANCE_EM
-  return measuredAdvanceEm
-}
-
 const KnockoutFades = React.memo(function KnockoutFades() {
   return (
     <defs>
@@ -62,26 +51,27 @@ const KnockoutFades = React.memo(function KnockoutFades() {
   )
 })
 
-type LabelledPin = { label: PinLabel; point: Point }
+type Knockout = { id: string; text: string; anchor: LabelAnchor; angle: number; ground: LabelGround; at: Point; size: number }
 
-function LabelKnockouts({ pins, grid, size }: { pins: LabelledPin[]; grid: number; size: number }) {
+function LabelKnockouts({ items, grid }: { items: Knockout[]; grid: number }) {
   const advance = monoAdvanceEm()
   const solids = new Map<LabelGround, string[]>()
   const fades: React.ReactNode[] = []
-  for (const { label, point } of pins) {
-    const knockout = labelKnockout(label.text, label.anchor, size, advance)
-    const onField = (p: Point) => ({ x: point.x + p.x * grid, y: point.y + p.y * grid })
-    const corners = boxCorners(knockout.solid, labelFrame(label, size)).map(onField)
-    const rects = solids.get(label.ground)
+  for (const { id, text, anchor: align, angle, ground, at: anchor, size } of items) {
+    const knockout = labelKnockout(text, align, size, advance)
+    const cos = Math.cos((angle * Math.PI) / 180)
+    const sin = Math.sin((angle * Math.PI) / 180)
+    const onField = (p: Point) => ({ x: anchor.x + (p.x * cos - p.y * sin) * grid, y: anchor.y + (p.x * sin + p.y * cos) * grid })
+    const corners = boxCorners(knockout.solid, onField)
+    const rects = solids.get(ground)
     const rect = `M${corners.map((c) => `${c.x} ${c.y}`).join("L")}z`
     if (rects) rects.push(rect)
-    else solids.set(label.ground, [rect])
-    const anchor = onField(labelOrigin(label, size))
-    const transform = label.angle ? `rotate(${label.angle} ${anchor.x} ${anchor.y})` : undefined
+    else solids.set(ground, [rect])
+    const transform = angle ? `rotate(${angle} ${anchor.x} ${anchor.y})` : undefined
     const at = (box: Box) => ({ x: anchor.x + box.x * grid, y: anchor.y + box.y * grid, width: box.w * grid, height: box.h * grid, transform })
     fades.push(
-      <rect key={`${label.id}:rise`} {...at(knockout.rise)} fill={`url(#${fadeId(label.ground, knockout.axis, true)})`} />,
-      <rect key={`${label.id}:fall`} {...at(knockout.fall)} fill={`url(#${fadeId(label.ground, knockout.axis, false)})`} />,
+      <rect key={`${id}:rise`} {...at(knockout.rise)} fill={`url(#${fadeId(ground, knockout.axis, true)})`} />,
+      <rect key={`${id}:fall`} {...at(knockout.fall)} fill={`url(#${fadeId(ground, knockout.axis, false)})`} />,
     )
   }
   return (
@@ -103,6 +93,7 @@ type PinLayerProps = {
   contacts: ReadonlyMap<string, string>
   selected: ReadonlySet<string>
   sheeted?: (object: PlacedObject) => boolean
+  routes?: readonly RoutedWire[]
   netColor?: (pinKey: string) => string | undefined
   onPinPointerDown: PinPointerHandler
   onPinPointerMove: PinPointerHandler
@@ -128,6 +119,12 @@ function PinMarks({ object, grid }: { object: PlacedObject; grid: number }) {
  * both visible and clickable: the wire layer paints on top of the components and claims a hit
  * area five times its own width, which would otherwise swallow the pin underneath it.
  */
+function routesOver(routes: readonly RoutedWire[], object: PlacedObject, def: NonNullable<ReturnType<typeof getDef>>, grid: number): Point[][] {
+  const size = objectSize(def, object.rotation ?? 0)
+  const reach: Rect = { x: object.x - grid, y: object.y - grid, w: (size.w + 2) * grid, h: (size.h + 2) * grid }
+  return routes.filter((route) => touches(routeBox(route), reach)).map((route) => route.pts)
+}
+
 export const PinLayer = React.memo(function PinLayer({
   objects,
   grid,
@@ -136,6 +133,7 @@ export const PinLayer = React.memo(function PinLayer({
   contacts,
   selected,
   sheeted,
+  routes,
   netColor,
   onPinPointerDown,
   onPinPointerMove,
@@ -154,6 +152,8 @@ export const PinLayer = React.memo(function PinLayer({
       </svg>
     )
   }
+  const metrics = { grid, boost: detail.textBoost, advanceEm: monoAdvanceEm() }
+  const underDocked = namesUnderDocked(objects, contacts, metrics)
   return (
     <svg data-slot="pins" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
       <KnockoutFades />
@@ -163,16 +163,53 @@ export const PinLayer = React.memo(function PinLayer({
         const pins = objectPins(object, grid)
         const labels = names && def ? pinLabelById(pinLabels(def, orientationOf(object))) : undefined
         const numbered = detail.labels && def !== undefined && selected.has(object.id) && numbersItsPins(def)
-        const labelled: LabelledPin[] = []
+        const underCaps = def ? pinsOnSwitchContacts(def) : undefined
+        const labelled: Knockout[] = []
         if (labels) {
           for (const { key, pin, point } of pins) {
             const label = labels.get(pin.id)
-            if (label && !contacts.has(key) && (pin.labelAt === pin.side || connected(key))) labelled.push({ label, point })
+            if (!label || contacts.has(key) || (pin.labelAt !== pin.side && !connected(key))) continue
+            const origin = labelOrigin(label, detail.pinLabelSize)
+            labelled.push({ ...label, at: { x: point.x + g(origin.x), y: point.y + g(origin.y) }, size: detail.pinLabelSize })
           }
         }
+        const printed = names && def ? printedNameLayout(def, orientationOf(object)) : []
+        const covered = printed.length ? underDocked(object) : undefined
+        const printedOnField = printed.flatMap((name) => {
+          if (covered?.has(name.shape)) return []
+          const size = printedNameSize(name, detail.textBoost)
+          const at = printedNameAt(name, size)
+          return [{ name, at: { x: object.x + g(at.x), y: object.y + g(at.y) }, size }]
+        })
+        const crossing = printedOnField.length && routes ? routesOver(routes, object, def!, grid) : []
+        const knocked: Knockout[] = crossing.length
+          ? printedOnField.flatMap(({ name, at, size }) =>
+              crossedBy(printedNameOnField(object, name, metrics), crossing) ? [{ id: name.id, text: name.shape.text, anchor: name.anchor, angle: name.angle, ground: name.ground, at, size }] : [],
+            )
+          : []
         return (
         <g key={object.id} data-pins={object.id}>
-          {labelled.length > 0 && <LabelKnockouts pins={labelled} grid={grid} size={detail.pinLabelSize} />}
+          {knocked.length > 0 && <LabelKnockouts items={knocked} grid={grid} />}
+          {printedOnField.length > 0 && (
+            <g data-printed-names="" className="pointer-events-none">
+              {printedOnField.map(({ name, at, size }) => (
+                <text
+                  key={name.id}
+                  x={at.x}
+                  y={at.y}
+                  fontSize={g(size)}
+                  textAnchor={name.anchor}
+                  dominantBaseline="middle"
+                  textRendering="geometricPrecision"
+                  transform={name.angle ? `rotate(${name.angle} ${at.x} ${at.y})` : undefined}
+                  className={cn("stroke-none font-mono", name.shape.muted ? "fill-muted-foreground" : "fill-foreground")}
+                >
+                  {name.shape.text}
+                </text>
+              ))}
+            </g>
+          )}
+          {labelled.length > 0 && <LabelKnockouts items={labelled} grid={grid} />}
           {pins.map(({ key, pin, point }) => {
             const live = connected(key)
             const contact = contacts.has(key)
@@ -206,6 +243,7 @@ export const PinLayer = React.memo(function PinLayer({
                   strokeWidth={marker.strokeWidth}
                   vectorEffect="non-scaling-stroke"
                 />}
+                {marker && !contact && underCaps?.has(pin.id) && <circle data-switch-contact="" cx={point.x} cy={point.y} r={g(SWITCH_CONTACT_CELLS)} className="pointer-events-none fill-foreground stroke-none" />}
                 {!contact && label && origin && (
                   <text
                     x={point.x + g(origin.x)}

@@ -36,6 +36,7 @@ export type PinDef = {
   connectorPin?: number
   inverted?: boolean
   note?: string
+  printed?: boolean
 }
 
 /** `grip` paints nothing but catches the pointer: a handle to drag a symbol that has no body of its own. */
@@ -64,7 +65,13 @@ export type BodyShape =
       /** Text drawn on a dark chip. */
       inverse?: boolean
       rotate?: number
+      mono?: boolean
+      printed?: boolean
+      group?: number
+      growsFrom?: Point
     }
+  | { type: "art"; d: string; fill?: Fill; muted?: boolean }
+  | { type: "soon"; x: number; y: number; w: number; h: number; label: string; body: BodyShape[] }
 
 /** Interactive element on a component. State lives in the schematic, not in the definition. */
 export type PartDef =
@@ -77,9 +84,11 @@ export type PartDef =
       color: string
       /** "glow" draws only the halo (for schematic symbols); default draws an SMD package. */
       style?: "package" | "glow"
+      mix?: string[]
       /** Pin id on this component the LED is tied to, if it is exposed. */
       pin?: string
       mcu?: string
+      printed?: boolean
     }
   | {
       type: "button"
@@ -91,6 +100,7 @@ export type PartDef =
       size?: number
       pin?: string
       mcu?: string
+      printed?: boolean
     }
   | {
       /** Toggle switch drawn as a lever between two contacts `span` cells apart. */
@@ -104,6 +114,8 @@ export type PartDef =
       mcu?: string
       /** Position the switch ships in (default off). */
       initial?: PartState
+      vertical?: boolean
+      throws?: { on: Point; off: Point }
     }
   | {
       /** Logic level indicator/toggle: a box reading 1 or 0, clicked to flip `on`. */
@@ -163,6 +175,15 @@ export type PartDef =
       x: number
       y: number
     }
+  | {
+      type: "link"
+      id: string
+      label: string
+      x: number
+      y: number
+      w: number
+      h: number
+    }
 
 // --- electrical model ---------------------------------------------------------
 
@@ -184,12 +205,12 @@ export type Value = number | string | ((props: Record<string, string>) => number
  * default) when it takes the whole component with it — one die, one winding — and not when
  * the rest of the part keeps working on its own (the other half of a potentiometer).
  */
-export type Limits = { power?: Value; current?: Value; voltage?: Value; reverse?: Value; surge?: Value; tau?: Value; fail?: "open" | "short"; fatal?: boolean }
+export type Limits = { power?: Value; current?: Value; voltage?: Value; reverse?: Value; surge?: Value; tau?: Value; fail?: "open" | "short"; fatal?: boolean; aboveSupply?: Value }
 
 export type Element =
   /** `live` names a pin-reader key the simulation loop answers with the resistance to use right now (an MCU's supply load by power mode). */
   | { kind: "R"; a: NodeRef; b: NodeRef; value: Value; live?: string; limits?: Limits; hidden?: boolean; supply?: boolean }
-  | { kind: "C"; a: NodeRef; b: NodeRef; value: Value; limits?: Limits; hidden?: boolean }
+  | { kind: "C"; a: NodeRef; b: NodeRef; value: Value; limits?: Limits; hidden?: boolean; euler?: boolean }
   | { kind: "L"; a: NodeRef; b: NodeRef; value: Value; limits?: Limits; hidden?: boolean }
   /**
    * Ideal voltage source, plus relative to minus. `value` is the DC level; with `amplitude`
@@ -208,6 +229,7 @@ export type Element =
       shape?: "sine" | "pulse"
       /** 0..1; default 0.5. */
       duty?: Value
+      delay?: Value
       limits?: Limits
     }
   /**
@@ -239,7 +261,7 @@ export type Element =
   /** Ideal transformer: V(s1, s2) = ratio · V(p1, p2), no losses or magnetising current. */
   | { kind: "XFMR"; p1: NodeRef; p2: NodeRef; s1: NodeRef; s2: NodeRef; ratio: Value; limits?: Limits }
   /** Shockley diode. `vf` is the forward drop at 10 mA; `zener` the reverse breakdown voltage. */
-  | { kind: "D"; anode: NodeRef; cathode: NodeRef; vf?: Value; zener?: Value; part?: string; hidden?: boolean; limits?: Limits }
+  | { kind: "D"; anode: NodeRef; cathode: NodeRef; vf?: Value; emission?: Value; zener?: Value; rs?: Value; part?: string; hidden?: boolean; limits?: Limits }
   /**
    * `limits.voltage` is Vce max, `current` Ic max, `power` total dissipation. `rc` is the ohmic
    * collector resistance in series with the junction model, which sets Vce(sat) above the
@@ -271,6 +293,9 @@ export type Element =
       vdd?: number
       gndNode?: NodeRef
       drive?: CmosDrive
+      capacitance?: number
+      pull?: Value
+      clamp?: PadClamp
       limits?: Limits
     }
   /**
@@ -288,7 +313,9 @@ export type Element =
 
 export type ProtChip = "dw01a" | "dw03"
 
-export type CmosDrive = { ohms: Value; at: Value }
+export type CmosDrive = { ohms: Value; at?: Value }
+
+export type PadClamp = { injection: Value; rail?: NodeRef }
 
 /** An editable per-instance property shown in the inspector. */
 export type PropField =
@@ -323,6 +350,7 @@ export type ComponentDef = {
   body: BodyShape[]
   pins: PinDef[]
   parts: PartDef[]
+  bounces?: string[]
   /** Electrical model; components without one are drawn but do not conduct. */
   model?: ModelElement[]
   /** Inspector hides internal elements that carry no current: boards have dozens of them. */
@@ -343,6 +371,7 @@ export type ComponentDef = {
    * losing VDD is a power-on reset that clears them.
    */
   mcuVbat?: string
+  mcuVref?: string
   /**
    * Clock sources a board carries for its MCU (null: the pins are free). A bare chip omits this
    * and gets its HSE/LSE from crystals or oscillators wired to its OSC pins on the field.

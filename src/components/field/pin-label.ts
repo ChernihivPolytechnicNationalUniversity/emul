@@ -254,7 +254,7 @@ function groundUnder(def: ComponentDef, raw: { x: number; y: number }, pin: Plac
 }
 
 function layOut(def: ComponentDef, orientation: Orientation): readonly PinLabel[] {
-  const raws = def.pins.filter((pin) => pin.label)
+  const raws = def.pins.filter((pin) => pin.label && !pin.printed)
   const pins = raws.map((raw) => orientPin(raw, def, orientation))
   const level = pins.map((pin) => footprintOn(pin, across(pin.labelAt), MAX_PIN_LABEL_CELLS))
   const hit = crowded(level)

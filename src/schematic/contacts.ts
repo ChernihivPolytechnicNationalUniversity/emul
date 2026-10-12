@@ -1,15 +1,15 @@
-import { objectPins, objectRect, unionOf, type ObjectPin, type PlacedPin, type Rect } from "./geometry"
+import { objectPins, objectRect, orientationOf, orientationSlot, orientedPins, unionOf, type PlacedPin, type Rect } from "./geometry"
 import { getDef } from "./registry"
-import type { ComponentDef, PinKind, PlacedObject } from "./types"
+import { pinKey, type ComponentDef, type PinKind, type PlacedObject } from "./types"
 
 const EPS = 0.01
+const ROUNDING = 1e-3
+const REACH = EPS + ROUNDING
+const BUCKET_CELLS = 16
 
 const cellKey = (x: number, y: number) => (Math.imul(x, 73856093) ^ Math.imul(y, 19349663)) | 0
 
-const straddles = (offset: number) => (offset < -0.5 + EPS ? -1 : offset > 0.5 - EPS ? 1 : 0)
-
-const touching = (a: ObjectPin, b: ObjectPin) =>
-  a.key !== b.key && Math.abs(a.point.x - b.point.x) < EPS && Math.abs(a.point.y - b.point.y) < EPS
+const straddles = (offset: number, by = EPS) => (offset < -0.5 + by ? -1 : offset > 0.5 - by ? 1 : 0)
 
 export type Contacts = {
   groups: ReadonlyMap<string, string>
@@ -18,18 +18,149 @@ export type Contacts = {
 
 const NOTHING: Contacts = { groups: new Map(), kinds: new Map() }
 
+type PinTable = {
+  grid: number
+  pins: readonly PlacedPin[]
+  x: Float64Array
+  y: Float64Array
+  left: number
+  top: number
+  right: number
+  bottom: number
+  cells: Map<number, number[]>
+  closePairs: readonly number[]
+}
+
+const nearby: number[] = []
+
+function pinsNear(table: Pick<PinTable, "x" | "y" | "cells">, x: number, y: number): readonly number[] {
+  nearby.length = 0
+  const cx = Math.round(x)
+  const cy = Math.round(y)
+  const sx = straddles(x - cx, REACH)
+  const sy = straddles(y - cy, REACH)
+  for (let dx = Math.min(sx, 0); dx <= Math.max(sx, 0); dx++) {
+    for (let dy = Math.min(sy, 0); dy <= Math.max(sy, 0); dy++) {
+      const cell = table.cells.get(cellKey(cx + dx, cy + dy))
+      if (cell) for (const i of cell) if (Math.abs(table.x[i] - x) < REACH && Math.abs(table.y[i] - y) < REACH) nearby.push(i)
+    }
+  }
+  return nearby
+}
+
+function tableOf(pins: readonly PlacedPin[], grid: number): PinTable {
+  const x = new Float64Array(pins.length)
+  const y = new Float64Array(pins.length)
+  const cells = new Map<number, number[]>()
+  const closePairs: number[] = []
+  let left = Infinity
+  let top = Infinity
+  let right = -Infinity
+  let bottom = -Infinity
+  for (let i = 0; i < pins.length; i++) {
+    x[i] = pins[i].x * grid
+    y[i] = pins[i].y * grid
+    left = Math.min(left, x[i])
+    top = Math.min(top, y[i])
+    right = Math.max(right, x[i])
+    bottom = Math.max(bottom, y[i])
+    for (const j of pinsNear({ x, y, cells }, x[i], y[i])) closePairs.push(j, i)
+    const key = cellKey(Math.round(x[i]), Math.round(y[i]))
+    const cell = cells.get(key)
+    if (cell) cell.push(i)
+    else cells.set(key, [i])
+  }
+  return { grid, pins, x, y, left, top, right, bottom, cells, closePairs }
+}
+
+const NO_PINS = tableOf([], 0)
+
+const tablesOf = new WeakMap<ComponentDef, (PinTable | undefined)[]>()
+
+function pinTable(def: ComponentDef, object: PlacedObject, grid: number): PinTable {
+  const orientation = orientationOf(object)
+  let tables = tablesOf.get(def)
+  if (!tables) tablesOf.set(def, (tables = []))
+  const slot = orientationSlot(orientation)
+  const known = tables[slot]
+  if (known?.grid === grid) return known
+  return (tables[slot] = tableOf(orientedPins(def, orientation).filter((pin) => pin.kind !== "nc"), grid))
+}
+
+type Touch = { key: string; kind: PinKind }
+
+type Placed = {
+  object: PlacedObject
+  seen: number
+  table: PinTable
+  left: number
+  top: number
+  right: number
+  bottom: number
+  buckets: number[]
+  own: Touch[] | null
+  links: Map<Placed, Touch[]> | null
+  met: number
+}
+
+const coincide = (ax: number, ay: number, bx: number, by: number) => Math.abs(ax - bx) < EPS && Math.abs(ay - by) < EPS
+
+const overlaps = (a: Placed, b: Placed) =>
+  a.left - EPS <= b.right && b.left - EPS <= a.right && a.top - EPS <= b.bottom && b.top - EPS <= a.bottom
+
+const touchOf = ({ object, table }: Placed, index: number): Touch => ({ key: pinKey(object.id, table.pins[index].id), kind: table.pins[index].kind })
+
+function ownTouches(placed: Placed): Touch[] | null {
+  const { object, table } = placed
+  let touches: Touch[] | null = null
+  for (let k = 0; k < table.closePairs.length; k += 2) {
+    const i = table.closePairs[k]
+    const j = table.closePairs[k + 1]
+    if (table.pins[i].id === table.pins[j].id) continue
+    if (coincide(object.x + table.x[i], object.y + table.y[i], object.x + table.x[j], object.y + table.y[j])) (touches ??= []).push(touchOf(placed, i), touchOf(placed, j))
+  }
+  return touches
+}
+
+function touchesBetween(a: Placed, b: Placed): Touch[] | null {
+  const [few, many] = a.table.pins.length <= b.table.pins.length ? [a, b] : [b, a]
+  let touches: Touch[] | null = null
+  for (let i = 0; i < few.table.pins.length; i++) {
+    const x = few.object.x + few.table.x[i]
+    const y = few.object.y + few.table.y[i]
+    if (x < many.left - EPS || x > many.right + EPS || y < many.top - EPS || y > many.bottom + EPS) continue
+    for (const j of pinsNear(many.table, x - many.object.x, y - many.object.y)) {
+      if (!coincide(x, y, many.object.x + many.table.x[j], many.object.y + many.table.y[j])) continue
+      const mine = touchOf(few, i)
+      const theirs = touchOf(many, j)
+      if (mine.key !== theirs.key) (touches ??= []).push(mine, theirs)
+    }
+  }
+  return touches
+}
+
+const linksOf = (placed: Placed) => (placed.links ??= new Map())
+
 export class ContactIndex {
+  private readonly defOf: (id: string) => ComponentDef | undefined
   private grid = 0
-  private placed = new Map<string, { object: PlacedObject; seen: number }>()
-  private cells = new Map<number, ObjectPin[]>()
-  private pairs = new Map<number, ObjectPin[]>()
-  private straddling = new Map<string, ObjectPin[]>()
+  private bucket = 0
+  private placed = new Map<string, Placed>()
+  private buckets = new Map<number, Placed[]>()
+  private linked = new Set<Placed>()
   private contacts: Contacts = NOTHING
   private visit = 0
+  private stamp = 0
+  private touched = false
+
+  constructor(defOf: (id: string) => ComponentDef | undefined = getDef) {
+    this.defOf = defOf
+  }
 
   of(objects: readonly PlacedObject[], grid: number): Contacts {
     if (grid !== this.grid) {
       this.grid = grid
+      this.bucket = BUCKET_CELLS * grid
       this.forget()
     }
     const at = ++this.visit
@@ -47,102 +178,113 @@ export class ContactIndex {
     }
     if (fresh.length === 0 && kept === this.placed.size) return this.contacts
 
-    const dirty = new Set<number>()
     if (fresh.length * 2 >= objects.length) {
       this.forget()
-      for (const o of objects) if (!this.placed.has(o.id)) this.put(o, at, dirty)
+      for (const o of objects) if (!this.placed.has(o.id)) this.put(o, at)
     } else {
       for (const o of fresh) {
         const known = this.placed.get(o.id)
         if (known?.seen === at) continue
-        if (known) this.take(known.object, dirty)
-        this.put(o, at, dirty)
+        if (known) this.take(known)
+        this.put(o, at)
       }
       if (kept + fresh.length !== this.placed.size) {
         for (const [id, placed] of this.placed) {
           if (placed.seen === at) continue
-          this.take(placed.object, dirty)
+          this.take(placed)
           this.placed.delete(id)
         }
       }
     }
-    for (const key of dirty) this.sweep(key)
-    this.contacts = this.regroup()
+    if (this.touched) {
+      this.touched = false
+      this.contacts = this.regroup()
+    }
     return this.contacts
   }
 
   private forget() {
+    if (this.linked.size) this.touched = true
     this.placed.clear()
-    this.cells.clear()
-    this.pairs.clear()
-    this.straddling.clear()
+    this.buckets.clear()
+    this.linked.clear()
   }
 
-  private take(object: PlacedObject, dirty: Set<number>) {
-    for (const pin of objectPins(object, this.grid)) {
-      if (pin.pin.kind === "nc") continue
-      const key = cellKey(Math.round(pin.point.x), Math.round(pin.point.y))
-      const cell = this.cells.get(key)
-      if (!cell) continue
-      const at = cell.indexOf(pin)
-      if (at >= 0) cell.splice(at, 1)
-      if (cell.length === 0) this.cells.delete(key)
-      dirty.add(key)
+  private take(placed: Placed) {
+    for (const key of placed.buckets) {
+      const list = this.buckets.get(key)
+      if (!list) continue
+      const at = list.indexOf(placed)
+      if (at >= 0) list.splice(at, 1)
+      if (list.length === 0) this.buckets.delete(key)
     }
-    this.straddling.delete(object.id)
-  }
-
-  private put(object: PlacedObject, at: number, dirty: Set<number>) {
-    let edges: ObjectPin[] | null = null
-    for (const pin of objectPins(object, this.grid)) {
-      if (pin.pin.kind === "nc") continue
-      const cx = Math.round(pin.point.x)
-      const cy = Math.round(pin.point.y)
-      const key = cellKey(cx, cy)
-      const cell = this.cells.get(key)
-      if (cell) cell.push(pin)
-      else this.cells.set(key, [pin])
-      dirty.add(key)
-      if (straddles(pin.point.x - cx) || straddles(pin.point.y - cy)) (edges ??= []).push(pin)
-    }
-    this.placed.set(object.id, { object, seen: at })
-    if (edges) this.straddling.set(object.id, edges)
-  }
-
-  private sweep(key: number) {
-    const cell = this.cells.get(key)
-    if (!cell || cell.length < 2) {
-      this.pairs.delete(key)
-      return
-    }
-    let found: ObjectPin[] | null = null
-    for (let i = 0; i < cell.length; i++) {
-      for (let j = i + 1; j < cell.length; j++) {
-        if (touching(cell[i], cell[j])) (found ??= []).push(cell[i], cell[j])
+    if (placed.own) this.touched = true
+    if (placed.links) {
+      for (const other of placed.links.keys()) {
+        other.links?.delete(placed)
+        if (other.links?.size === 0) other.links = null
+        if (!other.links && !other.own) this.linked.delete(other)
       }
+      this.touched = true
     }
-    if (found) this.pairs.set(key, found)
-    else this.pairs.delete(key)
+    this.linked.delete(placed)
   }
 
-  private acrossCells(): ObjectPin[] {
-    const out: ObjectPin[] = []
-    for (const edges of this.straddling.values()) {
-      for (const a of edges) {
-        const cx = Math.round(a.point.x)
-        const cy = Math.round(a.point.y)
-        const sx = straddles(a.point.x - cx)
-        const sy = straddles(a.point.y - cy)
-        for (let dx = sx < 0 ? -1 : 0; dx <= (sx > 0 ? 1 : 0); dx++) {
-          for (let dy = sy < 0 ? -1 : 0; dy <= (sy > 0 ? 1 : 0); dy++) {
-            if (dx === 0 && dy === 0) continue
-            const other = this.cells.get(cellKey(cx + dx, cy + dy))
-            if (other) for (const b of other) if (touching(a, b)) out.push(a, b)
-          }
+  private put(object: PlacedObject, at: number) {
+    const def = this.defOf(object.def)
+    const table = def ? pinTable(def, object, this.grid) : NO_PINS
+    const placed: Placed = {
+      object,
+      seen: at,
+      table,
+      left: object.x + table.left,
+      top: object.y + table.top,
+      right: object.x + table.right,
+      bottom: object.y + table.bottom,
+      buckets: [],
+      own: null,
+      links: null,
+      met: 0,
+    }
+    this.placed.set(object.id, placed)
+    if (table.pins.length === 0) return
+    const stamp = (placed.met = ++this.stamp)
+    const x0 = Math.floor((placed.left - EPS) / this.bucket)
+    const y0 = Math.floor((placed.top - EPS) / this.bucket)
+    const columns = Math.floor((placed.right + EPS) / this.bucket) - x0
+    const rows = Math.floor((placed.bottom + EPS) / this.bucket) - y0
+    for (let column = 0; column <= columns; column++) {
+      for (let row = 0; row <= rows; row++) {
+        const key = cellKey(x0 + column, y0 + row)
+        placed.buckets.push(key)
+        const list = this.buckets.get(key)
+        if (!list) {
+          this.buckets.set(key, [placed])
+          continue
         }
+        for (const other of list) {
+          if (other.met === stamp) continue
+          other.met = stamp
+          if (!overlaps(placed, other)) continue
+          const touches = touchesBetween(placed, other)
+          if (touches) this.link(placed, other, touches)
+        }
+        list.push(placed)
       }
     }
-    return out
+    placed.own = ownTouches(placed)
+    if (placed.own) {
+      this.linked.add(placed)
+      this.touched = true
+    }
+  }
+
+  private link(a: Placed, b: Placed, touches: Touch[]) {
+    linksOf(a).set(b, touches)
+    linksOf(b).set(a, touches)
+    this.linked.add(a)
+    this.linked.add(b)
+    this.touched = true
   }
 
   private regroup(): Contacts {
@@ -155,18 +297,22 @@ export class ContactIndex {
       return root
     }
     const kinds = new Map<string, PinKind>()
-    const union = (a: ObjectPin, b: ObjectPin) => {
-      kinds.set(a.key, a.pin.kind)
-      kinds.set(b.key, b.pin.kind)
+    const union = (a: Touch, b: Touch) => {
+      kinds.set(a.key, a.kind)
+      kinds.set(b.key, b.kind)
       const ra = find(a.key)
       const rb = find(b.key)
       if (ra === rb) return
       if (ra < rb) parent.set(rb, ra)
       else parent.set(ra, rb)
     }
-    for (const flat of this.pairs.values()) for (let i = 0; i < flat.length; i += 2) union(flat[i], flat[i + 1])
-    const across = this.acrossCells()
-    for (let i = 0; i < across.length; i += 2) union(across[i], across[i + 1])
+    const unite = (touches: readonly Touch[]) => {
+      for (let i = 0; i < touches.length; i += 2) union(touches[i], touches[i + 1])
+    }
+    for (const placed of this.linked) {
+      if (placed.own) unite(placed.own)
+      if (placed.links) for (const touches of placed.links.values()) unite(touches)
+    }
     if (kinds.size === 0) return NOTHING
     const groups = new Map<string, string>()
     for (const key of kinds.keys()) groups.set(key, find(key))
