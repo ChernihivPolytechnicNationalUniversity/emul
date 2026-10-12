@@ -6,12 +6,13 @@
  * the clock and syncs arrive on pads the firmware has switched to the LTDC, and only for a
  * pixel clock the panel can lock to.
  */
+import type { AfMap } from "@/mcu/chip"
 import type { PadRef, Stm32 } from "@/mcu/stm32f429"
 import { parsePad } from "@/mcu/pads"
 import type { PanelSignal, PanelSpec } from "@/schematic/types"
 
-/** LTDC pads on the F4/F7 (DS9405 / DS10693 alternate-function tables): signal → pads with their AF. */
-const LTDC_PADS: Record<PanelSignal, string[]> = {
+/** LTDC pads on the F4 (DS9405 alternate-function table): signal → pads with their AF. */
+const F42X_LTDC_PADS: Record<PanelSignal, string[]> = {
   R0: ["PI15/14", "PG13/14", "PH2/14"],
   R1: ["PJ0/14", "PH3/14", "PA2/14"],
   R2: ["PJ1/14", "PH8/14", "PA1/14", "PC10/14"],
@@ -42,16 +43,54 @@ const LTDC_PADS: Record<PanelSignal, string[]> = {
   DE: ["PE13/14", "PF10/14", "PK7/14"],
 }
 
+const DS10916_REV5_LTDC_PADS: Record<PanelSignal, string[]> = {
+  R0: ["PI15/14", "PG13/14", "PH2/14"],
+  R1: ["PJ0/14", "PH3/14", "PA2/14"],
+  R2: ["PJ1/14", "PH8/14", "PA1/14", "PC10/14"],
+  R3: ["PJ2/14", "PH9/14", "PB0/9"],
+  R4: ["PJ3/14", "PH10/14", "PA11/14", "PA5/14"],
+  R5: ["PJ4/14", "PH11/14", "PA12/14", "PC0/14"],
+  R6: ["PJ5/14", "PH12/14", "PA8/14", "PB1/9"],
+  R7: ["PJ6/14", "PG6/14", "PE15/14"],
+  G0: ["PJ7/14", "PE5/14"],
+  G1: ["PJ8/14", "PE6/14"],
+  G2: ["PJ9/14", "PH13/14", "PA6/14"],
+  G3: ["PJ10/14", "PH14/14", "PG10/9", "PE11/14"],
+  G4: ["PJ11/14", "PH15/14", "PB10/14"],
+  G5: ["PK0/14", "PI0/14", "PB11/14"],
+  G6: ["PK1/14", "PI1/14", "PC7/14"],
+  G7: ["PK2/14", "PI2/14", "PD3/14"],
+  B0: ["PE4/14", "PG14/14", "PJ12/14"],
+  B1: ["PG12/14", "PJ13/14"],
+  B2: ["PD6/14", "PG10/14", "PJ14/14"],
+  B3: ["PD10/14", "PG11/14", "PJ15/14"],
+  B4: ["PE12/14", "PG12/9", "PI4/14", "PK3/14"],
+  B5: ["PA3/14", "PI5/14", "PK4/14"],
+  B6: ["PB8/14", "PI6/14", "PK5/14"],
+  B7: ["PB9/14", "PI7/14", "PK6/14"],
+  CLK: ["PE14/14", "PG7/14", "PI14/14"],
+  HS: ["PC6/14", "PI10/14", "PI12/14"],
+  VS: ["PA4/14", "PI9/14", "PI13/14"],
+  DE: ["PE13/14", "PF10/14", "PK7/14"],
+}
+
+export const LTDC_PADS: Record<AfMap, Record<PanelSignal, string[]>> = { f42x: F42X_LTDC_PADS, f74x: DS10916_REV5_LTDC_PADS }
+
+function padsBySignal(table: Record<PanelSignal, string[]>) {
+  const byPad = new Map<number, { signal: PanelSignal; af: number }[]>()
+  for (const [signal, pads] of Object.entries(table) as [PanelSignal, string[]][])
+    for (const entry of pads) {
+      const [name, af] = entry.split("/")
+      const pad = parsePad(name)
+      if (!pad) continue
+      const key = pad.port * 16 + pad.pin
+      byPad.set(key, [...(byPad.get(key) ?? []), { signal, af: Number(af) }])
+    }
+  return byPad
+}
+
 /** Pad key (port*16+pin) → the LTDC signals it can carry, by AF. */
-const BY_PAD = new Map<number, { signal: PanelSignal; af: number }[]>()
-for (const [signal, pads] of Object.entries(LTDC_PADS) as [PanelSignal, string[]][])
-  for (const entry of pads) {
-    const [name, af] = entry.split("/")
-    const pad = parsePad(name)
-    if (!pad) continue
-    const key = pad.port * 16 + pad.pin
-    BY_PAD.set(key, [...(BY_PAD.get(key) ?? []), { signal, af: Number(af) }])
-  }
+const BY_PAD: Record<AfMap, Map<number, { signal: PanelSignal; af: number }[]>> = { f42x: padsBySignal(F42X_LTDC_PADS), f74x: padsBySignal(DS10916_REV5_LTDC_PADS) }
 
 /** Bit index of a colour signal in a 24-bit RGB word (R7 is bit 23, B0 bit 0). */
 function colourBit(signal: PanelSignal): number {
@@ -95,7 +134,7 @@ export class PanelInstance {
       if (w.mcu !== mcu) continue
       const af = mcu.padAf(w.pad)
       if (af === null) continue
-      const carries = BY_PAD.get(w.pad.port * 16 + w.pad.pin)?.find((c) => c.af === af)
+      const carries = BY_PAD[mcu.chip.af].get(w.pad.port * 16 + w.pad.pin)?.find((c) => c.af === af)
       if (!carries) continue
       if (signal === "CLK" || signal === "HS" || signal === "VS" || signal === "DE") {
         if (carries.signal === signal) syncs[signal] = true

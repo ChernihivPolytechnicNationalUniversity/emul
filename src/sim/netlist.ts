@@ -8,7 +8,7 @@ import { parseValue } from "./units"
 /** Net index; GROUND is the reference node and has no matrix row. */
 export const GROUND = -1
 
-export type ResolvedLimits = { power?: number; current?: number; voltage?: number; reverse?: number; surge?: number; tau: number; fail: "open" | "short"; fatal: boolean }
+export type ResolvedLimits = { power?: number; current?: number; voltage?: number; reverse?: number; surge?: number; tau: number; fail: "open" | "short"; fatal: boolean; aboveSupply?: number }
 
 export const DEFAULT_TAU = 0.035
 
@@ -18,9 +18,9 @@ type Base = { id: string; object: string; element: number; ref: string; limits?:
 /** `keys` are the node keys ("objectId:pinId") of the terminals, in the order listed per kind. */
 export type Resolved =
   /** An R with `live` takes its value from the pin reader on every step (see `Element`). */
-  | (Base & { kind: "R" | "C" | "L"; a: number; b: number; value: number; live?: string; keys: [string, string] })
+  | (Base & { kind: "R" | "C" | "L"; a: number; b: number; value: number; live?: string; euler?: boolean; keys: [string, string] })
   /** `amplitude` is 0 for a DC source. */
-  | (Base & { kind: "V"; plus: number; minus: number; value: number; amplitude: number; frequency: number; phase: number; shape: "sine" | "pulse"; duty: number; index: number; keys: [string, string] })
+  | (Base & { kind: "V"; plus: number; minus: number; value: number; amplitude: number; frequency: number; phase: number; shape: "sine" | "pulse"; duty: number; delay: number; index: number; keys: [string, string] })
   /**
    * Battery pack: `chem` the chemistry, `capacity` the nameplate in Ah, `soc0` the starting
    * state of charge (0..1), `rFull` the pack's internal resistance when full, fresh and at
@@ -45,14 +45,14 @@ export type Resolved =
     })
   /** `index` is the extra unknown (secondary current) like a source's. */
   | (Base & { kind: "XFMR"; p1: number; p2: number; s1: number; s2: number; ratio: number; index: number; keys: [string, string, string, string] })
-  | (Base & { kind: "D"; anode: number; cathode: number; is: number; n: number; zener?: number; part?: string; keys: [string, string] })
+  | (Base & { kind: "D"; anode: number; anodePin?: number; cathode: number; is: number; n: number; zener?: number; part?: string; keys: [string, string] })
   /** With `rc`, `c` is an internal node behind the collector resistance and `cPin` the pin's net; readings report pin to pin. */
   | (Base & { kind: "Q"; polarity: 1 | -1; b: number; c: number; e: number; beta: number; cPin: number; keys: [string, string, string] })
   | (Base & { kind: "M"; polarity: 1 | -1; g: number; d: number; s: number; vth: number; k: number; lambda: number; keys: [string, string, string] })
   /** `ron` is the contact resistance; `strike` the voltage the open gap arcs over at (Infinity for an ideal switch). */
   | (Base & { kind: "SW"; a: number; b: number; part: string; closed: "on" | "pressed" | "off"; ron: number; strike: number; keys: [string, string] })
   /** MCU pad; what it drives is read live from the pin reader on every step. `vddNet` is the rail it switches to, when it has one. */
-  | (Base & { kind: "GPIO"; node: number; nodeKey: string; vdd: number; vddNet: number | undefined; gndNet: number | undefined; ohms: number; ohmsAt: number; keys: string[] })
+  | (Base & { kind: "GPIO"; node: number; nodeKey: string; vdd: number; vddNet: number | undefined; gndNet: number | undefined; ohms: number; ohmsAt: number; pull: number; keys: string[] })
   /** `index` is the extra unknown (through current, in → out) like a source's. */
   | (Base & { kind: "REG"; in: number; out: number; gnd: number; value: number; dropout: number; imax: number; index: number; keys: [string, string] })
   | (Base & { kind: "CHG"; in: number; bat: number; gnd: number; progNet: number; chrg: number | undefined; stdby: number | undefined; ce: number | undefined; temp: number | undefined; value: number; index: number; prog: number; keys: string[] })
@@ -114,6 +114,9 @@ const SW_STRIKE = 300
 /** Test current at which a zener's nameplate voltage is specified (5 mA on small parts' datasheets). */
 const ZENER_IZT = 5e-3
 
+const ESD_DIODE_VF = 0.7
+const ESD_DIODE_N = 1
+
 /** Shockley saturation current so that the diode drops `vf` at 10 mA with emission coefficient n. */
 export function saturationCurrent(vf: number, n: number) {
   return 0.01 / (Math.exp(vf / (n * VT)) - 1)
@@ -169,9 +172,9 @@ function resolveLimits(l: Limits | undefined, props: Record<string, string>): Re
     const n = resolveValue(v, props)
     return Number.isFinite(n) && n > 0 ? n : undefined
   }
-  const out = { power: num(l.power), current: num(l.current), voltage: num(l.voltage), reverse: num(l.reverse), surge: num(l.surge), tau: num(l.tau) ?? DEFAULT_TAU, fail: l.fail ?? "open", fatal: l.fatal ?? true }
+  const out = { power: num(l.power), current: num(l.current), voltage: num(l.voltage), reverse: num(l.reverse), surge: num(l.surge), tau: num(l.tau) ?? DEFAULT_TAU, fail: l.fail ?? "open", fatal: l.fatal ?? true, aboveSupply: num(l.aboveSupply) }
   // Every rating left blank (a battery without a stated max current): the element is unrated.
-  if (out.power === undefined && out.current === undefined && out.voltage === undefined && out.reverse === undefined) return undefined
+  if (out.power === undefined && out.current === undefined && out.voltage === undefined && out.reverse === undefined && out.aboveSupply === undefined) return undefined
   return out
 }
 
@@ -347,7 +350,9 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
   for (const { obj, el } of gpios) {
     if (el.kind !== "GPIO") continue
     const root = uf.find(node(obj, el.node))
-    if (active.has(root) || wanted.has(root)) touch(obj, el.node)
+    if (!active.has(root) && !wanted.has(root)) continue
+    touch(obj, el.node)
+    if (el.clamp?.rail) touch(obj, el.clamp.rail)
   }
 
   // Reference node: explicit ground, else the first source's minus, else nothing.
@@ -379,7 +384,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
       case "L": {
         const value = resolveValue(el.value, props)
         if (Number.isFinite(value) && value > 0)
-          elements.push({ ...base, kind: el.kind, a: netOf(obj, el.a), b: netOf(obj, el.b), value, live: el.kind === "R" ? el.live : undefined, hidden: el.hidden, keys: [node(obj, el.a), node(obj, el.b)] })
+          elements.push({ ...base, kind: el.kind, a: netOf(obj, el.a), b: netOf(obj, el.b), value, live: el.kind === "R" ? el.live : undefined, euler: el.kind === "C" ? el.euler : undefined, hidden: el.hidden, keys: [node(obj, el.a), node(obj, el.b)] })
         break
       }
       case "V": {
@@ -396,7 +401,8 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
           frequency: amplitude > 0 ? frequency : 0,
           phase: num(el.phase),
           shape: el.shape ?? "sine",
-          duty: el.duty === undefined ? 0.5 : Math.min(0.99, Math.max(0.01, num(el.duty))),
+          duty: el.duty === undefined ? 0.5 : Math.min(1, Math.max(0, num(el.duty))),
+          delay: Math.max(0, num(el.delay)),
           index: sources++,
           keys: [node(obj, el.plus), node(obj, el.minus)],
         })
@@ -440,10 +446,22 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
       }
       case "D": {
         const zener = el.zener !== undefined ? resolveValue(el.zener, props) : undefined
-        const n = zener ? 1.5 : 1.8
+        const emission = el.emission !== undefined ? resolveValue(el.emission, props) : NaN
+        const n = Number.isFinite(emission) && emission > 0 ? emission : zener ? 1.5 : 1.8
         const vf = el.vf !== undefined ? resolveValue(el.vf, props) : 0.7
         const is = saturationCurrent(Number.isFinite(vf) && vf > 0 ? vf : 0.7, n)
-        elements.push({ ...base, kind: "D", anode: netOf(obj, el.anode), cathode: netOf(obj, el.cathode), is, n, zener: zener && Number.isFinite(zener) ? zenerOffset(zener, is, n) : undefined, part: el.part, hidden: el.hidden, keys: [node(obj, el.anode), node(obj, el.cathode)] })
+        const rs = el.rs === undefined ? 0 : resolveValue(el.rs, props)
+        const anodePin = netOf(obj, el.anode)
+        const withRs = Number.isFinite(rs) && rs > 0 && anodePin !== GROUND
+        let anode = anodePin
+        let anodeKey = node(obj, el.anode)
+        if (withRs) {
+          anode = nodes++
+          anodeKey = `${node(obj, el.anode)}$rs`
+          nodeNet.set(anodeKey, anode)
+        }
+        elements.push({ ...base, kind: "D", anode, anodePin, cathode: netOf(obj, el.cathode), is, n, zener: zener && Number.isFinite(zener) ? zenerOffset(zener, is, n) : undefined, part: el.part, hidden: el.hidden, keys: [anodeKey, node(obj, el.cathode)] })
+        if (withRs) elements.push({ ...base, id: `${base.id}$rs`, kind: "R", a: anodePin, b: anode, value: rs, hidden: true, limits: undefined, keys: [node(obj, el.anode), anodeKey] })
         break
       }
       case "Q": {
@@ -483,7 +501,8 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         const pin = node(obj, el.node)
         const keys = [pin, el.vddNode ? node(obj, el.vddNode) : pin, el.gndNode ? node(obj, el.gndNode) : pin]
         const ohms = el.drive ? resolveValue(el.drive.ohms, props) : NaN
-        const at = el.drive ? resolveValue(el.drive.at, props) : NaN
+        const at = el.drive?.at !== undefined ? resolveValue(el.drive.at, props) : NaN
+        const pull = el.pull === undefined ? NaN : resolveValue(el.pull, props)
         elements.push({
           ...base,
           kind: "GPIO",
@@ -494,8 +513,19 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
           gndNet: el.gndNode ? netOf(obj, el.gndNode) : undefined,
           ohms: Number.isFinite(ohms) && ohms > 0 ? ohms : 0,
           ohmsAt: Number.isFinite(at) && at > 0 ? at : 0,
+          pull: Number.isFinite(pull) && pull > 0 ? pull : 0,
           keys,
         })
+        const ground = el.gndNode ? netOf(obj, el.gndNode) : GROUND
+        const groundKey = el.gndNode ? node(obj, el.gndNode) : GND_KEY
+        if (el.capacitance && el.capacitance > 0)
+          elements.push({ ...base, id: `${base.id}$cio`, kind: "C", a: netOf(obj, el.node), b: ground, value: el.capacitance, euler: true, hidden: true, limits: undefined, keys: [pin, groundKey] })
+        const injection = el.clamp ? resolveValue(el.clamp.injection, props) : NaN
+        if (el.clamp && Number.isFinite(injection) && injection > 0) {
+          const clampDiode = { ...base, kind: "D" as const, is: saturationCurrent(ESD_DIODE_VF, ESD_DIODE_N), n: ESD_DIODE_N, hidden: true, limits: { current: injection, tau: DEFAULT_TAU, fail: "short" as const, fatal: true } }
+          elements.push({ ...clampDiode, id: `${base.id}$clamp-vss`, anode: ground, cathode: netOf(obj, el.node), keys: [groundKey, pin] })
+          if (el.clamp.rail) elements.push({ ...clampDiode, id: `${base.id}$clamp-vdd`, anode: netOf(obj, el.node), cathode: netOf(obj, el.clamp.rail), keys: [pin, node(obj, el.clamp.rail)] })
+        }
         break
       }
       case "REG": {

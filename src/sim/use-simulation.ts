@@ -29,7 +29,7 @@ export type SimReadout = {
   /** RMS voltage of a pin over the last few cycles; undefined when not solved or not an AC circuit. */
   pinVoltageRms: (object: string, pin: string) => number | undefined
   /** Parts whose state the simulation determines (LEDs), keyed by partKey. */
-  parts: Record<string, PartState & { level: number }>
+  parts: Record<string, PartState & { level: number; amps?: number }>
   /** Mean amps per wire id since the previous snapshot, positive from `wire.from` to `wire.to`. */
   wireCurrent: Map<string, number>
   /** Mean |amps| per wire: how much flows regardless of direction. */

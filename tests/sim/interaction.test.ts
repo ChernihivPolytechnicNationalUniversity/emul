@@ -38,6 +38,9 @@ type Burn = { ref: string; element: number; reason: string; at: number; doing: s
 
 const BENCH_WOULD_BURN_TOO: Record<string, Record<string, string>> = {
   "system-exam": { R12: "the overload block: 100 Ω ¼ W straight across 12 V is 1.44 W, 5.8 × its rating, and burns open in seconds on a real bench too" },
+  "open746-lcd": { U1: "PA9 is USART1 TX in this demo: the OTG VBUS cap put back with the module's USB in ties it to the host's 5 V, and the pad drives into that past its 25 mA on a real board too" },
+  "open746-touch": { U1: "PA9 is USART1 TX in this demo: the OTG VBUS cap put back with the module's USB in ties it to the host's 5 V, and the pad drives into that past its 25 mA on a real board too" },
+  "open746-cube": { U1: "PA9 is USART1 TX in this demo: the OTG VBUS cap put back with the module's USB in ties it to the host's 5 V, and the pad drives into that past its 25 mA on a real board too" },
 }
 
 function mulberry32(seed: number) {

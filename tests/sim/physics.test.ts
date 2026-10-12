@@ -510,6 +510,76 @@ describe("bench physics", () => {
     })
   })
 
+  describe("an RGB LED, common cathode (L-154A4SURKQBDZGW)", () => {
+    it("wired backwards on 12 V: past the 5 V reverse rating the sheet gives every die, all three fail open", () => {
+      const { doc, place, wire } = builder(GRID)
+      const bat = place("dc-source", 0, 0, { value: "12 V" })
+      const r = place("resistor", 6, 0, { value: "1 kΩ" })
+      const led = place("rgb-led", 12, 0)
+      const gnd = place("ground", 3, 8)
+      wire(bat, "+", r, "1")
+      wire(r, "2", led, "K")
+      for (const die of ["R", "G", "B"]) wire(led, die, gnd, "GND")
+      wire(bat, "-", gnd, "GND")
+      const snap = start(doc).run(0.2)
+      const damage = snap.damage[led.id]
+      const broken = [damage, ...(damage?.also ?? [])].filter(Boolean).map((d) => d!.element).sort()
+      expect.soft(broken, "red (0), green (1) and blue (2) broken").toEqual([0, 1, 2])
+      expect.soft(failures(snap)).toMatch(/voltage 1\d(\.\d+)? V exceeds the 5(\.\d+)? V rating/)
+      for (const die of ["R", "G", "B"]) expect.soft(snap.parts[partKey(led.id, die)]?.on ?? false, `${die} dark`).toBe(false)
+    })
+
+    it("on 5 V with no ballast: the red die goes past its 185 mA peak rating at once and burns open, green and blue keep working through theirs", () => {
+      const { doc, place, wire } = builder(GRID)
+      const bat = place("dc-source", 0, 0, { value: "5 V" })
+      const rg = place("resistor", 6, 4, { value: "85 Ω" })
+      const rb = place("resistor", 6, 8, { value: "85 Ω" })
+      const led = place("rgb-led", 12, 0)
+      const gnd = place("ground", 3, 12)
+      wire(bat, "+", led, "R")
+      wire(bat, "+", rg, "1")
+      wire(bat, "+", rb, "1")
+      wire(rg, "2", led, "G")
+      wire(rb, "2", led, "B")
+      wire(led, "K", gnd, "GND")
+      wire(bat, "-", gnd, "GND")
+      const snap = start(doc).run(1)
+      const damage = snap.damage[led.id]
+      expect.soft(damage?.element, "the red die").toBe(0)
+      expect.soft(damage?.reason ?? "", "by its peak current").toMatch(/^surge current .* exceeds the 185(\.0+)? mA rating/)
+      expect.soft(damage?.fatal, "not the whole lamp").toBeFalsy()
+      expect.soft(damage?.also ?? [], "nothing else").toEqual([])
+      expect.soft(snap.parts[partKey(led.id, "R")]?.on ?? false, "red dark").toBe(false)
+      expect.soft(snap.parts[partKey(led.id, "G")]?.on, "green lit").toBe(true)
+      expect.soft(snap.parts[partKey(led.id, "B")]?.on, "blue lit").toBe(true)
+    })
+
+    it("all three dies at 28 mA: red and blue hold under their 30 mA, green is past its 25 mA and burns open alone", () => {
+      const { doc, place, wire } = builder(GRID)
+      const bat = place("dc-source", 0, 0, { value: "12 V" })
+      const ballast = { R: "355 Ω", G: "309 Ω", B: "304 Ω" }
+      const led = place("rgb-led", 12, 0)
+      const gnd = place("ground", 3, 14)
+      ;(["R", "G", "B"] as const).forEach((die, i) => {
+        const r = place("resistor", 6, 4 * i, { value: ballast[die], power: "1" })
+        wire(bat, "+", r, "1")
+        wire(r, "2", led, die)
+      })
+      wire(led, "K", gnd, "GND")
+      wire(bat, "-", gnd, "GND")
+      const run = start(doc)
+      const early = run.run(0.02)
+      for (const [die, element] of [["R", 0], ["G", 1], ["B", 2]] as const) expect.soft(Math.abs(reading(early, led.id, element).current) * 1e3, `${die} (mA)`).toBeNear(28, 0.5)
+      const snap = run.run(1)
+      const damage = snap.damage[led.id]
+      expect.soft(damage?.element, "the green die").toBe(1)
+      expect.soft(damage?.reason ?? "", "by its current").toMatch(/^current 2\d(\.\d+)? mA exceeds the 25(\.0+)? mA rating/)
+      expect.soft(damage?.also ?? [], "nothing else").toEqual([])
+      expect.soft(snap.parts[partKey(led.id, "R")]?.on, "red lit").toBe(true)
+      expect.soft(snap.parts[partKey(led.id, "B")]?.on, "blue lit").toBe(true)
+    })
+  })
+
   it("12 V on a Nucleo pin: the chip dies and its supply shorts", () => {
     const { doc, place, wire } = builder(GRID)
     const u = place("nucleo-f429zi", 0, 0)

@@ -16,10 +16,11 @@ import { GROUND, type GpioState, type Netlist, type Resolved } from "./netlist"
 import { bias, dischargeSink, nextLatch, NE555, outputSink, outputSource, quiescent, supplyShare } from "./ne555"
 import { SparseLU } from "./sparse-lu"
 import { formatSI } from "./units"
+import { pulseHigh } from "./pulse"
 
 const VT = 0.025852
 /** Leak from every node to ground; keeps floating nodes solvable. */
-const GMIN = 1e-9
+const GMIN = 1e-10
 /**
  * An arc across open contacts: struck when the gap voltage reaches the switch's strike voltage
  * (an inductive load whose current has nowhere else to go), it then drops V_ARC — the minimum
@@ -44,7 +45,7 @@ const THETA = 0.52
 const R_GPIO = 25
 /** Output resistance of a pad sourcing a voltage (the DAC's buffered output). */
 const R_DAC = 100
-const R_PULL = 40e3
+export const R_PULL = 40e3
 /** Output resistance of an ideal regulator: keeps two in parallel solvable and sharing. */
 const R_REG = 0.01
 const REG_MODES = ["regulating", "dropout", "current limit", "off"] as const
@@ -496,7 +497,7 @@ export class Engine {
     this.scaledPads = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" && el.ohms > 0 && el.ohmsAt > 0 && el.vddNet !== undefined ? [i] : [])))
     this.padSteps = new Int32Array(m)
     this.arcStart = new Uint8Array(m)
-    this.capacitors = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "C" ? [i] : [])))
+    this.capacitors = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "C" && !el.euler ? [i] : [])))
     for (const i of this.timers) this.ctlT.fill(NaN, i * 3, i * 3 + 3)
     this.ohms = new Float64Array(m)
     this.batSoc = new Float64Array(m * MAX_CELLS)
@@ -722,10 +723,7 @@ export class Engine {
   /** Terminal voltage of a source at time `t`. */
   private sourceVoltage(el: Extract<Resolved, { kind: "V" }>, t: number) {
     if (el.amplitude <= 0) return el.value
-    if (el.shape === "pulse") {
-      const phase = ((t * el.frequency) % 1 + 1) % 1
-      return phase < el.duty ? el.value + el.amplitude : el.value
-    }
+    if (el.shape === "pulse") return pulseHigh(t, el) ? el.value + el.amplitude : el.value
     return el.value + el.amplitude * Math.sin(2 * Math.PI * el.frequency * t + el.phase)
   }
 
@@ -800,9 +798,10 @@ export class Engine {
         // θ-method companions: i = C/(θ dt) · (v − v₀) − (1−θ)/θ · i₀ for a capacitor,
         // i = i₀ + dt/L · (θ v + (1−θ) v₀) for an inductor.
         case "C": {
-          const geq = el.value / (this.theta * dt)
+          const theta = el.euler ? 1 : this.theta
+          const geq = el.value / (theta * dt)
           if (withA) this.addG(el.a, el.b, geq)
-          if (withZ) this.addI(el.a, el.b, -geq * this.capV[i] - ((1 - this.theta) / this.theta) * this.capI[i])
+          if (withZ) this.addI(el.a, el.b, -geq * this.capV[i] - ((1 - theta) / theta) * this.capI[i])
           break
         }
         case "L":
@@ -880,7 +879,7 @@ export class Engine {
             if (withZ) this.addI(GROUND, el.node, this.gpioVolts[i] / R_DAC)
             break
           }
-          const r = st <= 2 ? this.ohms[i] : R_PULL
+          const r = st <= 2 ? this.ohms[i] : el.pull || R_PULL
           const high = st === 1 || st === 3
           if (high && el.vddNet !== undefined) {
             if (withA) this.addG(el.node, el.vddNet, 1 / r)
@@ -1933,7 +1932,8 @@ export class Engine {
         }
         case "C": {
           const vNow = this.vol(el.a, this.v) - this.vol(el.b, this.v)
-          const cur = (el.value / (this.theta * dt)) * (vNow - this.capV[i]) - ((1 - this.theta) / this.theta) * this.capI[i]
+          const theta = el.euler ? 1 : this.theta
+          const cur = (el.value / (theta * dt)) * (vNow - this.capV[i]) - ((1 - theta) / theta) * this.capI[i]
           tc[this.termOf[base]] += cur
           tc[this.termOf[base + 1]] -= cur
           this.capV[i] = vNow
@@ -2047,24 +2047,25 @@ export class Engine {
           const st = this.gpioState[i]
           const vn = this.vol(el.node, this.v)
           const rated = el.gndNet === undefined ? vn : vn - this.vol(el.gndNet, this.v)
+          const voltageMax = this.padVoltageMax(el, this.v)
           if (st === 0) {
-            this.record(el, i, dt, 0, vn, 0, rated)
+            this.record(el, i, dt, 0, vn, 0, rated, voltageMax)
             break
           }
           if (st === GPIO_VOLTS) {
             const cur = (vn - this.gpioVolts[i]) / R_DAC
             tc[this.termOf[base]] += cur
-            this.record(el, i, dt, cur, vn, Math.abs(cur * cur * R_DAC), rated)
+            this.record(el, i, dt, cur, vn, Math.abs(cur * cur * R_DAC), rated, voltageMax)
             break
           }
-          const r = st <= 2 ? this.ohms[i] : R_PULL
+          const r = st <= 2 ? this.ohms[i] : el.pull || R_PULL
           const high = st === 1 || st === 3
           const rail = high ? (el.vddNet !== undefined ? this.vol(el.vddNet, this.v) : el.vdd) : el.gndNet !== undefined ? this.vol(el.gndNet, this.v) : 0
           const cur = (vn - rail) / r
           tc[this.termOf[base]] += cur
           if (high && el.vddNet !== undefined) tc[this.termOf[base + 1]] -= cur
           if (!high && el.gndNet !== undefined) tc[this.termOf[base + 2]] -= cur
-          this.record(el, i, dt, cur, vn, Math.abs(cur * cur * r), rated)
+          this.record(el, i, dt, cur, vn, Math.abs(cur * cur * r), rated, voltageMax)
           break
         }
         case "REG": {
@@ -2147,8 +2148,9 @@ export class Engine {
           this.diodeAvg[i] = !this.msPrimed ? cur : this.ac ? this.ema(this.diodeAvg[i], cur, dt) : this.diodeAvg[i] + (cur - this.diodeAvg[i]) * Math.min(1, dt / LED_EYE_TAU)
           tc[this.termOf[base]] += cur
           tc[this.termOf[base + 1]] -= cur
+          const across = el.anodePin === undefined || el.anodePin === el.anode ? vd : this.vol(el.anodePin, this.v) - this.vol(el.cathode, this.v)
           // Reverse voltage counts against the rating only for plain diodes; zeners are meant to break down.
-          this.record(el, i, dt, cur, vd, Math.abs(vd * cur), el.zener ? 0 : Math.min(0, vd))
+          this.record(el, i, dt, cur, across, Math.abs(across * cur), el.zener ? 0 : Math.min(0, across))
           break
         }
         case "Q": {
@@ -2291,7 +2293,15 @@ export class Engine {
   }
 
   /** Record the operating point and check it against the ratings; records a failure when it breaks. */
-  private record(el: Resolved, i: number, dt: number, cur: number, v: number, p: number, ratedV = v) {
+  private padVoltageMax(el: Pad, v: Float64Array): number | undefined {
+    const lim = el.limits
+    if (lim?.aboveSupply === undefined) return lim?.voltage
+    const gnd = el.gndNet === undefined ? 0 : this.vol(el.gndNet, v)
+    const supply = (el.vddNet === undefined ? el.vdd : this.vol(el.vddNet, v)) - gnd
+    return Math.min(lim.voltage ?? Infinity, Math.max(0, supply) + lim.aboveSupply)
+  }
+
+  private record(el: Resolved, i: number, dt: number, cur: number, v: number, p: number, ratedV = v, voltageMax = this.limitsOf[i]?.voltage) {
     this.rCurrent[i] = cur
     this.rVoltage[i] = v
     this.rPower[i] = p
@@ -2322,12 +2332,12 @@ export class Engine {
     }
     let load = lim.current !== undefined ? iLoad / lim.current : 0
     if (lim.power !== undefined && pLoad / lim.power > load) load = pLoad / lim.power
-    if (lim.voltage !== undefined && Math.abs(ratedV) / lim.voltage > load) load = Math.abs(ratedV) / lim.voltage
+    if (voltageMax !== undefined && Math.abs(ratedV) / voltageMax > load) load = Math.abs(ratedV) / voltageMax
     if (lim.reverse !== undefined && -ratedV / lim.reverse > load) load = -ratedV / lim.reverse
     this.rLoad[i] = load
 
-    if (lim.voltage !== undefined && Math.abs(ratedV) > lim.voltage)
-      return this.fail(el, lim.fail, "voltage", Math.abs(ratedV), lim.voltage, "V")
+    if (voltageMax !== undefined && Math.abs(ratedV) > voltageMax)
+      return this.fail(el, lim.fail, "voltage", Math.abs(ratedV), voltageMax, "V")
     // Polarity: an electrolytic the wrong way round breaks down long before its rating.
     if (lim.reverse !== undefined && -ratedV > lim.reverse)
       return this.fail(el, lim.fail, "reverse voltage", -ratedV, lim.reverse, "V")
@@ -2402,7 +2412,8 @@ export class Engine {
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i]
       const lim = el.limits
-      if (!lim?.voltage) continue
+      const voltageMax = el.kind === "GPIO" ? this.padVoltageMax(el, v) : lim?.voltage
+      if (!lim || !voltageMax) continue
       let mag: number
       switch (el.kind) {
         case "R":
@@ -2412,7 +2423,7 @@ export class Engine {
           break
         case "D":
           if (el.zener) continue
-          mag = Math.max(0, this.vol(el.cathode, v) - this.vol(el.anode, v))
+          mag = Math.max(0, this.vol(el.cathode, v) - this.vol(el.anodePin ?? el.anode, v))
           break
         case "Q":
           mag = Math.abs(this.vol(el.cPin, v) - this.vol(el.e, v))
@@ -2426,7 +2437,7 @@ export class Engine {
         default:
           continue
       }
-      if (mag > lim.voltage) this.fail(el, lim.fail, "voltage", mag, lim.voltage, "V")
+      if (mag > voltageMax) this.fail(el, lim.fail, "voltage", mag, voltageMax, "V")
     }
   }
 
@@ -2489,7 +2500,11 @@ export class Engine {
         reading.extra = this.timerReadout(el, i)
       } else if (el.kind === "V" && el.amplitude > 0) {
         reading.extra = { Frequency: formatSI(el.frequency, "Hz") }
-        if (el.shape === "pulse") reading.extra.Duty = `${Math.round(el.duty * 100)} %`
+        if (el.shape === "pulse") {
+          reading.extra.Duty = `${Number((el.duty * 100).toFixed(3))} %`
+          reading.extra["Pulse width"] = formatSI(el.duty / el.frequency, "s")
+          if (el.delay > 0) reading.extra.Delay = formatSI(el.delay, "s")
+        }
       } else if (el.kind === "XFMR") {
         reading.extra = { Ratio: `1 : ${formatSI(el.ratio, "")}` }
       } else if (el.kind === "BAT") {
@@ -2580,7 +2595,43 @@ export class Engine {
 
   private factorize(): boolean {
     this.luValid = this.lu.factorize(this.A)
+    this.factorizations++
     return this.luValid
+  }
+
+  private factorizations = 0
+  private unitRhs: Float64Array | null = null
+  private unitOut: Float64Array | null = null
+  private capacitorsAt: Map<number, number[]> | null = null
+
+  get factorizationCount(): number {
+    return this.factorizations
+  }
+
+  sourceAt(node: number): { ohms: number; farads: number } | null {
+    if (node === GROUND || !this.luValid || !(this.luDt > 0)) return null
+    const unit = (this.unitRhs ??= new Float64Array(this.size))
+    const out = (this.unitOut ??= new Float64Array(this.size))
+    unit.fill(0)
+    unit[node] = 1
+    if (!this.lu.solve(unit, out) || !(out[node] > 0)) return null
+    if (!this.capacitorsAt) {
+      this.capacitorsAt = new Map()
+      this.net.elements.forEach((el, i) => {
+        if (el.kind !== "C") return
+        for (const end of [el.a, el.b]) if (end !== GROUND) this.capacitorsAt!.set(end, [...(this.capacitorsAt!.get(end) ?? []), i])
+      })
+    }
+    let farads = 0
+    let companion = 0
+    for (const i of this.capacitorsAt.get(node) ?? []) {
+      const el = this.net.elements[i]
+      if (el.kind !== "C") continue
+      farads += el.value
+      companion += el.value / ((el.euler ? 1 : this.theta) * this.luDt)
+    }
+    const conductance = 1 / out[node] - companion
+    return { ohms: conductance > 0 ? 1 / conductance : Infinity, farads }
   }
 
   private substitute(): boolean {

@@ -3,7 +3,7 @@ import type { Damage, PartState } from "@/schematic/types"
 import type { Reading } from "./engine"
 import type { DisplayFrame, SimReadout } from "./use-simulation"
 
-type LivePart = PartState & { level: number }
+type LivePart = PartState & { level: number; amps?: number }
 
 export type ObjectSim = {
   live: boolean
@@ -32,7 +32,7 @@ function pixelsOf(snapshot: unknown): readonly number[] | undefined {
 }
 
 function samePart(a: LivePart, b: LivePart) {
-  return a.level === b.level && a.on === b.on && a.pressed === b.pressed && a.x === b.x && a.y === b.y
+  return a.level === b.level && a.amps === b.amps && a.on === b.on && a.pressed === b.pressed && a.x === b.x && a.y === b.y
 }
 
 function sameParts(a: Record<string, LivePart>, b: Record<string, LivePart>) {

@@ -28,7 +28,8 @@ import {
 import { buildNets } from "@/schematic/nets"
 import { autoNetColor, semanticNetColor, WIRE_COLORS } from "@/schematic/wire-colors"
 import { tapWireAt } from "@/schematic/wiring"
-import { partKey, pinKey, type PinKind, type PlacedObject, type Schematic } from "@/schematic/types"
+import { getDef } from "@/schematic/registry"
+import { partKey, pinKey, type ComponentDef, type PinKind, type PlacedObject, type Schematic } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
 import { TopologyGate } from "@/sim/topology"
 import { exampleBase64 } from "../lib/firmware"
@@ -1007,6 +1008,86 @@ describe("coincident pins, against a brute-force sweep over every pair", () => {
     expect.soft(partition(pinContacts(straddling, GRID).groups), "…and the brute-force sweep agrees").toBe(partition(brute(straddling)))
     const apart = [groundAt("a", 0.5 - 0.2), groundAt("b", 0.5 + 0.2)]
     expect.soft(pinContacts(apart, GRID).groups.size, "two pins 0.4 px apart stay separate").toBe(0)
+  })
+
+  it("at a pixel edge in a diagonal part's own frame", () => {
+    const nucleo: PlacedObject = { id: "n", def: "nucleo-f429zi", x: 0, y: 0, rotation: 45 }
+    const offEdge = (v: number) => Math.abs(v - Math.floor(v) - 0.5)
+    const pin = objectPins(nucleo, GRID).reduce((best, p) => (p.pin.kind !== "nc" && offEdge(p.point.y) < offEdge(best.point.y) ? p : best))
+    expect.soft(offEdge(pin.point.y), "a pin sits within a thousandth of a pixel edge").toBeLessThan(1e-3)
+    const across = Math.floor(pin.point.y) + 0.5 + (pin.point.y % 1 < 0.5 ? 0.0015 : -0.0015)
+    const pinOffset = objectPins({ id: "probe", def: "ground", x: 0, y: 0 }, GRID)[0].point
+    const objects = [nucleo, { id: "g", def: "ground", x: pin.point.x - pinOffset.x, y: across - pinOffset.y }]
+    const found = new ContactIndex().of(objects, GRID).groups
+    expect.soft(found.has(pinKey("g", "GND")) && found.has(pin.key), "a ground 0.002 px across that edge joins the pin").toBe(true)
+    expect.soft(partition(found), "…and the brute-force sweep agrees").toBe(partition(brute(objects)))
+  })
+
+  it("between two pins of one part", () => {
+    const resistor = getDef("resistor")!
+    const [first, second] = resistor.pins
+    const twin: ComponentDef = { ...resistor, id: "twin", pins: [first, { ...second, x: first.x, y: first.y }] }
+    const defOf = (id: string) => (id === twin.id ? twin : getDef(id))
+    const keys = [pinKey("t", first.id), pinKey("t", second.id)]
+    const root = keys[0] < keys[1] ? keys[0] : keys[1]
+    for (const rotation of [0, 45, 90, 135] as const) {
+      const found = new ContactIndex(defOf).of([{ id: "t", def: twin.id, x: 0, y: 0, rotation }], GRID)
+      expect.soft(Object.fromEntries(found.groups), `two pins drawn on one spot join, turned ${rotation}°`).toEqual({ [keys[0]]: root, [keys[1]]: root })
+    }
+    const index = new ContactIndex(defOf)
+    const others = [0, 1, 2].map((i): PlacedObject => ({ id: `r${i}`, def: "resistor", x: 0, y: (i + 1) * 4 * GRID }))
+    expect.soft(index.of([{ id: "t", def: twin.id, x: 0, y: 0 }, ...others], GRID).groups.size, "beside three resistors").toBe(2)
+    expect.soft(index.of(others, GRID).groups.size, "…and gone with the part").toBe(0)
+  })
+
+  it("on one index kept across 120 edits around a board with parts docked on its headers", () => {
+    let seed = 20261012
+    const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+    const pick = <T,>(items: readonly T[]) => items[Math.floor(random() * items.length)]
+    const rotations = [0, 45, 90, 135, 180, 225, 270, 315] as const
+    const parts = ["resistor", "led", "ground", "pushbutton"]
+    let board: PlacedObject = { id: "board", def: "open746i-c", x: 0, y: 0 }
+    const headerPins = () => objectPins(board, GRID).filter((p) => p.pin.kind !== "nc")
+    let made = 0
+    const part = (): PlacedObject => {
+      const id = `p${made++}`
+      const def = pick(parts)
+      const rotation = pick(rotations)
+      const mirror = random() < 0.25
+      if (random() < 0.3) return { id, def, rotation, mirror, x: Math.round(random() * 80) * GRID, y: Math.round(random() * 60) * GRID }
+      const pins = objectPins({ id, def, x: 0, y: 0, rotation, mirror }, GRID)
+      const own = pick(pins).point
+      const onto = pick(headerPins()).point
+      return { id, def, rotation, mirror, x: onto.x - own.x, y: onto.y - own.y }
+    }
+    let objects: PlacedObject[] = [board, ...Array.from({ length: 40 }, part)]
+    const index = new ContactIndex()
+    const kindOf = new Map(objects.flatMap((o) => objectPins(o, GRID)).map((p) => [p.key, p.pin.kind]))
+    let mismatches = 0
+    let contacts = 0
+    for (let step = 0; step < 120; step++) {
+      const roll = random()
+      if (roll < 0.05) objects = [board, ...Array.from({ length: 40 }, part)]
+      else if (roll < 0.15) {
+        board = { ...board, x: board.x + pick([-2, -1, 1, 2]) * GRID, rotation: random() < 0.3 ? pick([0, 90, 180, 270] as const) : board.rotation }
+        objects = objects.map((o) => (o.id === board.id ? board : o))
+      } else if (roll < 0.3) objects = objects.filter((o) => o.id === board.id || random() > 0.1)
+      else if (roll < 0.45) objects = [...objects, part(), part()]
+      else {
+        const moving = new Set(Array.from({ length: 1 + Math.floor(random() * 3) }, () => pick(objects).id))
+        moving.delete(board.id)
+        objects = objects.map((o) => (moving.has(o.id) ? { ...part(), id: o.id } : o))
+      }
+      for (const o of objects) for (const p of objectPins(o, GRID)) kindOf.set(p.key, p.pin.kind)
+      const found = index.of(objects, GRID)
+      const want = brute(objects)
+      contacts += found.groups.size
+      if (partition(found.groups) !== partition(want)) mismatches++
+      if ([...found.groups].some(([key, root]) => root > key || found.groups.get(root) !== root)) mismatches++
+      if ([...found.kinds].some(([key, kind]) => kindOf.get(key) !== kind) || found.kinds.size !== want.size) mismatches++
+    }
+    expect.soft(mismatches, "every step agrees with the sweep: groups, smallest key as root, kinds").toBe(0)
+    expect.soft(contacts, "…and the steps did join pins").toBeGreaterThan(200)
   })
 })
 

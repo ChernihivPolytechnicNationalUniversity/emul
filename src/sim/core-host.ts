@@ -82,7 +82,7 @@ export interface CoreHost {
   readonly sync: boolean
   load(data: ArrayBuffer, name: string): void
   /** Restart the core; `backup` keeps the RTC and backup registers (VBAT held them). */
-  reset(opts?: { backup?: boolean }): void
+  reset(opts?: { backup?: boolean; supplyKept?: boolean }): void
   /** Time VDD was off with VBAT on, to count the RTC through before the next reset. */
   runOnBattery(seconds: number): void
   /** Dead silicon: the core stops with this reason until the next run. */
@@ -93,11 +93,16 @@ export interface CoreHost {
   /** Pads the circuit is wired to: the only ones whose drive and duty need reporting. */
   setPads(keys: Iterable<number>): void
   /** A sampled level for a pad (the analog sampler, once per step). */
-  setPad(pad: PadRef, level: boolean): void
+  setPad(pad: PadRef, level: boolean, sampledUnder?: PadDrive): void
+  setReadback(pad: PadRef, code: number): void
   /** A level at an exact time, now or later (the digital fast path in). */
   setPadAt(pad: PadRef, level: boolean, time: number): void
   /** The voltage the ADC would sample on a pad, as the last solve left it. */
   setAnalog(pad: PadRef, volts: number): void
+  setAnalogSource(pad: PadRef, ohms: number, farads: number): void
+  setSupply(volts: number): void
+  setBattery(volts: number): void
+  setReference(volts: number): void
   /** Run to `end` (own time). Returns false when the core stopped. */
   runUntil(end: number): boolean
   /**
@@ -143,10 +148,18 @@ export const PAD_KEYS = 11 * 16
  * tens of microseconds — as much as a whole step — while the other side usually answers
  * within a few; then sleeping in short slices so a stalled peer costs no CPU.
  */
-export function awaitChange(ctl: Int32Array, index: number, value: number, spins = 20000) {
-  for (let i = 0; i < spins; i++) if (Atomics.load(ctl, index) !== value) return
-  while (Atomics.load(ctl, index) === value) Atomics.wait(ctl, index, value, 5)
+export function awaitChange(ctl: Int32Array, index: number, value: number, spins = 20000, withinMs = Infinity): boolean {
+  for (let i = 0; i < spins; i++) if (Atomics.load(ctl, index) !== value) return true
+  const giveUpAt = performance.now() + withinMs
+  while (Atomics.load(ctl, index) === value) {
+    if (performance.now() > giveUpAt) return false
+    Atomics.wait(ctl, index, value, 5)
+  }
+  return true
 }
+
+export const WORKER_ANSWERS_WITHIN_MS = 10_000
+export const WORKER_STOPPED_ANSWERING = "the core's worker stopped answering"
 
 // --- the core in this thread ------------------------------------------------------------------
 
@@ -197,7 +210,7 @@ export class LocalCore implements CoreHost {
       this.mcu.cpu.halted = new CpuHalt("fault", `cannot load firmware: ${(e as Error).message}`, 0)
     }
   }
-  reset(opts: { backup?: boolean } = {}) {
+  reset(opts: { backup?: boolean; supplyKept?: boolean } = {}) {
     this.mcu.reset("por", opts)
   }
   runOnBattery(seconds: number) {
@@ -213,9 +226,14 @@ export class LocalCore implements CoreHost {
     this.mcu.digitalWatch.clear()
     for (const k of keys) this.mcu.digitalWatch.add(k)
   }
-  setPads() {}
-  setPad(pad: PadRef, level: boolean) {
-    this.mcu.setPad(pad, level)
+  setPads(keys: Iterable<number>) {
+    this.mcu.setWiredPads(keys)
+  }
+  setPad(pad: PadRef, level: boolean, sampledUnder?: PadDrive) {
+    this.mcu.setPad(pad, level, sampledUnder)
+  }
+  setReadback(pad: PadRef, code: number) {
+    this.mcu.setReadback(pad, code)
   }
   setPadAt(pad: PadRef, level: boolean, time: number) {
     this.mcu.setPadAt(pad, level, time)
@@ -232,6 +250,28 @@ export class LocalCore implements CoreHost {
     }
   }
   private analogBound = false
+  private readonly sourceOhms = new Float64Array(PAD_KEYS).fill(NaN)
+  private readonly sourceFarads = new Float64Array(PAD_KEYS).fill(NaN)
+  private sourceBound = false
+  setAnalogSource(pad: PadRef, ohms: number, farads: number) {
+    this.sourceOhms[pad.port * 16 + pad.pin] = ohms
+    this.sourceFarads[pad.port * 16 + pad.pin] = farads
+    if (this.sourceBound) return
+    this.sourceBound = true
+    this.mcu.analogSource = (p) => {
+      const key = p.port * 16 + p.pin
+      return Number.isNaN(this.sourceOhms[key]) ? null : { ohms: this.sourceOhms[key], farads: this.sourceFarads[key] }
+    }
+  }
+  setSupply(volts: number) {
+    this.mcu.setSupply(volts)
+  }
+  setBattery(volts: number) {
+    this.mcu.setBattery(volts)
+  }
+  setReference(volts: number) {
+    this.mcu.setReference(volts)
+  }
   runUntil(end: number) {
     const ok = this.mcu.runUntil(end)
     if (this.mcu.digitalOut.length) {
@@ -280,7 +320,7 @@ export class LocalCore implements CoreHost {
   }
   supplyCurrent() {
     const idd = this.stepIdd
-    if (idd === null) return this.mcu.supplyCurrent()
+    if (idd === null) return this.mcu.supplyLoad()
     this.stepIdd = null
     return idd
   }
@@ -370,6 +410,7 @@ export const CMD_YIELD = 4
 export const CMD_BACKUP = 8
 /** Run the loop's steps (`CMD.STEPS` of `CMD.STEP` from loop time `CMD.TARGET`) while nothing changes. */
 export const CMD_STEPS = 16
+export const CMD_SUPPLY_KEPT = 32
 /** Output flags (per run, in the output bank). */
 export const OUT_LOADED = 1
 export const OUT_RUNNING = 2
@@ -380,7 +421,7 @@ export const OUT_STOPPED = 8
 export const STOP_REASONS: StopReason[] = ["breakpoint", "step", "pause", "bkpt", "exception", "reset"]
 
 /** Command bank layout (Float64 offsets within the bank). */
-export const CMD = { TARGET: 0, FLAGS: 1, HSE_HZ: 2, HSE_KIND: 3, HSE_START: 4, LSE_HZ: 5, LSE_KIND: 6, LSE_START: 7, LEVELS: 8, ANALOG: 8 + PAD_KEYS, BATTERY: 8 + 2 * PAD_KEYS, BASE: 9 + 2 * PAD_KEYS, STEP: 10 + 2 * PAD_KEYS, STEPS: 11 + 2 * PAD_KEYS, IN_UPTO: 12 + 2 * PAD_KEYS, SIZE: 13 + 2 * PAD_KEYS } as const
+export const CMD = { TARGET: 0, FLAGS: 1, HSE_HZ: 2, HSE_KIND: 3, HSE_START: 4, LSE_HZ: 5, LSE_KIND: 6, LSE_START: 7, LEVELS: 8, ANALOG: 8 + PAD_KEYS, BATTERY: 8 + 2 * PAD_KEYS, BASE: 9 + 2 * PAD_KEYS, STEP: 10 + 2 * PAD_KEYS, STEPS: 11 + 2 * PAD_KEYS, IN_UPTO: 12 + 2 * PAD_KEYS, VDD: 13 + 2 * PAD_KEYS, VBAT: 14 + 2 * PAD_KEYS, READBACK: 15 + 2 * PAD_KEYS, SOURCE_OHMS: 15 + 3 * PAD_KEYS, SOURCE_FARADS: 15 + 4 * PAD_KEYS, VREF: 15 + 5 * PAD_KEYS, SIZE: 16 + 5 * PAD_KEYS } as const
 /** Output bank layout. */
 export const OUT = { TIME: 0, FLAGS: 1, IDD: 2, POR: 3, STEPS: 4, STOP_PC: 5, STOP_REASON: 6, DRIVE: 7, DUTY: 7 + PAD_KEYS, DUTY_BASE: 7 + 2 * PAD_KEYS, SIZE: 7 + 3 * PAD_KEYS } as const
 /** Edge rings: [time, code] pairs; code = key·4 + level (0 low, 1 high, 2 released). */
@@ -412,6 +453,14 @@ export function decodeDrive(v: number): PadDrive {
   if (v === 0) return null
   if (v >= 1000 - 100) return v - 1000
   return v === 1 ? "high" : v === 2 ? "low" : v === 3 ? "pullup" : "pulldown"
+}
+export function encodeSample(level: boolean, sampledUnder?: PadDrive): number {
+  const under = sampledUnder === undefined || typeof sampledUnder === "number" ? 0 : 1 + encodeDrive(sampledUnder)
+  return (level ? 2 : 1) + 4 * under
+}
+export function decodeSample(code: number): { level: boolean; sampledUnder: PadDrive | undefined } {
+  const under = Math.floor(code / 4)
+  return { level: code % 4 === 2, sampledUnder: under === 0 ? undefined : decodeDrive(under - 1) }
 }
 export function encodeClock(bank: Float64Array, at: number, c: ClockSource | null) {
   bank[at] = c ? c.hz : 0
@@ -482,6 +531,7 @@ export class RemoteCore implements CoreHost {
   private lse: ClockSource | null = null
   private resetPending = true
   private resetBackup = false
+  private resetSupplyKept = false
   private battery = 0
   private watch: number[] = []
   boot0 = false
@@ -493,9 +543,13 @@ export class RemoteCore implements CoreHost {
   private syncUntil = 0
   private runs = 0
 
-  constructor(chip: ChipProfile, external: MemoryRegion[], transport: CoreTransport) {
+  private readonly answersWithinMs: number
+  private deaf = false
+
+  constructor(chip: ChipProfile, external: MemoryRegion[], transport: CoreTransport, answersWithinMs = WORKER_ANSWERS_WITHIN_MS) {
     this.chip = chip
     this.transport = transport
+    this.answersWithinMs = answersWithinMs
     const shm = new SharedArrayBuffer(SHM.bytes)
     this.ctl = new Int32Array(shm, 0, CTL.WORDS)
     this.f64 = new Float64Array(shm, SHM.f64Base)
@@ -579,11 +633,13 @@ export class RemoteCore implements CoreHost {
     this.lastTime = 0
     this.outBank.fill(0, OUT.DRIVE, OUT.DRIVE + PAD_KEYS)
     this.version++
+    this.keepDeafHalted()
   }
-  reset(opts: { backup?: boolean } = {}) {
+  reset(opts: { backup?: boolean; supplyKept?: boolean } = {}) {
     this.finish()
     this.resetPending = true
     this.resetBackup = !!opts.backup
+    this.resetSupplyKept = !!opts.supplyKept
     this.haltedFlag = false
     this.haltReason = null
     this.stopFlag = null
@@ -592,6 +648,7 @@ export class RemoteCore implements CoreHost {
     // Pads come up floating at reset; the core confirms after its next run.
     this.outBank.fill(0, OUT.DRIVE, OUT.DRIVE + PAD_KEYS)
     this.version++
+    this.keepDeafHalted()
   }  runOnBattery(seconds: number) {
     this.battery = seconds
   }
@@ -621,8 +678,11 @@ export class RemoteCore implements CoreHost {
     this.pads = next
     this.post({ t: "pads", keys: next })
   }
-  setPad(pad: PadRef, level: boolean) {
-    this.next[CMD.LEVELS + pad.port * 16 + pad.pin] = level ? 2 : 1
+  setPad(pad: PadRef, level: boolean, sampledUnder?: PadDrive) {
+    this.next[CMD.LEVELS + pad.port * 16 + pad.pin] = encodeSample(level, sampledUnder)
+  }
+  setReadback(pad: PadRef, code: number) {
+    this.next[CMD.READBACK + pad.port * 16 + pad.pin] = code
   }
   setPadAt(pad: PadRef, level: boolean, time: number) {
     const head = Atomics.load(this.ctl, CTL.IN_HEAD)
@@ -636,12 +696,25 @@ export class RemoteCore implements CoreHost {
   setAnalog(pad: PadRef, volts: number) {
     this.next[CMD.ANALOG + pad.port * 16 + pad.pin] = volts
   }
+  setAnalogSource(pad: PadRef, ohms: number, farads: number) {
+    this.next[CMD.SOURCE_OHMS + pad.port * 16 + pad.pin] = ohms
+    this.next[CMD.SOURCE_FARADS + pad.port * 16 + pad.pin] = farads
+  }
+  setSupply(volts: number) {
+    this.next[CMD.VDD] = volts
+  }
+  setBattery(volts: number) {
+    this.next[CMD.VBAT] = volts
+  }
+  setReference(volts: number) {
+    this.next[CMD.VREF] = volts
+  }
 
   /** Wait for the run in flight and take its results. */
   private finish() {
     if (!this.inFlight) return
     this.inFlight = false
-    awaitChange(this.ctl, CTL.ACK, this.seq - 1)
+    if (!awaitChange(this.ctl, CTL.ACK, this.seq - 1, undefined, this.answersWithinMs)) return this.giveUp()
     const prev = this.outBank
     this.outBank = this.outBanks[this.seq & 1]
     // Anything the pads drive differently than after the run before bumps the version.
@@ -669,6 +742,19 @@ export class RemoteCore implements CoreHost {
     Atomics.store(this.ctl, CTL.OUT_TAIL, tail)
   }
 
+  private giveUp() {
+    this.deaf = true
+    this.inFlight = false
+    this.keepDeafHalted()
+  }
+  private keepDeafHalted() {
+    if (!this.deaf) return
+    this.haltedFlag = true
+    this.runningFlag = false
+    this.stopFlag = null
+    this.haltReason = WORKER_STOPPED_ANSWERING
+  }
+
   runUntil(end: number) {
     this.finish()
     // Stopped for the debugger: nothing runs until it is told to go on.
@@ -689,10 +775,14 @@ export class RemoteCore implements CoreHost {
     this.issue(time, CMD_STEPS)
     // The solver follows the core through the steps it is past, while it runs on.
     let taken = 0
+    const giveUpAt = performance.now() + this.answersWithinMs
     while (Atomics.load(this.ctl, CTL.ACK) !== this.seq) {
       const past = Atomics.load(this.ctl, CTL.PROGRESS)
       if (taken < past) {
         for (; taken < past; taken++) step()
+      } else if (performance.now() > giveUpAt) {
+        this.giveUp()
+        return taken
       }
     }
     this.finish()
@@ -708,7 +798,7 @@ export class RemoteCore implements CoreHost {
     const bank = this.next
     bank[CMD.TARGET] = end
     // Yielding per edge only makes sense in step: pipelined, a run that stopped early would fall behind.
-    bank[CMD.FLAGS] = (this.resetPending ? CMD_RESET : 0) | (this.resetPending && this.resetBackup ? CMD_BACKUP : 0) | (this.boot0 ? CMD_BOOT0 : 0) | (this.sync ? CMD_YIELD : 0) | steps
+    bank[CMD.FLAGS] = (this.resetPending ? CMD_RESET : 0) | (this.resetPending && this.resetBackup ? CMD_BACKUP : 0) | (this.resetPending && this.resetSupplyKept ? CMD_SUPPLY_KEPT : 0) | (this.boot0 ? CMD_BOOT0 : 0) | (this.sync ? CMD_YIELD : 0) | steps
     bank[CMD.BATTERY] = this.resetPending ? this.battery : 0
     // The edges in so far are this run's; one queued while it runs waits for the next, whenever the core looks.
     bank[CMD.IN_UPTO] = Atomics.load(this.ctl, CTL.IN_HEAD)
