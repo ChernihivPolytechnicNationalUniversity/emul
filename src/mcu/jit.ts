@@ -17,7 +17,7 @@ import { LINE_FREE, LINE_PLAIN, type Cpu } from "./cpu"
 import { FPX, jitHelpers, type Instr } from "./decode"
 
 /** A compiled block: `run` executes from `addrs[0]` until it leaves the line or `target` cycles. */
-export type Compiled = (c: Cpu, r: Uint32Array, bus: Cpu["bus"], s: Float32Array, I: Instr[], H: typeof jitHelpers, target: number) => void
+export type Compiled = (c: Cpu, r: Uint32Array, bus: Cpu["mem"], s: Float32Array, I: Instr[], H: typeof jitHelpers, target: number) => void
 
 /** The most wait states a flash access can cost (FLASH_ACR.LATENCY is four bits). */
 const MAX_WAIT = 15

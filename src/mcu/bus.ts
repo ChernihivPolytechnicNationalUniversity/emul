@@ -21,6 +21,18 @@ export class BusFault extends Error {
   }
 }
 
+export interface MemoryPort {
+  slow: boolean
+  read(addr: number, size: 1 | 2 | 4): number
+  write(addr: number, value: number, size: 1 | 2 | 4): void
+  read8(addr: number): number
+  read16(addr: number): number
+  read32(addr: number): number
+  write8(addr: number, v: number): void
+  write16(addr: number, v: number): void
+  write32(addr: number, v: number): void
+}
+
 /** A memory-mapped block; offsets are relative to `base`, in bytes. */
 export interface Peripheral {
   readonly name: string
@@ -193,9 +205,10 @@ export class Bus {
    * every block and alias. A page shared by two blocks (system memory and the option bytes)
    * is marked mixed and scanned.
    */
-  private pageMem: (Memory | null)[] = new Array(PAGES).fill(null)
-  private pageBase = new Float64Array(PAGES)
-  private pageMixed = new Uint8Array(PAGES)
+  readonly pageMem: (Memory | null)[] = new Array(PAGES).fill(null)
+  readonly pageBase = new Float64Array(PAGES)
+  readonly pageMixed = new Uint8Array(PAGES)
+  onLayoutChange: (() => void) | null = null
 
   constructor(regions: MemoryRegion[] = STM32F429ZI.memory, bitBand = STM32F429ZI.core.bitBand) {
     this.memories = regions.map((r) => new Memory(r))
@@ -220,6 +233,7 @@ export class Bus {
           this.pageBase[p] = b
         }
       }
+    this.onLayoutChange?.()
   }
 
   /** Which flat memory backs an address (through any alias), or null. */

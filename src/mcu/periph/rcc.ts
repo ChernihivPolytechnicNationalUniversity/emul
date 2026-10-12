@@ -8,6 +8,7 @@
  * see the right rates.
  */
 import { RegBlock, type RegDef } from "./regblock"
+import type { LptimProfile } from "../chip"
 
 export const RCC_BASE = 0x40023800
 
@@ -85,8 +86,43 @@ export class Rcc extends RegBlock {
   /** Fired when the clock tree may have changed (the SoC ends its run slice to re-time). */
   onChange: (() => void) | null = null
 
-  constructor() {
-    super("RCC", RCC_BASE, 0x400, REGS)
+  readonly lptim: LptimProfile | undefined
+  onLptimReset: () => void = () => {}
+  readonly apbGated: Record<1 | 2, number> = { 1: 0, 2: 0 }
+  onApbChange: (apb: 1 | 2, changed: number, asserted: number) => void = () => {}
+
+  constructor(lptim?: LptimProfile) {
+    super("RCC", RCC_BASE, 0x400, lptim ? [...REGS, { name: "DCKCFGR2", offset: lptim.clockSelectOffset, rw: 0x1fffffff }] : REGS)
+    this.lptim = lptim
+  }
+
+  apbClockOn(apb: 1 | 2, bit: number): boolean {
+    const mask = 1 << bit
+    const enable = this.regs[(apb === 1 ? 0x40 : 0x44) >>> 2]
+    const reset = this.regs[(apb === 1 ? 0x20 : 0x24) >>> 2]
+    return (enable & mask) !== 0 && (reset & mask) === 0
+  }
+
+  private writeApb(d: RegDef, next: number, old: number) {
+    const apb = d.name.startsWith("APB1") ? 1 : 2
+    const changed = (next ^ old) >>> 0
+    const asserted = d.name.endsWith("RSTR") ? (next & ~old) >>> 0 : 0
+    const lptimBit = apb === 1 && this.lptim ? 1 << this.lptim.enableBit : 0
+    if (changed & lptimBit) this.bump()
+    this.regs[d.offset >>> 2] = next >>> 0
+    if (asserted & lptimBit) this.onLptimReset()
+    const gated = this.apbGated[apb]
+    if (changed & gated) this.onApbChange(apb, changed & gated, asserted & gated)
+    return next >>> 0
+  }
+
+  lptimClock(stopped = false): { hz: number; enabled: boolean; operational: boolean } {
+    const spec = this.lptim
+    if (!spec) return { hz: 0, enabled: false, operational: false }
+    const source = (this.regs[spec.clockSelectOffset >>> 2] >>> spec.clockSelectShift) & 3
+    const enabled = this.enabled("APB1ENR", spec.enableBit) && !(this.get("APB1RSTR") & (1 << spec.enableBit))
+    const hz = source === 0 ? this.clocks().pclk1 : source === 1 ? (this.regs[0x74 >>> 2] & 2 ? LSI_HZ : 0) : source === 2 ? (this.regs[0] & CR_HSIRDY ? HSI_HZ : 0) : this.lseHz()
+    return { hz: enabled && (!stopped || source === 1 || source === 3) ? hz : 0, enabled, operational: enabled }
   }
 
   /** Set before a reset: a power-on clears the backup domain (BDCR), a system reset keeps it. */
@@ -249,8 +285,14 @@ export class Rcc extends RegBlock {
       case "PLLI2SCFGR":
       case "PLLSAICFGR":
       case "DCKCFGR":
+      case "DCKCFGR2":
         if (next !== old) this.bump()
         return
+      case "APB1ENR":
+      case "APB2ENR":
+      case "APB1RSTR":
+      case "APB2RSTR":
+        return this.writeApb(d, next, old)
       case "CSR":
         // LSIRDY follows LSION; RMVF clears the reset flags.
         {

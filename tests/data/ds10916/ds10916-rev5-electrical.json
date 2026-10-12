@@ -1,0 +1,1852 @@
+{
+ "source": "DS10916 Rev 5 (July 2025), STM32F745xx STM32F746xx datasheet",
+ "page_numbering": "printed_page is the n of \"n/248\" in the page footer; pdf_page is the 1-based page index in DS10916.pdf (230 pages). They are equal up to page 90; from printed page 109 on, pdf_page = printed_page - 18 (the document numbering skips 91-108; its own table of contents agrees, so no content is missing).",
+ "conventions": [
+  "Strings are as printed. Subscripts are flattened into the symbol (VDD, VIN, IIO, CL, IINJ(PIN)); superscript footnote markers are removed from the cell text and listed in \"notes\" by column, as integers.",
+  "A cell that wraps over several lines is joined with one space where the line break falls between words, and with nothing where it falls inside a token (e.g. \"VDDA+\" / \"0.3\" -> \"VDDA+0.3\").",
+  "Merged (row-spanning) cells are repeated in every row they cover (unit, symbol, parameter, a shared min/max such as BOOT VIL 0.1VDD+0.1).",
+  "Minus signs keep the printed glyph: U+2212 \"−\" where the PDF uses it (e.g. \"− 0.3\", \"VDD − 0.4\"), ASCII \"-\" where it uses that (e.g. \"IIO = -8 mA\"); \"-\" alone means an empty value printed as a dash.",
+  "Whitespace inside values follows the printed spacing (a visible gap is a space) and is not reliable to the character; compare whitespace-insensitively."
+ ],
+ "tables": [
+  {
+   "table": 15,
+   "title": "Voltage characteristics",
+   "printed_pages": [
+    120
+   ],
+   "pdf_pages": [
+    102
+   ],
+   "columns": [
+    "symbol",
+    "ratings",
+    "min",
+    "max",
+    "unit"
+   ],
+   "rows": [
+    {
+     "symbol": "VDD–VSS",
+     "ratings": "External main supply voltage (including VDDA, VDD, VBAT and VDDUSB)",
+     "min": "− 0.3",
+     "max": "4.0",
+     "unit": "V",
+     "notes": {
+      "ratings": [
+       1
+      ]
+     }
+    },
+    {
+     "symbol": "VIN",
+     "ratings": "Input voltage on FT pins",
+     "min": "VSS − 0.3",
+     "max": "VDD+4.0",
+     "unit": "V",
+     "notes": {
+      "ratings": [
+       2
+      ]
+     }
+    },
+    {
+     "symbol": "VIN",
+     "ratings": "Input voltage on TTa pins",
+     "min": "VSS − 0.3",
+     "max": "4.0",
+     "unit": "V"
+    },
+    {
+     "symbol": "VIN",
+     "ratings": "Input voltage on any other pin",
+     "min": "VSS − 0.3",
+     "max": "4.0",
+     "unit": "V"
+    },
+    {
+     "symbol": "VIN",
+     "ratings": "Input voltage on BOOT pin",
+     "min": "VSS",
+     "max": "9.0",
+     "unit": "V"
+    },
+    {
+     "symbol": "|ΔVDDx|",
+     "ratings": "Variations between different VDD power pins",
+     "min": "-",
+     "max": "50",
+     "unit": "mV"
+    },
+    {
+     "symbol": "|VSSX −VSS|",
+     "ratings": "Variations between all the different ground pins",
+     "min": "-",
+     "max": "50",
+     "unit": "mV",
+     "notes": {
+      "ratings": [
+       3
+      ]
+     }
+    },
+    {
+     "symbol": "VESD(HBM)",
+     "ratings": "Electrostatic discharge voltage (human body model)",
+     "min": "see Section 6.3.15: Absolute maximum ratings (electrical sensitivity)",
+     "max": "see Section 6.3.15: Absolute maximum ratings (electrical sensitivity)",
+     "unit": "-"
+    }
+   ],
+   "footnotes": {
+    "1": "All main power (VDD, VDDA, VDDUSB) and ground (VSS, VSSA) pins must always be connected to the external power supply, in the permitted range.",
+    "2": "VIN maximum value must always be respected. Refer to Table 16 for the values of the maximum allowed injected current.",
+    "3": "Include VREF- pin."
+   }
+  },
+  {
+   "table": 16,
+   "title": "Current characteristics",
+   "printed_pages": [
+    121
+   ],
+   "pdf_pages": [
+    103
+   ],
+   "columns": [
+    "symbol",
+    "ratings",
+    "max",
+    "unit"
+   ],
+   "rows": [
+    {
+     "symbol": "ΣIVDD",
+     "ratings": "Total current into sum of all VDD_x power lines (source)",
+     "max": "320",
+     "unit": "mA",
+     "notes": {
+      "ratings": [
+       1
+      ]
+     }
+    },
+    {
+     "symbol": "Σ IVSS",
+     "ratings": "Total current out of sum of all VSS_x ground lines (sink)",
+     "max": "− 320",
+     "unit": "mA",
+     "notes": {
+      "ratings": [
+       1
+      ]
+     }
+    },
+    {
+     "symbol": "Σ IVDDUSB",
+     "ratings": "Total current into VDDUSB power line (source)",
+     "max": "25",
+     "unit": "mA"
+    },
+    {
+     "symbol": "IVDD",
+     "ratings": "Maximum current into each VDD_x power line (source)",
+     "max": "100",
+     "unit": "mA",
+     "notes": {
+      "ratings": [
+       1
+      ]
+     }
+    },
+    {
+     "symbol": "IVSS",
+     "ratings": "Maximum current out of each VSS_x ground line (sink)",
+     "max": "− 100",
+     "unit": "mA",
+     "notes": {
+      "ratings": [
+       1
+      ]
+     }
+    },
+    {
+     "symbol": "IIO",
+     "ratings": "Output current sunk by any I/O and control pin",
+     "max": "25",
+     "unit": "mA"
+    },
+    {
+     "symbol": "IIO",
+     "ratings": "Output current sourced by any I/Os and control pin",
+     "max": "− 25",
+     "unit": "mA"
+    },
+    {
+     "symbol": "ΣIIO",
+     "ratings": "Total output current sunk by sum of all I/O and control pins",
+     "max": "120",
+     "unit": "mA",
+     "notes": {
+      "ratings": [
+       2
+      ]
+     }
+    },
+    {
+     "symbol": "ΣIIO",
+     "ratings": "Total output current sunk by sum of all USB I/Os",
+     "max": "25",
+     "unit": "mA"
+    },
+    {
+     "symbol": "ΣIIO",
+     "ratings": "Total output current sourced by sum of all I/Os and control pins",
+     "max": "− 120",
+     "unit": "mA",
+     "notes": {
+      "ratings": [
+       2
+      ]
+     }
+    },
+    {
+     "symbol": "IINJ(PIN)",
+     "ratings": "Injected current on FT, FTf, RST and B pins",
+     "max": "− 5/+0",
+     "unit": "mA",
+     "notes": {
+      "ratings": [
+       3
+      ]
+     }
+    },
+    {
+     "symbol": "IINJ(PIN)",
+     "ratings": "Injected current on TTa pins",
+     "max": "±5",
+     "unit": "mA",
+     "notes": {
+      "ratings": [
+       4
+      ]
+     }
+    },
+    {
+     "symbol": "ΣIINJ(PIN)",
+     "ratings": "Total injected current (sum of all I/O and control pins)",
+     "max": "±25",
+     "unit": "mA",
+     "notes": {
+      "symbol": [
+       4
+      ],
+      "ratings": [
+       5
+      ]
+     }
+    }
+   ],
+   "footnotes": {
+    "1": "All main power (VDD, VDDA) and ground (VSS, VSSA) pins must always be connected to the external power supply, in the permitted range.",
+    "2": "This current consumption must be correctly distributed over all I/Os and control pins. The total output current must not be sunk/sourced between two consecutive power supply pins referring to high pin count LQFP packages.",
+    "3": "Positive injection is not possible on these I/Os and does not occur for input voltages lower than the specified maximum value.",
+    "4": "A positive injection is induced by VIN>VDDA while a negative injection is induced by VIN<VSS. IINJ(PIN) must never be exceeded. Refer to Table 15: Voltage characteristics for the values of the maximum allowed input voltage.",
+    "5": "When several inputs are submitted to a current injection, the maximum ΣIINJ(PIN) is the absolute sum of the positive and negative injected currents (instantaneous values)."
+   },
+   "column_header_as_printed": {
+    "max": "Max."
+   }
+  },
+  {
+   "table": 18,
+   "title": "General operating conditions",
+   "printed_pages": [
+    122,
+    123,
+    124
+   ],
+   "pdf_pages": [
+    104,
+    105,
+    106
+   ],
+   "columns": [
+    "symbol",
+    "parameter",
+    "conditions",
+    "min",
+    "typ",
+    "max",
+    "unit"
+   ],
+   "rows": [
+    {
+     "symbol": "VDD",
+     "parameter": "Standard operating voltage",
+     "conditions": "-",
+     "min": "1.7",
+     "typ": "-",
+     "max": "3.6",
+     "unit": "V",
+     "notes": {
+      "min": [
+       3
+      ]
+     }
+    },
+    {
+     "symbol": "VDDA",
+     "parameter": "Analog operating voltage (ADC limited to 1.2 M samples)",
+     "conditions": "Must be the same potential as VDD",
+     "min": "1.7",
+     "typ": "-",
+     "max": "2.4",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       4,
+       5
+      ],
+      "conditions": [
+       6
+      ],
+      "min": [
+       3
+      ]
+     }
+    },
+    {
+     "symbol": "VDDA",
+     "parameter": "Analog operating voltage (ADC limited to 2.4 M samples)",
+     "conditions": "Must be the same potential as VDD",
+     "min": "2.4",
+     "typ": "-",
+     "max": "3.6",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       4,
+       5
+      ],
+      "conditions": [
+       6
+      ]
+     }
+    },
+    {
+     "symbol": "VDDUSB",
+     "parameter": "USB supply voltage (supply voltage for PA11,PA12, PB14 and PB15 pins)",
+     "conditions": "USB not used",
+     "min": "1.7",
+     "typ": "3.3",
+     "max": "3.6",
+     "unit": "V"
+    },
+    {
+     "symbol": "VDDUSB",
+     "parameter": "USB supply voltage (supply voltage for PA11,PA12, PB14 and PB15 pins)",
+     "conditions": "USB used",
+     "min": "3.0",
+     "typ": "-",
+     "max": "3.6",
+     "unit": "V"
+    },
+    {
+     "symbol": "VBAT",
+     "parameter": "Backup operating voltage",
+     "conditions": "-",
+     "min": "1.65",
+     "typ": "-",
+     "max": "3.6",
+     "unit": "V"
+    },
+    {
+     "symbol": "VIN",
+     "parameter": "Input voltage on RST and FT pins",
+     "conditions": "2 V ≤VDD ≤3.6 V",
+     "min": "− 0.3",
+     "typ": "-",
+     "max": "5.5",
+     "unit": "V",
+     "notes": {
+      "parameter": [
+       8
+      ]
+     }
+    },
+    {
+     "symbol": "VIN",
+     "parameter": "Input voltage on RST and FT pins",
+     "conditions": "VDD ≤2 V",
+     "min": "− 0.3",
+     "typ": "-",
+     "max": "5.2",
+     "unit": "V",
+     "notes": {
+      "parameter": [
+       8
+      ]
+     }
+    },
+    {
+     "symbol": "VIN",
+     "parameter": "Input voltage on TTa pins",
+     "conditions": "-",
+     "min": "− 0.3",
+     "typ": "-",
+     "max": "VDDA+0.3",
+     "unit": "V"
+    },
+    {
+     "symbol": "VIN",
+     "parameter": "Input voltage on BOOT pin",
+     "conditions": "-",
+     "min": "0",
+     "typ": "-",
+     "max": "9",
+     "unit": "V"
+    }
+   ],
+   "footnotes": {
+    "1": "The over-drive mode is not supported at the voltage ranges from 1.7 to 2.1 V.",
+    "2": "216 MHz maximum frequency for 6 suffix version (200 MHz maximum frequency for 7 suffix version).",
+    "3": "VDD/VDDA minimum value of 1.7 V is obtained with the use of an external power supply supervisor (refer to Section 3.17.2: Internal reset OFF).",
+    "4": "When the ADC is used, refer to Table 63: ADC characteristics.",
+    "5": "If VREF+ pin is present, it must respect the following condition: VDDA-VREF+ < 1.2 V.",
+    "6": "It is recommended to power VDD and VDDA from the same source. A maximum difference of 300 mV between VDD and VDDA can be tolerated during power-up and power-down operation.",
+    "7": "The over-drive mode is not supported when the internal regulator is OFF.",
+    "8": "To sustain a voltage higher than VDD+0.3, the internal Pull-up and Pull-Down resistors must be disabled",
+    "9": "If TA is lower, higher PD values are allowed as long as TJ does not exceed TJmax.",
+    "10": "In low power dissipation state, TA can be extended to this range as long as TJ does not exceed TJmax."
+   },
+   "column_header_notes": {
+    "conditions": [
+     1
+    ]
+   },
+   "rows_not_transcribed": "fHCLK, fPCLK1, fPCLK2, V12, PD, TA, TJ (clock, core-supply and thermal rows; not pin behaviour). The PD row for LQFP176 reads 526 mW."
+  },
+  {
+   "table": 19,
+   "title": "Limitations depending on the operating power supply range",
+   "printed_pages": [
+    124
+   ],
+   "pdf_pages": [
+    106
+   ],
+   "columns": [
+    "operating_power_supply_range",
+    "io_operation"
+   ],
+   "rows": [
+    {
+     "operating_power_supply_range": "VDD =1.7 to 2.1 V",
+     "io_operation": "No I/O compensation",
+     "notes": {
+      "operating_power_supply_range": [
+       3
+      ]
+     }
+    },
+    {
+     "operating_power_supply_range": "VDD = 2.1 to 2.4 V",
+     "io_operation": "No I/O compensation"
+    },
+    {
+     "operating_power_supply_range": "VDD = 2.4 to 2.7 V",
+     "io_operation": "I/O compensation works"
+    },
+    {
+     "operating_power_supply_range": "VDD = 2.7 to 3.6 V",
+     "io_operation": "I/O compensation works",
+     "notes": {
+      "operating_power_supply_range": [
+       4
+      ]
+     }
+    }
+   ],
+   "footnotes": {
+    "3": "VDD/VDDA minimum value of 1.7 V is obtained with the use of an external power supply supervisor (refer to Section 3.17.2: Internal reset OFF).",
+    "4": "The voltage range for USB full speed  PHYs can drop down to 2.7 V. However the electrical characteristics of D- and D+ pins will be degraded between 2.7 and 3 V."
+   },
+   "columns_not_transcribed": "ADC operation, maximum flash memory access frequency, maximum HCLK frequency vs flash memory wait states, possible flash memory operations (footnotes 1 and 2 belong to those columns)"
+  },
+  {
+   "table": 56,
+   "title": "I/O current injection susceptibility",
+   "printed_pages": [
+    162
+   ],
+   "pdf_pages": [
+    144
+   ],
+   "columns": [
+    "symbol",
+    "description",
+    "negative_injection",
+    "positive_injection",
+    "unit"
+   ],
+   "rows": [
+    {
+     "symbol": "IINJ",
+     "description": "Injected current on BOOT pin",
+     "negative_injection": "− 0",
+     "positive_injection": "NA",
+     "unit": "mA"
+    },
+    {
+     "symbol": "IINJ",
+     "description": "Injected current on NRST pin",
+     "negative_injection": "− 0",
+     "positive_injection": "NA",
+     "unit": "mA"
+    },
+    {
+     "symbol": "IINJ",
+     "description": "Injected current on PA0, PC0 pins",
+     "negative_injection": "− 0",
+     "positive_injection": "NA",
+     "unit": "mA"
+    },
+    {
+     "symbol": "IINJ",
+     "description": "Injected current on any other FT pin",
+     "negative_injection": "− 5",
+     "positive_injection": "NA",
+     "unit": "mA"
+    },
+    {
+     "symbol": "IINJ",
+     "description": "Injected current on any other pins",
+     "negative_injection": "− 5",
+     "positive_injection": "+5",
+     "unit": "mA"
+    }
+   ],
+   "footnotes": {
+    "1": "NA = not applicable."
+   },
+   "title_notes": [
+    1
+   ],
+   "column_group_header": "Functional susceptibility",
+   "note_after_table": "It is recommended to add a Schottky diode (pin to ground) to analog pins which may potentially inject negative currents.",
+   "section_text": [
+    "As a general rule, current injection to the I/O pins, due to external voltage below VSS or above VDD (for standard, 3 V-capable I/O pins) should be avoided during normal product operation. However, in order to give an indication of the robustness of the microcontroller in cases when abnormal injection accidentally happens, susceptibility tests are performed on a sample basis during device characterization.",
+    "While a simple application is executed on the device, the device is stressed by injecting current into the I/O pins programmed in floating input mode. While current is injected into the I/O pin, one at a time, the device is checked for functional failures.",
+    "The failure is indicated by an out of range parameter: ADC error above a certain limit (>5 LSB TUE), out of conventional limits of induced leakage current on adjacent pins (out of –5 µA/+0 µA range), or other functional failure (for example reset, oscillator frequency deviation).",
+    "Negative induced leakage current is caused by negative injection and positive induced leakage current by positive injection."
+   ],
+   "section_text_pages": {
+    "printed": [
+     161,
+     162
+    ],
+    "pdf": [
+     143,
+     144
+    ]
+   }
+  },
+  {
+   "table": 57,
+   "title": "I/O static characteristics",
+   "printed_pages": [
+    162,
+    163,
+    164
+   ],
+   "pdf_pages": [
+    144,
+    145,
+    146
+   ],
+   "columns": [
+    "symbol",
+    "parameter",
+    "pins",
+    "conditions",
+    "min",
+    "typ",
+    "max",
+    "unit"
+   ],
+   "rows": [
+    {
+     "symbol": "VIL",
+     "parameter": "FT, TTa and NRST I/O input low level voltage",
+     "conditions": "1.7 V≤VDD≤3.6 V",
+     "min": "-",
+     "typ": "-",
+     "max": "0.35VDD − 0.04",
+     "unit": "V",
+     "notes": {
+      "max": [
+       1
+      ]
+     }
+    },
+    {
+     "symbol": "VIL",
+     "parameter": "FT, TTa and NRST I/O input low level voltage",
+     "conditions": "1.7 V≤VDD≤3.6 V",
+     "min": "-",
+     "typ": "-",
+     "max": "0.3VDD",
+     "unit": "V",
+     "notes": {
+      "max": [
+       2
+      ]
+     }
+    },
+    {
+     "symbol": "VIL",
+     "parameter": "BOOT I/O input low level voltage",
+     "conditions": "1.75 V≤VDD ≤3.6 V, –40 °C≤TA ≤105 °C",
+     "min": "-",
+     "typ": "-",
+     "max": "0.1VDD+0.1",
+     "unit": "V",
+     "notes": {
+      "max": [
+       1
+      ]
+     }
+    },
+    {
+     "symbol": "VIL",
+     "parameter": "BOOT I/O input low level voltage",
+     "conditions": "1.7 V≤VDD ≤3.6 V, 0 °C≤TA ≤105 °C",
+     "min": "-",
+     "typ": "-",
+     "max": "0.1VDD+0.1",
+     "unit": "V",
+     "notes": {
+      "max": [
+       1
+      ]
+     }
+    },
+    {
+     "symbol": "VIH",
+     "parameter": "FT, TTa and NRST I/O input high level voltage",
+     "conditions": "1.7 V≤VDD≤3.6 V",
+     "min": "0.45VDD+0.3",
+     "typ": "-",
+     "max": "-",
+     "unit": "V",
+     "notes": {
+      "parameter": [
+       5
+      ],
+      "min": [
+       1
+      ]
+     }
+    },
+    {
+     "symbol": "VIH",
+     "parameter": "FT, TTa and NRST I/O input high level voltage",
+     "conditions": "1.7 V≤VDD≤3.6 V",
+     "min": "0.7VDD",
+     "typ": "-",
+     "max": "-",
+     "unit": "V",
+     "notes": {
+      "parameter": [
+       5
+      ],
+      "min": [
+       2
+      ]
+     }
+    },
+    {
+     "symbol": "VIH",
+     "parameter": "BOOT I/O input high level voltage",
+     "conditions": "1.75 V≤VDD ≤3.6 V, –40 °C≤TA ≤105 °C",
+     "min": "0.17VDD+0.7",
+     "typ": "-",
+     "max": "-",
+     "unit": "V",
+     "notes": {
+      "min": [
+       1
+      ]
+     }
+    },
+    {
+     "symbol": "VIH",
+     "parameter": "BOOT I/O input high level voltage",
+     "conditions": "1.7 V≤VDD ≤3.6 V, 0 °C≤TA ≤105 °C",
+     "min": "0.17VDD+0.7",
+     "typ": "-",
+     "max": "-",
+     "unit": "V",
+     "notes": {
+      "min": [
+       1
+      ]
+     }
+    },
+    {
+     "symbol": "VHYS",
+     "parameter": "FT, TTa and NRST I/O input hysteresis",
+     "conditions": "1.7 V≤VDD≤3.6 V",
+     "min": "10%VDD",
+     "typ": "-",
+     "max": "-",
+     "unit": "V",
+     "notes": {
+      "min": [
+       3
+      ]
+     }
+    },
+    {
+     "symbol": "VHYS",
+     "parameter": "BOOT I/O input hysteresis",
+     "conditions": "1.75 V≤VDD ≤3.6 V, –40 °C≤TA ≤105 °C",
+     "min": "0.1",
+     "typ": "-",
+     "max": "-",
+     "unit": "V"
+    },
+    {
+     "symbol": "VHYS",
+     "parameter": "BOOT I/O input hysteresis",
+     "conditions": "1.7 V≤VDD ≤3.6 V, 0 °C≤TA ≤105 °C",
+     "min": "0.1",
+     "typ": "-",
+     "max": "-",
+     "unit": "V"
+    },
+    {
+     "symbol": "Ilkg",
+     "parameter": "I/O input leakage current",
+     "conditions": "VSS ≤VIN ≤VDD",
+     "min": "-",
+     "typ": "-",
+     "max": "±1",
+     "unit": "µA",
+     "notes": {
+      "parameter": [
+       4
+      ]
+     }
+    },
+    {
+     "symbol": "Ilkg",
+     "parameter": "I/O FT input leakage current",
+     "conditions": "VIN = 5 V",
+     "min": "-",
+     "typ": "-",
+     "max": "3",
+     "unit": "µA",
+     "notes": {
+      "parameter": [
+       5
+      ]
+     }
+    },
+    {
+     "symbol": "RPU",
+     "parameter": "Weak pull-up equivalent resistor",
+     "pins": "All pins except for PA10/PB12 (OTG_FS_ID,OTG_HS_ID)",
+     "conditions": "VIN = VSS",
+     "min": "30",
+     "typ": "40",
+     "max": "50",
+     "unit": "kΩ",
+     "notes": {
+      "parameter": [
+       6
+      ]
+     }
+    },
+    {
+     "symbol": "RPU",
+     "parameter": "Weak pull-up equivalent resistor",
+     "pins": "PA10/PB12 (OTG_FS_ID,OTG_HS_ID)",
+     "conditions": "VIN = VSS",
+     "min": "7",
+     "typ": "10",
+     "max": "14",
+     "unit": "kΩ",
+     "notes": {
+      "parameter": [
+       6
+      ]
+     }
+    },
+    {
+     "symbol": "RPD",
+     "parameter": "Weak pull-down equivalent resistor",
+     "pins": "All pins except for PA10/PB12 (OTG_FS_ID,OTG_HS_ID)",
+     "conditions": "VIN = VDD",
+     "min": "30",
+     "typ": "40",
+     "max": "50",
+     "unit": "kΩ",
+     "notes": {
+      "parameter": [
+       7
+      ]
+     }
+    },
+    {
+     "symbol": "RPD",
+     "parameter": "Weak pull-down equivalent resistor",
+     "pins": "PA10/PB12 (OTG_FS_ID,OTG_HS_ID)",
+     "conditions": "VIN = VDD",
+     "min": "7",
+     "typ": "10",
+     "max": "14",
+     "unit": "kΩ",
+     "notes": {
+      "parameter": [
+       7
+      ]
+     }
+    },
+    {
+     "symbol": "CIO",
+     "parameter": "I/O pin capacitance",
+     "conditions": "-",
+     "min": "-",
+     "typ": "5",
+     "max": "-",
+     "unit": "pF",
+     "notes": {
+      "symbol": [
+       8
+      ]
+     }
+    }
+   ],
+   "footnotes": {
+    "1": "Guaranteed by design.",
+    "2": "Tested in production.",
+    "3": "With a minimum of 200 mV.",
+    "4": "Leakage could be higher than the maximum value, if negative current is injected on adjacent pins, Refer to Table 56: I/O current injection susceptibility",
+    "5": "To sustain a voltage higher than VDD +0.3 V, the internal pull-up/pull-down resistors must be disabled. Leakage could be higher than the maximum value, if negative current is injected on adjacent pins.Refer to Table 56: I/O current injection susceptibility",
+    "6": "Pull-up resistors are designed with a true resistance in series with a switchable PMOS. This PMOS contribution to the series resistance is minimum (~10% order).",
+    "7": "Pull-down resistors are designed with a true resistance in series with a switchable NMOS. This NMOS contribution to the series resistance is minimum (~10% order).",
+    "8": "Hysteresis voltage between Schmitt trigger switching levels. Guaranteed by characterization results."
+   },
+   "intro_text": "Unless otherwise specified, the parameters given in Table 57: I/O static characteristics are derived from tests performed under the conditions summarized in Table 18. All I/Os are CMOS and TTL compliant.",
+   "text_after_table": "All I/Os are CMOS and TTL compliant (no software configuration required). Their characteristics cover more than the strict CMOS-technology or TTL parameters. The coverage of these requirements for FT I/Os is shown in Figure 38."
+  },
+  {
+   "table": 58,
+   "title": "Output voltage characteristics",
+   "printed_pages": [
+    165
+   ],
+   "pdf_pages": [
+    147
+   ],
+   "columns": [
+    "symbol",
+    "parameter",
+    "conditions",
+    "min",
+    "max",
+    "unit"
+   ],
+   "rows": [
+    {
+     "symbol": "VOL",
+     "parameter": "Output low level voltage for an I/O pin",
+     "conditions": "CMOS port IIO = +8 mA 2.7 V ≤VDD ≤3.6 V",
+     "min": "-",
+     "max": "0.4",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       1
+      ],
+      "conditions": [
+       2
+      ]
+     }
+    },
+    {
+     "symbol": "VOH",
+     "parameter": "Output high level voltage for an I/O pin except PC14",
+     "conditions": "CMOS port IIO = -8 mA 2.7 V ≤VDD ≤3.6 V",
+     "min": "VDD − 0.4",
+     "max": "-",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       3
+      ],
+      "conditions": [
+       2
+      ]
+     }
+    },
+    {
+     "symbol": "VOH",
+     "parameter": "Output high level voltage for PC14",
+     "conditions": "CMOS port IIO = -2 mA 2.7 V ≤VDD ≤3.6 V",
+     "min": "VDD − 0.4",
+     "max": "-",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       3
+      ],
+      "conditions": [
+       2
+      ]
+     }
+    },
+    {
+     "symbol": "VOL",
+     "parameter": "Output low level voltage for an I/O pin",
+     "conditions": "TTL port IIO =+8mA 2.7 V ≤VDD ≤3.6 V",
+     "min": "-",
+     "max": "0.4",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       1
+      ],
+      "conditions": [
+       2
+      ]
+     }
+    },
+    {
+     "symbol": "VOH",
+     "parameter": "Output high level voltage for an I/O pin except PC14",
+     "conditions": "TTL port IIO =-8mA 2.7 V ≤VDD ≤3.6 V",
+     "min": "2.4",
+     "max": "-",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       3
+      ],
+      "conditions": [
+       2
+      ]
+     }
+    },
+    {
+     "symbol": "VOL",
+     "parameter": "Output low level voltage for an I/O pin",
+     "conditions": "IIO = +20 mA 2.7 V ≤VDD ≤3.6 V",
+     "min": "-",
+     "max": "1.3",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       1
+      ],
+      "max": [
+       4
+      ]
+     }
+    },
+    {
+     "symbol": "VOH",
+     "parameter": "Output high level voltage for an I/O pin except PC14",
+     "conditions": "IIO = -20 mA 2.7 V ≤VDD ≤3.6 V",
+     "min": "VDD −1.3",
+     "max": "-",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       3
+      ],
+      "min": [
+       4
+      ]
+     }
+    },
+    {
+     "symbol": "VOL",
+     "parameter": "Output low level voltage for an I/O pin",
+     "conditions": "IIO = +6 mA 1.8 V ≤VDD ≤3.6 V",
+     "min": "-",
+     "max": "0.4",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       1
+      ],
+      "max": [
+       4
+      ]
+     }
+    },
+    {
+     "symbol": "VOH",
+     "parameter": "Output high level voltage for an I/O pin except PC14",
+     "conditions": "IIO = -6 mA 1.8 V ≤VDD ≤3.6 V",
+     "min": "VDD −0.4",
+     "max": "-",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       3
+      ],
+      "min": [
+       4
+      ]
+     }
+    },
+    {
+     "symbol": "VOL",
+     "parameter": "Output low level voltage for an I/O pin",
+     "conditions": "IIO = +4 mA 1.7 V ≤VDD ≤3.6V",
+     "min": "-",
+     "max": "0.4",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       1
+      ],
+      "max": [
+       5
+      ]
+     }
+    },
+    {
+     "symbol": "VOH",
+     "parameter": "Output high level voltage for an I/O pin except PC14",
+     "conditions": "IIO = -4 mA 1.7 V ≤VDD ≤3.6V",
+     "min": "VDD −0.4",
+     "max": "-",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       3
+      ],
+      "min": [
+       5
+      ]
+     }
+    },
+    {
+     "symbol": "VOH",
+     "parameter": "Output high level voltage for PC14",
+     "conditions": "IIO = -1 mA 1.7 V ≤VDD ≤3.6V",
+     "min": "VDD −0.4",
+     "max": "-",
+     "unit": "V",
+     "notes": {
+      "symbol": [
+       3
+      ],
+      "min": [
+       5
+      ]
+     }
+    }
+   ],
+   "footnotes": {
+    "1": "The IIO current sunk by the device must always respect the absolute maximum rating specified in Table 16. and the sum of IIO (I/O ports and control pins) must not exceed IVSS.",
+    "2": "TTL and CMOS outputs are compatible with JEDEC standards JESD36 and JESD52.",
+    "3": "The IIO current sourced by the device must always respect the absolute maximum rating specified in Table 16 and the sum of IIO (I/O ports and control pins) must not exceed IVDD.",
+    "4": "Based on characterization data.",
+    "5": "Guaranteed by design."
+   },
+   "intro_text": "Unless otherwise specified, the parameters given in Table 58 are derived from tests performed under ambient temperature and VDD supply voltage conditions summarized in Table 18. All I/Os are CMOS and TTL compliant."
+  },
+  {
+   "table": 59,
+   "title": "I/O AC characteristics",
+   "printed_pages": [
+    166,
+    167
+   ],
+   "pdf_pages": [
+    148,
+    149
+   ],
+   "columns": [
+    "ospeedr",
+    "symbol",
+    "parameter",
+    "conditions",
+    "min",
+    "typ",
+    "max",
+    "unit"
+   ],
+   "rows": [
+    {
+     "ospeedr": "00",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 50 pF, VDD ≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "4",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "00",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 50 pF, VDD ≥ 1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "2",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "00",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 10 pF, VDD ≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "8",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "00",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 10 pF, VDD ≥ 1.8 V",
+     "min": "-",
+     "typ": "-",
+     "max": "4",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "00",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 10 pF, VDD ≥ 1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "3",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "00",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 50 pF, VDD = 1.7 V to 3.6 V",
+     "min": "-",
+     "typ": "-",
+     "max": "100",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "01",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 50 pF, VDD≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "25",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "01",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 50 pF, VDD≥ 1.8 V",
+     "min": "-",
+     "typ": "-",
+     "max": "12.5",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "01",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 50 pF, VDD≥ 1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "10",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "01",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 10 pF, VDD ≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "50",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "01",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 10 pF, VDD≥ 1.8 V",
+     "min": "-",
+     "typ": "-",
+     "max": "20",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "01",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 10 pF, VDD≥ 1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "12.5",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "01",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 50 pF, VDD ≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "10",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "01",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 10 pF, VDD ≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "6",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "01",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 50 pF, VDD ≥ 1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "20",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "01",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 10 pF, VDD ≥ 1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "10",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "10",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 40 pF, VDD ≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "50",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ],
+      "max": [
+       4
+      ]
+     }
+    },
+    {
+     "ospeedr": "10",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 10 pF, VDD ≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "100",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ],
+      "max": [
+       4
+      ]
+     }
+    },
+    {
+     "ospeedr": "10",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 40 pF, VDD ≥ 1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "25",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "10",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 10 pF, VDD ≥ 1.8 V",
+     "min": "-",
+     "typ": "-",
+     "max": "50",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "10",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 10 pF, VDD ≥ 1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "42.5",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "10",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 40 pF, VDD ≥2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "6",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "10",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 10 pF, VDD ≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "4",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "10",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 40 pF, VDD ≥ 1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "10",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "10",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 10 pF, VDD ≥ 1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "6",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "11",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 30 pF, VDD ≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "100",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ],
+      "max": [
+       4
+      ]
+     }
+    },
+    {
+     "ospeedr": "11",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 30 pF, VDD ≥ 1.8 V",
+     "min": "-",
+     "typ": "-",
+     "max": "50",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "11",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 30 pF, VDD ≥ 1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "42.5",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "11",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 10 pF, VDD≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "180",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ],
+      "max": [
+       4
+      ]
+     }
+    },
+    {
+     "ospeedr": "11",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 10 pF, VDD ≥ 1.8 V",
+     "min": "-",
+     "typ": "-",
+     "max": "100",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "11",
+     "symbol": "fmax(IO)out",
+     "parameter": "Maximum frequency",
+     "conditions": "CL = 10 pF, VDD ≥ 1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "72.5",
+     "unit": "MHz",
+     "notes": {
+      "parameter": [
+       3
+      ]
+     }
+    },
+    {
+     "ospeedr": "11",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 30 pF, VDD ≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "4",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "11",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 30 pF, VDD ≥1.8 V",
+     "min": "-",
+     "typ": "-",
+     "max": "6",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "11",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 30 pF, VDD ≥1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "7",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "11",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 10 pF, VDD ≥ 2.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "2.5",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "11",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 10 pF, VDD ≥1.8 V",
+     "min": "-",
+     "typ": "-",
+     "max": "3.5",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "11",
+     "symbol": "tf(IO)out/tr(IO)out",
+     "parameter": "Output high to low level fall time and output low to high level rise time",
+     "conditions": "CL = 10 pF, VDD ≥1.7 V",
+     "min": "-",
+     "typ": "-",
+     "max": "4",
+     "unit": "ns"
+    },
+    {
+     "ospeedr": "-",
+     "symbol": "tEXTIpw",
+     "parameter": "Pulse width of external signals detected by the EXTI controller",
+     "conditions": "-",
+     "min": "10",
+     "typ": "-",
+     "max": "-",
+     "unit": "ns"
+    }
+   ],
+   "footnotes": {
+    "1": "Guaranteed by design.",
+    "2": "The I/O speed is configured using the OSPEEDRy[1:0] bits. Refer to the STM32F75xxx and STM32F74xxx reference manual for a description of the GPIOx_SPEEDR GPIO port output speed register.",
+    "3": "The maximum frequency is defined in Figure 39.",
+    "4": "For maximum frequencies above 50 MHz and VDD > 2.4 V, the compensation cell should be used."
+   },
+   "title_notes": [
+    1,
+    2
+   ],
+   "column_header_as_printed": {
+    "ospeedr": "OSPEEDRy [1:0] bit value"
+   },
+   "column_header_notes": {
+    "ospeedr": [
+     1
+    ]
+   },
+   "figure_39_text": "Maximum frequency is achieved with a duty cycle at (45 - 55%) when loaded by the specified capacitance.",
+   "figure_20_pin_loading_conditions": "C = 50 pF",
+   "intro_text": "Unless otherwise specified, the parameters given in Table 59 are derived from tests performed under the ambient temperature and VDD supply voltage conditions summarized in Table 18."
+  },
+  {
+   "table": 60,
+   "title": "NRST pin characteristics",
+   "printed_pages": [
+    168
+   ],
+   "pdf_pages": [
+    150
+   ],
+   "columns": [
+    "symbol",
+    "parameter",
+    "conditions",
+    "min",
+    "typ",
+    "max",
+    "unit"
+   ],
+   "rows": [
+    {
+     "symbol": "RPU",
+     "parameter": "Weak pull-up equivalent resistor",
+     "conditions": "VIN = VSS",
+     "min": "30",
+     "typ": "40",
+     "max": "50",
+     "unit": "kΩ",
+     "notes": {
+      "parameter": [
+       1
+      ]
+     }
+    },
+    {
+     "symbol": "VF(NRST)",
+     "parameter": "NRST Input filtered pulse",
+     "conditions": "-",
+     "min": "-",
+     "typ": "-",
+     "max": "100",
+     "unit": "ns",
+     "notes": {
+      "symbol": [
+       2
+      ]
+     }
+    },
+    {
+     "symbol": "VNF(NRST)",
+     "parameter": "NRST Input not filtered pulse",
+     "conditions": "VDD > 2.7 V",
+     "min": "300",
+     "typ": "-",
+     "max": "-",
+     "unit": "ns",
+     "notes": {
+      "symbol": [
+       2
+      ]
+     }
+    },
+    {
+     "symbol": "TNRST_OUT",
+     "parameter": "Generated reset pulse duration",
+     "conditions": "Internal Reset source",
+     "min": "20",
+     "typ": "-",
+     "max": "-",
+     "unit": "µs"
+    }
+   ],
+   "footnotes": {
+    "1": "The pull-up is designed with a true resistance in series with a switchable PMOS. This PMOS contribution to the series resistance must be minimum (~10% order).",
+    "2": "Guaranteed by design."
+   },
+   "intro_text": "The NRST pin input driver uses CMOS technology. It is connected to a permanent pull-up resistor, RPU (see Table 57: I/O static characteristics).",
+   "figure_40_notes": {
+    "1": "The reset network protects the device against parasitic resets.",
+    "2": "The user must ensure that the level on the NRST pin can go below the VIL(NRST) max level specified in Table 57. Otherwise the reset is not taken into account by the device."
+   },
+   "figure_40_title": "Recommended NRST pin protection",
+   "figure_40_capacitor": "0.1 μF"
+  }
+ ],
+ "backup_domain_pins_PC13_PC14_PC15_PI8": [
+  {
+   "text": "PC13, PC14, PC15 and PI8 are supplied through the power switch. Since the switch only sinks a limited amount of current (3 mA), the use of GPIOs PC13 to PC15 and PI8 in output mode is limited:\n- The speed should not exceed 2 MHz with a maximum load of 30 pF.\n- These I/Os must not be used as a current source (e.g. to drive an LED).",
+   "printed_page": 74,
+   "pdf_page": 74,
+   "where": "Table 10 footnote 2 (referenced by PI8, PC13, PC14-OSC32_IN(PC14), PC15-OSC32_OUT(PC15))"
+  },
+  {
+   "text": "Main function after the first backup domain power-up. Later on, it depends on the contents of the RTC registers even after reset (because these registers are not reset by the main reset). For details on how to manage these I/Os, refer to the RTC register description sections in the STM32F75xxx and STM32F74xxx reference manual.",
+   "printed_page": 74,
+   "pdf_page": 74,
+   "where": "Table 10 footnote 3 (referenced by PI8, PC13, PC14-OSC32_IN(PC14), PC15-OSC32_OUT(PC15))"
+  },
+  {
+   "text": "The GPIOs (general purpose input/outputs) can sink or source up to ±8 mA, and sink or source up to ±20 mA (with a relaxed VOL/VOH) except PC13, PC14, PC15 and PI8 which can sink or source up to ±3mA. When using the PC13 to PC15 and PI8 GPIOs in output mode, the speed should not exceed 2 MHz with a maximum load of 30 pF.",
+   "printed_page": 164,
+   "pdf_page": 146,
+   "where": "Section 6.3.17, \"Output driving current\""
+  },
+  {
+   "text": "Output high level voltage for PC14: CMOS port, IIO = -2 mA, 2.7 V ≤VDD ≤3.6 V, VOH min VDD − 0.4; IIO = -1 mA, 1.7 V ≤VDD ≤3.6V, VOH min VDD −0.4 (all other I/O pins: -8 mA / -4 mA in the same rows)",
+   "printed_page": 165,
+   "pdf_page": 147,
+   "where": "Table 58 rows 3 and 12 (PC14-specific); this entry is a pointer, the rows themselves are in tables[Table 58]"
+  },
+  {
+   "text": "VBAT = 1.65 to 3.6 V: power supply for RTC, external clock 32 kHz oscillator and backup registers (through power switch) when VDD is not present.",
+   "printed_page": 25,
+   "pdf_page": 25,
+   "where": "Section 3.16 Power supply schemes (context for the power switch named in Table 10 footnote 2)"
+  }
+ ],
+ "five_volt_tolerance": [
+  {
+   "text": "Up to 166 5 V-tolerant I/Os",
+   "printed_page": 1,
+   "pdf_page": 1,
+   "where": "Features list, page 1"
+  },
+  {
+   "text": "FT: 5 V tolerant I/O",
+   "printed_page": 55,
+   "pdf_page": 55,
+   "where": "Table 9 legend (I/O structure)"
+  },
+  {
+   "text": "TTa: 3.3 V tolerant I/O directly connected to ADC",
+   "printed_page": 55,
+   "pdf_page": 55,
+   "where": "Table 9 legend (I/O structure)"
+  },
+  {
+   "text": "FT = 5 V tolerant except when in analog mode or oscillator mode (for PC14, PC15, PH0 and PH1).",
+   "printed_page": 74,
+   "pdf_page": 74,
+   "where": "Table 10 footnote 4 (Notes column of PC0, PC1, PC2, PC3, PA1, PA2, PA3, PA4, PA5, PA6, PA7, PC4, PC5, PB0, PB1; also attached to the additional functions OSC_IN (PH0), OSC_OUT (PH1) and WKUP1 (PA0))"
+  },
+  {
+   "text": "Input voltage on FT pins(2): min VSS − 0.3, max VDD+4.0 V. Footnote 2: VIN maximum value must always be respected. Refer to Table 16 for the values of the maximum allowed injected current.",
+   "printed_page": 120,
+   "pdf_page": 102,
+   "where": "Table 15 (absolute maximum); pointer to tables[Table 15]"
+  },
+  {
+   "text": "Input voltage on RST and FT pins(8): 2 V ≤VDD ≤3.6 V: − 0.3 to 5.5 V; VDD ≤2 V: − 0.3 to 5.2 V. Footnote 8: To sustain a voltage higher than VDD+0.3, the internal Pull-up and Pull-Down resistors must be disabled",
+   "printed_page": 123,
+   "pdf_page": 105,
+   "where": "Table 18 (operating conditions); pointer to tables[Table 18]"
+  },
+  {
+   "text": "To sustain a voltage higher than VDD +0.3 V, the internal pull-up/pull-down resistors must be disabled. Leakage could be higher than the maximum value, if negative current is injected on adjacent pins.Refer to Table 56: I/O current injection susceptibility",
+   "printed_page": 163,
+   "pdf_page": 145,
+   "where": "Table 57 footnote 5 (on \"FT, TTa and NRST I/O input high level voltage\" and \"I/O FT input leakage current\", VIN = 5 V, max 3 µA)"
+  },
+  {
+   "text": "Positive injection is not possible on these I/Os and does not occur for input voltages lower than the specified maximum value.",
+   "printed_page": 121,
+   "pdf_page": 103,
+   "where": "Table 16 footnote 3 (on \"Injected current on FT, FTf, RST and B pins\", − 5/+0 mA)"
+  },
+  {
+   "text": "As a general rule, current injection to the I/O pins, due to external voltage below VSS or above VDD (for standard, 3 V-capable I/O pins) should be avoided during normal product operation.",
+   "printed_page": 161,
+   "pdf_page": 143,
+   "where": "Section 6.3.16 I/O current injection characteristics"
+  }
+ ],
+ "other_pin_rules": [
+  {
+   "text": "USB supply voltage (supply voltage for PA11,PA12, PB14 and PB15 pins)",
+   "printed_page": 122,
+   "pdf_page": 104,
+   "where": "Table 18, VDDUSB parameter: these four GPIOs are supplied from VDDUSB, not VDD"
+  },
+  {
+   "text": "If USB (USB OTG_HS/OTG_FS) is used, the associated GPIOs powered by VDDUSB are operating between VDDUSB_MIN and VDDUSB_MAX.\nThe VDDUSB supply both USB transceiver (USB OTG_HS and USB OTG_FS). If only one USB transceiver is used in the application, the GPIOs associated to the other USB transceiver are still supplied by VDDUSB.\nIf USB (USB OTG_HS/OTG_FS) is not used, the associated GPIOs powered by VDDUSB are operating between VDD_MIN and VDD_MAX.",
+   "printed_page": 25,
+   "pdf_page": 25,
+   "where": "Section 3.16 Power supply schemes"
+  },
+  {
+   "text": "If the device is delivered in an WLCSP143, UFBGA176, LQFP176, TFBGA100 or TFBGA216 package, and the BYPASS_REG pin is set to VDD (Regulator OFF/internal reset ON mode), then PA0 is used as an internal Reset (active low).",
+   "printed_page": 74,
+   "pdf_page": 74,
+   "where": "Table 10 footnote 5 (Notes column of PA0-WKUP(PA0))"
+  },
+  {
+   "text": "PA0 cannot be used as a GPIO pin since it allows to reset a part of the V12 logic power domain which is not reset by the NRST pin.",
+   "printed_page": 30,
+   "pdf_page": 30,
+   "where": "Section 3.18, list \"In regulator OFF mode, the following features are no more supported\""
+  },
+  {
+   "text": "For maximum frequencies above 50 MHz and VDD > 2.4 V, the compensation cell should be used.",
+   "printed_page": 167,
+   "pdf_page": 149,
+   "where": "Table 59 footnote 4"
+  },
+  {
+   "text": "Fast I/O handling allowing maximum I/O toggling up to 108 MHz.",
+   "printed_page": 45,
+   "pdf_page": 45,
+   "where": "Section 3.38 General-purpose input/outputs (GPIOs)"
+  },
+  {
+   "text": "Each of the GPIO pins can be configured by software as output (push-pull or open-drain, with or without pull-up or pull-down), as input (floating, with or without pull-up or pull-down) or as peripheral alternate function. Most of the GPIO pins are shared with digital or analog alternate functions. All GPIOs are high-current-capable and have speed selection to better manage internal noise, power consumption and electromagnetic emission.",
+   "printed_page": 45,
+   "pdf_page": 45,
+   "where": "Section 3.38 General-purpose input/outputs (GPIOs)"
+  },
+  {
+   "text": "Unless otherwise specified by a note, all I/Os are set as floating inputs during and after reset",
+   "printed_page": 55,
+   "pdf_page": 55,
+   "where": "Table 9 legend, Notes row"
+  },
+  {
+   "text": "In the user application, the number of I/O pins which can drive current must be limited to respect the absolute maximum rating specified in Section 6.2. In particular:\n• The sum of the currents sourced by all the I/Os on VDD, plus the maximum Run consumption of the MCU sourced on VDD, cannot exceed the absolute maximum rating ΣIVDD (see Table 16).\n• The sum of the currents sunk by all the I/Os on VSS plus the maximum Run consumption of the MCU sunk on VSS cannot exceed the absolute maximum rating ΣIVSS (see Table 16).",
+   "printed_page": 164,
+   "pdf_page": 146,
+   "where": "Section 6.3.17, \"Output driving current\""
+  },
+  {
+   "text": "Additional I/O current consumption is due to I/Os configured as inputs if an intermediate voltage level is externally applied. This current consumption is caused by the input Schmitt trigger circuits used to discriminate the input value. Unless this specific configuration is required by the application, this supply current consumption can be avoided by configuring these I/Os in analog mode. This is notably the case of ADC input pins which should be configured as analog inputs.",
+   "printed_page": 139,
+   "pdf_page": 121,
+   "where": "Section 6.3.6, I/O static current consumption"
+  },
+  {
+   "text": "Any floating input pin can also settle to an intermediate voltage level or switch inadvertently, as a result of external electromagnetic noise. To avoid current consumption related to floating pins, they must either be configured in analog mode, or forced internally to a definite digital value. This can be done either by using pull-up/down resistors or by configuring the pins in output mode.",
+   "printed_page": 139,
+   "pdf_page": 121,
+   "where": "Caution, I/O static current consumption"
+  }
+ ]
+}

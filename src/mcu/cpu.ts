@@ -6,13 +6,14 @@
  * References: ARMv7-M Architecture Reference Manual (DDI 0403E), chapters B1 (exception
  * model), B3 (System Control Space) and A7 (instruction set).
  */
-import { Bus, BusFault } from "./bus"
+import { Bus, BusFault, type MemoryPort } from "./bus"
 import { CORTEX_M4F, type CoreProfile } from "./chip"
 import { decode, jitHelpers, type Instr } from "./decode"
 import { compileBlock, type Compiled } from "./jit"
-import { CpuHalt, EXC, ExceptionRequest } from "./faults"
+import { CpuHalt, EXC, ExceptionRequest, excName } from "./faults"
 import { Scs } from "./scs"
 import { DBG_STEP_QUIET, DBG_STOP, type CoreDebugger } from "./debugger"
+import { defaultMapExecutable, MemoryGuard, MPU_ENABLE, MPU_HFNMIENA, READ, WRITE } from "./mpu"
 
 export { CpuHalt, EXC, ExceptionRequest, NUM_EXC, NUM_IRQ } from "./faults"
 
@@ -70,6 +71,7 @@ type Block = {
   /** The block this one last went on to, by the address it left for: chained without a lookup. */
   link: Block | null
   linkPc: number
+  fetchKey: number
 }
 /**
  * Decoded instructions and blocks of one 4 KB page, indexed by halfword. `inside` names a
@@ -88,6 +90,9 @@ export const LINE_PLAIN = 1
 
 export class Cpu {
   readonly bus: Bus
+  mem: MemoryPort
+  private guard: MemoryGuard | null = null
+  onUnsupported: (what: string) => void = () => {}
   readonly scs: Scs
 
   /** r0–r12, r13 = current SP; r14 = LR. PC is kept separately. */
@@ -179,6 +184,7 @@ export class Cpu {
 
   constructor(bus = new Bus(), core: CoreProfile = CORTEX_M4F) {
     this.bus = bus
+    this.mem = bus
     this.scs = new Scs(this, core)
     bus.attach(this.scs)
     this.hasFp64 = ((core.mvfr[0] >>> 8) & 0xf) === 2
@@ -226,6 +232,7 @@ export class Cpu {
     this.cache.clear()
     this.cachePageNo = -1
     this.scs.reset()
+    this.mpuChanged()
     this.scs.vtor = vectorBase >>> 0
     this.msp = this.bus.read32(vectorBase) & ~3
     this.psp = 0
@@ -318,6 +325,7 @@ export class Cpu {
       this.r[13] = newSel ? this.psp : this.msp
     }
     this.control = v & 7
+    this.updateAccess()
   }
   getMsp() {
     return this.spsel ? this.msp : this.r[13]
@@ -332,6 +340,86 @@ export class Cpu {
   setPsp(v: number) {
     if (this.spsel) this.r[13] = v >>> 0
     else this.psp = v >>> 0
+  }
+
+  get privileged(): boolean {
+    return this.ipsr !== 0 || (this.control & 1) === 0
+  }
+
+  private atNegativePriority(): boolean {
+    return this.faultmask !== 0 || this.scs.active[EXC.NMI] !== 0 || this.scs.active[EXC.HARD_FAULT] !== 0
+  }
+
+  private mpuInForce(): boolean {
+    const ctrl = this.scs.mpuCtrl
+    return (ctrl & MPU_ENABLE) !== 0 && ((ctrl & MPU_HFNMIENA) !== 0 || !this.atNegativePriority())
+  }
+
+  updateAccess() {
+    const privileged = this.privileged
+    const mpu = this.mpuInForce()
+    if (privileged && !mpu) {
+      this.mem = this.bus
+      return
+    }
+    const guard = this.memoryGuard()
+    guard.select(privileged, mpu)
+    this.mem = guard
+  }
+
+  mpuChanged() {
+    this.guard?.configure(this.scs.mpuCtrl, this.scs.mpuRbar, this.scs.mpuRasr)
+    this.updateAccess()
+  }
+
+  private memoryGuard(): MemoryGuard {
+    if (this.guard === null) {
+      this.guard = new MemoryGuard(
+        this.bus,
+        (addr, access, unprivilegedPpb) => this.refuseAccess(addr, access, unprivilegedPpb),
+        () => this.scs.unprivilegedMayPend(),
+      )
+      this.guard.configure(this.scs.mpuCtrl, this.scs.mpuRbar, this.scs.mpuRasr)
+      this.bus.onLayoutChange = () => this.mpuChanged()
+    }
+    return this.guard
+  }
+
+  private refuseAccess(addr: number, access: number, unprivilegedPpb: boolean): never {
+    const what = `${access === WRITE ? "write" : "read"} at 0x${addr.toString(16).padStart(8, "0")}`
+    if (unprivilegedPpb) {
+      this.scs.preciseBusFault(addr, `unprivileged ${what} in the private peripheral bus`, this.pc)
+      throw new ExceptionRequest(this.scs.escalate(EXC.BUS_FAULT))
+    }
+    this.scs.dataAccessViolation(addr, `MPU refused the ${this.privileged ? "privileged" : "unprivileged"} ${what}`, this.pc)
+    throw new ExceptionRequest(this.scs.escalate(EXC.MEM_MANAGE))
+  }
+
+  readUnprivileged(addr: number, size: 1 | 2 | 4): number {
+    this.memoryGuard().checkAsUnprivileged(addr, size, READ, this.mpuInForce())
+    return this.bus.read(addr, size)
+  }
+  writeUnprivileged(addr: number, value: number, size: 1 | 2 | 4) {
+    this.memoryGuard().checkAsUnprivileged(addr, size, WRITE, this.mpuInForce())
+    this.bus.write(addr, value, size)
+  }
+
+  private mayFetch(pc: number): boolean {
+    return this.mem === this.bus ? defaultMapExecutable(pc) : this.guard!.fetchable(pc)
+  }
+
+  private fetchableBlock(block: Block): boolean {
+    const guard = this.guard!
+    for (let i = 0; i < block.n; i++) if (!guard.fetchable(block.addrs[i])) return false
+    block.fetchKey = guard.fetchKey
+    return true
+  }
+
+  private takeInstructionAccessViolation(pc: number) {
+    this.scs.instructionAccessViolation(`instruction fetch at 0x${pc.toString(16).padStart(8, "0")} from a region that is not executable`, pc)
+    this.nextPc = pc
+    this.exceptionEntry(this.scs.escalate(EXC.MEM_MANAGE))
+    this.pc = this.nextPc
   }
 
   /** Reading r15 within an instruction: address of the instruction + 4. */
@@ -427,7 +515,11 @@ export class Cpu {
 
   /** Enter `exc` now: push the context frame, switch to Handler mode, fetch the vector. */
   exceptionEntry(exc: number) {
-    if (this.dbg !== null) this.dbg.onException(exc, this.returnAddress(exc), this.r[13], this.ipsr)
+    if (exc === EXC.HARD_FAULT && this.executionPriority() < 0) this.lockUp("a fault at priority −1 or −2 (in HardFault or NMI, or with FAULTMASK set) cannot be taken: the core locks up")
+    const returnAddress = this.returnAddress(exc)
+    const preemptedSp = this.r[13]
+    const preemptedIpsr = this.ipsr
+    if (this.dbg !== null) this.dbg.onException(exc, returnAddress, preemptedSp, preemptedIpsr)
     const spsel = this.spsel
     const framePtrAlign = 8
     const fp = (this.control & 4) !== 0
@@ -436,20 +528,9 @@ export class Cpu {
     let sp = this.r[13]
     const align = (sp & 4) !== 0 ? 1 : 0
     sp = (sp - frameSize) & ~(framePtrAlign - 1)
-    const bus = this.bus
-    bus.write32(sp, this.r[0])
-    bus.write32(sp + 4, this.r[1])
-    bus.write32(sp + 8, this.r[2])
-    bus.write32(sp + 12, this.r[3])
-    bus.write32(sp + 16, this.r[12])
-    bus.write32(sp + 20, this.r[14])
-    bus.write32(sp + 24, this.returnAddress(exc))
-    bus.write32(sp + 28, (this.xpsr & ~(1 << 9)) | (align << 9))
-    if (fp) {
-      // Non-lazy stacking of s0–s15 and FPSCR (ASPEN=1, LSPEN treated as 0).
-      for (let i = 0; i < 16; i++) bus.write32(sp + 32 + i * 4, this.sBits[i])
-      bus.write32(sp + 96, this.fpscr)
-    }
+    const stackingFault = this.pushFrame(sp, frameSize, returnAddress, align)
+    const taken = stackingFault === null ? exc : this.derivedLateArrival(exc, stackingFault)
+    if (taken !== exc && this.dbg !== null) this.dbg.onException(taken, returnAddress, preemptedSp, preemptedIpsr)
     this.r[13] = sp
     // EXC_RETURN encodes the mode and stack of the interrupted context.
     let excReturn = 0xffffffe1
@@ -463,14 +544,79 @@ export class Cpu {
     }
     this.control &= ~(4 | 2)
     this.r[14] = excReturn >>> 0
-    this.ipsr = exc
     this.itstate = 0
     this.eventRegister = true
+    this.cycles += 12
+    this.exceptionTaken(taken)
+  }
+
+  private pushFrame(sp: number, frameSize: number, returnAddress: number, align: number): typeof EXC.MEM_MANAGE | typeof EXC.BUS_FAULT | null {
+    if (this.mem !== this.bus && !this.guard!.allowsRange(sp, frameSize, WRITE)) {
+      this.scs.stackingFault(EXC.MEM_MANAGE, `exception stacking at 0x${sp.toString(16).padStart(8, "0")}: the MPU refuses the frame`, this.pc)
+      return EXC.MEM_MANAGE
+    }
+    const bus = this.bus
+    try {
+      bus.write32(sp, this.r[0])
+      bus.write32(sp + 4, this.r[1])
+      bus.write32(sp + 8, this.r[2])
+      bus.write32(sp + 12, this.r[3])
+      bus.write32(sp + 16, this.r[12])
+      bus.write32(sp + 20, this.r[14])
+      bus.write32(sp + 24, returnAddress)
+      bus.write32(sp + 28, (this.xpsr & ~(1 << 9)) | (align << 9))
+      if (frameSize > 0x20) {
+        // Non-lazy stacking of s0–s15 and FPSCR (ASPEN=1, LSPEN treated as 0).
+        for (let i = 0; i < 16; i++) bus.write32(sp + 32 + i * 4, this.sBits[i])
+        bus.write32(sp + 96, this.fpscr)
+      }
+    } catch (e) {
+      if (!(e instanceof BusFault)) throw e
+      this.scs.stackingFault(EXC.BUS_FAULT, `exception stacking: ${e.message}`, this.pc)
+      return EXC.BUS_FAULT
+    }
+    return null
+  }
+
+  private derivedLateArrival(original: number, derived: number): number {
+    const scs = this.scs
+    if (scs.escalate(derived) === EXC.HARD_FAULT) {
+      if (this.executionPriority() < 0) this.lockUp(`${excName(derived)} on exception stacking at priority −1 or −2 cannot be taken: the core locks up`)
+      if (original !== EXC.HARD_FAULT) scs.setPending(original, true)
+      return EXC.HARD_FAULT
+    }
+    if (scs.groupPriorityOf(derived) < scs.groupPriorityOf(original)) {
+      scs.setPending(original, true)
+      return derived
+    }
+    scs.setPending(derived, true)
+    return original
+  }
+
+  private exceptionTaken(exc: number) {
+    this.ipsr = exc
     this.scs.setActive(exc, true)
     this.scs.setPending(exc, false)
-    const vector = this.bus.read32(this.scs.vtor + exc * 4)
+    const entry = (this.scs.vtor + exc * 4) >>> 0
+    let vector: number
+    try {
+      vector = this.bus.read32(entry)
+    } catch (e) {
+      if (!(e instanceof BusFault)) throw e
+      this.scs.vectorTableFault(`${excName(exc)} vector: ${e.message}`, this.pc)
+      if (exc === EXC.HARD_FAULT || exc === EXC.NMI) this.lockUp(`the ${excName(exc)} vector at 0x${entry.toString(16).padStart(8, "0")} cannot be read: the core locks up`)
+      this.scs.setActive(exc, false)
+      this.scs.setPending(exc, true)
+      this.exceptionTaken(EXC.HARD_FAULT)
+      return
+    }
     this.nextPc = (vector & ~1) >>> 0
-    this.cycles += 12
+    this.updateAccess()
+  }
+
+  private lockUp(detail: string): never {
+    this.halted = new CpuHalt("lockup", detail, this.pc)
+    throw this.halted
   }
 
   /** The address to resume at, per exception type (B1.5.6, table of preferred return addresses). */
@@ -492,6 +638,7 @@ export class Cpu {
   exceptionReturn(excReturn: number) {
     const returning = this.ipsr
     this.scs.setActive(returning, false)
+    if (returning !== EXC.NMI) this.faultmask = 0
     const toThread = (excReturn & 8) !== 0
     const usePsp = (excReturn & 4) !== 0
     const fp = (excReturn & 0x10) === 0
@@ -531,6 +678,8 @@ export class Cpu {
     }
     if (fp) this.control |= 4
     else this.control &= ~4
+    this.updateAccess()
+    if (this.mem !== this.bus && !this.guard!.allowsRange(sp, frameSize, READ)) this.onUnsupported("MemManage on exception return (MUNSTKERR): the MPU refuses the frame, which was read anyway")
     this.nextPc = (pc & ~1) >>> 0
     this.cycles += 10
     // A pending exception that can preempt the returned-to context is taken by the next step,
@@ -550,7 +699,7 @@ export class Cpu {
   /** Raise a synchronous fault from within an instruction. */
   fault(exc: number, detail: string): never {
     this.scs.recordFault(exc, detail, this.pc)
-    throw new ExceptionRequest(exc)
+    throw new ExceptionRequest(this.scs.escalate(exc))
   }
 
   // --- execution ------------------------------------------------------------------
@@ -781,7 +930,7 @@ export class Cpu {
       }
       if (FLOW.test(instr.text)) break
     }
-    block = { addrs: Float64Array.from(addrs), instrs, n: instrs.length, fn: null, lineShift: this.lineShift, link: null, linkPc: -1 }
+    block = { addrs: Float64Array.from(addrs), instrs, n: instrs.length, fn: null, lineShift: this.lineShift, link: null, linkPc: -1, fetchKey: -1 }
     if (this.jit) block.fn = compileBlock(addrs, instrs, this.lineShift)
     page.blocks[slot] = block
     for (let i = 1; i < addrs.length; i++) {
@@ -815,6 +964,7 @@ export class Cpu {
    */
   slowTick(target: number, next: number): number {
     this.bus.slow = false
+    this.mem.slow = false
     if (next >= 0 && this.lastLine === -1 && this.timed) this.cycles += this.fetchCost(next, next >>> this.lineShift)
     let dl = this.deadline(target)
     if (this.cycles >= dl) {
@@ -839,7 +989,7 @@ export class Cpu {
     const bps = this.breakpoints
     try {
       for (;;) {
-        block.fn!(this, this.r, this.bus, this.s, block.instrs, jitHelpers, target)
+        block.fn!(this, this.r, this.mem, this.s, block.instrs, jitHelpers, target)
         // A block leaving on a taken branch has not looked at the deadline since its last
         // instruction: what came due is taken now, as the run loop would. Then straight on to
         // the next block while nothing needs the run loop's attention — a breakpoint where the
@@ -859,7 +1009,7 @@ export class Cpu {
           block.link = next
           block.linkPc = pc
         }
-        if (next === null || next.fn === null || next.lineShift !== this.lineShift) return
+        if (next === null || next.fn === null || next.lineShift !== this.lineShift || (this.mem !== this.bus && next.fetchKey !== this.guard!.fetchKey && !this.fetchableBlock(next))) return
         block = next
       }
     } catch (e) {
@@ -889,6 +1039,7 @@ export class Cpu {
       this.cycles += instr.cycles
       this.instructions += i + 1
       this.bus.slow = false
+      this.mem.slow = false
     }
   }
 
@@ -974,6 +1125,10 @@ export class Cpu {
       return 1
     }
     const pc = this.pc
+    if ((pc >= 0x40000000 || this.mem !== this.bus) && !this.mayFetch(pc)) {
+      this.takeInstructionAccessViolation(pc)
+      return this.cycles - before
+    }
     let instr: Instr
     try {
       instr = this.fetch(pc)
@@ -1061,9 +1216,20 @@ export class Cpu {
       }
       if (this.itstate === 0 && this.scs.pendingCount === 0) {
         // The common case: nothing pending, no IT block — run the straight line as a block.
-        if (this.bus.flashDirty) this.fetch(this.pc)
-        const block = this.blockAt(this.pc)
+        let block: Block | null
+        try {
+          if (this.bus.flashDirty) this.fetch(this.pc)
+          block = this.blockAt(this.pc)
+        } catch (e) {
+          if (!(e instanceof BusFault)) throw e
+          this.step()
+          continue
+        }
         if (block !== null) {
+          if (this.mem !== this.bus && block.fetchKey !== this.guard!.fetchKey && !this.fetchableBlock(block)) {
+            this.step()
+            continue
+          }
           if (block.fn !== null && block.lineShift === this.lineShift) {
             this.runCompiled(block, target)
             this.service()
@@ -1073,6 +1239,10 @@ export class Cpu {
         const cold = this.coldEntry
         if (cold !== null) {
           this.coldEntry = null
+          if (this.mem !== this.bus && cold.block.fetchKey !== this.guard!.fetchKey && !this.fetchableBlock(cold.block)) {
+            this.step()
+            continue
+          }
           this.runBlock(cold.block, target, cold.index)
           continue
         }

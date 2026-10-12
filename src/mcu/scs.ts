@@ -8,10 +8,21 @@
 import { WordPeripheral } from "./bus"
 import { CORTEX_M4F, type CoreProfile } from "./chip"
 import type { Cpu } from "./cpu"
-import { EXC, NUM_EXC, NUM_IRQ, excName } from "./faults"
+import { EXC, excName } from "./faults"
+import { MPU_RASR_WRITABLE, MPU_REGIONS } from "./mpu"
 
 const PRIO_BITS = 4
 const PRIO_MASK = (0xff << (8 - PRIO_BITS)) & 0xff
+const MMFSR_IACCVIOL = 1 << 0
+const MMFSR_DACCVIOL = 1 << 1
+const MMFSR_MSTKERR = 1 << 4
+const MMFSR_MMARVALID = 1 << 7
+const BFSR_STKERR = 1 << 12
+const BFSR_BFARVALID = 1 << 15
+const HFSR_VECTTBL = 1 << 1
+const CCR_USERSETMPEND = 1 << 1
+const MPU_RBAR_ADDR = 0xffffffe0
+const MPU_RBAR_VALID = 1 << 4
 
 export type FaultRecord = { exc: number; detail: string; pc: number; time: number }
 
@@ -48,24 +59,19 @@ export class Scs extends WordPeripheral {
   fpdscr = 0
   /** CoreDebug DEMCR (TRCENA gates the DWT). */
   demcr = 0
-  /**
-   * MPU (ARMv7-M B3.5): 8 regions on both M4 and M7. The registers are kept so firmware can
-   * program and read them back; the memory protection itself is not enforced — the bus
-   * never raises MemManage for a region violation.
-   */
   mpuCtrl = 0
   mpuRnr = 0
-  readonly mpuRbar = new Uint32Array(8)
-  readonly mpuRasr = new Uint32Array(8)
+  readonly mpuRbar = new Uint32Array(MPU_REGIONS)
+  readonly mpuRasr = new Uint32Array(MPU_REGIONS)
   /** CSSELR: which cache CCSIDR describes (Cortex-M7 only). */
   csselr = 0
 
   /** Per-exception state; index = exception number. */
-  readonly enabled = new Uint8Array(NUM_EXC)
-  readonly pending = new Uint8Array(NUM_EXC)
-  readonly active = new Uint8Array(NUM_EXC)
+  readonly enabled: Uint8Array
+  readonly pending: Uint8Array
+  readonly active: Uint8Array
   /** Configured priority bytes: SHPR for 4..15, IPR for IRQs. Reset, NMI, HardFault are fixed. */
-  readonly priority = new Uint8Array(NUM_EXC)
+  readonly priority: Uint8Array
   pendingCount = 0
   private activeCount = 0
 
@@ -79,6 +85,10 @@ export class Scs extends WordPeripheral {
     super("SCS", 0xe000e000, 0x1000)
     this.cpu = cpu
     this.core = core
+    this.enabled = new Uint8Array(EXC.IRQ0 + core.irqCount)
+    this.pending = new Uint8Array(this.enabled.length)
+    this.active = new Uint8Array(this.enabled.length)
+    this.priority = new Uint8Array(this.enabled.length)
   }
 
   reset() {
@@ -142,7 +152,7 @@ export class Scs extends WordPeripheral {
   highestActivePriority(): number {
     if (this.activeCount === 0) return 256
     let best = 256
-    for (let e = 2; e < NUM_EXC; e++) if (this.active[e]) best = Math.min(best, this.groupPriorityOf(e))
+    for (let e = 2; e < this.enabled.length; e++) if (this.active[e]) best = Math.min(best, this.groupPriorityOf(e))
     return best
   }
 
@@ -159,7 +169,7 @@ export class Scs extends WordPeripheral {
     let bestExc = 0
     let bestPrio = 256
     let bestGroup = 256
-    for (let e = 2; e < NUM_EXC; e++) {
+    for (let e = 2; e < this.enabled.length; e++) {
       if (!this.pending[e] || !this.enabled[e]) continue
       const p = this.priorityOf(e)
       if (p < bestPrio) {
@@ -173,7 +183,7 @@ export class Scs extends WordPeripheral {
   }
 
   setPending(exc: number, on: boolean) {
-    if (exc <= 0 || exc >= NUM_EXC) return
+    if (exc <= 0 || exc >= this.enabled.length) return
     const cur = this.pending[exc]
     if (on && !cur) {
       this.pending[exc] = 1
@@ -213,8 +223,38 @@ export class Scs extends WordPeripheral {
   recordFault(exc: number, detail: string, pc: number) {
     if (exc === EXC.BUS_FAULT) this.cfsr |= 1 << 9 // PRECISERR
     if (exc === EXC.USAGE_FAULT) this.cfsr |= detail.startsWith("divide") ? 1 << 25 : 1 << 16
+    this.logFault(exc, detail, pc)
+  }
+  private logFault(exc: number, detail: string, pc: number) {
     this.faults.push({ exc, detail, pc, time: this.cpu.cycles })
     if (this.faults.length > 64) this.faults.shift()
+  }
+
+  stackingFault(exc: typeof EXC.MEM_MANAGE | typeof EXC.BUS_FAULT, detail: string, pc: number) {
+    this.cfsr |= exc === EXC.MEM_MANAGE ? MMFSR_MSTKERR : BFSR_STKERR
+    this.logFault(exc, detail, pc)
+  }
+  vectorTableFault(detail: string, pc: number) {
+    this.hfsr |= HFSR_VECTTBL
+    this.logFault(EXC.HARD_FAULT, detail, pc)
+  }
+
+  instructionAccessViolation(detail: string, pc: number) {
+    this.cfsr |= MMFSR_IACCVIOL
+    this.recordFault(EXC.MEM_MANAGE, detail, pc)
+  }
+  dataAccessViolation(addr: number, detail: string, pc: number) {
+    this.cfsr |= MMFSR_DACCVIOL | MMFSR_MMARVALID
+    this.mmfar = addr >>> 0
+    this.recordFault(EXC.MEM_MANAGE, detail, pc)
+  }
+  preciseBusFault(addr: number, detail: string, pc: number) {
+    this.cfsr |= BFSR_BFARVALID
+    this.bfar = addr >>> 0
+    this.recordFault(EXC.BUS_FAULT, detail, pc)
+  }
+  unprivilegedMayPend() {
+    return (this.ccr & CCR_USERSETMPEND) !== 0
   }
 
   divByZeroTraps() {
@@ -288,7 +328,7 @@ export class Scs extends WordPeripheral {
   readWord(off: number): number {
     switch (off) {
       case 0x004: // ICTR: number of interrupt lines / 32 - 1
-        return Math.ceil(NUM_IRQ / 32) - 1
+        return Math.ceil(this.core.irqCount / 32) - 1
       case 0x008: // ACTLR
         return 0
       case 0x010: {
@@ -311,7 +351,7 @@ export class Scs extends WordPeripheral {
         let v = cpu.ipsr
         const pend = this.pendingToTake(-4)
         if (pend) v |= pend << 12
-        for (let e = EXC.IRQ0; e < NUM_EXC; e++) if (this.pending[e]) v |= 1 << 22
+        for (let e = EXC.IRQ0; e < this.enabled.length; e++) if (this.pending[e]) v |= 1 << 22
         if (this.pending[EXC.SYSTICK]) v |= 1 << 26
         if (this.pending[EXC.PENDSV]) v |= 1 << 28
         if (this.pending[EXC.NMI]) v |= 1 << 31
@@ -401,13 +441,13 @@ export class Scs extends WordPeripheral {
       case 0xd9c:
       case 0xda4:
       case 0xdac:
-      case 0xdb4: // RBAR and its A1..A3 aliases index RNR, RNR+1, ...
-        return this.mpuRbar[(this.mpuRnr + ((off - 0xd9c) >>> 3)) & 7]
+      case 0xdb4:
+        return (this.mpuRbar[this.mpuRnr] | this.mpuRnr) >>> 0
       case 0xda0:
       case 0xda8:
       case 0xdb0:
       case 0xdb8:
-        return this.mpuRasr[(this.mpuRnr + ((off - 0xda0) >>> 3)) & 7]
+        return this.mpuRasr[this.mpuRnr]
       case 0xf34:
         return this.fpccr
       case 0xf38:
@@ -430,7 +470,7 @@ export class Scs extends WordPeripheral {
     if (off >= 0x200 && off < 0x220) return this.readIrqBits(this.pending, off - 0x200)
     if (off >= 0x280 && off < 0x2a0) return this.readIrqBits(this.pending, off - 0x280)
     if (off >= 0x300 && off < 0x320) return this.readIrqBits(this.active, off - 0x300)
-    if (off >= 0x400 && off < 0x400 + NUM_IRQ) {
+    if (off >= 0x400 && off < 0x400 + this.core.irqCount) {
       const base = EXC.IRQ0 + (off - 0x400)
       return (this.priority[base] | (this.priority[base + 1] << 8) | (this.priority[base + 2] << 16) | (this.priority[base + 3] << 24)) >>> 0
     }
@@ -440,7 +480,7 @@ export class Scs extends WordPeripheral {
   private readIrqBits(arr: Uint8Array, byteOff: number): number {
     const first = EXC.IRQ0 + (byteOff >>> 2) * 32
     let v = 0
-    for (let i = 0; i < 32; i++) if (first + i < NUM_EXC && arr[first + i]) v |= 1 << i
+    for (let i = 0; i < 32; i++) if (first + i < this.enabled.length && arr[first + i]) v |= 1 << i
     return v >>> 0
   }
 
@@ -526,25 +566,25 @@ export class Scs extends WordPeripheral {
         return
       case 0xd94:
         this.mpuCtrl = value & 7
+        this.cpu.mpuChanged()
         return
       case 0xd98:
-        this.mpuRnr = value & 7
+        this.mpuRnr = value & (MPU_REGIONS - 1)
         return
       case 0xd9c:
       case 0xda4:
       case 0xdac:
-      case 0xdb4: {
-        // VALID (bit 4) makes the write also select the region named in REGION[3:0].
-        const slot = (off - 0xd9c) >>> 3
-        if (value & 0x10) this.mpuRnr = ((value & 0xf) - slot) & 7
-        this.mpuRbar[(this.mpuRnr + slot) & 7] = (value & 0xffffffe0) >>> 0
+      case 0xdb4:
+        if (value & MPU_RBAR_VALID) this.mpuRnr = value & (MPU_REGIONS - 1)
+        this.mpuRbar[this.mpuRnr] = (value & MPU_RBAR_ADDR) >>> 0
+        this.cpu.mpuChanged()
         return
-      }
       case 0xda0:
       case 0xda8:
       case 0xdb0:
       case 0xdb8:
-        this.mpuRasr[(this.mpuRnr + ((off - 0xda0) >>> 3)) & 7] = value >>> 0
+        this.mpuRasr[this.mpuRnr] = (value & MPU_RASR_WRITABLE) >>> 0
+        this.cpu.mpuChanged()
         return
       // Cache maintenance (ICIALLU .. BPIALL): write-only, nothing to invalidate here.
       case 0xf50:
@@ -568,7 +608,7 @@ export class Scs extends WordPeripheral {
         this.fpdscr = value & 0x07c00000
         return
       case 0xf00: // STIR
-        if ((value & 0x1ff) < NUM_IRQ) this.raiseIrq(value & 0x1ff)
+        if ((value & 0x1ff) < this.core.irqCount) this.raiseIrq(value & 0x1ff)
         return
       case 0xdfc:
         this.demcr = value >>> 0
@@ -578,21 +618,21 @@ export class Scs extends WordPeripheral {
     if (off >= 0x180 && off < 0x1a0) return this.writeIrqBits(off - 0x180, value, (e) => (this.enabled[e] = 0))
     if (off >= 0x200 && off < 0x220) return this.writeIrqBits(off - 0x200, value, (e) => this.setPending(e, true))
     if (off >= 0x280 && off < 0x2a0) return this.writeIrqBits(off - 0x280, value, (e) => this.setPending(e, false))
-    if (off >= 0x400 && off < 0x400 + NUM_IRQ) {
+    if (off >= 0x400 && off < 0x400 + this.core.irqCount) {
       const base = EXC.IRQ0 + (off - 0x400)
-      for (let i = 0; i < 4; i++) if (base + i < NUM_EXC) this.priority[base + i] = ((value >>> (i * 8)) & 0xff) & PRIO_MASK
+      for (let i = 0; i < 4; i++) if (base + i < this.enabled.length) this.priority[base + i] = ((value >>> (i * 8)) & 0xff) & PRIO_MASK
     }
   }
 
   private writeIrqBits(byteOff: number, value: number, fn: (exc: number) => void) {
     const first = EXC.IRQ0 + (byteOff >>> 2) * 32
-    for (let i = 0; i < 32; i++) if (value & (1 << i) && first + i < NUM_EXC) fn(first + i)
+    for (let i = 0; i < 32; i++) if (value & (1 << i) && first + i < this.enabled.length) fn(first + i)
   }
 
   /** Human-readable state for the debugger. */
   describePending(): string[] {
     const out: string[] = []
-    for (let e = 2; e < NUM_EXC; e++) if (this.pending[e]) out.push(excName(e))
+    for (let e = 2; e < this.enabled.length; e++) if (this.pending[e]) out.push(excName(e))
     return out
   }
 }

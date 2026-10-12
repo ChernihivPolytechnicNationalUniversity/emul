@@ -20,6 +20,7 @@ void PendSV_Handler(void) WEAK_ALIAS;
 void SysTick_Handler(void) WEAK_ALIAS;
 /* External interrupts used by the tests. */
 void WWDG_IRQHandler(void) WEAK_ALIAS;            /* 0 */
+void PVD_IRQHandler(void) WEAK_ALIAS;
 void EXTI0_IRQHandler(void) WEAK_ALIAS;           /* 6 */
 void EXTI1_IRQHandler(void) WEAK_ALIAS;           /* 7 */
 void TIM2_IRQHandler(void) WEAK_ALIAS;            /* 28 */
@@ -44,6 +45,7 @@ const vector_t g_pfnVectors[16 + 91] = {
   PendSV_Handler,
   SysTick_Handler,
   [16 + 0] = WWDG_IRQHandler,
+  [16 + 1] = PVD_IRQHandler,
   [16 + 6] = EXTI0_IRQHandler,
   [16 + 7] = EXTI1_IRQHandler,
   [16 + 28] = TIM2_IRQHandler,
