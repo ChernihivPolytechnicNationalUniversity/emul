@@ -107,14 +107,14 @@ describe("display demo: SDRAM, DMA2D clear, text through the LTDC", () => {
 
   describe("unplugging the module's USB (the supply)", () => {
     it("kills the picture: dark, not 'no signal'", () => {
-      s.loop.setParts({ [partKey(s.u.id, "MUSB")]: { on: false } })
+      s.loop.setParts({ ...s.doc.parts, [partKey(s.u.id, "MUSB")]: { on: false } })
       const snap = s.run(0.1)
       expect.soft(snap.displays[s.lcd.id].status, "panel").toBe("off")
       expect.soft(snap.parts[partKey(s.lcd.id, "BL")]?.level ?? 0, "backlight").toBe(0)
     })
 
     it("restarts the demo when plugged back", () => {
-      s.loop.setParts({ [partKey(s.u.id, "MUSB")]: { on: true }, [partKey(s.u.id, "BOOT")]: { on: false } })
+      s.loop.setParts({ ...s.doc.parts, [partKey(s.u.id, "MUSB")]: { on: true }, [partKey(s.u.id, "BOOT")]: { on: false } })
       const snap = s.run(0.4)
       expect.soft(snap.displays[s.lcd.id].status, "panel").toBe("ok")
       expect.soft(colours(s.frame(), 1024, 600)[0][0], "background").toBe("255,0,0")
@@ -153,7 +153,7 @@ describe("touch test: GT911 reset and id, a press drawn as crosshairs", () => {
   describe("a press at (500, 300)", () => {
     let pressed: Snapshot
     beforeAll(() => {
-      s.loop.setParts({ [partKey(s.lcd.id, "PANEL")]: { pressed: true, x: 500, y: 300 } })
+      s.loop.setParts({ ...s.doc.parts, [partKey(s.lcd.id, "PANEL")]: { pressed: true, x: 500, y: 300 } })
       pressed = s.run(0.3)
     })
 
@@ -170,7 +170,7 @@ describe("touch test: GT911 reset and id, a press drawn as crosshairs", () => {
   })
 
   it("reports the release and erases the crosshairs", () => {
-    s.loop.setParts({ [partKey(s.lcd.id, "PANEL")]: { pressed: false } })
+    s.loop.setParts({ ...s.doc.parts, [partKey(s.lcd.id, "PANEL")]: { pressed: false } })
     const snap = s.run(0.2)
     expect.soft(gt(snap).touches.length, "touches after release").toBe(0)
     expect.soft(gt(snap).ready, "release report (zero points) taken by the firmware").toBeFalsy()
@@ -179,7 +179,7 @@ describe("touch test: GT911 reset and id, a press drawn as crosshairs", () => {
 
   // A second press: the zero-length read of the release report must not have hung the bus.
   it("draws a second press at x = 200", () => {
-    s.loop.setParts({ [partKey(s.lcd.id, "PANEL")]: { pressed: true, x: 200, y: 100 } })
+    s.loop.setParts({ ...s.doc.parts, [partKey(s.lcd.id, "PANEL")]: { pressed: true, x: 200, y: 100 } })
     s.run(0.3)
     expectCrosshairLine(colours(s.frame(), 1024, 600, { x: 200, y: 0, w: 1, h: 600 }), 590)
   })

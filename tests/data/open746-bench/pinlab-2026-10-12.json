@@ -1,0 +1,330 @@
+{
+ "setup": "Open746I-C, powered from the USART1 micro-USB (S2 U5V, SW1 5Vin), module USB out; OTG VBUS cap off, JMP2 x4 on, OTG PWR/FLG on, WAKEUP on, LEDs on; PA4 (DAC1 + ADC1 ch4, buffer on) wired by one dupont lead to the target pad; firmware/ports/pinlab.c second build (robust target search); 2026-10-12",
+ "factory": {
+  "uid": "003c00273138510a34303331",
+  "flash_kb": "1024",
+  "vrefint_cal": "1499",
+  "ts_cal1": "938",
+  "ts_cal2": "1192",
+  "package": "64375"
+ },
+ "vdda_mv": {
+  "min": 3289,
+  "max": 3291,
+  "mean": 3290.4
+ },
+ "targets": {
+  "PA5": {
+   "rise_mv_min": {
+    "min": 1728,
+    "max": 1732
+   },
+   "rise_mv_max": {
+    "min": 1734,
+    "max": 1736
+   },
+   "fall_mv_min": {
+    "min": 1326,
+    "max": 1330
+   },
+   "fall_mv_max": {
+    "min": 1329,
+    "max": 1337
+   },
+   "high_mv": {
+    "min": 3287,
+    "max": 3289
+   },
+   "low_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "pull_up_mv": {
+    "min": 3287,
+    "max": 3289
+   },
+   "pull_down_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "wired_mv": {
+    "min": 777,
+    "max": 837
+   },
+   "passes": 6
+  },
+  "PB2": {
+   "rise_mv_min": {
+    "min": 1723,
+    "max": 1731
+   },
+   "rise_mv_max": {
+    "min": 1731,
+    "max": 1736
+   },
+   "fall_mv_min": {
+    "min": 1330,
+    "max": 1336
+   },
+   "fall_mv_max": {
+    "min": 1337,
+    "max": 1345
+   },
+   "high_mv": {
+    "min": 3287,
+    "max": 3289
+   },
+   "low_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "pull_up_mv": {
+    "min": 3287,
+    "max": 3289
+   },
+   "pull_down_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "wired_mv": {
+    "min": 793,
+    "max": 830
+   },
+   "passes": 6
+  },
+  "PH4": {
+   "rise_mv_min": {
+    "min": 1733,
+    "max": 1741
+   },
+   "rise_mv_max": {
+    "min": 1744,
+    "max": 1746
+   },
+   "fall_mv_min": {
+    "min": 1333,
+    "max": 1339
+   },
+   "fall_mv_max": {
+    "min": 1341,
+    "max": 1352
+   },
+   "high_mv": {
+    "min": 3261,
+    "max": 3263
+   },
+   "low_mv": {
+    "min": 1,
+    "max": 2
+   },
+   "pull_up_mv": {
+    "min": 1729,
+    "max": 1731
+   },
+   "pull_down_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "wired_mv": {
+    "min": 861,
+    "max": 939
+   },
+   "passes": 6
+  },
+  "PC13": {
+   "rise_mv_min": {
+    "min": 1717,
+    "max": 1726
+   },
+   "rise_mv_max": {
+    "min": 1730,
+    "max": 1737
+   },
+   "fall_mv_min": {
+    "min": 1328,
+    "max": 1332
+   },
+   "fall_mv_max": {
+    "min": 1336,
+    "max": 1345
+   },
+   "high_mv": {
+    "min": 3280,
+    "max": 3284
+   },
+   "low_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "pull_up_mv": {
+    "min": 3282,
+    "max": 3284
+   },
+   "pull_down_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "wired_mv": {
+    "min": 777,
+    "max": 809
+   },
+   "passes": 6
+  },
+  "PI8": {
+   "rise_mv_min": {
+    "min": 1725,
+    "max": 1731
+   },
+   "rise_mv_max": {
+    "min": 1734,
+    "max": 1741
+   },
+   "fall_mv_min": {
+    "min": 1333,
+    "max": 1336
+   },
+   "fall_mv_max": {
+    "min": 1341,
+    "max": 1345
+   },
+   "high_mv": {
+    "min": 3223,
+    "max": 3225
+   },
+   "low_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "pull_up_mv": {
+    "min": 1721,
+    "max": 1722
+   },
+   "pull_down_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "wired_mv": {
+    "min": 846,
+    "max": 941
+   },
+   "passes": 5
+  },
+  "PA13": {
+   "rise_mv_min": {
+    "min": 1732,
+    "max": 1741
+   },
+   "rise_mv_max": {
+    "min": 1743,
+    "max": 1750
+   },
+   "fall_mv_min": {
+    "min": 1353,
+    "max": 1355
+   },
+   "fall_mv_max": {
+    "min": 1357,
+    "max": 1369
+   },
+   "high_mv": {
+    "min": 3286,
+    "max": 3288
+   },
+   "low_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "pull_up_mv": {
+    "min": 3287,
+    "max": 3289
+   },
+   "pull_down_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "wired_mv": {
+    "min": 878,
+    "max": 887
+   },
+   "passes": 5
+  },
+  "PB3": {
+   "rise_mv_min": {
+    "min": 1734,
+    "max": 1739
+   },
+   "rise_mv_max": {
+    "min": 1739,
+    "max": 1742
+   },
+   "fall_mv_min": {
+    "min": 1336,
+    "max": 1341
+   },
+   "fall_mv_max": {
+    "min": 1342,
+    "max": 1345
+   },
+   "high_mv": {
+    "min": 3287,
+    "max": 3289
+   },
+   "low_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "pull_up_mv": {
+    "min": 3287,
+    "max": 3289
+   },
+   "pull_down_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "wired_mv": {
+    "min": 797,
+    "max": 852
+   },
+   "passes": 6
+  },
+  "PE3": {
+   "rise_mv_min": {
+    "min": 1732,
+    "max": 1739
+   },
+   "rise_mv_max": {
+    "min": 1744,
+    "max": 1747
+   },
+   "fall_mv_min": {
+    "min": 1333,
+    "max": 1335
+   },
+   "fall_mv_max": {
+    "min": 1334,
+    "max": 1335
+   },
+   "high_mv": {
+    "min": 3287,
+    "max": 3289
+   },
+   "low_mv": {
+    "min": 2,
+    "max": 2
+   },
+   "pull_up_mv": {
+    "min": 1440,
+    "max": 1443
+   },
+   "pull_down_mv": {
+    "min": 1057,
+    "max": 1058
+   },
+   "wired_mv": {
+    "min": 803,
+    "max": 804
+   },
+   "passes": 6
+  }
+ }
+}

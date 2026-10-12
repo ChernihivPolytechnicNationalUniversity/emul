@@ -1,4 +1,4 @@
-import { STM32F429ZI, STM32F746IG, type ChipProfile } from "@/mcu/chip"
+import { STM32F429ZI, STM32F746IG, type ChipElectrical, type ChipProfile } from "@/mcu/chip"
 import { ChipIcon } from "../icons"
 import { mcuModel } from "../mcu-model"
 import type { BodyShape, ComponentDef, Element, PinDef, PinKind } from "../types"
@@ -37,6 +37,18 @@ const PIN_NOTES: Record<string, string> = {
 }
 
 type Group = { names: string[]; kind?: PinKind }
+
+function absoluteMaximum(e: ChipElectrical) {
+  const pads = e.pads
+  if (!pads) return `VDD ${e.vddMax} V, I/O pins ${e.pinVoltageMax} V and ${e.pinCurrentMax * 1e3} mA`
+  const mA = (amps: number) => `${amps * 1e3} mA`
+  return [
+    `VDD ${e.vddMax} V`,
+    `FT pins VDD + ${pads.ft.aboveVdd} V, TTa pins (${pads.tta.pads.join(", ")}) ${pads.tta.voltageMax} V`,
+    `${mA(e.pinCurrentMax)} a pin, ${mA(pads.backupDomain.currentMax)} on ${pads.backupDomain.pads.join(", ")}`,
+    `injected −${mA(pads.injectedCurrentMax)} (TTa ±${mA(pads.injectedCurrentMax)})`,
+  ].join("; ")
+}
 
 export function stm32Chip(chip: ChipProfile, pkg: Package, description: string): ComponentDef {
   const byName = new Map<string, number[]>()
@@ -139,7 +151,7 @@ export function stm32Chip(chip: ChipProfile, pkg: Package, description: string):
     info: {
       MCU: `${chip.name}, ${chip.core.name}, ${kb(flash.size)} Flash, ${kb(ram)} SRAM`,
       Package: pkg.name,
-      "Absolute maximum": `VDD ${e.vddMax} V, I/O pins ${e.pinVoltageMax} V and ${e.pinCurrentMax * 1e3} mA`,
+      "Absolute maximum": absoluteMaximum(e),
       Source: pkg.source,
     },
   }

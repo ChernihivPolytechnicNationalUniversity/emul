@@ -107,7 +107,7 @@ describe("Open746I-C running lab 1", () => {
     press("WAKEUP", true)
     snap = run(0.05)
     expect.soft(v(snap, "P12-8"), "PD4 released").toBeNear(3.3, 0.05)
-    expect.soft(v(snap, "CN3-1"), "PA0 while K1 is pressed (÷2 divider)").toBeNear(1.65, 0.05)
+    expect.soft(v(snap, "CN3-1"), "PA0 while K1 is pressed: 3.3 V through R5, R6 sits on K1's side").toBeNear(3.3, 0.05)
     press("WAKEUP", false)
     expect.soft(v(run(0.05), "CN3-1"), "PA0 back down").toBeNear(0, 0.02)
   })

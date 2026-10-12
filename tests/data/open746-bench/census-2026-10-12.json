@@ -1,0 +1,982 @@
+{
+ "PA0": {
+  "finding": "held-low",
+  "up": 0,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA1": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA2": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA3": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA4": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA5": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA6": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA7": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA8": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA9": {
+  "finding": "serial",
+  "up": 0,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA10": {
+  "finding": "serial",
+  "up": 0,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA11": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 2
+ },
+ "PA12": {
+  "finding": "held-high",
+  "up": 1,
+  "down": 1,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA13": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 0,
+  "rise_us": 65535
+ },
+ "PA14": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PA15": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB0": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB1": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB2": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB3": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 0,
+  "rise_us": 65535
+ },
+ "PB4": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB5": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB6": {
+  "finding": "held-low",
+  "up": 0,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB7": {
+  "finding": "held-low",
+  "up": 0,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB8": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB9": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB10": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB11": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB12": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB13": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB14": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PB15": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC0": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC1": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC2": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC3": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC4": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC5": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC6": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC7": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC8": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC9": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC10": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC11": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC12": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC13": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC14": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PC15": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD0": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD1": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD2": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD3": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD4": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD5": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD6": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD7": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD8": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD9": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD10": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD11": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD12": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD13": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD14": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PD15": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE0": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE1": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE2": {
+  "finding": "held-high",
+  "up": 1,
+  "down": 1,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE3": {
+  "finding": "held-low",
+  "up": 0,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE4": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE5": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE6": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE7": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE8": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE9": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE10": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE11": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE12": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE13": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE14": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PE15": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF0": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF1": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF2": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF3": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF4": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF5": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF6": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF7": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF8": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF9": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF10": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF11": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF12": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF13": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF14": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PF15": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG0": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG1": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG2": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG3": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG4": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG5": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG6": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG7": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG8": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG9": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG10": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG11": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG12": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG13": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG14": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PG15": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH0": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH1": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH2": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH3": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH4": {
+  "finding": "held-low",
+  "up": 0,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH5": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH6": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH7": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH8": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH9": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH10": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH11": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH12": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH13": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH14": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PH15": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PI0": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PI1": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PI2": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PI3": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PI4": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PI5": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PI6": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PI7": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PI8": {
+  "finding": "held-low",
+  "up": 0,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PI9": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PI10": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ },
+ "PI11": {
+  "finding": "follows",
+  "up": 1,
+  "down": 0,
+  "fall_us": 65535,
+  "rise_us": 65535
+ }
+}

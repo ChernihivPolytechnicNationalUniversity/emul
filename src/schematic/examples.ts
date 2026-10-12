@@ -365,14 +365,15 @@ export const lab1RunningLight: Example = {
 export const lcdDemo: Example = {
   id: "open746-lcd",
   name: "Open746I-C: 7\" LCD demo",
-  description: "Waveshare's LCD demo on the stand: the 1024×600 panel on the LTDC with the framebuffer in the SDRAM, text drawn through the DMA2D.",
+  description: "Waveshare's LCD demo on the stand: the 1024×600 panel on the LTDC with the framebuffer in the SDRAM, text drawn through the DMA2D. It sets up USART1 on PA9, so the module's OTG VBUS cap is off.",
   icon: CpuIcon,
   projects: [{ ref: "U1", load: lcdProject("display"), opt: "-O2" }],
   build(grid) {
     const { doc, place } = builder(grid)
-    place("open746i-c", 0, 0)
-    // P15's first pin is at (35, 52) on the board, the module's at (32, -4) on itself.
-    place("lcd7-f", 3, 56)
+    const u = place("open746i-c", 0, 0)
+    // P15's first pin is at (35, 55) on the board, the module's at (32, -4) on itself.
+    place("lcd7-f", 3, 59)
+    doc.parts[`${u.id}:OTG_VBUS`] = { on: false }
     return doc
   },
 }
@@ -385,17 +386,18 @@ export const lcdDemo: Example = {
 export const touchDemo: Example = {
   id: "open746-touch",
   name: "Open746I-C: touch test",
-  description: "Waveshare's GT911 test on the stand: press the panel and crosshairs follow; the controller's id goes out on USART1.",
+  description: "Waveshare's GT911 test on the stand: press the panel and crosshairs follow; the controller's id goes out on USART1, so the module's OTG VBUS cap is off (PA9 is TX).",
   icon: CpuIcon,
   projects: [{ ref: "U1", load: lcdProject("touch"), opt: "-O2" }],
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("open746i-c", 0, 0)
-    place("lcd7-f", 3, 56)
-    // The CP2102's side of USART1: TX at (46, 3), RX at (52, 3) either side of the micro-USB.
+    place("lcd7-f", 3, 59)
+    // The CP2102's side of USART1: TX and RX on the USART1 JMP's right column, at (45, 7) and (45, 8).
     const term = place("serial-terminal", 34, -9, { baud: "115200" })
     wire(u, "VCP-TX", term, "RX")
     wire(u, "VCP-RX", term, "TX")
+    doc.parts[`${u.id}:OTG_VBUS`] = { on: false }
     return doc
   },
 }
@@ -409,13 +411,14 @@ export const touchDemo: Example = {
 export const cubeDemo: Example = {
   id: "open746-cube",
   name: "Open746I-C: spinning cube",
-  description: "A textured cube rotating on the 7\" panel: software rasteriser in C++ into double-buffered SDRAM framebuffers, scanned out by the LTDC.",
+  description: "A textured cube rotating on the 7\" panel: software rasteriser in C++ into double-buffered SDRAM framebuffers, scanned out by the LTDC. It sets up USART1 on PA9, so the module's OTG VBUS cap is off.",
   icon: CpuIcon,
   projects: [{ ref: "U1", load: lcdProject("cube"), opt: "-O2" }],
   build(grid) {
     const { doc, place } = builder(grid)
-    place("open746i-c", 0, 0)
-    place("lcd7-f", 3, 56)
+    const u = place("open746i-c", 0, 0)
+    place("lcd7-f", 3, 59)
+    doc.parts[`${u.id}:OTG_VBUS`] = { on: false }
     return doc
   },
 }

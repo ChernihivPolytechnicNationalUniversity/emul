@@ -390,7 +390,7 @@ const CONTACT_SPOT_TAU = 1e-3
 const contactWeldCurrent = (p: Record<string, string>) => SILVER_MELTING_VOLTS / parseValue(p.rcontact)
 const CONTACT_LIMITS = { current: "{imax}", surge: contactWeldCurrent, tau: CONTACT_SPOT_TAU, fail: "short" } as const
 
-const BOUNCE_FIELDS: PropField[] = [
+export const BOUNCE_FIELDS: PropField[] = [
   { key: "bounce", label: "Contact bounce", type: "select", options: [{ value: "off", label: "Off" }, { value: "on", label: "On" }] },
   { key: "tbounce", label: "Bounce time", type: "quantity", unit: "s" },
 ]
@@ -581,10 +581,15 @@ export const acSource: ComponentDef = {
   ],
 }
 
+const pulseDuty = (p: Record<string, string>) => {
+  const width = parseValue(p.width ?? "")
+  return Number.isFinite(width) && width >= 0 ? width * parseValue(p.freq) : Number(p.duty) / 100
+}
+
 export const pulseSource: ComponentDef = {
   id: "pulse-source",
   name: "Pulse source",
-  description: "Square wave between two levels at a set frequency and duty cycle: a clock, a PWM output, a logic signal.",
+  description: "Square wave between two levels at a set frequency and duty cycle, or pulse width, from an optional delay: a clock, a PWM output, a logic signal. Into an MCU input at logic levels its edges arrive at their exact times, while nothing on the net loads or slows it.",
   category: "Power",
   icon: PulseSourceIcon,
   prefix: "G",
@@ -593,7 +598,9 @@ export const pulseSource: ComponentDef = {
     { key: "high", label: "High level", type: "quantity", unit: "V" },
     { key: "low", label: "Low level", type: "quantity", unit: "V" },
     { key: "freq", label: "Frequency", type: "quantity", unit: "Hz" },
-    { key: "duty", label: "Duty cycle", type: "range", min: 1, max: 99, step: 1, unit: "%" },
+    { key: "duty", label: "Duty cycle", type: "range", min: 0, max: 100, step: 0.1, unit: "%" },
+    { key: "width", label: "Pulse width", type: "quantity", unit: "s", placeholder: "from the duty cycle" },
+    { key: "delay", label: "First rising edge at", type: "quantity", unit: "s", placeholder: "0 s" },
     { key: "rint", label: "Internal resistance", type: "quantity", unit: "Ω" },
     { key: "imax", label: "Max current", type: "quantity", unit: "A" },
   ],
@@ -620,7 +627,8 @@ export const pulseSource: ComponentDef = {
       value: "{low}",
       amplitude: (p) => parseValue(p.high) - parseValue(p.low),
       frequency: "{freq}",
-      duty: (p) => Number(p.duty) / 100,
+      duty: pulseDuty,
+      delay: (p) => parseValue(p.delay ?? "") || 0,
       limits: { current: "{imax}" },
     },
     { kind: "R", a: "$cell", b: "+", value: "{rint}" },
