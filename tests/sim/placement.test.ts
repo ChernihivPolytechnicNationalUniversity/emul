@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { examples } from "@/schematic/examples"
 import { GRID, intersects, objectPins, objectRect, routeAll, Router, snap } from "@/schematic/geometry"
-import { bodyBounds, contactCheck, designatorRects, freeOffset, freeSpot, landingOffset, nearestFreeWithin, placementCheck, ringsToClear, type PlacementScene } from "@/schematic/placement"
+import { bodyBounds, contactCheck, contourOf, designatorRects, freeOffset, freeSpot, landingOffset, nearestFreeWithin, placementCheck, ringsToClear, type PlacementScene } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject, Wire } from "@/schematic/types"
 import { boardDocuments } from "../../scripts/lib/stress"
@@ -83,9 +83,9 @@ describe("parts do not pile onto each other", () => {
 
   it("a socket part docks only by whole connectors: a Nucleo with two stray pins on the board's pins is refused", () => {
     const board = part("board", "open746i-c", 0, 0)
-    const nucleo = part("nucleo", "nucleo-f429zi", 4, 43)
+    const nucleo = part("nucleo", "nucleo-f429zi", 13, -38)
     const s = scene([board, nucleo])
-    const over = objectPins(nucleo, GRID).filter(({ point }) => point.y > c(1) && point.y < c(55) && point.x > c(1) && point.x < c(75))
+    const over = objectPins(nucleo, GRID).filter(({ point }) => point.y > c(1) && point.y < c(55) && point.x > c(1) && point.x < c(72))
     const boardPins = new Set(objectPins(board, GRID).map(({ point }) => `${point.x},${point.y}`))
     expect.soft(over.length, "two Nucleo pins over the board").toBe(2)
     expect.soft(over.every(({ point }) => boardPins.has(`${point.x},${point.y}`)), "…both on board pins").toBe(true)
@@ -134,9 +134,11 @@ describe("parts do not pile onto each other", () => {
     const refuse = [placementCheck(s, [probe]), contactCheck(s, [probe])]
     expect.soft(freeOffset(refuse, GRID), "a search of 24 rings finds no room inside the board").toBeNull()
     const at = freeSpot(s, [probe])
-    const landed = objectRect({ ...probe, x: probe.x + at.x, y: probe.y + at.y }, GRID)
+    const body = bodyBounds(def)
+    const landed = { x: probe.x + at.x + c(body.x), y: probe.y + at.y + c(body.y), w: c(body.w), h: c(body.h) }
+    const contour = contourOf(getDef("open746i-c")!).map((r) => ({ x: board.x + c(r.x), y: board.y + c(r.y), w: c(r.w), h: c(r.h) }))
     expect.soft(refuse.some((r) => r(at.x, at.y)), "the spot found is free").toBe(false)
-    expect.soft(intersects(landed, board), "…and off the board").toBe(false)
+    expect.soft(contour.some((r) => intersects(landed, r)), "…and off the board and its P15 tab").toBe(false)
     expect.soft(Math.hypot(at.x, at.y) / GRID, "…the nearest way out, past the board's near edge").toBeLessThan(board.h / 2 / GRID + def.height + 2)
   })
 
@@ -243,13 +245,33 @@ describe("parts do not pile onto each other", () => {
     expect.soft(landingOffset(refusals(scene([a, b]), [b]), 0, c(-1), GRID), "a cell up, onto its neighbour's words").toEqual({ x: 0, y: 0 })
     const doc = examples.find((e) => e.id === "lab1-running-light")!.build(GRID)
     const board = objectRect(doc.objects.find((o) => o.def === "open746i-c")!, GRID)
-    const below = part("q", "crystal", 30, (board.y + board.h) / GRID)
+    const below = part("q", "crystal", 42, (board.y + board.h) / GRID - 4)
     const s = scene([...doc.objects, below], doc.wires)
-    const clear = Array.from({ length: 6 }, (_, k) => k).find((k) => !placementCheck(s, [below])(0, c(k)))!
-    expect.soft(clear, "a crystal fits just under the board").toBeDefined()
+    const clear = Array.from({ length: 10 }, (_, k) => k).find((k) => !placementCheck(s, [below])(0, c(k)))!
+    expect.soft(clear, "a crystal fits just under the board's P15 tab").toBeDefined()
     const q = { ...below, y: below.y + c(clear) }
     const t = scene([...doc.objects, q], doc.wires)
-    expect.soft(landingOffset(refusals(t, [q]), 0, c(-5), GRID), "as close under the board as it fits, dragged five cells up onto it, it comes back").toEqual({ x: 0, y: 0 })
+    expect.soft(landingOffset(refusals(t, [q]), 0, c(-5), GRID), "as close under the tab as it fits, dragged five cells up onto it, it comes back").toEqual({ x: 0, y: 0 })
+  })
+
+  it("a board takes the room of its outline and the P15 tab, not their bounding box: the pockets either side of the tab are free", () => {
+    const board = part("U1", "open746i-c", 0, 0)
+    const def = getDef("open746i-c")!
+    const [outline, tab] = contourOf(def)
+    expect(contourOf(def)).toHaveLength(2)
+    expect(tab.y + tab.h, "the tab hangs below the outline").toBeGreaterThan(outline.y + outline.h + 3)
+    const pocketY = Math.ceil(outline.y + outline.h + 1)
+    const check = (x: number, y: number) => {
+      const r = part("r", "resistor", x, y)
+      return placementCheck(scene([board, r]), [r])(0, 0)
+    }
+    expect.soft(check(Math.floor(tab.x) - 7, pocketY), "left of the tab, under 8BIT FMC and ULPI").toBe(false)
+    expect.soft(check(Math.ceil(tab.x + tab.w) + 2, pocketY), "right of the tab, under WAKEUP").toBe(false)
+    expect.soft(check(Math.round(tab.x + tab.w / 2) - 2, pocketY + 1), "on the tab").toBe(true)
+    expect.soft(check(Math.floor(tab.x) - 7, Math.floor(outline.y + outline.h) - 3), "on the board, above the pocket").toBe(true)
+    const nucleo = getDef("nucleo-f429zi")!
+    expect.soft(contourOf(nucleo), "a board with nothing hanging off it takes its outline").toEqual([bodyBounds(nucleo)])
+    expect.soft(contourOf(getDef("stm32f746ig")!), "a chip whose leads stick out of its housing still takes its whole drawing").toEqual([bodyBounds(getDef("stm32f746ig")!)])
   })
 
   it("a free drop lands where it was dropped", () => {

@@ -21,10 +21,10 @@ function rectPath({ x, y, w, h, rx }: Extract<BodyShape, { type: "rect" }>) {
 }
 
 const isClosed = (subpath: string) => /[Zz]\s*$/.test(subpath)
-const isHollow = (shape: BodyShape) => shape.type !== "text" && (!shape.fill || shape.fill === "none")
+const isHollow = (shape: BodyShape) => shape.type !== "text" && shape.type !== "soon" && (shape.type === "art" ? shape.fill === "none" : !shape.fill || shape.fill === "none")
 
 function subpaths(shape: BodyShape): string[] {
-  if (shape.type === "text" || shape.fill === "grip") return []
+  if (shape.type === "text" || shape.type === "soon" || shape.fill === "grip") return []
   if (shape.type === "circle") return [circlePath(shape.cx, shape.cy, shape.r)]
   if (shape.type === "rect") return [rectPath(shape)]
   return shape.d.split(/(?=M)/).map((s) => s.trim()).filter(Boolean)
@@ -37,7 +37,7 @@ function junctionOutline(def: ComponentDef): Outline {
 export function selectionOutline(def: ComponentDef): Outline {
   const cached = outlines.get(def)
   if (cached) return cached
-  const housing = def.body.filter((shape) => shape.type !== "text" && shape.fill === "board")
+  const housing = def.body.filter((shape) => shape.type !== "text" && shape.type !== "soon" && shape.fill === "board")
   const shapes = housing.length ? housing : def.body
   const strokes = shapes.flatMap(subpaths)
   const hollow = shapes.filter(isHollow).flatMap(subpaths).filter(isClosed)

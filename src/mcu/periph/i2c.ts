@@ -15,6 +15,7 @@
  * SCL/SDA are open-drain: the block drives low or releases; the resolved bus level comes
  * back in through `pinEdge`, which also lets it see a slave holding SDA low for ACK.
  */
+import type { AfMap } from "../chip"
 import type { Clocked } from "./clocked"
 import { RegBlock, type RegDef } from "./regblock"
 
@@ -859,16 +860,25 @@ export const I2C_SPECS: I2cSpec[] = [
 
 export type I2cPad = { port: number; pin: number; af: number; line: I2cLine }
 
-/** Pads per line (DS9405 Table 12 / DS10916 Table 13), AF4 unless marked. */
-const PADS: Record<string, string> = {
+/** Pads per line (DS9405 Table 12), AF4 unless marked. */
+const F42X_PADS: Record<string, string> = {
   I2C1: "SCL PB6 PB8; SDA PB7 PB9 @4",
   I2C2: "SCL PB10 PF1 PH4; SDA PB11 PF0 PH5 PB3@9 @4",
   I2C3: "SCL PA8 PH7; SDA PC9 PH8 PB4@9 @4",
   I2C4: "SCL PD12 PF14 PH11; SDA PD13 PF15 PH12 @4",
 }
 
-export function i2cPads(name: string): I2cPad[] {
-  const spec = PADS[name]
+const DS10916_REV5_PADS: Record<string, string> = {
+  I2C1: "SCL PB6 PB8; SDA PB7 PB9 @4",
+  I2C2: "SCL PB10 PF1 PH4; SDA PB11 PF0 PH5 @4",
+  I2C3: "SCL PA8 PH7; SDA PC9 PH8 @4",
+  I2C4: "SCL PD12 PF14 PH11; SDA PD13 PF15 PH12 @4",
+}
+
+const PADS: Record<AfMap, Record<string, string>> = { f42x: F42X_PADS, f74x: DS10916_REV5_PADS }
+
+export function i2cPads(name: string, map: AfMap): I2cPad[] {
+  const spec = PADS[map][name]
   if (!spec) return []
   const at = spec.lastIndexOf("@")
   const body = spec.slice(0, at)

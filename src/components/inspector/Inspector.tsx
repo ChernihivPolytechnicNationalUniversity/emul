@@ -562,6 +562,16 @@ function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { ob
           </AlertDescription>
         </Alert>
       ) : null}
+      {status?.reference ? (
+        <Alert data-slot="reference-alert">
+          <TriangleAlertIcon />
+          <AlertTitle>ADC/DAC reference</AlertTitle>
+          <AlertDescription>
+            {status.reference}. The ADC and DAC measure against VREF+: an ADC reads full scale for any input above it, and its codes mean nothing outside 1.7 V
+            to VDDA. Tie VREF+ to VDDA (on a board, its jumper) or wire a reference to the VREF+ pin.
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {data && status && status.unmodelled.length > 0 ? (
         <Alert>
           <TriangleAlertIcon />

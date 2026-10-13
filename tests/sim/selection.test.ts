@@ -29,7 +29,7 @@ describe("the selection follows the symbol", () => {
 
   it("a filled body is not filled again, so the plate adds nothing over what the part fills", () => {
     const led = selectionOutline(def("led"))
-    const filled = def("led").body.filter((s) => s.type !== "text" && s.fill && s.fill !== "none" && s.fill !== "grip").length
+    const filled = def("led").body.filter((s) => s.type !== "text" && s.type !== "soon" && s.fill && s.fill !== "none" && s.fill !== "grip").length
     expect(filled).toBeGreaterThan(0)
     expect(subpaths(led.hollow).length).toBeLessThan(subpaths(led.strokes).length)
   })

@@ -35,7 +35,6 @@ const REGS: RegDef[] = [
   { name: "TAFCR", offset: 0x40, rw: 0x00fcffff },
   { name: "ALRMASSR", offset: 0x44, rw: 0x0f007fff },
   { name: "ALRMBSSR", offset: 0x48, rw: 0x0f007fff },
-  ...Array.from({ length: 20 }, (_, i) => ({ name: `BKP${i}R`, offset: 0x50 + i * 4 })),
 ]
 
 const ISR_ALRAWF = 1 << 0
@@ -93,12 +92,13 @@ export class Rtc extends RegBlock implements Clocked {
   raiseIrq: (irq: number) => void = () => {}
   /** An EXTI line pulse (17 alarm, 22 wake-up). */
   onExti: (line: number) => void = () => {}
+  onAlarm: (alarm: "A" | "B", level: boolean) => void = () => {}
   onUnsupported: (what: string) => void = () => {}
   /** Whether RCC has the RTC clocked, and at what rate (Hz); 0 when off. */
   clockHz: () => number = () => 0
 
-  constructor() {
-    super("RTC", 0x40002800, 0x400, REGS)
+  constructor(backupRegisters = 20) {
+    super("RTC", 0x40002800, 0x400, [...REGS, ...Array.from({ length: backupRegisters }, (_, i) => ({ name: `BKP${i}R`, offset: 0x50 + i * 4 }))])
   }
 
   setClock(hclkHz: number) {
@@ -222,6 +222,8 @@ export class Rtc extends RegBlock implements Clocked {
         this.rsfArmed = true
       }
       v &= ~(~written & (ISR_ALRAF | ISR_ALRBF | ISR_WUTF | (0xf << 11)))
+      if (old & ISR_ALRAF && !(v & ISR_ALRAF)) this.onAlarm("A", false)
+      if (old & ISR_ALRBF && !(v & ISR_ALRBF)) this.onAlarm("B", false)
       this.regs[3] = v >>> 0
       this.updateActive()
       return v >>> 0
@@ -320,8 +322,14 @@ export class Rtc extends RegBlock implements Clocked {
   /** Alarm A/B compare on every second: fields not masked must match. */
   private checkAlarms() {
     const cr = this.cr()
-    if (cr & CR_ALRAE && this.alarmMatches(this.regs[0x1c >>> 2])) this.flag(ISR_ALRAF, CR_ALRAIE, 17)
-    if (cr & CR_ALRBE && this.alarmMatches(this.regs[0x20 >>> 2])) this.flag(ISR_ALRBF, CR_ALRBIE, 17)
+    if (cr & CR_ALRAE && this.alarmMatches(this.regs[0x1c >>> 2])) {
+      this.flag(ISR_ALRAF, CR_ALRAIE, 17)
+      this.onAlarm("A", true)
+    }
+    if (cr & CR_ALRBE && this.alarmMatches(this.regs[0x20 >>> 2])) {
+      this.flag(ISR_ALRBF, CR_ALRBIE, 17)
+      this.onAlarm("B", true)
+    }
   }
   private alarmMatches(a: number) {
     if (!(a & (1 << 7)) && unbcd(a & 0x7f) !== this.sec) return false

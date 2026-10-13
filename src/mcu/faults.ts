@@ -34,6 +34,10 @@ export class CpuHalt extends Error {
   }
 }
 
+export function emulatorError(error: unknown, pc: number) {
+  return new CpuHalt("fault", `emulator error: ${error instanceof Error ? error.message : String(error)}`, pc)
+}
+
 /** Thrown by an instruction to request a synchronous exception; the step loop takes it. */
 export class ExceptionRequest {
   readonly exc: number

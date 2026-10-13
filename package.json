@@ -24,6 +24,7 @@
     "symbols": "tsx --tsconfig tsconfig.app.json scripts/symbols.ts",
     "st-sources": "tsx --tsconfig tsconfig.app.json scripts/st-sources.ts",
     "peripherals": "tsx --tsconfig tsconfig.app.json scripts/peripherals.ts",
+    "strip-bench": "tsx --tsconfig tsconfig.app.json scripts/strip-bench.ts",
     "firmware": "make -C firmware all expect && make -C firmware/hal"
   },
   "dependencies": {

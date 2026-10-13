@@ -163,6 +163,17 @@ export function objectRect(obj: PlacedObject, grid: number): Rect {
 
 export type ObjectPin = { key: string; pin: PlacedPin; point: Point }
 
+const orientedPinsOf = new WeakMap<ComponentDef, (readonly PlacedPin[] | undefined)[]>()
+
+export const orientationSlot = ({ rotation, mirror }: Orientation) => rotation / 45 + (mirror ? 8 : 0)
+
+export function orientedPins(def: ComponentDef, orientation: Orientation): readonly PlacedPin[] {
+  let slots = orientedPinsOf.get(def)
+  if (!slots) orientedPinsOf.set(def, (slots = []))
+  const slot = orientationSlot(orientation)
+  return (slots[slot] ??= def.pins.map((raw) => orientPin(raw, def, orientation)))
+}
+
 const placementOf = (obj: PlacedObject, grid: number) => `${obj.id}|${obj.def}|${obj.x}|${obj.y}|${obj.rotation ?? 0}|${obj.mirror ? "m" : ""}|${grid}`
 
 const placedPins = new WeakMap<PlacedObject, { placement: string; pins: readonly ObjectPin[] }>()
@@ -176,12 +187,8 @@ export function objectPins(obj: PlacedObject, grid: number): readonly ObjectPin[
   const cached = placedPins.get(obj)
   if (cached && cached.placement === placement) return cached.pins
   const def = getDef(obj.def)
-  const orientation = orientationOf(obj)
   const pins: readonly ObjectPin[] = def
-    ? def.pins.map((raw) => {
-        const pin = orientPin(raw, def, orientation)
-        return { key: `${obj.id}:${pin.id}`, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }
-      })
+    ? orientedPins(def, orientationOf(obj)).map((pin) => ({ key: `${obj.id}:${pin.id}`, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }))
     : []
   placedPins.set(obj, { placement, pins })
   return pins

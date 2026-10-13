@@ -543,7 +543,7 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
     return J(
       i2(2, `ldr ${REG[rt]}, [pc, #${imm}]`, (c) => {
         const base = (c.pc + 4) & ~3
-        c.r[rt] = c.bus.read32((base + imm) >>> 0)
+        c.r[rt] = c.mem.read32((base + imm) >>> 0)
       }),
       `r[${rt}] = bus.read32(${(((addr + 4) & ~3) + imm) >>> 0});`,
       true,
@@ -563,21 +563,21 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       const EA = `((r[${rn}] + r[${rm}]) >>> 0)`
       switch (opB) {
         case 0:
-          return J(i2(2, fmt("str"), (c) => c.bus.write32(ea(c), c.r[rt])), `bus.write32(${EA}, r[${rt}]);`, true)
+          return J(i2(2, fmt("str"), (c) => c.mem.write32(ea(c), c.r[rt])), `bus.write32(${EA}, r[${rt}]);`, true)
         case 1:
-          return J(i2(2, fmt("strh"), (c) => c.bus.write16(ea(c), c.r[rt])), `bus.write16(${EA}, r[${rt}]);`, true)
+          return J(i2(2, fmt("strh"), (c) => c.mem.write16(ea(c), c.r[rt])), `bus.write16(${EA}, r[${rt}]);`, true)
         case 2:
-          return J(i2(2, fmt("strb"), (c) => c.bus.write8(ea(c), c.r[rt])), `bus.write8(${EA}, r[${rt}]);`, true)
+          return J(i2(2, fmt("strb"), (c) => c.mem.write8(ea(c), c.r[rt])), `bus.write8(${EA}, r[${rt}]);`, true)
         case 3:
-          return J(i2(2, fmt("ldrsb"), (c) => (c.r[rt] = signExtend(c.bus.read8(ea(c)), 8) >>> 0)), `r[${rt}] = ((bus.read8(${EA}) << 24) >> 24) >>> 0;`, true)
+          return J(i2(2, fmt("ldrsb"), (c) => (c.r[rt] = signExtend(c.mem.read8(ea(c)), 8) >>> 0)), `r[${rt}] = ((bus.read8(${EA}) << 24) >> 24) >>> 0;`, true)
         case 4:
-          return J(i2(2, fmt("ldr"), (c) => (c.r[rt] = c.bus.read32(ea(c)))), `r[${rt}] = bus.read32(${EA});`, true)
+          return J(i2(2, fmt("ldr"), (c) => (c.r[rt] = c.mem.read32(ea(c)))), `r[${rt}] = bus.read32(${EA});`, true)
         case 5:
-          return J(i2(2, fmt("ldrh"), (c) => (c.r[rt] = c.bus.read16(ea(c)))), `r[${rt}] = bus.read16(${EA});`, true)
+          return J(i2(2, fmt("ldrh"), (c) => (c.r[rt] = c.mem.read16(ea(c)))), `r[${rt}] = bus.read16(${EA});`, true)
         case 6:
-          return J(i2(2, fmt("ldrb"), (c) => (c.r[rt] = c.bus.read8(ea(c)))), `r[${rt}] = bus.read8(${EA});`, true)
+          return J(i2(2, fmt("ldrb"), (c) => (c.r[rt] = c.mem.read8(ea(c)))), `r[${rt}] = bus.read8(${EA});`, true)
         default:
-          return J(i2(2, fmt("ldrsh"), (c) => (c.r[rt] = signExtend(c.bus.read16(ea(c)), 16) >>> 0)), `r[${rt}] = ((bus.read16(${EA}) << 16) >> 16) >>> 0;`, true)
+          return J(i2(2, fmt("ldrsh"), (c) => (c.r[rt] = signExtend(c.mem.read16(ea(c)), 16) >>> 0)), `r[${rt}] = ((bus.read16(${EA}) << 16) >> 16) >>> 0;`, true)
       }
     }
     const imm5 = (hw >>> 6) & 0x1f
@@ -587,31 +587,31 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       const imm = imm5 << 2
       const fmt = (name: string) => `${name} ${REG[rt]}, [${REG[rn]}, #${imm}]`
       return load
-        ? J(i2(2, fmt("ldr"), (c) => (c.r[rt] = c.bus.read32((c.r[rn] + imm) >>> 0))), `r[${rt}] = bus.read32((r[${rn}] + ${imm}) >>> 0);`, true)
-        : J(i2(2, fmt("str"), (c) => c.bus.write32((c.r[rn] + imm) >>> 0, c.r[rt])), `bus.write32((r[${rn}] + ${imm}) >>> 0, r[${rt}]);`, true)
+        ? J(i2(2, fmt("ldr"), (c) => (c.r[rt] = c.mem.read32((c.r[rn] + imm) >>> 0))), `r[${rt}] = bus.read32((r[${rn}] + ${imm}) >>> 0);`, true)
+        : J(i2(2, fmt("str"), (c) => c.mem.write32((c.r[rn] + imm) >>> 0, c.r[rt])), `bus.write32((r[${rn}] + ${imm}) >>> 0, r[${rt}]);`, true)
     }
     if (op < 0x20) {
       // STRB/LDRB (immediate) T1
       const fmt = (name: string) => `${name} ${REG[rt]}, [${REG[rn]}, #${imm5}]`
       return load
-        ? J(i2(2, fmt("ldrb"), (c) => (c.r[rt] = c.bus.read8((c.r[rn] + imm5) >>> 0))), `r[${rt}] = bus.read8((r[${rn}] + ${imm5}) >>> 0);`, true)
-        : J(i2(2, fmt("strb"), (c) => c.bus.write8((c.r[rn] + imm5) >>> 0, c.r[rt])), `bus.write8((r[${rn}] + ${imm5}) >>> 0, r[${rt}]);`, true)
+        ? J(i2(2, fmt("ldrb"), (c) => (c.r[rt] = c.mem.read8((c.r[rn] + imm5) >>> 0))), `r[${rt}] = bus.read8((r[${rn}] + ${imm5}) >>> 0);`, true)
+        : J(i2(2, fmt("strb"), (c) => c.mem.write8((c.r[rn] + imm5) >>> 0, c.r[rt])), `bus.write8((r[${rn}] + ${imm5}) >>> 0, r[${rt}]);`, true)
     }
     if (op < 0x24) {
       // STRH/LDRH (immediate) T1
       const imm = imm5 << 1
       const fmt = (name: string) => `${name} ${REG[rt]}, [${REG[rn]}, #${imm}]`
       return load
-        ? J(i2(2, fmt("ldrh"), (c) => (c.r[rt] = c.bus.read16((c.r[rn] + imm) >>> 0))), `r[${rt}] = bus.read16((r[${rn}] + ${imm}) >>> 0);`, true)
-        : J(i2(2, fmt("strh"), (c) => c.bus.write16((c.r[rn] + imm) >>> 0, c.r[rt])), `bus.write16((r[${rn}] + ${imm}) >>> 0, r[${rt}]);`, true)
+        ? J(i2(2, fmt("ldrh"), (c) => (c.r[rt] = c.mem.read16((c.r[rn] + imm) >>> 0))), `r[${rt}] = bus.read16((r[${rn}] + ${imm}) >>> 0);`, true)
+        : J(i2(2, fmt("strh"), (c) => c.mem.write16((c.r[rn] + imm) >>> 0, c.r[rt])), `bus.write16((r[${rn}] + ${imm}) >>> 0, r[${rt}]);`, true)
     }
     // STR/LDR (immediate) T2, SP-relative
     const rt8 = (hw >>> 8) & 7
     const imm = (hw & 0xff) << 2
     const fmt = (name: string) => `${name} ${REG[rt8]}, [sp, #${imm}]`
     return load
-      ? J(i2(2, fmt("ldr"), (c) => (c.r[rt8] = c.bus.read32((c.r[13] + imm) >>> 0))), `r[${rt8}] = bus.read32((r[13] + ${imm}) >>> 0);`, true)
-      : J(i2(2, fmt("str"), (c) => c.bus.write32((c.r[13] + imm) >>> 0, c.r[rt8])), `bus.write32((r[13] + ${imm}) >>> 0, r[${rt8}]);`, true)
+      ? J(i2(2, fmt("ldr"), (c) => (c.r[rt8] = c.mem.read32((c.r[13] + imm) >>> 0))), `r[${rt8}] = bus.read32((r[13] + ${imm}) >>> 0);`, true)
+      : J(i2(2, fmt("str"), (c) => c.mem.write32((c.r[13] + imm) >>> 0, c.r[rt8])), `bus.write32((r[13] + ${imm}) >>> 0, r[${rt8}]);`, true)
   }
 
   // ADR T1: 10100x
@@ -681,7 +681,7 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
         const base = sp
         for (let i = 0; i < 15; i++) {
           if (list & (1 << i)) {
-            c.bus.write32(sp, c.r[i])
+            c.mem.write32(sp, c.r[i])
             sp += 4
           }
         }
@@ -694,9 +694,12 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       const affectI = (hw & 2) !== 0
       const affectF = (hw & 1) !== 0
       return i2(1, `cps${disable ? "id" : "ie"} ${affectI ? "i" : ""}${affectF ? "f" : ""}`, (c) => {
-        if (c.control & 1) return // unprivileged: no effect
+        if (!c.privileged) return
         if (affectI) c.primask = disable ? 1 : 0
-        if (affectF) c.faultmask = disable ? 1 : 0
+        if (affectF && (!disable || c.executionPriority() > -1)) {
+          c.faultmask = disable ? 1 : 0
+          c.updateAccess()
+        }
       })
     }
     if ((opc & 0x78) === 0x50) {
@@ -722,12 +725,12 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
         let sp = c.r[13]
         for (let i = 0; i < 8; i++) {
           if (list & (1 << i)) {
-            c.r[i] = c.bus.read32(sp)
+            c.r[i] = c.mem.read32(sp)
             sp += 4
           }
         }
         if (list & 0x8000) {
-          const target = c.bus.read32(sp)
+          const target = c.mem.read32(sp)
           sp += 4
           c.r[13] = sp >>> 0
           c.branchTo(target)
@@ -788,7 +791,7 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
         let a = c.r[rn]
         for (let i = 0; i < 8; i++) {
           if (list & (1 << i)) {
-            c.r[i] = c.bus.read32(a)
+            c.r[i] = c.mem.read32(a)
             a += 4
           }
         }
@@ -799,7 +802,7 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
       let a = c.r[rn]
       for (let i = 0; i < 8; i++) {
         if (list & (1 << i)) {
-          c.bus.write32(a, c.r[i])
+          c.mem.write32(a, c.r[i])
           a += 4
         }
       }
@@ -813,8 +816,8 @@ function decode16(hw: number, addr: number, inIT: boolean): Instr {
     if (cond === 0xe) return undefinedInstr(hw, 0, 2)
     if (cond === 0xf) {
       const imm = hw & 0xff
-      return i2(1, `svc #${imm}`, () => {
-        throw new ExceptionRequest(EXC.SVCALL)
+      return i2(1, `svc #${imm}`, (c) => {
+        throw new ExceptionRequest(c.scs.escalate(EXC.SVCALL))
       })
     }
     const imm = signExtend(hw & 0xff, 8) << 1
@@ -943,7 +946,7 @@ function loadStoreMultiple(hw1: number, hw2: number, i4: I4): Instr {
       let a = c.r[rn]
       for (let i = 0; i < 15; i++) {
         if (list & (1 << i)) {
-          c.bus.write32(a, c.r[i])
+          c.mem.write32(a, c.r[i])
           a += 4
         }
       }
@@ -957,13 +960,13 @@ function loadStoreMultiple(hw1: number, hw2: number, i4: I4): Instr {
       let a = c.r[rn]
       for (let i = 0; i < 15; i++) {
         if (list & (1 << i)) {
-          c.r[i] = c.bus.read32(a)
+          c.r[i] = c.mem.read32(a)
           a += 4
         }
       }
       let target = -1
       if (list & 0x8000) {
-        target = c.bus.read32(a)
+        target = c.mem.read32(a)
         a += 4
       }
       if (w && !(list & (1 << rn))) c.r[rn] = a >>> 0
@@ -981,7 +984,7 @@ function loadStoreMultiple(hw1: number, hw2: number, i4: I4): Instr {
       const base = a
       for (let i = 0; i < 15; i++) {
         if (list & (1 << i)) {
-          c.bus.write32(a, c.r[i])
+          c.mem.write32(a, c.r[i])
           a += 4
         }
       }
@@ -995,12 +998,12 @@ function loadStoreMultiple(hw1: number, hw2: number, i4: I4): Instr {
       const base = a
       for (let i = 0; i < 15; i++) {
         if (list & (1 << i)) {
-          c.r[i] = c.bus.read32(a)
+          c.r[i] = c.mem.read32(a)
           a += 4
         }
       }
       let target = -1
-      if (list & 0x8000) target = c.bus.read32(a)
+      if (list & 0x8000) target = c.mem.read32(a)
       if (w && !(list & (1 << rn))) c.r[rn] = base
       if (target >= 0) c.branchTo(target)
     })
@@ -1020,26 +1023,26 @@ function loadStoreDualExclusiveTable(hw1: number, hw2: number, i4: I4): Instr {
     // STREX
     const imm = (hw2 & 0xff) << 2
     return i4(2, `strex ${REG[rt2]}, ${REG[rt]}, [${REG[rn]}, #${imm}]`, (c) => {
-      c.bus.write32((c.r[rn] + imm) >>> 0, c.r[rt])
+      c.mem.write32((c.r[rn] + imm) >>> 0, c.r[rt])
       c.r[rt2] = 0 // single core: always succeeds
     })
   }
   if (op1 === 0 && op2 === 1) {
     const imm = (hw2 & 0xff) << 2
     return i4(2, `ldrex ${REG[rt]}, [${REG[rn]}, #${imm}]`, (c) => {
-      c.r[rt] = c.bus.read32((c.r[rn] + imm) >>> 0)
+      c.r[rt] = c.mem.read32((c.r[rn] + imm) >>> 0)
     })
   }
   if (op1 === 1 && op2 === 0) {
     switch ((hw2 >>> 4) & 0xf) {
       case 4: // STREXB
         return i4(2, `strexb ${REG[rd2]}, ${REG[rt]}, [${REG[rn]}]`, (c) => {
-          c.bus.write8(c.r[rn], c.r[rt])
+          c.mem.write8(c.r[rn], c.r[rt])
           c.r[rd2] = 0
         })
       case 5: // STREXH
         return i4(2, `strexh ${REG[rd2]}, ${REG[rt]}, [${REG[rn]}]`, (c) => {
-          c.bus.write16(c.r[rn], c.r[rt])
+          c.mem.write16(c.r[rn], c.r[rt])
           c.r[rd2] = 0
         })
     }
@@ -1051,7 +1054,7 @@ function loadStoreDualExclusiveTable(hw1: number, hw2: number, i4: I4): Instr {
         const rm = hw2 & 0xf
         return i4(3, `tbb [${REG[rn]}, ${REG[rm]}]`, (c) => {
           const base = rd(c, rn)
-          const off = c.bus.read8((base + c.r[rm]) >>> 0)
+          const off = c.mem.read8((base + c.r[rm]) >>> 0)
           c.branchWritePc(c.pc + 4 + off * 2)
         })
       }
@@ -1060,14 +1063,14 @@ function loadStoreDualExclusiveTable(hw1: number, hw2: number, i4: I4): Instr {
         const rm = hw2 & 0xf
         return i4(3, `tbh [${REG[rn]}, ${REG[rm]}, lsl #1]`, (c) => {
           const base = rd(c, rn)
-          const off = c.bus.read16((base + c.r[rm] * 2) >>> 0)
+          const off = c.mem.read16((base + c.r[rm] * 2) >>> 0)
           c.branchWritePc(c.pc + 4 + off * 2)
         })
       }
       case 4: // LDREXB
-        return i4(2, `ldrexb ${REG[rt]}, [${REG[rn]}]`, (c) => (c.r[rt] = c.bus.read8(c.r[rn])))
+        return i4(2, `ldrexb ${REG[rt]}, [${REG[rn]}]`, (c) => (c.r[rt] = c.mem.read8(c.r[rn])))
       case 5: // LDREXH
-        return i4(2, `ldrexh ${REG[rt]}, [${REG[rn]}]`, (c) => (c.r[rt] = c.bus.read16(c.r[rn])))
+        return i4(2, `ldrexh ${REG[rt]}, [${REG[rn]}]`, (c) => (c.r[rt] = c.mem.read16(c.r[rn])))
     }
     return undefinedInstr(hw1, hw2, 4)
   }
@@ -1086,8 +1089,8 @@ function loadStoreDualExclusiveTable(hw1: number, hw2: number, i4: I4): Instr {
       // LDRD (literal)
       return i4(3, `ldrd ${REG[rt]}, ${REG[rt2]}, [pc, #${signed}]`, (c) => {
         const base = ((c.pc + 4) & ~3) + signed
-        c.r[rt] = c.bus.read32(base >>> 0)
-        c.r[rt2] = c.bus.read32((base + 4) >>> 0)
+        c.r[rt] = c.mem.read32(base >>> 0)
+        c.r[rt2] = c.mem.read32((base + 4) >>> 0)
       })
     }
     return J(
@@ -1095,8 +1098,8 @@ function loadStoreDualExclusiveTable(hw1: number, hw2: number, i4: I4): Instr {
         const base = c.r[rn]
         const offAddr = (base + signed) >>> 0
         const a = index ? offAddr : base
-        const v1 = c.bus.read32(a)
-        const v2 = c.bus.read32((a + 4) >>> 0)
+        const v1 = c.mem.read32(a)
+        const v2 = c.mem.read32((a + 4) >>> 0)
         if (wback) c.r[rn] = offAddr
         c.r[rt] = v1
         c.r[rt2] = v2
@@ -1110,8 +1113,8 @@ function loadStoreDualExclusiveTable(hw1: number, hw2: number, i4: I4): Instr {
       const base = c.r[rn]
       const offAddr = (base + signed) >>> 0
       const a = index ? offAddr : base
-      c.bus.write32(a, c.r[rt])
-      c.bus.write32((a + 4) >>> 0, c.r[rt2])
+      c.mem.write32(a, c.r[rt])
+      c.mem.write32((a + 4) >>> 0, c.r[rt2])
       if (wback) c.r[rn] = offAddr
     }),
     `const base = r[${rn}], offAddr = (base + ${signed}) >>> 0, a = ${index ? "offAddr" : "base"}; bus.write32(a, r[${rt}]); bus.write32((a + 4) >>> 0, r[${rt2}]); ${wback ? `r[${rn}] = offAddr;` : ""}`,
@@ -1526,12 +1529,12 @@ function branchesAndMisc(hw1: number, hw2: number, addr: number, _inIT: boolean,
               if (mask & 1) c.ge = (v >>> 16) & 0xf
               return
             case 1: // SP
-              if (c.control & 1) return
-              if (sysm === 8) c.setMsp(v)
-              else if (sysm === 9) c.setPsp(v)
+              if (!c.privileged) return
+              if (sysm === 8) c.setMsp(v & ~3)
+              else if (sysm === 9) c.setPsp(v & ~3)
               return
             case 2: // PRIMASK, BASEPRI, BASEPRI_MAX, FAULTMASK, CONTROL
-              if (c.control & 1) return
+              if (!c.privileged) return
               switch (sysm) {
                 case 16:
                   c.primask = v & 1
@@ -1544,6 +1547,7 @@ function branchesAndMisc(hw1: number, hw2: number, addr: number, _inIT: boolean,
                   return
                 case 19:
                   if (c.executionPriority() > -1) c.faultmask = v & 1
+                  c.updateAccess()
                   return
                 case 20:
                   c.setControl(c.ipsr === 0 ? v & 7 : (v & 5) | (c.control & 2))
@@ -1580,24 +1584,26 @@ function branchesAndMisc(hw1: number, hw2: number, addr: number, _inIT: boolean,
               if ((sysm & 4) === 0) v |= c.apsr
               break
             case 1:
-              v = sysm === 8 ? c.getMsp() : c.getPsp()
+              if (c.privileged) v = sysm === 8 ? c.getMsp() : c.getPsp()
               break
-            case 2:
+            case 2: {
+              const privileged = c.privileged
               switch (sysm) {
                 case 16:
-                  v = c.primask
+                  if (privileged) v = c.primask
                   break
                 case 17:
                 case 18:
-                  v = c.basepri
+                  if (privileged) v = c.basepri
                   break
                 case 19:
-                  v = c.faultmask
+                  if (privileged) v = c.faultmask
                   break
                 case 20:
                   v = c.control
                   break
               }
+            }
           }
           c.r[rdN] = v >>> 0
         })
@@ -1663,6 +1669,7 @@ type MemAccess = {
   /** The same two as snippets: the address expression, and the writeback statement (or ""). */
   eaJs: string
   commitJs: string
+  unprivileged?: true
 }
 
 function memAddressing(hw1: number, hw2: number, rn: number): MemAccess | null {
@@ -1703,7 +1710,7 @@ function memAddressing(hw1: number, hw2: number, rn: number): MemAccess | null {
   if (op2 === 0xc || op2 === 0xe) {
     // imm8: 1100 = negative offset, 1110 = unprivileged (T) form, same address here
     const imm = hw2 & 0xff
-    if (op2 === 0xe) return { text: `[${REG[rn]}, #${imm}]`, ea: (c) => (c.r[rn] + imm) >>> 0, commit: null, literal: false, eaJs: `((r[${rn}] + ${imm}) >>> 0)`, commitJs: "" }
+    if (op2 === 0xe) return { text: `[${REG[rn]}, #${imm}]`, ea: (c) => (c.r[rn] + imm) >>> 0, commit: null, literal: false, eaJs: `((r[${rn}] + ${imm}) >>> 0)`, commitJs: "", unprivileged: true }
     return { text: `[${REG[rn]}, #-${imm}]`, ea: (c) => (c.r[rn] - imm) >>> 0, commit: null, literal: false, eaJs: `((r[${rn}] - ${imm}) >>> 0)`, commitJs: "" }
   }
   if ((op2 & 0x9) === 0x9) {
@@ -1747,9 +1754,10 @@ function storeSingle(hw1: number, hw2: number, i4: I4): Instr {
   const width = (size === 0 ? 1 : size === 1 ? 2 : 4) as 1 | 2 | 4
   const commit = m.commit
   const ea = m.ea
+  if (m.unprivileged) return i4(2, `${name}t ${REG[rt]}, ${m.text}`, (c) => c.writeUnprivileged(ea(c), rd(c, rt), width))
   const instr = i4(2, `${name}.w ${REG[rt]}, ${m.text}`, (c) => {
     const a = ea(c)
-    c.bus.write(a, rd(c, rt), width)
+    c.mem.write(a, rd(c, rt), width)
     if (commit) commit(c)
   })
   if (rt === 15) return instr
@@ -1767,9 +1775,14 @@ function loadByteOrHint(hw1: number, hw2: number, i4: I4): Instr {
   const commit = m.commit
   const ea = m.ea
   const name = signed ? "ldrsb" : "ldrb"
+  if (m.unprivileged)
+    return i4(2, `${name}t ${REG[rt]}, ${m.text}`, (c) => {
+      const v = c.readUnprivileged(ea(c), 1)
+      c.r[rt] = signed ? signExtend(v, 8) >>> 0 : v
+    })
   return J(
     i4(2, `${name}.w ${REG[rt]}, ${m.text}`, (c) => {
-      const v = c.bus.read8(ea(c))
+      const v = c.mem.read8(ea(c))
       if (commit) commit(c)
       c.r[rt] = signed ? signExtend(v, 8) >>> 0 : v
     }),
@@ -1789,9 +1802,14 @@ function loadHalfword(hw1: number, hw2: number, i4: I4): Instr {
   const commit = m.commit
   const ea = m.ea
   const name = signed ? "ldrsh" : "ldrh"
+  if (m.unprivileged)
+    return i4(2, `${name}t ${REG[rt]}, ${m.text}`, (c) => {
+      const v = c.readUnprivileged(ea(c), 2)
+      c.r[rt] = signed ? signExtend(v, 16) >>> 0 : v
+    })
   return J(
     i4(2, `${name}.w ${REG[rt]}, ${m.text}`, (c) => {
-      const v = c.bus.read16(ea(c))
+      const v = c.mem.read16(ea(c))
       if (commit) commit(c)
       c.r[rt] = signed ? signExtend(v, 16) >>> 0 : v
     }),
@@ -1808,8 +1826,9 @@ function loadWord(hw1: number, hw2: number, i4: I4): Instr {
   if (!m) return undefinedInstr(hw1, hw2, 4)
   const commit = m.commit
   const ea = m.ea
+  if (m.unprivileged) return i4(2, `ldrt ${REG[rt]}, ${m.text}`, (c) => wrLoad(c, rt, c.readUnprivileged(ea(c), 4)))
   const instr = i4(2, `ldr.w ${REG[rt]}, ${m.text}`, (c) => {
-    const v = c.bus.read32(ea(c))
+    const v = c.mem.read32(ea(c))
     if (commit) commit(c)
     wrLoad(c, rt, v)
     if (rt === 15) c.cycles += 2
@@ -2428,8 +2447,8 @@ function fpLoadStore(hw1: number, hw2: number, dp: boolean, i4: I4): Instr {
       return JF(
         i4(2, `vldr ${regName}, [${REG[rn]}, #${off}]`, (c) => {
           const a = (base(c) + off) >>> 0
-          c.sBits[first] = c.bus.read32(a)
-          if (dp) c.sBits[first + 1] = c.bus.read32(a + 4)
+          c.sBits[first] = c.mem.read32(a)
+          if (dp) c.sBits[first + 1] = c.mem.read32(a + 4)
         }),
         `const a = (${baseJs} + ${off}) >>> 0; c.sBits[${first}] = bus.read32(a); ${dp ? `c.sBits[${first + 1}] = bus.read32(a + 4);` : ""}`,
         true,
@@ -2438,8 +2457,8 @@ function fpLoadStore(hw1: number, hw2: number, dp: boolean, i4: I4): Instr {
     return JF(
       i4(2, `vstr ${regName}, [${REG[rn]}, #${off}]`, (c) => {
         const a = (base(c) + off) >>> 0
-        c.bus.write32(a, c.sBits[first])
-        if (dp) c.bus.write32(a + 4, c.sBits[first + 1])
+        c.mem.write32(a, c.sBits[first])
+        if (dp) c.mem.write32(a + 4, c.sBits[first + 1])
       }),
       `const a = (${baseJs} + ${off}) >>> 0; bus.write32(a, c.sBits[${first}]); ${dp ? `bus.write32(a + 4, c.sBits[${first + 1}]);` : ""}`,
       true,
@@ -2456,8 +2475,8 @@ function fpLoadStore(hw1: number, hw2: number, dp: boolean, i4: I4): Instr {
     const start = p ? (c.r[rn] - 4 * count) >>> 0 : c.r[rn]
     let a = start
     for (let i = 0; i < count; i++) {
-      if (l) c.sBits[first + i] = c.bus.read32(a)
-      else c.bus.write32(a, c.sBits[first + i])
+      if (l) c.sBits[first + i] = c.mem.read32(a)
+      else c.mem.write32(a, c.sBits[first + i])
       a += 4
     }
     if (w) c.r[rn] = p ? start : a >>> 0

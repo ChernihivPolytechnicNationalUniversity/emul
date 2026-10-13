@@ -11,10 +11,11 @@
  * control word so the worker knows when to yield to its event loop.
  */
 import { chipById, STM32F429ZI } from "./chip"
-import { CpuHalt } from "./faults"
+import { CpuHalt, emulatorError } from "./faults"
+import { READS_ONLY_THE_CIRCUIT } from "./periph/gpio"
 import { Stm32, type PadRef } from "./stm32f429"
 import { PanelInstance } from "@/sim/display"
-import { CMD, CMD_BACKUP, CMD_BOOT0, CMD_RESET, CMD_STEPS, CMD_YIELD, CTL, IN_RING, OUT, OUT_HALTED, OUT_LOADED, OUT_RING, OUT_RUNNING, OUT_STOPPED, PAD_KEYS, SHM, STOP_REASONS, decodeClock, encodeDrive, statusOf, type FromCore, type ToCore } from "@/sim/core-host"
+import { CMD, CMD_BACKUP, CMD_BOOT0, CMD_RESET, CMD_STEPS, CMD_SUPPLY_KEPT, CMD_YIELD, CTL, IN_RING, OUT, OUT_HALTED, OUT_LOADED, OUT_RING, OUT_RUNNING, OUT_STOPPED, PAD_KEYS, SHM, STOP_REASONS, decodeClock, decodeSample, encodeDrive, statusOf, type FromCore, type ToCore } from "@/sim/core-host"
 
 type Port = { post(msg: FromCore, transfer?: ArrayBuffer[]): void; onMessage(cb: (msg: ToCore) => void): void }
 
@@ -48,6 +49,7 @@ const captures: { object: string; wall: number; powered: boolean }[] = []
 let statusWanted = 0
 /** Pads the circuit is wired to, the only ones reported per run. */
 let padList = new Int32Array(0)
+const readback = new Float64Array(PAD_KEYS)
 
 /** A message port ping: resolves after every task already queued (the pending messages) ran. */
 const channel = new MessageChannel()
@@ -70,6 +72,7 @@ p.onMessage((msg) => {
     case "init": {
       const chip = chipById(msg.chip) ?? STM32F429ZI
       mcu = new Stm32(chip, msg.external)
+      mcu.setWiredPads(padList)
       ctl = new Int32Array(msg.shm, 0, CTL.WORDS)
       f64 = new Float64Array(msg.shm, SHM.f64Base)
       cmdBanks = [0, 1].map((b) => f64.subarray(SHM.cmd + b * CMD.SIZE, SHM.cmd + (b + 1) * CMD.SIZE))
@@ -78,6 +81,11 @@ p.onMessage((msg) => {
       mcu.analogRead = (pad) => {
         const v = analogBank[CMD.ANALOG + pad.port * 16 + pad.pin]
         return Number.isNaN(v) ? null : v
+      }
+      mcu.analogSource = (pad) => {
+        const key = pad.port * 16 + pad.pin
+        const ohms = analogBank[CMD.SOURCE_OHMS + key]
+        return Number.isNaN(ohms) ? null : { ohms, farads: analogBank[CMD.SOURCE_FARADS + key] }
       }
       Atomics.store(ctl, CTL.READY, 1)
       break
@@ -98,6 +106,7 @@ p.onMessage((msg) => {
       break
     case "pads":
       padList = Int32Array.from(msg.keys)
+      mcu?.setWiredPads(padList)
       break
     case "status":
       statusWanted = msg.seq
@@ -212,18 +221,30 @@ function run(seq: number) {
   m.boot0 = (flags & CMD_BOOT0) !== 0
   if (flags & CMD_RESET) {
     if (cmd[CMD.BATTERY] > 0) m.runOnBattery(cmd[CMD.BATTERY])
-    m.reset("por", { backup: (flags & CMD_BACKUP) !== 0 })
+    m.reset("por", { backup: (flags & CMD_BACKUP) !== 0, supplyKept: (flags & CMD_SUPPLY_KEPT) !== 0 })
     dutyAcc.fill(-1)
   }
   m.setClockSources(decodeClock(cmd, CMD.HSE_HZ), decodeClock(cmd, CMD.LSE_HZ))
+  if (Number.isFinite(cmd[CMD.VDD])) m.setSupply(cmd[CMD.VDD])
+  if (Number.isFinite(cmd[CMD.VBAT])) m.setBattery(cmd[CMD.VBAT])
+  if (Number.isFinite(cmd[CMD.VREF])) m.setReference(cmd[CMD.VREF])
   m.yieldOnOutput = (flags & CMD_YIELD) !== 0
   const pad: PadRef = { port: 0, pin: 0 }
+  for (let key = 0; key < PAD_KEYS; key++) {
+    const code = cmd[CMD.READBACK + key] || READS_ONLY_THE_CIRCUIT
+    if (code === readback[key]) continue
+    readback[key] = code
+    pad.port = key >>> 4
+    pad.pin = key & 15
+    m.setReadback(pad, code)
+  }
   for (let key = 0; key < PAD_KEYS; key++) {
     const lv = cmd[CMD.LEVELS + key]
     if (lv === 0) continue
     pad.port = key >>> 4
     pad.pin = key & 15
-    m.setPad(pad, lv === 2)
+    const sample = decodeSample(lv)
+    m.setPad(pad, sample.level, sample.sampledUnder)
   }
   takeEdgesIn(cmd[CMD.IN_UPTO])
   const target = cmd[CMD.TARGET]
@@ -241,7 +262,7 @@ function run(seq: number) {
           return true
         })
       : 0
-    publish(parity, m.running, running ? m.stepIdd : m.supplyCurrent())
+    publish(parity, m.running, running ? m.stepIdd : m.supplyLoad())
     return
   }
   if (running) {
@@ -249,7 +270,19 @@ function run(seq: number) {
     else while (m.time < target && m.running) if (!m.runUntil(target)) break
     running = m.running
   }
-  publish(parity, running, m.supplyCurrent())
+  publish(parity, running, m.supplyLoad())
+}
+
+function haltOn(error: unknown, seq: number) {
+  const m = mcu!
+  const out = outBanks[seq & 1]
+  m.cpu.halted = emulatorError(error, m.cpu.pc)
+  out[OUT.STEPS] = Atomics.load(ctl, CTL.PROGRESS) + 1
+  try {
+    publish(seq & 1, false, 0)
+  } catch {
+    out[OUT.FLAGS] = (m.firmware ? OUT_LOADED : 0) | OUT_HALTED
+  }
 }
 
 async function main() {
@@ -272,7 +305,11 @@ async function main() {
       mail = Atomics.load(ctl, CTL.MAIL)
       await drain(mail)
     }
-    run(seen)
+    try {
+      run(seen)
+    } catch (e) {
+      haltOn(e, seen)
+    }
     Atomics.store(ctl, CTL.ACK, seen)
     Atomics.notify(ctl, CTL.ACK)
     serve()

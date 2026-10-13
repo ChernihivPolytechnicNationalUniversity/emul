@@ -1,3 +1,4 @@
+import { pinContacts } from "@/schematic/contacts"
 import { objectRect, objectSize, orientationOf, orientOffset, placedText, routeBox, type Rect, type RoutedWire } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject } from "@/schematic/types"
@@ -5,6 +6,7 @@ import type { WireColorKey } from "@/schematic/wire-colors"
 import { cssColor, paintField } from "./field-paint"
 import { readFieldPalette } from "./field-palette"
 import { MAX_PIN_LABEL_CELLS, PIN_LABEL_CELLS } from "./pin-label"
+import { monoAdvanceEm, namesUnderDocked } from "./printed-names"
 import { fixedText, type SymbolRaster, type TextRaster } from "./symbol-raster"
 
 const MAX_PIXELS = 2
@@ -89,9 +91,10 @@ export async function exportPng({ host, theme, objects, routes, grid, colorOf, s
 
   texts.setPalette(readFieldPalette(host, theme))
   const sheetText = { boost: textScale, pinSize: Math.min(MAX_PIN_LABEL_CELLS, PIN_LABEL_CELLS * textScale) }
+  const underDocked = namesUnderDocked(objects, pinContacts(objects, grid).groups, { grid, boost: textScale, advanceEm: monoAdvanceEm() })
   for (const object of objects) {
     const def = getDef(object.def)
-    const sheet = def && texts.get(def, orientationOf(object), grid, pixels, sheetText)
+    const sheet = def && texts.get(def, orientationOf(object), grid, pixels, sheetText, underDocked(object))
     if (!sheet) continue
     const stretch = pixels / sheet.scale
     const rect = objectRect(object, grid)

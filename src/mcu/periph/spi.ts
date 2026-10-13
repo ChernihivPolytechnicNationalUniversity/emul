@@ -15,6 +15,7 @@
  * Lazy like the timers and USARTs: the master's clock edges are events (see `Clocked`); the
  * slave only moves when a pin it listens to changes.
  */
+import type { AfMap } from "../chip"
 import type { Clocked } from "./clocked"
 import { RegBlock, type RegDef } from "./regblock"
 
@@ -535,8 +536,8 @@ export const SPI_SPECS: SpiSpec[] = [
 
 export type SpiPad = { port: number; pin: number; af: number; line: SpiLine }
 
-/** Pads per line (DS9405 Table 12 / DS10916 Table 13); "PD6@5" marks a pad on a different AF. */
-const PADS: Record<string, string> = {
+/** Pads per line (DS9405 Table 12); "PD6@5" marks a pad on a different AF. */
+const F42X_PADS: Record<string, string> = {
   SPI1: "NSS PA4 PA15 PG10; SCK PA5 PB3 PG11; MISO PA6 PB4 PG9; MOSI PA7 PB5 PD7 @5",
   SPI2: "NSS PB9 PB12 PI0 PB4@7; SCK PB10 PB13 PD3 PI1 PA9; MISO PB14 PC2 PI2; MOSI PB15 PC3 PI3 PC1 @5",
   SPI3: "NSS PA4 PA15; SCK PB3 PC10; MISO PB4 PC11; MOSI PB5 PC12 PD6@5 @6",
@@ -545,8 +546,19 @@ const PADS: Record<string, string> = {
   SPI6: "NSS PG8; SCK PG13; MISO PG12; MOSI PG14 @5",
 }
 
-export function spiPads(name: string): SpiPad[] {
-  const spec = PADS[name]
+const DS10916_REV5_PADS: Record<string, string> = {
+  SPI1: "NSS PA4 PA15; SCK PA5 PB3; MISO PA6 PB4; MOSI PA7 PB5 @5",
+  SPI2: "NSS PB9 PB12 PI0 PB4@7; SCK PB10 PB13 PD3 PI1 PA9; MISO PB14 PC2 PI2; MOSI PB15 PC3 PI3 PC1 @5",
+  SPI3: "NSS PA4 PA15; SCK PB3 PC10; MISO PB4 PC11; MOSI PB5 PC12 PD6@5 PB2@7 @6",
+  SPI4: "NSS PE4 PE11; SCK PE2 PE12; MISO PE5 PE13; MOSI PE6 PE14 @5",
+  SPI5: "NSS PF6 PH5; SCK PF7 PH6; MISO PF8 PH7; MOSI PF9 PF11 @5",
+  SPI6: "NSS PG8; SCK PG13; MISO PG12; MOSI PG14 @5",
+}
+
+const PADS: Record<AfMap, Record<string, string>> = { f42x: F42X_PADS, f74x: DS10916_REV5_PADS }
+
+export function spiPads(name: string, map: AfMap): SpiPad[] {
+  const spec = PADS[map][name]
   if (!spec) return []
   const at = spec.lastIndexOf("@")
   const body = spec.slice(0, at)

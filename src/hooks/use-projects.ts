@@ -5,11 +5,13 @@ import {
   lastProject,
   listProjects,
   newId,
+  parseProject,
   parseSchematic,
   readProject,
   readShare,
   sharedId,
   setLastProject,
+  schematicText,
   thumbnail,
   writeProject,
   type ProjectMeta,
@@ -61,6 +63,10 @@ function setTabProject(id: string) {
   }
 }
 
+export function announceUpgrade(notes: readonly string[]) {
+  if (notes.length) toast("Brought up to date from an older εmul", { description: notes.join(" "), duration: 15000 })
+}
+
 export function useProjects(load: (doc: Schematic) => void): Projects {
   const [current, setCurrent] = React.useState<ProjectMeta | null>(null)
   const [list, setList] = React.useState<ProjectMeta[]>([])
@@ -103,7 +109,7 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
     pending.current = null
     const m = meta.current
     if (!doc || !m || !ready.current || viewing.current) return
-    const text = JSON.stringify(doc)
+    const text = schematicText(doc)
     if (text === saved.current) return
     if (!stored.current && !doc.objects.length && !doc.library?.length) return
     saved.current = text
@@ -143,12 +149,13 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
     if (meta.current?.id === id) return
     await flush()
     const p = await readProject(id)
-    const doc = p && parseSchematic(p.text)
-    if (!p || !doc) {
+    const opened = p && parseProject(p.text)
+    if (!p || !opened) {
       toast.error("That project could not be opened")
       return void refresh()
     }
-    enter(p.meta, p.text, doc, true)
+    enter(p.meta, p.text, opened.doc, true)
+    announceUpgrade(opened.notes)
   })
 
   const create = useEvent(async (name: string, doc: Schematic = emptySchematic()) => {
@@ -158,7 +165,7 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
     const now = Date.now()
     const all = await listProjects()
     const next: ProjectMeta = { id: newId(), name: uniqueName(name, all), created: now, at: now, thumb: thumbnail(doc) }
-    const text = JSON.stringify(doc)
+    const text = schematicText(doc)
     const keep = doc.objects.length > 0 || !!doc.library?.length
     if (keep) {
       await writeProject(next, text)
@@ -237,6 +244,7 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
       return false
     }
     await visit(got.name ?? "Shared bench", got.doc)
+    announceUpgrade(got.notes)
     return true
   })
 
@@ -245,7 +253,7 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
     if (!m || !viewing.current) return
     const now = Date.now()
     const next: ProjectMeta = { ...m, name: uniqueName(m.name, await listProjects()), created: now, at: now, thumb: thumbnail(doc) }
-    const text = JSON.stringify(doc)
+    const text = schematicText(doc)
     await writeProject(next, text)
     await setLastProject(next.id)
     leaveShare()
@@ -267,9 +275,10 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
     const m = meta.current
     if (!m) return
     const p = await readProject(m.id)
-    const doc = p && parseSchematic(p.text)
-    if (!p || !doc || p.text === saved.current) return
-    enter(p.meta, p.text, doc, true)
+    const opened = p && parseProject(p.text)
+    if (!p || !opened || p.text === saved.current) return
+    enter(p.meta, p.text, opened.doc, true)
+    announceUpgrade(opened.notes)
   })
 
   const boot = useEvent(async () => {
@@ -281,9 +290,11 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
     for (const id of [tabProject(), await lastProject()]) {
       if (!id || !all.some((p) => p.id === id)) continue
       const p = await readProject(id)
-      const doc = p && parseSchematic(p.text)
-      if (!p || !doc) continue
+      const opened = p && parseProject(p.text)
+      if (!p || !opened) continue
+      const doc = opened.doc
       enter(p.meta, p.text, doc, true)
+      announceUpgrade(opened.notes)
       if (doc.objects.length && !location.pathname.startsWith("/r/"))
         toast(`“${p.meta.name}” is back`, { description: "Projects are kept in this browser only. File → Save to file keeps a copy on disk." })
       return

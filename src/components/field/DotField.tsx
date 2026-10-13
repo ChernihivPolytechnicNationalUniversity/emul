@@ -172,7 +172,7 @@ function pinAt(clientX: number, clientY: number): PinRef | null {
 }
 
 export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, projectName, children, ...props }: DotFieldProps) {
-  const { containerRef, contentRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, toWorld, isPanStart, startPan, movePan, endPan } = useViewport(grid)
+  const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, toWorld, isPanStart, startPan, movePan, endPan } = useViewport(grid)
   const marquee = useSelection(toWorld, worldPerPixel, grid)
   const { boxRef: marqueeRef } = marquee
   const sch = useSchematic(grid)
@@ -1104,7 +1104,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               data-slot="dot-field-content"
               className="absolute top-0 left-0 origin-top-left"
             >
-              {children}
+              <div ref={overlayRef} data-slot="dot-field-overlay" className="contents">
+                {children}
+              </div>
               {detail.canvas ? (
                 <>
                   <FieldCanvas objects={staticObjects} routes={staticRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedWires} />
@@ -1153,6 +1155,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 contacts={nets.contacts}
                 selected={sch.selectedObjects}
                 sheeted={onSheet}
+                routes={visibleRoutes}
                 netColor={pinNetColor}
                 onPinPointerDown={onPinPointerDown}
                 onPinPointerMove={onPinPointerMove}

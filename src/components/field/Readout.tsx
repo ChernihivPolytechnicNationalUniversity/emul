@@ -92,7 +92,7 @@ function pinContent(ref: PinRef, objects: PlacedObject[], sim: SimReadout) {
     if (i !== undefined) rows.push(["I", formatSI(Math.abs(i), "A")])
     if (v === undefined) rows.push(["V", "not on a live net"])
   }
-  const note = [pin.mcu, pin.signal && pin.signal !== pin.label ? pin.signal : undefined, pin.fn, pin.connector ? `${pin.connector} pin ${pin.connectorPin}` : undefined, pin.note]
+  const note = [pin.mcu !== pin.label ? pin.mcu : undefined, pin.signal && pin.signal !== pin.label ? pin.signal : undefined, pin.fn, pin.connector ? `${pin.connector} pin ${pin.connectorPin}` : undefined, pin.note]
     .filter(Boolean)
     .join(" · ")
   const owner = obj.props?.ref || def.name

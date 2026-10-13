@@ -13,7 +13,7 @@ import type { Schematic } from "@/schematic/types"
 import { HDL_ACCEPT, readHdlFiles } from "@/components/hdl/files"
 import { useEvent } from "@/hooks/use-event"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useProjects } from "@/hooks/use-projects"
+import { announceUpgrade, useProjects } from "@/hooks/use-projects"
 import { fileName, nameFromFile, projectFile, readProjectFile, shareLink } from "@/project/project-store"
 import { cubeBench, importNotes, readCubeProject, unsupportedChip, type ProjectEntry } from "@/project/cubemx"
 import { dropEntries, filesEntries, isProjectDrop, isZip, pickFolder } from "@/project/entries"
@@ -231,6 +231,7 @@ export default function App() {
       return
     }
     await projects.create(read.name ?? nameFromFile(file.name), read.doc)
+    announceUpgrade(read.notes)
   }
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {

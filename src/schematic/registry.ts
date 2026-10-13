@@ -1,5 +1,6 @@
 import type { ComponentDef, HdlModule, PartDef, PartState, PinDef, PinRef, PlacedObject } from "./types"
 import { hdlDef } from "./hdl"
+import { withPadClasses } from "./mcu-model"
 import { basicComponents } from "./components/basic"
 import { nucleoF429zi } from "./components/nucleo-f429zi"
 import { open746ic } from "./components/open746i-c"
@@ -14,9 +15,10 @@ import { ne555 } from "./components/ne555"
 import { hc595, hct595 } from "./components/hc595"
 import { buzzers } from "./components/buzzer"
 import { addressableComponents } from "./components/addressable"
+import { rgbLeds } from "./components/rgb-led"
 
 /** Every component the palette can place. Add a definition file and list it here. */
-export const registry: ComponentDef[] = [open746ic, nucleoF429zi, stm32f746ig, stm32f429zi, crystal, oscillator, eeprom24c, hc595, hct595, ne555, lcd7f, ...buzzers, ...addressableComponents, chargeBoostModule, ...powerIcs, ...meterComponents, ...basicComponents]
+export const registry: ComponentDef[] = [open746ic, nucleoF429zi, stm32f746ig, stm32f429zi, crystal, oscillator, eeprom24c, hc595, hct595, ne555, lcd7f, ...buzzers, ...addressableComponents, chargeBoostModule, ...powerIcs, ...meterComponents, ...basicComponents, ...rgbLeds].map(withPadClasses)
 
 const byId = new Map(registry.map((d) => [d.id, d]))
 

@@ -13,7 +13,6 @@ import type { BodyShape, ComponentDef, Element, PanelSignal, PinDef } from "../t
 
 const W = 65
 const H = 40
-/** First FFC pin's column: the module hangs centred under the board when its P15 is at 35. */
 const FFC_X = 32
 
 /** [pin, label, signal on the panel, note] */

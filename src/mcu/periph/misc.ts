@@ -8,7 +8,16 @@ import { RegBlock, type RegDef } from "./regblock"
 // --- PWR (RM0090 §5, RM0385 §4) -----------------------------------------------------------
 
 /** F7 wake-up pins WKUP1–6 (RM0385 §4.3.6), as port × 16 + pin. */
-const WKUP_V2 = [0, 2, 2 * 16 + 1, 2 * 16 + 13, 8 * 16 + 8, 8 * 16 + 11] // PA0 PA2 PC1 PC13 PI8 PI11
+export const WKUP_V2 = [0, 2, 2 * 16 + 1, 2 * 16 + 13, 8 * 16 + 8, 8 * 16 + 11] // PA0 PA2 PC1 PC13 PI8 PI11
+
+export type PvdLevels = { rising: readonly number[]; falling: readonly number[] }
+
+const CR_PVDE = 1 << 4
+const CR_PLS_SHIFT = 5
+const CR_DBP = 1 << 8
+const CSR_PVDO = 1 << 2
+const CSR_BRR = 1 << 3
+const CSR_BRE = 1 << 9
 
 /**
  * Power control: the regulator flags software polls, the low-power mode selected for the next
@@ -19,9 +28,16 @@ const WKUP_V2 = [0, 2, 2 * 16 + 1, 2 * 16 + 13, 8 * 16 + 8, 8 * 16 + 11] // PA0 
 export class Pwr extends RegBlock {
   /** Set before a reset: a power-on clears the Standby/wake-up flags, any other reset keeps them. */
   powerOn = true
+  backupDomainReset = true
   readonly map: "v1" | "v2"
+  private readonly pvdLevels: PvdLevels | null
+  private vdd: number
+  private vddBelowPvd = false
+  private pvdStoppedByStandby = false
+  onPvdOutput: (vddBelow: boolean) => void = () => {}
+  onUnsupported: (what: string) => void = () => {}
 
-  constructor(map: "v1" | "v2" = "v1") {
+  constructor(map: "v1" | "v2" = "v1", pvdLevels: PvdLevels | null = null, vdd = 3.3) {
     super(
       "PWR",
       0x40007000,
@@ -39,6 +55,8 @@ export class Pwr extends RegBlock {
           ],
     )
     this.map = map
+    this.pvdLevels = pvdLevels
+    this.vdd = vdd
   }
 
   reset() {
@@ -48,12 +66,43 @@ export class Pwr extends RegBlock {
     // SBF and the wake-up flags survive everything but a power-on (they are how firmware
     // learns it came back from Standby); so do the wake-up pin enables.
     if (!this.powerOn && this.regs) {
-      this.regs[1] = csr & (this.map === "v1" ? 0x303 : 0x202)
+      this.regs[1] = csr & (this.map === "v1" ? 0x303 : 0x202) & ~(CSR_BRE | CSR_BRR)
       if (this.map === "v2") this.regs[3] = csr2 & 0x3f3f
     }
+    if (this.backupDomainReset === false) this.regs[1] = (this.regs[1] & ~(CSR_BRE | CSR_BRR)) | (csr & (CSR_BRE | CSR_BRR))
+    this.vddBelowPvd = false
+    this.pvdStoppedByStandby = false
   }
 
-  protected onWrite(d: RegDef, next: number, _old: number, written: number): number | void {
+  backupDomainWritable(): boolean {
+    return (this.regs[0] & CR_DBP) !== 0
+  }
+  backupRegulatorOn(): boolean {
+    return (this.regs[1] & CSR_BRE) !== 0
+  }
+
+  setVdd(volts: number) {
+    this.vdd = volts
+    this.updatePvd(this.regs[0])
+  }
+  stopPvdForStandby() {
+    this.pvdStoppedByStandby = true
+  }
+
+  private updatePvd(cr: number) {
+    if (this.pvdStoppedByStandby) return
+    const enabled = (cr & CR_PVDE) !== 0
+    if (enabled && this.pvdLevels === null) this.onUnsupported("PVD: no thresholds for this part, PVDO stays 0")
+    const levels = this.pvdLevels
+    const level = (cr >>> CR_PLS_SHIFT) & 7
+    const below = enabled && levels !== null && this.vdd < (this.vddBelowPvd ? levels.rising[level] : levels.falling[level])
+    if (below === this.vddBelowPvd) return
+    this.vddBelowPvd = below
+    this.regs[1] = below ? this.regs[1] | CSR_PVDO : this.regs[1] & ~CSR_PVDO
+    this.onPvdOutput(below)
+  }
+
+  protected onWrite(d: RegDef, next: number, old: number, written: number): number | void {
     switch (d.name) {
       case "CR":
       case "CR1": {
@@ -66,7 +115,13 @@ export class Pwr extends RegBlock {
         if (this.map === "v1" && written & (1 << 2)) csr &= ~1
         if (written & (1 << 3)) csr &= ~2
         this.regs[1] = csr >>> 0
+        this.updatePvd(next)
         return next & ~0xc
+      }
+      case "CSR":
+      case "CSR1": {
+        const bre = this.backupDomainWritable() ? next & CSR_BRE : old & CSR_BRE
+        return ((next & ~(CSR_BRE | CSR_BRR)) | bre | (bre ? CSR_BRR : 0)) >>> 0
       }
       case "CR2":
         // CWUPF1–6 clear the wake-up pin flags in CSR2.

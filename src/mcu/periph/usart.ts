@@ -2,14 +2,18 @@
  * USART/UART in asynchronous mode (RM0090 §30, RM0385 §31). One shifter, two register maps:
  * the F4 ("v1": SR/DR at the top) and the F7 ("v2": ISR/ICR/RDR/TDR). The chip profile picks.
  *
- * Modelled: baud from BRR with 16× and 8× oversampling, 8/9-bit words, even/odd parity, 1/2
- * stop bits, the transmit holding and shift registers with TXE/TC, receive with start-bit
- * detection and mid-bit sampling, RXNE, overrun, framing and parity errors, IDLE, and the
- * interrupts for all of them. TX drives its pin; RX samples its pin.
+ * Modelled: baud from BRR with 16× and 8× oversampling, 7 (F7)/8/9-bit words, even/odd parity
+ * (read back in the word's MSB), 1/2 stop bits, the transmit holding and shift registers with
+ * TXE/TC, receive with start-bit detection and one mid-bit sample, RXNE, overrun, framing and
+ * parity errors, IDLE, and the interrupts for all of them. TX drives its pin; RX samples its pin.
+ * On the F7 also TX and RX level inversion, data inversion, MSB first, overrun disable, the
+ * reception-error DMA rule (DDRE) and character match (CMF).
  *
- * Not modelled: synchronous clock output, hardware flow control (CTS/RTS), LIN, IrDA,
- * smartcard, half-duplex single wire, receiver wake-up, the F7 FIFO-less extras (RTOR,
- * auto-baud, swap, inversion). DMA requests (DMAT/DMAR) are level lines the DMA polls.
+ * Not modelled, and reported when turned on: synchronous clock output, hardware flow control
+ * (CTS/RTS), LIN, IrDA, smartcard, half-duplex single wire, mute mode, break characters, and on
+ * the F7 TX/RX swap, auto-baud, receiver timeout, RS-485 driver enable and MSB first with
+ * parity. Noise detection (NF) is not modelled. DMA requests (DMAT/DMAR) are level lines the
+ * DMA polls.
  *
  * Lazy like the timers: the SoC catches the shifter up on register access, on RX pin edges
  * and at its next bit boundary; see `Clocked`.
@@ -36,9 +40,9 @@ const V1_REGS: RegDef[] = [
   { name: "GTPR", offset: 0x18, rw: 0xffff },
 ]
 const V2_REGS: RegDef[] = [
-  { name: "CR1", offset: 0x00 },
-  { name: "CR2", offset: 0x04 },
-  { name: "CR3", offset: 0x08 },
+  { name: "CR1", offset: 0x00, rw: 0x1ffffffd },
+  { name: "CR2", offset: 0x04, rw: 0xffffff70 },
+  { name: "CR3", offset: 0x08, rw: 0x000effff },
   { name: "BRR", offset: 0x0c, rw: 0xffff },
   { name: "GTPR", offset: 0x10, rw: 0xffff },
   { name: "RTOR", offset: 0x14 },
@@ -57,6 +61,7 @@ const IDLE = 1 << 4
 const RXNE = 1 << 5
 const TC = 1 << 6
 const TXE = 1 << 7
+const CMF = 1 << 17
 // CR1 bits shared by both maps (UE differs: bit 13 on v1, bit 0 on v2).
 const CR1_RE = 1 << 2
 const CR1_TE = 1 << 3
@@ -68,10 +73,37 @@ const CR1_PEIE = 1 << 8
 const CR1_PS = 1 << 9
 const CR1_PCE = 1 << 10
 const CR1_M = 1 << 12
+const CR1_CMIE = 1 << 14
 const CR1_OVER8 = 1 << 15
+const CR2_RXINV = 1 << 16
+const CR2_TXINV = 1 << 17
+const CR2_DATAINV = 1 << 18
+const CR2_MSBFIRST = 1 << 19
 const CR3_EIE = 1 << 0
 const CR3_DMAR = 1 << 6
 const CR3_DMAT = 1 << 7
+const CR3_OVRDIS = 1 << 12
+const CR3_DDRE = 1 << 13
+const RQR_RXFRQ = 1 << 3
+const RECEPTION_ERRORS = PE | FE
+
+type ModeRegister = "CR1" | "CR2" | "CR3" | "RQR"
+type UnmodelledModes = Partial<Record<ModeRegister, [bit: number, what: string][]>>
+const SHARED_CR2_MODES: [number, string][] = [[1 << 11, "synchronous mode (CK)"], [1 << 14, "LIN mode"]]
+const SHARED_CR3_MODES: [number, string][] = [[1 << 1, "IrDA mode"], [1 << 3, "half-duplex mode"], [1 << 5, "smartcard mode"], [1 << 8, "RTS flow control"], [1 << 9, "CTS flow control"]]
+const UNMODELLED_MODES: Record<UsartFlavour, UnmodelledModes> = {
+  v1: {
+    CR1: [[1 << 0, "break character (SBK)"], [1 << 1, "mute mode (RWU)"]],
+    CR2: SHARED_CR2_MODES,
+    CR3: SHARED_CR3_MODES,
+  },
+  v2: {
+    CR1: [[1 << 13, "mute mode (MME)"]],
+    CR2: [...SHARED_CR2_MODES, [1 << 15, "TX/RX pin swap (SWAP)"], [1 << 20, "auto baud rate detection (ABREN)"], [1 << 23, "receiver timeout (RTOEN)"]],
+    CR3: [...SHARED_CR3_MODES, [1 << 14, "RS-485 driver enable (DEM)"]],
+    RQR: [[1 << 1, "break character (SBKRQ)"]],
+  },
+}
 
 export class Usart extends RegBlock implements Clocked {
   readonly spec: UsartSpec
@@ -91,7 +123,7 @@ export class Usart extends RegBlock implements Clocked {
   private rxBit = -1
   private rxDue = Infinity
   private rxBits: boolean[] = []
-  private rxLevel = true
+  private rxPadLevel = true
   private rxIdleArmed = false
 
   private pclkHz = 16e6
@@ -106,6 +138,7 @@ export class Usart extends RegBlock implements Clocked {
   onActive: (on: boolean) => void = () => {}
   /** A DMA request line (TX: TXE with DMAT, RX: RXNE with DMAR) turned on. */
   onDmaRequest: (line: "tx" | "rx") => void = () => {}
+  onUnsupported: (what: string) => void = () => {}
   private active = false
   private txLevel: boolean | null = null
 
@@ -131,7 +164,7 @@ export class Usart extends RegBlock implements Clocked {
     this.txDue = Infinity
     this.rxBit = -1
     this.rxDue = Infinity
-    this.rxLevel = true
+    this.rxPadLevel = true
     this.rxIdleArmed = false
     this.setActive(false)
     this.driveTx(null)
@@ -221,11 +254,15 @@ export class Usart extends RegBlock implements Clocked {
       case "TDR":
         this.loadTx(written & 0x1ff)
         return 0
-      case "ICR":
-        this.status &= ~(written & (PE | FE | ORE | IDLE | TC))
+      case "ICR": {
+        const rxDmaBefore = this.dmaLevel("rx")
+        this.status &= ~(written & (PE | FE | ORE | IDLE | TC | CMF))
+        if (!rxDmaBefore && this.dmaLevel("rx")) this.onDmaRequest("rx")
         return 0
+      }
       case "RQR":
-        if (written & (1 << 3)) this.status &= ~RXNE // RXFRQ
+        this.reportModes("RQR", written)
+        if (written & RQR_RXFRQ) this.status &= ~RXNE
         return 0
       case "SR":
         // v1: write-zero-to-clear on RXNE and TC (the rest through the DR sequence).
@@ -234,15 +271,26 @@ export class Usart extends RegBlock implements Clocked {
       case "CR1":
       case "CR2":
       case "CR3":
-      case "BRR":
+      case "BRR": {
+        const msbFirstWithParity = this.msbFirstWithParity()
         this.regs[d.offset >>> 2] = next >>> 0
         this.refresh(d.name === "CR1" ? next & ~old : 0)
+        if (d.name !== "BRR") this.reportModes(d.name, next & ~old)
+        if (!msbFirstWithParity && this.msbFirstWithParity()) this.onUnsupported(`${this.name} MSB first with parity`)
         if (d.name === "CR3") {
           if (next & ~old & CR3_DMAT && this.status & TXE) this.onDmaRequest("tx")
-          if (next & ~old & CR3_DMAR && this.status & RXNE) this.onDmaRequest("rx")
+          if (next & ~old & CR3_DMAR && this.dmaLevel("rx")) this.onDmaRequest("rx")
         }
         return
+      }
     }
+  }
+
+  private reportModes(register: ModeRegister, raised: number) {
+    for (const [bit, what] of UNMODELLED_MODES[this.flavour][register] ?? []) if (raised & bit) this.onUnsupported(`${this.name} ${what}`)
+  }
+  private msbFirstWithParity() {
+    return (this.cr2() & CR2_MSBFIRST) !== 0 && (this.cr1() & CR1_PCE) !== 0
   }
 
   /** Configuration changed: TX idle level, interrupt lines. */
@@ -264,7 +312,7 @@ export class Usart extends RegBlock implements Clocked {
   private checkIrq() {
     const cr1 = this.cr1()
     const st = this.status
-    if ((cr1 & CR1_TXEIE && st & TXE) || (cr1 & CR1_TCIE && st & TC) || (cr1 & CR1_RXNEIE && st & (RXNE | ORE)) || (cr1 & CR1_IDLEIE && st & IDLE) || (cr1 & CR1_PEIE && st & PE) || (this.cr3() & CR3_EIE && st & (FE | ORE)))
+    if ((cr1 & CR1_TXEIE && st & TXE) || (cr1 & CR1_TCIE && st & TC) || (cr1 & CR1_RXNEIE && st & (RXNE | ORE)) || (cr1 & CR1_IDLEIE && st & IDLE) || (cr1 & CR1_PEIE && st & PE) || (cr1 & CR1_CMIE && st & CMF) || (this.cr3() & CR3_EIE && st & (FE | ORE)))
       this.raiseIrq(this.spec.irq)
   }
   private setFlag(bit: number) {
@@ -272,13 +320,14 @@ export class Usart extends RegBlock implements Clocked {
     this.status |= bit
     this.checkIrq()
     if (bit === TXE && this.cr3() & CR3_DMAT) this.onDmaRequest("tx")
-    if (bit === RXNE && this.cr3() & CR3_DMAR) this.onDmaRequest("rx")
+    if (bit === RXNE && this.dmaLevel("rx")) this.onDmaRequest("rx")
   }
 
   /** Level of a DMA request line, for the DMA controller. */
   dmaLevel(line: "tx" | "rx"): boolean {
     const cr3 = this.cr3()
-    return line === "tx" ? (cr3 & CR3_DMAT) !== 0 && (this.status & TXE) !== 0 : (cr3 & CR3_DMAR) !== 0 && (this.status & RXNE) !== 0
+    if (line === "tx") return (cr3 & CR3_DMAT) !== 0 && (this.status & TXE) !== 0
+    return (cr3 & CR3_DMAR) !== 0 && (this.status & RXNE) !== 0 && !(cr3 & CR3_DDRE && this.status & RECEPTION_ERRORS)
   }
 
   // --- transmit -----------------------------------------------------------------------------
@@ -299,14 +348,17 @@ export class Usart extends RegBlock implements Clocked {
     const bits = this.wordBits()
     const parity = this.parity()
     const dataBits = parity === "none" ? bits : bits - 1
+    const cr2 = this.cr2()
+    const msbFirst = (cr2 & CR2_MSBFIRST) !== 0
+    const inverted = (cr2 & CR2_DATAINV) !== 0
     const frame: boolean[] = [false]
     let ones = 0
     for (let i = 0; i < dataBits; i++) {
-      const b = ((data >>> i) & 1) === 1
+      const b = ((data >>> (msbFirst ? dataBits - 1 - i : i)) & 1) === 1
       if (b) ones++
-      frame.push(b)
+      frame.push(b !== inverted)
     }
-    if (parity !== "none") frame.push(parity === "even" ? ones % 2 === 1 : ones % 2 === 0)
+    if (parity !== "none") frame.push((parity === "even" ? ones % 2 === 1 : ones % 2 === 0) !== inverted)
     const stop = this.stopBits()
     for (let i = 0; i < Math.ceil(stop); i++) frame.push(true)
     this.txFrame = frame
@@ -322,19 +374,19 @@ export class Usart extends RegBlock implements Clocked {
   }
 
   private driveTx(level: boolean | null) {
-    if (this.txLevel === level) return
-    this.txLevel = level
-    this.onTx(level)
+    const pin = level === null ? null : level !== ((this.cr2() & CR2_TXINV) !== 0)
+    if (this.txLevel === pin) return
+    this.txLevel = pin
+    this.onTx(pin)
   }
 
   // --- receive ------------------------------------------------------------------------------
 
   /** The RX pad changed level (the SoC calls this after syncing the block). */
   rxEdge(level: boolean) {
-    if (level === this.rxLevel) return
-    this.rxLevel = level
+    this.rxPadLevel = level
     if (!this.enabled() || !(this.cr1() & CR1_RE)) return
-    if (this.rxBit < 0 && !level) {
+    if (this.rxBit < 0 && !this.rxLine()) {
       // Start bit: sample the data bits at their centres, 1.5 bit times from this edge on.
       this.rxBit = 0
       this.rxBits = []
@@ -344,13 +396,17 @@ export class Usart extends RegBlock implements Clocked {
     }
   }
 
+  private rxLine() {
+    return this.rxPadLevel !== ((this.cr2() & CR2_RXINV) !== 0)
+  }
+
   private rxFrameBits() {
     const bits = this.wordBits()
     return bits + (this.stopBits() >= 1 ? 1 : 0) // parity is inside the word; one stop bit is checked
   }
 
   private sampleRx() {
-    this.rxBits.push(this.rxLevel)
+    this.rxBits.push(this.rxLine())
     this.rxBit++
     if (this.rxBit < this.rxFrameBits()) {
       this.rxDue = this.bitCycles()
@@ -360,30 +416,38 @@ export class Usart extends RegBlock implements Clocked {
     const bits = this.wordBits()
     const parity = this.parity()
     const dataBits = parity === "none" ? bits : bits - 1
-    let data = 0
+    const cr2 = this.cr2()
+    const cr3 = this.cr3()
+    const msbFirst = (cr2 & CR2_MSBFIRST) !== 0
+    const inverted = (cr2 & CR2_DATAINV) !== 0
+    let word = 0
     let ones = 0
     for (let i = 0; i < dataBits; i++) {
-      if (this.rxBits[i]) {
-        data |= 1 << i
+      if (this.rxBits[i] !== inverted) {
+        word |= 1 << (msbFirst ? dataBits - 1 - i : i)
         ones++
       }
     }
     let flags = 0
     if (parity !== "none") {
-      const p = this.rxBits[dataBits]
-      if (p) ones++
+      if (this.rxBits[dataBits] !== inverted) {
+        word |= 1 << dataBits
+        ones++
+      }
       if ((parity === "even" && ones % 2 !== 0) || (parity === "odd" && ones % 2 !== 1)) flags |= PE
     }
     if (this.stopBits() >= 1 && !this.rxBits[bits]) flags |= FE
-    if (this.status & RXNE) flags |= ORE
-    else this.rdr = data
+    const withheldFromDma = this.flavour === "v2" && (flags & RECEPTION_ERRORS) !== 0 && (cr3 & CR3_DMAR) !== 0 && !(cr3 & CR3_DDRE)
+    if (!(this.status & RXNE) || cr3 & CR3_OVRDIS) this.rdr = word
+    else if (!withheldFromDma) flags |= ORE
+    if (this.flavour === "v2" && (word & 0xff) === cr2 >>> 24) flags |= CMF
     this.rxBit = -1
     this.rxDue = Infinity
     // IDLE is flagged when the line stays high for a frame after the last stop bit.
     this.rxDue = this.rxIdleArmed ? this.bitCycles() * (bits + 1) : Infinity
     this.rxBit = -2
     this.status |= flags
-    this.setFlag(RXNE)
+    if (!withheldFromDma) this.setFlag(RXNE)
     if (flags) this.checkIrq()
     this.updateActive()
   }
@@ -430,7 +494,7 @@ export class Usart extends RegBlock implements Clocked {
           // Idle line after a frame.
           this.rxBit = -1
           this.rxDue = Infinity
-          if (this.rxLevel) this.setFlag(IDLE)
+          if (this.rxLine()) this.setFlag(IDLE)
         } else {
           const carry = this.rxDue
           this.sampleRx()
@@ -462,7 +526,7 @@ export const USART_SPECS: UsartSpec[] = [
 
 export type UsartPad = { port: number; pin: number; af: number; dir: "tx" | "rx" }
 
-/** TX/RX pads (DS9405 Table 12 / DS10916 Table 13; the Nucleo-144 header map agrees). */
+/** TX/RX pads (DS9405 Table 12 / DS10916 Rev 5 Table 12; the Nucleo-144 header map agrees). */
 const PADS: Record<string, string> = {
   USART1: "TX PA9 PB6; RX PA10 PB7 @7",
   USART2: "TX PA2 PD5; RX PA3 PD6 @7",

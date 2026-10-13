@@ -50,6 +50,7 @@ function shapePoints(shape: BodyShape): Point[] {
   if (shape.type === "text") return []
   if (shape.type === "rect") return [{ x: shape.x, y: shape.y }, { x: shape.x + shape.w, y: shape.y + shape.h }]
   if (shape.type === "circle") return [{ x: shape.cx - shape.r, y: shape.cy - shape.r }, { x: shape.cx + shape.r, y: shape.cy + shape.r }]
+  if (shape.type === "soon") return [{ x: shape.x, y: shape.y }, { x: shape.x + shape.w, y: shape.y + shape.h }]
   return pathPoints(shape.d)
 }
 

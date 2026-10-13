@@ -1,3 +1,5 @@
+import { easeFactor, FIRST_FRAME_MS, frameClock, progress } from "./easing"
+
 const FLOW_MIN = 1e-5
 const FLOW_TAU = 300
 const WEIGHT_GAIN = 0.8
@@ -29,13 +31,14 @@ export class WireFlow {
   private shown = new Map<string, number>()
   private targetWeight = new Map<string, number>()
   private nowWeight = new Map<string, number>()
-  private at = 0
+  private pushedAt = 0
+  private slideFrom = Number.NaN
   private span = 50
   private live = false
   private paused = false
   private scale = 1
   private raf = 0
-  private frameAt = 0
+  private sinceLastFrame = frameClock()
 
   /** A stable ref callback per wire, so React never detaches and re-attaches on a re-render. */
   bodyRef(id: string): Ref {
@@ -67,8 +70,9 @@ export class WireFlow {
 
   push(currents: ReadonlyMap<string, number>, phases: ReadonlyMap<string, number>, live: boolean, paused: boolean) {
     const now = performance.now()
-    this.span = this.at ? Math.min(250, Math.max(16, now - this.at)) : 50
-    this.at = now
+    this.span = this.pushedAt ? Math.min(250, Math.max(16, now - this.pushedAt)) : 50
+    this.pushedAt = now
+    this.slideFrom = Number.NaN
     this.from = new Map(this.shown)
     this.to = phases
     this.targetWeight = new Map()
@@ -99,10 +103,10 @@ export class WireFlow {
 
   start() {
     if (this.raf) return
-    this.frameAt = performance.now()
+    this.sinceLastFrame = frameClock()
     const frame = (now: number) => {
       this.raf = 0
-      if (this.tick(now)) this.raf = requestAnimationFrame(frame)
+      if (this.advance(now)) this.raf = requestAnimationFrame(frame)
     }
     this.raf = requestAnimationFrame(frame)
   }
@@ -113,36 +117,32 @@ export class WireFlow {
     this.raf = 0
   }
 
-  /** One frame; returns whether anything is still moving and the loop should go on. */
-  private tick(now: number): boolean {
-    const dt = now - this.frameAt
-    this.frameAt = now
-    const k = 1 - Math.exp(-dt / FLOW_TAU)
-    const slide = Math.min(1, (now - this.at) / this.span)
-    let moving = false
+  private advance(now: number): boolean {
+    const k = easeFactor(this.sinceLastFrame(now), FLOW_TAU)
+    if (Number.isNaN(this.slideFrom)) this.slideFrom = now - FIRST_FRAME_MS
+    const slide = progress(now - this.slideFrom, this.span)
+    let unfinished = false
 
     for (const [id, dash] of this.dashes) {
       const target = this.targetWeight.get(id) ?? 0
       const prev = this.nowWeight.get(id) ?? 0
       const w = target === 0 ? 0 : Math.abs(target - prev) < SETTLED ? target : prev + (target - prev) * k
-      if (w !== prev) {
-        this.nowWeight.set(id, w)
-        moving = true
-      }
+      if (w !== prev) this.nowWeight.set(id, w)
+      if (w !== target) unfinished = true
       this.paint(id, dash, this.bodies.get(id), w)
       if (w === 0 || this.paused) continue
 
       const to = this.to.get(id)
       if (to === undefined) continue
       const at = this.from.get(id) ?? to
-      const pos = at + (to - at) * slide
+      const pos = slide < 1 ? at + (to - at) * slide : to
+      if (pos !== to) unfinished = true
       if (pos !== this.shown.get(id)) {
         this.shown.set(id, pos)
         dash.style.strokeDashoffset = String(-pos * this.scale)
-        moving = true
       }
     }
-    return moving
+    return unfinished
   }
 
   private paint(id: string, dash: SVGPathElement, body: SVGPathElement | undefined, w: number) {

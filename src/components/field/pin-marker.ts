@@ -1,5 +1,20 @@
 import { cn } from "@/lib/utils"
+import { switchContacts } from "@/schematic/printed-text"
 import type { ComponentDef, PinKind } from "@/schematic/types"
+
+export const SWITCH_CONTACT_CELLS = 0.12
+const SAME_POINT_CELLS = 1e-3
+
+const onSwitchContacts = new WeakMap<ComponentDef, ReadonlySet<string>>()
+
+export function pinsOnSwitchContacts(def: ComponentDef): ReadonlySet<string> {
+  const cached = onSwitchContacts.get(def)
+  if (cached) return cached
+  const contacts = def.parts.flatMap((part) => (part.type === "switch" ? switchContacts(part).slice(0, part.throws ? 3 : 2) : []))
+  const found = new Set(def.pins.filter((pin) => contacts.some((c) => Math.hypot(c.x - pin.x, c.y - pin.y) < SAME_POINT_CELLS)).map((pin) => pin.id))
+  onSwitchContacts.set(def, found)
+  return found
+}
 
 const PIN_FILL: Record<PinKind, string> = {
   power: "fill-red-500",

@@ -5,20 +5,24 @@ import type { ClockSource } from "@/mcu/periph/rcc"
 import { crystalStartup } from "@/schematic/components/clock"
 import { parseValue } from "./units"
 import { DT } from "./speeds"
-import { Engine, switchClosed, type Failure, type PartReader, type PinReader, type ProbeReading, type Reading, type TraceChunk } from "./engine"
+import { Engine, R_PULL, switchClosed, type Failure, type PartReader, type PinReader, type ProbeReading, type Reading, type TraceChunk } from "./engine"
 import { wireCurrents } from "./flow"
-import { buildNetlist, GROUND, type GpioState } from "./netlist"
+import { buildNetlist, GROUND, type GpioState, type Resolved } from "./netlist"
 import { UartDecoder, uartFrameEdges, uartFrameSeconds, type Edge } from "./serial"
+import { bounceFlips, bounceSeed } from "./bounce"
+import { nextPulseEdge, pulseHigh, pulseTiming, type PulseEdge, type PulseTiming } from "./pulse"
 import { createDigitalPart, type DigitalPart } from "./digital"
 import { PanelInstance } from "./display"
-import { LocalCore, makeCore, type CoreHost, type CoreStatus, type CoreTransport, type PanelWiring } from "./core-host"
+import { isAdcPad } from "@/mcu/periph/adc"
+import { LocalCore, makeCore, PAD_KEYS, type CoreHost, type CoreStatus, type CoreTransport, type PanelWiring } from "./core-host"
+import { NO_READBACK, PadRelease, releaseKind, Surroundings } from "./readback"
 import type { BreakpointSpec, CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 
 /**
  * Shortest press a button registers, in simulated seconds. A mouse click can come and go
  * between two solver batches; a finger on a real button cannot, so the release is held back.
  */
-const MIN_PRESS = 0.02
+const MIN_PRESS = 0.05
 /** STM32 power-on reset threshold (DS9405/DS10916 VPOR/PDR ≈ 1.7 V); below it the core is held in reset. */
 const VDD_POR = 1.7
 /** NRST input low threshold: the reset pin is a Schmitt input like any other (VIL 0.3 VDD). */
@@ -38,9 +42,11 @@ const FLOW_SPEED = 40
 const FLOW_MAX_SPEED = 220
 const FLOW_SPEED_REUSE = 1e-3
 
-/** Schmitt thresholds of an STM32 input, as a fraction of VDD (DS9405: VIL 0.3 VDD, VIH 0.7 VDD). */
-const VIH = 0.7 * 3.3
-const VIL = 0.3 * 3.3
+const LOGIC_HIGH = 0.7 * 3.3
+const LOGIC_LOW = 0.3 * 3.3
+const PIPELINED_PULSE_LEAD_STEPS = 4
+const FOLLOWS_WITHIN = DT / 2
+const SOURCE_REFRESH = 1e-3
 
 /** A serial terminal on the field: what it has received, and where its bits go. */
 class TerminalInstance {
@@ -90,10 +96,20 @@ class DigitalNet {
   pulls: number[] = []
   /** Logic-analyser probes (indices into the probe list) watching this net. */
   logic: number[] = []
+  lone = false
   /** A terminal's TX: its frames arrive as levels ahead of time (`sendSerial`), never from the analog side. */
   terminal = false
+  source = false
+  sampled = false
   constructor(node: number) {
     this.node = node
+  }
+  padsOnly() {
+    return !this.terminal && !this.source && this.parts.length === 0 && this.rx.length === 0
+  }
+  driven() {
+    for (const d of this.drivers.values()) if (d.level !== null) return true
+    return false
   }
   resolve(): boolean {
     let strongHigh = false
@@ -139,12 +155,32 @@ export type McuStatus = CoreStatus & {
   firmware: string
   /** VDD is up; below the power-on threshold the core is held in reset. */
   powered: boolean
+  reference: string | null
+}
+
+const VREF_MIN_VOLTS = 1.7
+const VREF_UNDER_VDDA_MAX_VOLTS = 1.2
+const VREF_OVER_VDDA_TOLERANCE_VOLTS = 0.01
+
+export type ReferenceWiring = { grounded: boolean; wired: boolean }
+
+export function referenceProblem(volts: number, vdda: number, { grounded, wired }: ReferenceWiring): string | null {
+  const at = (v: number) => `${v.toFixed(2)} V`
+  if (grounded) return "VREF+ grounded: no ADC/DAC reference"
+  if (!wired && volts < VREF_MIN_VOLTS) return "VREF+ floating: no ADC/DAC reference"
+  if (volts < VREF_MIN_VOLTS) return `VREF+ at ${at(volts)}: under the ${VREF_MIN_VOLTS} V the ADC and DAC need (DS10916 Tables 63 and 74)`
+  if (!(vdda > 0)) return null
+  if (volts > vdda + VREF_OVER_VDDA_TOLERANCE_VOLTS) return `VREF+ at ${at(volts)}: above VDDA (${at(vdda)}), which DS10916 Table 63 does not allow`
+  if (vdda - volts >= VREF_UNDER_VDDA_MAX_VOLTS) return `VREF+ at ${at(volts)}: ${VREF_UNDER_VDDA_MAX_VOLTS} V or more under VDDA (${at(vdda)}), outside DS10916 Table 63`
+  return null
 }
 
 /** A clock source found on an MCU's oscillator pins; an oscillator module only runs while its VCC net is up. */
 type ClockFeed = { source: ClockSource | null; vccNet?: number }
 
 /** An emulated MCU sitting on a board object, with the map from model nodes to its pads. */
+type PadInput = { pad: PadRef; node: number; key: string; digital: boolean; gpio: Extract<Resolved, { kind: "GPIO" }> }
+
 class McuInstance {
   mcu: CoreHost
   /** Model node ("CN7-10", "$PB7") → pad. */
@@ -154,11 +190,22 @@ class McuInstance {
    * `digital` marks nets fed by the exact-time path (a terminal or another core), which the
    * analog sampler then leaves alone: its 20 µs quantization would mangle the bits.
    */
-  inputs: { pad: PadRef; node: number; key: string; digital: boolean }[] = []
+  inputs: PadInput[] = []
   /** Net index by pad (port*16+pin) for the same pads. */
   padNode = new Map<number, number>()
   /** The same inputs by pad (port*16+pin), for the duty sampling of PWM pads. */
-  inputByPad = new Map<number, { pad: PadRef; node: number; key: string; digital: boolean }>()
+  inputByPad = new Map<number, PadInput>()
+  readonly release: (PadRelease | undefined)[] = new Array<PadRelease | undefined>(PAD_KEYS)
+  readonly readback = new Map<number, number>()
+  readonly sourceStamps = new Map<number, { engine: Engine; count: number; time: number }>()
+  readonly solvedDrive: GpioState[] = new Array<GpioState>(PAD_KEYS).fill(null)
+  private readonly pulls = new Map<number, "pullup" | "pulldown" | null>()
+  pullOf(pad: PadRef) {
+    const key = pad.port * 16 + pad.pin
+    const drive = this.mcu.padDrive(pad)
+    if (drive === "pullup" || drive === "pulldown" || drive === null) this.pulls.set(key, drive)
+    return this.pulls.get(key) ?? null
+  }
   /**
    * Level to present for pads that switched within the step just run (PWM faster than the
    * analog step), by model node. Sampled at a random instant of the step, so over many steps
@@ -220,8 +267,13 @@ class McuInstance {
   boot0Net: number | undefined = undefined
   /** Net of VBAT (undefined: unsolved or absent, treated as VDD: nothing survives an outage). */
   vbatNet: number | undefined = undefined
+  vrefNet: number | undefined = undefined
+  vrefWired = false
+  vref: number | undefined = undefined
+  vdda = 0
   /** Engine time VDD went down, while the backup domain is living on VBAT. */
   offAt: number | null = null
+  heldByResetPin = false
   /** What the circuit puts on OSC_IN/OSC_OUT and OSC32_IN/OSC32_OUT (a board's own parts, or crystals wired to a bare chip). */
   hse: ClockFeed = { source: null }
   lse: ClockFeed = { source: null }
@@ -247,7 +299,13 @@ class McuInstance {
   }
 
   status(): McuStatus {
-    return { ...this.mcu.status(), firmware: this.name, powered: this.powered }
+    const reference = this.vref === undefined || this.vrefNet === undefined ? null : referenceProblem(this.vref, this.vdda, { grounded: this.vrefNet === GROUND, wired: this.vrefWired })
+    return { ...this.mcu.status(), firmware: this.name, powered: this.powered, reference }
+  }
+
+  setReference(volts: number) {
+    this.vref = volts
+    this.mcu.setReference(volts)
   }
 }
 
@@ -309,7 +367,7 @@ export type Snapshot = {
   pinVoltage: Record<string, number>
   pinVoltageRms: Record<string, number>
   /** LED states by partKey. */
-  parts: Record<string, PartState & { level: number }>
+  parts: Record<string, PartState & { level: number; amps?: number }>
   /** Amps per wire id, positive from `wire.from` to `wire.to`; the mean since the last snapshot. */
   wireCurrent: Record<string, number>
   /** Mean |amps| per wire over the same interval: what flows, whichever way it went. */
@@ -360,7 +418,8 @@ export class SimLoop {
   /** Simulated time each part was pressed at, and releases waiting for MIN_PRESS to pass. */
   private pressedAt = new Map<string, number>()
   private heldReleases = new Map<string, PartState>()
-  private bounceTime = new Map<string, { time: number; field: "pressed" | "on" }>()
+  private bounceTime = new Map<string, { time: number; field: "pressed" | "on"; seedKey: string }>()
+  private bounceTransitions = new Map<string, number>()
   private bouncing = new Map<string, { state: PartState; field: "pressed" | "on"; flips: number[] }>()
   private probes: Probe[] = []
   private mcus = new Map<string, McuInstance>()
@@ -388,6 +447,7 @@ export class SimLoop {
   spawnCore: (() => CoreTransport) | null = (globalThis as { __emulSpawnCore?: () => CoreTransport }).__emulSpawnCore ?? null
   /** Nets on the exact-time path, by net index. */
   private digitalNets = new Map<number, DigitalNet>()
+  private pulses: { id: string; net: DigitalNet; node: number; timing: PulseTiming; next: PulseEdge | null }[] = []
   private joined = new Map<number, number>()
   private links: { a: number; b: number; key: string; closed: "on" | "pressed" | "off" }[] = []
   private linkState = ""
@@ -586,7 +646,7 @@ export class SimLoop {
         // the backup domain keeps its time, the rest of the bench does not notice.
         if (reflash) {
           inst.mcu.boot0 = false
-          inst.mcu.reset({ backup: true })
+          inst.mcu.reset({ backup: true, supplyKept: true })
         } else inst.go = true
         inst.base = this.engine?.time ?? 0
         this.mapInputs()
@@ -646,6 +706,9 @@ export class SimLoop {
       inst.resetNet = def?.mcuReset ? engine.net.pinNet.get(pinKey(inst.object, def.mcuReset)) : undefined
       inst.boot0Net = def?.mcuBoot0 ? engine.net.pinNet.get(pinKey(inst.object, def.mcuBoot0)) : undefined
       inst.vbatNet = def?.mcuVbat ? engine.net.pinNet.get(pinKey(inst.object, def.mcuVbat)) : undefined
+      const vrefPin = def?.mcuVref ? pinKey(inst.object, def.mcuVref) : undefined
+      inst.vrefNet = vrefPin ? engine.net.pinNet.get(vrefPin) : undefined
+      inst.vrefWired = inst.vrefNet !== undefined && [...engine.net.pinNet].some(([key, net]) => net === inst.vrefNet && key !== vrefPin)
       if (def) {
         inst.hse = def.mcuClocks ? { source: def.mcuClocks.hse } : this.oscillatorFeed(inst.object, def, "PH0", "PH1")
         inst.lse = def.mcuClocks ? { source: def.mcuClocks.lse } : this.oscillatorFeed(inst.object, def, "PC14", "PC15")
@@ -656,7 +719,7 @@ export class SimLoop {
         if (el.kind !== "GPIO" || el.object !== inst.object) continue
         const pad = inst.pads.get(el.nodeKey)
         if (pad) {
-          const input = { pad, node: el.node, key: el.nodeKey, digital: false }
+          const input = { pad, node: el.node, key: el.nodeKey, digital: false, gpio: el }
           inst.inputs.push(input)
           inst.padNode.set(pad.port * 16 + pad.pin, el.node)
           inst.inputByPad.set(pad.port * 16 + pad.pin, input)
@@ -669,7 +732,7 @@ export class SimLoop {
     const root = (node: number) => this.joined.get(node) ?? node
     const members = new Map<number, number[]>()
     for (const [node, r] of this.joined) members.set(r, [...(members.get(r) ?? []), node])
-    // Nets on the digital path: shared by two cores, at a terminal, or at a digital part.
+    // Nets on the digital path: two pads on one net (of two cores, or one core's pads wired together), at a terminal, or at a digital part.
     const nets = new Map<number, DigitalNet>()
     const netFor = (node: number) => {
       let n = nets.get(node)
@@ -689,8 +752,10 @@ export class SimLoop {
     for (const inst of this.mcus.values())
       for (const { pad, node } of inst.inputs) padsByNet.set(root(node), [...(padsByNet.get(root(node)) ?? []), { inst, pad }])
     const shared = new Set<number>()
-    for (const [node, pads] of padsByNet) if (new Set(pads.map((p) => p.inst)).size > 1) shared.add(node)
+    for (const [node, pads] of padsByNet) if (pads.length > 1) shared.add(node)
     for (const node of shared) netFor(node)
+    const pulseSources = engine ? this.logicPulseSources(engine).filter((s) => padsByNet.has(root(s.node)) && this.followsItsSource(engine, s.el, root(s.node), root)) : []
+    for (const s of pulseSources) netFor(root(s.node)).source = true
     for (const t of this.terminals.values()) {
       t.rxNet = engine?.net.pinNet.get(pinKey(t.object, "RX"))
       t.txNet = engine?.net.pinNet.get(pinKey(t.object, "TX"))
@@ -739,6 +804,7 @@ export class SimLoop {
     this.senseWiring(engine)
     for (const [node, n] of nets) {
       n.pads = padsByNet.get(node) ?? []
+      n.lone = n.pads.length === 1 && n.padsOnly()
       if (engine)
         for (const el of engine.net.elements) {
           if (el.kind !== "R" || root(el.a) === root(el.b)) continue
@@ -750,8 +816,9 @@ export class SimLoop {
       if (this.digitalNets.has(node) || n.terminal) for (const probe of n.logic) this.logicLevel[probe] = probe * 2 + (n.terminal || n.level ? 1 : 0)
     }
     if (relink && engine) {
+      const pulseDrivers = new Set(this.pulses.map((p) => p.id))
       for (const old of this.digitalNets.values())
-        for (const [id, d] of old.drivers) nets.get(root(d.node))?.drivers.set(id, d)
+        for (const [id, d] of old.drivers) if (!pulseDrivers.has(id)) nets.get(root(d.node))?.drivers.set(id, d)
     }
     this.digitalNets = nets
     if (this.freshParts.size && engine) {
@@ -776,10 +843,11 @@ export class SimLoop {
       inst.partPads.clear()
       const watch: number[] = []
       for (const i of inst.inputs) {
-        i.digital = nets.has(root(i.node))
+        const net = nets.get(root(i.node))
+        i.digital = net !== undefined && !net.lone
         // Plain GPIO edges on those nets travel exactly too (a bit-banged chip select, a
         // bit-banged UART into the terminal), so they keep their order against the serial ones.
-        if (i.digital) watch.push(i.pad.port * 16 + i.pad.pin)
+        if (net) watch.push(i.pad.port * 16 + i.pad.pin)
         if (shared.has(root(i.node))) inst.coupled = true
         if (partNets.has(root(i.node))) inst.partPads.add(i.pad.port * 16 + i.pad.pin)
       }
@@ -790,20 +858,108 @@ export class SimLoop {
       // A part answers an edge at the edge's own time, so the core must hand edges over as it makes them.
       inst.mcu.yieldOnOutput = inst.coupled || inst.partPads.size > 0
     }
+    this.mapReadback(engine, nets, root)
     // A relocated core is a new host: the panels wired to it must point at the new one.
     for (const panel of this.panels.values())
       for (const [signal, w] of panel.wired) {
         const inst = padsByNet.get(root(engine!.net.pinNet.get(pinKey(panel.object, Object.entries(panel.spec.signals).find(([, s]) => s === signal)![0]))!))?.[0]
         if (inst && inst.inst.mcu !== w.host) panel.wired.set(signal, { host: inst.inst.mcu, pad: w.pad })
       }
+    this.pulses = []
+    if (engine)
+      for (const s of pulseSources) {
+        const timing = pulseTiming(s.el)
+        const pulse = { id: `${s.el.object}/pulse`, net: nets.get(root(s.node))!, node: s.node, timing, next: nextPulseEdge(engine.time, timing) }
+        this.pulses.push(pulse)
+        this.setDriver(pulse.net, pulse.id, pulseHigh(engine.time, s.el), engine.time, true, s.node)
+      }
     if (relink && engine)
       for (const n of nets.values()) {
-        if (!n.drivers.size) continue
+        if (!n.drivers.size || (n.lone && !n.driven())) continue
         const level = n.resolve()
         if (level === n.level) continue
         n.level = level
         this.deliverLevel(n, level, engine.time)
       }
+  }
+
+  private logicPulseSources(engine: Engine) {
+    const sources: { el: Extract<Resolved, { kind: "V" }>; node: number }[] = []
+    for (const el of engine.net.elements) {
+      if (el.kind !== "V" || el.shape !== "pulse" || el.minus !== GROUND) continue
+      if (el.value > LOGIC_LOW || el.value + el.amplitude < LOGIC_HIGH) continue
+      const node = engine.net.pinNet.get(pinKey(el.object, "+"))
+      if (node !== undefined && node !== GROUND) sources.push({ el, node })
+    }
+    return sources
+  }
+
+  private followsItsSource(engine: Engine, source: Extract<Resolved, { kind: "V" }>, net: number, root: (node: number) => number): boolean {
+    const { elements, pinNet, nodeNet } = engine.net
+    const onNet = (node: number | undefined) => node !== undefined && node !== GROUND && root(node) === net
+    const pads = new Set(elements.flatMap((el) => (el.kind === "GPIO" && onNet(el.node) ? [el.id] : [])))
+    const padOwns = (el: Resolved) => {
+      const cut = el.id.indexOf("$")
+      return cut > 0 && pads.has(el.id.slice(0, cut))
+    }
+    let rint = 0
+    let conductance = 0
+    let capacitance = 0
+    for (const el of elements) {
+      const ends = el.kind === "R" || el.kind === "C" || el.kind === "L" || el.kind === "SW" ? [el.a, el.b] : el.keys.map((key) => pinNet.get(key) ?? nodeNet.get(key))
+      const touching = ends.filter(onNet).length
+      if (touching === 0) continue
+      if (el.object === source.object) {
+        if (el.kind === "R") rint = el.value
+      } else if (el.kind === "GPIO") {
+        if (!pads.has(el.id)) return false
+        conductance += 1 / (el.pull || R_PULL)
+      } else if (padOwns(el)) {
+        if (el.kind === "C") capacitance += el.value
+      } else if (el.kind === "SW") {
+        if (touching === 1 && switchClosed(el.closed, this.readPart(partKey(el.object, el.part)))) conductance += 1 / el.ron
+      } else if (el.kind === "R" || el.kind === "C") {
+        if (touching === 2) continue
+        if (el.kind === "R") conductance += 1 / el.value
+        else capacitance += el.value
+      } else return false
+    }
+    const lost = (source.amplitude * rint * conductance) / (1 + rint * conductance)
+    return source.value + lost <= LOGIC_LOW && source.value + source.amplitude - lost >= LOGIC_HIGH && rint * capacitance <= FOLLOWS_WITHIN
+  }
+
+  private drivePulses(until: number) {
+    this.dispatching++
+    for (const pulse of this.pulses)
+      while (pulse.next && pulse.next.time < until) {
+        const edge = pulse.next
+        this.queueEdge(edge.time, () => this.setDriver(pulse.net, pulse.id, edge.level, edge.time, true, pulse.node))
+        pulse.next = nextPulseEdge(edge.time, pulse.timing)
+      }
+    this.dispatching--
+    this.flushPartEdges()
+  }
+
+  private mapReadback(engine: Engine | null, nets: Map<number, DigitalNet>, root: (node: number) => number) {
+    const surroundings = engine ? new Surroundings(engine.net, LINK_OHMS, this.readPart) : null
+    for (const inst of this.mcus.values()) {
+      inst.release.fill(undefined)
+      const codes = new Map<number, number>()
+      for (const i of inst.inputs) {
+        const net = nets.get(root(i.node))
+        if (!surroundings || (net && !net.lone)) continue
+        const key = i.pad.port * 16 + i.pad.pin
+        const release = new PadRelease(surroundings.of(i.gpio))
+        inst.release[key] = release
+        codes.set(key, release.code)
+      }
+      for (const key of inst.readback.keys()) if (!codes.has(key)) inst.mcu.setReadback({ port: key >>> 4, pin: key & 15 }, NO_READBACK)
+      inst.readback.clear()
+      for (const [key, code] of codes) {
+        inst.readback.set(key, code)
+        inst.mcu.setReadback({ port: key >>> 4, pin: key & 15 }, code)
+      }
+    }
   }
 
   private senseWiring(engine: Engine | null) {
@@ -940,39 +1096,57 @@ export class SimLoop {
   private refreshReleased(engine: Engine, time: number) {
     this.dispatching++
     for (const n of this.digitalNets.values()) {
-      let up = false
-      let down = false
-      for (const other of n.pulls) {
-        const v = other === GROUND ? 0 : engine.v[other]
-        if (v > VIH) up = true
-        else if (v < VIL) down = true
-      }
-      for (const { inst, pad } of n.pads) {
-        const d = inst.mcu.padDrive(pad)
-        if (d === "pullup") up = true
-        else if (d === "pulldown") down = true
-      }
-      n.released = up ? true : down ? false : null
-      if (n.drivers.size === 0 && !n.terminal && (n.parts.length || n.logic.length)) {
+      const released = this.releasedLevel(engine, n)
+      const changed = released !== n.released
+      n.released = released
+      if ((n.drivers.size === 0 || (n.lone && !n.driven())) && !n.terminal && (n.parts.length || n.logic.length)) {
         const v = n.node === GROUND ? 0 : engine.v[n.node]
-        const level = v > VIH ? true : v < VIL ? false : n.level
+        const level = v > LOGIC_HIGH ? true : v < LOGIC_LOW ? false : n.level
         if (level !== n.level) {
           n.level = level
           this.deliverLevel(n, level, time, true)
         }
         for (const { part, pin } of n.parts) if (part.thresholds) this.thresholdInput(part, pin, v, time)
+      } else if (changed && n.drivers.size) {
+        const level = n.resolve()
+        if (level !== n.level) {
+          n.level = level
+          this.deliverLevel(n, level, time)
+        }
       }
     }
     this.dispatching--
     this.flushPartEdges()
   }
 
+  private releasedLevel(engine: Engine, n: DigitalNet): boolean | null {
+    if (n.lone) {
+      const { inst, pad } = n.pads[0]
+      const release = inst.release[pad.port * 16 + pad.pin]
+      if (release) return release.releasedLevel()
+    }
+    let up = false
+    let down = false
+    for (const other of n.pulls) {
+      const v = other === GROUND ? 0 : engine.v[other]
+      if (v > LOGIC_HIGH) up = true
+      else if (v < LOGIC_LOW) down = true
+    }
+    for (const { inst, pad } of n.pads) {
+      const pull = inst.pullOf(pad)
+      if (pull === "pullup") up = true
+      else if (pull === "pulldown") down = true
+    }
+    return up ? true : down ? false : null
+  }
+
   /** One driver on a net changed: re-resolve, and tell everyone if the level moved. */
   private setDriver(net: DigitalNet, driver: string, level: boolean | null, time: number, strong: boolean, node: number) {
     net.drivers.set(driver, { level, strong, node })
     const resolved = net.resolve()
-    if (resolved === net.level) return
+    if (resolved === net.level && !net.sampled) return
     net.level = resolved
+    net.sampled = false
     this.deliverLevel(net, resolved, time)
   }
 
@@ -980,10 +1154,11 @@ export class SimLoop {
   private deliverLevel(net: DigitalNet, level: boolean, time: number, analog = false) {
     this.dispatching++
     for (const probe of net.logic) this.logEdge(probe, level, time)
-    for (const p of net.pads) {
-      if (net.parts.length) p.inst.keepInStep()
-      p.inst.drive(p.pad, level, time - p.inst.offset)
-    }
+    if (!net.lone)
+      for (const p of net.pads) {
+        if (net.parts.length) p.inst.keepInStep()
+        p.inst.drive(p.pad, level, time - p.inst.offset)
+      }
     for (const t of net.rx) t.decoder.edge({ time, level })
     for (const { part, pin } of net.parts) {
       if (part.thresholds) {
@@ -1155,6 +1330,7 @@ export class SimLoop {
         if (inst.padVersion !== version) {
           version = inst.padVersion
           drive = inst.mcu.padDrive(pad)
+          inst.solvedDrive[pad.port * 16 + pad.pin] = drive
         }
         return drive
       }
@@ -1173,16 +1349,46 @@ export class SimLoop {
   }
 
   /** After a solver step, feed the node voltages back into the MCU input registers. */
+  private refreshSource(inst: McuInstance, engine: Engine, pad: PadRef, node: number) {
+    const key = pad.port * 16 + pad.pin
+    const stamp = inst.sourceStamps.get(key)
+    const count = engine.factorizationCount
+    if (stamp && stamp.engine === engine && (stamp.count === count || engine.time - stamp.time < SOURCE_REFRESH)) return
+    const source = node === GROUND ? { ohms: 0, farads: 0 } : engine.sourceAt(node)
+    inst.mcu.setAnalogSource(pad, source?.ohms ?? NaN, source?.farads ?? NaN)
+    inst.sourceStamps.set(key, { engine, count, time: engine.time })
+  }
+
   private sampleInputs(engine: Engine) {
     for (const inst of this.mcus.values()) {
       if (!inst.mcu.loaded) continue
-      for (const { pad, node, digital } of inst.inputs) {
+      const { rising, falling } = inst.mcu.chip.electrical.inputThresholdsOfVdd
+      const supply = inst.powerNet === undefined ? inst.mcu.chip.electrical.vdd : inst.powerNet === GROUND ? 0 : engine.v[inst.powerNet]
+      const high = rising * supply
+      const low = falling * supply
+      for (const { pad, node, digital, key } of inst.inputs) {
         const v = node === GROUND ? 0 : engine.v[node]
         // The ADC samples the pad's net as the last solve left it (a step old at most).
         inst.mcu.setAnalog(pad, v)
-        if (digital && inst.digitalPads.has(pad.port * 16 + pad.pin)) continue
-        if (v > VIH) inst.mcu.setPad(pad, true)
-        else if (v < VIL) inst.mcu.setPad(pad, false)
+        const padKey = pad.port * 16 + pad.pin
+        if (isAdcPad(pad.port, pad.pin)) this.refreshSource(inst, engine, pad, node)
+        if (digital && inst.digitalPads.has(padKey)) {
+          const net = this.digitalNet(node)
+          if (!net || !net.padsOnly() || net.driven()) continue
+          net.sampled = true
+        }
+        const release = inst.release[padKey]
+        let under: GpioState | undefined
+        if (release) {
+          under = (inst.sampled.size && inst.sampled.get(key)) || inst.solvedDrive[padKey]
+          const kind = releaseKind(under)
+          if (kind && release.observe(kind, v, high, low)) {
+            inst.readback.set(padKey, release.code)
+            inst.mcu.setReadback(pad, release.code)
+          }
+        }
+        if (v > high) inst.mcu.setPad(pad, true, under)
+        else if (v < low) inst.mcu.setPad(pad, false, under)
       }
     }
   }
@@ -1193,10 +1399,10 @@ export class SimLoop {
     for (const key of new Set([...Object.keys(parts), ...Object.keys(this.parts)])) {
       const was = (this.bouncing.get(key)?.state ?? this.parts[key])?.pressed ?? false
       const is = parts[key]?.pressed ?? false
-      if (is && !was) {
-        this.pressedAt.set(key, now)
+      if (is) {
+        if (!was) this.pressedAt.set(key, now)
         this.heldReleases.delete(key)
-      } else if (!is && was && now - (this.pressedAt.get(key) ?? -Infinity) < MIN_PRESS) {
+      } else if (was && now - (this.pressedAt.get(key) ?? -Infinity) < MIN_PRESS) {
         // Too quick: keep it pressed and let the release through once the press has lasted.
         this.heldReleases.set(key, parts[key] ?? {})
         next[key] = { ...(parts[key] ?? {}), pressed: true }
@@ -1204,6 +1410,7 @@ export class SimLoop {
     }
     const prev = this.parts
     this.parts = next
+    this.padsDirty = true
     for (const key of this.bounceTime.keys()) this.startBounce(key, prev[key], now)
     // Touch panels and the like: the part's state goes to the digital part behind it.
     for (const [key, state] of Object.entries(parts)) {
@@ -1233,9 +1440,21 @@ export class SimLoop {
     }
   }
 
-  private syncBounce() {
+  private settleBounces() {
     for (const [key, b] of this.bouncing) this.parts = { ...this.parts, [key]: b.state }
     this.bouncing.clear()
+  }
+
+  private settleContacts() {
+    this.settleBounces()
+    for (const [key, state] of this.heldReleases) this.parts = { ...this.parts, [key]: state }
+    this.heldReleases.clear()
+    this.pressedAt.clear()
+    this.bounceTransitions.clear()
+  }
+
+  private syncBounce() {
+    this.settleBounces()
     this.bounceTime.clear()
     for (const obj of this.doc.objects) {
       const def = getDef(obj.def)
@@ -1245,8 +1464,10 @@ export class SimLoop {
       const time = parseValue(props.tbounce ?? "")
       if (!(time > 0)) continue
       for (const p of def.parts) {
-        if (p.type === "button") this.bounceTime.set(partKey(obj.id, p.id), { time, field: "pressed" })
-        else if (p.type === "switch") this.bounceTime.set(partKey(obj.id, p.id), { time, field: "on" })
+        if (def.bounces && !def.bounces.includes(p.id)) continue
+        const seedKey = `${props.ref ?? obj.id}:${p.id}`
+        if (p.type === "button") this.bounceTime.set(partKey(obj.id, p.id), { time, field: "pressed", seedKey })
+        else if (p.type === "switch") this.bounceTime.set(partKey(obj.id, p.id), { time, field: "on", seedKey })
       }
     }
   }
@@ -1260,8 +1481,9 @@ export class SimLoop {
       if (cur) cur.state = state
       return
     }
-    const n = 2 * (2 + Math.floor(Math.random() * 5))
-    const flips = Array.from({ length: n }, () => now + b.time * Math.random() ** 2).sort((x, y) => x - y)
+    const transition = this.bounceTransitions.get(key) ?? 0
+    this.bounceTransitions.set(key, transition + 1)
+    const flips = bounceFlips(bounceSeed(b.seedKey, transition), now, b.time)
     this.bouncing.set(key, { state, field: b.field, flips })
   }
 
@@ -1272,7 +1494,10 @@ export class SimLoop {
       if (i) b.flips = b.flips.slice(i)
       const value = b.flips.length % 2 ? !b.state[b.field] : !!b.state[b.field]
       if (!b.flips.length) this.bouncing.delete(key)
-      if (!!this.parts[key]?.[b.field] !== value) this.parts = { ...this.parts, [key]: { ...b.state, [b.field]: value } }
+      if (!!this.parts[key]?.[b.field] !== value) {
+        this.parts = { ...this.parts, [key]: { ...b.state, [b.field]: value } }
+        this.padsDirty = true
+      }
     }
   }
 
@@ -1405,7 +1630,7 @@ export class SimLoop {
   resetCore(object: string) {
     const inst = this.mcus.get(object)
     if (!inst?.mcu.loaded) return
-    inst.mcu.reset({ backup: true })
+    inst.mcu.reset({ backup: true, supplyKept: true })
     inst.base = this.engine?.time ?? 0
     inst.digitalPads.clear()
   }
@@ -1451,9 +1676,11 @@ export class SimLoop {
     this.stale = true
     this.last = null
     this.rate = null
+    this.settleContacts()
     for (const inst of this.mcus.values()) {
       inst.burnt = false
       inst.powered = false
+      inst.heldByResetPin = false
       inst.mcu.reset()
       inst.digitalPads.clear()
       inst.base = 0
@@ -1594,13 +1821,18 @@ export class SimLoop {
         const nrst = inst.resetNet === undefined ? Infinity : inst.resetNet === GROUND ? 0 : engine.v[inst.resetNet]
         // The backup domain lives on VBAT: with it up through an outage the RTC keeps counting.
         const vbatUp = inst.vbatNet !== undefined && inst.vbatNet !== GROUND && engine.v[inst.vbatNet] > VBAT_MIN
-        if (vdd < Math.max(VDD_POR, inst.mcu.porThreshold) || nrst < NRST_LOW) {
+        const outage = vdd < Math.max(VDD_POR, inst.mcu.porThreshold)
+        if (outage || nrst < NRST_LOW) {
           if (inst.powered) {
             inst.powered = false
-            const outage = vdd < Math.max(VDD_POR, inst.mcu.porThreshold)
-            inst.mcu.reset({ backup: outage && vbatUp })
+            inst.heldByResetPin = !outage
+            inst.mcu.reset(outage ? { backup: vbatUp } : { backup: true, supplyKept: true })
             inst.offAt = outage && vbatUp ? engine.time : null
             inst.digitalPads.clear()
+          } else if (outage && inst.heldByResetPin) {
+            inst.heldByResetPin = false
+            inst.mcu.reset({ backup: vbatUp })
+            inst.offAt = vbatUp ? engine.time : null
           } else if (inst.offAt !== null && !vbatUp) {
             // The battery went too while VDD was down: the backup domain is gone.
             inst.mcu.reset()
@@ -1614,10 +1846,17 @@ export class SimLoop {
           inst.mcu.boot0 = !inst.go && this.boot0High(inst)
           inst.go = false
           if (inst.offAt !== null) inst.mcu.runOnBattery(engine.time - inst.offAt)
-          inst.mcu.reset({ backup: inst.offAt !== null })
+          inst.mcu.reset(inst.heldByResetPin ? { backup: true, supplyKept: true } : { backup: inst.offAt !== null })
+          inst.heldByResetPin = false
           inst.offAt = null
           inst.base = engine.time
         }
+        if (Number.isFinite(vdd)) {
+          inst.vdda = vdd
+          inst.mcu.setSupply(vdd)
+        }
+        if (inst.vbatNet !== undefined) inst.mcu.setBattery(inst.vbatNet === GROUND ? 0 : engine.v[inst.vbatNet])
+        if (inst.vrefNet !== undefined) inst.setReference(inst.vrefNet === GROUND ? 0 : engine.v[inst.vrefNet])
         // An oscillator module clocks only while its own supply is up.
         const feed = (f: ClockFeed) => (f.vccNet === undefined || (f.vccNet !== GROUND && engine.v[f.vccNet] > OSC_VCC_MIN) ? f.source : null)
         inst.mcu.setClockSources(feed(inst.hse), feed(inst.lse))
@@ -1627,6 +1866,7 @@ export class SimLoop {
         inst.offset = inst.base
         if (inst.mcu.running) active.push(inst)
       }
+      if (this.pulses.length) this.drivePulses(engine.time + DT * (this.pipelined ? PIPELINED_PULSE_LEAD_STEPS : 1))
       if (this.pendingEdges.length && !this.dispatching) this.flushPartEdges()
       if (this.sensed.length) this.senseSupplies(engine.time)
       if (this.digitalNets.size) this.refreshReleased(engine, engine.time)
@@ -1836,7 +2076,7 @@ export class SimLoop {
       // stopped code left them for as long as the eye cares to look.
       const i = paused && !this.running ? engine.diodeI[index] : engine.diodeAvg[index]
       const level = i < LED_DARK ? 0 : Math.min(1, i / LED_FULL)
-      parts[partKey(el.object, el.part)] = { on: level > 0.05, level }
+      parts[partKey(el.object, el.part)] = { on: level > 0.05, level, amps: i }
     })
     for (const part of this.digitalParts.values()) {
       const lit = part.parts?.()
