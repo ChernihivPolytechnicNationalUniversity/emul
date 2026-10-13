@@ -2,13 +2,13 @@
 
 ## Layout
 
-- `src/mcu/` — the emulator: `cpu.ts`, `decode.ts`, `jit.ts` (blocks compiled to JavaScript), `scs.ts` (NVIC/SysTick/SCB), `bus.ts`, `periph/*`, `chip.ts` (profiles), `stm32f429.ts` (the SoC class `Stm32`), `debugger.ts` (breakpoints and stepping, beside the core), `core-worker.ts` (one core in a worker of its own)
+- `src/mcu/` — the emulator: `cpu.ts`, `decode.ts`, `jit.ts` (blocks compiled to JavaScript), `scs.ts` (NVIC/SysTick/SCB), `mpu.ts` (the MPU and the unprivileged PPB rule, checked in front of the bus only while they can refuse something), `bus.ts`, `periph/*`, `chip.ts` (profiles), `stm32f429.ts` (the SoC class `Stm32`), `debugger.ts` (breakpoints and stepping, beside the core), `core-worker.ts` (one core in a worker of its own)
 - `src/sim/` — analog engine (`engine.ts`), netlist, the co-simulation loop (`loop.ts`) and its worker, `core-host.ts` (a core in this thread or in a worker, over a SharedArrayBuffer), digital parts (`digital.ts`)
 - `src/schematic/` — component definitions (`components/*`), examples, geometry, `mcu-model.ts`; wiring in `nets.ts` (the net map), `wiring.ts` (connect, tap), `wire-colors.ts` (palette, shortcuts, the automatic rule)
 - `src/debug/` — the debugger's reading of an image: `dwarf/*` (DWARF 2–5: units, line programs, range and location lists, call frame information, expressions, macros), `lines.ts` (the line table, shared by the core and the editor), `info.ts`, `unwind.ts`, `values.ts` and `eval.ts` (values and C expressions over a stop's memory), `disasm.ts`, `sources.ts` (where a file the image names comes from); `session.ts` is the UI's controller for the whole bench
 - `src/components/` — the React UI; `code/` is the editor panel (Monaco, explorer, tabs, build output), `debug/` its debugger toolbar and panes
 - `src/project/` — a board's firmware project: file operations that mirror the API's rules, the template, the build-service client, and the STM32 project import and export (`cubemx.ts` reads the `.ioc` and decides what to keep; `entries.ts` turns a picked folder, a drop or a `.zip` into files, `.zip`s through `src/lib/zip.ts`; `cubeide.ts` makes an STM32CubeIDE project from a board's code, its `.cproject` and `.project` from the templates in `cubeide/`, the drivers and the build service's files from the site's `/st/` through `st-sources`' index)
-- `firmware/` — test firmware and HAL apps (`hal/Src/main.c` blink, `square.c`, `pwm.c`, `uart.c`, `spi.c`, `spi-slave.c`, `i2c.c`, `dma.c`, `adc.c`, `wdg.c`), the lab's CubeIDE project (`lab1/`), the Open746I-C demos (`lcd/`), and their built images in `examples/` for the test scripts; the site bundles the sources as the examples' projects (`src/schematic/projects.ts`)
+- `firmware/` — test firmware and HAL apps (`hal/Src/main.c` blink, `square.c`, `pwm.c`, `uart.c`, `spi.c`, `spi-slave.c`, `i2c.c`, `dma.c`, `adc.c`, `wdg.c`), the lab's CubeIDE project (`lab1/`), the Open746I-C demos (`lcd/`), the ADC benches (`adc/`: an idle core for register-level tests, the sample-and-hold scan, the lecturer's F767 ADC exemplar ported), the labs' variants (`labs/`), and their built images in `examples/` for the test scripts; the site bundles the sources as the examples' projects (`src/schematic/projects.ts`)
 - `scripts/` — the test drivers above
 - `backend/` — the services below: `api/`, `worker/` (firmware builds, and HDL synthesis in a second image), `shared/`
 
@@ -125,11 +125,22 @@ the reset, jumped to 6.2 V and burnt the pin. Capacitors in a resonance are not 
 Digital parts with a supply of their own (the 74HC595) declare its model nodes (`supply`) and get `sense` called
 each step with their VCC and their pin voltages: power-on and power-off, VCC out of range, an input sitting
 between VIL and VIH. On a net nothing drives digitally, such a part reads the voltage against its own
-`thresholds` instead of the 3.3 V STM32 levels the loop uses for everything else; on a net an MCU or another part
+`thresholds` instead of the generic 3.3 V levels (0.3 and 0.7 of 3.3 V) the loop uses for other parts — an MCU pad
+reads against its own chip's thresholds at its own supply (`ChipElectrical.inputThresholdsOfVdd`); on a net an MCU or another part
 drives, it gets the exact-time edges like any digital part — unless the voltage there, held for two steps, says
 the opposite of what the driver claims (a 2 V chip's high on a 6 V chip's input), in which case it takes the
 voltage and warns. Its pins are GPIO elements switching to its internal VCC and GND rails, with a drive resistance
 that scales with its supply, rated against its own ground.
+
+An MCU pad on a net nobody else drives on the exact-time path reads its own drive change at
+once, inside the core's run, rather than a solver step later: its driven level, or, released, the
+level its net settles to (`src/sim/readback.ts`). The loop works that release level out per pad
+and per kind of release (pulled up, pulled down, floating) from the solver's last step that left
+the pad released that way, or from the pad's own pull on a net with nothing else on it, and only
+for a net that settles within 1 µs — a floating net, a slow one and a level inside the Schmitt
+band keep the input as it was. The core then drops a solver sample taken while the pad drove
+otherwise. A net the logic analyser watches is such a net too: watching it changes nothing the
+firmware reads. Nets with another driver on them get each edge resolved by the loop, as above.
 
 Edges digital parts produce carry their propagation delay, so they are dispatched in time order: while a level is
 being delivered (and while the loop thresholds analog nets or senses supplies), a part's new edges wait in a queue
@@ -271,6 +282,15 @@ per-kind index lists instead of every element (strike checks, the switch mask, t
 operating-point memo's arrays, caching each part's heating factor per step length, and caching a wire's marker
 speed while its current holds within 0.1 %.
 
+The same factors give the ADC its source. An ADC-capable pad's driving-point resistance is one
+substitution with a unit vector at its node (`Engine.sourceAt`), less the companion conductance of
+the capacitors on that node, whose capacitance is reported beside it; the loop hands both to the
+core with the pad's voltage (`CoreHost.setAnalogSource`, two more sections of a worker's command
+bank) whenever the factors change, at most once a millisecond on a nonlinear circuit. The ADC
+charges its sampling capacitor through them in closed form over the sampling time (`heldVolts`
+in `src/mcu/periph/adc.ts`), so a source impedance the solver sees only at 20 µs still acts
+within the sub-microsecond window.
+
 ## Threads
 
 The UI thread draws; the simulation worker runs the analog solver, the digital parts and the
@@ -280,6 +300,16 @@ solver — pad and pin levels cross with 20 µs of latency, which the inspector 
 worker (pipelined)"). A core with a digital part on its nets (an I²C EEPROM, the GT911) drops
 into step with the loop while that traffic lasts, and two cores sharing a net stay in the
 solver's thread in lockstep. Without isolation everything runs in the simulation worker.
+
+The loop waits on a worker's answer with `Atomics.wait`, so a worker that never answers would
+freeze the whole bench: no time, no Pause, no Start over. Two things keep that from happening.
+An error inside a run — the emulator's own, not the firmware's — halts that core with
+"emulator error: …" as its reason, in a worker or in this thread, and the worker answers as
+usual. And a worker that still does not answer within 10 s is given up on: its core halts as
+"the core's worker stopped answering" and stays halted, and the bench runs on without it
+(`tests/sim/core-failure.test.ts`). A core is not run at all until its worker has started
+(`ready`): a browser cannot start a nested worker while its parent is blocked, which is how
+Compile on a running board deadlocked before.
 
 ## The debugger
 

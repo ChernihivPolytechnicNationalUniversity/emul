@@ -20,14 +20,11 @@ a firmware or circuit test, and its row in `docs/coverage.md` flipped; then it l
 - [ ] **Open746I-C tech debt** — what the stand still cannot do, in order of how soon a lab will need it:
   - the accessory boards from the box as components: DP83848 Ethernet, USB3300 ULPI, WM8960 audio, Micro SD, OV2640
     camera, W25QXX flash, 10 DOF IMU, SN65HVD230 CAN, Analog Test Board — each with its firmware and a scenario;
-  - the 2×40 pin ports P16–P21 as pins (an I/O that is only there cannot be wired today);
-  - JMP2 (USART1 ↔ CP2102) and JMP5 (A4/A5 ↔ PB9/PB8) as switches (a closed switch now carries the exact-time path);
-  - USB OTG data lines (device/host, MIC2075 VBUS switch on PE2/PE3, VBUS LED); CP2102 CTS/RTS and flow control;
-  - the 4.3" LCD with XPT2046 touch on P14; VREF+ jumper (external ADC reference); JTAG/SWD.
+  - USB OTG data lines (device/host, MIC2025 VBUS switch on PE2/PE3, VBUS LED); CP2102 CTS/RTS and flow control;
+  - the 4.3" LCD with XPT2046 touch on P14; JTAG/SWD.
 - [ ] **MCU long tail** — CAN, USB OTG, Ethernet, SDIO/SDMMC, SAI, QSPI, CRC, RNG, as a lab needs one: register model
   in `src/mcu/periph/`, attached in `Stm32`, clocked from its bus, pins through the GPIO alternate-function hook,
   interrupts through the NVIC; reported by name in the inspector until then.
-- [ ] **MPU enforcement** — MemManage faults on region violations, so the CubeMX MPU config is real.
 - [ ] **SD card (SPI mode)** — later, if a lab needs it.
 - [ ] **Cloud projects** — sign-in through digituni SSO, projects on the server and on every device; a teacher hands
   out a lab template, a student submits their project, the teacher opens the submission; owner/editor/viewer rights.
