@@ -1,0 +1,17 @@
+{
+ "source": "CIE 1931 chromaticity coordinates of spectrum loci, 2 degree observer (CIE 018:2019, Table 6), DOI 10.25039/CIE.DS.mifmy4x4",
+ "url": "https://files.cie.co.at/Publications-datasets/CIE_cc_1931_2deg.csv",
+ "sha256": "5a3f0582ea0907867c7a2718051bbdc04f39e758d8c09e628930efc62386e399",
+ "rows": "the dominant wavelengths of the three dies and 1 nm either side (the datasheet's wavelength tolerance)",
+ "xy": {
+  "464": [0.13737, 0.0374],
+  "465": [0.1355, 0.03988],
+  "466": [0.13351, 0.04269],
+  "524": [0.10602, 0.82918],
+  "525": [0.11416, 0.82621],
+  "526": [0.12235, 0.82277],
+  "629": [0.70656, 0.29338],
+  "630": [0.70792, 0.29203],
+  "631": [0.70923, 0.29072]
+ }
+}
