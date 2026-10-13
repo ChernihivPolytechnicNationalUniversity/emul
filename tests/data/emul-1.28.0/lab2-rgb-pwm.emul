@@ -1,0 +1,225 @@
+{
+  "format": "emul-project",
+  "version": 1,
+  "name": "Лабораторна робота 2, прошивка lab2-v3",
+  "schematic": {
+    "objects": [
+      {
+        "id": "4cf48c3c-fb1f-4248-bdb7-3326547b31a2",
+        "def": "open746i-c",
+        "x": 0,
+        "y": 0,
+        "props": {
+          "ref": "U1"
+        }
+      },
+      {
+        "id": "b222ce17-3c18-421b-8024-fa15f2c187c9",
+        "def": "resistor",
+        "x": -240,
+        "y": 576,
+        "props": {
+          "ref": "R3",
+          "value": "220 Ω",
+          "power": "0.25"
+        }
+      },
+      {
+        "id": "53ac772d-14e8-418f-9125-719bd7c77693",
+        "def": "led",
+        "x": -432,
+        "y": 576,
+        "props": {
+          "ref": "VD1G",
+          "value": "green",
+          "imax": "30 mA"
+        },
+        "mirror": true
+      },
+      {
+        "id": "5831f8b0-74d7-4e12-85fb-8d20b1261e02",
+        "def": "ground",
+        "x": -552,
+        "y": 624,
+        "props": {}
+      },
+      {
+        "id": "ed711c82-1b50-4514-b9fd-3c9854765bdc",
+        "def": "resistor",
+        "x": -240,
+        "y": 744,
+        "props": {
+          "ref": "R2",
+          "value": "270 Ω",
+          "power": "0.25"
+        }
+      },
+      {
+        "id": "7a853e1d-b5f2-434e-9f7b-8616079517cc",
+        "def": "led",
+        "x": -432,
+        "y": 744,
+        "props": {
+          "ref": "VD1R",
+          "value": "red",
+          "imax": "30 mA"
+        },
+        "mirror": true
+      },
+      {
+        "id": "f4c97226-7f51-4eda-ba05-8d867efadba2",
+        "def": "ground",
+        "x": -552,
+        "y": 792,
+        "props": {}
+      },
+      {
+        "id": "6a44c8aa-a306-4fec-b51d-5081513c9163",
+        "def": "resistor",
+        "x": 432,
+        "y": 1392,
+        "props": {
+          "ref": "R4",
+          "value": "43 Ω",
+          "power": "0.25"
+        }
+      },
+      {
+        "id": "b8c66862-c1cf-4aea-b93c-4d4c0476b097",
+        "def": "led",
+        "x": 624,
+        "y": 1392,
+        "props": {
+          "ref": "VD1B",
+          "value": "blue",
+          "imax": "30 mA"
+        }
+      },
+      {
+        "id": "c2412023-fc73-49b9-a8c6-e6d5b6a2a354",
+        "def": "ground",
+        "x": 768,
+        "y": 1440,
+        "props": {}
+      }
+    ],
+    "wires": [
+      {
+        "id": "e525d60c-dc09-491c-bd74-3396015cdaa2",
+        "from": {
+          "object": "4cf48c3c-fb1f-4248-bdb7-3326547b31a2",
+          "pin": "P4-3"
+        },
+        "to": {
+          "object": "b222ce17-3c18-421b-8024-fa15f2c187c9",
+          "pin": "2"
+        },
+        "points": [
+          {
+            "x": -24,
+            "y": 600
+          },
+          {
+            "x": -24,
+            "y": 744
+          }
+        ]
+      },
+      {
+        "id": "694711fb-2c4a-4d6a-b884-5c4b8da4f358",
+        "from": {
+          "object": "b222ce17-3c18-421b-8024-fa15f2c187c9",
+          "pin": "1"
+        },
+        "to": {
+          "object": "53ac772d-14e8-418f-9125-719bd7c77693",
+          "pin": "1"
+        }
+      },
+      {
+        "id": "4fddcab5-1047-427e-b679-c219a1f0ac58",
+        "from": {
+          "object": "53ac772d-14e8-418f-9125-719bd7c77693",
+          "pin": "2"
+        },
+        "to": {
+          "object": "5831f8b0-74d7-4e12-85fb-8d20b1261e02",
+          "pin": "GND"
+        }
+      },
+      {
+        "id": "4076fb94-8e7f-4ebe-b1f7-ba872efb9fe8",
+        "from": {
+          "object": "4cf48c3c-fb1f-4248-bdb7-3326547b31a2",
+          "pin": "P4-5"
+        },
+        "to": {
+          "object": "ed711c82-1b50-4514-b9fd-3c9854765bdc",
+          "pin": "2"
+        }
+      },
+      {
+        "id": "a41dd83d-d579-4e59-8587-706d567c8458",
+        "from": {
+          "object": "ed711c82-1b50-4514-b9fd-3c9854765bdc",
+          "pin": "1"
+        },
+        "to": {
+          "object": "7a853e1d-b5f2-434e-9f7b-8616079517cc",
+          "pin": "1"
+        }
+      },
+      {
+        "id": "ed083634-feac-40e0-9cf7-df5ff7b64a49",
+        "from": {
+          "object": "7a853e1d-b5f2-434e-9f7b-8616079517cc",
+          "pin": "2"
+        },
+        "to": {
+          "object": "f4c97226-7f51-4eda-ba05-8d867efadba2",
+          "pin": "GND"
+        }
+      },
+      {
+        "id": "d46121ea-a732-4215-b0ae-89ab86c18677",
+        "from": {
+          "object": "4cf48c3c-fb1f-4248-bdb7-3326547b31a2",
+          "pin": "P12-5"
+        },
+        "to": {
+          "object": "6a44c8aa-a306-4fec-b51d-5081513c9163",
+          "pin": "1"
+        },
+        "points": [
+          {
+            "x": 312,
+            "y": 1416
+          }
+        ]
+      },
+      {
+        "id": "6eb65016-dcec-4016-8502-74505710fe18",
+        "from": {
+          "object": "6a44c8aa-a306-4fec-b51d-5081513c9163",
+          "pin": "2"
+        },
+        "to": {
+          "object": "b8c66862-c1cf-4aea-b93c-4d4c0476b097",
+          "pin": "1"
+        }
+      },
+      {
+        "id": "187426d1-e11f-4b8c-822d-e63e67a71a61",
+        "from": {
+          "object": "b8c66862-c1cf-4aea-b93c-4d4c0476b097",
+          "pin": "2"
+        },
+        "to": {
+          "object": "c2412023-fc73-49b9-a8c6-e6d5b6a2a354",
+          "pin": "GND"
+        }
+      }
+    ],
+    "parts": {}
+  }
+}

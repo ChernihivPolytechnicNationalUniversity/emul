@@ -1,4 +1,5 @@
 import { objectIndex, objectRect, resolvePinIn, GRID } from "@/schematic/geometry"
+import { stamped, upgraded, type Upgrade } from "@/schematic/migrate"
 import type { Schematic } from "@/schematic/types"
 
 const DB_NAME = "emul"
@@ -21,25 +22,33 @@ export function isSchematic(doc: unknown): doc is Schematic {
   return !!d && Array.isArray(d.objects) && Array.isArray(d.wires)
 }
 
-export function parseSchematic(text: string): Schematic | null {
+export function parseProject(text: string): Upgrade | null {
   try {
     const doc: unknown = JSON.parse(text)
-    return isSchematic(doc) ? doc : null
+    return isSchematic(doc) ? upgraded(doc) : null
   } catch {
     return null
   }
 }
+
+export function parseSchematic(text: string): Schematic | null {
+  return parseProject(text)?.doc ?? null
+}
+
+export const schematicText = (doc: Schematic) => JSON.stringify(stamped(doc))
 
 const ZSTD_MAGIC = [0x28, 0xb5, 0x2f, 0xfd]
 const LEVEL = 19
 
 const zstd = () => import("@hpcc-js/wasm-zstd").then((m) => m.Zstd.load())
 
-export async function readProjectFile(file: Blob): Promise<{ name?: string; doc: Schematic } | null> {
+export type ReadProject = Upgrade & { name?: string }
+
+export async function readProjectFile(file: Blob): Promise<ReadProject | null> {
   return readProjectBytes(new Uint8Array(await file.arrayBuffer()))
 }
 
-async function readProjectBytes(raw: Uint8Array): Promise<{ name?: string; doc: Schematic } | null> {
+async function readProjectBytes(raw: Uint8Array): Promise<ReadProject | null> {
   let parsed: unknown
   try {
     let bytes = raw
@@ -50,11 +59,11 @@ async function readProjectBytes(raw: Uint8Array): Promise<{ name?: string; doc: 
   }
   const f = parsed as { format?: unknown; name?: unknown; schematic?: unknown }
   if (f?.format !== FILE_FORMAT || !isSchematic(f.schematic)) return null
-  return { name: typeof f.name === "string" ? f.name : undefined, doc: f.schematic }
+  return { name: typeof f.name === "string" ? f.name : undefined, ...upgraded(f.schematic) }
 }
 
 async function projectBytes(name: string, doc: Schematic): Promise<Uint8Array> {
-  const json = new TextEncoder().encode(JSON.stringify({ format: FILE_FORMAT, version: 1, name, schematic: doc }))
+  const json = new TextEncoder().encode(JSON.stringify({ format: FILE_FORMAT, version: 1, name, schematic: stamped(doc) }))
   return (await zstd()).compress(json, LEVEL)
 }
 
@@ -79,7 +88,7 @@ export function sharedId(path = location.pathname): string | null {
   return SHARE.exec(path)?.[1] ?? null
 }
 
-export async function readShare(id: string): Promise<{ name?: string; doc: Schematic } | null> {
+export async function readShare(id: string): Promise<ReadProject | null> {
   const res = await fetch(`/api/shares/${id}`)
   if (!res.ok) return null
   return readProjectBytes(new Uint8Array(await res.arrayBuffer()))
