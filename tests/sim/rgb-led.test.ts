@@ -108,7 +108,8 @@ describe(`RGB LED (${sheet.part}, ${sheet.spec} rev. ${sheet.revision}), line by
       const def = getDef("rgb-led")!
       expect(PART_NUMBER).toBe(sheet.part)
       expect(line("part-number").printed).toContain(PART_NUMBER)
-      expect(def.defaults?.value).toBe(PART_NUMBER)
+      expect(def.body.some((shape) => shape.type === "text" && shape.text === PART_NUMBER), "the symbol prints the part number").toBe(true)
+      expect(def.fields?.map((f) => f.key), "one part, so there is no part to pick or type in").toEqual(["temp"])
       expect(def.name).toMatch(/common cathode/)
       expect(line("title").printed).toMatch(/\(5mm\) FULL COLOR LED LAMP/)
       expect(def.description).toMatch(/5 mm full-colour lamp/)

@@ -338,9 +338,9 @@ const QUIET_STEPS = 500
 const IN_STEP_RUNS = 100
 /** Time constant of the achieved-speed average, wall-clock seconds. */
 const RATE_TAU = 0.5
-/** Diode current that counts as fully lit, and the current below which an LED is dark. */
-const LED_FULL = 8e-3
-const LED_DARK = 2e-4
+/** Diode current that counts as fully lit. */
+export const LED_FULL = 8e-3
+export const LED_ON_LEVEL = 0.05
 
 /** A voltage measurement between two pins; a null `b` measures against ground. */
 export type Probe = { id: string; a: string; b: string | null }
@@ -2075,8 +2075,8 @@ export class SimLoop {
       // A bench frozen by the debugger shows the current as it stands: the pins stay where the
       // stopped code left them for as long as the eye cares to look.
       const i = paused && !this.running ? engine.diodeI[index] : engine.diodeAvg[index]
-      const level = i < LED_DARK ? 0 : Math.min(1, i / LED_FULL)
-      parts[partKey(el.object, el.part)] = { on: level > 0.05, level, amps: i }
+      const level = Math.min(1, Math.max(0, i) / LED_FULL)
+      parts[partKey(el.object, el.part)] = { on: level > LED_ON_LEVEL, level, amps: i }
     })
     for (const part of this.digitalParts.values()) {
       const lit = part.parts?.()

@@ -12,6 +12,7 @@ import { useObjectReadings, useObjectSim, type SimStore } from "@/sim/sim-store"
 import type { FieldDetail } from "./detail"
 import { formatSI } from "@/sim/units"
 import { fixedText, soonBadgeText } from "./symbol-raster"
+import { GLOW_OPACITY, glowOf, HALO_OPACITY, visible } from "./led-glow"
 import { selectionOutline } from "./selection-geometry"
 import { LUCIDE_CLOCK, SOON_BADGE, soonBadge, soonImage, textBoost } from "./body-paint"
 import { readFieldPalette, useThemeName, type FieldPalette } from "./field-palette"
@@ -566,11 +567,10 @@ function Part({
     )
 
   if (part.type === "led") {
-    const glow = level ?? (state.on ? 1 : 0)
+    const glow = glowOf(level ?? (state.on ? 1 : 0))
+    const halo = (part.style === "glow" ? GLOW_OPACITY : HALO_OPACITY) * glow
     if (part.style === "glow") {
-      return glow > 0 ? (
-        <circle cx={cx} cy={cy} r={g(0.9)} fill={part.color} opacity={0.15 + 0.45 * glow} stroke="none" pointerEvents="none" />
-      ) : null
+      return visible(halo) ? <circle cx={cx} cy={cy} r={g(0.9)} fill={part.color} opacity={halo} stroke="none" pointerEvents="none" /> : null
     }
     return (
       <g
@@ -582,7 +582,7 @@ function Part({
         }}
       >
         <title>{title}</title>
-        {glow > 0 && <circle cx={cx} cy={cy} r={g(0.7)} fill={part.color} opacity={0.1 + 0.3 * glow} stroke="none" />}
+        {visible(halo) && <circle cx={cx} cy={cy} r={g(0.7)} fill={part.color} opacity={halo} stroke="none" />}
         <rect
           x={cx - g(0.35)}
           y={cy - g(0.25)}

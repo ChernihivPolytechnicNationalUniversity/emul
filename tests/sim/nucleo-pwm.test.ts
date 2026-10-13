@@ -18,10 +18,10 @@ describe("Nucleo timers and PWM", () => {
 
   const loop = new SimLoop()
   let clock = 0
-  function run(seconds: number, sample?: (s: Snapshot) => void) {
+  function run(seconds: number, sample?: (s: Snapshot) => void, everyMs = 30) {
     const end = clock + seconds * 1000
     while (clock < end) {
-      clock = Math.min(end, clock + 30)
+      clock = Math.min(end, clock + everyMs)
       loop.advance(clock)
       if (sample) sample(loop.snapshot()!)
     }
@@ -64,9 +64,9 @@ describe("Nucleo timers and PWM", () => {
   // LD2 (blue, 330 Ω) is toggled at 200 Hz by the TIM2 interrupt: a 100 Hz square the eye sees as half brightness.
   it("lights LD2 steadily from the TIM2 interrupt", () => {
     const ld2: number[] = []
-    run(0.1, (s) => ld2.push(s.parts[partKey(u.id, "LD2")]!.level))
+    run(0.1, (s) => ld2.push(s.parts[partKey(u.id, "LD2")]!.level), 1)
     const mean = ld2.reduce((a, b) => a + b, 0) / ld2.length
     expect(mean, "lit").toBeGreaterThan(0.03)
-    expect((Math.max(...ld2) - Math.min(...ld2)) / mean, "steady, not strobing").toBeNear(0, 0.3)
+    expect((Math.max(...ld2) - Math.min(...ld2)) / mean, "steady at every phase of the 100 Hz square, not strobing").toBeLessThan(0.01)
   })
 })

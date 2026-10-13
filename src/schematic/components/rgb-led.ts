@@ -1,3 +1,4 @@
+import { srgbEncode } from "@/lib/srgb"
 import { LedIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PinDef } from "../types"
 
@@ -119,8 +120,6 @@ const XYZ_TO_LINEAR_SRGB = [
   [0.0557, -0.204, 1.057],
 ] as const
 
-const srgbEncode = (c: number) => (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055)
-
 export type DieLight = { level: number; amps?: number } | undefined
 
 export function rgbLedGlow(lights: readonly DieLight[], celsius = AMBIENT.reference, dies: readonly RgbDie[] = L154A4SURKQBDZGW): { color: string; level: number } | null {
@@ -201,9 +200,8 @@ export const rgbLed: ComponentDef = {
   prefix: "LED",
   width: WIDTH,
   height: HEIGHT,
-  defaults: { value: PART_NUMBER, temp: String(AMBIENT.reference) },
+  defaults: { temp: String(AMBIENT.reference) },
   fields: [
-    { key: "value", label: "Part", type: "text", placeholder: `e.g. ${PART_NUMBER}` },
     { key: "temp", label: "Ambient temperature", type: "range", min: AMBIENT.min, max: AMBIENT.max, step: 1, unit: "°C" },
   ],
   pins,
@@ -212,7 +210,7 @@ export const rgbLed: ComponentDef = {
     ...rows.map(triangle),
     LIGHT_ARROWS,
     { type: "text", x: 1.5, y: 0.28, text: "{ref}", size: 0.35, anchor: "end" },
-    { type: "text", x: 2, y: 5.85, text: "{value}", size: 0.3, muted: true },
+    { type: "text", x: 2, y: 5.85, text: PART_NUMBER, size: 0.3, muted: true },
   ],
   parts: [{ type: "led", id: "RGB", label: "", x: 2, y: COMMON_ROW, color: "white", style: "glow", mix: L154A4SURKQBDZGW.map((die) => die.id) }],
   model,

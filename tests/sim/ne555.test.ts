@@ -4,9 +4,10 @@ import { GRID } from "@/schematic/geometry"
 import { partKey, pinKey, type PlacedObject, type Schematic } from "@/schematic/types"
 import { Engine } from "@/sim/engine"
 import { buildNetlist, GROUND } from "@/sim/netlist"
-import { SimLoop } from "@/sim/loop"
+import { LED_FULL, LED_ON_LEVEL, SimLoop } from "@/sim/loop"
 import { ne555Flasher } from "@/schematic/timers"
 import { DT } from "@/sim/speeds"
+import { sustainedReaches } from "../lib/eye"
 
 type Edge = { high: boolean; time: number }
 
@@ -571,15 +572,23 @@ describe("the NE555 flasher example", () => {
     const leds = doc.objects.filter((o) => o.def === "led")
     const t = start(doc)
     const seen = new Set<string>()
-    let both = 0
-    for (let k = 0; k < 40; k++) {
-      const s = t.run(0.1)
-      const lit = leds.map((led) => s.parts[partKey(led.id, "LED")]?.on ?? false)
-      seen.add(lit.join(","))
-      if (lit[0] && lit[1]) both++
+    const peak = [0, 0]
+    let bothFor = 0
+    let longestBoth = 0
+    for (let k = 0; k < 4000; k++) {
+      const s = t.run(0.001)
+      const parts = leds.map((led) => s.parts[partKey(led.id, "LED")])
+      const lit = parts.map((part) => part?.on ?? false)
+      parts.forEach((part, i) => (peak[i] = Math.max(peak[i], part?.amps ?? 0)))
+      if (k % 100 === 99) seen.add(lit.join(","))
+      bothFor = lit[0] && lit[1] ? bothFor + 0.001 : 0
+      longestBoth = Math.max(longestBoth, bothFor)
     }
+    const dimmest = Math.min(...peak)
+    const onShare = (LED_ON_LEVEL * LED_FULL) / dimmest
+    const overlap = sustainedReaches(1 - onShare) - sustainedReaches(onShare)
     expect.soft(seen.has("true,false") && seen.has("false,true"), "each LED on alone").toBe(true)
-    expect.soft(both, "both lit only in the eye's 10 ms around a transition").toBeLessThan(5)
+    expect.soft(longestBoth, "both lit only while the eye's response to one edge fades and to the other builds").toBeLessThan(overlap + 0.005)
     const r = t.run(0.1).readings.find((x) => x.object === u.id && x.kind === "TMR")!
     const hz = Number.parseFloat(r.extra!.Frequency) * (r.extra!.Frequency.includes("mHz") ? 1e-3 : 1)
     expect.soft(hz, "1.44 / ((10k + 2·68k) · 10 µF)").toBeNearRel(1.44 / (146e3 * 10e-6), 0.04)

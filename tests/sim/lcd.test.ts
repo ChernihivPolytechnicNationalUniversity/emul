@@ -11,6 +11,7 @@ import { cubeDemo, lcdDemo, touchDemo } from "@/schematic/examples"
 import { partKey, pinKey } from "@/schematic/types"
 import type { Gt911Snapshot } from "@/sim/digital"
 import { SimLoop, type Snapshot } from "@/sim/loop"
+import { EYE_SETTLED } from "../lib/eye"
 import { exampleBase64 } from "../lib/firmware"
 
 /** Colour histogram of a frame: the most common RGB triples and the count of each. */
@@ -110,7 +111,7 @@ describe("display demo: SDRAM, DMA2D clear, text through the LTDC", () => {
       s.loop.setParts({ ...s.doc.parts, [partKey(s.u.id, "MUSB")]: { on: false } })
       const snap = s.run(0.1)
       expect.soft(snap.displays[s.lcd.id].status, "panel").toBe("off")
-      expect.soft(snap.parts[partKey(s.lcd.id, "BL")]?.level ?? 0, "backlight").toBe(0)
+      expect.soft(s.run(EYE_SETTLED).parts[partKey(s.lcd.id, "BL")]?.level ?? 0, "backlight, once the eye lets go of it: under one grey level").toBeLessThan(1 / 255)
     })
 
     it("restarts the demo when plugged back", () => {

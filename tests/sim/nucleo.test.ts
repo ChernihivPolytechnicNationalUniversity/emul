@@ -10,6 +10,7 @@ import { builder } from "@/schematic/builder"
 import { nucleoBlink } from "@/schematic/examples"
 import { partKey, pinKey, type PlacedObject } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
+import { EYE_SETTLED } from "../lib/eye"
 
 const doc = nucleoBlink.build(GRID)
 const u = doc.objects.find((o) => o.def === "nucleo-f429zi")!
@@ -33,7 +34,7 @@ function settle(): Snapshot {
   loop.setParts(doc.parts)
   loop.setRunning(true)
   loop.advance(clock)
-  run(0.05)
+  run(EYE_SETTLED)
   const snap = loop.snapshot()
   if (!snap) throw new Error("no snapshot")
   return snap

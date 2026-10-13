@@ -12,6 +12,7 @@ import { SimLoop, type Snapshot } from "@/sim/loop"
 import { example } from "../lib/firmware"
 
 const LEDS = ["LED1", "LED2", "LED3", "LED4"]
+const ALONE_AT = 0.5
 const elf = example("lab1-f746.elf")
 
 describe("Open746I-C running lab 1", () => {
@@ -70,20 +71,23 @@ describe("Open746I-C running lab 1", () => {
       expect.soft(v(snap, "CN3-1"), "PA0 (A0)").toBeNear(0, 0.02)
     })
 
-    it("lights LED1 dimly", () => {
-      expect(ledStr(snap)).toBe("●○○○")
-      // 1.4 mA through 1 kΩ: a dim LED, as on the real board (8 mA counts as full).
-      expect(snap.parts[partKey(u.id, "LED1")]?.level ?? 0).toBeNear(0.18, 0.05)
-    })
+    it("lights LED1", () => expect(ledStr(snap)).toBe("●○○○"))
   })
 
   describe("staircase: LED2 at 1 s, LED3 at 3 s, LED4 at 6 s, then off from 10 s", () => {
     const onAt: Record<string, number> = {}
+    let alone: number | undefined
     let snap: Snapshot
     beforeAll(() => {
       snap = run(11.5, (s) => {
         for (const l of LEDS) if (onAt[l] === undefined && ledOn(s, l)) onAt[l] = s.time
+        if (alone === undefined && s.time >= ALONE_AT) alone = s.parts[partKey(u.id, "LED1")]?.level
       })
+    })
+
+    it("lights LED1 dimly while it is the only one on", () => {
+      // 1.4 mA through 1 kΩ: a dim LED, as on the real board (8 mA counts as full).
+      expect(alone ?? 0).toBeNear(0.18, 0.05)
     })
 
     it.each([

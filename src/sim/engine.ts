@@ -133,8 +133,9 @@ const RMS_PERIODS = 3
 
 export type Failure = { object: string; damage: Damage; ref: string }
 
-/** Persistence of vision for LED brightness: PWM above ~100 Hz reads as a steady level. */
-const LED_EYE_TAU = 0.01
+export const WATSON_SUSTAINED_STAGES = 9
+export const WATSON_STAGE_TAU = 4.94e-3
+const EYE_INNER_STAGES = WATSON_SUSTAINED_STAGES - 1
 /**
  * Window for a battery's average load, which its time-to-empty estimate divides into the charge
  * left: long enough to cover a sleeping MCU's wake-ups, short enough to follow a changed load.
@@ -293,9 +294,12 @@ export class Engine {
   private readonly msV: Float64Array
   private readonly msP: Float64Array
   private msPrimed = false
-  /** Diode currents, instantaneous and averaged (for steady LED brightness on AC). */
+  /** Diode currents, instantaneous and as the eye sees them. */
   readonly diodeI: Float64Array
   readonly diodeAvg: Float64Array
+  private readonly eyeStages: Float64Array
+  private eyeDt = 0
+  private eyeK = 0
   /** Battery: per cell (blocks of MAX_CELLS) the state of charge (0..1; below 0 exhausted, above 1 overcharged). */
   private readonly batSoc: Float64Array
   /** Battery: ohmic resistance in force and its 1 % step, pack open-circuit voltage, the two diffusion voltages, cell temperature (°C), charge throughput (A·s, for live cycle wear). */
@@ -474,6 +478,7 @@ export class Engine {
     this.msP = new Float64Array(m)
     this.diodeI = new Float64Array(m)
     this.diodeAvg = new Float64Array(m)
+    this.eyeStages = new Float64Array(m * EYE_INNER_STAGES)
     this.rCurrent = new Float64Array(m)
     this.rVoltage = new Float64Array(m)
     this.rPower = new Float64Array(m)
@@ -561,6 +566,7 @@ export class Engine {
       this.msV[to] = prev.msV[from]
       this.msP[to] = prev.msP[from]
       this.diodeAvg[to] = prev.diodeAvg[from]
+      this.eyeStages.set(prev.eyeStages.subarray(from * EYE_INNER_STAGES, (from + 1) * EYE_INNER_STAGES), to * EYE_INNER_STAGES)
       this.arc[to] = prev.arc[from]
       this.ctl[to] = prev.ctl[from]
       for (let k = 0; k < 3; k++) this.ctlT[to * 3 + k] = prev.ctlT[from * 3 + k]
@@ -930,12 +936,6 @@ export class Engine {
    */
   private settledTick(dt: number): boolean {
     this.failures.length = 0
-    const k = Math.min(1, dt / LED_EYE_TAU)
-    const diodes = this.diodeElements
-    for (let j = 0; j < diodes.length; j++) {
-      const i = diodes[j]
-      this.diodeAvg[i] += (this.rCurrent[i] - this.diodeAvg[i]) * k
-    }
     const loaded = this.loadedElements
     const elements = this.net.elements
     for (let j = 0; j < loaded.length; j++) {
@@ -946,7 +946,31 @@ export class Engine {
       if (heat > 1) return false
       this.stress[i] = heat
     }
+    const diodes = this.diodeElements
+    for (let j = 0; j < diodes.length; j++) this.see(diodes[j], this.rCurrent[diodes[j]], dt)
     return true
+  }
+
+  private see(i: number, amps: number, dt: number) {
+    const stages = this.eyeStages
+    const first = i * EYE_INNER_STAGES
+    const last = first + EYE_INNER_STAGES
+    if (!this.msPrimed) {
+      stages.fill(amps, first, last)
+      this.diodeAvg[i] = amps
+      return
+    }
+    if (dt !== this.eyeDt) {
+      this.eyeDt = dt
+      this.eyeK = -Math.expm1(-dt / WATSON_STAGE_TAU)
+    }
+    const k = this.eyeK
+    let upstream = amps
+    for (let s = first; s < last; s++) {
+      stages[s] += (upstream - stages[s]) * k
+      upstream = stages[s]
+    }
+    this.diodeAvg[i] += (upstream - this.diodeAvg[i]) * k
   }
 
   /**
@@ -2143,9 +2167,7 @@ export class Engine {
           let cur = el.is * (Math.exp(Math.min(vd / nvt, 80)) - 1)
           if (el.zener) cur -= el.is * (Math.exp(Math.min(-(vd + el.zener) / nvt, 80)) - 1)
           this.diodeI[i] = cur
-          // What the eye sees: the current averaged over ~10 ms, so a PWM-dimmed LED reads as
-          // dim rather than strobing with the snapshot phase. On AC the RMS window applies.
-          this.diodeAvg[i] = !this.msPrimed ? cur : this.ac ? this.ema(this.diodeAvg[i], cur, dt) : this.diodeAvg[i] + (cur - this.diodeAvg[i]) * Math.min(1, dt / LED_EYE_TAU)
+          this.see(i, cur, dt)
           tc[this.termOf[base]] += cur
           tc[this.termOf[base + 1]] -= cur
           const across = el.anodePin === undefined || el.anodePin === el.anode ? vd : this.vol(el.anodePin, this.v) - this.vol(el.cathode, this.v)

@@ -10,6 +10,7 @@ import counter from "./hdl/counter.json"
 import ring from "./hdl/ring.json"
 import shreg from "./hdl/shreg.json"
 import top from "./hdl/top.json"
+import { EYE_SETTLED } from "../lib/eye"
 
 const module = (name: string, netlist: unknown): HdlModule => ({ id: `hdl:${name}`, name, files: [], netlist: netlist as unknown as HdlNetlist, built: name })
 
@@ -122,7 +123,7 @@ describe("hdl component on the bench", () => {
 
   it.each([0, 1].flatMap((x) => [0, 1].map((y) => [x, y] as const)))("a=%i b=%i lights AND and OR", (x, y) => {
     loop.setParts({ [partKey(a.id, "S")]: { on: !!x }, [partKey(b.id, "S")]: { on: !!y } })
-    run(0.02)
+    run(EYE_SETTLED)
     expect([lit(and), lit(or)]).toEqual([x & y, x | y])
   })
 })

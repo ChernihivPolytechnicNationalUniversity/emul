@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { EYE_SETTLED } from "../lib/eye"
 import { example } from "../lib/firmware"
 import { Lab2Bench, patchWord, type Joy } from "../lib/lab2-bench"
 
@@ -13,7 +14,6 @@ const STATE_WORDS = 14
 const JOY_INDEX: Record<Joy, number> = { JOY_A: 0, JOY_B: 1, JOY_C: 2, JOY_D: 3, JOY_CTR: 4 }
 const LED_PADS = ["PD12", "PD13", "PD14"] as const
 const DIES = ["R", "G", "B"] as const
-const EYE_SETTLED = 0.05
 
 const bench = (variant: number) =>
   new Lab2Bench({
