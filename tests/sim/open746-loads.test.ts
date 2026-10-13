@@ -7,6 +7,7 @@ import { GRID } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import { partKey, pinKey, type Element, type PartState } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
+import { EYE_SETTLED } from "../lib/eye"
 import { buffer, example } from "../lib/firmware"
 
 const board = getDef("open746i-c")!
@@ -111,7 +112,7 @@ describe("OTG JMP VBUS (USB.P3): PA9 on the module USB's 5 V, empty as the lab's
     expect(board.parts.find((p) => p.id === "OTG_VBUS"), "no cap on VBUS (two benches, 2026-10-13)").toMatchObject({ type: "switch", initial: undefined })
     const bench = loadsBench()
     await bench.order(Command.outputHigh, "PA9")
-    const snap = bench.run(0.005)
+    const snap = bench.run(EYE_SETTLED)
     expect(bench.volts(snap, PA9), "PA9 high at the pad's own VDD").toBeNear(VDD, 0.05)
     expect(bench.lit(snap, "MVBUS"), "the module's VBUS LED, on that USB's 5 V either way").toBe(true)
     expect(bench.failures).toEqual([])
@@ -166,9 +167,9 @@ describe("OTG JMP VBUS (USB.P3): PA9 on the module USB's 5 V, empty as the lab's
   it("fitted, lights the module's VBUS LED from PA9 through the cap when the module's USB is out", async () => {
     const bench = loadsBench({ ...BOARD_ON_THE_USART1_USB, ...VBUS_FITTED })
     await bench.order(Command.outputLow, "PA9")
-    expect(bench.lit(bench.run(0.005), "MVBUS"), "PA9 low").toBe(false)
+    expect(bench.lit(bench.run(EYE_SETTLED), "MVBUS"), "PA9 low").toBe(false)
     await bench.order(Command.outputHigh, "PA9")
-    const snap = bench.run(0.005)
+    const snap = bench.run(EYE_SETTLED)
     expect(bench.lit(snap, "MVBUS"), "PA9 high feeds the LED through 1 kΩ").toBe(true)
     expect(bench.volts(snap, PA9), "PA9 high").toBeGreaterThan(3.1)
     expect(bench.failures).toEqual([])
@@ -208,9 +209,9 @@ describe("USART1 JMP (JMP2): the CP2102's side of PA9–PA12", () => {
   it("lights the TX LED while PA9 is low, through JMP2; open, the LED stays dark", async () => {
     const bench = loadsBench()
     await bench.order(Command.outputLow, "PA9")
-    expect(bench.lit(bench.run(0.005), "TXLED"), "cap on").toBe(true)
+    expect(bench.lit(bench.run(EYE_SETTLED), "TXLED"), "cap on").toBe(true)
     bench.set({ JMP2_1: { on: false } })
-    const snap = bench.run(0.005)
+    const snap = bench.run(EYE_SETTLED)
     expect(bench.lit(snap, "TXLED"), "cap off").toBe(false)
     expect(bench.volts(snap, "VCP-TX"), "the bridge's RXD, cut off from PA9, rises on its own pull-up").toBeGreaterThan(1)
   })
@@ -225,7 +226,7 @@ describe("USART1 JMP (JMP2): the CP2102's side of PA9–PA12", () => {
   it("lights the RX LED while the MCU pulls PA10 low against the bridge, 13 mA, inside the pad's rating", async () => {
     const bench = loadsBench()
     await bench.order(Command.outputLow, "PA10")
-    const snap = bench.run(0.005)
+    const snap = bench.run(EYE_SETTLED)
     expect(bench.lit(snap, "RXLED")).toBe(true)
     expect(bench.volts(snap, stripPin("PA10")), "25 Ω low against 233 Ω high").toBeNear(divider(CP2102_OUTPUT_HIGH_OHMS, 25), 0.05)
     expect(bench.failures).toEqual([])
@@ -277,7 +278,7 @@ describe("USART1 JMP (JMP2): the CP2102's side of PA9–PA12", () => {
   it("lights the TX and RX LEDs with the USART1 USB out: the unpowered bridge's protection sinks them into its dead supply, PA9 and PA10 under 1 V", async () => {
     const bench = loadsBench({ USB: { on: false } })
     for (const pad of ["PA9", "PA10"]) await bench.order(Command.floating, pad)
-    const snap = bench.run(0.005)
+    const snap = bench.run(EYE_SETTLED)
     expect(bench.lit(snap, "TXLED"), "TX LED").toBe(true)
     expect(bench.lit(snap, "RXLED"), "RX LED").toBe(true)
     for (const pad of ["PA9", "PA10"]) {
@@ -301,7 +302,7 @@ describe("USART1 JMP (JMP2): the CP2102's side of PA9–PA12", () => {
   it("keeps both LEDs dark with the bridge powered and the pads let go: its TXD and RXD idle high", async () => {
     const bench = loadsBench()
     for (const pad of ["PA9", "PA10"]) await bench.order(Command.floating, pad)
-    const snap = bench.run(0.005)
+    const snap = bench.run(EYE_SETTLED)
     expect(bench.lit(snap, "TXLED"), "TX LED").toBe(false)
     expect(bench.lit(snap, "RXLED"), "RX LED").toBe(false)
   })

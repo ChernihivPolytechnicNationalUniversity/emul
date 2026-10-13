@@ -8,6 +8,7 @@ import { GRID } from "@/schematic/geometry"
 import { nucleoBlink } from "@/schematic/examples"
 import { partKey, pinKey } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
+import { EYE_SETTLED } from "../lib/eye"
 import { hal } from "../lib/firmware"
 
 describe("Nucleo blink through the circuit", () => {
@@ -70,9 +71,19 @@ describe("Nucleo blink through the circuit", () => {
     })
 
     it("drives the external LED and LD1 (PB0) with D13", () => {
-      const d13High = snap.pinVoltage[d13] > 1.65
-      expect.soft(snap.parts[partKey(led.id, "LED")]?.on, "external LED").toBe(d13High)
-      expect.soft(snap.parts[partKey(u.id, "LD1")]?.on ?? false, "LD1").toBe(d13High)
+      let seen = snap
+      let steadySince = edges[edges.length - 1] ?? 0
+      let high = seen.pinVoltage[d13] > 1.65
+      while (seen.time - steadySince < EYE_SETTLED) {
+        run(0.01, (s) => {
+          const level = s.pinVoltage[d13] > 1.65
+          if (level !== high) steadySince = s.time
+          high = level
+          seen = s
+        })
+      }
+      expect.soft(seen.parts[partKey(led.id, "LED")]?.on, "external LED").toBe(high)
+      expect.soft(seen.parts[partKey(u.id, "LD1")]?.on ?? false, "LD1").toBe(high)
     })
 
     it("toggles LD2 (PB7) at 5 Hz", () => {

@@ -1,3 +1,4 @@
+import { srgbEncode } from "@/lib/srgb"
 import { LedIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PinDef } from "../types"
 
@@ -118,8 +119,6 @@ const XYZ_TO_LINEAR_SRGB = [
   [-0.9689, 1.8758, 0.0415],
   [0.0557, -0.204, 1.057],
 ] as const
-
-const srgbEncode = (c: number) => (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055)
 
 export type DieLight = { level: number; amps?: number } | undefined
 

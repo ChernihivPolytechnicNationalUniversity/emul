@@ -7,6 +7,7 @@ import { GRID } from "@/schematic/geometry"
 import { buildLogic } from "@/schematic/logic"
 import { partKey, pinKey, type PlacedObject } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
+import { EYE_SETTLED } from "../lib/eye"
 
 const { doc, parts } = buildLogic(GRID)
 
@@ -33,7 +34,7 @@ function run(seconds: number) {
 const switches = [parts.not.in, parts.nand.a, parts.nand.b, parts.nor.a, parts.nor.b, parts.adder.a, parts.adder.b]
 function set(on: Map<PlacedObject, boolean>) {
   loop.setParts(Object.fromEntries(switches.map((sw) => [partKey(sw.id, "SW"), { on: on.get(sw) ?? false }])))
-  run(0.05)
+  run(EYE_SETTLED)
   return loop.snapshot()!
 }
 const lit = (snap: Snapshot, led: PlacedObject) => (snap.parts[partKey(led.id, "LED")]?.on ? 1 : 0)
