@@ -8,11 +8,15 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { GRID } from "@/schematic/geometry"
 import { lab1RunningLight } from "@/schematic/examples"
-import { partKey } from "@/schematic/types"
+import { LogicStore } from "@/components/logic/logic-store"
+import { partKey, pinKey } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
 import { exampleBase64 } from "../lib/firmware"
 
 const LEDS = ["LED1", "LED2", "LED3", "LED4"]
+const LED_PADS = ["P21-27", "P21-26", "P19-1", "P18-7"]
+const DWELL_S = 1.001
+const DWELL_TOLERANCE_S = 1e-5
 
 describe("lab 1 running light on the Open746I-C", () => {
   const doc = lab1RunningLight.build(GRID)
@@ -20,12 +24,18 @@ describe("lab 1 running light on the Open746I-C", () => {
   u.props = { ...u.props, firmware: "lab1-running-light.elf", firmwareData: exampleBase64("lab1-running-light.elf") }
 
   const loop = new SimLoop()
+  const store = new LogicStore()
   let clock = 0
+  const advance = (to: number) => {
+    loop.advance(to)
+    const s = loop.snapshot()
+    if (s?.logic) store.push(s.logic, s.traceProbes)
+  }
   const run = (seconds: number) => {
     const end = clock + seconds * 1000
     while (clock < end) {
       clock = Math.min(end, clock + 30)
-      loop.advance(clock)
+      advance(clock)
     }
   }
   const ledStr = (s: Snapshot) => LEDS.map((l) => (s.parts[partKey(u.id, l)]?.on ? "●" : "○")).join("")
@@ -45,7 +55,7 @@ describe("lab 1 running light on the Open746I-C", () => {
     const end = clock + within * 1000
     while (clock < end) {
       clock = Math.min(end, clock + 30)
-      loop.advance(clock)
+      advance(clock)
       const s = loop.snapshot()!
       if (ledStr(s) === want) return s.time - started
     }
@@ -56,8 +66,10 @@ describe("lab 1 running light on the Open746I-C", () => {
     beforeAll(() => {
       loop.setDoc(doc)
       loop.setParts(doc.parts)
+      loop.setProbes(LED_PADS.map((pad) => ({ id: pad, a: pinKey(u.id, pad), b: null })))
+      loop.setLogic(true)
       loop.setRunning(true)
-      loop.advance(clock)
+      advance(clock)
       run(0.1)
     })
 
@@ -82,6 +94,17 @@ describe("lab 1 running light on the Open746I-C", () => {
     expect.soft(until("○○●○", 1.5), "LED3 after another").toBeNear(1.0, 0.1)
     expect.soft(until("○○○●", 1.5), "LED4 after another").toBeNear(1.0, 0.1)
     expect.soft(until("●○○○", 1.5), "back to LED1 after another").toBeNear(1.0, 0.1)
+  })
+
+  it(`steps every ${DWELL_S} s to within ${DWELL_TOLERANCE_S * 1e6} µs, the dwell the analysis gives and the bench measured (S1)`, () => {
+    const from = loop.snapshot()!.time
+    run(4.5)
+    const rises = LED_PADS.flatMap((pad) => {
+      const e = store.edges(pad)!
+      return Array.from({ length: e.count }, (_, i) => i).filter((i) => e.levels[i] === 1 && e.times[i] > from).map((i) => e.times[i])
+    }).sort((a, b) => a - b)
+    expect(rises.length).toBeGreaterThanOrEqual(4)
+    for (let k = 1; k < rises.length; k++) expect.soft(rises[k] - rises[k - 1], `dwell ${k}`).toBeNear(DWELL_S, DWELL_TOLERANCE_S)
   })
 
   it("stops where it is on the centre", () => {
