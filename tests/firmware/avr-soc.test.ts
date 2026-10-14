@@ -16,7 +16,10 @@ const SMCR = 0x33
 const SPMCSR = 0x37
 
 /** A 328P with the program at 0: Arduino clock fuses (16 MHz crystal), BOOTRST unprogrammed. */
-function mcu(words: number[], fuses = { low: 0xff, high: 0xd9, extended: 0xfd, lock: 0xff }) {
+/** DWEN unprogrammed: RESET is the reset pin (with debugWIRE on it is the dW line, §25.5). */
+const NO_DW = { low: 0xff, high: 0xd9, extended: 0xfd, lock: 0xff }
+/** DWEN programmed in the default fuses: debugWIRE on, so BREAK stops the core and ends a test (ISA §6.13). */
+function mcu(words: number[], fuses = { low: 0xff, high: 0x99, extended: 0xfd, lock: 0xff }) {
   const m = new AvrMcu(ATMEGA328P)
   m.fuses = { ...fuses }
   m.setClockFeed({ hz: 16e6, kind: "crystal" })
@@ -86,7 +89,7 @@ describe("I/O ports (§14.2, Table 14-1)", () => {
   })
 
   it("pins are tri-stated while reset is active and come up as inputs (§14.2.1, §11.1)", () => {
-    const m = mcu(prog(ldi(16, 0xff), out(DDRB, 16), out(PORTB, 16), rjmp(-1)))
+    const m = mcu(prog(ldi(16, 0xff), out(DDRB, 16), out(PORTB, 16), rjmp(-1)), NO_DW)
     m.runUntil(0.1)
     expect(m.padDrive({ port: 1, pin: 0 })).toBe("high")
     m.setResetPin(true)
@@ -126,7 +129,7 @@ describe("reset and start-up (§9.2, §11)", () => {
   })
 
   it("factory fuses (low 0x62: internal 8 MHz RC, SUT=10, CKDIV8): 6 CK start-up + 19 CK + 65 ms, then 1 MHz (Table 9-12, §9.2.1–9.2.2; DS80000855C §3.1.4)", () => {
-    const t = firstInstructionTime({ low: 0x62, high: 0xd9, extended: 0xff, lock: 0xff }, null)
+    const t = firstInstructionTime({ low: 0x62, high: 0x99, extended: 0xff, lock: 0xff }, null)
     // From reset the start-up time and the additional delay add up (§9.2.2); CK are cycles of the undivided 8 MHz source.
     expect(t).toBeCloseTo(65e-3 + (6 + 19) / 8e6, 9)
     const m = new AvrMcu(ATMEGA328P)
@@ -151,7 +154,7 @@ describe("reset and start-up (§9.2, §11)", () => {
   })
 
   it("MCUSR: power-on sets PORF only; an external reset adds EXTRF; writing zero clears (§11.9.1)", () => {
-    const m = mcu(prog(rjmp(-1)))
+    const m = mcu(prog(rjmp(-1)), NO_DW)
     expect(m.read(0x54)).toBe(0x01)
     m.runUntil(0.1)
     m.setResetPin(true)
@@ -167,7 +170,7 @@ describe("reset and start-up (§9.2, §11)", () => {
   })
 
   it("an external reset holds the core for the time-out after RESET rises (§11.4)", () => {
-    const m = mcu(prog(rjmp(-1)))
+    const m = mcu(prog(rjmp(-1)), NO_DW)
     m.runUntil(0.1)
     m.setResetPin(true)
     m.runUntil(0.2)

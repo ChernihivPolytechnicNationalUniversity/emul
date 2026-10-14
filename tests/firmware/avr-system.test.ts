@@ -19,7 +19,7 @@ const EEARH = 0x42
 const SPMCSR = 0x57
 const HZ = 16e6
 
-function part(fuses = { low: 0xff, high: 0xd9, extended: 0xfd, lock: 0xff }): AvrMcu {
+function part(fuses = { low: 0xff, high: 0x99, extended: 0xfd, lock: 0xff }): AvrMcu {
   const m = createAtmega328p()
   m.fuses = { ...fuses }
   m.setClockFeed({ hz: HZ, kind: "crystal" })
@@ -245,7 +245,7 @@ describe("self-programming (§27)", () => {
   }
 
   it("fills the page buffer, erases and writes a page from the boot section; each takes 3.7–4.5 ms (Table 27-6)", () => {
-    const m = part({ low: 0xff, high: 0xd8, extended: 0xfd, lock: 0xff })
+    const m = part({ low: 0xff, high: 0x98, extended: 0xfd, lock: 0xff })
     programPage(m, 10)
     const t0 = m.time
     m.runUntil(t0 + 20e-3)
@@ -257,7 +257,7 @@ describe("self-programming (§27)", () => {
   })
 
   it("SPM from the application section does nothing (§27.3)", () => {
-    const m = part({ low: 0xff, high: 0xd8, extended: 0xfd, lock: 0xff })
+    const m = part({ low: 0xff, high: 0x98, extended: 0xfd, lock: 0xff })
     programPage(m, 10)
     // Copy the routine into the application section and run it from there.
     const code = Array.from(m.cpu.flash.subarray(0x3800, 0x3840))
@@ -294,7 +294,7 @@ describe("supply supervision (§11.3, §11.5, Tables 29-11 and 29-12)", () => {
   })
 
   it("BOD off (extended fuse 0xFF): the part keeps running at 2 V; below VPOT (1.3 V falling) it resets as at power-on", () => {
-    const m = part({ low: 0xff, high: 0xd9, extended: 0xff, lock: 0xff })
+    const m = part({ low: 0xff, high: 0x99, extended: 0xff, lock: 0xff })
     m.setSupply(2.0)
     m.runUntil(m.time + 1e-3)
     expect(m.inReset).toBe(false)

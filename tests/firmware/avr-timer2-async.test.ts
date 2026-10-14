@@ -28,7 +28,7 @@ const IDLE = 0x50
 /** A 328P on its internal 8 MHz RC oscillator with a 32.768 kHz crystal across TOSC1/TOSC2. */
 function part(feed: { hz: number; kind: "crystal" | "clock" } | null = { hz: F, kind: "crystal" }, low = 0xe2): AvrMcu {
   const m = createAtmega328p()
-  m.fuses = { low, high: 0xd9, extended: 0xfd, lock: 0xff }
+  m.fuses = { low, high: 0x99, extended: 0xfd, lock: 0xff }
   m.setClockFeed(feed)
   m.cpu.flash.fill(0x0000)
   m.cpu.flash.set(rjmp(-1), IDLE)

@@ -105,6 +105,7 @@ export class AvrMcu implements AvrBus, AvrSystem {
 
   // System control registers.
   private mcusr = 0
+  dwdr = 0
   private mcucr = 0
   private smcr = 0
   private prr = 0
@@ -259,7 +260,33 @@ export class AvrMcu implements AvrBus, AvrSystem {
       this.register(spec.pin + 2, { name: `PORT${spec.letter}`, read: () => port.port, write: (v) => port.writePort(v, this.cpu.at) })
     }
     this.systemRegisters()
+    // BREAK stops the core for the debugger only with debugWIRE on; otherwise it is a NOP (ISA §6.13).
+    this.cpu.onBreak = (pc) => {
+      if (this.debugWire) throw new CpuHalt("bkpt", "break", pc * 2)
+    }
     this.reset("power-on")
+  }
+
+  /** debugWIRE is on: DWEN programmed and no lock bit programmed (§25.3). */
+  get debugWire(): boolean {
+    return (this.fuses.high & 0x40) === 0 && (this.fuses.lock & 0x3f) === 0x3f
+  }
+  /**
+   * Boot lock bits (Tables 27-2, 27-3): code in one section may not read the other with LPM
+   * (BLB02 for the application, BLB12 for the boot section, programmed = 0).
+   */
+  private lpmBlocked(byteAddr: number): boolean {
+    const fromBoot = this.cpu.opPc >= this.bootStart
+    const toBoot = byteAddr >> 1 >= this.bootStart
+    if (fromBoot === toBoot) return false
+    return fromBoot ? !(this.fuses.lock & 0x08) : !(this.fuses.lock & 0x20)
+  }
+  /** Interrupts whose vectors sit in a read-protected section are held off while the other section runs. */
+  private interruptsHeld(): boolean {
+    const vectorsInBoot = (this.mcucr & 0x02) !== 0
+    const inBoot = this.cpu.pc >= this.bootStart
+    if (vectorsInBoot === inBoot) return false
+    return vectorsInBoot ? !(this.fuses.lock & 0x08) : !(this.fuses.lock & 0x20)
   }
 
   // --- AvrBus ------------------------------------------------------------------------------
@@ -340,6 +367,8 @@ export class AvrMcu implements AvrBus, AvrSystem {
         },
       })
     }
+    // DWDR: the program's channel to the debugger (§25.6.1).
+    this.register(0x51, { name: "DWDR", read: () => this.dwdr, write: (v) => (this.dwdr = v) })
     // MCUSR: flags cleared by writing zero (§11.9.1).
     this.register(0x54, { name: "MCUSR", read: () => this.mcusr, write: (v, m) => (this.mcusr = (this.mcusr & ~m) | (v & m & 0x0f)) })
     this.register(0x53, { name: "SMCR", read: () => this.smcr, write: (v, m) => (this.smcr = ((this.smcr & ~m) | (v & m)) & 0x0f) })
@@ -512,6 +541,7 @@ export class AvrMcu implements AvrBus, AvrSystem {
     this.resets = cause === "power-on" ? 0 : this.resets + 1
     this.lastReset = cause
     this.mcusr = cause === "power-on" ? MCUSR_FLAG["power-on"] : this.mcusr | MCUSR_FLAG[cause]
+    this.dwdr = 0
     this.mcucr = 0
     this.smcr = 0
     this.prr = 0
@@ -573,7 +603,8 @@ export class AvrMcu implements AvrBus, AvrSystem {
 
   /** RESET pin level (unless RSTDISBL makes it PC6): low holds the core in reset, the rising edge starts the time-out. */
   setResetPin(low: boolean) {
-    if (!(this.fuses.high & 0x80)) return
+    // RSTDISBL makes the pin PC6; with debugWIRE on it is the dW line and an external reset is not supported (§25.5).
+    if (!(this.fuses.high & 0x80) || this.debugWire) return
     if (low === this.resetPinLow) return
     this.resetPinLow = low
     if (!low) {
@@ -651,6 +682,7 @@ export class AvrMcu implements AvrBus, AvrSystem {
   // --- AvrSystem (what the core asks) --------------------------------------------------------
 
   takeInterrupt(): number {
+    if (this.interruptsHeld()) return 0
     return this.irq.take()
   }
   sleep(): boolean {
@@ -696,6 +728,10 @@ export class AvrMcu implements AvrBus, AvrSystem {
       this.spmcsr &= ~0x29
       if (sel === 0x21) return [this.chip.signature[0], this.chip.osccal, this.chip.signature[1], 0xff, this.chip.signature[2]][byteAddr & 0x1f] ?? 0
       return [this.fuses.low, this.fuses.lock, this.fuses.extended, this.fuses.high][byteAddr & 3]
+    }
+    if (this.lpmBlocked(byteAddr)) {
+      this.feature("LPM: read blocked by the boot lock bits — silicon returns an undocumented value, 0xFF here")
+      return 0xff
     }
     const w = this.cpu.flash[(byteAddr >> 1) & this.cpu.pcMask]
     return byteAddr & 1 ? w >> 8 : w & 0xff

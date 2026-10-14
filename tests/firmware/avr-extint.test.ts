@@ -22,7 +22,7 @@ const PB0 = { port: 1, pin: 0 }
 /** A 328P running `main` at 0x40 with RETI-counting handlers: each vector increments r(20 + vector) and returns. */
 function part(main: number[]) {
   const m = createAtmega328p()
-  m.fuses = { low: 0xff, high: 0xd9, extended: 0xfd, lock: 0xff }
+  m.fuses = { low: 0xff, high: 0x99, extended: 0xfd, lock: 0xff }
   m.setClockFeed({ hz: 16e6, kind: "crystal" })
   m.cpu.flash.fill(0xffff)
   // Vector 1 (RESET) jumps to main; vectors 2–26 jump to a handler stub at 0x100 + 4·vector: INC r(vector), RETI.

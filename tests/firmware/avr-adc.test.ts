@@ -29,7 +29,7 @@ const IF = 0x10
 type Volts = (pad: PadRef, cycle: number) => number
 function part(volts: Volts = () => 0): AvrMcu {
   const m = createAtmega328p()
-  m.fuses = { low: 0xff, high: 0xd9, extended: 0xfd, lock: 0xff }
+  m.fuses = { low: 0xff, high: 0x99, extended: 0xfd, lock: 0xff }
   m.setClockFeed({ hz: HZ, kind: "crystal" })
   m.cpu.flash.fill(0x0000)
   m.cpu.invalidate()

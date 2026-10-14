@@ -262,8 +262,20 @@ export class SelfProgramming extends Peripheral {
       this.mcu.spmDone(!this.rwwBusy)
       return 0
     }
+    if (op === 0x08) {
+      // BLBSET: zeros in R0 bits 5:0 program lock bits; only a chip erase clears them (§27.8.7).
+      this.mcu.fuses.lock &= (word & 0x3f) | 0xc0
+      this.mcu.spmDone()
+      return 0
+    }
     if (op === 0x02 || op === 0x04) {
       const start = page & cpu.pcMask
+      // BLB01 / BLB11 programmed: SPM may not write that section (Tables 27-2, 27-3).
+      const bit = start >= this.mcu.bootStart ? 0x10 : 0x04
+      if (!(this.mcu.fuses.lock & bit)) {
+        this.mcu.spmDone()
+        return 0
+      }
       if (op === 0x02) cpu.flash.fill(0xffff, start, start + this.buffer.length)
       else {
         for (let i = 0; i < this.buffer.length; i++) cpu.flash[start + i] &= this.buffer[i]
@@ -278,7 +290,7 @@ export class SelfProgramming extends Peripheral {
       if (!this.rwwBusy) return Math.ceil(SPM_TIME * this.mcu.hz)
       return 0
     }
-    this.mcu.feature(`SPM: SPMCSR operation 0x${spmcsr.toString(16)} (lock bits)`)
+    this.mcu.feature(`SPM: SPMCSR operation 0x${spmcsr.toString(16)}`)
     this.mcu.spmDone()
     return 0
   }
