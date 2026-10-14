@@ -162,8 +162,9 @@ export function createAtmega328p(): AvrMcu {
       name: "USART0",
       regs: { ucsrA: 0xc0, ucsrB: 0xc1, ucsrC: 0xc2, ubrrL: 0xc4, ubrrH: 0xc5, udr: 0xc6 },
       vectors: { rx: 19, udre: 20, tx: 21 },
-      pins: { rxd: [D, 0], txd: [D, 1] },
+      pins: { rxd: [D, 0], txd: [D, 1], xck: [D, 4] },
       prr: 1,
+      xckOutput: () => (m.port("D").ddr & 0x10) !== 0,
     }),
   )
 
@@ -300,6 +301,7 @@ export function createAtmega328p(): AvrMcu {
   const portD = m.port("D")
   wire(D, 0, (o) => usart.rxdOverride(o, (portD.port & 1) !== 0, portD.pud))
   wire(D, 1, (o) => usart.txdOverride(o))
+  wire(D, 4, (o) => usart.xckOverride(o))
   m.dutySource = (port, pin) => {
     for (const t of [t0, t1, t2])
       for (const c of [0, 1] as const) {
