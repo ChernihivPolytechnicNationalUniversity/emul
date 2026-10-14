@@ -16,6 +16,7 @@ import { PicPort, type PinMode } from "./port"
 import { Timer0, Watchdog } from "./periph/timer0"
 import { Timer1, type T1Oscillator } from "./periph/timer1"
 import { Ccp1, Timer2 } from "./periph/ccp"
+import { Comparators } from "./periph/comparator"
 
 export type PicResetCause = "power-on" | "brown-out" | "mclr" | "mclr-sleep" | "wdt"
 
@@ -49,7 +50,6 @@ const PENDING: Pending[] = [
   { name: "EEADR", addr: 0x9b, block: "Data EEPROM", por: "x", reset: "u" },
   { name: "EECON1", addr: 0x9c, block: "Data EEPROM", por: 0x00, reset: 0x00, mask: 0x0f },
   { name: "EECON2", addr: 0x9d, block: "Data EEPROM", por: 0x00, reset: 0x00, mask: 0x00 },
-  { name: "VRCON", addr: 0x9f, block: "Voltage reference", por: 0x00, reset: 0x00, mask: 0xef },
 ]
 
 export class PicMcu implements PicBus, PicSystem {
@@ -63,6 +63,9 @@ export class PicMcu implements PicBus, PicSystem {
   readonly timer1: Timer1
   readonly timer2: Timer2
   readonly ccp: Ccp1
+  readonly comparators: Comparators
+  /** The voltage on each pad as the circuit last solved it (comparator inputs). */
+  private readonly analog = new Map<number, number>()
   readonly eeprom: Uint8Array
   /** Configuration word at 2007h (Register 14-1); erased: 3FFFh (P8-162). */
   config = 0x3fff
@@ -77,7 +80,6 @@ export class PicMcu implements PicBus, PicSystem {
   pie1 = 0
   optionReg = 0xff
   pcon = 0x08
-  private cmcon = 0
   private readonly pending = new Map<number, number>()
 
   /** Simulated time at the start of the current slice, and the cycle it began at. */
@@ -189,6 +191,17 @@ export class PicMcu implements PicBus, PicSystem {
         pinChanged: (cycle) => this.portb.refresh(cycle),
       }),
     )
+    this.comparators = this.attach(
+      new Comparators(this, {
+        volts: (pin) => this.analog.get(pin) ?? (this.porta.pin(pin) ? this.vdd : 0),
+        get vdd() {
+          return host.vdd
+        },
+        setCmif: (cycle) => this.setFlag("pir1", 0x40, cycle),
+        pinsChanged: (cycle) => this.porta.refresh(cycle),
+        defective001: chip.comparator001Defective,
+      }),
+    )
     this.registers()
     this.powerOnReset()
   }
@@ -288,6 +301,8 @@ export class PicMcu implements PicBus, PicSystem {
       write: (v) => {
         this.pir1 = (this.pir1 & 0x30) | (v & 0xc7)
         this.irqChanged(at())
+        // A comparator mismatch keeps CMIF set until CMCON is read (§10.6).
+        if (!(v & 0x40) && this.comparators.mismatch()) this.setFlag("pir1", 0x40, Math.ceil(at()))
       },
     })
     this.register(PIE1, {
@@ -325,17 +340,17 @@ export class PicMcu implements PicBus, PicSystem {
       },
     })
     this.register(TRISB, { name: "TRISB", read: () => this.portb.tris, write: (v) => this.writeTrisB(v, at()) })
+    const cmp = this.comparators
     this.register(0x1f, {
       name: "CMCON",
-      // C2OUT/C1OUT read-only (Register 10-1); the comparators themselves are the next block.
-      read: () => this.cmcon,
-      write: (v) => {
-        this.cmcon = (this.cmcon & 0xc0) | (v & 0x3f)
-        const cm = v & 7
-        if (cm !== 7 && cm !== 0) this.feature("Comparators (CMCON modes other than off/reset)")
-        if (cm === 1 && this.chip.comparator001Defective) this.feature(`Comparator mode 001: defective on the ${this.chip.name} (DS40300C Figure 9-1)`)
-        this.pinsChanged(Math.ceil(at()))
-      },
+      read: () => cmp.readCmcon(),
+      peek: () => cmp.peekCmcon(),
+      write: (v) => cmp.writeCmcon(v, Math.ceil(at())),
+    })
+    this.register(0x9f, {
+      name: "VRCON",
+      read: () => cmp.vrcon,
+      write: (v) => cmp.writeVrcon(v, Math.ceil(at())),
     })
     const t1 = this.timer1
     const t2 = this.timer2
@@ -470,9 +485,17 @@ export class PicMcu implements PicBus, PicSystem {
   /** PORTA pins: comparator inputs/outputs, RA4 open drain, RA5 input only, RA6/RA7 by FOSC (§5.1, Figures 5-1…5-7). */
   private modeA(p: number): PinMode {
     const m: PinMode = { digital: true, output: true, openDrain: false, pullUp: false }
-    const cm = this.cmcon & 7
+    const cmp = this.comparators
+    const cm = cmp ? cmp.mode : 0
     if (p < 4 && ANALOG_BY_CM[cm] & (1 << p)) m.digital = false
     if (p === 4) m.openDrain = true
+    // CM = 110: C1 out on RA3, C2 out on RA4 (open drain), TRISA enabling them (§10.5, Figures 5-3/5-4).
+    if (cm === 6 && (p === 3 || p === 4)) m.outValue = ((cmp.outputs >> (p - 3)) & 1) === 1
+    // VREF on RA2: VREN and VROE with TRISA<2> = 1 (§11, P3-070).
+    if (p === 2 && cmp?.outputOn && (this.porta.tris & 0x04)) {
+      m.outEnable = true
+      m.outValue = cmp.vref()
+    }
     if (p === 5) m.output = false
     const f = fosc(this.config)
     if (p === 6) {
@@ -583,7 +606,6 @@ export class PicMcu implements PicBus, PicSystem {
     this.pir1 = 0
     this.pie1 = 0
     this.optionReg = 0xff
-    this.cmcon = 0
     this.porta.latch &= 0xf0
     this.porta.tris = 0xff
     this.portb.tris = 0xff
@@ -994,6 +1016,22 @@ export class PicMcu implements PicBus, PicSystem {
   setT1Oscillator(o: T1Oscillator) {
     this.timer1.setOscillator(o)
     this.reschedule()
+  }
+  /** The voltage the circuit puts on a pad (comparator inputs); the comparators re-evaluate. */
+  setAnalog(p: PadRef, volts: number) {
+    if (p.port !== 0) return
+    if (this.analog.get(p.pin) === volts) return
+    this.analog.set(p.pin, volts)
+    if (p.pin < 4) this.comparators.evaluate(this.cpu.cycles)
+  }
+  /** VREF, V, and what RA2 sees when it is put out (§11). */
+  vrefVolts(): number {
+    return this.comparators.vref()
+  }
+  vrefOutput(): { volts: number; ohms: number } | null {
+    const c = this.comparators
+    if (!c.outputOn || !(this.porta.tris & 0x04)) return null
+    return { volts: c.vref(), ohms: c.vrefOhms() }
   }
   /** CCP1's output latch (compare/PWM), before the pin's TRIS gate. */
   get ccpOutput() {

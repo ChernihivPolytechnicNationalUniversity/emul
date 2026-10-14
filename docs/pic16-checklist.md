@@ -25,17 +25,24 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 
 | Status | Rows |
 |---|---|
-| todo | 1078 |
-| done (SoC) | 340 |
+| todo | 1004 |
+| done (SoC) | 416 |
 | done (core) | 171 |
-| info | 160 |
-| **decide** | 48 |
-| **check PDF** | 9 |
+| info | 166 |
+| **decide** | 32 |
+| **check PDF** | 7 |
+| D19 | 3 |
+| D21 | 2 |
 | D1 | 2 |
 | D4 | 2 |
+| D13 | 1 |
+| D14 | 1 |
+| D15 | 1 |
+| D12 | 1 |
 | D5 | 1 |
 | D2 | 1 |
 | D3 | 1 |
+| D20 | 1 |
 | total | 1813 |
 
 ## Decisions where the documents are silent or contradict each other
@@ -111,6 +118,17 @@ until TMR1 wraps round to it).
 Table 9-4's uuuu uuuu: two against one.
 
 **D20. CCP1 modes 0001–0011** (P2-109, P9-079): not described; run as off (0000) and reported.
+
+**D21. Comparator outputs in mode 001** (P3-021, P9-209): §10.5's "CM = 110 or 001" against Figure 10-1
+and DS33023A, which put outputs on RA3/RA4 in 110 only; the PDF's figure shows RA3 as C1's switched
+VIN- input in 001 — 110 only.
+
+**D22. Mode 001 on the original PIC16F627/628** ("disfunctional", DS40300C Figure 9-1, nothing more): the
+outputs read 0 and the inspector says why.
+
+**D23. VREF with VREN = 0**: the ladder is unpowered — 0 V to the comparators, nothing on RA2. On RA2 the
+reference is seen through the ladder's Thevenin resistance (Figure 11-1, R = 2 kΩ, D312); the circuit
+engine still drives every analog pad through 100 Ω (P3-072, P9-190: to do with the integration).
 
 **D8. The 48 rows marked decide** are settled the same way, block by block, before each block is
 written; the decision is added here.
@@ -329,11 +347,11 @@ written; the decision is added here.
 | P1-208 | RA4 Schmitt buffer feeds TMR0 clock input | Figure 5-4 | pin | todo |
 | P1-209 | Example 5-1: writing CMCON = 0x07 turns comparators off and enables PORTA digital I/O | Example 5-1 p.33 | behaviour | done (SoC) |
 | P1-210 | Example 5-1 comment: TRISA<5> always reads as '1'; TRISA<7:6> depend on oscillator mode | Example 5-1 p.33 | register | done (SoC) |
-| P1-211 | Note: Fig 5-5 draws RD TRISA for RA5 tied to VSS (suggesting '0'), contradicting the Example 5-1 comment that TRISA<5> always reads '1'; and TRISA reset is listed 1111 1111 | Fig 5-5 p.35 vs Example 5-1 p.33 | note | **decide** |
+| P1-211 | Note: Fig 5-5 draws RD TRISA for RA5 tied to VSS (suggesting '0'), contradicting the Example 5-1 comment that TRISA<5> always reads '1'; and TRISA reset is listed 1111 1111 | Fig 5-5 p.35 vs Example 5-1 p.33 | note | D13 |
 | P1-212 | RA5/MCLR: MCLRE configuration bit selects MCLR vs RA5 input; MCLR path has a "MCLR filter"; HV detect drives Program mode | Figure 5-5; Table 5-2 Note 1 | pin | done (SoC) |
 | P1-213 | RA6: output mux drives CLKOUT (FOSC/4) when FOSC = 101 or 111 (INTOSC or RC with RA6 = CLKOUT) | Figure 5-6 + Note 2 p.35 | pin | todo |
 | P1-214 | RA6: digital I/O path (latch/TRIS/ST buffer read) enabled when FOSC = 011, 100, 110 (Note 1: INTOSC with RA6 = I/O or RC with RA6 = I/O) | Figure 5-6 + Note 1 | pin | done (SoC) |
-| P1-215 | Note: Fig 5-6 lists FOSC = 011 as an RA6-I/O mode but its Note 1 only names INTOSC and RC; 011 is presumably EC (defined in §14). Confirm against Register 14-1 | Figure 5-6 p.35 | note | **decide** |
+| P1-215 | Note: Fig 5-6 lists FOSC = 011 as an RA6-I/O mode but its Note 1 only names INTOSC and RC; 011 is presumably EC (defined in §14). Confirm against Register 14-1 | Figure 5-6 p.35 | note | info |
 | P1-216 | RA6 in other FOSC modes is the OSC2 oscillator circuit output (fed from OSC1) | Figure 5-6 | pin | done (SoC) |
 | P1-217 | RA7: digital I/O path enabled only when FOSC = 100 or 101 (INTOSC with CLKOUT and INTOSC with I/O); otherwise pin goes to clock circuits | Figure 5-7 + Note 1 p.36 | pin | done (SoC) |
 | P1-218 | Note: Table 5-1 describes T0CKI as "External clock input for TMR0 or comparator output", Table 3-2 says "Timer0 clock input" | Table 5-1 vs Table 3-2 | note | info |
@@ -491,7 +509,7 @@ written; the decision is added here.
 | P2-090 | T2CKPS<1:0>: 00=1:1, 01=1:4, 1x=1:16 | Reg 8-1, p.55 | register | done (SoC) |
 | P2-091 | TMR2 at 11h: POR 0000 0000; other resets 0000 0000 | Table 8-1 p.55; Table 9-4 p.61 | register | done (SoC) |
 | P2-092 | T2CON at 12h: POR -000 0000; Table 8-1 other resets -000 0000 | Table 8-1, p.55 | register | done (SoC) |
-| P2-093 | Contradiction: Table 9-4 gives T2CON "all other resets" = uuuu uuuu, Table 8-1 gives -000 0000; §8.1 says any reset clears pre/postscaler counters | Table 8-1 p.55 vs Table 9-4 p.61 | note | **decide** |
+| P2-093 | Contradiction: Table 9-4 gives T2CON "all other resets" = uuuu uuuu, Table 8-1 gives -000 0000; §8.1 says any reset clears pre/postscaler counters | Table 8-1 p.55 vs Table 9-4 p.61 | note | D19 |
 | P2-094 | PR2 at 92h: POR 1111 1111; other resets 1111 1111 | Table 8-1 p.55; Table 9-4 p.61 | register | done (SoC) |
 | P2-095 | CCP resource mapping: Capture→Timer1, Compare→Timer1, PWM→Timer2 | Table 9-1, p.57 | behaviour | done (SoC) |
 | P2-096 | CCPR1 = CCPR1L (low) + CCPR1H (high); CCP1CON controls; all readable/writable (except CCPR1H read-only in PWM, see P2-143) | §9.0, p.57 | register | done (SoC) |
@@ -553,7 +571,7 @@ written; the decision is added here.
 | P2-152 | Table 9-3: 78.12 kHz, prescaler 1, PR2=0x3F, 8 bits | Table 9-3, p.61 | timing | done (SoC) |
 | P2-153 | Table 9-3: 156.3 kHz, prescaler 1, PR2=0x1F, 7 bits | Table 9-3, p.61 | timing | done (SoC) |
 | P2-154 | Table 9-3: 208.3 kHz, prescaler 1, PR2=0x17, 6.5 bits (formula gives log2(96) ≈ 6.58; table rounds to 6.5) | Table 9-3, p.61 | note | info |
-| P2-155 | Table 9-4 T2CON POR -000 0000 shows bit 7 '-' but "other resets" uuuu uuuu includes bit 7 as 'u' (inconsistent notation) | Table 9-4, p.61 | note | **decide** |
+| P2-155 | Table 9-4 T2CON POR -000 0000 shows bit 7 '-' but "other resets" uuuu uuuu includes bit 7 as 'u' (inconsistent notation) | Table 9-4, p.61 | note | D19 |
 | P2-156 | Register 9-1 text for 1011 lacks closing parenthesis; Reg 9-1 refers to "CCPRxL"/"CCPx" generic names for CCPR1L/CCP1 | Reg 9-1, p.57 | note | info |
 
 ## Cross-references
@@ -566,76 +584,76 @@ written; the decision is added here.
 
 | ID | Item | Source | Kind | Status |
 |---|---|---|---|---|
-| P3-001 | Comparator module has two analog comparators; inputs multiplexed with RA0–RA3; on-chip VREF module can also be a comparator input | §10.0, p63 | behaviour | todo |
-| P3-002 | CMCON at address 01Fh. Bits: 7 C2OUT (R-0), 6 C1OUT (R-0), 5 C2INV (R/W-0), 4 C1INV (R/W-0), 3 CIS (R/W-0), 2-0 CM<2:0> (R/W-0) | Register 10-1, p63 | register | todo |
-| P3-003 | CMCON reset value: POR 0000 0000, all other Resets 0000 0000 | Table 10-1 / Table 11-1, p68/p71 | register | todo |
-| P3-004 | C2OUT: with C2INV=0, 1 = C2 VIN+ > C2 VIN-, 0 = VIN+ < VIN-; with C2INV=1, 1 = VIN+ < VIN-, 0 = VIN+ > VIN- | Register 10-1 bit 7, p63 | register | todo |
-| P3-005 | C1OUT: same polarity rules as C2OUT using C1INV (C1INV=0: 1 = C1 VIN+ > VIN-; C1INV=1: 1 = VIN+ < VIN-) | Register 10-1 bit 6, p63 | register | todo |
-| P3-006 | C2INV / C1INV: 1 = output inverted, 0 = not inverted | Register 10-1 bits 5,4, p63 | register | todo |
-| P3-007 | C1OUT/C2OUT are read-only (writes ignored) | Register 10-1 (R-0); §10.5 "These bits are read-only", p66 | register | todo |
-| P3-008 | CIS when CM=001: 1 = C1 VIN- connects to RA3; 0 = C1 VIN- connects to RA0 | Register 10-1 bit 3, p63 | register | todo |
-| P3-009 | CIS when CM=010: 1 = C1 VIN- to RA3 and C2 VIN- to RA2; 0 = C1 VIN- to RA0 and C2 VIN- to RA1 | Register 10-1 bit 3, p63; Figure 10-1, p64 | register | todo |
+| P3-001 | Comparator module has two analog comparators; inputs multiplexed with RA0–RA3; on-chip VREF module can also be a comparator input | §10.0, p63 | behaviour | done (SoC) |
+| P3-002 | CMCON at address 01Fh. Bits: 7 C2OUT (R-0), 6 C1OUT (R-0), 5 C2INV (R/W-0), 4 C1INV (R/W-0), 3 CIS (R/W-0), 2-0 CM<2:0> (R/W-0) | Register 10-1, p63 | register | done (SoC) |
+| P3-003 | CMCON reset value: POR 0000 0000, all other Resets 0000 0000 | Table 10-1 / Table 11-1, p68/p71 | register | done (SoC) |
+| P3-004 | C2OUT: with C2INV=0, 1 = C2 VIN+ > C2 VIN-, 0 = VIN+ < VIN-; with C2INV=1, 1 = VIN+ < VIN-, 0 = VIN+ > VIN- | Register 10-1 bit 7, p63 | register | done (SoC) |
+| P3-005 | C1OUT: same polarity rules as C2OUT using C1INV (C1INV=0: 1 = C1 VIN+ > VIN-; C1INV=1: 1 = VIN+ < VIN-) | Register 10-1 bit 6, p63 | register | done (SoC) |
+| P3-006 | C2INV / C1INV: 1 = output inverted, 0 = not inverted | Register 10-1 bits 5,4, p63 | register | done (SoC) |
+| P3-007 | C1OUT/C2OUT are read-only (writes ignored) | Register 10-1 (R-0); §10.5 "These bits are read-only", p66 | register | done (SoC) |
+| P3-008 | CIS when CM=001: 1 = C1 VIN- connects to RA3; 0 = C1 VIN- connects to RA0 | Register 10-1 bit 3, p63 | register | done (SoC) |
+| P3-009 | CIS when CM=010: 1 = C1 VIN- to RA3 and C2 VIN- to RA2; 0 = C1 VIN- to RA0 and C2 VIN- to RA1 | Register 10-1 bit 3, p63; Figure 10-1, p64 | register | done (SoC) |
 | P3-010 | CIS has no documented effect in modes other than 001 and 010 | Register 10-1 bit 3, p63 | note | info |
-| P3-011 | Eight comparator modes selected by CM<2:0>; TRISA controls data direction of comparator pins in each mode | §10.1, p64 | behaviour | todo |
-| P3-012 | Mode CM=000 "Comparators Reset (POR default)": RA0, RA3, RA1, RA2 all analog (A); C1 and C2 Off, outputs read as '0' | Figure 10-1, p64 | behaviour | todo |
-| P3-013 | Mode CM=111 "Comparators Off": RA0, RA3, RA1, RA2 all digital inputs (D); C1 and C2 Off, read as '0' (figure shows VSS tie) | Figure 10-1, p64 | behaviour | todo |
-| P3-014 | Mode CM=100 "Two Independent Comparators": C1 VIN-=RA0 (A), VIN+=RA3 (A) -> C1VOUT; C2 VIN-=RA1 (A), VIN+=RA2 (A) -> C2VOUT | Figure 10-1, p64 | behaviour | todo |
-| P3-015 | Mode CM=010 "Four Inputs Multiplexed to Two Comparators": RA0, RA3, RA1, RA2 all A; C1 VIN- = RA0 (CIS=0)/RA3 (CIS=1); C2 VIN- = RA1 (CIS=0)/RA2 (CIS=1); VIN+ of both from VREF module | Figure 10-1, p64; §10.3.2, p65 | behaviour | todo |
-| P3-016 | Mode CM=011 "Two Common Reference Comparators": RA0 A (C1 VIN-), RA3 D (digital), RA1 A (C2 VIN-), RA2 A (VIN+, common reference to both comparators); outputs C1VOUT, C2VOUT internal only | Figure 10-1, p64 | behaviour | todo |
-| P3-017 | Mode CM=110 "Two Common Reference Comparators with Outputs": RA0 A (C1 VIN-), RA1 A (C2 VIN-), RA2 A (common VIN+); RA3/AN3/CMP1 marked D and carries C1 output; RA4/T0CKI/CMP2 carries C2 output as Open Drain | Figure 10-1, p64; §10.5, p66 | pin | todo |
-| P3-018 | Mode CM=101 "One Independent Comparator": RA0 D, RA3 D, C1 Off (read as '0', VIN+ shown to VSS); C2 VIN-=RA1 (A), VIN+=RA2 (A) -> C2VOUT | Figure 10-1, p64 | behaviour | todo |
-| P3-019 | Mode CM=001 "Three Inputs Multiplexed to Two Comparators": RA0 A, RA3 A, RA1 A, RA2 A; C1 VIN- = RA0 (CIS=0)/RA3 (CIS=1); C2 VIN- = RA1; RA2 = VIN+ (shared by C1 and C2 per figure); outputs C1VOUT, C2VOUT | Figure 10-1, p64 | behaviour | todo |
-| P3-020 | Figure legend: A = Analog Input, port reads zeros always; D = Digital Input | Figure 10-1 legend, p64 | pin | todo |
-| P3-021 | AMBIGUITY: §10.5 says comparator outputs go to RA3 and RA4 pins when CM=110 or 001, but Figure 10-1 shows CM=001 with RA3 as an analog input (CIS mux) and no pin outputs; only CM=110 shows pin outputs (RA4 open drain) | §10.5 p66 vs Figure 10-1 p64 | note | **decide** |
-| P3-022 | Changing the comparator mode: the output level may not be valid for the specified mode change delay (Table 17-2) | §10.1, p64 | timing | todo |
+| P3-011 | Eight comparator modes selected by CM<2:0>; TRISA controls data direction of comparator pins in each mode | §10.1, p64 | behaviour | done (SoC) |
+| P3-012 | Mode CM=000 "Comparators Reset (POR default)": RA0, RA3, RA1, RA2 all analog (A); C1 and C2 Off, outputs read as '0' | Figure 10-1, p64 | behaviour | done (SoC) |
+| P3-013 | Mode CM=111 "Comparators Off": RA0, RA3, RA1, RA2 all digital inputs (D); C1 and C2 Off, read as '0' (figure shows VSS tie) | Figure 10-1, p64 | behaviour | done (SoC) |
+| P3-014 | Mode CM=100 "Two Independent Comparators": C1 VIN-=RA0 (A), VIN+=RA3 (A) -> C1VOUT; C2 VIN-=RA1 (A), VIN+=RA2 (A) -> C2VOUT | Figure 10-1, p64 | behaviour | done (SoC) |
+| P3-015 | Mode CM=010 "Four Inputs Multiplexed to Two Comparators": RA0, RA3, RA1, RA2 all A; C1 VIN- = RA0 (CIS=0)/RA3 (CIS=1); C2 VIN- = RA1 (CIS=0)/RA2 (CIS=1); VIN+ of both from VREF module | Figure 10-1, p64; §10.3.2, p65 | behaviour | done (SoC) |
+| P3-016 | Mode CM=011 "Two Common Reference Comparators": RA0 A (C1 VIN-), RA3 D (digital), RA1 A (C2 VIN-), RA2 A (VIN+, common reference to both comparators); outputs C1VOUT, C2VOUT internal only | Figure 10-1, p64 | behaviour | done (SoC) |
+| P3-017 | Mode CM=110 "Two Common Reference Comparators with Outputs": RA0 A (C1 VIN-), RA1 A (C2 VIN-), RA2 A (common VIN+); RA3/AN3/CMP1 marked D and carries C1 output; RA4/T0CKI/CMP2 carries C2 output as Open Drain | Figure 10-1, p64; §10.5, p66 | pin | done (SoC) |
+| P3-018 | Mode CM=101 "One Independent Comparator": RA0 D, RA3 D, C1 Off (read as '0', VIN+ shown to VSS); C2 VIN-=RA1 (A), VIN+=RA2 (A) -> C2VOUT | Figure 10-1, p64 | behaviour | done (SoC) |
+| P3-019 | Mode CM=001 "Three Inputs Multiplexed to Two Comparators": RA0 A, RA3 A, RA1 A, RA2 A; C1 VIN- = RA0 (CIS=0)/RA3 (CIS=1); C2 VIN- = RA1; RA2 = VIN+ (shared by C1 and C2 per figure); outputs C1VOUT, C2VOUT | Figure 10-1, p64 | behaviour | done (SoC) |
+| P3-020 | Figure legend: A = Analog Input, port reads zeros always; D = Digital Input | Figure 10-1 legend, p64 | pin | done (SoC) |
+| P3-021 | AMBIGUITY: §10.5 says comparator outputs go to RA3 and RA4 pins when CM=110 or 001, but Figure 10-1 shows CM=001 with RA3 as an analog input (CIS mux) and no pin outputs; only CM=110 shows pin outputs (RA4 open drain) | §10.5 p66 vs Figure 10-1 p64 | note | D21 |
+| P3-022 | Changing the comparator mode: the output level may not be valid for the specified mode change delay (Table 17-2) | §10.1, p64 | timing | done (SoC) |
 | P3-023 | Note 1: comparator interrupts should be disabled during a mode change, otherwise a false interrupt may occur | §10.1 Note 1, p64 | failure-mode | todo |
 | P3-024 | Note 2: comparators can have an inverted output (see Figure 10-1) | §10.1 Note 2, p64 | note | info |
 | P3-025 | Example 10-1 init: CLRF PORTA; read CMCON & 0xC0 to flag reg; CMCON=0x03 (CM=011); TRISA=0x07; 10 µs delay (DELAY10); MOVF CMCON,F "to end change condition"; BCF PIR1,CMIF; BSF PIE1,CMIE; BSF INTCON,PEIE; BSF INTCON,GIE | Example 10-1, p65 | behaviour | todo |
-| P3-026 | INCONSISTENCY: Example 10-1 text says RA3 and RA4 configured as digital outputs and RA2 as V+ of both comparators (matches CM=110 behaviour), but code writes CMCON=0x03 (CM=011, no pin outputs) | §10 text before Example 10-1, p65 | note | **decide** |
-| P3-027 | INCONSISTENCY: Example 10-1 comment "TRISA<7:5> always read '0'", but Table 10-1/11-1 list TRISA7..TRISA5 implemented with reset 1111 1111 | Example 10-1 p65 vs Table 10-1 p68 | note | **decide** |
-| P3-028 | Comparator output is digital low when VIN+ < VIN-, high when VIN+ > VIN- (non-inverted); shaded uncertainty regions due to input offset and response time | §10.2, Figure 10-2, p65 | behaviour | todo |
+| P3-026 | INCONSISTENCY: Example 10-1 text says RA3 and RA4 configured as digital outputs and RA2 as V+ of both comparators (matches CM=110 behaviour), but code writes CMCON=0x03 (CM=011, no pin outputs) | §10 text before Example 10-1, p65 | note | info |
+| P3-027 | INCONSISTENCY: Example 10-1 comment "TRISA<7:5> always read '0'", but Table 10-1/11-1 list TRISA7..TRISA5 implemented with reset 1111 1111 | Example 10-1 p65 vs Table 10-1 p68 | note | info |
+| P3-028 | Comparator output is digital low when VIN+ < VIN-, high when VIN+ > VIN- (non-inverted); shaded uncertainty regions due to input offset and response time | §10.2, Figure 10-2, p65 | behaviour | done (SoC) |
 | P3-029 | Common Mode voltage spec in Table 17-2 | §10.2, p65 | electrical | todo |
-| P3-030 | External reference: comparators may use same or different references; reference must be between VSS and VDD; can be applied to either comparator pin | §10.3.1, p65 | electrical | todo |
-| P3-031 | Internal reference used only in CM=010; internal VREF applied to VIN+ of both comparators | §10.3.2, p65 | behaviour | todo |
+| P3-030 | External reference: comparators may use same or different references; reference must be between VSS and VDD; can be applied to either comparator pin | §10.3.1, p65 | electrical | done (SoC) |
+| P3-031 | Internal reference used only in CM=010; internal VREF applied to VIN+ of both comparators | §10.3.2, p65 | behaviour | done (SoC) |
 | P3-032 | Response time = minimum time after selecting new reference or input source before output valid; if internal reference changed, use VREF max delay (Table 17-3); otherwise comparator max delay (Table 17-2, p142) | §10.4, p65 | timing | todo |
-| P3-033 | Comparator outputs readable via CMCON<7:6>; may also be driven directly on RA3 and RA4 | §10.5, p66 | pin | todo |
-| P3-034 | When output multiplexors are switched, each pin outputs the unsynchronized comparator output | §10.5, p66 | pin | todo |
-| P3-035 | TRISA bits still act as output enable/disable for RA3/AN3/CMP1 and RA4/T0CKI/CMP2 in comparator-output mode | §10.5, p66 | pin | todo |
-| P3-036 | Note 1: reading PORT, pins configured as analog inputs read '0'; digital-input pins convert analog input per Schmitt Trigger input specification | §10.5 Note 1, p66 | pin | todo |
+| P3-033 | Comparator outputs readable via CMCON<7:6>; may also be driven directly on RA3 and RA4 | §10.5, p66 | pin | done (SoC) |
+| P3-034 | When output multiplexors are switched, each pin outputs the unsynchronized comparator output | §10.5, p66 | pin | done (SoC) |
+| P3-035 | TRISA bits still act as output enable/disable for RA3/AN3/CMP1 and RA4/T0CKI/CMP2 in comparator-output mode | §10.5, p66 | pin | done (SoC) |
+| P3-036 | Note 1: reading PORT, pins configured as analog inputs read '0'; digital-input pins convert analog input per Schmitt Trigger input specification | §10.5 Note 1, p66 | pin | done (SoC) |
 | P3-037 | Note 2: analog levels on a pin defined as digital input may cause the input buffer to consume more current than specified | §10.5 Note 2, p66 | electrical | todo |
-| P3-038 | Figure 10-3: CnVOUT passes through CnINV to the pin and into a D-latch read onto data bus (CMCON<7:6>) enabled by RD CMCON (Q3 shown); a second latch (Q1 shown, cleared by Reset) compared against output sets CMIF; "From other Comparator" OR-ed into CMIF | Figure 10-3, p66 | behaviour | todo |
-| P3-039 | CMIF set whenever output value of either comparator changes; software must track CMCON<7:6> to know which changed | §10.6, p67 | behaviour | todo |
-| P3-040 | CMIF is PIR1<6>; must be cleared by writing '0'; writing '1' initiates a simulated interrupt | §10.6, p67 | register | todo |
-| P3-041 | Interrupt requires CMIE (PIE1<6>), PEIE (INTCON<6>) and GIE set; CMIF still set if any is clear | §10.6, p67 | behaviour | todo |
+| P3-038 | Figure 10-3: CnVOUT passes through CnINV to the pin and into a D-latch read onto data bus (CMCON<7:6>) enabled by RD CMCON (Q3 shown); a second latch (Q1 shown, cleared by Reset) compared against output sets CMIF; "From other Comparator" OR-ed into CMIF | Figure 10-3, p66 | behaviour | done (SoC) |
+| P3-039 | CMIF set whenever output value of either comparator changes; software must track CMCON<7:6> to know which changed | §10.6, p67 | behaviour | done (SoC) |
+| P3-040 | CMIF is PIR1<6>; must be cleared by writing '0'; writing '1' initiates a simulated interrupt | §10.6, p67 | register | done (SoC) |
+| P3-041 | Interrupt requires CMIE (PIE1<6>), PEIE (INTCON<6>) and GIE set; CMIF still set if any is clear | §10.6, p67 | behaviour | done (SoC) |
 | P3-042 | Note: if CMCON change (C1OUT/C2OUT) occurs while a read is being executed (start of Q2), CMIF may not get set | §10.6 Note, p67 | failure-mode | todo |
-| P3-043 | ISR clear: (a) any write or read of CMCON ends mismatch condition; (b) clear CMIF. Mismatch condition keeps setting CMIF until CMCON is read | §10.6, p67 | behaviour | todo |
-| P3-044 | Sleep: active comparator stays active; interrupt functional if enabled and wakes the device | §10.7, p67 | behaviour | todo |
+| P3-043 | ISR clear: (a) any write or read of CMCON ends mismatch condition; (b) clear CMIF. Mismatch condition keeps setting CMIF until CMCON is read | §10.6, p67 | behaviour | done (SoC) |
+| P3-044 | Sleep: active comparator stays active; interrupt functional if enabled and wakes the device | §10.7, p67 | behaviour | done (SoC) |
 | P3-045 | Sleep: powered comparators raise Sleep current above power-down spec; each operating comparator adds current per comparator specs; set CM=111 to minimize | §10.7, p67 | electrical | todo |
-| P3-046 | Wake from Sleep does not affect CMCON contents | §10.7, p67 | behaviour | todo |
-| P3-047 | Device Reset forces CMCON to reset state, CM=000 (all potential inputs analog); comparators powered-down during Reset interval | §10.8, p67 | behaviour | todo |
+| P3-046 | Wake from Sleep does not affect CMCON contents | §10.7, p67 | behaviour | done (SoC) |
+| P3-047 | Device Reset forces CMCON to reset state, CM=000 (all potential inputs analog); comparators powered-down during Reset interval | §10.8, p67 | behaviour | done (SoC) |
 | P3-048 | Analog input must be between VSS and VDD; deviation >0.6V either way forward-biases a protection diode and latch-up may occur | §10.9, p67; Figure 10-4 (VT=0.6V) | failure-mode | todo |
 | P3-049 | Max recommended analog source impedance 10 kΩ (RS < 10K); external components on analog pin should have very little leakage | §10.9, p67; Figure 10-4, p68 | electrical | todo |
 | P3-050 | Analog input model: CPIN = 5 pF, ILEAKAGE = ±500 nA, VT = 0.6V diodes to VDD/VSS, RIC interconnect resistance | Figure 10-4, p68 | electrical | todo |
 | P3-051 | Comparator-related registers: INTCON (0Bh/8Bh/10Bh/18Bh) POR 0000 000x, other 0000 000u; PIR1 0Ch 0000 -000/0000 -000 (EEIF,CMIF,RCIF,TXIF,—,CCP1IF,TMR2IF,TMR1IF); PIE1 8Ch 0000 -000 (EEIE,CMIE,RCIE,TXIE,—,CCP1IE,TMR2IE,TMR1IE); TRISA 85h 1111 1111/1111 1111 | Table 10-1, p68 | register | todo |
-| P3-052 | Typo: Table 10-1 labels CMCON bit 4 "C1NV" (Register 10-1 says C1INV) | Table 10-1, p68 | note | **decide** |
-| P3-053 | VREF module: 16-tap resistor ladder, two ranges, power-down function; 16 distinct levels per range | §11.0/§11.1, p69 | behaviour | todo |
-| P3-054 | VRCON at address 9Fh: bit7 VREN (R/W-0), bit6 VROE (R/W-0), bit5 VRR (R/W-0), bit4 unimplemented read '0', bits3-0 VR<3:0> (R/W-0) | Register 11-1, p69 | register | todo |
-| P3-055 | VRCON reset: POR 000- 0000, all other Resets 000- 0000 | Table 11-1, p71 | register | todo |
-| P3-056 | VREN: 1 = VREF circuit powered on; 0 = powered down, no IDD drain | Register 11-1 bit 7, p69 | register | todo |
-| P3-057 | VROE: 1 = VREF output on RA2 pin; 0 = disconnected from RA2 | Register 11-1 bit 6, p69 | register | todo |
-| P3-058 | VRR: 1 = Low range; 0 = High range | Register 11-1 bit 5, p69 | register | todo |
-| P3-059 | VRR=1: VREF = (VR<3:0>/24) × VDD; 0 ≤ VR ≤ 15 | Register 11-1; equations §11.0, p69 | behaviour | todo |
-| P3-060 | VRR=0: VREF = 1/4 × VDD + (VR<3:0>/32) × VDD | Register 11-1; equations §11.0, p69 | behaviour | todo |
-| P3-061 | Test vector (doc): VDD=5.0V, VRCON=0xA6 (VREN=1, VROE=0, VRR=1, VR=6) -> 1.25V; Example also sets CMCON=0x02, TRISA=0x07, 10 µs delay | Example 11-1, p70 | behaviour | todo |
-| P3-062 | Test vectors (computed from the doc equations, VDD=5.0V): VRR=1 VR=0 -> 0V, VR=15 -> 3.125V; VRR=0 VR=0 -> 1.25V, VR=15 -> 3.59375V | §11.0 equations, p69 | behaviour | todo |
-| P3-063 | INCONSISTENCY: Example 11-1 comment says "RA3-RA0 are outputs" while it writes TRISA=0x07 (RA2:0 inputs) | Example 11-1, p70 | note | **decide** |
+| P3-052 | Typo: Table 10-1 labels CMCON bit 4 "C1NV" (Register 10-1 says C1INV) | Table 10-1, p68 | note | info |
+| P3-053 | VREF module: 16-tap resistor ladder, two ranges, power-down function; 16 distinct levels per range | §11.0/§11.1, p69 | behaviour | done (SoC) |
+| P3-054 | VRCON at address 9Fh: bit7 VREN (R/W-0), bit6 VROE (R/W-0), bit5 VRR (R/W-0), bit4 unimplemented read '0', bits3-0 VR<3:0> (R/W-0) | Register 11-1, p69 | register | done (SoC) |
+| P3-055 | VRCON reset: POR 000- 0000, all other Resets 000- 0000 | Table 11-1, p71 | register | done (SoC) |
+| P3-056 | VREN: 1 = VREF circuit powered on; 0 = powered down, no IDD drain | Register 11-1 bit 7, p69 | register | done (SoC) |
+| P3-057 | VROE: 1 = VREF output on RA2 pin; 0 = disconnected from RA2 | Register 11-1 bit 6, p69 | register | done (SoC) |
+| P3-058 | VRR: 1 = Low range; 0 = High range | Register 11-1 bit 5, p69 | register | done (SoC) |
+| P3-059 | VRR=1: VREF = (VR<3:0>/24) × VDD; 0 ≤ VR ≤ 15 | Register 11-1; equations §11.0, p69 | behaviour | done (SoC) |
+| P3-060 | VRR=0: VREF = 1/4 × VDD + (VR<3:0>/32) × VDD | Register 11-1; equations §11.0, p69 | behaviour | done (SoC) |
+| P3-061 | Test vector (doc): VDD=5.0V, VRCON=0xA6 (VREN=1, VROE=0, VRR=1, VR=6) -> 1.25V; Example also sets CMCON=0x02, TRISA=0x07, 10 µs delay | Example 11-1, p70 | behaviour | done (SoC) |
+| P3-062 | Test vectors (computed from the doc equations, VDD=5.0V): VRR=1 VR=0 -> 0V, VR=15 -> 3.125V; VRR=0 VR=0 -> 1.25V, VR=15 -> 3.59375V | §11.0 equations, p69 | behaviour | done (SoC) |
+| P3-063 | INCONSISTENCY: Example 11-1 comment says "RA3-RA0 are outputs" while it writes TRISA=0x07 (RA2:0 inputs) | Example 11-1, p70 | note | info |
 | P3-064 | VREF settling time must be considered when changing output (Table 17-3) | §11.0, p69 | timing | todo |
-| P3-065 | Ladder: 8R at top (VREN switch to VDD), 16 R stages, 8R at bottom switched by VRR to VSS; 16-1 analog mux by VR<3:0>; R defined in Table 17-3 | Figure 11-1, p70 | electrical | todo |
+| P3-065 | Ladder: 8R at top (VREN switch to VDD), 16 R stages, 8R at bottom switched by VRR to VSS; 16-1 analog mux by VR<3:0>; R defined in Table 17-3 | Figure 11-1, p70 | electrical | done (SoC) |
 | P3-066 | Full VSS–VDD range cannot be reached (top/bottom transistors); VREF is VDD-derived and tracks VDD fluctuations; absolute accuracy in Table 17-3 | §11.2, p70 | electrical | todo |
-| P3-067 | Sleep: VRCON unaffected on wake by interrupt or WDT time-out; disable module to minimize Sleep current | §11.3, p70 | behaviour | todo |
-| P3-068 | Reset clears VREN, VROE, VRR (selects high range) and VR<3:0> | §11.4, p70 | behaviour | todo |
-| P3-069 | VREF module operates independently of the comparator module | §11.5, p70 | behaviour | todo |
-| P3-070 | VREF output connected to RA2 if TRISA<2> = 1 and VROE = 1 | §11.5, p70 | pin | todo |
+| P3-067 | Sleep: VRCON unaffected on wake by interrupt or WDT time-out; disable module to minimize Sleep current | §11.3, p70 | behaviour | done (SoC) |
+| P3-068 | Reset clears VREN, VROE, VRR (selects high range) and VR<3:0> | §11.4, p70 | behaviour | done (SoC) |
+| P3-069 | VREF module operates independently of the comparator module | §11.5, p70 | behaviour | done (SoC) |
+| P3-070 | VREF output connected to RA2 if TRISA<2> = 1 and VROE = 1 | §11.5, p70 | pin | done (SoC) |
 | P3-071 | VROE with an input signal present on RA2 increases current; RA2 as digital output with VREF enabled also increases current | §11.5, p70 | electrical | todo |
 | P3-072 | RA2 as simple D/A output has limited drive; buffer (op amp) required for external use; VREF output impedance R depends on VRCON<3:0> and VRCON<5> | §11.5, Figure 11-2 Note 1, p70-71 | electrical | todo |
 | P3-073 | USART (SCI) modes: Asynchronous full-duplex; Synchronous Master half-duplex; Synchronous Slave half-duplex | §12.0, p73 | behaviour | todo |
@@ -799,7 +817,7 @@ written; the decision is added here.
 | P4-006 | Configuration bits: programmed = reads '0', unprogrammed = reads '1' | §14.1, p.97 | memory | done (SoC) |
 | P4-007 | Configuration Word is at program-memory address 2007h, in the configuration space 2000h–3FFFh, which can only be accessed during programming (not by user code) | §14.1, p.97 | memory | todo |
 | P4-008 | CONFIG layout (14 bits): bit13 CP, bits12–9 unimplemented (read '0'), bit8 CPD, bit7 LVP, bit6 BOREN, bit5 MCLRE, bit4 FOSC2, bit3 PWRTE, bit2 WDTE, bit1 FOSC1, bit0 FOSC0 | Register 14-1, p.98 | register | done (SoC) |
-| P4-009 | CONFIG bit labels print "F0SC1"/"F0SC0" (digit zero) in the bit diagram; the text calls them FOSC1/FOSC0 — typo | Register 14-1, p.98 | note | **decide** |
+| P4-009 | CONFIG bit labels print "F0SC1"/"F0SC0" (digit zero) in the bit diagram; the text calls them FOSC1/FOSC0 — typo | Register 14-1, p.98 | note | info |
 | P4-010 | CP (bit13) for PIC16F648A: 1 = off; 0 = 0000h–0FFFh code-protected | Register 14-1, p.98 | register | todo |
 | P4-011 | CP (bit13) for PIC16F628A: 1 = off; 0 = 0000h–07FFh code-protected | Register 14-1, p.98 | register | todo |
 | P4-012 | CP (bit13) for PIC16F627A: 1 = off; 0 = 0000h–03FFh code-protected | Register 14-1, p.98 | register | todo |
@@ -857,7 +875,7 @@ written; the decision is added here.
 | P4-064 | PWRT delay varies chip-to-chip, with VDD, temperature and process (Table 17-7) | §14.4.2, p.103 | timing | todo |
 | P4-065 | OST: 1024 oscillator cycles (from OSC1 input) delay after the PWRT delay is over; execution does not start until OST completes | §14.4.3, p.103 | timing | done (SoC) |
 | P4-066 | OST is invoked only for XT, LP and HS modes and only on Power-on Reset or wake-up from Sleep | §14.4.3, p.103 | behaviour | done (SoC) |
-| P4-067 | Text says OST only on POR or Sleep wake-up, but Table 14-3 lists 72 ms + 1024·TOSC (PWRTE=0) and 1024·TOSC (PWRTE=1) for XT/HS/LP after Brown-out Reset — contradiction | §14.4.3 vs Table 14-3, p.103–104 | note | **decide** |
+| P4-067 | Text says OST only on POR or Sleep wake-up, but Table 14-3 lists 72 ms + 1024·TOSC (PWRTE=0) and 1024·TOSC (PWRTE=1) for XT/HS/LP after Brown-out Reset — contradiction | §14.4.3 vs Table 14-3, p.103–104 | note | D14 |
 | P4-068 | BOR: if VDD falls below VBOR for longer than TBOR, chip resets; a Reset is not assured if VDD is below VBOR for shorter than TBOR (VBOR Table 17-2, TBOR Table 17-7) | §14.4.4, p.103 | electrical | todo |
 | P4-069 | BOREN clear (programmed) disables BOR circuitry; set enables it | §14.4.4, p.103 | register | todo |
 | P4-070 | On any Reset (Power-on, Brown-out, Watchdog, etc.) the chip remains in Reset until VDD rises above VBOR, then PWRT (if enabled) adds 72 ms | §14.4.4, p.103 | behaviour | todo |
@@ -876,7 +894,7 @@ written; the decision is added here.
 | P4-083 | Table 14-3 XT/HS/LP: POR PWRTE=0 → 72 ms + 1024·TOSC; POR PWRTE=1 → 1024·TOSC; BOR PWRTE=0 → 72 ms + 1024·TOSC; BOR PWRTE=1 → 1024·TOSC; wake from Sleep → 1024·TOSC | Table 14-3, p.104 | timing | done (SoC) |
 | P4-084 | Table 14-3 RC, EC: POR PWRTE=0 → 72 ms; PWRTE=1 → —; BOR PWRTE=0 → 72 ms; PWRTE=1 → —; wake from Sleep → — | Table 14-3, p.104 | timing | done (SoC) |
 | P4-085 | Table 14-3 INTOSC: POR PWRTE=0 → 72 ms; PWRTE=1 → —; BOR PWRTE=0 → 72 ms; PWRTE=1 → —; wake from Sleep → 6 μs | Table 14-3, p.104 | timing | done (SoC) |
-| P4-086 | Table 14-3 shows no wake delay for RC, but Fig 14-17 Note 2 says approximately 1 μs delay for RC oscillator mode — inconsistency | Table 14-3 vs Fig 14-17 Note 2, p.104/113 | note | **decide** |
+| P4-086 | Table 14-3 shows no wake delay for RC, but Fig 14-17 Note 2 says approximately 1 μs delay for RC oscillator mode — inconsistency | Table 14-3 vs Fig 14-17 Note 2, p.104/113 | note | D15 |
 | P4-087 | Table 14-4: POR=0, BOR=x, TO=1, PD=1 → Power-on Reset | Table 14-4, p.104 | register | done (SoC) |
 | P4-088 | Table 14-4: POR=0, TO=0 → illegal (TO is set on POR); POR=0, PD=0 → illegal (PD is set on POR) | Table 14-4, p.104 | register | done (SoC) |
 | P4-089 | Table 14-4: POR=1, BOR=0, TO=x, PD=x → Brown-out Reset | Table 14-4, p.104 | register | done (SoC) |
@@ -884,7 +902,7 @@ written; the decision is added here.
 | P4-091 | Table 14-4: POR=1, BOR=1, TO=u, PD=u → MCLR Reset during normal operation; TO=1, PD=0 → MCLR Reset during Sleep | Table 14-4, p.104 | register | done (SoC) |
 | P4-092 | Table 14-5 STATUS (03h/83h/103h/183h: IRP RP1 RP0 TO PD Z DC C): POR 0001 1xxx; other Resets 000q quuu | Table 14-5, p.105 | register | done (SoC) |
 | P4-093 | Table 14-5 PCON (8Eh: —,—,—,—,OSCF,—,POR,BOR): POR ---- 1-0x; other Resets ---- u-uq; "other Resets" = MCLR, BOR, WDT Reset during normal operation | Table 14-5 + Note 1, p.105 | register | done (SoC) |
-| P4-094 | Table 14-5 gives PCON.OSCF = u on other Resets, but Tables 14-6/14-7 give OSCF = 1 on MCLR/WDT/BOR Resets — contradiction; also STATUS bit printed "RPO" (letter O) | Table 14-5 vs 14-6/14-7, p.105–106 | note | **decide** |
+| P4-094 | Table 14-5 gives PCON.OSCF = u on other Resets, but Tables 14-6/14-7 give OSCF = 1 on MCLR/WDT/BOR Resets — contradiction; also STATUS bit printed "RPO" (letter O) | Table 14-5 vs 14-6/14-7, p.105–106 | note | D12 |
 | P4-095 | Table 14-6 Power-on Reset: PC 000h, STATUS 0001 1xxx, PCON ---- 1-0x | Table 14-6, p.105 | register | done (SoC) |
 | P4-096 | Table 14-6 MCLR Reset during normal operation: PC 000h, STATUS 000u uuuu, PCON ---- 1-uu | Table 14-6, p.105 | register | done (SoC) |
 | P4-097 | Table 14-6 MCLR Reset during Sleep: PC 000h, STATUS 0001 0uuu, PCON ---- 1-uu | Table 14-6, p.105 | register | done (SoC) |
@@ -915,7 +933,7 @@ written; the decision is added here.
 | P4-122 | Table 14-7 TXREG (19h): POR 0000 0000; resets 0000 0000; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
 | P4-123 | Table 14-7 RCREG (1Ah): POR 0000 0000; resets 0000 0000; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
 | P4-124 | Table 14-7 CMCON (1Fh): POR 0000 0000; resets 0000 0000; wake uu-- uuuu | Table 14-7, p.106 | register | done (SoC) |
-| P4-125 | CMCON wake column "uu-- uuuu" shows bits 5:4 as unimplemented although POR/reset columns give all 8 bits as 0 — inconsistent within the row | Table 14-7, p.106 | note | **decide** |
+| P4-125 | CMCON wake column "uu-- uuuu" shows bits 5:4 as unimplemented although POR/reset columns give all 8 bits as 0 — inconsistent within the row | Table 14-7, p.106 | note | info |
 | P4-126 | Table 14-7 OPTION (81h,181h): POR 1111 1111; resets 1111 1111; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
 | P4-127 | Table 14-7 TRISA (85h): POR 1111 1111; resets 1111 1111; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
 | P4-128 | Table 14-7 TRISB (86h,186h): POR 1111 1111; resets 1111 1111; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
@@ -1887,12 +1905,12 @@ DS80151B applies to "all PIC16F627A and PIC16F628A devices", meaning Rev. A sili
 | P9-071 | Prescaler and postscaler counters are cleared on: any write to TMR2, any write to T2CON, any device reset. Writing T2CON does not clear TMR2 | §13.6 + Note, p.13-4 | behaviour | done (SoC) |
 | P9-072 | In SLEEP TMR2 does not increment; the prescaler retains its count and resumes after wake | §13.7, p.13-4 | behaviour | done (SoC) |
 | P9-073 | Design tip: Timer2 resets to zero when it equals PR2 and TMR2IF gets set at that time; PR2=FFh gives an interrupt at FFh rollover like Timer0; PR2 holds its value so no reload is needed | §14.7 Q6, p.14-15 | behaviour | done (SoC) |
-| P9-074 | T2CON other-reset value: manual Table 13-1 and DS40044G Table 8-1 give -000 0000; DS40044G Table 9-4 gives uuuu uuuu (inconsistent within the device data sheet) | DS33023A Table 13-1 p.13-4 vs DS40044G Table 8-1 p.55 and Table 9-4 p.61 | note | **decide** |
+| P9-074 | T2CON other-reset value: manual Table 13-1 and DS40044G Table 8-1 give -000 0000; DS40044G Table 9-4 gives uuuu uuuu (inconsistent within the device data sheet) | DS33023A Table 13-1 p.13-4 vs DS40044G Table 8-1 p.55 and Table 9-4 p.61 | note | D19 |
 | P9-075 | CCP: 16-bit register usable as 16-bit capture, 16-bit compare, or 10-bit PWM master/slave duty-cycle register | §14.1, p.14-2 | behaviour | done (SoC) |
 | P9-076 | Timer resources: capture and compare use Timer1 only; PWM uses Timer2 only (only timer with period register) | Table 14-2, §14.7 Q1/Q2, pp.14-2/14-15 | behaviour | done (SoC) |
 | P9-077 | One CCP module cannot do capture/compare and PWM at the same time (logic is shared); it can switch between modes | §14.7 Q3, p.14-15 | behaviour | done (SoC) |
 | P9-078 | CCPxCON: bits 7:6 unimplemented; bits 5:4 DCxB1:DCxB0 = PWM duty LSbs (unused in capture/compare); CCPxM3:0: 0000 off (resets module), 0100 capture every falling edge, 0101 every rising edge, 0110 every 4th rising, 0111 every 16th rising, 1000 compare set pin on match, 1001 compare clear pin on match, 1010 compare software interrupt only, 1011 compare special event, 11xx PWM | Reg 14-1, p.14-3 | register | done (SoC) |
-| P9-079 | Mode codes 0001–0011 are not listed in the manual (only 0000, 01xx, 10xx, 11xx); the device data sheet lists the same set. Behaviour for 0001–0011 is undocumented | Reg 14-1 p.14-3; DS40044G Reg 9-1 p.57 | note | **decide** |
+| P9-079 | Mode codes 0001–0011 are not listed in the manual (only 0000, 01xx, 10xx, 11xx); the device data sheet lists the same set. Behaviour for 0001–0011 is undocumented | Reg 14-1 p.14-3; DS40044G Reg 9-1 p.57 | note | D20 |
 | P9-080 | Device data sheet names CCP1CON<5:4> CCP1X:CCP1Y; manual names them DCxB1:DCxB0 (same function) | DS33023A Reg 14-1 vs DS40044G Reg 9-1 | note | info |
 | P9-081 | Capture: on the selected event on CCPx, CCPRxH:L latches the 16-bit TMR1 value and CCPxIF is set (software clears it); a second capture before CCPRx is read overwrites (loses) the previous value | §14.3, p.14-4 | behaviour | done (SoC) |
 | P9-082 | Capture does not reset TMR1; interval = difference of successive captures; TMR1 overflow sets TMR1IF to extend beyond 16 bits | §14.3, p.14-4 | behaviour | done (SoC) |
@@ -1993,43 +2011,43 @@ DS80151B applies to "all PIC16F627A and PIC16F628A devices", meaning Rev. A sili
 | P9-177 | VREF: 16-tap resistor ladder, two ranges, power-down when unused; within each range the 16 steps are monotonic; limited drive capability (intended for comparator inputs) | §19.1, p.19-2 | electrical | todo |
 | P9-178 | Ladder (Fig 19-1): VREN switch, 8R top, 16 R stages, 8R bottom switched out by VRR, 16:1 analog mux by VR3:VR0; R = param D312 | Fig 19-1, p.19-2 | electrical | todo |
 | P9-179 | VRR=1: VREF = (VR/24)·VDD, range 0…0.625·VDD in VDD/24 steps; VRR=0: VREF = VDD/4 + (VR/32)·VDD, VDD/32 steps | Reg 19-1, §19.3, pp.19-3/19-4 | electrical | todo |
-| P9-180 | Table 19-1 typical at VDD=5.0 V: VRR=1 → 0.00, 0.21, 0.42, 0.63, 0.83, 1.04, 1.25, 1.46, 1.67, 1.88, 2.08, 2.29, 2.50, 2.71, 2.92, 3.13 V; VRR=0 → 1.25, 1.41, 1.56, 1.72, 1.88, 2.03, 2.19, 2.34, 2.50, 2.66, 2.81, 2.97, 3.13, 3.28, 3.44, 3.59 V | Table 19-1, p.19-2 | electrical | todo |
-| P9-181 | VRCON: VREN (bit7), VROE (bit6), VRR (bit5), bit4 unimplemented, VR3:VR0. Reset 000- 0000 | Reg 19-1, Table 20-1, pp.19-3/20-10 | register | todo |
+| P9-180 | Table 19-1 typical at VDD=5.0 V: VRR=1 → 0.00, 0.21, 0.42, 0.63, 0.83, 1.04, 1.25, 1.46, 1.67, 1.88, 2.08, 2.29, 2.50, 2.71, 2.92, 3.13 V; VRR=0 → 1.25, 1.41, 1.56, 1.72, 1.88, 2.03, 2.19, 2.34, 2.50, 2.66, 2.81, 2.97, 3.13, 3.28, 3.44, 3.59 V | Table 19-1, p.19-2 | electrical | done (SoC) |
+| P9-181 | VRCON: VREN (bit7), VROE (bit6), VRR (bit5), bit4 unimplemented, VR3:VR0. Reset 000- 0000 | Reg 19-1, Table 20-1, pp.19-3/20-10 | register | done (SoC) |
 | P9-182 | Manual Reg 19-1 says VROE=1 connects VREF internally to the comparator module AND outputs it on the VREF pin, VROE=0 disconnects it from both; DS40044G says VROE only switches the output to RA2. Manual §20.5.2 also says the internal reference "may be used in any comparator mode" while both documents say it is applied to VIN+ only in CM=010 | DS33023A Reg 19-1 p.19-3, §20.5.2 p.20-7 vs DS40044G Reg 11-1 p.69, §10.3.2 p.65 | note | info |
 | P9-183 | Manual VRR bit text gives low range as "0 V to 0.75 VDD" though the formula maxes at 15/24·VDD = 0.625 VDD | Reg 19-1 bit 5, p.19-3 | note | info |
 | P9-184 | Settling time must be allowed after changing VREF; examples use a 10 µs delay (DS40044G D313: 10 µs max) | §19.3, Ex 19-1, pp.19-4/19-7 | timing | todo |
-| P9-185 | VR3:VR0 from target: VRR=1: VR = VREF/VDD·24; VRR=0: VR = (VREF − VDD/4)/VDD·32; integer only, must be ≤ 15 | Eq 19-1, p.19-4 | electrical | todo |
+| P9-185 | VR3:VR0 from target: VRR=1: VR = VREF/VDD·24; VRR=0: VR = (VREF − VDD/4)/VDD·32; integer only, must be ≤ 15 | Eq 19-1, p.19-4 | electrical | done (SoC) |
 | P9-186 | The full VSS…VDD range cannot be reached (top/bottom ladder transistors); VREF tracks VDD fluctuations directly; absolute accuracy = param D311 | §19.4, §19.9 Q1, pp.19-5/19-8 | electrical | todo |
-| P9-187 | SLEEP / wake by interrupt or WDT does not change VRCON; disable VREF to minimise sleep current | §19.5, p.19-5 | behaviour | todo |
-| P9-188 | Any device reset clears VREN, VROE, VRR (selects high range) and VR3:VR0 | §19.6, p.19-5 | register | todo |
-| P9-189 | VREF output reaches the pin only if VROE=1 and the pin's TRIS bit is set; driving the pin with a signal while VREF is output, or configuring it as digital output with VREF enabled, increases current | §19.7, p.19-6 | pin | todo |
+| P9-187 | SLEEP / wake by interrupt or WDT does not change VRCON; disable VREF to minimise sleep current | §19.5, p.19-5 | behaviour | done (SoC) |
+| P9-188 | Any device reset clears VREN, VROE, VRR (selects high range) and VR3:VR0 | §19.6, p.19-5 | register | done (SoC) |
+| P9-189 | VREF output reaches the pin only if VROE=1 and the pin's TRIS bit is set; driving the pin with a signal while VREF is output, or configuring it as digital output with VREF enabled, increases current | §19.7, p.19-6 | pin | done (SoC) |
 | P9-190 | VREF pin has output impedance R that depends on VRCON<3:0> and VRR; a buffer is required for external loads; low-impedance loads pull VREF off its expected level | §19.7, Fig 19-2, §19.9 Q2, pp.19-6/19-8 | electrical | todo |
-| P9-191 | Comparator module: two analog comparators, inputs multiplexed with I/O pins; on-chip VREF can be an input; CMCON controls input/output muxes | §20.1, p.20-2 | behaviour | todo |
+| P9-191 | Comparator module: two analog comparators, inputs multiplexed with I/O pins; on-chip VREF can be an input; CMCON controls input/output muxes | §20.1, p.20-2 | behaviour | done (SoC) |
 | P9-192 | CMCON (manual): C2OUT (R), C1OUT (R), bits 5:4 unimplemented, CIS, CM2:CM0; COUT=1 when VIN+ > VIN−. Reset 00-- 0000 | Reg 20-1, Table 20-1, pp.20-3/20-10 | register | todo |
 | P9-193 | 62xA CMCON bits 5:4 are C2INV/C1INV (output inversion, R/W, also inverts CnOUT meaning and pin output) and reset value is 0000 0000; manual shows them unimplemented | DS33023A Reg 20-1 p.20-3 vs DS40044G Reg 10-1 p.63, Fig 10-3 p.66 | note | info |
-| P9-194 | CIS: in CM=001, CIS=1 → C1 VIN− = AN3, CIS=0 → AN0; in CM=010, CIS=1 → C1 VIN−=AN3 and C2 VIN−=AN2, CIS=0 → AN0 and AN1 | Reg 20-1, p.20-3 | register | todo |
-| P9-195 | CM=000 (reset/POR default): RA0-RA3 analog, both comparators off, outputs read 0 | Fig 20-1, p.20-5 | behaviour | todo |
-| P9-196 | CM=111: comparators off (read 0), RA0-RA3 digital inputs | Fig 20-1, p.20-5 | behaviour | todo |
-| P9-197 | CM=100: two independent comparators: C1 = AN0(−)/AN3(+), C2 = AN1(−)/AN2(+), all analog | Fig 20-1, p.20-5 | behaviour | todo |
-| P9-198 | CM=010: four inputs muxed to two comparators: C1 VIN− = AN0/AN3 by CIS, C2 VIN− = AN1/AN2 by CIS, both VIN+ = internal VREF | Fig 20-1, §20.5.2, pp.20-5/20-7 | behaviour | todo |
-| P9-199 | CM=011: two common-reference comparators: C1 VIN− AN0, C2 VIN− AN1, shared VIN+ = AN2; RA3 digital | Fig 20-1, p.20-5 | behaviour | **check PDF** |
-| P9-200 | CM=110: as 011 but C1/C2 outputs driven onto RA3 and RA4 (RA4 open drain) | Fig 20-1, §20.7, pp.20-5/20-8 | pin | todo |
-| P9-201 | CM=101: one independent comparator: C1 off (reads 0) with RA0/RA3 digital, C2 = AN1(−)/AN2(+) | Fig 20-1, p.20-5 | behaviour | todo |
-| P9-202 | CM=001: three inputs muxed to two comparators: C1 VIN− = AN0/AN3 by CIS, VIN+ = AN2; C2 = AN1(−)/AN2(+) | Fig 20-1, p.20-5 | behaviour | **check PDF** |
-| P9-203 | Pins in analog mode ("A") read as 0 in the PORT register; digital-input pins convert analog levels per Schmitt trigger specification; analog levels on digital inputs can draw more current than specified | Fig 20-1 legend, §20.7 Notes 1-2, pp.20-5/20-8 | pin | todo |
+| P9-194 | CIS: in CM=001, CIS=1 → C1 VIN− = AN3, CIS=0 → AN0; in CM=010, CIS=1 → C1 VIN−=AN3 and C2 VIN−=AN2, CIS=0 → AN0 and AN1 | Reg 20-1, p.20-3 | register | done (SoC) |
+| P9-195 | CM=000 (reset/POR default): RA0-RA3 analog, both comparators off, outputs read 0 | Fig 20-1, p.20-5 | behaviour | done (SoC) |
+| P9-196 | CM=111: comparators off (read 0), RA0-RA3 digital inputs | Fig 20-1, p.20-5 | behaviour | done (SoC) |
+| P9-197 | CM=100: two independent comparators: C1 = AN0(−)/AN3(+), C2 = AN1(−)/AN2(+), all analog | Fig 20-1, p.20-5 | behaviour | done (SoC) |
+| P9-198 | CM=010: four inputs muxed to two comparators: C1 VIN− = AN0/AN3 by CIS, C2 VIN− = AN1/AN2 by CIS, both VIN+ = internal VREF | Fig 20-1, §20.5.2, pp.20-5/20-7 | behaviour | done (SoC) |
+| P9-199 | CM=011: two common-reference comparators: C1 VIN− AN0, C2 VIN− AN1, shared VIN+ = AN2; RA3 digital | Fig 20-1, p.20-5 | behaviour | done (SoC) |
+| P9-200 | CM=110: as 011 but C1/C2 outputs driven onto RA3 and RA4 (RA4 open drain) | Fig 20-1, §20.7, pp.20-5/20-8 | pin | done (SoC) |
+| P9-201 | CM=101: one independent comparator: C1 off (reads 0) with RA0/RA3 digital, C2 = AN1(−)/AN2(+) | Fig 20-1, p.20-5 | behaviour | done (SoC) |
+| P9-202 | CM=001: three inputs muxed to two comparators: C1 VIN− = AN0/AN3 by CIS, VIN+ = AN2; C2 = AN1(−)/AN2(+) | Fig 20-1, p.20-5 | behaviour | done (SoC) |
+| P9-203 | Pins in analog mode ("A") read as 0 in the PORT register; digital-input pins convert analog levels per Schmitt trigger specification; analog levels on digital inputs can draw more current than specified | Fig 20-1 legend, §20.7 Notes 1-2, pp.20-5/20-8 | pin | done (SoC) |
 | P9-204 | After a mode change the comparator output may be invalid for the mode-change delay (electrical spec; DS40044G D304 10 µs max); disable comparator interrupts during the change or a false interrupt may occur | §20.3 + Note, p.20-4 | failure-mode | todo |
-| P9-205 | Comparator output: digital high when VIN+ > VIN−, low when VIN+ < VIN−; uncertainty band from input offset and response time | §20.4, Fig 20-2, p.20-6 | electrical | todo |
-| P9-206 | External reference must be between VSS and VDD and may be applied to either comparator input | §20.5.1, p.20-7 | electrical | todo |
+| P9-205 | Comparator output: digital high when VIN+ > VIN−, low when VIN+ < VIN−; uncertainty band from input offset and response time | §20.4, Fig 20-2, p.20-6 | electrical | done (SoC) |
+| P9-206 | External reference must be between VSS and VDD and may be applied to either comparator input | §20.5.1, p.20-7 | electrical | done (SoC) |
 | P9-207 | Response time = minimum time after selecting a new reference or input source before the output is guaranteed valid; if internal VREF changed, use VREF max settling time, else comparator response time (DS40044G D303: 300 ns typ / 400 ns max at 3.0-5.5 V, -40..85 °C) | §20.6, p.20-8 | timing | todo |
-| P9-208 | CMCON C1OUT/C2OUT are read-only; with CM=110 the pin output muxes switch and each pin carries the unsynchronized comparator output; TRIS still enables/disables the pin driver | §20.7, p.20-8 | pin | todo |
-| P9-209 | DS40044G §10.5 says the pin output muxes switch for CM=110 or 001; manual §20.7 and both Figure 20-1/10-1 show pin outputs only for CM=110 | DS33023A §20.7 p.20-8 vs DS40044G §10.5 p.66 | note | info |
-| P9-210 | Fig 20-3 output path: comparator output → D latch loaded on RD CMCON → data bus; a second latch (mismatch) sets CMIF when the live output differs from the last latched value; reset clears it | Fig 20-3, p.20-8 | behaviour | todo |
-| P9-211 | CMIF sets whenever a comparator output changes relative to the value last loaded into CMxOUT (by a CMCON read/write); software must keep the previous CMCON<7:6> to know what changed | §20.8, p.20-9 | behaviour | todo |
-| P9-212 | CMIF is software-writable (setting it simulates an interrupt); interrupt needs CMIE, PEIE and GIE; CMIF still sets when they are clear | §20.8, p.20-9 | behaviour | todo |
-| P9-213 | Clearing the interrupt: (a) read or write CMCON (latches current outputs, ends the mismatch), then (b) clear CMIF. While the mismatch persists CMIF keeps being set | §20.8, p.20-9 | behaviour | todo |
+| P9-208 | CMCON C1OUT/C2OUT are read-only; with CM=110 the pin output muxes switch and each pin carries the unsynchronized comparator output; TRIS still enables/disables the pin driver | §20.7, p.20-8 | pin | done (SoC) |
+| P9-209 | DS40044G §10.5 says the pin output muxes switch for CM=110 or 001; manual §20.7 and both Figure 20-1/10-1 show pin outputs only for CM=110 | DS33023A §20.7 p.20-8 vs DS40044G §10.5 p.66 | note | D21 |
+| P9-210 | Fig 20-3 output path: comparator output → D latch loaded on RD CMCON → data bus; a second latch (mismatch) sets CMIF when the live output differs from the last latched value; reset clears it | Fig 20-3, p.20-8 | behaviour | done (SoC) |
+| P9-211 | CMIF sets whenever a comparator output changes relative to the value last loaded into CMxOUT (by a CMCON read/write); software must keep the previous CMCON<7:6> to know what changed | §20.8, p.20-9 | behaviour | done (SoC) |
+| P9-212 | CMIF is software-writable (setting it simulates an interrupt); interrupt needs CMIE, PEIE and GIE; CMIF still sets when they are clear | §20.8, p.20-9 | behaviour | done (SoC) |
+| P9-213 | Clearing the interrupt: (a) read or write CMCON (latches current outputs, ends the mismatch), then (b) clear CMIF. While the mismatch persists CMIF keeps being set | §20.8, p.20-9 | behaviour | done (SoC) |
 | P9-214 | Design tip: clearing CMIF without first reading CMCON leaves the mismatch → CMIF re-sets immediately → ISR re-entered forever (apparent lock-up) | §20.13 Q1, p.20-12 | failure-mode | todo |
 | P9-215 | DS40044G adds: if C1OUT/C2OUT changes while CMCON is being read (start of Q2), CMIF may not get set | DS40044G §10.6 Note p.67 (not in DS33023A §20.8) | note | info |
-| P9-216 | Comparators remain active in SLEEP and their interrupt wakes the device if enabled; each active comparator adds current; CM=111 before SLEEP minimises current; CMCON unaffected by wake | §20.9, p.20-9 | behaviour | todo |
-| P9-217 | Any reset forces CMCON to reset state, CM=000 (all comparator pins analog); comparators are powered down during the reset interval | §20.10, p.20-9 | register | todo |
+| P9-216 | Comparators remain active in SLEEP and their interrupt wakes the device if enabled; each active comparator adds current; CM=111 before SLEEP minimises current; CMCON unaffected by wake | §20.9, p.20-9 | behaviour | done (SoC) |
+| P9-217 | Any reset forces CMCON to reset state, CM=000 (all comparator pins analog); comparators are powered down during the reset interval | §20.10, p.20-9 | register | done (SoC) |
 | P9-218 | Analog input model: diodes to VDD/VSS (VT 0.6 V); input more than 0.6 V outside VSS..VDD forward-biases a diode and may cause latch-up; source impedance ≤ 10 kΩ recommended; CPIN 5 pF; leakage ±500 nA | §20.11, Fig 20-4, p.20-10 | electrical | todo |
 | P9-219 | Manual Example 20-1 omits the MOVF CMCON,W before ANDLW 0xC0 (masks W, not CMCON); DS40044G Example 10-1 includes it. Both read CMCON after a 10 µs delay to end the change condition before clearing CMIF | DS33023A Ex 20-1 p.20-11 vs DS40044G Ex 10-1 p.65 | note | info |
