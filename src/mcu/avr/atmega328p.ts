@@ -94,6 +94,12 @@ export function createAtmega328p(): AvrMcu {
     ),
   )
 
+  /** INTRC: an internal RC oscillator is the clock; EXTCK: an external clock on XTAL1 (Table 14-4 note). */
+  const intrc = () => {
+    const k = clockKind(m.fuses.low & 0x0f)
+    return k === "internal-rc" || k === "internal-128k"
+  }
+  const extck = () => clockKind(m.fuses.low & 0x0f) === "external"
   const ps01 = new Prescaler()
   const ps2 = new Prescaler()
   const t0 = m.attach(
@@ -137,6 +143,17 @@ export function createAtmega328p(): AvrMcu {
       prr: 6,
       prescaler: ps2,
       powerSave: true,
+      // TOSC1/TOSC2 share PB6/PB7 with XTAL1/XTAL2: free for the timer oscillator only on the internal RC (§14.3.2).
+      async: {
+        assr: 0xb6,
+        tosc: (exclk) => {
+          const feed = m.clockFeed
+          if (!intrc() || !feed) return null
+          // EXCLK enables the input buffer for a clock; the crystal oscillator runs only with EXCLK = 0 (§18.11.8).
+          return exclk && feed.kind !== "clock" ? null : feed.hz
+        },
+        conflict: () => !intrc(),
+      },
     }),
   )
   m.attach(new Gtccr(m, ps01, ps2, [t0, t1, t2]))
@@ -156,13 +173,7 @@ export function createAtmega328p(): AvrMcu {
     const key = port * 16 + pin
     alt.set(key, [...(alt.get(key) ?? []), f])
   }
-  /** INTRC: an internal RC oscillator is the clock; EXTCK: an external clock on XTAL1 (Table 14-4 note). */
-  const intrc = () => {
-    const k = clockKind(m.fuses.low & 0x0f)
-    return k === "internal-rc" || k === "internal-128k"
-  }
-  const extck = () => clockKind(m.fuses.low & 0x0f) === "external"
-  const AS2 = () => false // asynchronous Timer/Counter2: wired with TIMER2
+  const AS2 = () => t2.async
 
   for (const [port, pins] of [
     [B, 8],

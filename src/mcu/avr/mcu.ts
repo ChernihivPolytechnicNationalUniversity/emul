@@ -454,6 +454,9 @@ export class AvrMcu implements AvrBus, AvrSystem {
     this.clockFeed = feed
     const hz = this.sourceFromFuses()
     if (hz !== null) this.setSource(hz)
+    // The feed may be the timer oscillator's crystal (TOSC1/TOSC2 on the XTAL pins).
+    for (const p of this.peripherals) p.clockChanged(this.cpu.cycles)
+    this.reschedule()
   }
 
   private setSource(hz: number) {
@@ -470,6 +473,8 @@ export class AvrMcu implements AvrBus, AvrSystem {
   }
   /** Close the current slice at the present cycle, so time keeps counting at the old rate up to here. */
   private rebase() {
+    // Blocks catch up at the old rate first (the asynchronous timer maps cycles to time).
+    for (const p of this.peripherals) p.sync(this.cpu.cycles)
     this.time = this.cycleTime(this.cpu.cycles)
     this.sliceTime = this.time
     this.sliceCycle = this.cpu.cycles
