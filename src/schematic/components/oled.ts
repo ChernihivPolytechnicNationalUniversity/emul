@@ -12,7 +12,14 @@ import { OLED_SUPPLY_KEY } from "@/sim/ssd1306"
 import { OledIcon } from "../icons"
 import type { ComponentDef, ModelElement, PinDef } from "../types"
 
-const INPUT = { aboveSupply: 0.3, voltage: 4, fail: "short" } as const
+/**
+ * SDA, SCL and the SPI inputs: Table 11-1 rates Vin to VDD + 0.3 V, where the pins' ESD diodes
+ * to VDD start to conduct; past it they carry the excess into VDD, and what breaks the chip is
+ * that current, not the volts. Solomon gives no figure for it: JESD78's latch-up I-test level
+ * (±100 mA), which a qualified CMOS part survives, stands in. So a 5 V Arduino's pull-ups
+ * (≈ 35 kΩ) on the module's 10 kΩ ones push tens of µA in, as on the bench, harmlessly.
+ */
+const INPUT_CLAMP = { injection: 0.1, rail: "$vdd" } as const
 
 const COLOUR_FIELD = { key: "colour", label: "Colour", type: "select" as const, options: [{ value: "white", label: "White" }, { value: "blue", label: "Blue" }, { value: "yellow-blue", label: "Yellow top band, blue" }] }
 
@@ -54,8 +61,8 @@ function i2cModule(id: string, name: string, rows: 64 | 32): ComponentDef {
     parts: [{ type: "screen", id: "GLASS", label: "Display", x: 1.6, y: 1.7, w: w - 3.2, h: glassH }],
     model: [
       ...supply,
-      { kind: "GPIO", node: "SDA", vddNode: "$vdd", gndNode: "GND", drive: { ohms: 0.4 / 3e-3 }, limits: INPUT },
-      { kind: "GPIO", node: "SCL", vddNode: "$vdd", gndNode: "GND", limits: INPUT },
+      { kind: "GPIO", node: "SDA", vddNode: "$vdd", gndNode: "GND", drive: { ohms: 0.4 / 3e-3 }, clamp: INPUT_CLAMP },
+      { kind: "GPIO", node: "SCL", vddNode: "$vdd", gndNode: "GND", clamp: INPUT_CLAMP },
       { kind: "R", a: "$vdd", b: "SDA", value: 10e3, label: "SDA pull-up" },
       { kind: "R", a: "$vdd", b: "SCL", value: 10e3, label: "SCL pull-up" },
     ],
@@ -94,7 +101,7 @@ export const oledSpi: ComponentDef = {
   ],
   body: body(SPI_W, SPI_H, SPI_GLASS),
   parts: [{ type: "screen", id: "GLASS", label: "Display", x: 1.6, y: 1.7, w: SPI_W - 3.2, h: SPI_GLASS }],
-  model: [...supply, ...["D0", "D1", "RES", "DC", "CS"].map((node): ModelElement => ({ kind: "GPIO", node, vddNode: "$vdd", gndNode: "GND", limits: INPUT }))],
+  model: [...supply, ...["D0", "D1", "RES", "DC", "CS"].map((node): ModelElement => ({ kind: "GPIO", node, vddNode: "$vdd", gndNode: "GND", clamp: INPUT_CLAMP }))],
   info: { Source: "Solomon Systech SSD1306 Rev 1.1; board as vendor manuals and forums describe it (no maker's schematic)" },
 }
 
