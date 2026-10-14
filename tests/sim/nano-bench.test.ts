@@ -233,3 +233,30 @@ describe("Arduino Nano: 3V3 with only a capacitor on it", () => {
     expect(loop.snapshot()!.pinVoltage[pinKey(b.nano.id, "J2-14")]).toBeCloseTo(3.3, 1)
   })
 })
+
+describe("Arduino Nano: the terminal on the USB serial pins is the PC, not a wire (FT232RL drives the lines)", () => {
+  it("the PC side idles at the bridge's VCCIO (+5V rail), not at a 3.3 V terminal fighting it", () => {
+    const b = bench()
+    const { loop, state } = start(b.doc)
+    run(loop, state, 0.2)
+    const s = loop.snapshot()!
+    const v5 = s.pinVoltage[pinKey(b.nano.id, "J2-4")]
+    expect(s.pinVoltage[pinKey(b.nano.id, "VCP-RX")]).toBeGreaterThan(v5 - 0.05)
+    // D1 idles high at +5V through RP1B into the FT232RL's RXD (a 200 kΩ pull-up): no terminal load on it.
+    expect(s.pinVoltage[pinKey(b.nano.id, "VCP-TX")]).toBeGreaterThan(v5 - 0.05)
+    expect(s.pinVoltage[pinKey(b.term!.id, "TX")]).toBeGreaterThan(v5 - 0.05)
+  })
+
+  it("a byte typed in the terminal reaches D0 at the bridge's 5 V levels: low bits pull D0 under VIL", () => {
+    const b = bench()
+    const { loop, state } = start(b.doc)
+    run(loop, state, 0.1)
+    loop.sendSerial(b.term!.id, "\u0000")
+    let lowest = 5
+    for (let i = 0; i < 40; i++) {
+      run(loop, state, 0.00002)
+      lowest = Math.min(lowest, loop.snapshot()!.pinVoltage[pinKey(b.nano.id, "J1-2")])
+    }
+    expect(lowest).toBeLessThan(0.3 * 4.7)
+  })
+})

@@ -441,6 +441,10 @@ export class SimLoop {
   private probes: Probe[] = []
   private mcus = new Map<string, McuInstance>()
   private terminals = new Map<string, TerminalInstance>()
+  /** A bridge's TXD pin (pin key) → the terminal standing in for the PC behind it. */
+  private readonly bridgeTerminal = new Map<string, TerminalInstance>()
+  /** Terminals on a bridge's PC end: the PC is on USB, so their own drivers stay off the lines. */
+  private readonly hostedTerminals = new Set<string>()
   private digitalParts = new Map<string, DigitalPart>()
   /** Solved nodes of the pins each sensing part reads, refreshed with the digital nets. */
   private senseNodes = new Map<DigitalPart, Map<string, number>>()
@@ -813,6 +817,25 @@ export class SimLoop {
       if (t.txNet !== undefined) netFor(root(t.txNet)).terminal = true
       if (t.rxNet !== undefined) netFor(root(t.rxNet)).rx.push(t)
     }
+    // Terminals wired to a bridge's PC end: the bridge's TXD sends what they type, and they load neither line.
+    this.bridgeTerminal.clear()
+    this.hostedTerminals.clear()
+    if (engine)
+      for (const obj of this.doc.objects) {
+        const def = getDef(obj.def)
+        for (const pin of def?.pins ?? []) {
+          if (!pin.hostSerial) continue
+          const net = engine.net.pinNet.get(pinKey(obj.id, pin.id))
+          if (net === undefined) continue
+          for (const t of this.terminals.values()) {
+            if (pin.hostSerial === "out" && t.txNet === net) {
+              this.bridgeTerminal.set(pinKey(obj.id, pin.id), t)
+              this.hostedTerminals.add(t.object)
+            }
+            if (pin.hostSerial === "in" && t.rxNet === net) this.hostedTerminals.add(t.object)
+          }
+        }
+      }
     // The analyser's probes: their nets travel exactly too. A net with nothing digital on it
     // (an analog source, a gate's output) is thresholded from the solution each step.
     this.logicLevel = new Uint8Array(this.probes.length).fill(LOGIC_UNKNOWN)
@@ -1362,6 +1385,15 @@ export class SimLoop {
   }
   private pinReaders: (() => GpioState)[] = []
   private resolvePin(object: string, node: string): () => GpioState {
+    // A bridge's TXD sends what the PC (the terminal behind it) types, and idles high.
+    const bridge = getDef(this.doc.objects.find((o) => o.id === object)?.def ?? "")?.pins.find((p) => p.hostSerial === "out" && (p.hostDriver ?? p.id) === node)
+    if (bridge) {
+      const key = pinKey(object, bridge.id)
+      return () => {
+        const t = this.bridgeTerminal.get(key)
+        return !t || t.txLevel ? "high" : "low"
+      }
+    }
     const inst = this.mcus.get(object)
     if (inst?.mcu.loaded) {
       // The supply load follows the power mode: the resistance that draws the mode's current.
@@ -1387,7 +1419,10 @@ export class SimLoop {
       }
     }
     const term = this.terminals.get(object)
-    if (term) return node === "TX" ? () => (term.txLevel ? "high" : "low") : node === "RX" ? () => "pullup" : () => null
+    if (term) {
+      const hosted = () => this.hostedTerminals.has(object)
+      return node === "TX" ? () => (hosted() ? null : term.txLevel ? "high" : "low") : node === "RX" ? () => (hosted() ? null : "pullup") : () => null
+    }
     const part = this.digitalParts.get(object)
     if (part) {
       if (part.analog?.(node) !== undefined) return () => part.analog!(node) ?? null

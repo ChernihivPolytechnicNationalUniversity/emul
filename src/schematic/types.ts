@@ -37,6 +37,15 @@ export type PinDef = {
   inverted?: boolean
   note?: string
   printed?: boolean
+  /**
+   * The PC's end of a board's USB-serial bridge (an FT232RL, a CP2102): a terminal wired here is
+   * the PC, which reaches the bridge over USB and so loads no line. "out": the bridge's TXD, a
+   * GPIO element of the board on this pin that sends what the terminal types and idles high;
+   * "in": the bridge's RXD, which the terminal listens to.
+   */
+  hostSerial?: "in" | "out"
+  /** The node of the bridge's TXD driver when it is not the pin itself (behind the bridge's power switch). */
+  hostDriver?: string
 }
 
 /** `grip` paints nothing but catches the pointer: a handle to drag a symbol that has no body of its own. */

@@ -141,8 +141,8 @@ const pins: PinDef[] = [
   // The FT232RL's side of RP1A/RP1B: where the PC's end of the USB serial port is. On the real
   // board only the USB cable reaches it; here a terminal wired to these two pins stands in for
   // the PC.
-  { id: "VCP-TX", label: "TX", ...cell({ x: VCP_X.tx, y: VCP_Y }), side: "top", labelAt: "bottom", kind: "digital", stub: 1, signal: "FT232RL RXD", note: "D1/TX through 1 kΩ: what the board sends to the PC. Connect a terminal's RX here", printed: true },
-  { id: "VCP-RX", label: "RX", ...cell({ x: VCP_X.rx, y: VCP_Y }), side: "top", labelAt: "bottom", kind: "digital", stub: 1, signal: "FT232RL TXD", note: "The bridge's TXD, to D0/RX through 1 kΩ: what the PC sends. A terminal's TX here stands in for the PC", printed: true },
+  { id: "VCP-TX", label: "TX", ...cell({ x: VCP_X.tx, y: VCP_Y }), side: "top", labelAt: "bottom", kind: "digital", stub: 1, signal: "FT232RL RXD", note: "D1/TX through 1 kΩ: what the board sends to the PC. A terminal's RX here is the PC listening over USB", printed: true, hostSerial: "in" },
+  { id: "VCP-RX", label: "RX", ...cell({ x: VCP_X.rx, y: VCP_Y }), side: "top", labelAt: "bottom", kind: "digital", stub: 1, signal: "FT232RL TXD", note: "The bridge's TXD, to D0/RX through 1 kΩ: what the PC sends. A terminal's TX here is the PC typing over USB: the bridge's 5 V output sends it", printed: true, hostSerial: "out" },
   ...header("J2", J2),
   ...header("J1", J1),
   ...icsp,
@@ -306,7 +306,8 @@ const model: ModelElement[] = [
   { kind: "R", a: FT_VCC, b: GND, value: 5 / FT232.supply, label: "FT232RL supply" },
   { kind: "REG", in: FT_VCC, out: V3V3, gnd: GND, value: FT232.v3, dropout: FT232.v3Dropout, imax: FT232.v3Max, label: "FT232RL 3V3OUT" },
   // TXD drives the RX net high when idle; RXD is an input with a pull-up. RP1A/RP1B to the MCU.
-  { kind: "R", a: FT_VCC, b: "VCP-RX", value: FT232.outOhms, label: "FT232RL TXD" },
+  // TXD is a 5 V output (VCCIO on +5V) sending what the PC types; a terminal on the pin is that PC.
+  { kind: "GPIO", node: "VCP-RX", vddNode: FT_VCC, drive: { ohms: FT232.outOhms }, label: "FT232RL TXD" },
   { kind: "R", a: FT_VCC, b: "VCP-TX", value: FT232.pullUp, label: "FT232RL RXD pull-up" },
   { kind: "R", a: "VCP-RX", b: "J1-2", value: RP, label: "RP1A" },
   { kind: "R", a: "J1-1", b: "VCP-TX", value: RP, label: "RP1B" },

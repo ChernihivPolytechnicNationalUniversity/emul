@@ -196,8 +196,10 @@ describe("Open746I-C strips expose every GPIO with one driver", () => {
   it("drives each strip GPIO with exactly one GPIO element, including formerly internal joystick pads", () => {
     const drivers = new Map<string, string[]>()
     expect(board.model, "board electrical model").toBeDefined()
+    // The CP2102's TXD is a GPIO element of the board too, driven from the terminal on its PC end, not by the MCU.
+    const bridgeDrivers = new Set(board.pins.flatMap((p) => (p.hostSerial === "out" && p.hostDriver ? [p.hostDriver] : [])))
     for (const element of board.model!) {
-      if (element.kind !== "GPIO") continue
+      if (element.kind !== "GPIO" || bridgeDrivers.has(element.node)) continue
       const name = element.node.startsWith("$") ? element.node.slice(1) : pin(element.node).mcu
       expect(name, `${element.node} resolves to an MCU GPIO`).toMatch(/^P[A-I](?:[0-9]|1[0-5])$/)
       const nodes = drivers.get(name!) ?? []
