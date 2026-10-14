@@ -56,16 +56,17 @@ export const DEFAULT_BUILD_OPT: OptLevel = "-O0"
 const AVR_BUILD_OPT: OptLevel = "-Os"
 /** What each level is for, beside it in the list. */
 const OPT_NOTES: Record<OptLevel, string> = {
-  "-O0": "no optimization: steps line by line, every variable visible",
+  "-O0": "none, best for stepping",
   "-Og": "debugs well, runs faster",
   "-O1": "light optimization",
-  "-O2": "Release build: fast, hard to follow",
+  "-O2": "fast, hard to step",
   "-O3": "fastest, largest",
   "-Os": "smallest",
 }
 /** The select's tooltip: what the field is, and for an Arduino sketch what it does not touch. */
 const optHelp = (avr: boolean, sketch: boolean) =>
   "GCC optimization level" +
+  (avr ? "; -Os by default, as the Arduino IDE builds" : "; -O0 by default, as a CubeIDE Debug build") +
   (sketch ? ". Applies to your sketch; the Arduino core and libraries are always built -Os" : "") +
   (avr ? ". At -O0 avr-libc's _delay_ms/_delay_us are wrong (they need optimization)" : "")
 const DISASM = "@disasm"
@@ -608,7 +609,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
                         <span className="w-6 font-mono">{o}</span>
                         <span className="text-muted-foreground">
                           {OPT_NOTES[o]}
-                          {o === (avr ? AVR_BUILD_OPT : DEFAULT_BUILD_OPT) && (avr ? " · Arduino IDE default" : " · CubeIDE Debug default")}
+                          {o === (avr ? AVR_BUILD_OPT : DEFAULT_BUILD_OPT) && " · default"}
                         </span>
                       </SelectItem>
                     ))}
