@@ -2448,7 +2448,7 @@ export class Engine {
       if (this.warm(i, dt, melt * melt, lim.tau) > 1) this.weld(el, lim.fail, Math.abs(cur), weldCurrent)
       return
     }
-    const heatsThroughItsBody = el.kind === "R" || el.kind === "L"
+    const heatsThroughItsBody = el.kind === "R" || el.kind === "L" || lim.slow === true
     let heating = 0
     let what = "current"
     let actual = 0

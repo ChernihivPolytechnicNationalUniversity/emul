@@ -258,11 +258,12 @@ describe("bench physics", () => {
       expect.soft(Math.abs(reading(snap, r.id).current), "released, the current stops (A)").toBeNear(0, 1e-6)
     })
 
-    it("a toggle closing three AA cells onto 100 µF rides out the 8 A inrush: the contact spot needs milliseconds to melt", () => {
+    // 1000 µF 16 V: UVR's tan δ 0.20 puts its ESR at 0.27 Ω, so with the cells' 0.42 Ω the inrush is ~6 A.
+    it("a toggle closing three AA cells onto 1000 µF rides out the 6 A inrush: the contact spot needs milliseconds to melt", () => {
       const { doc, place, wire } = builder(GRID)
       const bat = place("battery", 0, 0, { chem: "alkaline", cells: "3", capacity: "2.5 Ah" })
       const sw = place("switch", 6, 0)
-      const c = place("capacitor-polarized", 12, 0, { value: "100 µF", vmax: "16 V" })
+      const c = place("capacitor-polarized", 12, 0, { value: "1000 µF", vmax: "16 V" })
       const gnd = place("ground", 3, 6)
       wire(bat, "+", sw, "1")
       wire(sw, "2", c, "1")
