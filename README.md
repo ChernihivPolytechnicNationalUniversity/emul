@@ -31,8 +31,9 @@ editor and the build service compiles it as the Arduino IDE does (ArduinoCore-av
 LiquidCrystal, Adafruit NeoPixel/SSD1306/GFX, Keypad).
 
 PIC16F627A/628A/648A and the original PIC16F627/628 run as bare PDIP-18 chips: drop a `.hex` (MPLAB,
-XC8, SDCC or gpasm) on one — timers, CCP/PWM, comparators, USART, data EEPROM, sleep, the
-configuration word's oscillators and resets, and 13 V on MCLR entering programming mode.
+XC8, SDCC or gpasm) on one, or write C (SDCC) or assembly (gpasm) in the editor — timers, CCP/PWM,
+comparators, USART, data EEPROM, sleep, the configuration word's oscillators and resets, and 13 V on
+MCLR entering programming mode.
 
 ```sh
 pnpm install && pnpm dev     # http://localhost:5173

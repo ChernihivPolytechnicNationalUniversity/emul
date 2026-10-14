@@ -3,9 +3,26 @@
  * No Node imports here — the site bundles this file to validate a project before sending it.
  */
 
-/** Chips the emulator has a profile for (`src/mcu/chip.ts`, `src/mcu/avr/chip.ts`); a job targets one of them. */
+/** Chips the emulator has a profile for (`src/mcu/chip.ts`, `src/mcu/avr/chip.ts`, `src/mcu/pic/chip.ts`); a job targets one of them. */
 export const STM32_TARGETS = ["stm32f429zi", "stm32f746ig"] as const
-export const TARGETS = [...STM32_TARGETS, "atmega328p"] as const
+/** PIC16F62x parts, by their profile ids lower-cased: C builds with SDCC, assembly with gpasm. */
+export const PIC_TARGETS = [
+  "pic16f627",
+  "pic16f627-04",
+  "pic16f628",
+  "pic16f628-04",
+  "pic16lf627",
+  "pic16lf628",
+  "pic16f627a",
+  "pic16f628a",
+  "pic16f648a",
+  "pic16lf627a",
+  "pic16lf628a",
+  "pic16lf648a",
+] as const
+export const TARGETS = [...STM32_TARGETS, "atmega328p", ...PIC_TARGETS] as const
+export type PicTarget = (typeof PIC_TARGETS)[number]
+export const isPicTarget = (t: string | undefined): t is PicTarget => !!t && (PIC_TARGETS as readonly string[]).includes(t)
 export type Target = (typeof TARGETS)[number]
 /** The targets an STM32CubeMX/CubeIDE project can be for. */
 export type Stm32Target = (typeof STM32_TARGETS)[number]
@@ -31,7 +48,7 @@ export const isOptLevel = (v: unknown): v is OptLevel => typeof v === "string" &
 export type BuildOptions = { opt?: OptLevel; fcpu?: number }
 export const FCPU_RANGE = { min: 1_000, max: 32_000_000 } as const
 
-const SOURCE_EXTENSIONS = new Set([".ino", ".pde", ".c", ".h", ".cpp", ".hpp", ".cc", ".s", ".S", ".ld", ".ioc", ".txt", ".md", ".vhd", ".vhdl", ".v", ".sv"])
+const SOURCE_EXTENSIONS = new Set([".ino", ".pde", ".c", ".h", ".cpp", ".hpp", ".cc", ".s", ".S", ".asm", ".inc", ".ld", ".ioc", ".txt", ".md", ".vhd", ".vhdl", ".v", ".sv"])
 export const SOURCE_LIMITS = { files: 200, fileBytes: 1024 * 1024 }
 
 /**
