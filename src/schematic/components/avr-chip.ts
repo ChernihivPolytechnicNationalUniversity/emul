@@ -1,6 +1,6 @@
 import { ATMEGA328P, type AvrProfile } from "@/mcu/avr/chip"
 import { ChipIcon } from "../icons"
-import type { BodyShape, ComponentDef, Element, PinDef, PinKind } from "../types"
+import type { BodyShape, ComponentDef, Element, PinDef, PinKind, PropField } from "../types"
 
 /**
  * AVR parts as bare chips, drawn like the STM32 ones: an IC body with every package pin,
@@ -17,7 +17,7 @@ const TOP = 4
 const STUB = 2
 
 /** Alternate functions for the pin notes (DS40002061B Tables 14-3, 14-6, 14-9). */
-const ALT: Record<string, string> = {
+export const AVR_ALT: Record<string, string> = {
   PB0: "ICP1 / CLKO / PCINT0",
   PB1: "OC1A / PCINT1",
   PB2: "SS / OC1B / PCINT2",
@@ -86,7 +86,7 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string, id 
           mcu: isPort ? name : undefined,
           connector: pkg.name,
           connectorPin: nums[0],
-          note: ALT[name] ?? (nums.length > 1 ? `pins ${nums.join(", ")}, joined on the die` : undefined),
+          note: AVR_ALT[name] ?? (nums.length > 1 ? `pins ${nums.join(", ")}, joined on the die` : undefined),
         })
         decorations.push({ type: "text", x: x + out * 1.1, y: y - 0.32, text: String(nums[0]), size: 0.22, muted: true })
         y++
@@ -110,7 +110,6 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string, id 
   const model: Element[] = [{ kind: "GND", node: "GND" }, ...avrMcuModel(chip, { vcc: "VCC", avcc: "AVCC", gnd: "GND", pads: pads.map((p) => ({ node: p.id, avcc: /^(PC|ADC)/.test(p.id), reset: p.id === "PC6" })) })]
   const e = chip.electrical
   const f = chip.factoryFuses
-  const hex = (v: number) => `0x${v.toString(16).toUpperCase().padStart(2, "0")}`
   return {
     id,
     name: pkg.name === "PDIP-28" ? chip.name : `${chip.name} ${pkg.name}`,
@@ -130,20 +129,7 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string, id 
     mcuPower: "VCC",
     mcuReset: "PC6",
     mcuVref: "AREF",
-    fields: [
-      { key: "fuseLow", label: "Low fuse", type: "text", placeholder: `${hex(f.low)} (factory)` },
-      { key: "fuseHigh", label: "High fuse", type: "text", placeholder: `${hex(f.high)} (factory)` },
-      { key: "fuseExtended", label: "Extended fuse", type: "text", placeholder: `${hex(f.extended)} (factory)` },
-      {
-        key: "revision",
-        label: "Silicon revision",
-        type: "select",
-        options: [...chip.revisions].reverse().map((r) => {
-          const errata = Object.entries(chip.errata).filter(([, revs]) => revs.includes(r)).map(([id]) => id)
-          return { value: r, label: `Rev. ${r}${errata.length ? ` · errata ${errata.join(", ")}` : ""}` }
-        }),
-      },
-    ],
+    fields: avrFields(chip),
     info: {
       MCU: `${chip.name}, AVR 8-bit, ${chip.flashBytes / 1024} KB Flash, ${(chip.ramEnd - 0xff) / 1024} KB SRAM, ${chip.eepromBytes} B EEPROM`,
       Package: pkg.name,
@@ -153,6 +139,30 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string, id 
       Source: pkg.source,
     },
   }
+}
+
+const hex = (v: number) => `0x${v.toString(16).toUpperCase().padStart(2, "0")}`
+
+/**
+ * Fuse and lock bytes (hex) and the silicon revision. An empty fuse field keeps what the
+ * image's .fuse section or the factory set; `origin` names where the placeholder values come from.
+ */
+export function avrFields(chip: AvrProfile, f: AvrProfile["factoryFuses"] = chip.factoryFuses, origin = "factory"): PropField[] {
+  return [
+    { key: "fuseLow", label: "Low fuse", type: "text", placeholder: `${hex(f.low)} (${origin})` },
+    { key: "fuseHigh", label: "High fuse", type: "text", placeholder: `${hex(f.high)} (${origin})` },
+    { key: "fuseExtended", label: "Extended fuse", type: "text", placeholder: `${hex(f.extended)} (${origin})` },
+    { key: "lock", label: "Lock bits", type: "text", placeholder: `${hex(f.lock)} (${origin})` },
+    {
+      key: "revision",
+      label: "Silicon revision",
+      type: "select",
+      options: [...chip.revisions].reverse().map((r) => {
+        const errata = Object.entries(chip.errata).filter(([, revs]) => revs.includes(r)).map(([id]) => id)
+        return { value: r, label: `Rev. ${r}${errata.length ? ` · errata ${errata.join(", ")}` : ""}` }
+      }),
+    },
+  ]
 }
 
 /**

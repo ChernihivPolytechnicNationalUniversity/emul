@@ -7,6 +7,7 @@
 import { CpuHalt } from "@/mcu/faults"
 import type { AvrProfile } from "@/mcu/avr/chip"
 import { createAvr } from "@/mcu/avr/parts"
+import { Adc } from "@/mcu/avr/periph/adc"
 import type { AvrMcu, SleepMode } from "@/mcu/avr/mcu"
 import type { PadDrive } from "@/mcu/periph/gpio"
 import type { ClockSource } from "@/mcu/periph/rcc"
@@ -82,8 +83,8 @@ export class AvrCore implements CoreHost {
     }
   }
   /**
-   * Fuse bytes from the component's fields (hex); empty fields keep what the image's .fuse
-   * section or the factory set. A change is a reprogramming: the part restarts with them.
+   * Fuse and lock bytes from the component's fields (hex); empty fields keep what the image's
+   * .fuse/.lock sections or the factory set. A change is a reprogramming: the part restarts with them.
    */
   configure(props: Record<string, string>) {
     // The silicon revision picks the errata that apply (DS80000855C); it takes effect at once.
@@ -102,9 +103,32 @@ export class AvrCore implements CoreHost {
     next.low = parse(props.fuseLow) ?? f.low
     next.high = parse(props.fuseHigh) ?? f.high
     next.extended = parse(props.fuseExtended) ?? f.extended
-    if (next.low === f.low && next.high === f.high && next.extended === f.extended) return
+    next.lock = parse(props.lock) ?? f.lock
+    if (next.low === f.low && next.high === f.high && next.extended === f.extended && next.lock === f.lock) return
     this.mcu.fuses = next
     if (this.loaded) this.reset()
+  }
+  /**
+   * AREF by the ADC's REFS bits (DS40002061B §24.5.2, Table 29-15). With AVCC or the 1.1 V
+   * bandgap selected the part drives AREF itself, so only a capacitor belongs there: anything
+   * else wired to it is shorted to the internal reference. With REFS = 00 the ADC measures
+   * against AREF, which must then be driven, between 1.0 V and AVCC. A disabled ADC uses none.
+   */
+  referenceProblem(volts: number, { grounded, wired }: { grounded: boolean; wired: boolean }): string | null {
+    const adc = this.mcu.peripherals.find((p): p is Adc => p instanceof Adc)
+    if (!adc || !(adc.adcsra & 0x80)) return null
+    const refs = adc.admux >> 6
+    const at = (v: number) => `${v.toFixed(2)} V`
+    if (refs !== 0) {
+      if (!grounded && !wired) return null
+      const internal = refs === 1 ? "AVCC" : "the 1.1 V bandgap"
+      return `AREF ${grounded ? "grounded" : `driven from outside (${at(volts)})`} while REFS = ${refs.toString(2).padStart(2, "0")} selects ${internal}: the internal reference is shorted to it (§24.5.2). Leave only a capacitor on AREF, or select the external reference (REFS = 00)`
+    }
+    if (grounded) return "AREF grounded while REFS = 00 selects it as the ADC reference"
+    if (!wired && volts < 1) return "AREF floating while REFS = 00 selects it as the ADC reference: wire a reference to AREF, or select AVCC (REFS = 01)"
+    if (volts < 1) return `AREF at ${at(volts)}: under the 1.0 V minimum (Table 29-15)`
+    if (volts > this.mcu.vcc + 0.01) return `AREF at ${at(volts)}: above AVCC (${at(this.mcu.vcc)}), which Table 29-15 does not allow`
+    return null
   }
   /** The loop releases reset: a power-on (supply came up) or the RESET pin going high (supply kept). */
   reset(opts: { backup?: boolean; supplyKept?: boolean } = {}) {

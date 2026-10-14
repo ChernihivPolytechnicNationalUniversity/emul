@@ -308,7 +308,8 @@ class McuInstance {
   }
 
   status(): McuStatus {
-    const reference = this.vref === undefined || this.vrefNet === undefined ? null : referenceProblem(this.vref, this.vdda, { grounded: this.vrefNet === GROUND, wired: this.vrefWired })
+    const wiring = { grounded: this.vrefNet === GROUND, wired: this.vrefWired }
+    const reference = this.vref === undefined || this.vrefNet === undefined ? null : this.mcu.referenceProblem ? this.mcu.referenceProblem(this.vref, wiring) : referenceProblem(this.vref, this.vdda, wiring)
     return { ...this.mcu.status(), firmware: this.name, powered: this.powered, reference }
   }
 
@@ -668,7 +669,7 @@ export class SimLoop {
         inst.base = this.engine?.time ?? 0
         this.mapInputs()
       }
-      inst.mcu.configure?.(obj.props ?? {})
+      inst.mcu.configure?.({ ...getDef(obj.def)?.defaults, ...obj.props })
     }
     for (const id of [...this.mcus.keys()])
       if (!seen.has(id)) {

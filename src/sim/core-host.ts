@@ -87,6 +87,11 @@ export interface CoreHost {
   load(data: ArrayBuffer, name: string): void
   /** The reset pin resets the part (false: a fuse made it an I/O or debug pin — RSTDISBL, DWEN on an AVR). */
   readonly resetPin?: boolean
+  /**
+   * What is wrong with the voltage on the reference pin, in this part's own terms; absent, the
+   * STM32 rules for VREF+ apply. `wired`: something besides the board's own parts is on the pin.
+   */
+  referenceProblem?(volts: number, wiring: { grounded: boolean; wired: boolean }): string | null
   /** Settings the part keeps outside its program (an AVR's fuses), from the object's props. */
   configure?(props: Record<string, string>): void
   /** Restart the core; `backup` keeps the RTC and backup registers (VBAT held them). */

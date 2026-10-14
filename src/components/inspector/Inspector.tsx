@@ -9,6 +9,7 @@ import * as React from "react"
 import { CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { chipById } from "@/mcu/chip"
+import { avrChipById } from "@/mcu/avr/chip"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -113,7 +114,7 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
               </AlertDescription>
             </Alert>
           )}
-          {def.chip && <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? "STM32"} sim={sim} onChange={onChange} onFirmware={onFirmware} onCode={onCode} />}
+          {def.chip && <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? avrChipById(def.chip)?.name ?? def.chip} sim={sim} onChange={onChange} onFirmware={onFirmware} onCode={onCode} />}
           {def.id === "serial-terminal" && <TerminalPanel object={object} sim={sim} onSend={(text) => onSerial?.(object.id, text)} />}
           {def.id === "eeprom-24c" && <EepromPanel object={object} sim={sim} />}
           {isShiftRegisterDef(def.id) && <ShiftRegisterPanel object={object} sim={sim} />}
