@@ -1,12 +1,13 @@
 import * as React from "react"
 import { toast } from "sonner"
 import { CpuIcon, HammerIcon, LoaderCircleIcon, TriangleAlertIcon, XIcon } from "lucide-react"
-import { OPT_LEVELS, SOURCE_LIMITS, type OptLevel, type SourceFile, type Target } from "emul-shared/source"
+import { OPT_LEVELS, SOURCE_LIMITS, TARGETS, type OptLevel, type SourceFile, type Stm32Target } from "emul-shared/source"
 import { Button } from "@/components/ui/button"
 import { fetchArtifact, fetchText, submitBuild, waitForJob } from "@/project/api"
 import { parseDiagnostic, parseDiagnostics, type Diagnostic } from "@/project/diagnostics"
 import { createFile, mainFile, removeFile, renameFile, renameFolder, writeFile } from "@/project/files"
 import { template } from "@/project/template"
+import { avrFcpu } from "@/project/avr-clock"
 import { importNotes, readCubeProject, unsupportedChip, type CubeProject, type ProjectEntry } from "@/project/cubemx"
 import { filesEntries, pickFolder } from "@/project/entries"
 import { cubeIdeProject } from "@/project/cubeide"
@@ -51,6 +52,7 @@ const DEFAULT_WIDTH = 640
 const EXPLORER_WIDTH = 200
 /** What a board compiles at until its project says otherwise: a Debug build, as CubeIDE starts one. */
 export const DEFAULT_BUILD_OPT: OptLevel = "-O0"
+const AVR_BUILD_OPT: OptLevel = "-Os"
 /** What each level is for, in the select's tooltip. */
 const OPT_HELP = "Optimization: -O0 is a Debug build (every line steps, every variable is visible); -Og debugs well and runs faster; -O2 is a Release build (fast, hard to follow); -O3 fastest; -Os smallest"
 const DISASM = "@disasm"
@@ -115,9 +117,13 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
 
   const id = board?.id ?? null
   const def = board ? getDef(board.def) : undefined
-  const chip = def?.chip as Target | undefined
+  // The build target is the chip's id (an AVR's, upper-case in its profile, too).
+  const chip = TARGETS.find((t) => t === def?.chip?.toLowerCase())
+  const avr = chip === "atmega328p"
+  const stm32 = avr ? undefined : (chip as Stm32Target | undefined)
+  // An AVR builds at -Os as the Arduino IDE does: avr-libc's delays are only right when optimized.
+  const opt = board?.build?.opt ?? (avr ? AVR_BUILD_OPT : DEFAULT_BUILD_OPT)
   const files = board?.project
-  const opt = board?.build?.opt ?? DEFAULT_BUILD_OPT
   const bps = React.useMemo(() => board?.debug?.breakpoints ?? [], [board?.debug?.breakpoints])
   const added = React.useMemo(() => board?.debug?.sources ?? [], [board?.debug?.sources])
   const watches = board?.debug?.watches ?? []
@@ -395,7 +401,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
   }
   const currentBoard = useEvent(() => board)
   const importProject = async (entries: Promise<ProjectEntry[]>) => {
-    if (!id || !chip || !board) return
+    if (!id || !stm32 || !board) return
     const was = board.project
     let imported: CubeProject
     try {
@@ -405,10 +411,10 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
       return
     }
     if (!imported.target && imported.mcu) return void toast.error(unsupportedChip(imported).title, { description: unsupportedChip(imported).description })
-    if (imported.target && imported.target !== chip) {
+    if (imported.target && imported.target !== stm32) {
       const fits = boards.find((b) => getDef(b.def)?.chip === imported.target)
       toast.error(`${imported.name}: wrong chip`, {
-        description: `Project is for ${imported.mcu}, ${boardName(board)} has ${chipById(chip)!.name}. ${fits ? `Select ${boardName(fits)} and import there.` : "Open it as a new bench: File › Open STM32 project."}`,
+        description: `Project is for ${imported.mcu}, ${boardName(board)} has ${chipById(stm32)!.name}. ${fits ? `Select ${boardName(fits)} and import there.` : "Open it as a new bench: File › Open STM32 project."}`,
       })
       return
     }
@@ -420,7 +426,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
     onFiles(id, imported.files, was)
     setTab({ open: [], active: null })
     toast.success(`Imported ${imported.name} into ${boardName(board)}`, {
-      description: [`${imported.files.length} files.`, ...importNotes(imported, chip)].join(" "),
+      description: [`${imported.files.length} files.`, ...importNotes(imported, stm32)].join(" "),
       duration: 20_000,
       action: {
         label: "Undo",
@@ -438,10 +444,10 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
   }
 
   const exportCubeIde = async () => {
-    if (!chip || !board) return
+    if (!stm32 || !board) return
     const packing = toast.loading("Packing project…")
     try {
-      const exported = await cubeIdeProject({ name: projectName || boardName(board), target: chip, files: project, opt, site: await stSite() })
+      const exported = await cubeIdeProject({ name: projectName || boardName(board), target: stm32, files: project, opt, site: await stSite() })
       downloadBlob(new Blob([await writeZip(exported.entries)], { type: "application/zip" }), `${exported.name}.zip`)
       toast.success(`Saved ${exported.name}.zip`, {
         description: `Open in STM32CubeIDE: File › Import › Existing Projects into Workspace › Select archive file.${exported.cubeMxVersion ? ` The .ioc needs STM32CubeMX ${exported.cubeMxVersion} or newer. Build and flash work without it.` : ""}`,
@@ -475,7 +481,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
     let done: Build
     let flashed = false
     try {
-      const job = await waitForJob(await submitBuild(chip, files, { opt }))
+      const job = await waitForJob(await submitBuild(chip, files, avr && def ? { opt, fcpu: avrFcpu(def, board.props) } : { opt }))
       const log = job.artifacts.find((a) => a.name === "build.log")
       const elf = job.artifacts.find((a) => a.name === "firmware.elf")
       const ok = !!job.result?.ok && !!elf
@@ -564,9 +570,9 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
               onCreate={create}
               onRename={rename}
               onRemove={remove}
-              onImport={() => void importFolder()}
-              onExport={() => void exportCubeIde()}
-              onImportDrop={(entries) => void importProject(entries)}
+              onImport={avr ? undefined : () => void importFolder()}
+              onExport={avr ? undefined : () => void exportCubeIde()}
+              onImportDrop={avr ? undefined : (entries) => void importProject(entries)}
             />
             {info && (programSources.length > 0 || !dboard?.project) && (
               <ProgramSources className="max-h-[45%]" sources={programSources} active={active} tabOf={tabOfRef} onOpen={(r) => openSource(r.image)} onAdd={(f) => void addSources(f)} />

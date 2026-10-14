@@ -16,9 +16,10 @@ type ExplorerProps = React.ComponentProps<"div"> & {
   onCreate: (rawPath: string) => void
   onRename: (path: string, rawTo: string, folder: boolean) => void
   onRemove: (path: string) => void
-  onImport: () => void
-  onExport: () => void
-  onImportDrop: (entries: Promise<ProjectEntry[]>) => void
+  /** STM32 project import and CubeIDE export; absent for a chip they do not apply to (an AVR). */
+  onImport?: () => void
+  onExport?: () => void
+  onImportDrop?: (entries: Promise<ProjectEntry[]>) => void
 }
 
 /** A row of the tree; folders are implied by the paths, so one with children is a folder. */
@@ -197,7 +198,7 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
   }
 
   const dropProject = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes(DRAG_TYPE) || !isProjectDrop(e.dataTransfer)) return
+    if (!onImportDrop || e.dataTransfer.types.includes(DRAG_TYPE) || !isProjectDrop(e.dataTransfer)) return
     e.preventDefault()
     e.stopPropagation()
     setDropDir(null)
@@ -325,12 +326,16 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
         <Button variant="ghost" size="icon-xs" aria-label="New folder" title="New folder" onClick={() => startNew("new-folder", cursorDir)}>
           <FolderPlusIcon />
         </Button>
-        <Button variant="ghost" size="icon-xs" aria-label="Import STM32 project" title="Import an STM32 project folder: STM32CubeMX, STM32CubeIDE, Makefile or CMake (or drop it here)" onClick={onImport}>
-          <FolderInputIcon />
-        </Button>
-        <Button variant="ghost" size="icon-xs" aria-label="Export to STM32CubeIDE" title="Download this code as an STM32CubeIDE project (.zip), to build and flash the real board" onClick={onExport}>
-          <FolderOutputIcon />
-        </Button>
+        {onImport && (
+          <Button variant="ghost" size="icon-xs" aria-label="Import STM32 project" title="Import an STM32 project folder: STM32CubeMX, STM32CubeIDE, Makefile or CMake (or drop it here)" onClick={onImport}>
+            <FolderInputIcon />
+          </Button>
+        )}
+        {onExport && (
+          <Button variant="ghost" size="icon-xs" aria-label="Export to STM32CubeIDE" title="Download this code as an STM32CubeIDE project (.zip), to build and flash the real board" onClick={onExport}>
+            <FolderOutputIcon />
+          </Button>
+        )}
         <Button variant="ghost" size="icon-xs" aria-label="Collapse all" title="Collapse all" onClick={collapseAll}>
           <CopyMinusIcon />
         </Button>
@@ -406,14 +411,18 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
             </>
           )}
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={onImport}>
-            <FolderInputIcon />
-            Import STM32 project…
-          </ContextMenuItem>
-          <ContextMenuItem onClick={onExport}>
-            <FolderOutputIcon />
-            Export to STM32CubeIDE (.zip)
-          </ContextMenuItem>
+          {onImport && (
+            <ContextMenuItem onClick={onImport}>
+              <FolderInputIcon />
+              Import STM32 project…
+            </ContextMenuItem>
+          )}
+          {onExport && (
+            <ContextMenuItem onClick={onExport}>
+              <FolderOutputIcon />
+              Export to STM32CubeIDE (.zip)
+            </ContextMenuItem>
+          )}
           <ContextMenuItem onClick={collapseAll}>
             <CopyMinusIcon />
             Collapse all

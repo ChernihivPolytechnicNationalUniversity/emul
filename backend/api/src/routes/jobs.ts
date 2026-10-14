@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { JOB_KINDS, JOB_URL_TTL, OPT_LEVELS, OUTPUTS, QUEUES, SOURCE_LIMITS, TARGETS, jobKeys, newJobId, queueOf, sourcePath, type BuildOptions, type JobData, type JobKind, type ProjectManifest, type SourceFile, type Target } from "emul-shared/jobs"
+import { FCPU_RANGE, JOB_KINDS, JOB_URL_TTL, OPT_LEVELS, OUTPUTS, QUEUES, SOURCE_LIMITS, TARGETS, jobKeys, newJobId, queueOf, sourcePath, type BuildOptions, type JobData, type JobKind, type ProjectManifest, type SourceFile, type Target } from "emul-shared/jobs"
 import { checkSynthOptions, type SynthOptions } from "emul-shared/hdl"
 import { presignGet, presignRead, presignWrite, putJson, putObject } from "emul-shared/s3"
 import type { FastifyInstance } from "fastify"
@@ -23,6 +23,7 @@ export async function jobs(app: FastifyInstance) {
               additionalProperties: false,
               properties: {
                 opt: { type: "string", enum: OPT_LEVELS },
+                fcpu: { type: "integer", minimum: FCPU_RANGE.min, maximum: FCPU_RANGE.max },
                 top: { type: "string", maxLength: 64 },
                 generics: { type: "object", maxProperties: 64, additionalProperties: { type: "string", maxLength: 300 } },
               },

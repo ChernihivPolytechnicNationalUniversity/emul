@@ -1,4 +1,4 @@
-import type { OptLevel, SourceFile, Target } from "emul-shared/source"
+import type { OptLevel, SourceFile, Stm32Target } from "emul-shared/source"
 import type { ZipInput } from "@/lib/zip"
 import { safeName } from "@/components/hdl/files"
 import { partOf } from "./cubemx"
@@ -11,7 +11,7 @@ export type CubeIdeExport = { name: string; entries: ZipInput[]; cubeMxVersion: 
 
 type TargetSpec = { family: string; defines: string[] }
 
-const CUBEIDE: Record<Target, { fpu: string; clockMHz: number }> = {
+const CUBEIDE: Record<Stm32Target, { fpu: string; clockMHz: number }> = {
   stm32f429zi: { fpu: "fpv4-sp-d16", clockMHz: 180 },
   stm32f746ig: { fpu: "fpv5-sp-d16", clockMHz: 216 },
 }
@@ -35,7 +35,7 @@ const xml = (text: string) => text.replace(/&/g, "&amp;").replace(/"/g, "&quot;"
 
 export const eclipseName = (name: string) => safeName(name.replace(/\./g, "_")).replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "emul_project"
 
-export const cubeMcu = (target: Target) => `${partOf(target).slice(0, -1)}x`
+export const cubeMcu = (target: Stm32Target) => `${partOf(target).slice(0, -1)}x`
 
 function fill(template: string, values: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
@@ -89,7 +89,7 @@ function batteryPath(name: string, mcu: string): string {
   return HEADER.test(name) ? `Core/Inc/${name}` : `Core/Src/${name}`
 }
 
-async function batteries(site: StSite, target: Target, project: SourceFile[], mcu: string): Promise<{ path: string; content: Uint8Array }[]> {
+async function batteries(site: StSite, target: Stm32Target, project: SourceFile[], mcu: string): Promise<{ path: string; content: Uint8Array }[]> {
   const own = new Set(project.map((f) => baseName(f.path)))
   const hasStartup = project.some((f) => STARTUP.test(f.path))
   const hasLinker = project.some((f) => LINKER.test(f.path))
@@ -192,7 +192,7 @@ function buildDefaults(config: "Debug" | "Release", mcu: string, includes: strin
   ].join(" || ")
 }
 
-export async function cubeIdeProject(options: { name: string; target: Target; files: SourceFile[]; opt: OptLevel; site: StSite }): Promise<CubeIdeExport> {
+export async function cubeIdeProject(options: { name: string; target: Stm32Target; files: SourceFile[]; opt: OptLevel; site: StSite }): Promise<CubeIdeExport> {
   const { target, opt, site } = options
   const mcu = cubeMcu(target)
   const ownIoc = options.files.find((f) => IOC.test(f.path))

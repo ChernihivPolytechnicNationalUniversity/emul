@@ -3,10 +3,13 @@ import type { SourceFile, Target } from "emul-shared/source"
 /**
  * What a board's project starts as: the CubeIDE layout (`Core/Inc`, `Core/Src`) around the
  * repo's own Nucleo-F429ZI HAL blink (`firmware/hal/Src/main.c`), or an Open746I-C one for the
- * F746, so the first build has something to show on the board's LEDs.
+ * F746, so the first build has something to show on the board's LEDs. An ATmega328P (the
+ * Arduino Nano) starts from an avr-libc blink with a serial echo.
  */
 export const template = (target: Target): SourceFile[] =>
-  target === "stm32f746ig"
+  target === "atmega328p"
+    ? [{ path: "src/main.c", content: AVR_MAIN_C }]
+    : target === "stm32f746ig"
     ? [
         { path: "Core/Inc/main.h", content: F7_MAIN_H },
         { path: "Core/Src/main.c", content: F7_MAIN_C },
@@ -205,6 +208,91 @@ void HAL_SYSTICK_Callback(void)
   {
     n = 0;
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+  }
+}
+`
+
+const AVR_MAIN_C = `/*
+ * Arduino Nano: blink and serial echo on avr-libc (no Arduino core), 16 MHz.
+ *
+ *   L (D13, PB5)  toggles every 500 ms
+ *   USB serial    9600 8N1 through the FT232RL on D0/D1: "tick N" every second, and whatever
+ *                 arrives comes back upper-cased
+ *
+ * F_CPU comes from the board (16 MHz on the Nano's resonator); <util/setbaud.h> works the
+ * baud divisor out from it.
+ */
+#include <avr/interrupt.h>
+#include <avr/io.h>
+#include <stdio.h>
+#include <util/delay.h>
+
+#define BAUD 9600
+#include <util/setbaud.h>
+
+/* What the RX interrupt has received and the main loop has not echoed yet. */
+static volatile char rx[32];
+static volatile uint8_t rx_head, rx_tail;
+
+ISR(USART_RX_vect)
+{
+  char c = UDR0;
+  uint8_t next = (rx_head + 1) % sizeof rx;
+  if (next != rx_tail) {
+    rx[rx_head] = c;
+    rx_head = next;
+  }
+}
+
+static int uart_putchar(char c, FILE *stream)
+{
+  if (c == '\\n') uart_putchar('\\r', stream);
+  loop_until_bit_is_set(UCSR0A, UDRE0);
+  UDR0 = c;
+  return 0;
+}
+
+static FILE uart = FDEV_SETUP_STREAM(uart_putchar, NULL, _FDEV_SETUP_WRITE);
+
+static void uart_init(void)
+{
+  UBRR0H = UBRRH_VALUE;
+  UBRR0L = UBRRL_VALUE;
+#if USE_2X
+  UCSR0A |= _BV(U2X0);
+#else
+  UCSR0A &= ~_BV(U2X0);
+#endif
+  UCSR0C = _BV(UCSZ01) | _BV(UCSZ00);
+  UCSR0B = _BV(RXEN0) | _BV(TXEN0) | _BV(RXCIE0);
+  stdout = &uart;
+}
+
+static void echo(void)
+{
+  while (rx_tail != rx_head) {
+    char c = rx[rx_tail];
+    rx_tail = (rx_tail + 1) % sizeof rx;
+    uart_putchar(c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c, &uart);
+  }
+}
+
+int main(void)
+{
+  DDRB |= _BV(DDB5);
+  uart_init();
+  sei();
+
+  unsigned tick = 0;
+  for (;;) {
+    printf("tick %u\\n", tick++);
+    for (uint8_t half = 0; half < 2; half++) {
+      PORTB ^= _BV(PORTB5);
+      for (uint16_t ms = 0; ms < 500; ms++) {
+        _delay_ms(1);
+        echo();
+      }
+    }
   }
 }
 `
