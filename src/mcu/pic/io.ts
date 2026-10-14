@@ -29,6 +29,8 @@ export interface PicBus {
   timeCycle(t: number): number
   /** A mode the emulator does not model was used. */
   feature(what: string): void
+  /** Power-up values of cells the documents give as unknown (decision D2): the part's own random source. */
+  random(): number
 }
 
 export abstract class Peripheral {

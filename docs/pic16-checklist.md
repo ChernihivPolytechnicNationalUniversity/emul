@@ -25,14 +25,15 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 
 | Status | Rows |
 |---|---|
-| todo | 1416 |
+| todo | 1233 |
+| done (SoC) | 183 |
 | done (core) | 168 |
 | info | 160 |
 | **decide** | 48 |
 | **check PDF** | 9 |
-| **fix** | 3 |
+
 | D1 | 2 |
-| core done, SoC todo | 2 |
+
 | D4 | 2 |
 | D5 | 1 |
 | D2 | 1 |
@@ -74,6 +75,30 @@ as a NOP here too; the interrupt is then taken as usual.
 that samples the request, whatever instruction is running ("the latency is the same for one or
 two-cycle instructions", Figure 14-15 note 2); the address pushed is the one that instruction would
 have continued at (its branch target).
+
+**D9. Power-on reset level**: §14.4.1 gives "a VDD rise … in the range of 1.2–1.7 V"; the middle, 1.45 V.
+
+**D10. POR re-arming**: D003 says a POR is ensured when VDD starts from VSS; the part is put back into
+power-on reset when VDD falls under the same 1.45 V, so a supply that collapses and recovers resets it.
+
+**D11. Leaving Program/Verify mode** (DS41196G P7-057: "not described"): only through a reset — MCLR
+low for TMCL or a power-on. A part left with RB4/PGM high under LVP, or VPP brought straight down to VDD,
+stays in Program/Verify and does not run, which is what such boards are known to do.
+
+**D12. OSCF on resets** (P4-094): Tables 14-6 and 14-7 give 1 on MCLR/WDT/BOR resets, Table 14-5 "u";
+two tables against one: 1.
+
+**D13. TRISA5** (P1-211): reads 1 (Example 5-1, Table 4-4), not the 0 Figure 5-5 draws.
+
+**D14. OST after a brown-out** (P4-067): runs, as Table 14-3 lists it; §14.4.3's "only on POR or wake-up"
+is read as the text being shorter than its table.
+
+**D15. Wake-up delays**: INTOSC by VDD from Table 17-5 F14 (6/4/3 µs at 2/3/5 V; Table 14-3's single
+6 µs is the 2 V figure); RC/ER about 1 µs (Figure 14-17 note 2); EC none.
+
+**D16. T0CKI synchronisation**: the increment lands 3 TOSC after the next Q2/Q4 sample, 3–5 TOSC after the
+edge — inside DS33023A's 3–7 TOSC (P9-023); the original parts' speed switch (P6-012, undocumented) takes
+the A parts' 2 + 8 clock pulses.
 
 **D8. The 48 rows marked decide** are settled the same way, block by block, before each block is
 written; the decision is added here.
@@ -276,41 +301,41 @@ written; the decision is added here.
 | P1-192 | Writing INDF indirectly (FSR pointing at INDF) is a no-operation, although Status bits may be affected | §4.4 p.30 | behaviour | done (core) |
 | P1-193 | Direct addressing: 9-bit address = RP1:RP0 : opcode<6:0> | Figure 4-5 p.31 | behaviour | done (core) |
 | P1-194 | Example 4-1: clear 20h–2Fh using FSR/INDF loop terminating on BTFSS FSR,4 (usable as an indirect-addressing test) | Example 4-1 p.30 | behaviour | todo |
-| P1-195 | Two ports PORTA and PORTB; when a peripheral is enabled the pin generally may not be used as GPIO | §5.0 p.33 | pin | todo |
-| P1-196 | PORTA is an 8-bit wide latch | §5.1 p.33 | register | todo |
-| P1-197 | TRIS bit '1' = output driver hi-Z (input); '0' = latch contents driven on pin (both ports) | §5.1, §5.2 | pin | todo |
-| P1-198 | Reading PORTx reads pin states; writing writes the latch; all writes are read-modify-write (pins read, modified, written to latch) | §5.1, §5.2, §5.3.1 | behaviour | todo |
-| P1-199 | PORTA pins selected as comparator (analog) inputs read as '0' | §5.1 p.33; Fig 5-1 (Analog Input Mode gates ST buffer) | pin | todo |
-| P1-200 | On Reset TRISA = all inputs; digital inputs RA<3:0> disabled and comparator inputs forced to ground (to reduce current) | §5.1 Note 2 p.33 | behaviour | todo |
-| P1-201 | TRISA<7:6> overridden by oscillator configuration; when overridden, PORTA<7:6> data reads '0' and TRISA<7:6> are ignored | §5.1 Note 3 p.33 | pin | todo |
+| P1-195 | Two ports PORTA and PORTB; when a peripheral is enabled the pin generally may not be used as GPIO | §5.0 p.33 | pin | done (SoC) |
+| P1-196 | PORTA is an 8-bit wide latch | §5.1 p.33 | register | done (SoC) |
+| P1-197 | TRIS bit '1' = output driver hi-Z (input); '0' = latch contents driven on pin (both ports) | §5.1, §5.2 | pin | done (SoC) |
+| P1-198 | Reading PORTx reads pin states; writing writes the latch; all writes are read-modify-write (pins read, modified, written to latch) | §5.1, §5.2, §5.3.1 | behaviour | done (SoC) |
+| P1-199 | PORTA pins selected as comparator (analog) inputs read as '0' | §5.1 p.33; Fig 5-1 (Analog Input Mode gates ST buffer) | pin | done (SoC) |
+| P1-200 | On Reset TRISA = all inputs; digital inputs RA<3:0> disabled and comparator inputs forced to ground (to reduce current) | §5.1 Note 2 p.33 | behaviour | done (SoC) |
+| P1-201 | TRISA<7:6> overridden by oscillator configuration; when overridden, PORTA<7:6> data reads '0' and TRISA<7:6> are ignored | §5.1 Note 3 p.33 | pin | done (SoC) |
 | P1-202 | TRISA still controls direction of RA pins used as comparator inputs; user must keep them as inputs (output driver would fight the analog signal) | §5.1 p.33 | failure-mode | todo |
 | P1-203 | RA2 also VREF output: very high-impedance output; TRISA<2> must be input; use high-impedance loads | §5.1 p.33 | electrical | todo |
 | P1-204 | Fig 5-2: VROE switch connects VREF to RA2 pin | Figure 5-2 p.34 | pin | todo |
 | P1-205 | In one comparator mode RA3 and RA4 become comparator outputs; TRISA<4:3> must be cleared for outputs to appear | §5.0/5.1 p.33 | pin | todo |
 | P1-206 | Figs 5-3/5-4: output mux selects comparator output instead of data latch when CMCON comparator mode = 110 (RA3 = C1 out, RA4 = C2 out) | Figure 5-3, 5-4 p.34-35 | pin | todo |
-| P1-207 | RA4 output is N-channel to VSS only (open drain), no P-channel; needs external pull-up to drive high; also applies to CMP2 output | Figure 5-4 p.35; Table 5-1 | electrical | todo |
+| P1-207 | RA4 output is N-channel to VSS only (open drain), no P-channel; needs external pull-up to drive high; also applies to CMP2 output | Figure 5-4 p.35; Table 5-1 | electrical | done (SoC) |
 | P1-208 | RA4 Schmitt buffer feeds TMR0 clock input | Figure 5-4 | pin | todo |
-| P1-209 | Example 5-1: writing CMCON = 0x07 turns comparators off and enables PORTA digital I/O | Example 5-1 p.33 | behaviour | todo |
-| P1-210 | Example 5-1 comment: TRISA<5> always reads as '1'; TRISA<7:6> depend on oscillator mode | Example 5-1 p.33 | register | todo |
+| P1-209 | Example 5-1: writing CMCON = 0x07 turns comparators off and enables PORTA digital I/O | Example 5-1 p.33 | behaviour | done (SoC) |
+| P1-210 | Example 5-1 comment: TRISA<5> always reads as '1'; TRISA<7:6> depend on oscillator mode | Example 5-1 p.33 | register | done (SoC) |
 | P1-211 | Note: Fig 5-5 draws RD TRISA for RA5 tied to VSS (suggesting '0'), contradicting the Example 5-1 comment that TRISA<5> always reads '1'; and TRISA reset is listed 1111 1111 | Fig 5-5 p.35 vs Example 5-1 p.33 | note | **decide** |
-| P1-212 | RA5/MCLR: MCLRE configuration bit selects MCLR vs RA5 input; MCLR path has a "MCLR filter"; HV detect drives Program mode | Figure 5-5; Table 5-2 Note 1 | pin | todo |
+| P1-212 | RA5/MCLR: MCLRE configuration bit selects MCLR vs RA5 input; MCLR path has a "MCLR filter"; HV detect drives Program mode | Figure 5-5; Table 5-2 Note 1 | pin | done (SoC) |
 | P1-213 | RA6: output mux drives CLKOUT (FOSC/4) when FOSC = 101 or 111 (INTOSC or RC with RA6 = CLKOUT) | Figure 5-6 + Note 2 p.35 | pin | todo |
-| P1-214 | RA6: digital I/O path (latch/TRIS/ST buffer read) enabled when FOSC = 011, 100, 110 (Note 1: INTOSC with RA6 = I/O or RC with RA6 = I/O) | Figure 5-6 + Note 1 | pin | todo |
+| P1-214 | RA6: digital I/O path (latch/TRIS/ST buffer read) enabled when FOSC = 011, 100, 110 (Note 1: INTOSC with RA6 = I/O or RC with RA6 = I/O) | Figure 5-6 + Note 1 | pin | done (SoC) |
 | P1-215 | Note: Fig 5-6 lists FOSC = 011 as an RA6-I/O mode but its Note 1 only names INTOSC and RC; 011 is presumably EC (defined in §14). Confirm against Register 14-1 | Figure 5-6 p.35 | note | **decide** |
-| P1-216 | RA6 in other FOSC modes is the OSC2 oscillator circuit output (fed from OSC1) | Figure 5-6 | pin | todo |
-| P1-217 | RA7: digital I/O path enabled only when FOSC = 100 or 101 (INTOSC with CLKOUT and INTOSC with I/O); otherwise pin goes to clock circuits | Figure 5-7 + Note 1 p.36 | pin | todo |
+| P1-216 | RA6 in other FOSC modes is the OSC2 oscillator circuit output (fed from OSC1) | Figure 5-6 | pin | done (SoC) |
+| P1-217 | RA7: digital I/O path enabled only when FOSC = 100 or 101 (INTOSC with CLKOUT and INTOSC with I/O); otherwise pin goes to clock circuits | Figure 5-7 + Note 1 p.36 | pin | done (SoC) |
 | P1-218 | Note: Table 5-1 describes T0CKI as "External clock input for TMR0 or comparator output", Table 3-2 says "Timer0 clock input" | Table 5-1 vs Table 3-2 | note | info |
-| P1-219 | Table 5-2 PORTA: RA5 bit note "MCLRE configuration bit sets RA5 functionality"; PORTA reset bits 7:5 = q on non-POR resets ("qqqu 0000") | Table 5-2 p.37 | register | todo |
-| P1-220 | PORTA bits 3:0 reset to 0 on POR and all other resets (reads '0' since comparators default to analog, Note 2) | Table 5-2; §5.1 Note 2 | register | todo |
-| P1-221 | PORTB: 8-bit bidirectional; alternate functions (INT, USART, CCP, TMR1 clock in/out) may override TRIS when enabled | §5.2 p.38 | pin | todo |
-| P1-222 | PORTB weak pull-ups ≈200 μA typical each | §5.2 p.38 | electrical | todo |
-| P1-223 | All PORTB pull-ups enabled by clearing RBPU (OPTION<7>); pull-up automatically off on any pin configured as output | §5.2 p.38 | pin | todo |
-| P1-224 | PORTB pull-ups disabled on Power-on Reset (RBPU = 1) | §5.2 p.38 | behaviour | todo |
-| P1-225 | Interrupt-on-change on RB<7:4> only; only pins configured as inputs participate (outputs excluded from comparison) | §5.2 p.38 | behaviour | todo |
-| P1-226 | IOC compares input pins with the old value latched on the last read of PORTB; mismatch outputs OR'ed to set RBIF (INTCON<0>) | §5.2 p.38 | behaviour | todo |
+| P1-219 | Table 5-2 PORTA: RA5 bit note "MCLRE configuration bit sets RA5 functionality"; PORTA reset bits 7:5 = q on non-POR resets ("qqqu 0000") | Table 5-2 p.37 | register | done (SoC) |
+| P1-220 | PORTA bits 3:0 reset to 0 on POR and all other resets (reads '0' since comparators default to analog, Note 2) | Table 5-2; §5.1 Note 2 | register | done (SoC) |
+| P1-221 | PORTB: 8-bit bidirectional; alternate functions (INT, USART, CCP, TMR1 clock in/out) may override TRIS when enabled | §5.2 p.38 | pin | done (SoC) |
+| P1-222 | PORTB weak pull-ups ≈200 μA typical each | §5.2 p.38 | electrical | done (SoC) |
+| P1-223 | All PORTB pull-ups enabled by clearing RBPU (OPTION<7>); pull-up automatically off on any pin configured as output | §5.2 p.38 | pin | done (SoC) |
+| P1-224 | PORTB pull-ups disabled on Power-on Reset (RBPU = 1) | §5.2 p.38 | behaviour | done (SoC) |
+| P1-225 | Interrupt-on-change on RB<7:4> only; only pins configured as inputs participate (outputs excluded from comparison) | §5.2 p.38 | behaviour | done (SoC) |
+| P1-226 | IOC compares input pins with the old value latched on the last read of PORTB; mismatch outputs OR'ed to set RBIF (INTCON<0>) | §5.2 p.38 | behaviour | done (SoC) |
 | P1-227 | IOC latches: RBIF compare uses latches clocked on Q1 and Q3 | Figs 5-12..5-15 | timing | todo |
-| P1-228 | RB change interrupt can wake the device from Sleep | §5.2 p.38 | behaviour | todo |
-| P1-229 | Clearing IOC: (a) any read or write of PORTB ends the mismatch, then (b) clear RBIF. A persisting mismatch keeps setting RBIF (clearing RBIF without reading PORTB does not stick) | §5.2 p.38 | behaviour | todo |
+| P1-228 | RB change interrupt can wake the device from Sleep | §5.2 p.38 | behaviour | done (SoC) |
+| P1-229 | Clearing IOC: (a) any read or write of PORTB ends the mismatch, then (b) clear RBIF. A persisting mismatch keeps setting RBIF (clearing RBIF without reading PORTB does not stick) | §5.2 p.38 | behaviour | done (SoC) |
 | P1-230 | If a change on an RB<7:4> pin occurs while a PORTB read is executing (start of Q2), RBIF may not get set | §5.2 Note p.38 | failure-mode | todo |
 | P1-231 | Polling PORTB is not recommended while using the IOC feature (reads reset the mismatch reference) | §5.2 p.38 | failure-mode | todo |
 | P1-232 | IOC + pull-ups intended for keypad wake-up on key press (AN552) | §5.2 p.38 | note | info |
@@ -319,14 +344,14 @@ written; the decision is added here.
 | P1-235 | RB2/TX/CK: output mux selects USART TX/CK output when SPEN set; Peripheral OE active only with peripheral select; USART slave clock input via Schmitt Trigger | Figure 5-10 + Note 1 p.39 | pin | todo |
 | P1-236 | RB3/CCP1: CCP1CON selects CCP output into output mux; Peripheral OE; CCP input via Schmitt Trigger; weak pull-up gated by RBPU | Figure 5-11 p.40 | pin | todo |
 | P1-237 | Note: Fig 5-11 labels the mux inputs reversed relative to Figs 5-9/5-10 (CCP output on '0', data latch on '1'), and the OE signal carries footnote (2) while only Note 1 exists | Figure 5-11 p.40 | note | info |
-| P1-238 | RB4/PGM: LVP configuration bit routes pin to PGM input (Schmitt) and disables RB4 IOC and weak pull-up | Figure 5-12 + Note p.41 | pin | todo |
+| P1-238 | RB4/PGM: LVP configuration bit routes pin to PGM input (Schmitt) and disables RB4 IOC and weak pull-up | Figure 5-12 + Note p.41 | pin | done (SoC) |
 | P1-239 | RB6: T1OSCEN input disables digital port use; pin feeds TMR1 clock via Schmitt Trigger, serial programming clock, and Timer1 oscillator (with RB7) | Figure 5-14 p.43 | pin | todo |
 | P1-240 | RB7: T1OSCEN; pin is Timer1 oscillator input linked to RB6; serial programming data input via Schmitt Trigger | Figure 5-15 p.44 | pin | todo |
-| P1-241 | Table 5-4: OPTION at 81h,181h reset 1111 1111 all resets; PORTB RB4 note "LVP configuration bit sets RB4 functionality" | Table 5-4 p.45 | register | todo |
-| P1-242 | Read-modify-write on a port: BCF/BSF read all 8 pins, modify one bit, write all 8 to the latch; an input pin's current level overwrites its latch bit, so later switching it to output drives an unexpected value | §5.3.1 p.46 | failure-mode | todo |
-| P1-243 | Example 5-2: with RB7:6 externally pulled up, BCF PORTB,7 → latch 01pp pppp; BCF TRISB,7 then BCF TRISB,6 → pins 10pp pppp (not the expected 00pp pppp) because the RMW latched RB7's pin value high | Example 5-2 p.46 | behaviour | todo |
+| P1-241 | Table 5-4: OPTION at 81h,181h reset 1111 1111 all resets; PORTB RB4 note "LVP configuration bit sets RB4 functionality" | Table 5-4 p.45 | register | done (SoC) |
+| P1-242 | Read-modify-write on a port: BCF/BSF read all 8 pins, modify one bit, write all 8 to the latch; an input pin's current level overwrites its latch bit, so later switching it to output drives an unexpected value | §5.3.1 p.46 | failure-mode | done (SoC) |
+| P1-243 | Example 5-2: with RB7:6 externally pulled up, BCF PORTB,7 → latch 01pp pppp; BCF TRISB,7 then BCF TRISB,6 → pins 10pp pppp (not the expected 00pp pppp) because the RMW latched RB7's pin value high | Example 5-2 p.46 | behaviour | done (SoC) |
 | P1-244 | A pin actively driving high or low must not be driven externally at the same time (wired-OR/wired-AND); resulting high currents may damage the chip | §5.3.1 p.46 | failure-mode | todo |
-| P1-245 | Port write happens at the end of the instruction cycle (Q4); port read data must be valid at the beginning of the cycle (sampled early, ~Q2) | §5.3.2 p.46; Figure 5-16 | timing | todo |
+| P1-245 | Port write happens at the end of the instruction cycle (Q4); port read data must be valid at the beginning of the cycle (sampled early, ~Q2) | §5.3.2 p.46; Figure 5-16 | timing | done (SoC) |
 | P1-246 | Write followed immediately by read of same port may read the previous pin state; data setup time = 0.25 TCY − TPD (TPD = propagation delay Q1 to output valid); problematic at higher clock frequencies; insert NOP | §5.3.2; Figure 5-16 Note 2 p.46 | timing | todo |
 | P1-247 | Package marking: line formats XX..X customer info, YY year, WW week (week of Jan 1 = '01'), NNN traceability code, e3 = Pb-free matte tin | §19.1 p.163 | note | info |
 | P1-248 | Package drawings for PDIP-18, SOIC-18 (.300"), SSOP-20, QFN-28 (with exposed pad, D2/E2) are present but their dimension tables are font-garbled in the text extraction | §19 p.164–169 | note | info |
@@ -362,40 +387,40 @@ written; the decision is added here.
 
 | ID | Item | Source | Kind | Status |
 |---|---|---|---|---|
-| P2-001 | Timer0 is an 8-bit timer/counter, readable and writable | §6.0, p.47 | register | todo |
+| P2-001 | Timer0 is an 8-bit timer/counter, readable and writable | §6.0, p.47 | register | done (SoC) |
 | P2-002 | Timer0 has an 8-bit software-programmable prescaler (shared with WDT) | §6.0, p.47 | behaviour | todo |
-| P2-003 | Timer0 clock source selectable: internal or external | §6.0, p.47 | behaviour | todo |
-| P2-004 | Timer0 interrupt on overflow from FFh to 00h | §6.0, §6.1, p.47 | behaviour | todo |
+| P2-003 | Timer0 clock source selectable: internal or external | §6.0, p.47 | behaviour | done (SoC) |
+| P2-004 | Timer0 interrupt on overflow from FFh to 00h | §6.0, §6.1, p.47 | behaviour | done (SoC) |
 | P2-005 | Timer0 external clock has edge select | §6.0, p.47 | behaviour | todo |
-| P2-006 | Timer mode selected by clearing T0CS (OPTION<5>); TMR0 increments every instruction cycle when no prescaler is used | §6.0, p.47 | behaviour | todo |
-| P2-007 | Writing TMR0 inhibits the increment for the following two instruction cycles (user may compensate by writing an adjusted value) | §6.0, p.47; Fig 6-1 "SYNC 2 Cycles" | timing | todo |
-| P2-008 | Counter mode selected by setting T0CS; TMR0 increments on every rising or falling edge of pin RA4/T0CKI/CMP2 | §6.0, p.47 | pin | todo |
-| P2-009 | T0SE (OPTION<4>) selects edge: T0SE=0 rising edge, T0SE=1 falling edge (doc: "Clearing the T0SE bit selects the rising edge") | §6.0, p.47 | register | todo |
-| P2-010 | Prescaler assignment by PSA (OPTION<3>): PSA=0 assigns prescaler to Timer0, PSA=1 to WDT | §6.0, §6.3, p.47–48; Fig 6-1 | register | todo |
+| P2-006 | Timer mode selected by clearing T0CS (OPTION<5>); TMR0 increments every instruction cycle when no prescaler is used | §6.0, p.47 | behaviour | done (SoC) |
+| P2-007 | Writing TMR0 inhibits the increment for the following two instruction cycles (user may compensate by writing an adjusted value) | §6.0, p.47; Fig 6-1 "SYNC 2 Cycles" | timing | done (SoC) |
+| P2-008 | Counter mode selected by setting T0CS; TMR0 increments on every rising or falling edge of pin RA4/T0CKI/CMP2 | §6.0, p.47 | pin | done (SoC) |
+| P2-009 | T0SE (OPTION<4>) selects edge: T0SE=0 rising edge, T0SE=1 falling edge (doc: "Clearing the T0SE bit selects the rising edge") | §6.0, p.47 | register | done (SoC) |
+| P2-010 | Prescaler assignment by PSA (OPTION<3>): PSA=0 assigns prescaler to Timer0, PSA=1 to WDT | §6.0, §6.3, p.47–48; Fig 6-1 | register | done (SoC) |
 | P2-011 | Prescaler is not readable or writable | §6.0 p.47; §6.3 p.48 | register | todo |
-| P2-012 | When assigned to Timer0, prescale values 1:2, 1:4, ..., 1:256 selectable via PS<2:0> (OPTION<2:0>) (8-to-1 MUX in Fig 6-1) | §6.0, §6.3, Fig 6-1, p.47–48 | register | todo |
-| P2-013 | Timer0 overflow FFh→00h sets T0IF (INTCON<2>) | §6.1, p.47 | behaviour | todo |
-| P2-014 | Timer0 interrupt masked by clearing T0IE (INTCON<5>) | §6.1, p.47 | register | todo |
-| P2-015 | T0IF must be cleared in software (ISR) before re-enabling the interrupt; hardware does not clear it | §6.1, p.47 | behaviour | todo |
-| P2-016 | Timer0 interrupt cannot wake the processor from Sleep: timer is shut off during Sleep | §6.1, p.47 | behaviour | todo |
+| P2-012 | When assigned to Timer0, prescale values 1:2, 1:4, ..., 1:256 selectable via PS<2:0> (OPTION<2:0>) (8-to-1 MUX in Fig 6-1) | §6.0, §6.3, Fig 6-1, p.47–48 | register | done (SoC) |
+| P2-013 | Timer0 overflow FFh→00h sets T0IF (INTCON<2>) | §6.1, p.47 | behaviour | done (SoC) |
+| P2-014 | Timer0 interrupt masked by clearing T0IE (INTCON<5>) | §6.1, p.47 | register | done (SoC) |
+| P2-015 | T0IF must be cleared in software (ISR) before re-enabling the interrupt; hardware does not clear it | §6.1, p.47 | behaviour | done (SoC) |
+| P2-016 | Timer0 interrupt cannot wake the processor from Sleep: timer is shut off during Sleep | §6.1, p.47 | behaviour | done (SoC) |
 | P2-017 | External clock for Timer0 is synchronized with internal phase clocks (TOSC); there is a delay in actual TMR0 increment after synchronization | §6.2, p.47 | timing | todo |
 | P2-018 | No prescaler: external clock = prescaler output; synchronization done by sampling prescaler output on Q2 and Q4 | §6.2.1, p.47 | timing | todo |
 | P2-019 | No prescaler: T0CKI must be high ≥ 2TOSC (+ small RC delay 20 ns) and low ≥ 2TOSC (+ 20 ns); otherwise edges may be missed | §6.2.1, p.47 | electrical | todo |
 | P2-020 | With prescaler: external clock divided by asynchronous ripple-counter prescaler, prescaler output symmetrical | §6.2.1, p.47 | behaviour | todo |
 | P2-021 | With prescaler: T0CKI period ≥ 4TOSC (+ small RC delay 40 ns) divided by the prescaler value; T0CKI high and low time only need meet minimum pulse width 10 ns | §6.2.1, p.47 | electrical | todo |
 | P2-022 | T0CKI timing parameters 40, 41, 42 in Table 17-8 | §6.2.1, p.47 | note | info |
-| P2-023 | Single 8-bit counter acts as Timer0 prescaler or WDT postscaler; assigning to Timer0 means WDT has no postscaler and vice-versa | §6.3, p.48 | behaviour | todo |
-| P2-024 | When prescaler assigned to Timer0, any instruction writing TMR0 (e.g. CLRF 1, MOVWF 1, BSF 1,x) clears the prescaler | §6.3, p.48 | behaviour | todo |
+| P2-023 | Single 8-bit counter acts as Timer0 prescaler or WDT postscaler; assigning to Timer0 means WDT has no postscaler and vice-versa | §6.3, p.48 | behaviour | done (SoC) |
+| P2-024 | When prescaler assigned to Timer0, any instruction writing TMR0 (e.g. CLRF 1, MOVWF 1, BSF 1,x) clears the prescaler | §6.3, p.48 | behaviour | done (SoC) |
 | P2-025 | When prescaler assigned to WDT, CLRWDT clears the prescaler along with the WDT | §6.3, p.48 | behaviour | todo |
 | P2-026 | Fig 6-1: T0CS mux selects FOSC/4 (0) or T0CKI pin XOR T0SE (1); PSA mux selects prescaler output or bypass into SYNC (2 cycles) → TMR0; WDT side: PSA selects WDT direct or via prescaler to WDT time-out | Fig 6-1, p.48 | behaviour | todo |
 | P2-027 | Fig 6-1 contains a label "TMR1 Clock Source" near the T0CKI/T0SE path; unclear (likely drawing artifact). Fig note: T0SE, T0CS, PSA, PS<2:0> are OPTION register bits | Fig 6-1, p.48 | note | **decide** |
 | P2-028 | Prescaler assignment can be changed on-the-fly; Timer0→WDT switch must follow Example 6-1 to avoid unintended device Reset | §6.3.1, p.49 | failure-mode | todo |
 | P2-029 | Example 6-1 (Timer0→WDT): BCF STATUS,RP0; CLRWDT; CLRF TMR0 (clears TMR0 and prescaler); BSF STATUS,RP0; MOVLW '00101111'b; MOVWF OPTION_REG; CLRWDT; MOVLW '00101xxx'b; MOVWF OPTION_REG; BCF STATUS,RP0. Lines 5–7 (MOVLW 00101111/MOVWF/CLRWDT) required only if desired PS<2:0> are 000 or 001 | Example 6-1, p.49 | behaviour | todo |
 | P2-030 | Example 6-2 (WDT→Timer0): CLRWDT (clear WDT and prescaler); BSF STATUS,RP0; MOVLW b'xxxx0xxx'; MOVWF OPTION_REG; BCF STATUS,RP0. Precaution required even if WDT is disabled | §6.3.1, Example 6-2, p.49 | behaviour | todo |
-| P2-031 | TMR0 at 01h, 101h; POR xxxx xxxx; other resets uuuu uuuu | Table 6-1, p.49 | register | todo |
-| P2-032 | INTCON at 0Bh, 8Bh, 10Bh, 18Bh: GIE PEIE T0IE INTE RBIE T0IF INTF RBIF; POR 0000 000x; other resets 0000 000u | Table 6-1, p.49 | register | todo |
-| P2-033 | OPTION at 81h, 181h: RBPU INTEDG T0CS T0SE PSA PS2 PS1 PS0; POR 1111 1111; other resets 1111 1111 (so after reset T0CS=1 counter mode, PSA=1 prescaler to WDT, 1:128 WDT) | Table 6-1, p.49 | register | todo |
-| P2-034 | TRISA at 85h: TRISA7..TRISA0; POR 1111 1111; other resets 1111 1111 (TRISA4 relevant for T0CKI) | Table 6-1, p.49 | register | todo |
+| P2-031 | TMR0 at 01h, 101h; POR xxxx xxxx; other resets uuuu uuuu | Table 6-1, p.49 | register | done (SoC) |
+| P2-032 | INTCON at 0Bh, 8Bh, 10Bh, 18Bh: GIE PEIE T0IE INTE RBIE T0IF INTF RBIF; POR 0000 000x; other resets 0000 000u | Table 6-1, p.49 | register | done (SoC) |
+| P2-033 | OPTION at 81h, 181h: RBPU INTEDG T0CS T0SE PSA PS2 PS1 PS0; POR 1111 1111; other resets 1111 1111 (so after reset T0CS=1 counter mode, PSA=1 prescaler to WDT, 1:128 WDT) | Table 6-1, p.49 | register | done (SoC) |
+| P2-034 | TRISA at 85h: TRISA7..TRISA0; POR 1111 1111; other resets 1111 1111 (TRISA4 relevant for T0CKI) | Table 6-1, p.49 | register | done (SoC) |
 | P2-035 | Table 6-1 header says OPTION(2) but footnote is "Note 1: Option is referred by OPTION_REG in MPLAB IDE" — footnote number mismatch | Table 6-1, p.49 | note | info |
 | P2-036 | Timer1: 16-bit timer/counter of TMR1H:TMR1L, both readable/writable; increments 0000h→FFFFh and rolls over to 0000h | §7.0, p.50 | register | todo |
 | P2-037 | TMR1 overflow latches TMR1IF (PIR1<0>); interrupt enabled by TMR1IE (PIE1<0>) | §7.0, p.50 | behaviour | todo |
@@ -759,27 +784,27 @@ written; the decision is added here.
 | P4-003 | OST keeps the chip in Reset until the crystal oscillator is stable | §14.0, p.97 | behaviour | todo |
 | P4-004 | Intro says PWRT gives a fixed 72 ms (nominal) delay "on power-up only"; §14.4.2 and Table 14-3 also apply it after a Brown-out Reset — the intro is narrower than the body | §14.0 p.97 vs §14.4.2 p.103 | note | info |
 | P4-005 | Sleep is a very-low-current power-down mode; wake via external Reset, WDT wake-up or interrupt | §14.0, p.97 | behaviour | todo |
-| P4-006 | Configuration bits: programmed = reads '0', unprogrammed = reads '1' | §14.1, p.97 | memory | todo |
+| P4-006 | Configuration bits: programmed = reads '0', unprogrammed = reads '1' | §14.1, p.97 | memory | done (SoC) |
 | P4-007 | Configuration Word is at program-memory address 2007h, in the configuration space 2000h–3FFFh, which can only be accessed during programming (not by user code) | §14.1, p.97 | memory | todo |
-| P4-008 | CONFIG layout (14 bits): bit13 CP, bits12–9 unimplemented (read '0'), bit8 CPD, bit7 LVP, bit6 BOREN, bit5 MCLRE, bit4 FOSC2, bit3 PWRTE, bit2 WDTE, bit1 FOSC1, bit0 FOSC0 | Register 14-1, p.98 | register | todo |
+| P4-008 | CONFIG layout (14 bits): bit13 CP, bits12–9 unimplemented (read '0'), bit8 CPD, bit7 LVP, bit6 BOREN, bit5 MCLRE, bit4 FOSC2, bit3 PWRTE, bit2 WDTE, bit1 FOSC1, bit0 FOSC0 | Register 14-1, p.98 | register | done (SoC) |
 | P4-009 | CONFIG bit labels print "F0SC1"/"F0SC0" (digit zero) in the bit diagram; the text calls them FOSC1/FOSC0 — typo | Register 14-1, p.98 | note | **decide** |
 | P4-010 | CP (bit13) for PIC16F648A: 1 = off; 0 = 0000h–0FFFh code-protected | Register 14-1, p.98 | register | todo |
 | P4-011 | CP (bit13) for PIC16F628A: 1 = off; 0 = 0000h–07FFh code-protected | Register 14-1, p.98 | register | todo |
 | P4-012 | CP (bit13) for PIC16F627A: 1 = off; 0 = 0000h–03FFh code-protected | Register 14-1, p.98 | register | todo |
 | P4-013 | CPD (bit8): 1 = data memory code protection off; 0 = data memory (EEPROM) code-protected | Register 14-1, p.98 | register | todo |
-| P4-014 | LVP (bit7): 1 = RB4/PGM pin has PGM function, LVP enabled; 0 = RB4/PGM is digital I/O, HV on MCLR must be used for programming | Register 14-1, p.98 | register | todo |
-| P4-015 | BOREN (bit6): 1 = BOR enabled; 0 = BOR disabled | Register 14-1, p.98 | register | todo |
-| P4-016 | MCLRE (bit5): 1 = RA5/MCLR/VPP pin is MCLR; 0 = pin is digital input and MCLR is internally tied to VDD | Register 14-1, p.98 | pin | todo |
-| P4-017 | PWRTE (bit3): 1 = PWRT disabled; 0 = PWRT enabled (active-low enable) | Register 14-1, p.98 | register | todo |
-| P4-018 | WDTE (bit2): 1 = WDT enabled; 0 = WDT disabled | Register 14-1, p.98 | register | todo |
+| P4-014 | LVP (bit7): 1 = RB4/PGM pin has PGM function, LVP enabled; 0 = RB4/PGM is digital I/O, HV on MCLR must be used for programming | Register 14-1, p.98 | register | done (SoC) |
+| P4-015 | BOREN (bit6): 1 = BOR enabled; 0 = BOR disabled | Register 14-1, p.98 | register | done (SoC) |
+| P4-016 | MCLRE (bit5): 1 = RA5/MCLR/VPP pin is MCLR; 0 = pin is digital input and MCLR is internally tied to VDD | Register 14-1, p.98 | pin | done (SoC) |
+| P4-017 | PWRTE (bit3): 1 = PWRT disabled; 0 = PWRT enabled (active-low enable) | Register 14-1, p.98 | register | done (SoC) |
+| P4-018 | WDTE (bit2): 1 = WDT enabled; 0 = WDT disabled | Register 14-1, p.98 | register | done (SoC) |
 | P4-019 | FOSC<2:0> = 111: RC oscillator, CLKOUT on RA6/OSC2/CLKOUT, R and C on RA7/OSC1/CLKIN | Register 14-1, p.98 | pin | todo |
 | P4-020 | FOSC<2:0> = 110: RC oscillator, RA6 is I/O, R and C on RA7/OSC1/CLKIN | Register 14-1, p.98 | pin | todo |
-| P4-021 | FOSC<2:0> = 101: INTOSC, CLKOUT on RA6/OSC2/CLKOUT, RA7 is I/O | Register 14-1, p.98 | pin | todo |
-| P4-022 | FOSC<2:0> = 100: INTOSC, RA6 is I/O, RA7 is I/O | Register 14-1, p.98 | pin | todo |
-| P4-023 | FOSC<2:0> = 011: EC, RA6 is I/O, CLKIN on RA7/OSC1/CLKIN | Register 14-1, p.98 | pin | todo |
-| P4-024 | FOSC<2:0> = 010: HS, high-speed crystal/resonator on RA6/OSC2 and RA7/OSC1 (both pins taken) | Register 14-1, p.98 | pin | todo |
-| P4-025 | FOSC<2:0> = 001: XT, crystal/resonator on RA6/OSC2 and RA7/OSC1 | Register 14-1, p.98 | pin | todo |
-| P4-026 | FOSC<2:0> = 000: LP, low-power crystal on RA6/OSC2 and RA7/OSC1 | Register 14-1, p.98 | pin | todo |
+| P4-021 | FOSC<2:0> = 101: INTOSC, CLKOUT on RA6/OSC2/CLKOUT, RA7 is I/O | Register 14-1, p.98 | pin | done (SoC) |
+| P4-022 | FOSC<2:0> = 100: INTOSC, RA6 is I/O, RA7 is I/O | Register 14-1, p.98 | pin | done (SoC) |
+| P4-023 | FOSC<2:0> = 011: EC, RA6 is I/O, CLKIN on RA7/OSC1/CLKIN | Register 14-1, p.98 | pin | done (SoC) |
+| P4-024 | FOSC<2:0> = 010: HS, high-speed crystal/resonator on RA6/OSC2 and RA7/OSC1 (both pins taken) | Register 14-1, p.98 | pin | done (SoC) |
+| P4-025 | FOSC<2:0> = 001: XT, crystal/resonator on RA6/OSC2 and RA7/OSC1 | Register 14-1, p.98 | pin | done (SoC) |
+| P4-026 | FOSC<2:0> = 000: LP, low-power crystal on RA6/OSC2 and RA7/OSC1 | Register 14-1, p.98 | pin | done (SoC) |
 | P4-027 | Enabling BOR does NOT automatically enable PWRT (differs from PIC16F627/628) | Register 14-1 Note 1, p.98 | behaviour | todo |
 | P4-028 | Setting CP (turning code protection off) requires a bulk erase of the entire Flash program memory (scheme differs from PIC16F627/628) | Register 14-1 Note 2, p.98 | memory | todo |
 | P4-029 | Setting CPD (turning data protection off) requires a bulk erase of the entire data EEPROM | Register 14-1 Note 3, p.98 | memory | todo |
@@ -796,7 +821,7 @@ written; the decision is added here.
 | P4-040 | Table 14-2 crystal caps: HS 8 MHz, 10 MHz, 20 MHz all C1 = C2 = 15–30 pF | Table 14-2, p.99 | electrical | todo |
 | P4-041 | A series resistor RS may be required in HS and XT modes to avoid overdriving crystals with a low drive-level specification | Table 14-2 Note, p.99 | failure-mode | todo |
 | P4-042 | External crystal oscillator: prepackaged oscillator or TTL-gate circuit; Fig 14-2 parallel-resonant (74AS04, 4.7 kΩ feedback, 10 kΩ bias pots, 180° shift); Fig 14-3 series-resonant (74AS04 x3, 330 kΩ bias resistors, 0.1 pF) driving CLKIN | §14.2.3, Fig 14-2/14-3, p.100 | electrical | todo |
-| P4-043 | INTOSC: fixed 4 MHz (nominal) at VDD = 5 V and 25 °C; variation over V/T in §17 | §14.2.4, p.100 | timing | todo |
+| P4-043 | INTOSC: fixed 4 MHz (nominal) at VDD = 5 V and 25 °C; variation over V/T in §17 | §14.2.4, p.100 | timing | done (SoC) |
 | P4-044 | EC: external clock drives OSC1/CLKIN; must meet AC/DC timing of §17.6 | §14.2.5, p.100 | electrical | todo |
 | P4-045 | Figure 14-4 (EC, HS, XT or LP) shows OSC2 labelled as RA6 I/O with an external clock on OSC1 — for HS/XT/LP the register says both pins are crystal pins; the figure implies OSC2 behaviour with external clock in crystal modes is not stated in text | Fig 14-4 vs Register 14-1, p.100/98 | note | **decide** |
 | P4-046 | RC oscillator frequency depends on supply voltage, REXT, CEXT and operating temperature; varies unit-to-unit (process); lead-frame capacitance differs per package, notably at low CEXT; R/C tolerance adds | §14.2.6, p.101 | behaviour | todo |
@@ -804,30 +829,30 @@ written; the decision is added here.
 | P4-048 | RC topology: REXT from VDD to RA7/OSC1/CLKIN, CEXT from OSC1 to VSS; OSC2 outputs FOSC/4 in CLKOUT variant | Fig 14-5, p.101 | pin | todo |
 | P4-049 | RC mode OSC2 options: general-purpose I/O, or output FOSC/4 (internal clock divided by 4) | §14.2.6, p.101 | pin | todo |
 | P4-050 | CLKOUT = oscillator frequency / 4, enabled through the Configuration Word | §14.2.7, p.101 | pin | todo |
-| P4-051 | Dual-speed oscillator (INTOSC modes only): software toggles between 4 MHz and 48 kHz nominal, controlled by PCON.OSCF | §14.2.8, p.101 | behaviour | todo |
-| P4-052 | Speed transition delay = 2 existing-speed clock pulses + 8 new-speed clock pulses; during it the system clock is halted, CPU frozen, PC and CLKOUT stop | §14.2.8, p.101 | timing | todo |
-| P4-053 | Reset kinds: POR, MCLR during normal operation, MCLR during Sleep, WDT Reset (normal operation), WDT wake-up (Sleep), BOR | §14.3, p.101 | behaviour | todo |
+| P4-051 | Dual-speed oscillator (INTOSC modes only): software toggles between 4 MHz and 48 kHz nominal, controlled by PCON.OSCF | §14.2.8, p.101 | behaviour | done (SoC) |
+| P4-052 | Speed transition delay = 2 existing-speed clock pulses + 8 new-speed clock pulses; during it the system clock is halted, CPU frozen, PC and CLKOUT stop | §14.2.8, p.101 | timing | done (SoC) |
+| P4-053 | Reset kinds: POR, MCLR during normal operation, MCLR during Sleep, WDT Reset (normal operation), WDT wake-up (Sleep), BOR | §14.3, p.101 | behaviour | done (SoC) |
 | P4-054 | Some registers are unaffected by any Reset: unknown on POR, unchanged on other Resets | §14.3, p.101 | behaviour | todo |
-| P4-055 | Most registers go to their Reset state on POR, BOR, MCLR Reset, WDT Reset and MCLR-during-Sleep; they are NOT affected by WDT wake-up (resumption of normal operation) | §14.3, p.101 | behaviour | todo |
+| P4-055 | Most registers go to their Reset state on POR, BOR, MCLR Reset, WDT Reset and MCLR-during-Sleep; they are NOT affected by WDT wake-up (resumption of normal operation) | §14.3, p.101 | behaviour | done (SoC) |
 | P4-056 | MCLR Reset path has a noise filter that ignores small pulses (pulse width in Table 17-7); MCLR/VPP is a Schmitt-trigger input | §14.3, Fig 14-6, p.101–102 | pin | todo |
 | P4-057 | Reset block diagram: Chip_Reset from SR latch set by MCLR (external reset), WDT time-out reset (gated by Sleep: in Sleep a WDT time-out is wake, not reset), POR (VDD rise detect), BOR (gated by BOREN); released by OST/PWRT | Fig 14-6, p.102 | behaviour | todo |
 | P4-058 | OST and PWRT are each 10-bit ripple counters; OST clocked from OSC1/CLKIN, PWRT from an on-chip oscillator that is separate from INTOSC/RC | Fig 14-6 + Note 1, p.102 | timing | todo |
 | P4-059 | POR holds the part in Reset until a VDD rise is detected in the range 1.2–1.7 V; a maximum VDD rise time is required (§17) | §14.4.1, p.103 | electrical | todo |
 | P4-060 | POR does NOT produce an internal Reset when VDD declines | §14.4.1, p.103 | failure-mode | todo |
 | P4-061 | After leaving Reset, voltage/frequency/temperature must be in spec; otherwise device must be held in Reset via MCLR, BOR or PWRT | §14.4.1, p.103 | failure-mode | todo |
-| P4-062 | PWRT: fixed 72 ms (nominal) time-out on POR, or (if enabled) from BOR; runs on internal RC oscillator; chip held in Reset while active | §14.4.2, p.103 | timing | todo |
+| P4-062 | PWRT: fixed 72 ms (nominal) time-out on POR, or (if enabled) from BOR; runs on internal RC oscillator; chip held in Reset while active | §14.4.2, p.103 | timing | done (SoC) |
 | P4-063 | PWRT enabled when PWRTE cleared (programmed), disabled when set; recommended to enable PWRT when BOR is enabled | §14.4.2, p.103 | register | todo |
 | P4-064 | PWRT delay varies chip-to-chip, with VDD, temperature and process (Table 17-7) | §14.4.2, p.103 | timing | todo |
-| P4-065 | OST: 1024 oscillator cycles (from OSC1 input) delay after the PWRT delay is over; execution does not start until OST completes | §14.4.3, p.103 | timing | todo |
-| P4-066 | OST is invoked only for XT, LP and HS modes and only on Power-on Reset or wake-up from Sleep | §14.4.3, p.103 | behaviour | todo |
+| P4-065 | OST: 1024 oscillator cycles (from OSC1 input) delay after the PWRT delay is over; execution does not start until OST completes | §14.4.3, p.103 | timing | done (SoC) |
+| P4-066 | OST is invoked only for XT, LP and HS modes and only on Power-on Reset or wake-up from Sleep | §14.4.3, p.103 | behaviour | done (SoC) |
 | P4-067 | Text says OST only on POR or Sleep wake-up, but Table 14-3 lists 72 ms + 1024·TOSC (PWRTE=0) and 1024·TOSC (PWRTE=1) for XT/HS/LP after Brown-out Reset — contradiction | §14.4.3 vs Table 14-3, p.103–104 | note | **decide** |
 | P4-068 | BOR: if VDD falls below VBOR for longer than TBOR, chip resets; a Reset is not assured if VDD is below VBOR for shorter than TBOR (VBOR Table 17-2, TBOR Table 17-7) | §14.4.4, p.103 | electrical | todo |
 | P4-069 | BOREN clear (programmed) disables BOR circuitry; set enables it | §14.4.4, p.103 | register | todo |
 | P4-070 | On any Reset (Power-on, Brown-out, Watchdog, etc.) the chip remains in Reset until VDD rises above VBOR, then PWRT (if enabled) adds 72 ms | §14.4.4, p.103 | behaviour | todo |
 | P4-071 | If VDD drops below VBOR while PWRT is running, chip re-enters BOR and PWRT is re-initialized; once VDD > VBOR a fresh 72 ms PWRT runs | §14.4.4, Fig 14-7, p.103 | timing | todo |
 | P4-072 | Figure 14-7 brown-out cases: (1) dip ≥ TBOR → Reset, released 72 ms after VDD recovers; (2) second dip during PWRT (<72 ms) → restart full 72 ms; (3) slow recovery → 72 ms after crossing VBOR; 72 ms only if PWRTE = 0 | Fig 14-7 + Note, p.103 | timing | todo |
-| P4-073 | Power-up time-out sequence: PWRT starts after POR expires, then OST; total depends on oscillator mode and PWRTE (e.g. RC with PWRTE=1 → no time-out at all) | §14.4.5, p.104 | timing | todo |
-| P4-074 | Time-outs run from the POR pulse: if MCLR held low long enough the time-outs expire and raising MCLR begins execution immediately (useful to sync several devices) | §14.4.5, p.104 | behaviour | todo |
+| P4-073 | Power-up time-out sequence: PWRT starts after POR expires, then OST; total depends on oscillator mode and PWRTE (e.g. RC with PWRTE=1 → no time-out at all) | §14.4.5, p.104 | timing | done (SoC) |
+| P4-074 | Time-outs run from the POR pulse: if MCLR held low long enough the time-outs expire and raising MCLR begins execution immediately (useful to sync several devices) | §14.4.5, p.104 | behaviour | done (SoC) |
 | P4-075 | §14.4.5 cites "Figure 14-8, Figure 14-11 and Figure 14-12" for time-out sequences and Figure 14-11 for MCLR-held-low case; the time-out figures are actually 14-8/14-9/14-10 (14-11/14-12 are external POR/BOR circuits) — misnumbered references | §14.4.5, p.104 | note | info |
 | P4-076 | Figure 14-8 (MCLR not tied to VDD, case 1): MCLR rises after TPWRT+TOST have elapsed → internal Reset releases with MCLR | Fig 14-8, p.107 | timing | todo |
 | P4-077 | Figure 14-9 (MCLR not tied to VDD, case 2): MCLR rises during the time-outs → internal Reset releases at end of TPWRT + TOST | Fig 14-9, p.107 | timing | todo |
@@ -836,129 +861,129 @@ written; the decision is added here.
 | P4-080 | PCON at address 8Eh; text says it "has two bits" (BOR bit0, POR bit1) but Table 14-5/14-7 also show OSCF at bit3 | §14.4.6 vs Table 14-5, p.104–105 | note | info |
 | P4-081 | PCON.BOR (bit0): unknown on POR; user must set it and check later — BOR = 0 means brown-out occurred; don't-care/unpredictable if BOREN = 0 | §14.4.6, p.104 | register | todo |
 | P4-082 | PCON.POR (bit1): '0' on Power-on Reset, unaffected otherwise; user must write '1' after POR; later '0' means POR occurred (VDD may have gone too low) | §14.4.6, p.104 | register | todo |
-| P4-083 | Table 14-3 XT/HS/LP: POR PWRTE=0 → 72 ms + 1024·TOSC; POR PWRTE=1 → 1024·TOSC; BOR PWRTE=0 → 72 ms + 1024·TOSC; BOR PWRTE=1 → 1024·TOSC; wake from Sleep → 1024·TOSC | Table 14-3, p.104 | timing | todo |
-| P4-084 | Table 14-3 RC, EC: POR PWRTE=0 → 72 ms; PWRTE=1 → —; BOR PWRTE=0 → 72 ms; PWRTE=1 → —; wake from Sleep → — | Table 14-3, p.104 | timing | todo |
-| P4-085 | Table 14-3 INTOSC: POR PWRTE=0 → 72 ms; PWRTE=1 → —; BOR PWRTE=0 → 72 ms; PWRTE=1 → —; wake from Sleep → 6 μs | Table 14-3, p.104 | timing | todo |
+| P4-083 | Table 14-3 XT/HS/LP: POR PWRTE=0 → 72 ms + 1024·TOSC; POR PWRTE=1 → 1024·TOSC; BOR PWRTE=0 → 72 ms + 1024·TOSC; BOR PWRTE=1 → 1024·TOSC; wake from Sleep → 1024·TOSC | Table 14-3, p.104 | timing | done (SoC) |
+| P4-084 | Table 14-3 RC, EC: POR PWRTE=0 → 72 ms; PWRTE=1 → —; BOR PWRTE=0 → 72 ms; PWRTE=1 → —; wake from Sleep → — | Table 14-3, p.104 | timing | done (SoC) |
+| P4-085 | Table 14-3 INTOSC: POR PWRTE=0 → 72 ms; PWRTE=1 → —; BOR PWRTE=0 → 72 ms; PWRTE=1 → —; wake from Sleep → 6 μs | Table 14-3, p.104 | timing | done (SoC) |
 | P4-086 | Table 14-3 shows no wake delay for RC, but Fig 14-17 Note 2 says approximately 1 μs delay for RC oscillator mode — inconsistency | Table 14-3 vs Fig 14-17 Note 2, p.104/113 | note | **decide** |
-| P4-087 | Table 14-4: POR=0, BOR=x, TO=1, PD=1 → Power-on Reset | Table 14-4, p.104 | register | todo |
-| P4-088 | Table 14-4: POR=0, TO=0 → illegal (TO is set on POR); POR=0, PD=0 → illegal (PD is set on POR) | Table 14-4, p.104 | register | todo |
-| P4-089 | Table 14-4: POR=1, BOR=0, TO=x, PD=x → Brown-out Reset | Table 14-4, p.104 | register | todo |
-| P4-090 | Table 14-4: POR=1, BOR=1, TO=0, PD=u → WDT Reset; TO=0, PD=0 → WDT Wake-up | Table 14-4, p.104 | register | todo |
-| P4-091 | Table 14-4: POR=1, BOR=1, TO=u, PD=u → MCLR Reset during normal operation; TO=1, PD=0 → MCLR Reset during Sleep | Table 14-4, p.104 | register | todo |
-| P4-092 | Table 14-5 STATUS (03h/83h/103h/183h: IRP RP1 RP0 TO PD Z DC C): POR 0001 1xxx; other Resets 000q quuu | Table 14-5, p.105 | register | todo |
-| P4-093 | Table 14-5 PCON (8Eh: —,—,—,—,OSCF,—,POR,BOR): POR ---- 1-0x; other Resets ---- u-uq; "other Resets" = MCLR, BOR, WDT Reset during normal operation | Table 14-5 + Note 1, p.105 | register | todo |
+| P4-087 | Table 14-4: POR=0, BOR=x, TO=1, PD=1 → Power-on Reset | Table 14-4, p.104 | register | done (SoC) |
+| P4-088 | Table 14-4: POR=0, TO=0 → illegal (TO is set on POR); POR=0, PD=0 → illegal (PD is set on POR) | Table 14-4, p.104 | register | done (SoC) |
+| P4-089 | Table 14-4: POR=1, BOR=0, TO=x, PD=x → Brown-out Reset | Table 14-4, p.104 | register | done (SoC) |
+| P4-090 | Table 14-4: POR=1, BOR=1, TO=0, PD=u → WDT Reset; TO=0, PD=0 → WDT Wake-up | Table 14-4, p.104 | register | done (SoC) |
+| P4-091 | Table 14-4: POR=1, BOR=1, TO=u, PD=u → MCLR Reset during normal operation; TO=1, PD=0 → MCLR Reset during Sleep | Table 14-4, p.104 | register | done (SoC) |
+| P4-092 | Table 14-5 STATUS (03h/83h/103h/183h: IRP RP1 RP0 TO PD Z DC C): POR 0001 1xxx; other Resets 000q quuu | Table 14-5, p.105 | register | done (SoC) |
+| P4-093 | Table 14-5 PCON (8Eh: —,—,—,—,OSCF,—,POR,BOR): POR ---- 1-0x; other Resets ---- u-uq; "other Resets" = MCLR, BOR, WDT Reset during normal operation | Table 14-5 + Note 1, p.105 | register | done (SoC) |
 | P4-094 | Table 14-5 gives PCON.OSCF = u on other Resets, but Tables 14-6/14-7 give OSCF = 1 on MCLR/WDT/BOR Resets — contradiction; also STATUS bit printed "RPO" (letter O) | Table 14-5 vs 14-6/14-7, p.105–106 | note | **decide** |
-| P4-095 | Table 14-6 Power-on Reset: PC 000h, STATUS 0001 1xxx, PCON ---- 1-0x | Table 14-6, p.105 | register | todo |
-| P4-096 | Table 14-6 MCLR Reset during normal operation: PC 000h, STATUS 000u uuuu, PCON ---- 1-uu | Table 14-6, p.105 | register | todo |
-| P4-097 | Table 14-6 MCLR Reset during Sleep: PC 000h, STATUS 0001 0uuu, PCON ---- 1-uu | Table 14-6, p.105 | register | todo |
-| P4-098 | Table 14-6 WDT Reset: PC 000h, STATUS 0000 uuuu, PCON ---- 1-uu | Table 14-6, p.105 | register | todo |
-| P4-099 | Table 14-6 WDT Wake-up: PC = PC + 1, STATUS uuu0 0uuu, PCON ---- u-uu | Table 14-6, p.105 | register | todo |
-| P4-100 | Table 14-6 Brown-out Reset: PC 000h, STATUS 000x xuuu, PCON ---- 1-u0 | Table 14-6, p.105 | register | todo |
-| P4-101 | Table 14-6 Interrupt wake-up from Sleep: PC = PC + 1 (then 0004h if GIE set, Note 1), STATUS uuu1 0uuu, PCON ---- u-uu | Table 14-6 + Note 1, p.105 | register | todo |
-| P4-102 | Table 14-7 W: POR xxxx xxxx; MCLR/WDT/BOR uuuu uuuu; wake (int/WDT) uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-103 | Table 14-7 INDF (00h,80h,100h,180h): — in all columns (not a physical register) | Table 14-7, p.106 | register | todo |
-| P4-104 | Table 14-7 TMR0 (01h,101h): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-105 | Table 14-7 PCL (02h,82h,102h,182h): POR 0000 0000; resets 0000 0000; wake PC + 1 (Note 3: 0004h if wake by interrupt with GIE set) | Table 14-7 + Note 3, p.106 | register | todo |
-| P4-106 | Table 14-7 STATUS (03h,83h,103h,183h): POR 0001 1xxx; resets 000q quuu (Note 4 → Table 14-6); wake uuuq 0uuu | Table 14-7 + Note 4, p.106 | register | todo |
-| P4-107 | Table 14-7 FSR (04h,84h,104h,184h): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-108 | Table 14-7 PORTA (05h): POR xxxx 0000; resets xxxx 0000 (not uuuu — low nibble forced 0, upper unknown even on non-POR resets); wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-109 | Table 14-7 PORTB (06h,106h): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-110 | Table 14-7 PCLATH (0Ah,8Ah,10Ah,18Ah): POR ---0 0000; resets ---0 0000; wake ---u uuuu | Table 14-7, p.106 | register | todo |
-| P4-111 | Table 14-7 INTCON (0Bh,8Bh,10Bh,18Bh): POR 0000 000x; resets 0000 000u; wake uuuu uqqq (Note 2: flag bits set to cause wake-up) | Table 14-7 + Note 2, p.106 | register | todo |
-| P4-112 | Table 14-7 PIR1 (0Ch): POR 0000 -000; resets 0000 -000; wake qqqq -qqq (Note 2) | Table 14-7, p.106 | register | todo |
+| P4-095 | Table 14-6 Power-on Reset: PC 000h, STATUS 0001 1xxx, PCON ---- 1-0x | Table 14-6, p.105 | register | done (SoC) |
+| P4-096 | Table 14-6 MCLR Reset during normal operation: PC 000h, STATUS 000u uuuu, PCON ---- 1-uu | Table 14-6, p.105 | register | done (SoC) |
+| P4-097 | Table 14-6 MCLR Reset during Sleep: PC 000h, STATUS 0001 0uuu, PCON ---- 1-uu | Table 14-6, p.105 | register | done (SoC) |
+| P4-098 | Table 14-6 WDT Reset: PC 000h, STATUS 0000 uuuu, PCON ---- 1-uu | Table 14-6, p.105 | register | done (SoC) |
+| P4-099 | Table 14-6 WDT Wake-up: PC = PC + 1, STATUS uuu0 0uuu, PCON ---- u-uu | Table 14-6, p.105 | register | done (SoC) |
+| P4-100 | Table 14-6 Brown-out Reset: PC 000h, STATUS 000x xuuu, PCON ---- 1-u0 | Table 14-6, p.105 | register | done (SoC) |
+| P4-101 | Table 14-6 Interrupt wake-up from Sleep: PC = PC + 1 (then 0004h if GIE set, Note 1), STATUS uuu1 0uuu, PCON ---- u-uu | Table 14-6 + Note 1, p.105 | register | done (SoC) |
+| P4-102 | Table 14-7 W: POR xxxx xxxx; MCLR/WDT/BOR uuuu uuuu; wake (int/WDT) uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-103 | Table 14-7 INDF (00h,80h,100h,180h): — in all columns (not a physical register) | Table 14-7, p.106 | register | done (SoC) |
+| P4-104 | Table 14-7 TMR0 (01h,101h): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-105 | Table 14-7 PCL (02h,82h,102h,182h): POR 0000 0000; resets 0000 0000; wake PC + 1 (Note 3: 0004h if wake by interrupt with GIE set) | Table 14-7 + Note 3, p.106 | register | done (SoC) |
+| P4-106 | Table 14-7 STATUS (03h,83h,103h,183h): POR 0001 1xxx; resets 000q quuu (Note 4 → Table 14-6); wake uuuq 0uuu | Table 14-7 + Note 4, p.106 | register | done (SoC) |
+| P4-107 | Table 14-7 FSR (04h,84h,104h,184h): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-108 | Table 14-7 PORTA (05h): POR xxxx 0000; resets xxxx 0000 (not uuuu — low nibble forced 0, upper unknown even on non-POR resets); wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-109 | Table 14-7 PORTB (06h,106h): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-110 | Table 14-7 PCLATH (0Ah,8Ah,10Ah,18Ah): POR ---0 0000; resets ---0 0000; wake ---u uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-111 | Table 14-7 INTCON (0Bh,8Bh,10Bh,18Bh): POR 0000 000x; resets 0000 000u; wake uuuu uqqq (Note 2: flag bits set to cause wake-up) | Table 14-7 + Note 2, p.106 | register | done (SoC) |
+| P4-112 | Table 14-7 PIR1 (0Ch): POR 0000 -000; resets 0000 -000; wake qqqq -qqq (Note 2) | Table 14-7, p.106 | register | done (SoC) |
 | P4-113 | Table 14-7 TMR1L (0Eh): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
 | P4-114 | Table 14-7 TMR1H (0Fh): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
 | P4-115 | Table 14-7 T1CON (10h): POR --00 0000; resets --uu uuuu (Note 6: --00 0000 on BOR); wake --uu uuuu | Table 14-7 + Note 6, p.106 | register | todo |
-| P4-116 | Table 14-7 TMR2 (11h): POR 0000 0000; resets 0000 0000; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-117 | Table 14-7 T2CON (12h): POR -000 0000; resets -000 0000; wake -uuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-118 | Table 14-7 CCPR1L (15h): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-119 | Table 14-7 CCPR1H (16h): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-120 | Table 14-7 CCP1CON (17h): POR --00 0000; resets --00 0000; wake --uu uuuu | Table 14-7, p.106 | register | todo |
-| P4-121 | Table 14-7 RCSTA (18h): POR 0000 000x; resets 0000 000x; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-122 | Table 14-7 TXREG (19h): POR 0000 0000; resets 0000 0000; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-123 | Table 14-7 RCREG (1Ah): POR 0000 0000; resets 0000 0000; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-124 | Table 14-7 CMCON (1Fh): POR 0000 0000; resets 0000 0000; wake uu-- uuuu | Table 14-7, p.106 | register | todo |
+| P4-116 | Table 14-7 TMR2 (11h): POR 0000 0000; resets 0000 0000; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-117 | Table 14-7 T2CON (12h): POR -000 0000; resets -000 0000; wake -uuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-118 | Table 14-7 CCPR1L (15h): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-119 | Table 14-7 CCPR1H (16h): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-120 | Table 14-7 CCP1CON (17h): POR --00 0000; resets --00 0000; wake --uu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-121 | Table 14-7 RCSTA (18h): POR 0000 000x; resets 0000 000x; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-122 | Table 14-7 TXREG (19h): POR 0000 0000; resets 0000 0000; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-123 | Table 14-7 RCREG (1Ah): POR 0000 0000; resets 0000 0000; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-124 | Table 14-7 CMCON (1Fh): POR 0000 0000; resets 0000 0000; wake uu-- uuuu | Table 14-7, p.106 | register | done (SoC) |
 | P4-125 | CMCON wake column "uu-- uuuu" shows bits 5:4 as unimplemented although POR/reset columns give all 8 bits as 0 — inconsistent within the row | Table 14-7, p.106 | note | **decide** |
-| P4-126 | Table 14-7 OPTION (81h,181h): POR 1111 1111; resets 1111 1111; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-127 | Table 14-7 TRISA (85h): POR 1111 1111; resets 1111 1111; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-128 | Table 14-7 TRISB (86h,186h): POR 1111 1111; resets 1111 1111; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-129 | Table 14-7 PIE1 (8Ch): POR 0000 -000; resets 0000 -000; wake uuuu -uuu | Table 14-7, p.106 | register | todo |
-| P4-130 | Table 14-7 PCON (8Eh): POR ---- 1-0x; resets ---- 1-uq (Note 1: if VDD too low a POR happens instead; Note 5: bit0 = 0 if Reset was BOR, otherwise bit0 = u); wake ---- u-uu | Table 14-7 + Notes 1,5, p.106 | register | todo |
-| P4-131 | Table 14-7 PR2 (92h): POR 1111 1111; resets 1111 1111; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-132 | Table 14-7 TXSTA (98h): POR 0000 -010; resets 0000 -010; wake uuuu -uuu | Table 14-7, p.106 | register | todo |
-| P4-133 | Table 14-7 SPBRG (99h): POR 0000 0000; resets 0000 0000; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-134 | Table 14-7 EEDATA (9Ah): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-135 | Table 14-7 EEADR (9Bh): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | todo |
-| P4-136 | Table 14-7 EECON1 (9Ch): POR ---- x000; resets ---- q000; wake ---- uuuu | Table 14-7, p.106 | register | todo |
-| P4-137 | Table 14-7 EECON2 (9Dh): — in all columns (not a physical register) | Table 14-7, p.106 | register | todo |
-| P4-138 | Table 14-7 VRCON (9Fh): POR 000- 0000; resets 000- 0000; wake uuu- uuuu | Table 14-7, p.106 | register | todo |
+| P4-126 | Table 14-7 OPTION (81h,181h): POR 1111 1111; resets 1111 1111; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-127 | Table 14-7 TRISA (85h): POR 1111 1111; resets 1111 1111; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-128 | Table 14-7 TRISB (86h,186h): POR 1111 1111; resets 1111 1111; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-129 | Table 14-7 PIE1 (8Ch): POR 0000 -000; resets 0000 -000; wake uuuu -uuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-130 | Table 14-7 PCON (8Eh): POR ---- 1-0x; resets ---- 1-uq (Note 1: if VDD too low a POR happens instead; Note 5: bit0 = 0 if Reset was BOR, otherwise bit0 = u); wake ---- u-uu | Table 14-7 + Notes 1,5, p.106 | register | done (SoC) |
+| P4-131 | Table 14-7 PR2 (92h): POR 1111 1111; resets 1111 1111; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-132 | Table 14-7 TXSTA (98h): POR 0000 -010; resets 0000 -010; wake uuuu -uuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-133 | Table 14-7 SPBRG (99h): POR 0000 0000; resets 0000 0000; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-134 | Table 14-7 EEDATA (9Ah): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-135 | Table 14-7 EEADR (9Bh): POR xxxx xxxx; resets uuuu uuuu; wake uuuu uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-136 | Table 14-7 EECON1 (9Ch): POR ---- x000; resets ---- q000; wake ---- uuuu | Table 14-7, p.106 | register | done (SoC) |
+| P4-137 | Table 14-7 EECON2 (9Dh): — in all columns (not a physical register) | Table 14-7, p.106 | register | done (SoC) |
+| P4-138 | Table 14-7 VRCON (9Fh): POR 000- 0000; resets 000- 0000; wake uuu- uuuu | Table 14-7, p.106 | register | done (SoC) |
 | P4-139 | Table 14-7 Note 7: peripherals generating wake-up interrupts change the resulting bits in their associated registers | Table 14-7 Note 7, p.106 | behaviour | todo |
 | P4-140 | Table 14-7 column 2 groups MCLR during normal operation, MCLR during Sleep, WDT Reset, Brown-out Reset; column 3 groups wake from Sleep via interrupt and via WDT time-out | Table 14-7 header, p.106 | note | info |
 | P4-141 | External POR circuit for slow VDD ramp (Fig 14-11): diode D across R to discharge C at power-down; R < 40 kΩ recommended (voltage drop on R vs spec); R1 = 100 Ω–1 kΩ limits current from C into MCLR on MCLR/VPP breakdown (ESD/EOS) | Fig 14-11 + Notes 1–3, p.108 | electrical | todo |
 | P4-142 | External brown-out circuit 1 (Fig 14-12: Zener, 33k, 10k, 40k): activates Reset when VDD < Vz + 0.7 V; internal BOR should be disabled | Fig 14-12 + Notes, p.108 | electrical | todo |
 | P4-143 | External brown-out circuit 2 (Fig 14-13: Q1, R1, R2, 40k): Q1 turns off when VDD·R1/(R1+R2) = 0.7 V; cheaper but less accurate; internal BOR should be disabled; resistors adjusted to transistor | Fig 14-13 + Notes, p.108 | electrical | todo |
-| P4-144 | 10 interrupt sources: RB0/INT, TMR0 overflow, PORTB change RB<7:4>, comparator, USART TX, USART RX, CCP, TMR1 overflow, TMR2 match, data EEPROM | §14.5, p.109 | behaviour | todo |
-| P4-145 | GIE (INTCON<7>) enables all un-masked interrupts when set, disables all when clear; GIE cleared on Reset | §14.5, p.109 | register | todo |
-| P4-146 | RETFIE exits the ISR and sets GIE | §14.5, p.109 | behaviour | todo |
-| P4-147 | INT, RB-change and TMR0 overflow flags live in INTCON; peripheral flags in PIR1, enables in PIE1 | §14.5, p.109 | register | todo |
-| P4-148 | Interrupt response: GIE cleared, return address pushed on stack, PC loaded with 0004h | §14.5, p.109 | behaviour | todo |
-| P4-149 | Flag bits must be cleared in software before re-enabling interrupts, else recursive/multiple interrupt requests | §14.5, p.109 | failure-mode | todo |
-| P4-150 | External interrupt (INT pin, PORTB change) latency is 3 or 4 instruction cycles depending on when the event occurs; same for 1- or 2-cycle instructions | §14.5, p.109 | timing | todo |
-| P4-151 | Individual interrupt flag bits are set regardless of their mask bit or GIE | §14.5 Note 1, p.109 | behaviour | todo |
-| P4-152 | When an instruction that clears GIE executes, interrupts pending for the next cycle are ignored; CPU executes a NOP in the cycle after that instruction; ignored interrupts remain pending until GIE is set again | §14.5 Note 2, p.109 | behaviour | todo |
-| P4-153 | Interrupt logic: (TMR1IF·TMR1IE + TMR2IF·TMR2IE + CCP1IF·CCP1IE + CMIF·CMIE + TXIF·TXIE + RCIF·RCIE + EEIF·EEIE)·PEIE + T0IF·T0IE + INTF·INTE + RBIF·RBIE → wake-up (before GIE gate); AND GIE → interrupt to CPU | Fig 14-14, p.109 | behaviour | todo |
-| P4-154 | Only peripherals not dependent on the system clock can wake the part from Sleep (system clock suspended in Sleep) | Fig 14-14 Note 1, p.109 | behaviour | todo |
-| P4-155 | RB0/INT is edge-triggered: rising if INTEDG (OPTION<6>) = 1, falling if 0; valid edge sets INTF (INTCON<1>); INTE (INTCON<4>) enables; INTF must be cleared in software | §14.5.1, p.110 | behaviour | todo |
-| P4-156 | RB0/INT wakes from Sleep if INTE was set before Sleep; GIE decides whether processor branches to vector after wake | §14.5.1, p.110 | behaviour | todo |
-| P4-157 | TMR0 overflow FFh → 00h sets T0IF (INTCON<2>); enabled by T0IE (INTCON<5>) | §14.5.2, p.110 | register | todo |
-| P4-158 | Input change on PORTB<7:4> sets RBIF (INTCON<0>); enabled by RBIE (INTCON<3>) | §14.5.3, p.110 | register | todo |
+| P4-144 | 10 interrupt sources: RB0/INT, TMR0 overflow, PORTB change RB<7:4>, comparator, USART TX, USART RX, CCP, TMR1 overflow, TMR2 match, data EEPROM | §14.5, p.109 | behaviour | done (SoC) |
+| P4-145 | GIE (INTCON<7>) enables all un-masked interrupts when set, disables all when clear; GIE cleared on Reset | §14.5, p.109 | register | done (SoC) |
+| P4-146 | RETFIE exits the ISR and sets GIE | §14.5, p.109 | behaviour | done (SoC) |
+| P4-147 | INT, RB-change and TMR0 overflow flags live in INTCON; peripheral flags in PIR1, enables in PIE1 | §14.5, p.109 | register | done (SoC) |
+| P4-148 | Interrupt response: GIE cleared, return address pushed on stack, PC loaded with 0004h | §14.5, p.109 | behaviour | done (SoC) |
+| P4-149 | Flag bits must be cleared in software before re-enabling interrupts, else recursive/multiple interrupt requests | §14.5, p.109 | failure-mode | done (SoC) |
+| P4-150 | External interrupt (INT pin, PORTB change) latency is 3 or 4 instruction cycles depending on when the event occurs; same for 1- or 2-cycle instructions | §14.5, p.109 | timing | done (SoC) |
+| P4-151 | Individual interrupt flag bits are set regardless of their mask bit or GIE | §14.5 Note 1, p.109 | behaviour | done (SoC) |
+| P4-152 | When an instruction that clears GIE executes, interrupts pending for the next cycle are ignored; CPU executes a NOP in the cycle after that instruction; ignored interrupts remain pending until GIE is set again | §14.5 Note 2, p.109 | behaviour | done (SoC) |
+| P4-153 | Interrupt logic: (TMR1IF·TMR1IE + TMR2IF·TMR2IE + CCP1IF·CCP1IE + CMIF·CMIE + TXIF·TXIE + RCIF·RCIE + EEIF·EEIE)·PEIE + T0IF·T0IE + INTF·INTE + RBIF·RBIE → wake-up (before GIE gate); AND GIE → interrupt to CPU | Fig 14-14, p.109 | behaviour | done (SoC) |
+| P4-154 | Only peripherals not dependent on the system clock can wake the part from Sleep (system clock suspended in Sleep) | Fig 14-14 Note 1, p.109 | behaviour | done (SoC) |
+| P4-155 | RB0/INT is edge-triggered: rising if INTEDG (OPTION<6>) = 1, falling if 0; valid edge sets INTF (INTCON<1>); INTE (INTCON<4>) enables; INTF must be cleared in software | §14.5.1, p.110 | behaviour | done (SoC) |
+| P4-156 | RB0/INT wakes from Sleep if INTE was set before Sleep; GIE decides whether processor branches to vector after wake | §14.5.1, p.110 | behaviour | done (SoC) |
+| P4-157 | TMR0 overflow FFh → 00h sets T0IF (INTCON<2>); enabled by T0IE (INTCON<5>) | §14.5.2, p.110 | register | done (SoC) |
+| P4-158 | Input change on PORTB<7:4> sets RBIF (INTCON<0>); enabled by RBIE (INTCON<3>) | §14.5.3, p.110 | register | done (SoC) |
 | P4-159 | If a PORTB pin changes while a read is executing (starts in Q2, ends before Q3), RBIF may not get set | §14.5.3 Note, p.110 | failure-mode | todo |
-| P4-160 | Figure 14-15 INT timing: INTF sampled every Q1; INTF can be set any time during Q4–Q1; flow: Inst(PC) executes, Inst(PC+1) fetched but replaced by dummy cycle, second dummy cycle with fetch of 0004h, then Inst(0004h) executes | Fig 14-15 + Notes 1,5, p.110 | timing | todo |
-| P4-161 | Asynchronous interrupt latency = 3–4 TCY; synchronous latency = 3 TCY; same whether Inst(PC) is 1- or 2-cycle | Fig 14-15 Note 2, p.110 | timing | todo |
+| P4-160 | Figure 14-15 INT timing: INTF sampled every Q1; INTF can be set any time during Q4–Q1; flow: Inst(PC) executes, Inst(PC+1) fetched but replaced by dummy cycle, second dummy cycle with fetch of 0004h, then Inst(0004h) executes | Fig 14-15 + Notes 1,5, p.110 | timing | done (SoC) |
+| P4-161 | Asynchronous interrupt latency = 3–4 TCY; synchronous latency = 3 TCY; same whether Inst(PC) is 1- or 2-cycle | Fig 14-15 Note 2, p.110 | timing | done (SoC) |
 | P4-162 | CLKOUT is available in RC and INTOSC oscillator modes; minimum INT pulse width per AC specs | Fig 14-15 Notes 3,4, p.110 | pin | todo |
-| P4-163 | Table 14-8 INTCON bits: GIE PEIE T0IE INTE RBIE T0IF INTF RBIF; POR 0000 000x; other Resets 0000 000u | Table 14-8, p.111 | register | todo |
-| P4-164 | Table 14-8 PIR1 (0Ch) bits: EEIF CMIF RCIF TXIF — CCP1IF TMR2IF TMR1IF; POR/other 0000 -000 | Table 14-8, p.111 | register | todo |
-| P4-165 | Table 14-8 PIE1 (8Ch) bits: EEIE CMIE RCIE TXIE — CCP1IE TMR2IE TMR1IE; POR/other 0000 -000 | Table 14-8, p.111 | register | todo |
+| P4-163 | Table 14-8 INTCON bits: GIE PEIE T0IE INTE RBIE T0IF INTF RBIF; POR 0000 000x; other Resets 0000 000u | Table 14-8, p.111 | register | done (SoC) |
+| P4-164 | Table 14-8 PIR1 (0Ch) bits: EEIF CMIF RCIF TXIF — CCP1IF TMR2IF TMR1IF; POR/other 0000 -000 | Table 14-8, p.111 | register | done (SoC) |
+| P4-165 | Table 14-8 PIE1 (8Ch) bits: EEIE CMIE RCIE TXIE — CCP1IE TMR2IE TMR1IE; POR/other 0000 -000 | Table 14-8, p.111 | register | done (SoC) |
 | P4-166 | Only the return PC is saved on interrupt; W and STATUS must be saved in software | §14.6, p.111 | behaviour | todo |
 | P4-167 | Example 14-1 context save: MOVWF W_TEMP; SWAPF STATUS,W; BCF STATUS,RP0; MOVWF STATUS_TEMP; …ISR…; SWAPF STATUS_TEMP,W; MOVWF STATUS; SWAPF W_TEMP,F; SWAPF W_TEMP,W | Example 14-1, p.111 | behaviour | todo |
 | P4-168 | W_TEMP defined at 0x70 in Bank 0 is accessible at 0xF0, 0x170 and 0x1F0 (common/shared RAM across banks) | §14.6, p.111 | memory | todo |
 | P4-169 | Example 14-1 "BCF STATUS,RP0 ;change to bank 0" only clears RP0 (RP1 untouched); comment says "regardless of current bank" | Example 14-1, p.111 | note | info |
-| P4-170 | WDT is a free-running on-chip RC oscillator, separate from the CLKIN RC; keeps running when OSC1/OSC2 clock stopped (e.g. SLEEP) | §14.7, p.111 | behaviour | todo |
-| P4-171 | WDT time-out in normal operation → device Reset; in Sleep → wake-up and continue normal operation | §14.7, p.111 | behaviour | todo |
-| P4-172 | WDT permanently disabled by programming WDTE = 0 | §14.7, p.111 | register | todo |
-| P4-173 | WDT nominal time-out 18 ms (no prescaler); varies with temperature, VDD, process (Table 17-7) | §14.7.1, p.111 | timing | todo |
-| P4-174 | Postscaler up to 1:128 assignable to WDT via OPTION → time-outs up to 2.3 s | §14.7.1, p.111 | timing | todo |
-| P4-175 | CLRWDT and SLEEP clear the WDT and the postscaler (if assigned to WDT) | §14.7.1, p.111 | behaviour | todo |
-| P4-176 | TO bit in STATUS cleared upon WDT time-out | §14.7.1, p.111 | register | todo |
+| P4-170 | WDT is a free-running on-chip RC oscillator, separate from the CLKIN RC; keeps running when OSC1/OSC2 clock stopped (e.g. SLEEP) | §14.7, p.111 | behaviour | done (SoC) |
+| P4-171 | WDT time-out in normal operation → device Reset; in Sleep → wake-up and continue normal operation | §14.7, p.111 | behaviour | done (SoC) |
+| P4-172 | WDT permanently disabled by programming WDTE = 0 | §14.7, p.111 | register | done (SoC) |
+| P4-173 | WDT nominal time-out 18 ms (no prescaler); varies with temperature, VDD, process (Table 17-7) | §14.7.1, p.111 | timing | done (SoC) |
+| P4-174 | Postscaler up to 1:128 assignable to WDT via OPTION → time-outs up to 2.3 s | §14.7.1, p.111 | timing | done (SoC) |
+| P4-175 | CLRWDT and SLEEP clear the WDT and the postscaler (if assigned to WDT) | §14.7.1, p.111 | behaviour | done (SoC) |
+| P4-176 | TO bit in STATUS cleared upon WDT time-out | §14.7.1, p.111 | register | done (SoC) |
 | P4-177 | Worst case (VDD min, temperature max, max prescaler) WDT time-out may take several seconds | §14.7.2, p.111 | timing | todo |
-| P4-178 | WDT block: PSA mux selects whether the shared 8-bit prescaler/postscaler serves TMR0 (PSA=0) or WDT (PSA=1); PS<2:0> select via 8-to-1 mux; WDT enable bit gates the WDT | Fig 14-16, p.112 | behaviour | todo |
+| P4-178 | WDT block: PSA mux selects whether the shared 8-bit prescaler/postscaler serves TMR0 (PSA=0) or WDT (PSA=1); PS<2:0> select via 8-to-1 mux; WDT enable bit gates the WDT | Fig 14-16, p.112 | behaviour | done (SoC) |
 | P4-179 | Table 14-9 CONFIG (2007h) row lists LVP BOREN MCLRE FOSC2 PWRTE WDTE FOSC1 FOSC0 in bits 7..0 with values "uuuu uuuu uuuu uuuu" (16 digits for a 14-bit word); OPTION (81h,181h) RBPU INTEDG T0CS T0SE PSA PS2 PS1 PS0 with "1111 1111 1111 1111" (16 digits for 8-bit register) — columns appear merged/misprinted | Table 14-9, p.112 | note | **decide** |
-| P4-180 | SLEEP: WDT (if enabled) cleared but keeps running; PD cleared; TO set; oscillator driver turned off | §14.8, p.112 | behaviour | todo |
+| P4-180 | SLEEP: WDT (if enabled) cleared but keeps running; PD cleared; TO set; oscillator driver turned off | §14.8, p.112 | behaviour | done (SoC) |
 | P4-181 | In Sleep I/O ports keep the state they had before SLEEP (driving high, low or high-Z) | §14.8, p.112 | pin | todo |
 | P4-182 | Lowest Sleep current: all I/O at VDD or VSS with no external load, comparators and VREF disabled, floating hi-Z inputs pulled externally, T0CKI at VDD or VSS; PORTB pull-ups contribute current | §14.8, p.112 | electrical | todo |
 | P4-183 | Floating high-impedance inputs cause switching currents (extra current in Sleep) | §14.8, p.112 | failure-mode | todo |
 | P4-184 | In Sleep the MCLR pin must be at logic high (VIHMC) | §14.8, p.112 | pin | todo |
 | P4-185 | A Reset generated by WDT time-out does not drive the MCLR pin low | §14.8 Note, p.112 | pin | todo |
-| P4-186 | Wake-up sources: (1) external Reset on MCLR → device Reset; (2) WDT wake-up (if enabled) and (3) RB0/INT, RB port change or any peripheral interrupt active in Sleep → continuation of execution | §14.8.1, p.113 | behaviour | todo |
-| P4-187 | PD is set on power-up and cleared when Sleep is invoked; TO is cleared if WDT wake-up occurred | §14.8.1, p.113 | register | todo |
-| P4-188 | During SLEEP execution, PC+1 is pre-fetched; interrupt wake-up requires the interrupt's enable bit set; wake-up is independent of GIE | §14.8.1, p.113 | behaviour | todo |
-| P4-189 | Wake with GIE = 0: continue at instruction after SLEEP; GIE = 1: execute instruction after SLEEP, then branch to 0004h (put a NOP after SLEEP if that is undesirable) | §14.8.1, p.113 | behaviour | todo |
-| P4-190 | If GIE = 0 but any source has both its enable and flag set, the device will not enter Sleep — SLEEP executes as a NOP | §14.8.1 Note, p.113 | behaviour | todo |
-| P4-191 | WDT is cleared when the device wakes from Sleep, regardless of wake source | §14.8.1, p.113 | behaviour | todo |
-| P4-192 | Figure 14-17 wake via interrupt: Inst(PC)=SLEEP executes while Inst(PC+1) fetched; processor in Sleep; on INT, after TOST (1024 TOSC, XT/HS/LP) Inst(PC+1) executes (fetching PC+2), then two dummy cycles, then Inst(0004h) fetched/executed (GIE=1); with GIE=0 continues in-line | Fig 14-17 + Notes 1–3, p.113 | timing | todo |
+| P4-186 | Wake-up sources: (1) external Reset on MCLR → device Reset; (2) WDT wake-up (if enabled) and (3) RB0/INT, RB port change or any peripheral interrupt active in Sleep → continuation of execution | §14.8.1, p.113 | behaviour | done (SoC) |
+| P4-187 | PD is set on power-up and cleared when Sleep is invoked; TO is cleared if WDT wake-up occurred | §14.8.1, p.113 | register | done (SoC) |
+| P4-188 | During SLEEP execution, PC+1 is pre-fetched; interrupt wake-up requires the interrupt's enable bit set; wake-up is independent of GIE | §14.8.1, p.113 | behaviour | done (SoC) |
+| P4-189 | Wake with GIE = 0: continue at instruction after SLEEP; GIE = 1: execute instruction after SLEEP, then branch to 0004h (put a NOP after SLEEP if that is undesirable) | §14.8.1, p.113 | behaviour | done (SoC) |
+| P4-190 | If GIE = 0 but any source has both its enable and flag set, the device will not enter Sleep — SLEEP executes as a NOP | §14.8.1 Note, p.113 | behaviour | done (SoC) |
+| P4-191 | WDT is cleared when the device wakes from Sleep, regardless of wake source | §14.8.1, p.113 | behaviour | done (SoC) |
+| P4-192 | Figure 14-17 wake via interrupt: Inst(PC)=SLEEP executes while Inst(PC+1) fetched; processor in Sleep; on INT, after TOST (1024 TOSC, XT/HS/LP) Inst(PC+1) executes (fetching PC+2), then two dummy cycles, then Inst(0004h) fetched/executed (GIE=1); with GIE=0 continues in-line | Fig 14-17 + Notes 1–3, p.113 | timing | done (SoC) |
 | P4-193 | Figure 14-17 Note 4: CLKOUT not available in XT/HS/LP oscillator modes (shown only for timing reference) | Fig 14-17 Note 4, p.113 | pin | todo |
 | P4-194 | Code protection: with CP cleared, program memory locations read out as '0' (via programming interface) | §14.9, p.113 | memory | todo |
 | P4-195 | Only a Bulk Erase can set CP and CPD (turn protection off); it erases entire data EEPROM and Flash program memory | §14.9 Note, p.113 | memory | todo |
 | P4-196 | User ID locations 2000h–2003h (four); not accessible in normal execution; readable/writable during Program/Verify; 14 bits each but only the LS 4 bits used in checksum | §14.10, p.113 | memory | todo |
 | P4-197 | ICSP uses clock, data, power, ground and programming voltage lines; devices can be programmed in-circuit | §14.11, p.114 | behaviour | todo |
-| P4-198 | High-voltage Program/Verify entry: hold RB6 and RB7 low while raising MCLR/VPP from VIL to VIHH | §14.11, p.114 | pin | todo |
+| P4-198 | High-voltage Program/Verify entry: hold RB6 and RB7 low while raising MCLR/VPP from VIL to VIHH | §14.11, p.114 | pin | done (SoC) |
 | P4-199 | In Program/Verify mode RB6 = programming clock (PGC), RB7 = programming data (PGD); both Schmitt-trigger inputs | §14.11, Fig 14-18, p.114 | pin | todo |
 | P4-200 | After entering Program/Verify, PC is at 00h; a 6-bit command is supplied, then 14 bits of data to or from the device depending on load vs read | §14.11, p.114 | behaviour | todo |
 | P4-201 | Fig 14-18 ICSP connection: +5V→VDD, 0V→VSS, VPP→RA5/MCLR/VPP, CLK→RB6/PGC, Data I/O→RB7/PGD | Fig 14-18, p.114 | pin | todo |
-| P4-202 | LVP: programming via ICSP using only a 5 V source, no VIHH on MCLR; LVP bit erased state is '1' (LVP enabled by default) | §14.12, p.114 | behaviour | todo |
-| P4-203 | With LVP = 1, RB4/PGM is dedicated to programming and is not usable as general-purpose I/O | §14.12 + Note 1, p.114 | pin | todo |
-| P4-204 | With LVP = 1, the device enters Programming mode when '1' is placed on RB4/PGM (failure mode for apps that drive RB4 high while LVP left enabled) | §14.12, p.114 | failure-mode | todo |
-| P4-205 | High-voltage programming (VIHH on MCLR) remains available when LVP = 1 | §14.12, p.114 | behaviour | todo |
+| P4-202 | LVP: programming via ICSP using only a 5 V source, no VIHH on MCLR; LVP bit erased state is '1' (LVP enabled by default) | §14.12, p.114 | behaviour | done (SoC) |
+| P4-203 | With LVP = 1, RB4/PGM is dedicated to programming and is not usable as general-purpose I/O | §14.12 + Note 1, p.114 | pin | done (SoC) |
+| P4-204 | With LVP = 1, the device enters Programming mode when '1' is placed on RB4/PGM (failure mode for apps that drive RB4 high while LVP left enabled) | §14.12, p.114 | failure-mode | done (SoC) |
+| P4-205 | High-voltage programming (VIHH on MCLR) remains available when LVP = 1 | §14.12, p.114 | behaviour | done (SoC) |
 | P4-206 | VDD must be 5.0 V +10% during erase operations (LVP mode) | §14.12 Note 2, p.114 | electrical | todo |
 | P4-207 | If LVP unused, program LVP = 0 so RB4/PGM becomes digital I/O; then VIHH must be on MCLR to program | §14.12, p.114 | pin | todo |
 | P4-208 | LVP bit can only be programmed when programming mode was entered with VIHH on MCLR, not when entered via RB4/PGM; once LVP = 0 only HV programming can be used | §14.12, p.114 | behaviour | todo |
@@ -973,8 +998,8 @@ written; the decision is added here.
 | P4-217 | 1 instruction cycle = 4 oscillator periods; at 4 MHz normal instruction = 1 μs, 2-cycle = 2 μs | §15.0, p.117 | timing | done (core) |
 | P4-218 | Any unused opcode is reserved; using one may cause unexpected operation | §15.0 Note 1, p.117 | failure-mode | D1 |
 | P4-219 | Do not use OPTION and TRIS instructions (upward compatibility) | §15.0 Note 2, p.117 | note | info |
-| P4-220 | Read-Modify-Write: any instruction with a file operand reads the register even if it only writes it; result stored per d | §15.1, p.117 | behaviour | **fix** |
-| P4-221 | R-M-W hazard: "CLRF PORTB" reads PORTB, clears, writes back — clears the RBIF mismatch condition for input pins using interrupt-on-change | §15.1, p.117 | failure-mode | **fix** |
+| P4-220 | Read-Modify-Write: any instruction with a file operand reads the register even if it only writes it; result stored per d | §15.1, p.117 | behaviour | done (core) |
+| P4-221 | R-M-W hazard: "CLRF PORTB" reads PORTB, clears, writes back — clears the RBIF mismatch condition for input pins using interrupt-on-change | §15.1, p.117 | failure-mode | done (core) |
 | P4-222 | When an I/O register is modified as a function of itself (e.g. MOVF PORTB,1) the value used is the pin value: latch '1' on an input driven low externally is written back as '0' | Table 15-2 Note 1, p.118 | failure-mode | todo |
 | P4-223 | If an instruction (with Note 2) targets TMR0 (and d = 1 where applicable), the prescaler is cleared if assigned to Timer0 | Table 15-2 Note 2, p.118 | behaviour | todo |
 | P4-224 | Table 15-2 note mapping: ADDWF, ANDWF, COMF, DECF, INCF, IORWF, MOVF, RLF, RRF, SUBWF, SWAPF, XORWF, BCF, BSF → Notes 1,2; CLRF → Note 2; DECFSZ, INCFSZ → Notes 1,2,3; BTFSC, BTFSS → Note 3; MOVWF, CLRW, NOP, literal/control → none | Table 15-2, p.118 | note | info |
@@ -1060,8 +1085,8 @@ written; the decision is added here.
 | P4-304 | SUBLW examples do not give Z or DC values (only C) | §15.2 SUBLW, p.128 | note | done (core) |
 | P4-305 | XORLW k: 11 1010 kkkk kkkk; (W).XOR.k→W; Z; 1 cycle | Table 15-2, §15.2, p.118/130 | behaviour | done (core) |
 | P4-306 | XORLW example: W=0xB5, XORLW 0xAF → W=0x1A | §15.2 XORLW, p.130 | behaviour | done (core) |
-| P4-307 | OPTION: 00 0000 0110 0010 (0x0062); (W)→OPTION; None; 1 cycle; PIC16C5X compatibility, not in Table 15-2, do not use | §15.2 OPTION, p.126 | behaviour | core done, SoC todo |
-| P4-308 | TRIS f: 00 0000 0110 0fff; 5 ≤ f ≤ 7; (W)→TRIS register f; None; 1 cycle; PIC16C5X compatibility, not in Table 15-2, do not use | §15.2 TRIS, p.129 | behaviour | core done, SoC todo |
+| P4-307 | OPTION: 00 0000 0110 0010 (0x0062); (W)→OPTION; None; 1 cycle; PIC16C5X compatibility, not in Table 15-2, do not use | §15.2 OPTION, p.126 | behaviour | done (SoC) |
+| P4-308 | TRIS f: 00 0000 0110 0fff; 5 ≤ f ≤ 7; (W)→TRIS register f; None; 1 cycle; PIC16C5X compatibility, not in Table 15-2, do not use | §15.2 TRIS, p.129 | behaviour | done (SoC) |
 | P4-309 | TRIS operand 5 ≤ f ≤ 7 includes f = 7 although only TRISA/TRISB exist in the reset tables — behaviour for f = 7 not stated | §15.2 TRIS, p.129 | note | D5 |
 | P4-310 | Literal opcodes with x don't-care bits (ADDLW 111x, SUBLW 110x, MOVLW 00xx, RETLW 01xx, NOP 0xx0) must decode identically for x = 0 or 1 | Table 15-2, p.118 | behaviour | done (core) |
 | P4-311 | Examples use 0xhh hex notation | §15.0, p.117 | note | info |
@@ -1688,49 +1713,49 @@ DS80151B applies to "all PIC16F627A and PIC16F628A devices", meaning Rev. A sili
 | P8-099 | With code protection on, the CPU can still read and write data EEPROM; the device programmer can no longer access it. | §7.1 p. 7-2; §7.9 p. 7-7 | behaviour | todo |
 | P8-100 | Write verify: read back the location after the write (BSF EECON1,RD then SUBWF EEDATA,W; BTFSS STATUS,Z) when a cell may be stressed near its endurance limit. | §7.7, Example 7-3 p. 7-6 | behaviour | todo |
 | P8-101 | Design tips: data not written - most likely the unlock sequence was not followed exactly or an interrupt hit during it. Data corrupted - inadvertent writes can happen during brown-out if the device is not held in reset; enable BOR or an external reset circuit so no EEPROM write occurs out of the operating range. | §7.11 Q1, Q2 p. 7-8 | failure-mode | todo |
-| P8-102 | GIE (INTCON<7>) enables all unmasked interrupts and is cleared on reset. On an interrupt response the core clears GIE, pushes the return address, and loads PC = 0004h. RETFIE returns and sets GIE, so any still-pending interrupt is taken immediately. PEIE (INTCON<6>) must be set for any peripheral (PIE/PIR) interrupt to vector. | §8.1 p. 8-3; §8.2.2 p. 8-6 | behaviour | todo |
-| P8-103 | Interrupt flag bits (INTCON T0IF/INTF/RBIF and PIR bits) are set when the condition occurs regardless of their enable bit or GIE, allowing polling. Flags must be cleared in software before re-enabling GIE (and before enabling an interrupt) to avoid recursive interrupts. | §8.1 note 1 p. 8-3; §8.2.1 note p. 8-5; §8.2.3 notes p. 8-8 | behaviour | todo |
+| P8-102 | GIE (INTCON<7>) enables all unmasked interrupts and is cleared on reset. On an interrupt response the core clears GIE, pushes the return address, and loads PC = 0004h. RETFIE returns and sets GIE, so any still-pending interrupt is taken immediately. PEIE (INTCON<6>) must be set for any peripheral (PIE/PIR) interrupt to vector. | §8.1 p. 8-3; §8.2.2 p. 8-6 | behaviour | done (SoC) |
+| P8-103 | Interrupt flag bits (INTCON T0IF/INTF/RBIF and PIR bits) are set when the condition occurs regardless of their enable bit or GIE, allowing polling. Flags must be cleared in software before re-enabling GIE (and before enabling an interrupt) to avoid recursive interrupts. | §8.1 note 1 p. 8-3; §8.2.1 note p. 8-5; §8.2.3 notes p. 8-8 | behaviour | done (SoC) |
 | P8-104 | When an instruction that clears GIE executes, any interrupt that was pending for execution in the next cycle is ignored; the CPU executes a NOP in the cycle immediately after the GIE-clearing instruction. The ignored interrupts stay pending and are serviced when GIE is set again. | §8.1 note 2 p. 8-3 | timing | D3 |
-| P8-105 | INTCON (all R/W-0): GIE, PEIE, T0IE, INTE, RBIE, T0IF, INTF, RBIF (bits 7..0). T0IF = TMR0 overflowed; INTF = INT edge occurred; RBIF = at least one of RB7:RB4 changed state; all flags cleared only by software. | §8.2.1 Register 8-1 p. 8-5 | register | todo |
-| P8-106 | Interrupt logic (Fig. 8-1): each source is flag AND enable; peripheral sources are ORed and gated by PEIE; INTCON sources and the PEIE term are ORed. The OR of enabled flags produces "Wake-up (if in SLEEP)" independent of GIE; the same term ANDed with GIE produces "Interrupt to CPU" and clears GIE. | §8.1 Fig. 8-1 p. 8-4 | behaviour | todo |
+| P8-105 | INTCON (all R/W-0): GIE, PEIE, T0IE, INTE, RBIE, T0IF, INTF, RBIF (bits 7..0). T0IF = TMR0 overflowed; INTF = INT edge occurred; RBIF = at least one of RB7:RB4 changed state; all flags cleared only by software. | §8.2.1 Register 8-1 p. 8-5 | register | done (SoC) |
+| P8-106 | Interrupt logic (Fig. 8-1): each source is flag AND enable; peripheral sources are ORed and gated by PEIE; INTCON sources and the PEIE term are ORed. The OR of enabled flags produces "Wake-up (if in SLEEP)" independent of GIE; the same term ANDed with GIE produces "Interrupt to CPU" and clears GIE. | §8.1 Fig. 8-1 p. 8-4 | behaviour | done (SoC) |
 | P8-107 | Generic PIR flag semantics relevant to the 62xA: RCIF = RCREG full, cleared when RCREG is read (not by software write); TXIF = TXREG empty, cleared when TXREG is written; TMR1IF, TMR2IF, CCP1IF, EEIF, CMIF must be cleared in software. | §8.2.3 Register 8-3 p. 8-8/8-9 | register | todo |
 | P8-108 | Interrupt latency (flag set -> first instruction at 0004h starts): synchronous (internal) interrupts 3 TCY; asynchronous external interrupts (INT, RB change) 3 to 3.75 TCY depending on when the event lands in the cycle. Latency is the same for one- and two-cycle instructions. | §8.3 p. 8-10 | timing | D4 |
-| P8-109 | INT timing (Fig. 8-2): INTF can be set any time during Q4-Q1; the interrupt condition is sampled every Q1. After sampling, the instruction in progress (Inst(PC)) completes, then two dummy cycles occur (Inst(PC+1) is fetched but not executed; PC+1 is pushed), then Inst(0004h) is fetched and executes on the next cycle. | §8.4 Fig. 8-2 and notes p. 8-10 | timing | todo |
+| P8-109 | INT timing (Fig. 8-2): INTF can be set any time during Q4-Q1; the interrupt condition is sampled every Q1. After sampling, the instruction in progress (Inst(PC)) completes, then two dummy cycles occur (Inst(PC+1) is fetched but not executed; PC+1 is pushed), then Inst(0004h) is fetched and executes on the next cycle. | §8.4 Fig. 8-2 and notes p. 8-10 | timing | done (SoC) |
 | P8-110 | Manual §8.3 text gives asynchronous latency as 3-3.75 TCY, while Fig. 8-2 note 2 in the same manual says 3-4 TCY; DS40044G §14.6 says three or four instruction cycles. Use 3-4 TCY. | Manual §8.3 vs Fig. 8-2 note 2 p. 8-10; DS40044G §14.6 | note | D4 |
-| P8-111 | INT pin: edge-triggered, rising if INTEDG = 1, falling if INTEDG = 0; valid edge sets INTF; INTE enables it. INT wakes the device from SLEEP if INTE was set before SLEEP; GIE then decides whether the CPU vectors to 0004h after wake-up. Other externally-caused interrupts (timers, capture, port change) have similar timing. | §8.4 p. 8-10 | behaviour | todo |
+| P8-111 | INT pin: edge-triggered, rising if INTEDG = 1, falling if INTEDG = 0; valid edge sets INTF; INTE enables it. INT wakes the device from SLEEP if INTE was set before SLEEP; GIE then decides whether the CPU vectors to 0004h after wake-up. Other externally-caused interrupts (timers, capture, port change) have similar timing. | §8.4 p. 8-10 | behaviour | done (SoC) |
 | P8-112 | Only the return PC is saved by hardware on interrupt; W and STATUS (and PCLATH, FSR, etc.) must be saved by software. Canonical save: MOVWF W_TEMP; SWAPF STATUS,W; MOVWF STATUS_TEMP. Restore: SWAPF STATUS_TEMP,W; MOVWF STATUS; SWAPF W_TEMP,F; SWAPF W_TEMP,W (SWAPF/MOVWF do not change STATUS flags). W_TEMP must be at the same offset in every bank (e.g. common RAM 70h-7Fh) because the bank is unknown at ISR entry. | §8.5, Examples 8-1, 8-2 p. 8-11/8-12 | behaviour | todo |
 | P8-113 | Design tips: an algorithm gives wrong results when registers shared with the ISR are not saved/restored; the system "locks up" if an interrupt flag is not cleared before RETFIE, because execution immediately re-enters the ISR while an enabled flag is still set. | §8.7 Q1, Q2 p. 8-16 | failure-mode | todo |
-| P8-114 | TRIS bit = 1 makes the pin an input (output driver hi-Z); TRIS = 0 drives the PORT latch value onto the pin. Reading PORT returns the pin levels, not the latch; writing PORT writes the latch. When a peripheral is active on a pin it generally cannot be used as GPIO. | §9.1 p. 9-2; §9.2, §9.3 p. 9-4/9-6 | pin | todo |
+| P8-114 | TRIS bit = 1 makes the pin an input (output driver hi-Z); TRIS = 0 drives the PORT latch value onto the pin. Reading PORT returns the pin levels, not the latch; writing PORT writes the latch. When a peripheral is active on a pin it generally cannot be used as GPIO. | §9.1 p. 9-2; §9.2, §9.3 p. 9-4/9-6 | pin | done (SoC) |
 | P8-115 | Typical I/O pin structure (Fig. 9-1): D-latch for data and TRIS, P/N CMOS output stage, TTL or Schmitt input buffer feeding a latch enabled by RD PORT; protection diodes to VDD and VSS. | §9.1 Fig. 9-1 p. 9-2 | pin | todo |
 | P8-116 | All writes to ports (BSF, BCF, etc.) are read-modify-write: the pins are read, modified, and written to the data latch. With some peripherals the TRIS bit is overridden while the peripheral is enabled, so RMW instructions (BSF, BCF, XORWF) on TRIS should be avoided. | §9.1 p. 9-2/9-3; §9.10.1 p. 9-14 | failure-mode | todo |
-| P8-117 | Pins multiplexed with comparator inputs are configured as analog inputs at Power-on Reset (controlled by CMCON); a pin configured as analog reads 0 regardless of its voltage (its digital input buffer is disabled). TRIS still controls direction on analog pins and must be kept set (input) for analog use; an analog-configured pin set as output can still be driven, but always reads 0, so RMW on the port writes 0 into those latches. | §9.1 note 2 p. 9-3; §9.12 Q4.2 p. 9-18 | pin | todo |
+| P8-117 | Pins multiplexed with comparator inputs are configured as analog inputs at Power-on Reset (controlled by CMCON); a pin configured as analog reads 0 regardless of its voltage (its digital input buffer is disabled). TRIS still controls direction on analog pins and must be kept set (input) for analog use; an analog-configured pin set as output can still be driven, but always reads 0, so RMW on the port writes 0 into those latches. | §9.1 note 2 p. 9-3; §9.12 Q4.2 p. 9-18 | pin | done (SoC) |
 | P8-118 | RA4 is a Schmitt-trigger input and an open-drain output (N-channel only, protection diode to VSS only, no diode to VDD); it can only drive low or float and needs an external pull-up, which may go to a voltage other than VDD. Other RA pins are TTL input / full CMOS output in the manual's generic description. | §9.2 p. 9-4; Fig. 9-3 p. 9-5; §9.12 Q2.3 p. 9-17 | pin | todo |
 | P8-119 | Manual Example 9-1 comments "TRISA<7:6> always read as '0'" for a 6-bit PORTA; on the 62xA PORTA is 8 bits (RA6/RA7 shared with OSC2/OSC1), TRISA resets to 1111 1111 and TRISA<7:6> are overridden by the oscillator mode (DS40044G §5.1). Do not force TRISA<7:6> to 0. | Manual §9.2 Example 9-1 p. 9-4 vs DS40044G §5.1, Table 4-3 | note | info |
-| P8-120 | PORTB weak pull-ups: one control bit (RBPU = 0, OPTION<7>) turns on all pull-ups; each pull-up is automatically off when its pin is an output; pull-ups are disabled on POR (OPTION = FFh). To enable a pull-up, set the TRIS bit and clear RBPU. | §9.3 p. 9-6; Figs. 9-4, 9-5 notes | pin | todo |
+| P8-120 | PORTB weak pull-ups: one control bit (RBPU = 0, OPTION<7>) turns on all pull-ups; each pull-up is automatically off when its pin is an output; pull-ups are disabled on POR (OPTION = FFh). To enable a pull-up, set the TRIS bit and clear RBPU. | §9.3 p. 9-6; Figs. 9-4, 9-5 notes | pin | done (SoC) |
 | P8-121 | RB0/INT: the PORTB data path uses a TTL buffer but the INT path uses a Schmitt trigger. Design tip: an input of e.g. 3 V at VDD = 5 V reads as 1 on PORTB but may not trigger INT, since the Schmitt threshold is higher (deliberately, so noise does not cause interrupts). | §9.3 Fig. 9-4 p. 9-6; §9.12 Q3 p. 9-17 | pin | todo |
-| P8-122 | RB7:RB4 interrupt-on-change: only pins configured as inputs take part (outputs are excluded from the compare). Each input is compared with the value latched on the last read of PORTB; the mismatch outputs are ORed to set RBIF (INTCON<0>). Fig. 9-5 shows the two latches in the compare path enabled by RD PORT and by Q1/Q3, and notes that in Sleep the device is held in Q1. | §9.3 p. 9-7; Fig. 9-5 and note 3 p. 9-7 | behaviour | todo |
-| P8-123 | Clearing the RB change interrupt: (a) any read or write of PORTB ends the mismatch condition, then (b) clear RBIF. While the mismatch persists RBIF keeps being set again, so clearing RBIF without reading/writing PORTB does not stick. RB change can wake the device from SLEEP. Polling PORTB while using interrupt-on-change is not recommended (a read clears the mismatch and can lose a change). | §9.3 p. 9-7 | failure-mode | todo |
+| P8-122 | RB7:RB4 interrupt-on-change: only pins configured as inputs take part (outputs are excluded from the compare). Each input is compared with the value latched on the last read of PORTB; the mismatch outputs are ORed to set RBIF (INTCON<0>). Fig. 9-5 shows the two latches in the compare path enabled by RD PORT and by Q1/Q3, and notes that in Sleep the device is held in Q1. | §9.3 p. 9-7; Fig. 9-5 and note 3 p. 9-7 | behaviour | done (SoC) |
+| P8-123 | Clearing the RB change interrupt: (a) any read or write of PORTB ends the mismatch condition, then (b) clear RBIF. While the mismatch persists RBIF keeps being set again, so clearing RBIF without reading/writing PORTB does not stick. RB change can wake the device from SLEEP. Polling PORTB while using interrupt-on-change is not recommended (a read clears the mismatch and can lose a change). | §9.3 p. 9-7 | failure-mode | done (SoC) |
 | P8-124 | In serial programming mode RB7:RB6 are used as programming data/clock (Fig. 9-5 path "RB7:RB6 in serial programming mode", ST buffer). | §9.3 Fig. 9-5 p. 9-7; Table 4-1 p. 4-9 | pin | todo |
 | P8-125 | Peripheral output override (Fig. 9-6 style): a port/peripheral select mux chooses between the port latch and peripheral data-out; peripheral OE overrides the TRIS output enable only when peripheral select is active. Some peripherals force a pin to output, others force input. | §9.4 Fig. 9-6 p. 9-8 | pin | todo |
-| P8-126 | RMW example (Example 9-9): PORTB<7:4> inputs with external pull-ups, PORTB<3:0> outputs. BCF PORTB,7 -> latch 01pp pppp (RB6 reads 1 from pin); BCF PORTB,6 -> latch 10pp pppp (RB7 re-latched as pin value 1); after BCF TRISB,7 and BCF TRISB,6 the pins become 10pp pppp, not the expected 00pp pppp. | §9.10.1 Example 9-9 p. 9-14 | failure-mode | todo |
+| P8-126 | RMW example (Example 9-9): PORTB<7:4> inputs with external pull-ups, PORTB<3:0> outputs. BCF PORTB,7 -> latch 01pp pppp (RB6 reads 1 from pin); BCF PORTB,6 -> latch 10pp pppp (RB7 re-latched as pin value 1); after BCF TRISB,7 and BCF TRISB,6 the pins become 10pp pppp, not the expected 00pp pppp. | §9.10.1 Example 9-9 p. 9-14 | failure-mode | done (SoC) |
 | P8-127 | An output pin actively driving low or high must not be simultaneously driven by an external device to change its level ("wired-OR / wired-AND"); the resulting high currents may damage the chip. | §9.10.1 p. 9-14 | electrical | todo |
-| P8-128 | Successive port operations: the port write happens at the end of the instruction cycle (Q4), while for a read the data must be valid at the beginning of the instruction cycle (Fig. 9-12). For MOVWF PORTB followed by MOVF PORTB,W the data setup time is 0.25 TCY - TPD, so at high clock rates or with large load capacitance the read returns the old pin state. Fix: insert a NOP (or unrelated instruction), or add a series resistor. | §9.10.2 Fig. 9-12 p. 9-15 | timing | todo |
+| P8-128 | Successive port operations: the port write happens at the end of the instruction cycle (Q4), while for a read the data must be valid at the beginning of the instruction cycle (Fig. 9-12). For MOVWF PORTB followed by MOVF PORTB,W the data setup time is 0.25 TCY - TPD, so at high clock rates or with large load capacitance the read returns the old pin state. Fix: insert a NOP (or unrelated instruction), or add a series resistor. | §9.10.2 Fig. 9-12 p. 9-15 | timing | done (SoC) |
 | P8-129 | Capacitive load RMW (Fig. 9-13): BSF PORTx,PINy then BSF PORTx,PINz - if PINy has not risen above VIL by the read of the second instruction, PINy is read low and the second BSF clears it in the latch. Design-tip example: 20 MHz, LEDs with 100 µF across each, BSF PORTC,0; BSF PORTC,1; ... leaves only the last pin set. | §9.10.2 Fig. 9-13 p. 9-15; §9.12 Q4.1 p. 9-18 | failure-mode | todo |
 | P8-130 | Port initialisation should write the PORT data latch first, then TRIS, because the latches power up in a random state and writing TRIS first can glitch the pins. | §9.11 note p. 9-16 | pin | todo |
 | P8-131 | A port read always returns the pin, regardless of input or output: an output pin with latch = 1 shorted to ground reads 0 (useful for detecting bus conflicts such as I2C-style open-drain sharing). | §9.12 Q2 p. 9-17 | behaviour | todo |
 | P8-132 | Design tip checklist for "ports do not toggle": TRIS written without selecting bank 1 (BSF STATUS,RP0); not returning to bank 0 before writing PORT; a peripheral enabled on the pins; WDT enabled but not cleared at least every 9 ms (more if prescaled); MOVF used instead of MOVWF; interrupts interfering. | §9.12 Q1 p. 9-17 | failure-mode | todo |
 | P8-133 | Manual design tip quotes a 9 ms minimum WDT clearing interval; DS40044G gives TWDT = 18 ms nominal (7 ms min, 33 ms max at VDD = 5 V, -40..85°C). Use DS40044G parameter 31. | Manual §9.12 Q1.4 p. 9-17 vs DS40044G §14.7.1, parameter 31 | note | info |
-| P8-134 | WDT is a free-running on-chip RC oscillator, separate from the OSC1/CLKIN oscillator, needing no external parts; it keeps running when the main clock stops (e.g. in SLEEP). It is enabled by the WDTE configuration bit, and once enabled firmware cannot disable it. | §26.1 p. 26-2; §26.3 p. 26-4 | behaviour | todo |
-| P8-135 | Prescaler sharing (Fig. 26-1): one 8-bit prescaler is assigned by PSA to either TMR0 (as prescaler) or the WDT (as postscaler); PS2:PS0 drive an 8-to-1 mux. When PSA = 1 the TMR0 clock bypasses the prescaler (1:1), when PSA = 0 the WDT time-out bypasses it. | §26.1 Fig. 26-1 p. 26-2; Register 26-1 p. 26-3 | behaviour | todo |
-| P8-136 | WDT time-out in normal operation causes a device RESET; in SLEEP it causes a WDT wake-up (execution continues after SLEEP). TO is cleared on any WDT time-out (reset or wake-up). | §26.3 p. 26-4; §26.3.1 p. 26-6 | behaviour | todo |
+| P8-134 | WDT is a free-running on-chip RC oscillator, separate from the OSC1/CLKIN oscillator, needing no external parts; it keeps running when the main clock stops (e.g. in SLEEP). It is enabled by the WDTE configuration bit, and once enabled firmware cannot disable it. | §26.1 p. 26-2; §26.3 p. 26-4 | behaviour | done (SoC) |
+| P8-135 | Prescaler sharing (Fig. 26-1): one 8-bit prescaler is assigned by PSA to either TMR0 (as prescaler) or the WDT (as postscaler); PS2:PS0 drive an 8-to-1 mux. When PSA = 1 the TMR0 clock bypasses the prescaler (1:1), when PSA = 0 the WDT time-out bypasses it. | §26.1 Fig. 26-1 p. 26-2; Register 26-1 p. 26-3 | behaviour | done (SoC) |
+| P8-136 | WDT time-out in normal operation causes a device RESET; in SLEEP it causes a WDT wake-up (execution continues after SLEEP). TO is cleared on any WDT time-out (reset or wake-up). | §26.3 p. 26-4; §26.3.1 p. 26-6 | behaviour | done (SoC) |
 | P8-137 | Changing the prescaler from Timer0 to the WDT must use Example 26-1 even if the WDT is disabled, because the prescaler count is unknown and an unplanned WDT reset can follow: (optional, only if final ratio is 1:1) write OPTION with a temporary non-1:1 ratio; CLRF TMR0 (clears TMR0 and prescaler); write OPTION with PSA = 1; CLRWDT; write OPTION with final ratio. WDT -> Timer0: CLRWDT, then write OPTION with PSA = 0 and new ratio (Example 26-2). | §26.3, Examples 26-1, 26-2 p. 26-4/26-5 | failure-mode | todo |
-| P8-138 | WDT period: nominal 18 ms with no postscaler, varying with temperature, VDD and process; up to 1:128 postscaler gives up to about 2.3 s. Worst case (minimum VDD, maximum temperature, maximum postscaler) may take several seconds. | §26.3.1, §26.3.2 p. 26-6 | timing | todo |
-| P8-139 | CLRWDT and SLEEP both clear the WDT and the postscaler (if assigned to the WDT). With the postscaler assigned to the WDT, always execute CLRWDT before changing the postscale value, otherwise a WDT reset may occur. | §26.3.1, §26.3.2 note p. 26-6 | behaviour | todo |
-| P8-140 | SLEEP entry: WDT (if enabled) is cleared but keeps running, PD is cleared, TO is set, the oscillator driver is turned off (no system clocks). I/O ports keep the state they had before SLEEP (driving high, low, or hi-Z). | §26.4 p. 26-7 | behaviour | todo |
+| P8-138 | WDT period: nominal 18 ms with no postscaler, varying with temperature, VDD and process; up to 1:128 postscaler gives up to about 2.3 s. Worst case (minimum VDD, maximum temperature, maximum postscaler) may take several seconds. | §26.3.1, §26.3.2 p. 26-6 | timing | done (SoC) |
+| P8-139 | CLRWDT and SLEEP both clear the WDT and the postscaler (if assigned to the WDT). With the postscaler assigned to the WDT, always execute CLRWDT before changing the postscale value, otherwise a WDT reset may occur. | §26.3.1, §26.3.2 note p. 26-6 | behaviour | done (SoC) |
+| P8-140 | SLEEP entry: WDT (if enabled) is cleared but keeps running, PD is cleared, TO is set, the oscillator driver is turned off (no system clocks). I/O ports keep the state they had before SLEEP (driving high, low, or hi-Z). | §26.4 p. 26-7 | behaviour | done (SoC) |
 | P8-141 | Lowest Sleep current: all I/O at VDD or VSS with no external load, hi-Z inputs pulled high or low externally (floating inputs cause switching current), T0CKI at VDD or VSS, account for PORTB pull-up current, peripherals with delta sleep current disabled; MCLR must be at logic high (VIHMC). WDT and BOR add delta sleep current and are set by configuration bits. | §26.4 p. 26-7 | electrical | todo |
 | P8-142 | Wake-up sources: any device reset (MCLR, which resets the device), WDT wake-up (if enabled), or any interrupt source that can set its flag in Sleep (on the 62xA: INT pin, PORTB change, comparators, Timer1 async, CCP capture, etc.). WDT and interrupt wake-ups resume execution rather than reset. | §26.4.1 p. 26-7 | behaviour | todo |
-| P8-143 | While SLEEP executes, the next instruction (PC+1) is pre-fetched. Interrupt wake-up requires the source's individual enable bit; it happens regardless of GIE. GIE = 0: execution continues at PC+1. GIE = 1: the instruction at PC+1 is executed first, then the CPU branches to 0004h. Put a NOP after SLEEP if executing PC+1 is undesirable. | §26.4.1 p. 26-7 | behaviour | todo |
-| P8-144 | SLEEP with GIE = 0 and a source whose enable and flag are both set: if the interrupt condition arises before SLEEP executes, SLEEP completes as a NOP - the WDT and postscaler are not cleared, TO is not set and PD is not cleared. If it arises during or after SLEEP, the device wakes immediately after SLEEP has fully executed (WDT/postscaler cleared, TO = 1, PD = 0). Firmware detects the NOP case by PD still being 1. Execute CLRWDT before SLEEP to guarantee the WDT is clear. | §26.4.2 p. 26-8 | behaviour | todo |
+| P8-143 | While SLEEP executes, the next instruction (PC+1) is pre-fetched. Interrupt wake-up requires the source's individual enable bit; it happens regardless of GIE. GIE = 0: execution continues at PC+1. GIE = 1: the instruction at PC+1 is executed first, then the CPU branches to 0004h. Put a NOP after SLEEP if executing PC+1 is undesirable. | §26.4.1 p. 26-7 | behaviour | done (SoC) |
+| P8-144 | SLEEP with GIE = 0 and a source whose enable and flag are both set: if the interrupt condition arises before SLEEP executes, SLEEP completes as a NOP - the WDT and postscaler are not cleared, TO is not set and PD is not cleared. If it arises during or after SLEEP, the device wakes immediately after SLEEP has fully executed (WDT/postscaler cleared, TO = 1, PD = 0). Firmware detects the NOP case by PD still being 1. Execute CLRWDT before SLEEP to guarantee the WDT is clear. | §26.4.2 p. 26-8 | behaviour | done (SoC) |
 | P8-145 | Wake-up through interrupt timing (Fig. 26-2, XT/HS/LP): SLEEP executes in the cycle after its fetch, during which PC+1 is fetched; processor stays in Sleep; the INT edge sets INTF; the oscillator restarts and the OST waits TOST = 1024 TOSC; then Inst(PC+1) executes (Inst(PC+2) fetched), followed by two dummy cycles (with GIE = 1), then Inst(0004h) is fetched and executed. | §26.4.2 Fig. 26-2 p. 26-8 | timing | todo |
 | P8-146 | Manual Fig. 26-2 note 2 says the TOST delay "will not be there for RC osc mode"; DS40044G Fig. 14-17 note 2 says approximately 1 µs delay for RC oscillator mode, and DS40044G Table 14-3 gives 6 µs wake-up for INTOSC. Use DS40044G. | Manual Fig. 26-2 note 2 p. 26-8 vs DS40044G Fig. 14-17, Table 14-3 | note | info |
 | P8-147 | DS40044G §14.8.1 adds that the WDT is cleared when the device wakes from Sleep regardless of the wake-up source; the manual only states that SLEEP itself clears the WDT. Model both. | Manual §26.3.1, §26.4 vs DS40044G §14.8.1 | note | info |
@@ -1771,7 +1796,7 @@ DS80151B applies to "all PIC16F627A and PIC16F628A devices", meaning Rev. A sili
 | P8-182 | RETLW table idiom: CALL TABLE with W = offset; TABLE: ADDWF PCL,F; RETLW k1; RETLW k2; ... With W = 07h the call returns with W = k8 and PC = return address. Table must not cross a 256-word boundary unless PCLATH is adjusted. | §29.5 RETLW Example p. 29-34; §6.2.4.1 p. 6-6 | behaviour | done (core) |
 | P8-183 | Design tip: W can be decremented with ADDLW 0xFF; DECF f,W decrements and moves to W in one instruction. | §29.6 Q1 p. 29-45 | note | info |
 | P8-184 | R-M-W pitfall worked example: TRISB all outputs, PORTB = FFh; switch RB3 to input (pin goes low); BCF PORTB,6 reads the whole port (RB3 = 0) and writes RB3's latch to 0; switching RB3 back to output now drives low although 1 was last written. Any instruction that depends on the register's current value (ADDWF, SUBWF, BCF, BSF, INCF, XORWF, ...) is R-M-W. | §29.6 Q4 p. 29-45 | failure-mode | todo |
-| P8-185 | Manual §29.6 Q4 says MOVWF and CLRF are not R-M-W instructions, but its own Q-cycle tables show both reading register f in Q2, and DS40044G §15.1 states every instruction that names a file register performs a read even if it only writes - e.g. CLRF PORTB reads PORTB and so clears the RB4-RB7 change mismatch (losing a pending RBIF condition). Model the read (with read side-effects such as the PORTB mismatch latch update) for CLRF and MOVWF. | Manual §29.6 Q4 p. 29-45 vs §29.5 CLRF p. 29-17, MOVWF p. 29-30; DS40044G §15.1 | note | **fix** |
+| P8-185 | Manual §29.6 Q4 says MOVWF and CLRF are not R-M-W instructions, but its own Q-cycle tables show both reading register f in Q2, and DS40044G §15.1 states every instruction that names a file register performs a read even if it only writes - e.g. CLRF PORTB reads PORTB and so clears the RB4-RB7 change mismatch (losing a pending RBIF condition). Model the read (with read side-effects such as the PORTB mismatch latch update) for CLRF and MOVWF. | Manual §29.6 Q4 p. 29-45 vs §29.5 CLRF p. 29-17, MOVWF p. 29-30; DS40044G §15.1 | note | done (core) |
 
 ## DS33023A (reference manual): Timer0/1/2, CCP, USART, voltage reference, comparators
 

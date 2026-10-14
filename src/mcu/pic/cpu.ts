@@ -173,6 +173,7 @@ export class PicCpu {
     this.sp = byte() & 7
     this.touched.fill(0)
     this.reset()
+    this.status |= STATUS_TO | STATUS_PD
   }
   /** Whether the program has written this RAM location since power-on. */
   written(a: number): boolean {
@@ -180,7 +181,7 @@ export class PicCpu {
   }
 
   /**
-   * Reset state of the core registers (Table 14-6): PC and PCLATH zero, bank 0, TO and PD set. W,
+   * Reset state of the core registers (Table 14-6): PC and PCLATH zero, bank 0. W,
    * FSR, the RAM and the stack pointer keep what they held (Table 14-7 "u"; the stack pointer is not
    * documented, decision D2).
    */
@@ -189,7 +190,8 @@ export class PicCpu {
     this.opPc = 0
     this.opStart = 0
     this.pclath = 0
-    this.status = (this.status & 0x07) | STATUS_TO | STATUS_PD
+    // IRP, RP1, RP0 clear on every reset; TO and PD are the SoC's, by the kind of reset (Table 14-6).
+    this.status &= 0x1f
     this.cycles = 0
     this.instructions = 0
     this.sleeping = false
