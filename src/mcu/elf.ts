@@ -1,5 +1,5 @@
 /**
- * ELF32 (little-endian ARM) reader: loadable segments by physical address, plus the
+ * ELF32 (little-endian ARM or AVR) reader: loadable segments by physical address, plus the
  * symbol table for the debugger. Also parses Intel HEX and raw binaries into the same shape.
  */
 
@@ -26,14 +26,18 @@ const STT_OBJECT = 1
 const STT_FUNC = 2
 const STB_LOCAL = 0
 
-export function parseElf(buf: ArrayBuffer): Firmware {
+/** e_machine values: ARM (Cortex-M) and Atmel AVR. */
+export const EM_ARM = 40
+export const EM_AVR = 83
+
+export function parseElf(buf: ArrayBuffer, machines: readonly number[] = [EM_ARM]): Firmware {
   const v = new DataView(buf)
   const bytes = new Uint8Array(buf)
   if (v.getUint32(0, false) !== 0x7f454c46) throw new Error("not an ELF file")
   if (bytes[4] !== 1) throw new Error("not a 32-bit ELF")
   if (bytes[5] !== 1) throw new Error("not little-endian")
   const machine = v.getUint16(18, true)
-  if (machine !== 40) throw new Error(`not an ARM ELF (e_machine = ${machine})`)
+  if (!machines.includes(machine)) throw new Error(machines.includes(EM_ARM) ? `not an ARM ELF (e_machine = ${machine})` : `not an AVR ELF (e_machine = ${machine})`)
   const entry = v.getUint32(24, true)
   const phoff = v.getUint32(28, true)
   const shoff = v.getUint32(32, true)
@@ -197,9 +201,9 @@ export function parseBin(buf: ArrayBuffer, base = 0x08000000): Firmware {
 }
 
 /** Pick the parser by content: ELF magic, then HEX record marker, else raw binary. */
-export function parseFirmware(buf: ArrayBuffer, name = ""): Firmware {
+export function parseFirmware(buf: ArrayBuffer, name = "", machines: readonly number[] = [EM_ARM]): Firmware {
   const bytes = new Uint8Array(buf)
-  if (bytes.length >= 4 && bytes[0] === 0x7f && bytes[1] === 0x45 && bytes[2] === 0x4c && bytes[3] === 0x46) return parseElf(buf)
+  if (bytes.length >= 4 && bytes[0] === 0x7f && bytes[1] === 0x45 && bytes[2] === 0x4c && bytes[3] === 0x46) return parseElf(buf, machines)
   if (bytes[0] === 0x3a || /\.(hex|ihex)$/i.test(name)) return parseIhex(new TextDecoder().decode(buf))
   return parseBin(buf)
 }

@@ -6,6 +6,7 @@ dist-ssr
 
 # Compiled test firmware (`make -C firmware`); the examples ship sources, built by the service
 firmware/build
+firmware/avr/build
 firmware/*/build
 
 # Deploy-time settings; copy config.example.json here for local dev, the image writes its own
