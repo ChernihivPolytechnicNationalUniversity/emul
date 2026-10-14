@@ -187,6 +187,9 @@ export class TimerCounter extends Peripheral {
         acknowledge: () => {
           this.sync(this.bus.cpu.cycles)
           this.tifr &= ~bit
+          // With the flag clear the timer is watched again: plan its next event, or an interrupt
+          // that only the flag enables (TOV0 in Arduino's millis()) fires once and never again.
+          this.plan()
         },
         wakes: () => this.runsIn(this.mcu.sleepMode),
       })
@@ -723,6 +726,10 @@ export class TimerCounter extends Peripheral {
 
   /** Something changed: work out when the next tick that matters comes (if anything watches it). */
   private changed() {
+    // Only the dual-slope modes count down: a mode change out of phase correct PWM on the way
+    // down leaves the counter counting up from where it stood (Normal, CTC and fast PWM count up).
+    const m = this.mode
+    if (!m || (m.kind !== "pc" && m.kind !== "pfc")) this.dir = 1
     this.bus.irq.update()
     this.bus.pinsChanged()
     this.plan()

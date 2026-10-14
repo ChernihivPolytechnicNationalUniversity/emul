@@ -433,3 +433,50 @@ describe("power reduction (§10.9)", () => {
     expect(v).toBeLessThanOrEqual(52)
   })
 })
+
+describe("an interrupt the flag alone keeps armed: TOV0 in fast PWM, nothing else watched (Arduino's millis())", () => {
+  it("TIMER0_OVF fires every 256 × 64 cycles, not once: taking the vector clears TOV0 and the timer is watched again", () => {
+    const m = part()
+    // Reset: SEI, then spin. TIMER0_OVF (vector 16, word 0x20): INC r16, RETI.
+    m.cpu.flash[0] = 0x9478
+    m.cpu.flash[1] = 0xcfff
+    m.cpu.flash[0x20] = 0x9503
+    m.cpu.flash[0x21] = 0x9518
+    m.cpu.invalidate()
+    m.cpu.pc = 0
+    m.poke(R.TCCR0A, 0x03) // fast PWM, no output
+    m.poke(R.TIMSK0, 0x01) // TOIE0 only
+    m.poke(R.TCCR0B, 0x03) // clk/64
+    m.runUntil(m.time + 10.24e-3 + 2e-6)
+    // One overflow every 1.024 ms (§15.7.3): ten in 10.24 ms.
+    expect(m.cpu.data[16]).toBe(10)
+  })
+})
+
+describe("leaving phase correct PWM on the way down (Arduino's noTone() then tone() on Timer2)", () => {
+  it("CTC counts up from where the counter stood: OCF2A sets every OCR2A + 1 ticks, as §18.7.2 has it", () => {
+    const m = part()
+    // noTone(): Timer2 back to phase correct PWM at clk/64 with OCR2A = 0, as analogWrite() expects.
+    m.poke(R.TCCR2A, 0x01)
+    m.poke(R.TCCR2B, 0x04)
+    m.poke(R.OCR2A, 0)
+    // Run into the down-counting half of a cycle (TOP 0xFF at 4 µs a tick: up 1.02 ms, then down).
+    m.runUntil(m.time + 1.6e-3)
+    // tone(): CTC at clk/256, OCR2A = 158, the compare interrupt flag watched.
+    m.poke(R.TCCR2A, 0)
+    m.poke(R.TCCR2B, 0)
+    m.poke(R.TCCR2A, 0x02)
+    m.poke(R.TCCR2B, 0x06)
+    m.poke(R.OCR2A, 158)
+    m.poke(R.TIFR2, 0x07)
+    const matches: number[] = []
+    for (let i = 0; i < 4; i++) {
+      const start = m.time
+      while (!(m.read(R.TIFR2) & 0x02) && m.time - start < 20e-3) m.runUntil(m.time + 1e-6)
+      matches.push(m.time)
+      m.poke(R.TIFR2, 0x02)
+    }
+    // After the first (which may wait for a wrap), one compare every 159 × 16 µs = 2.544 ms.
+    for (let i = 2; i < matches.length; i++) expect(matches[i] - matches[i - 1]).toBeCloseTo(2.544e-3, 5)
+  })
+})
