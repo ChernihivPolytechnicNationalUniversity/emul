@@ -668,6 +668,7 @@ export class SimLoop {
         inst.base = this.engine?.time ?? 0
         this.mapInputs()
       }
+      inst.mcu.configure?.(obj.props ?? {})
     }
     for (const id of [...this.mcus.keys()])
       if (!seen.has(id)) {
@@ -727,8 +728,10 @@ export class SimLoop {
       inst.vrefNet = vrefPin ? engine.net.pinNet.get(vrefPin) : undefined
       inst.vrefWired = inst.vrefNet !== undefined && [...engine.net.pinNet].some(([key, net]) => net === inst.vrefNet && key !== vrefPin)
       if (def) {
-        inst.hse = def.mcuClocks ? { source: def.mcuClocks.hse } : this.oscillatorFeed(inst.object, def, "PH0", "PH1")
-        inst.lse = def.mcuClocks ? { source: def.mcuClocks.lse } : this.oscillatorFeed(inst.object, def, "PC14", "PC15")
+        // The oscillator pin pairs: OSC_IN/OSC_OUT and OSC32 on an STM32, XTAL1/XTAL2 (PB6/PB7) on an AVR.
+        const avr = inst.mcu.chip.family === "avr"
+        inst.hse = def.mcuClocks ? { source: def.mcuClocks.hse } : this.oscillatorFeed(inst.object, def, avr ? "PB6" : "PH0", avr ? "PB7" : "PH1")
+        inst.lse = def.mcuClocks ? { source: def.mcuClocks.lse } : avr ? { source: null } : this.oscillatorFeed(inst.object, def, "PC14", "PC15")
       }
       inst.padNode.clear()
       inst.inputByPad.clear()
@@ -1943,10 +1946,11 @@ export class SimLoop {
         // Reset is held while VDD is below the POR threshold or NRST is pulled low; the core
         // starts from the vector table when both are released.
         const vdd = inst.powerNet === undefined ? Infinity : inst.powerNet === GROUND ? 0 : engine.v[inst.powerNet]
-        const nrst = inst.resetNet === undefined ? Infinity : inst.resetNet === GROUND ? 0 : engine.v[inst.resetNet]
+        const nrst = inst.resetNet === undefined || inst.mcu.resetPin === false ? Infinity : inst.resetNet === GROUND ? 0 : engine.v[inst.resetNet]
         // The backup domain lives on VBAT: with it up through an outage the RTC keeps counting.
         const vbatUp = inst.vbatNet !== undefined && inst.vbatNet !== GROUND && engine.v[inst.vbatNet] > VBAT_MIN
-        const outage = vdd < Math.max(VDD_POR, inst.mcu.porThreshold)
+        // An AVR has its own power-on threshold (VPOT) and brown-out detector, handled in its model.
+        const outage = vdd < (inst.mcu.chip.family === "avr" ? inst.mcu.porThreshold : Math.max(VDD_POR, inst.mcu.porThreshold))
         if (outage || nrst < NRST_LOW) {
           if (inst.powered) {
             inst.powered = false

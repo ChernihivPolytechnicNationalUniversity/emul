@@ -498,7 +498,7 @@ function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { ob
               <dd className={cn("text-right font-mono", (status.halted || !status.powered) && "text-destructive")}>{!status.powered ? "no power" : status.halted ? "halted" : status.running ? "running" : "stopped"}</dd>
               <dt className="text-muted-foreground">SYSCLK</dt>
               <dd className="text-right font-mono tabular-nums" title="System clock source; HSE/LSE come from the crystal or oscillator wired to the OSC pins (a board brings its own)">
-                {status.sysclk ? `${formatSI(status.sysclk, "Hz", 4)} · ${clockLabel(status.clock)}` : "—"}
+                {status.sysclk ? `${formatSI(status.sysclk, "Hz", 4)} · ${status.labels?.clock ?? clockLabel(status.clock)}` : "—"}
               </dd>
               <dt className="text-muted-foreground">PC</dt>
               <dd className="text-right font-mono tabular-nums">0x{status.pc.toString(16).padStart(8, "0")}</dd>
@@ -523,7 +523,7 @@ function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { ob
                 <>
                   <dt className="text-muted-foreground">Power</dt>
                   <dd className="text-right font-mono tabular-nums" title="Datasheet typical for the mode and clock, not a measurement of what the code does">
-                    {powerLabel(status.power)} · ≈{formatSI(status.power.current, "A", 2)}
+                    {status.labels?.power ?? powerLabel(status.power)} · ≈{formatSI(status.power.current, "A", 2)}
                   </dd>
                 </>
               )}
@@ -531,7 +531,7 @@ function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { ob
                 <>
                   <dt className="text-muted-foreground">Resets</dt>
                   <dd className="text-right font-mono tabular-nums">
-                    {status.resets} · last by {status.lastReset === "iwdg" ? "IWDG" : status.lastReset === "wwdg" ? "WWDG" : status.lastReset === "standby" ? "Standby exit" : "software"}
+                    {status.resets} · last by {status.labels?.reset ?? (status.lastReset === "iwdg" ? "IWDG" : status.lastReset === "wwdg" ? "WWDG" : status.lastReset === "standby" ? "Standby exit" : "software")}
                   </dd>
                 </>
               )}
@@ -557,8 +557,10 @@ function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { ob
           <TriangleAlertIcon />
           <AlertTitle>No clock</AlertTitle>
           <AlertDescription>
-            {status.clock.problems.join("; ")}. The program is waiting for an oscillator that cannot start — wire a crystal across OSC_IN/OSC_OUT (an
-            oscillator module into OSC_IN for bypass mode), or it times out into its error handler.
+            {status.clock.problems.join("; ")}.{" "}
+            {status.labels?.noClock
+              ? `The core does not run: ${status.labels.noClock}.`
+              : "The program is waiting for an oscillator that cannot start — wire a crystal across OSC_IN/OSC_OUT (an oscillator module into OSC_IN for bypass mode), or it times out into its error handler."}
           </AlertDescription>
         </Alert>
       ) : null}

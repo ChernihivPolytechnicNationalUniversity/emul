@@ -14,7 +14,13 @@ HOSTS := $(foreach t,$(TESTS),build/$(t).host)
 
 $(shell mkdir -p build)
 
-all: $(ELFS) $(HOSTS:.host=.expect) $(ELFS:.elf=.lst)
+# Example programs for the schematic examples: -Os, committed as firmware/examples/avr-*.elf.
+EXAMPLES := $(foreach e,$(basename $(notdir $(wildcard examples/*.c))),../examples/avr-$(e).elf)
+
+all: $(ELFS) $(HOSTS:.host=.expect) $(ELFS:.elf=.lst) $(EXAMPLES)
+
+../examples/avr-%.elf: examples/%.c
+	$(CC) $(CFLAGS) -Os $< -o $@ $(LDFLAGS)
 
 build/%-O0.elf: tests/%.c common/test.h
 	$(CC) $(CFLAGS) -O0 $< -o $@ $(LDFLAGS)

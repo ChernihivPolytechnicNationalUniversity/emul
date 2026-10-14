@@ -323,7 +323,19 @@ export class AvrMcu implements AvrBus, AvrSystem {
   reschedule() {
     let due = Infinity
     for (const p of this.peripherals) if (p.due < due) due = p.due
+    // An outside edge queued for later: the core stops on the cycle it arrives in.
+    if (this.padQueue.length) due = Math.min(due, Math.max(this.cpu.cycles, Math.ceil(this.timeCycle(this.padQueue[0].time) - 1e-9)))
     this.cpu.nextEventCycle = due
+  }
+  /** Outside levels at exact future times (a terminal's frame, sent ahead), oldest first. */
+  private readonly padQueue: { pad: PadRef; level: boolean; time: number }[] = []
+  /** Apply the queued levels due by `cycle` (each at its own, possibly fractional, cycle). */
+  private drainPads(cycle: number) {
+    const q = this.padQueue
+    while (q.length && this.timeCycle(q[0].time) <= cycle + 1e-9) {
+      const e = q.shift()!
+      this.portByIndex[e.pad.port]!.setExternal(e.pad.pin, e.level, Math.min(cycle, this.timeCycle(e.time)), undefined)
+    }
   }
   pinsChanged() {
     this.pinsChangedAt(this.cpu.at + 1)
@@ -651,6 +663,7 @@ export class AvrMcu implements AvrBus, AvrSystem {
       while (this.time < end) {
         if (this.resetPinLow || this.porHeld || this.bodHeld) {
           this.time = end
+          this.drainHeld()
           break
         }
         if (this.time < this.resetUntil) {
@@ -659,6 +672,7 @@ export class AvrMcu implements AvrBus, AvrSystem {
           this.time = t
           this.sliceTime = t
           this.sliceCycle = this.cpu.cycles
+          this.drainHeld()
           // Blocks timed in seconds (watchdog, EEPROM) re-plan in cycles now that the clock counts again.
           if (t >= this.resetUntil) for (const p of this.peripherals) p.clockChanged(this.cpu.cycles)
           this.reschedule()
@@ -667,6 +681,7 @@ export class AvrMcu implements AvrBus, AvrSystem {
         const hz = this.hz
         if (this.sourceFromFuses() === null) {
           this.time = end
+          this.drainHeld()
           break
         }
         const cycles = Math.max(1, Math.round((end - this.time) * hz))
@@ -691,6 +706,15 @@ export class AvrMcu implements AvrBus, AvrSystem {
       return false
     }
     return true
+  }
+
+  /** No clock counts (reset, no oscillator): queued levels up to the present land on the current cycle. */
+  private drainHeld() {
+    const q = this.padQueue
+    while (q.length && q[0].time <= this.time) {
+      const e = q.shift()!
+      this.portByIndex[e.pad.port]!.setExternal(e.pad.pin, e.level, this.cpu.cycles, undefined)
+    }
   }
 
   // --- AvrSystem (what the core asks) --------------------------------------------------------
@@ -752,6 +776,7 @@ export class AvrMcu implements AvrBus, AvrSystem {
   }
   service() {
     const c = this.cpu.cycles
+    this.drainPads(c)
     for (const p of this.peripherals) if (p.due <= c) p.service(c)
     this.reschedule()
   }
@@ -876,9 +901,17 @@ export class AvrMcu implements AvrBus, AvrSystem {
     if (!this.hasPad(p)) return
     this.portByIndex[p.port]!.setExternal(p.pin, level, this.cpu.cycles, sampledUnder)
   }
-  /** A level at an exact simulated time (now or in the past; the loop delivers in order). */
+  /** A level at an exact simulated time: now, in the past (applied at once), or later (queued). */
   setPadAt(p: PadRef, level: boolean, time: number) {
     if (!this.hasPad(p)) return
+    if (time > this.now) {
+      const q = this.padQueue
+      let i = q.length
+      while (i > 0 && q[i - 1].time > time) i--
+      q.splice(i, 0, { pad: p, level, time })
+      this.reschedule()
+      return
+    }
     const cycle = Math.min(this.cpu.cycles, this.timeCycle(time))
     this.portByIndex[p.port]!.setExternal(p.pin, level, cycle, undefined)
   }

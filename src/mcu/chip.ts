@@ -114,6 +114,7 @@ export type DacProfile = {
 }
 
 export type ChipProfile = {
+  family?: "stm32"
   id: string
   /** Part number as printed on the package. */
   name: string
@@ -357,3 +358,6 @@ export function internalChannelVolts(chip: ChipProfile, celsius: number): { vref
   const slope = (volts(tsCal2.value) - volts(tsCal1.value)) / (tsCal2.celsius - tsCal1.celsius)
   return { vrefint: volts(factory.vrefintCal.value), temperature: volts(tsCal1.value) + (celsius - tsCal1.celsius) * slope }
 }
+
+/** Any emulated MCU's profile: an STM32 one here, or an AVR one (`src/mcu/avr/chip.ts`). */
+export type McuProfile = ChipProfile | import("./avr/chip").AvrProfile

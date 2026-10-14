@@ -27,6 +27,25 @@ panel says which blocks the program touched that are missing**, so it is never a
 |---|---|---|
 | STM32F429ZIT6 (Cortex-M4F, 2 MB / 256 KB) | `STM32F429ZI` LQFP144 | Nucleo-144 (NUCLEO-F429ZI) |
 | STM32F746IGT6 (Cortex-M7, 1 MB / 320 KB) | `STM32F746IG` LQFP176 | Open746I-C (Waveshare, with the Core746I module) |
+| ATmega328P (AVRe+, 32 KB / 2 KB / 1 KB EEPROM) | `ATmega328P` PDIP-28 (`src/mcu/avr/chip.ts`) | — (Arduino Nano next) |
+
+## AVR (ATmega328P)
+
+`src/mcu/avr`: the core, the ports and one class per block, assembled from the chip profile;
+references DS40002061B (data sheet), DS40002198C (instruction set), DS80000855C (errata).
+
+| | Status |
+|---|---|
+| AVRe+ core: every instruction with its cycles and flags, interrupts (priorities, four-cycle response, the instruction after SEI/RETI), SLEEP | done (`tests/firmware/avr-core.test.ts` against host builds of `firmware/avr/tests`, `avr-flags.test.ts`) |
+| Clock: fuses (CKSEL/SUT/CKDIV8), crystal or clock on XTAL1/XTAL2 from the circuit, internal RC and OSCCAL, 128 kHz, CLKPR; start-up times with the errata's 19 CK; reset sources, MCUSR, POR/BOD from the supply | done (`avr-soc.test.ts`, `tests/sim/avr-bench.test.ts`) |
+| Sleep modes and wake-up sources (Table 10-1), PRR, supply current from Table 29-8 | done (`avr-system.test.ts`, `avr-timer2-async.test.ts`) |
+| Ports with the datasheet's override signals (Tables 14-4…14-11), synchronizer timing, pin change and external interrupts | done (`avr-soc.test.ts`, `avr-extint.test.ts`) |
+| Timer/Counter0/1/2: every waveform mode, input capture, prescalers and GTCCR; Timer2 asynchronous on a 32.768 kHz crystal at TOSC1/TOSC2 (internal RC only): ASSR busy flags, two-edge latching, late flags, TCNT2 stale after wake-up, the sleep-before-OCR2xUB trap, Power-save wake-ups | done (`avr-timers.test.ts`, `avr-timer2-async.test.ts`). **Not modelled:** the timer oscillator's start-up (the data sheet says only "up to one second") |
+| USART0: asynchronous (sampling and vote, FIFO, errors, MPCM), synchronous master/slave on XCK with UCPOL, Master SPI mode | done (`avr-usart.test.ts`, `avr-usart-sync.test.ts`). **Not modelled:** edges lost when a slave XCK exceeds fosc/4 (reported); a free-running master XCK is followed edge by edge only on a watched pad |
+| SPI, TWI (master and slave, stretching), ADC (sample-and-hold, references, triggers, noise reduction), analog comparator, watchdog, EEPROM, self-programming | done (`avr-spi`, `avr-twi`, `avr-adc`, `avr-system` tests) |
+| Lock bits: boot lock bits stop SPM/LPM across sections and hold off interrupts (Tables 27-2/27-3), BLBSET; debugWIRE: BREAK stops only with DWEN programmed and no lock bit, RESET becomes dW, DWDR | done (`avr-lock.test.ts`). **Not modelled:** what a blocked LPM returns on silicon (undocumented: 0xFF here, reported); the extra sleep current DWEN causes (no figure) |
+| Silicon revisions A, B, D (inspector field, D by default) and errata 2.2.1 (D: no 32 kHz system clock, the asynchronous timer "inaccurate" — reported, no figure), 2.3.1 (A/B: TWI slave false START when TWCR follows TWDR within 500 ns, an assumption), 2.4.1 | done (`avr-errata.test.ts`, `avr-twi.test.ts`) |
+| Debugger (breakpoints, stepping, registers) for AVR; the core in a worker | **not modelled** — the core runs in the loop's thread; the debugger speaks ARM only |
 
 ## Peripherals
 
