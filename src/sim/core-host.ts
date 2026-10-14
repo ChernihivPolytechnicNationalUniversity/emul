@@ -136,6 +136,8 @@ export interface CoreHost {
   dutyPads(): Iterable<number>
   /** Fraction of the last interval a peripheral-driven pad was high; null when nothing drives it that way. */
   takeDuty(pad: PadRef, interval: number): number | null
+  /** What `takeDuty` would return now, the accounting left as it is (a core in this thread; a remote one has no such view). */
+  peekDuty?(pad: PadRef, interval: number): number | null
   /** Edges made since the last drain (own time). */
   drainEdges(): OutEdge[]
   supplyCurrent(): number

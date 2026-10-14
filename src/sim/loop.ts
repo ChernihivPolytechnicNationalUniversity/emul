@@ -14,7 +14,7 @@ import { nextPulseEdge, pulseHigh, pulseTiming, type PulseEdge, type PulseTiming
 import { createDigitalPart, type DigitalPart } from "./digital"
 import { PanelInstance } from "./display"
 import { isAdcPad } from "@/mcu/periph/adc"
-import { LocalCore, makeCore, PAD_KEYS, type CoreHost, type CoreStatus, type CoreTransport, type PanelWiring } from "./core-host"
+import { makeCore, PAD_KEYS, RemoteCore, type CoreHost, type CoreStatus, type CoreTransport, type PanelWiring } from "./core-host"
 import { NO_READBACK, PadRelease, releaseKind, Surroundings } from "./readback"
 import type { BreakpointSpec, CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 
@@ -236,12 +236,13 @@ class McuInstance {
   readonly partPads = new Set<number>()
   /** A remote core with part traffic runs in step with the loop for this many runs after the last edge. */
   keepInStep() {
-    if (this.mcu instanceof LocalCore) return
+    if (!(this.mcu instanceof RemoteCore)) return
     ;(this.mcu as { keepInStep?: (runs: number) => void }).keepInStep?.(IN_STEP_RUNS)
   }
   /** Bring a remote core back into this thread (a peer to run in lockstep with turned up). */
   relocate() {
-    if (this.mcu instanceof LocalCore) return
+    // Only a core in a worker moves; one in this thread (an STM32's LocalCore, an AVR) already is here.
+    if (!(this.mcu instanceof RemoteCore)) return
     const remote = this.mcu
     remote.dispose()
     const def = getDef(this.defId)
@@ -1101,7 +1102,7 @@ export class SimLoop {
 
   /** Whether any core runs in a worker pipelined behind the loop (its edges arrive a step late). */
   private get pipelined() {
-    for (const inst of this.mcus.values()) if (!(inst.mcu instanceof LocalCore)) return true
+    for (const inst of this.mcus.values()) if (inst.mcu instanceof RemoteCore) return true
     return false
   }
 
@@ -2146,7 +2147,7 @@ export class SimLoop {
   private quietSteps(engine: Engine, inst: McuInstance, left: number): number {
     if (left < 2 || this.padsDirty || this.heldReleases.size || this.bouncing.size || this.contactPlan.length || !inst.padsLive) return 1
     // An in-process core's PWM pads are sampled step by step as they run (`quietDuty`); a worker's are not.
-    if (inst.sampled.size && !(inst.mcu instanceof LocalCore)) return 1
+    if (inst.sampled.size && inst.mcu instanceof RemoteCore) return 1
     for (const t of this.terminals.values()) if (t.txEdges.length) return 1
     let n = Math.min(left, this.quietMax, engine.settledFor(DT) + 1)
     for (const part of this.digitalParts.values()) {
@@ -2165,7 +2166,7 @@ export class SimLoop {
    * if not, nothing is touched and the step is the core's last, for `advance` to take.
    */
   private quietDuty(inst: McuInstance): boolean {
-    const core = inst.mcu as LocalCore
+    const core = inst.mcu
     const drive = (key: string) => {
       const pad = inst.pads.get(key)
       return pad ? core.padDrive(pad) : null
@@ -2176,7 +2177,7 @@ export class SimLoop {
     for (const padKey of core.dutyPads()) {
       const input = inst.inputByPad.get(padKey)
       if (input === undefined) continue
-      const d = core.peekDuty(input.pad, DT)
+      const d = core.peekDuty?.(input.pad, DT) ?? null
       if (d !== null && d > 0 && d < 1) {
         state = (Math.imul(state, 1664525) + 1013904223) >>> 0
         now.set(input.key, state / 4294967296 < d ? "high" : "low")

@@ -260,3 +260,39 @@ describe("Arduino Nano: the terminal on the USB serial pins is the PC, not a wir
     expect(lowest).toBeLessThan(0.3 * 4.7)
   })
 })
+
+describe("Arduino Nano: two of its pins tied together keep it running as it was", () => {
+  it("a button from D2 to the board's own 5V (which RP1D ties to RESET) neither restarts the core nor its serial", () => {
+    const b = bench()
+    const sw = b.place("pushbutton", 16, 4)
+    b.wire(b.nano, "J1-5", sw, "2")
+    b.wire(b.nano, "J2-4", sw, "1")
+    const { loop, state } = start(b.doc)
+    run(loop, state, 1.2)
+    const before = loop.snapshot()!.mcus[b.nano.id]
+    loop.setParts({ ...b.doc.parts, [`${sw.id}:SW`]: { pressed: true } })
+    run(loop, state, 2)
+    const after = loop.snapshot()!.mcus[b.nano.id]
+    // The same core, its time and instruction count carried on: not reloaded with the image's (factory) fuses.
+    expect(after.instructions).toBeGreaterThan(before.instructions)
+    expect(after.labels?.fuses).toBe("L:FF H:DA E:FD lock:0F")
+    expect(after.host).toBe("in-process")
+    const t = loop.snapshot()!.terminals[b.term!.id]
+    expect(t.text).toMatch(/^tick 0\r\ntick 1\r\ntick 2\r\n/)
+    expect(t.framingErrors).toBe(0)
+  })
+})
+
+describe("Arduino Nano: the terminal on the USB pins is rated as nothing", () => {
+  it("its pins carry no current and no rating: the PC is on the other end of a USB cable", () => {
+    const b = bench()
+    const { loop, state } = start(b.doc)
+    run(loop, state, 0.3)
+    const readings = loop.snapshot()!.readings.filter((r) => r.object === b.term!.id)
+    expect(readings.length).toBeGreaterThan(0)
+    for (const r of readings) {
+      expect(r.load).toBeUndefined()
+      expect(Math.abs(r.current)).toBeLessThan(1e-9)
+    }
+  })
+})

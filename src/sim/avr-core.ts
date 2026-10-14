@@ -220,6 +220,9 @@ export class AvrCore implements CoreHost {
   takeDuty(pad: PadRef, interval: number) {
     return this.mcu.takeDuty(pad, interval)
   }
+  peekDuty(pad: PadRef, interval: number) {
+    return this.mcu.peekDuty(pad, interval)
+  }
   drainEdges() {
     this.collect()
     const out = this.edges

@@ -838,6 +838,13 @@ export class AvrMcu implements AvrBus, AvrSystem {
   dutyPads(): IterableIterator<number> {
     return this.duty.keys()
   }
+  /** What `takeDuty` would return now, leaving the accounting as it is. */
+  peekDuty(p: PadRef, interval: number): number | null {
+    const d = this.duty.get(p.port * 16 + p.pin)
+    if (!d) return null
+    const high = d.level ? d.high + (this.now - d.since) : d.high
+    return interval > 0 ? Math.min(1, high / interval) : d.level ? 1 : 0
+  }
   /** Fraction of the last `interval` a timer-driven pad was high; null when no timer drives it. */
   takeDuty(p: PadRef, interval: number): number | null {
     const d = this.duty.get(p.port * 16 + p.pin)
