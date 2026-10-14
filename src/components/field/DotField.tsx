@@ -43,6 +43,7 @@ import { LogicAnalyser } from "@/components/logic/LogicAnalyser"
 import { LOGIC_SPANS, DEFAULT_DECODER, type DecoderConfig } from "@/components/logic/decoder-config"
 import { LogicStore } from "@/components/logic/logic-store"
 import type { EditorHandle } from "@/components/code/Editor"
+import { PanelLoading } from "@/components/code/PanelLoading"
 
 /** Monaco is a few megabytes; it loads the first time the code panel opens, not with the page. */
 const CodePanel = React.lazy(() => import("@/components/code/CodePanel").then((m) => ({ default: m.CodePanel })))
@@ -1378,7 +1379,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       </ContextMenuContent>
     </ContextMenu>
       {codeOpen && (
-        <React.Suspense fallback={<div className="w-160 shrink-0 border-l bg-background" />}>
+        <React.Suspense fallback={<PanelLoading className="w-160" />}>
           <CodePanel
             ref={codeEditor}
             board={codeBoard}
@@ -1395,7 +1396,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         </React.Suspense>
       )}
       {hdlOpen && (
-        <React.Suspense fallback={<div className="w-155 shrink-0 border-l bg-background" />}>
+        <React.Suspense fallback={<PanelLoading className="w-155" explorer={false} />}>
           <HdlPanel
             module={hdlOpen}
             placed={sch.doc.objects.filter((o) => o.def === hdlOpen.id).length}
