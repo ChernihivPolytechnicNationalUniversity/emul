@@ -90,6 +90,10 @@ export type PicProfile = {
   rcKind: "RC" | "ER"
   /** Comparator mode 001 is defective on the original silicon (DS40300C Fig 9-1, P6-019). */
   comparator001Defective: boolean
+  /** The LF part: VDD from `vddMinLf`, 4 MHz under 3.0 V (Figure 17-2). */
+  lowVoltage: boolean
+  /** The ordering grade's top FOSC, Hz: 20 MHz, or 4 MHz for the original's -04 and LF parts (Table 4-1; D38). */
+  grade: number
   electrical: PicElectrical
 }
 
@@ -108,7 +112,8 @@ export function clkoutOnRa6(config: number): boolean {
 
 /**
  * ER oscillator frequency from the resistor to VSS (DS40300C Table 14-3, VDD 5 V, 25 °C),
- * interpolated on log R between the printed points.
+ * interpolated on log R between the printed points; past 1 MΩ on the last segment's slope, and
+ * stopped (null) where that falls under Table 17-4's 10 kHz (decision D39).
  */
 const ER_TABLE: [number, number][] = [
   [1e3, 10e6],
@@ -120,7 +125,8 @@ const ER_TABLE: [number, number][] = [
   [470e3, 300e3],
   [1e6, 200e3],
 ]
-export function erFrequency(ohms: number): number {
+export const ER_MIN_HZ = 10e3
+export function erFrequency(ohms: number): number | null {
   if (ohms <= 0) return 10.4e6
   if (ohms <= ER_TABLE[0][0]) return 10.4e6 + (10e6 - 10.4e6) * (ohms / 1e3)
   for (let i = 1; i < ER_TABLE.length; i++) {
@@ -131,7 +137,54 @@ export function erFrequency(ohms: number): number {
       return f0 + (f1 - f0) * k
     }
   }
-  return 200e3
+  const [r0, f0] = ER_TABLE[ER_TABLE.length - 2]
+  const [r1, f1] = ER_TABLE[ER_TABLE.length - 1]
+  const f = f1 + ((f1 - f0) * Math.log(ohms / r1)) / Math.log(r1 / r0)
+  return f < ER_MIN_HZ ? null : f
+}
+
+/** Lowest VDD the part is specified for, V (D001: F 3.0 V, LF 2.0 V). */
+export function vddMin(p: PicProfile): number {
+  return p.lowVoltage ? p.electrical.vddMinLf : p.electrical.vddMin
+}
+
+/**
+ * The highest FOSC the voltage–frequency graph allows at `vdd` (Figures 17-1/17-2 of either sheet,
+ * read from the PDF: 10 MHz at 3.0 V rising linearly to 20 MHz at 4.5 V; LF 4 MHz from 2.0 V), capped
+ * by the ordering grade; 0 under the part's VDD minimum (decision D38).
+ */
+export function maxFosc(p: PicProfile, vdd: number): number {
+  if (vdd < vddMin(p) - 1e-9) return 0
+  let f: number
+  if (vdd < 3.0) f = 4e6
+  else if (vdd >= 4.5) f = 20e6
+  else f = 10e6 + ((vdd - 3.0) / 1.5) * 10e6
+  return Math.min(f, p.grade)
+}
+
+/** Why a clock is outside the part's ratings (Table 17-4, the V–F graph, the grade), or null (D38). */
+export function clockRating(p: PicProfile, config: number, hz: number, kind: "crystal" | "clock" | "rc" | "internal", vdd: number): string | null {
+  const mhz = (f: number) => (f >= 1e6 ? `${+(f / 1e6).toFixed(3)} MHz` : `${+(f / 1e3).toFixed(3)} kHz`)
+  const mode = oscMode(config)
+  const crystal = kind === "crystal"
+  const range: Record<OscMode, [number, number] | null> = {
+    LP: [0, 200e3],
+    XT: crystal ? [0.1e6, 4e6] : [0, 4e6],
+    HS: crystal ? [1e6, 20e6] : [0, 20e6],
+    EC: [0, 20e6],
+    RC: [0, 4e6],
+    INTOSC: null,
+  }
+  const r = range[mode]
+  const name = mode === "RC" && p.rcKind === "ER" ? "ER" : mode
+  if (r && (hz < r[0] || hz > r[1]))
+    return `FOSC ${mhz(hz)} outside the ${name} mode's ${r[0] ? `${mhz(r[0])}–` : "DC–"}${mhz(r[1])} (Table 17-4; decision D38) — it runs as configured`
+  const grade = mode === "LP" ? Math.min(p.grade, 200e3) : p.grade
+  if (hz > grade) return `FOSC ${mhz(hz)} above the ${p.name}'s ${mhz(grade)} rating (${p.grade < 20e6 ? (p.lowVoltage ? "LF part" : "-04 grade") : "Table 4-1"}; decision D38) — it runs as configured`
+  const vf = maxFosc(p, vdd)
+  if (vf > 0 && hz > vf + 1)
+    return `FOSC ${mhz(hz)} at VDD ${vdd.toFixed(2)} V: outside the voltage–frequency region (${p.lowVoltage ? "Figure 17-2/17-3" : "Figure 17-1"}, ${mhz(vf)} here; decision D38) — it runs as configured`
+  return null
 }
 
 /** Piecewise-linear lookup in a (VDD, value) table, clamped at its ends. */
@@ -231,8 +284,8 @@ const GPR_256: [number, number][] = [
 ]
 const COMMON = [0xf0, 0x170, 0x1f0]
 
-const A = { family: "pic", revisionA: true, commonMirrors: COMMON, borForcesPwrt: false, rcKind: "RC", comparator001Defective: false, electrical: ELECTRICAL_A } as const
-const ORIGINAL = { family: "pic", revisionA: false, commonMirrors: COMMON, borForcesPwrt: true, rcKind: "ER", comparator001Defective: true, electrical: ELECTRICAL_ORIGINAL } as const
+const A = { family: "pic", revisionA: true, lowVoltage: false, grade: 20e6, commonMirrors: COMMON, borForcesPwrt: false, rcKind: "RC", comparator001Defective: false, electrical: ELECTRICAL_A } as const
+const ORIGINAL = { family: "pic", revisionA: false, lowVoltage: false, grade: 20e6, commonMirrors: COMMON, borForcesPwrt: true, rcKind: "ER", comparator001Defective: true, electrical: ELECTRICAL_ORIGINAL } as const
 
 // Device IDs: DS41196G Table 3-2 (P7-092), revision bits <4:0> not given (0 here). The original parts' IDs are in their own
 // programming specification, not among the documents: 0 (P6-045).
@@ -242,7 +295,29 @@ export const PIC16F648A: PicProfile = { ...A, id: "PIC16F648A", name: "PIC16F648
 export const PIC16F627: PicProfile = { ...ORIGINAL, id: "PIC16F627", name: "PIC16F627", flashWords: 1024, eepromBytes: 128, gpr: GPR_224, deviceId: 0 }
 export const PIC16F628: PicProfile = { ...ORIGINAL, id: "PIC16F628", name: "PIC16F628", flashWords: 2048, eepromBytes: 128, gpr: GPR_224, deviceId: 0 }
 
-export const PIC_CHIPS: PicProfile[] = [PIC16F627, PIC16F628, PIC16F627A, PIC16F628A, PIC16F648A]
+export const PIC16LF627A: PicProfile = { ...PIC16F627A, id: "PIC16LF627A", name: "PIC16LF627A", lowVoltage: true }
+export const PIC16LF628A: PicProfile = { ...PIC16F628A, id: "PIC16LF628A", name: "PIC16LF628A", lowVoltage: true }
+export const PIC16LF648A: PicProfile = { ...PIC16F648A, id: "PIC16LF648A", name: "PIC16LF648A", lowVoltage: true }
+// The original's ordering grades (P6-034): -20 (20 MHz, the plain profiles above), -04 (4 MHz; 200 kHz in LP); LF parts are 4 MHz.
+export const PIC16F627_04: PicProfile = { ...PIC16F627, id: "PIC16F627-04", name: "PIC16F627-04", grade: 4e6 }
+export const PIC16F628_04: PicProfile = { ...PIC16F628, id: "PIC16F628-04", name: "PIC16F628-04", grade: 4e6 }
+export const PIC16LF627: PicProfile = { ...PIC16F627, id: "PIC16LF627", name: "PIC16LF627", lowVoltage: true, grade: 4e6 }
+export const PIC16LF628: PicProfile = { ...PIC16F628, id: "PIC16LF628", name: "PIC16LF628", lowVoltage: true, grade: 4e6 }
+
+export const PIC_CHIPS: PicProfile[] = [
+  PIC16F627,
+  PIC16F627_04,
+  PIC16F628,
+  PIC16F628_04,
+  PIC16LF627,
+  PIC16LF628,
+  PIC16F627A,
+  PIC16F628A,
+  PIC16F648A,
+  PIC16LF627A,
+  PIC16LF628A,
+  PIC16LF648A,
+]
 
 export function picChipById(id: string): PicProfile | undefined {
   return PIC_CHIPS.find((c) => c.id === id)

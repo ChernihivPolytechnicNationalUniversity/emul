@@ -10,7 +10,7 @@ import { parseFirmware, type Firmware } from "../elf"
 import type { PadDrive } from "../periph/gpio"
 import type { PadRef } from "../pads"
 import { PicCpu, STATUS_PD, STATUS_TO, type FileHooks, type PicSystem } from "./cpu"
-import { byVdd, clkoutOnRa6, fosc, oscMode, type OscMode, type PicProfile } from "./chip"
+import { ER_MIN_HZ, byVdd, clkoutOnRa6, clockRating, erFrequency, fosc, oscMode, vddMin, type OscMode, type PicProfile } from "./chip"
 import type { Peripheral, PicBus } from "./io"
 import { PicPort, type PinMode } from "./port"
 import { Timer0, Watchdog } from "./periph/timer0"
@@ -210,7 +210,7 @@ export class PicMcu implements PicBus, PicSystem {
         get vdd() {
           return host.vdd
         },
-        vddMin: chip.electrical.vddMin,
+        vddMin: vddMin(chip),
         writeTime: chip.electrical.eeWrite.typ,
         endurance: chip.electrical.eeEndurance,
         setEeif: (cycle) => this.setFlag("pir1", 0x80, cycle),
@@ -437,6 +437,7 @@ export class PicMcu implements PicBus, PicSystem {
     const newHz = this.oscillator() ?? oldHz
     this.haltedUntil = this.time + 2 / oldHz + 8 / newHz
     this.clockMoved()
+    this.checkClock()
   }
 
   // --- clock -------------------------------------------------------------------------------------
@@ -450,7 +451,7 @@ export class PicMcu implements PicBus, PicSystem {
         return slow ? e.intoscSlow : e.intosc
       case "RC":
         if (this.chip.rcKind === "ER" && slow) return e.intoscSlow // ER: OSCF = 0 is the fixed 37 kHz (P6-009)
-        return this.clockFeed?.kind === "rc" ? this.clockFeed.hz : null
+        return this.clockFeed?.kind === "rc" && this.clockFeed.hz > 0 ? this.clockFeed.hz : null
       case "EC":
         return this.clockFeed?.kind === "clock" ? this.clockFeed.hz : null
       default:
@@ -466,6 +467,8 @@ export class PicMcu implements PicBus, PicSystem {
     if (this.oscillator() !== null) return null
     switch (oscMode(this.config)) {
       case "RC":
+        if (this.chip.rcKind === "ER" && this.erOhms !== null)
+          return `the ER oscillator stops: ${(this.erOhms / 1e6).toFixed(2)} MΩ on RA7/OSC1 would give under ${ER_MIN_HZ / 1e3} kHz ("may stop completely", DS40300C §14.2.4; decision D39)`
         return this.chip.rcKind === "ER"
           ? "FOSC selects the ER oscillator: a resistor from RA7/OSC1 to VSS sets its frequency, and there is none"
           : "FOSC selects the RC oscillator: REXT to VDD and CEXT to VSS on RA7/OSC1 set its frequency, and there are none"
@@ -479,6 +482,24 @@ export class PicMcu implements PicBus, PicSystem {
     this.rebase()
     this.clockFeed = feed
     this.clockMoved()
+    this.checkClock()
+  }
+  /** The original part's ER resistor from RA7/OSC1 to VSS, Ω (DS40300C §14.2.4, Table 14-3; decision D39). */
+  erOhms: number | null = null
+  setErResistor(ohms: number | null) {
+    this.erOhms = ohms
+    if (ohms !== null && (ohms < 10e3 || ohms > 1e6))
+      this.feature(`ER resistor ${ohms >= 1e6 ? `${+(ohms / 1e6).toFixed(2)} MΩ` : `${+(ohms / 1e3).toFixed(2)} kΩ`} outside the recommended 10 kΩ–1 MΩ (DS40300C §14.2.4: temperature- or leakage-sensitive; decision D39)`)
+    const hz = ohms === null ? null : erFrequency(ohms)
+    this.setClockFeed(ohms === null ? null : { hz: hz ?? 0, kind: "rc" })
+  }
+  /** A clock outside the part's ratings is reported; the part runs as configured (decision D38). */
+  private checkClock() {
+    const hz = this.oscillator()
+    if (!hz) return
+    const kind = this.oscMode === "INTOSC" || (this.oscMode === "RC" && this.chip.rcKind === "ER" && !(this.pcon & 0x08)) ? "internal" : (this.clockFeed?.kind ?? "internal")
+    const why = clockRating(this.chip, this.config, hz, kind, this.vdd)
+    if (why) this.feature(why)
   }
   /** Close the current slice at the present cycle. */
   private rebase() {
@@ -695,6 +716,7 @@ export class PicMcu implements PicBus, PicSystem {
     this.config = config ?? 0x3fff
     this.time = 0
     this.powerOnReset()
+    this.checkClock()
   }
   /** Program words straight into flash (tests), with a configuration word. */
   program(words: number[], config = 0x3fff, at = 0) {
@@ -705,6 +727,7 @@ export class PicMcu implements PicBus, PicSystem {
     this.firmware = { format: "bin", segments: [], entry: 0, symbols: [] }
     this.time = 0
     this.powerOnReset()
+    this.checkClock()
   }
 
   /** The supply: POR on the rise through the POR level, BOR when enabled (§14.4.1, §14.4.4). */
@@ -743,7 +766,8 @@ export class PicMcu implements PicBus, PicSystem {
         }
       }
     }
-    if (volts < e.vddMin && !this.porHeld) this.feature(`VDD ${volts.toFixed(2)} V: under the operating range (D001)`)
+    if (volts < vddMin(this.chip) && !this.porHeld) this.feature(`VDD ${volts.toFixed(2)} V: under the operating range (D001)`)
+    else this.checkClock()
   }
 
   /** MCLR as a logic level (MCLRE = 1): low for at least TMCL resets (§14.3, param 30). */
@@ -1044,6 +1068,14 @@ export class PicMcu implements PicBus, PicSystem {
 
   /** The crystal on RB7/T1OSI–RB6/T1OSO, from the circuit. */
   setT1Oscillator(o: T1Oscillator) {
+    // The A part's Timer1 oscillator is rated for 32.768 kHz, the original's up to 200 kHz (Ft1; decision D42).
+    if (o?.kind === "crystal") {
+      const off = this.chip.revisionA ? Math.abs(o.hz - 32768) > 32768 * 0.01 : o.hz > 200e3
+      if (off)
+        this.feature(
+          `Timer1 crystal ${+(o.hz / 1e3).toFixed(3)} kHz: the ${this.chip.name}'s Timer1 oscillator is rated for ${this.chip.revisionA ? "32.768 kHz" : "up to 200 kHz"} (Ft1; decision D42) — it runs at the crystal's frequency`,
+        )
+    }
     this.timer1.setOscillator(o)
     this.reschedule()
   }

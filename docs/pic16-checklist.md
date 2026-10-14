@@ -25,18 +25,20 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 
 | Status | Rows |
 |---|---|
-| todo | 790 |
-| done (SoC) | 620 |
+| todo | 753 |
+| done (SoC) | 636 |
 | done (core) | 171 |
 | info | 166 |
-| **decide** | 24 |
-| D37 | 7 |
-| **check PDF** | 6 |
+| **decide** | 21 |
+| D38 | 19 |
+| D37 | 8 |
+| **check PDF** | 3 |
 | D19 | 3 |
 | D21 | 2 |
 | D24 | 2 |
 | D32 | 2 |
 | D1 | 2 |
+| D41 | 2 |
 | D25 | 2 |
 | D4 | 2 |
 | D27 | 1 |
@@ -47,6 +49,11 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 | D15 | 1 |
 | D12 | 1 |
 | D5 | 1 |
+| D39 | 1 |
+| D40 | 1 |
+| D43 | 1 |
+| D42 | 1 |
+| D22 | 1 |
 | D2 | 1 |
 | D3 | 1 |
 | D20 | 1 |
@@ -210,6 +217,36 @@ the same half-done byte, reported (the documents only give the range).
 D120 minimum (100 000; original part 1 000 000) is reported; its writes still succeed — the documents give a
 statistical limit, not a failure pattern. The D124 refresh limit is not tracked.
 
+**D38. Clock limits** (P1-001, P1-036, P5-018…P5-020, P5-160…P5-175, P6-008, P6-034): read from the PDF
+graphs. A parts, Figure 17-1 (F): 3.0 V allows 10 MHz, rising linearly to 20 MHz at 4.5 V, 20 MHz up to
+5.5 V; Figure 17-2 (LF): 4 MHz from 2.0 to 3.0 V, then the same. Original parts, Figures 17-1/17-3 (0 to
+70 °C — the emulator runs at room temperature): the same shapes. Each oscillator mode adds Table 17-4: LP
+200 kHz; XT crystal 0.1–4 MHz, clock in DC–4 MHz; HS crystal 1–20 MHz, clock in DC–20 MHz; EC DC–20 MHz;
+RC 4 MHz; ER 4 MHz (DS40300C Table 17-4, "Oscillator Frequency ER Osc mode"). The original's ordering grade
+caps it further: -04 at 4 MHz (200 kHz in LP), -20 at 20 MHz; PIC16LF627/628 are 4 MHz parts (Table 4-1 and
+the ordering table, which list no faster LF part — Figure 17-3's 20 MHz region above 4.5 V is not taken). A
+clock outside these runs as configured and is reported: real parts often run past their rating, but
+nothing is promised.
+
+**D39. The ER resistor** (P6-007): Table 14-3 interpolated on log R; under 10 kΩ or over 1 MΩ reported
+("sensitive to temperature", "to leakage"). Past 1 MΩ the frequency keeps falling on the 470 k–1 M slope;
+where it would go under the 10 kHz minimum of Table 17-4 (P6-008) the oscillator is taken as stopped —
+the sheet's "may stop completely".
+
+**D40. OSCF on the original part** (P6-012): the A part's switch-over (two old and eight new clock pulses,
+the clock halted) is used for INTRC and ER as well; DS40300C is silent, the oscillator is the same design.
+
+**D41. TRISA5 and ADEN on the original part** (P6-025, P6-027): as on the A part — TRISA5 reads 1 (Example
+5-1, Tables 3-2, 5-2) and ADEN is implemented, R/W-0 (Register 12-2 defines it); the reset tables that
+draw the bits as "-" are taken as misprints.
+
+**D42. The Timer1 crystal** (P6-017): the A part is rated for 32.768 kHz only (Ft1 32.7 kHz typ); another
+crystal is reported. The original part takes up to 200 kHz (Ft1 DC–200 kHz); above that is reported.
+Either way it runs at the crystal's frequency.
+
+**D43. MCLR and the internal / ER oscillator** (P6-014): the clock stops while MCLR holds the part; the
+emulator runs no clock and puts out no CLKOUT in any reset, so there is nothing more to model.
+
 **D8. The 48 rows marked decide** are settled the same way, block by block, before each block is
 written; the decision is added here.
 
@@ -217,7 +254,7 @@ written; the decision is added here.
 
 | ID | Item | Source | Kind | Status |
 |---|---|---|---|---|
-| P1-001 | Operating speed DC – 20 MHz (static design: clock may go down to DC) | Front page "High-Performance RISC CPU", p.3 | timing | todo |
+| P1-001 | Operating speed DC – 20 MHz (static design: clock may go down to DC) | Front page "High-Performance RISC CPU", p.3 | timing | D38 |
 | P1-002 | 35 single-word instructions; all single cycle except branches (2 cycles) | Front page p.3; §1 p.7; §3 p.11 | timing | todo |
 | P1-003 | 8-level deep hardware stack | Front page p.3; §1 p.7 | behaviour | todo |
 | P1-004 | Direct, Indirect and Relative addressing modes | Front page p.3 | behaviour | todo |
@@ -252,7 +289,7 @@ written; the decision is added here.
 | P1-033 | Memory sizes: 627A Flash 1024 words, SRAM 224 B, EEPROM 128 B; 628A 2048 / 224 / 128; 648A 4096 / 256 / 256. All: 16 I/O, 1 CCP, USART Y, 2 comparators, timers 2/1 (8/16-bit) | Front page device table p.3; Table 1-1 p.7; Table 3-1 p.11; Table B-1 p.171 | memory | todo |
 | P1-034 | Program memory word width 14 bits; data 8 bits (e.g. 1024 x 14, 224 x 8, 128 x 8) | Table 3-1 p.11; Table B-1 | memory | todo |
 | P1-035 | LF variants (PIC16LF627A/628A/648A) have identical memory sizes to F variants | Table 1-1 p.7; Table 3-1 | memory | todo |
-| P1-036 | Max frequency 20 MHz for all six variants including LF | Table 1-1 p.7 | timing | todo |
+| P1-036 | Max frequency 20 MHz for all six variants including LF | Table 1-1 p.7 | timing | D38 |
 | P1-037 | Voltage range: PIC16F6xxA 3.0-5.5 V; PIC16LF6xxA 2.0-5.5 V | Table 1-1 p.7; Product ID p.179 | electrical | todo |
 | P1-038 | Note: front-page "2.0-5.5V" applies only to LF parts; F parts are 3.0-5.5V per Table 1-1. Emulator must take VDD min from the variant | Front page vs Table 1-1 | note | info |
 | P1-039 | 10 interrupt sources | Table 1-1 p.7 | behaviour | todo |
@@ -264,7 +301,7 @@ written; the decision is added here.
 | P1-045 | "8 oscillator configurations"; text names RC (single-pin), LP (minimises power), XT (standard crystal), INTOSC (two-speed internal), HS (high-speed crystal), EC (external clock) | §1 p.7 | behaviour | todo |
 | P1-046 | Note: §1 says 8 oscillator configurations but only names 6 (RC, LP, XT, INTOSC, HS, EC); the RA6 I/O vs CLKOUT variants of RC/INTOSC are implied by Fig 5-6/5-7 FOSC codes, detail lives in §14 | §1 p.7 vs Fig 5-6/5-7 | note | info |
 | P1-047 | Sleep wake-up sources: several external interrupts, internal interrupts and Resets | §1 p.7 | behaviour | todo |
-| P1-048 | Instruction cycle 200 ns @ 20 MHz | §3 p.11 | timing | todo |
+| P1-048 | Instruction cycle 200 ns @ 20 MHz | §3 p.11 | timing | done (SoC) |
 | P1-049 | All SFRs including the program counter are mapped in data memory; orthogonal instruction set (any operation, any register, any addressing mode) | §3 p.11 | memory | todo |
 | P1-050 | 8-bit ALU; arithmetic is two's complement unless otherwise stated | §3 p.11 | behaviour | todo |
 | P1-051 | W register is 8-bit and NOT an addressable register | §3 p.11 | register | todo |
@@ -1238,9 +1275,9 @@ written; the decision is added here.
 | P5-015 | Power dissipation formula (Note 1): PDIS = VDD x {IDD – ∑ IOH} + ∑ {(VDD – VOH) x IOH} + ∑(VOL x IOL) | §17.0 Absolute Maximum Ratings Note 1, p.135 | electrical | todo |
 | P5-016 | † Notice: stresses above Absolute Maximum Ratings may cause permanent damage; functional operation at/above those conditions not implied; extended exposure to maximum rating conditions may affect device reliability | §17.0 Absolute Maximum Ratings notice, p.135 | failure-mode | todo |
 | P5-017 | Latch-up: voltage spikes below VSS at MCLR pin inducing currents greater than 80 mA may cause latch-up; a series resistor of 50-100 Ω should be used when applying a "low" level to MCLR rather than pulling directly to VSS | §17.0 Absolute Maximum Ratings Note, p.135 | failure-mode | todo |
-| P5-018 | Figure 17-1 PIC16F627A/628A/648A voltage-frequency graph, -40°C ≤ TA ≤ +125°C: axes VDD 2.5–6.0 V (gridlines 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0), frequency 0/4/10/20/25 MHz; "shaded region indicates the permissible combinations of voltage and frequency". Shaded region boundaries are not recoverable from the text extraction | §17.0 Figure 17-1, p.136 | note | **check PDF** |
-| P5-019 | Figure 17-2 PIC16LF627A/628A/648A voltage-frequency graph, -40°C ≤ TA ≤ +85°C: axes VDD 2.0–6.0 V, frequency 0/4/10/20/25 MHz; shaded region = permissible combinations. Shaded region boundaries not recoverable from the text; LF graph is industrial only (+85°C) | §17.0 Figure 17-2, p.136 | note | **check PDF** |
-| P5-020 | V-F region inferred only from tables, not from the graphs: Table 17-4 caps XT/RC at 4 MHz (VDD = 5.0 V), HS/EC at 20 MHz; D013 (20 MHz HS) IDD specified only at VDD 4.5 and 5.0 V; check the graphic in the PDF for exact corner points before modelling an overclock failure | §17.0 Fig 17-1/17-2 vs Table 17-4, Table 17.2 D013 | note | **check PDF** |
+| P5-018 | Figure 17-1 PIC16F627A/628A/648A voltage-frequency graph, -40°C ≤ TA ≤ +125°C: axes VDD 2.5–6.0 V (gridlines 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0), frequency 0/4/10/20/25 MHz; "shaded region indicates the permissible combinations of voltage and frequency". Shaded region boundaries are not recoverable from the text extraction | §17.0 Figure 17-1, p.136 | note | D38 |
+| P5-019 | Figure 17-2 PIC16LF627A/628A/648A voltage-frequency graph, -40°C ≤ TA ≤ +85°C: axes VDD 2.0–6.0 V, frequency 0/4/10/20/25 MHz; shaded region = permissible combinations. Shaded region boundaries not recoverable from the text; LF graph is industrial only (+85°C) | §17.0 Figure 17-2, p.136 | note | D38 |
+| P5-020 | V-F region inferred only from tables, not from the graphs: Table 17-4 caps XT/RC at 4 MHz (VDD = 5.0 V), HS/EC at 20 MHz; D013 (20 MHz HS) IDD specified only at VDD 4.5 and 5.0 V; check the graphic in the PDF for exact corner points before modelling an overclock failure | §17.0 Fig 17-1/17-2 vs Table 17-4, Table 17.2 D013 | note | D38 |
 | P5-021 | D001 VDD supply voltage PIC16LF627A/628A/648A: min 2.0, max 5.5 V | §17.1, p.137 | electrical | todo |
 | P5-022 | D001 VDD supply voltage PIC16F627A/628A/648A: min 3.0, max 5.5 V | §17.1, p.137 | electrical | todo |
 | P5-023 | D002 VDR RAM data retention voltage: typ 1.5* V, device in Sleep mode (Note 1: limit to which VDD can be lowered in Sleep without losing RAM data) | §17.1, p.137 | electrical | todo |
@@ -1380,25 +1417,25 @@ written; the decision is added here.
 | P5-157 | Table 17-3 Note 2: when VDD is between 2.0 V and 3.0 V, the VREF output voltage levels on RA2 described by [VDD/2 ± (3 – VDD)/2] may cause VRAA of the VREF output on RA2 to be greater than the stated max | Table 17-3 Note 2, p.142 | note | info |
 | P5-158 | §17.5 timing symbology: TppS2ppS / TppS; F = frequency, T = time; pp: ck CLKOUT, io I/O port, mc MCLR, osc OSC1, t0 T0CKI; S: F fall, H high, I invalid (high-impedance), L low, P period, R rise, V valid, Z high-impedance | §17.5, p.143 | note | info |
 | P5-159 | Figure 17-3 load condition 1: RL = 464 Ω to VDD/2, CL to VSS; load condition 2: CL to VSS; CL = 50 pF for all pins except OSC2, 15 pF for OSC2 output | §17.5 Figure 17-3, p.143 | electrical | todo |
-| P5-160 | Table 17-4 FOSC external CLKIN frequency(1): min DC, max 4 MHz, XT and RC osc mode, VDD = 5.0 V | Table 17-4, p.144 | timing | todo |
-| P5-161 | Table 17-4 FOSC external CLKIN frequency: min DC, max 20 MHz, HS, EC osc mode | Table 17-4, p.144 | timing | todo |
-| P5-162 | Table 17-4 FOSC external CLKIN frequency: min DC, max 200 kHz, LP osc mode | Table 17-4, p.144 | timing | todo |
-| P5-163 | Table 17-4 oscillator frequency(1): max 4 MHz, RC osc mode, VDD = 5.0 V | Table 17-4, p.144 | timing | todo |
-| P5-164 | Table 17-4 oscillator frequency: min 0.1, max 4 MHz, XT osc mode | Table 17-4, p.144 | timing | todo |
-| P5-165 | Table 17-4 oscillator frequency: min 1, max 20 MHz, HS osc mode | Table 17-4, p.144 | timing | todo |
-| P5-166 | Table 17-4 oscillator frequency: max 200 kHz, LP osc mode | Table 17-4, p.144 | timing | todo |
-| P5-167 | Table 17-4 oscillator frequency: typ 4 MHz, INTOSC mode (fast) | Table 17-4, p.144 | timing | todo |
-| P5-168 | Table 17-4 oscillator frequency: typ 48 kHz, INTOSC mode (slow) | Table 17-4, p.144 | timing | todo |
-| P5-169 | Param 1 TOSC external CLKIN period(1): min 250 ns, XT and RC osc mode | Table 17-4, p.144 | timing | todo |
-| P5-170 | Param 1 TOSC external CLKIN period: min 50 ns, HS, EC osc mode | Table 17-4, p.144 | timing | todo |
-| P5-171 | Param 1 TOSC external CLKIN period: min 5 μs, LP osc mode | Table 17-4, p.144 | timing | todo |
-| P5-172 | Param 1 TOSC oscillator period(1): min 250 ns, RC osc mode | Table 17-4, p.144 | timing | todo |
-| P5-173 | Param 1 TOSC oscillator period: min 250, max 10,000 ns, XT osc mode | Table 17-4, p.144 | timing | todo |
-| P5-174 | Param 1 TOSC oscillator period: min 50, max 1,000 ns, HS osc mode | Table 17-4, p.144 | timing | todo |
-| P5-175 | Param 1 TOSC oscillator period: min 5 μs, LP osc mode | Table 17-4, p.144 | timing | todo |
-| P5-176 | Param 1 TOSC oscillator period: typ 250 ns, INTOSC mode (fast) | Table 17-4, p.144 | timing | todo |
-| P5-177 | Param 1 TOSC oscillator period: typ 21 μs, INTOSC mode (slow) | Table 17-4, p.144 | timing | todo |
-| P5-178 | Param 2 TCY instruction cycle time: min 200 ns, typ TCY, max DC; TCY = 4/FOSC | Table 17-4, p.144 | timing | todo |
+| P5-160 | Table 17-4 FOSC external CLKIN frequency(1): min DC, max 4 MHz, XT and RC osc mode, VDD = 5.0 V | Table 17-4, p.144 | timing | D38 |
+| P5-161 | Table 17-4 FOSC external CLKIN frequency: min DC, max 20 MHz, HS, EC osc mode | Table 17-4, p.144 | timing | D38 |
+| P5-162 | Table 17-4 FOSC external CLKIN frequency: min DC, max 200 kHz, LP osc mode | Table 17-4, p.144 | timing | D38 |
+| P5-163 | Table 17-4 oscillator frequency(1): max 4 MHz, RC osc mode, VDD = 5.0 V | Table 17-4, p.144 | timing | D38 |
+| P5-164 | Table 17-4 oscillator frequency: min 0.1, max 4 MHz, XT osc mode | Table 17-4, p.144 | timing | D38 |
+| P5-165 | Table 17-4 oscillator frequency: min 1, max 20 MHz, HS osc mode | Table 17-4, p.144 | timing | done (SoC) |
+| P5-166 | Table 17-4 oscillator frequency: max 200 kHz, LP osc mode | Table 17-4, p.144 | timing | done (SoC) |
+| P5-167 | Table 17-4 oscillator frequency: typ 4 MHz, INTOSC mode (fast) | Table 17-4, p.144 | timing | done (SoC) |
+| P5-168 | Table 17-4 oscillator frequency: typ 48 kHz, INTOSC mode (slow) | Table 17-4, p.144 | timing | done (SoC) |
+| P5-169 | Param 1 TOSC external CLKIN period(1): min 250 ns, XT and RC osc mode | Table 17-4, p.144 | timing | D38 |
+| P5-170 | Param 1 TOSC external CLKIN period: min 50 ns, HS, EC osc mode | Table 17-4, p.144 | timing | D38 |
+| P5-171 | Param 1 TOSC external CLKIN period: min 5 μs, LP osc mode | Table 17-4, p.144 | timing | D38 |
+| P5-172 | Param 1 TOSC oscillator period(1): min 250 ns, RC osc mode | Table 17-4, p.144 | timing | D38 |
+| P5-173 | Param 1 TOSC oscillator period: min 250, max 10,000 ns, XT osc mode | Table 17-4, p.144 | timing | D38 |
+| P5-174 | Param 1 TOSC oscillator period: min 50, max 1,000 ns, HS osc mode | Table 17-4, p.144 | timing | D38 |
+| P5-175 | Param 1 TOSC oscillator period: min 5 μs, LP osc mode | Table 17-4, p.144 | timing | D38 |
+| P5-176 | Param 1 TOSC oscillator period: typ 250 ns, INTOSC mode (fast) | Table 17-4, p.144 | timing | done (SoC) |
+| P5-177 | Param 1 TOSC oscillator period: typ 21 μs, INTOSC mode (slow) | Table 17-4, p.144 | timing | done (SoC) |
+| P5-178 | Param 2 TCY instruction cycle time: min 200 ns, typ TCY, max DC; TCY = 4/FOSC | Table 17-4, p.144 | timing | done (SoC) |
 | P5-179 | Param 3 TosL, TosH external CLKIN (OSC1) high / low: min 100* ns, XT oscillator, TOSC L/H duty cycle | Table 17-4, p.144 | timing | todo |
 | P5-180 | Param 4 RC external biased RC frequency: min 10 kHz*, max 4 MHz, VDD = 5.0 V | Table 17-4, p.144 | timing | todo |
 | P5-181 | Table 17-4 Note 1: TCY = 4 × oscillator period; values from characterization with device executing code; exceeding limits may give unstable oscillator operation and/or higher than expected current; all devices tested at "Min" values with external clock on OSC1; with external clock input the "Max" cycle time limit is "DC" (no clock) | Table 17-4 Note 1, p.144 | failure-mode | todo |
@@ -1517,40 +1554,40 @@ written; the decision is added here.
 
 | ID | Item | Source | Kind | Status |
 |---|---|---|---|---|
-| P6-001 | **Family members.** The original family is only PIC16F627, PIC16F628, PIC16LF627 and PIC16LF628. Their memory matches 627A/628A: 1024 x 14 or 2048 x 14 flash, 224 x 8 RAM and 128 x 8 EEPROM. The original family has no 648-class part. A: it adds PIC16F648A, with 4096 x 14 flash, 256 x 8 RAM, 256 x 8 EEPROM, extra bank-2 RAM and an 8-bit EEADR. A non-A profile must not expose any of the 648A memory. | p.1 memory table; §2 Table 2-1, p.7; Table 4-1, p.27 | memory | todo |
+| P6-001 | **Family members.** The original family is only PIC16F627, PIC16F628, PIC16LF627 and PIC16LF628. Their memory matches 627A/628A: 1024 x 14 or 2048 x 14 flash, 224 x 8 RAM and 128 x 8 EEPROM. The original family has no 648-class part. A: it adds PIC16F648A, with 4096 x 14 flash, 256 x 8 RAM, 256 x 8 EEPROM, extra bank-2 RAM and an 8-bit EEADR. A non-A profile must not expose any of the 648A memory. | p.1 memory table; §2 Table 2-1, p.7; Table 4-1, p.27 | memory | done (SoC) |
 | P6-002 | **Configuration word layout (2007h).** bit13 CP1, bit12 CP0, bit11 CP1, bit10 CP0, bit9 unimplemented (reads '0'), bit8 CPD, bit7 LVP, bit6 BODEN, bit5 MCLRE, bit4 FOSC2, bit3 PWRTE, bit2 WDTE, bit1-0 FOSC1:FOSC0. A: bit13 is a single CP, bits 12-9 are unimplemented, and bit6 is named BOREN. Every other position is the same. | §14.1, Register 14-1, p.92 | register | todo |
 | P6-003 | **Code-protect pairs (CP1:CP0, given twice).** For 2K program memory: 11 = off, 10 = 0400h-07FFh protected, 01 = 0200h-07FFh protected, 00 = 0000h-07FFh protected. For 1K program memory: 11 = off, 10 = off, 01 = 0200h-03FFh protected, 00 = 0000h-03FFh protected. Note 2: "All of the CP1:CP0 pairs have to be given the same value to enable the code protection scheme listed." The sheet does not say what happens when the two pairs differ. A: one CP bit protects the whole memory, and protected locations read out as '0'. DS40300C does not give the value a programmer reads back from a protected region. | Register 14-1 bits 13-10 and Note 2, p.92 | register | todo |
 | P6-004 | **Turning code protection off.** "The entire data EEPROM and FLASH program memory will be erased when the code protection is turned off. The INTRC calibration data is not erased." Config Note 3 says the same for CPD and the data EEPROM. When protected, "the CPU may continue to read and write the data EEPROM memory. The device programmer can no longer access this memory", and the CPU reads and writes "unscrambled data". A: only a Bulk Erase can set CP/CPD. That rule is in the A errata as well (see E-003). | §14.10 Note, p.105; Register 14-1 Note 3, p.92; §13.0, §13.7, p.87/89 | memory | todo |
-| P6-005 | **BODEN forces PWRT on.** Note 1: "Enabling Brown-out Detect Reset automatically enables Power-up Timer (PWRT) regardless of the value of bit PWRTE." In Table 14-4 the Brown-out Detect Reset column has no PWRTE split: XT, HS, LP give "72 ms + 1024 TOSC" and ER, INTRC, EC give "72 ms". §14.5.4: once VDD rises above VBOD, "the Power-up Timer will now be invoked and will keep the chip in RESET an additional 72 ms". §14.0: brown-out circuitry "provides at least a 72 ms RESET". A: BOREN does not enable PWRT (DS40044G Register 14-1 Note 1, Appendix C item 4). With PWRTE = 1 the A part gives 1024 TOSC (XT, HS, LP) and "—" (RC, EC, INTOSC) after a BOR. | Register 14-1 Note 1, p.92; Table 14-4, p.97; §14.5.4, p.96; §14.0, p.91 | behaviour | todo |
-| P6-006 | **FOSC2:FOSC0 decode.** 111 = ER, CLKOUT on RA6, resistor on RA7/OSC1/CLKIN. 110 = ER, I/O on RA6, resistor on RA7. 101 = INTRC, CLKOUT on RA6, I/O on RA7. 100 = INTRC, I/O on RA6 and RA7. 011 = EC (RA6 I/O). 010 = HS. 001 = XT. 000 = LP. A: 111/110 are RC modes with REXT and CEXT on RA7, and 101/100 are named INTOSC. In ER modes RA7 is the bias pin and cannot be I/O (Fig. 5-7 shows RA7 as I/O only for FOSC = 100 and 101). | Register 14-1 bits 4,1-0, p.92; Fig. 5-6/5-7, p.31-32 | register | todo |
-| P6-007 | **ER oscillator (replaced by RC on the A part).** It uses "only one external component, a resistor to VSS". The resistor's DC bias current sets the frequency, and package or lead frame has no significant effect. REXT below 10k makes the frequency sensitive to temperature. Very high REXT (e.g. 1M) makes it sensitive to leakage, and the oscillator "may stop completely". The recommended range is 10k to 1M. Table 14-3 (resistance, frequency): 0 = 10.4 MHz, 1K = 10 MHz, 10K = 7.4 MHz, 20K = 5.3 MHz, 47K = 3 MHz, 100K = 1.6 MHz, 220K = 800 kHz, 470K = 300 kHz, 1M = 200 kHz. Fig. 18-7 plots typical FOSC against VDD (2.0-5.0 V) for R = 50k, 100k, 200k, 500k and 1M, on a 0-3.50 MHz axis. A: an RC network with REXT to VDD and CEXT to VSS. The A part recommends 3 kΩ ≤ REXT ≤ 100 kΩ (VDD ≥ 3.0 V), 10-100 kΩ (VDD < 3.0 V) and CEXT > 20 pF. | §14.2.5, Fig. 14-5, Table 14-3, p.94; Fig. 18-7, p.146 | behaviour | todo |
-| P6-008 | **ER electrical limits.** Table 17-4: ER external biased frequency is 10 kHz min to 8 MHz max at VDD = 5.0 V. "Oscillator Frequency ER Osc mode" is max 4 MHz at VDD = 5.0 V, and external CLKIN in XT and ER modes is DC-4 MHz. IDD Note 5: current through REXT is not included in IDD and "can be estimated by the formula Ir = VDD/2REXT (mA) with REXT in kΩ". In ER mode OSC1 is a Schmitt-trigger input with VIL max 0.2 VDD (D032) and VIH min 0.9 VDD (D043A). Driving it with an external clock in ER mode "is not recommended". A: RC external biased frequency is 10 kHz to 4 MHz. | Table 17-4 params 1, 5, p.136; §17.1 Note 5, p.130; D032/D043A and Note 1, p.132 | electrical | todo |
-| P6-009 | **Dual-speed oscillator works in both ER and INTRC modes.** It switches between 4 MHz and 37 kHz under PCON.OSCF. In ER mode "the 4 MHz setting will vary depending on the value of the external resistor", and "the 37 kHz operation is fixed and does not vary with resistor value". PCON Note 1: "When in ER Oscillator mode, setting OSCF = 1 will cause the oscillator frequency to change to the frequency specified by the external resistor." OSCF resets to 1. A: dual speed works only in INTOSC mode, at 4 MHz and 48 kHz (DS40044G §14.2.8, Appendix C item 7). | §14.3, p.95; Register 3-6 bit 3 and Note 1, p.24 | behaviour | todo |
-| P6-010 | **Slow internal oscillator is 37 kHz.** OSCF = 0 gives "37 KHz typical". Table 17-4 gives "37 kHz INTRC mode (slow)" with TOSC = "27 µs INTRC mode (slow)" and no min/max. Fig. 18-9 shows the 37 kHz oscillator against VDD from 2.0 to 5.5 V for -40, 25, 85 and 125 °C, on a 0-60 kHz axis. A: 48 kHz typical, TOSC 21 µs. | Register 3-6, p.24; Table 17-4, p.136; Fig. 18-9, p.147 | timing | todo |
+| P6-005 | **BODEN forces PWRT on.** Note 1: "Enabling Brown-out Detect Reset automatically enables Power-up Timer (PWRT) regardless of the value of bit PWRTE." In Table 14-4 the Brown-out Detect Reset column has no PWRTE split: XT, HS, LP give "72 ms + 1024 TOSC" and ER, INTRC, EC give "72 ms". §14.5.4: once VDD rises above VBOD, "the Power-up Timer will now be invoked and will keep the chip in RESET an additional 72 ms". §14.0: brown-out circuitry "provides at least a 72 ms RESET". A: BOREN does not enable PWRT (DS40044G Register 14-1 Note 1, Appendix C item 4). With PWRTE = 1 the A part gives 1024 TOSC (XT, HS, LP) and "—" (RC, EC, INTOSC) after a BOR. | Register 14-1 Note 1, p.92; Table 14-4, p.97; §14.5.4, p.96; §14.0, p.91 | behaviour | done (SoC) |
+| P6-006 | **FOSC2:FOSC0 decode.** 111 = ER, CLKOUT on RA6, resistor on RA7/OSC1/CLKIN. 110 = ER, I/O on RA6, resistor on RA7. 101 = INTRC, CLKOUT on RA6, I/O on RA7. 100 = INTRC, I/O on RA6 and RA7. 011 = EC (RA6 I/O). 010 = HS. 001 = XT. 000 = LP. A: 111/110 are RC modes with REXT and CEXT on RA7, and 101/100 are named INTOSC. In ER modes RA7 is the bias pin and cannot be I/O (Fig. 5-7 shows RA7 as I/O only for FOSC = 100 and 101). | Register 14-1 bits 4,1-0, p.92; Fig. 5-6/5-7, p.31-32 | register | done (SoC) |
+| P6-007 | **ER oscillator (replaced by RC on the A part).** It uses "only one external component, a resistor to VSS". The resistor's DC bias current sets the frequency, and package or lead frame has no significant effect. REXT below 10k makes the frequency sensitive to temperature. Very high REXT (e.g. 1M) makes it sensitive to leakage, and the oscillator "may stop completely". The recommended range is 10k to 1M. Table 14-3 (resistance, frequency): 0 = 10.4 MHz, 1K = 10 MHz, 10K = 7.4 MHz, 20K = 5.3 MHz, 47K = 3 MHz, 100K = 1.6 MHz, 220K = 800 kHz, 470K = 300 kHz, 1M = 200 kHz. Fig. 18-7 plots typical FOSC against VDD (2.0-5.0 V) for R = 50k, 100k, 200k, 500k and 1M, on a 0-3.50 MHz axis. A: an RC network with REXT to VDD and CEXT to VSS. The A part recommends 3 kΩ ≤ REXT ≤ 100 kΩ (VDD ≥ 3.0 V), 10-100 kΩ (VDD < 3.0 V) and CEXT > 20 pF. | §14.2.5, Fig. 14-5, Table 14-3, p.94; Fig. 18-7, p.146 | behaviour | D39 |
+| P6-008 | **ER electrical limits.** Table 17-4: ER external biased frequency is 10 kHz min to 8 MHz max at VDD = 5.0 V. "Oscillator Frequency ER Osc mode" is max 4 MHz at VDD = 5.0 V, and external CLKIN in XT and ER modes is DC-4 MHz. IDD Note 5: current through REXT is not included in IDD and "can be estimated by the formula Ir = VDD/2REXT (mA) with REXT in kΩ". In ER mode OSC1 is a Schmitt-trigger input with VIL max 0.2 VDD (D032) and VIH min 0.9 VDD (D043A). Driving it with an external clock in ER mode "is not recommended". A: RC external biased frequency is 10 kHz to 4 MHz. | Table 17-4 params 1, 5, p.136; §17.1 Note 5, p.130; D032/D043A and Note 1, p.132 | electrical | D38 |
+| P6-009 | **Dual-speed oscillator works in both ER and INTRC modes.** It switches between 4 MHz and 37 kHz under PCON.OSCF. In ER mode "the 4 MHz setting will vary depending on the value of the external resistor", and "the 37 kHz operation is fixed and does not vary with resistor value". PCON Note 1: "When in ER Oscillator mode, setting OSCF = 1 will cause the oscillator frequency to change to the frequency specified by the external resistor." OSCF resets to 1. A: dual speed works only in INTOSC mode, at 4 MHz and 48 kHz (DS40044G §14.2.8, Appendix C item 7). | §14.3, p.95; Register 3-6 bit 3 and Note 1, p.24 | behaviour | done (SoC) |
+| P6-010 | **Slow internal oscillator is 37 kHz.** OSCF = 0 gives "37 KHz typical". Table 17-4 gives "37 kHz INTRC mode (slow)" with TOSC = "27 µs INTRC mode (slow)" and no min/max. Fig. 18-9 shows the 37 kHz oscillator against VDD from 2.0 to 5.5 V for -40, 25, 85 and 125 °C, on a 0-60 kHz axis. A: 48 kHz typical, TOSC 21 µs. | Register 3-6, p.24; Table 17-4, p.136; Fig. 18-9, p.147 | timing | done (SoC) |
 | P6-011 | **Fast internal oscillator accuracy.** Table 17-4 gives "3.65 / 4 / 4.28 MHz INTRC mode (fast), VDD = 5.0V" and param 4 "INTRC Internal Calibrated RC 3.65 / 4.00 / 4.28 MHz, VDD = 5.0V". §14.2.6: 4 MHz nominal at VDD = 5 V and 25 °C. Fig. 18-8 shows typical 4 MHz FOSC against VDD (2.0-5.5 V) over -40 to 125 °C, on a 3.5-4.1 MHz axis. A: factory-calibrated "±1%". F13 gives 3.96-4.04 MHz (3.5 V, 25 °C), 3.92-4.08 MHz (2.0-5.5 V, 0-85 °C) and 3.80-4.20 MHz (-40 to +85 °C IND, -40 to +125 °C EXT). | Table 17-4 params 1/4, p.136; §14.2.6, p.95; Fig. 18-8, p.147 | electrical | todo |
-| P6-012 | **Speed-switch transition.** DS40300C says nothing about a delay when OSCF toggles. A: the transition takes "two existing clock pulses and eight new speed clock pulses", and the system clock, PC and CLKOUT halt during it. Whether the original part halts is not documented. | §14.3, p.95 (absence) | note | **decide** |
-| P6-013 | **Wake-up from SLEEP in the internal and ER oscillator modes.** Table 14-4 gives "—" (no delay) for ER, INTRC and EC wake-up. Fig. 14-17 Note 2: "Approximately 1 µs delay will be there for ER Osc mode." A: INTOSC wake-up is 6 µs (Table 14-3). F14 TIOSCST is 6/8 µs at 2.0 V, 4/6 µs at 3.0 V and 3/5 µs at 5.0 V. | Table 14-4, p.97; Fig. 14-17 Note 2, p.105 | timing | todo |
-| P6-014 | **MCLR stops the internal or ER oscillator.** Config Note 4: "When MCLR is asserted in INTRC or ER mode, the internal clock oscillator is disabled." A: INTOSC mode only. | Register 14-1 Note 4, p.92 | behaviour | todo |
+| P6-012 | **Speed-switch transition.** DS40300C says nothing about a delay when OSCF toggles. A: the transition takes "two existing clock pulses and eight new speed clock pulses", and the system clock, PC and CLKOUT halt during it. Whether the original part halts is not documented. | §14.3, p.95 (absence) | note | D40 |
+| P6-013 | **Wake-up from SLEEP in the internal and ER oscillator modes.** Table 14-4 gives "—" (no delay) for ER, INTRC and EC wake-up. Fig. 14-17 Note 2: "Approximately 1 µs delay will be there for ER Osc mode." A: INTOSC wake-up is 6 µs (Table 14-3). F14 TIOSCST is 6/8 µs at 2.0 V, 4/6 µs at 3.0 V and 3/5 µs at 5.0 V. | Table 14-4, p.97; Fig. 14-17 Note 2, p.105 | timing | done (SoC) |
+| P6-014 | **MCLR stops the internal or ER oscillator.** Config Note 4: "When MCLR is asserted in INTRC or ER mode, the internal clock oscillator is disabled." A: INTOSC mode only. | Register 14-1 Note 4, p.92 | behaviour | D43 |
 | P6-015 | **CLKOUT drive in ER mode.** D083 OSC2/CLKOUT (ER only): VOL max 0.6 V at IOL = 1.6 mA (VDD = 4.5 V, -40 to +85 °C) and at IOL = 1.2 mA (+125 °C). D092: VOH min VDD - 0.7 V at IOH = -1.3 mA (-40 to +85 °C) and at IOH = -1.0 mA (+125 °C). Fig. 14-15 Note 3: "CLKOUT is available in ER and INTRC Oscillator mode." A: has no separate CLKOUT rows. Its Note 4 folds OSC1/OSC2 used as CLKIN/CLKOUT into the normal I/O VOL/VOH (8.5 mA / -3.0 mA). | §17.2 D083/D092, p.132; Fig. 14-15 Note 3, p.102 | electrical | todo |
 | P6-016 | **OSC1 thresholds in the crystal modes.** D033 VIL max: OSC1 (XT and HS) 0.3 VDD, OSC1 (LP) 0.6 VDD - 1.0 V. D043 VIH min: OSC1 (XT, HS and LP) 0.7 VDD. A: VIL max is 0.3 VDD for HS and 0.6 V for LP and XT. VIH min is 1.3 V for XT and LP and 0.7 VDD for HS. | §17.2 D033/D043, p.132 | electrical | todo |
-| P6-017 | **Timer1 oscillator is rated up to 200 kHz.** "Low power oscillator rated up to 200 kHz ... primarily intended for a 32 kHz crystal", and "the Timer1 oscillator is identical to the LP oscillator". Table 7-1 (LP): 32 kHz 33 pF/33 pF, 100 kHz 15 pF/15 pF, 200 kHz 15 pF/15 pF. Table 17-7 Ft1 is DC-200 kHz. A: designed only for 32.768 kHz; Table 7-1 gives 15 pF/15 pF; Ft1 is 32.7 kHz typ, and "higher value crystal frequencies may not be compatible". On the original, a 100-200 kHz T1 crystal is legal and must run. | §7.4, Table 7-1, p.49; Table 17-7 Ft1, p.140 | behaviour | todo |
+| P6-017 | **Timer1 oscillator is rated up to 200 kHz.** "Low power oscillator rated up to 200 kHz ... primarily intended for a 32 kHz crystal", and "the Timer1 oscillator is identical to the LP oscillator". Table 7-1 (LP): 32 kHz 33 pF/33 pF, 100 kHz 15 pF/15 pF, 200 kHz 15 pF/15 pF. Table 17-7 Ft1 is DC-200 kHz. A: designed only for 32.768 kHz; Table 7-1 gives 15 pF/15 pF; Ft1 is 32.7 kHz typ, and "higher value crystal frequencies may not be compatible". On the original, a 100-200 kHz T1 crystal is legal and must run. | §7.4, Table 7-1, p.49; Table 17-7 Ft1, p.140 | behaviour | D42 |
 | P6-018 | **LP crystal capacitor guidance.** Table 14-2, LP: 32 kHz 68-100 pF on both pins, 200 kHz 15-30 pF on both pins. A: LP 32 kHz 15-30 pF, 200 kHz 0-15 pF. XT, HS and the resonator Table 14-1 are the same. This only matters if oscillator start-up is modelled against load capacitance. | Table 14-2, p.93 | electrical | todo |
-| P6-019 | **Comparator mode CM2:CM0 = 001 is defective.** In Fig. 9-1, the panel "Three Inputs Multiplexed to Two Comparators, CM2:CM0 = 001" carries the note: "This mode is disfunctional and has been corrected in the 'A' Revision Devices." The sheet gives no description of the faulty behaviour. Two consequences for the emulator. Selecting 001 on a non-A part must raise a "not modelled / known-defective silicon" warning; it must not silently behave like the A part. The CIS description for CM = 001 (Register 9-1) is otherwise identical on both parts. | Fig. 9-1, p.54; Register 9-1 bit 3, p.53 | failure-mode | todo |
+| P6-019 | **Comparator mode CM2:CM0 = 001 is defective.** In Fig. 9-1, the panel "Three Inputs Multiplexed to Two Comparators, CM2:CM0 = 001" carries the note: "This mode is disfunctional and has been corrected in the 'A' Revision Devices." The sheet gives no description of the faulty behaviour. Two consequences for the emulator. Selecting 001 on a non-A part must raise a "not modelled / known-defective silicon" warning; it must not silently behave like the A part. The CIS description for CM = 001 (Register 9-1) is otherwise identical on both parts. | Fig. 9-1, p.54; Register 9-1 bit 3, p.53 | failure-mode | D22 |
 | P6-020 | **Comparator AC/DC limits.** Table 17-1 applies for 3.0 V < VDD < 5.5 V. Param 300 TRESP is 150 ns typ and 400 ns max for 16F62X; param 300A is 600 ns for 16LF62X. Param 301 (mode change to output valid) is 10 µs max. D300, D301 and D302 match the A part. A: the table applies from 2.0 V. TRESP is 300 ns typ and 400 ns max (3.0-5.5 V, -40 to +85 °C), or 400 ns typ and 600 ns max (85-125 °C, or 2.0-3.0 V). | Table 17-1, p.133 | timing | todo |
 | P6-021 | **Comparator supply current.** ΔICOMP is 30 µA typ and 50 µA max "for each comparator" at VDD = 3.0 V, and the same at VDD = 4.0 V. A (D023) gives both comparators together: 15/22 µA at 2.0 V, 22/37 µA at 3.0 V, 44/68 µA at 5.0 V. | §17.1 D023, p.131 | electrical | todo |
 | P6-022 | **VREF module limits.** Table 17-2 applies for 3.0 V < VDD < 5.5 V. Resolution is given as "VDD/24 min, VDD/32 max" LSb. Accuracy is 1/4 LSb (VRR = 1) and 1/2 LSb (VRR = 0). R is 2k Ω. Settling is 10 µs max. ΔIVREF is 135 µA (one value, column ambiguous) at 3.0 V and at 4.0 V. A: the same ladder figures, but specified from 2.0 V, with a Note 2 that accuracy degrades between 2.0 and 3.0 V. A ΔIVREF (D024) is 34/55 µA at 2.0 V, 50/75 µA at 3.0 V and 80/110 µA at 5.0 V. | Table 17-2, p.133; §17.1 ΔIVREF, p.131 | electrical | todo |
-| P6-023 | **Brown-out naming and current.** The feature is called BOD ("Brown-out Detect"): config bit BODEN, PCON bit 0 BOD, and VBOD/TBOD. VBOD is 3.65 / 4.0 / 4.35 V. Extended: 3.65 / — / 4.4 V (no typical given). ΔIBOD is 75 µA typ and 125 µA max at VDD = 5.0 V. A: called BOR / BOREN / VBOR, extended typical 4.0 V, ΔIBOR 29/52 µA at 4.5 V and 30/55 µA at 5.0 V. | D005, p.130; D023 ΔIBOD, p.131; Register 3-6, p.24 | electrical | todo |
-| P6-024 | **PCON register.** It sits at 8Eh; the Register 3-6 heading "ADDRESS: 0Ch" is a documentation error, and Table 3-2 says 8Eh. Bits: OSCF R/W-1 ("INTRC/ER oscillator frequency"), POR R/W-q, BOD R/W-q. Reset value is ---- 1-0x. The BOD bit is "unknown on Power-on Reset" and "not necessarily predictable" when BODEN = 0. A: POR R/W-0, BOR R/W-x, same reset value, OSCF is INTOSC-only. | Register 3-6, p.24; Table 3-2, p.16; §14.5.6, p.97 | register | todo |
-| P6-025 | **TRISA reset value in Table 14-8.** POR gives 11-1 1111. MCLR, WDT and BOD resets give 11-- 1111. Wake-up gives uu-u uuuu. The bit 5 position (RA5 is input only) is shown as '-'. Tables 3-2, 5-2, 6-1 and 9-1 of the same sheet give 1111 1111 / 1111 1111, and Example 5-1 says "TRISA<5> always read as '1'". A: 1111 1111 everywhere. The original sheet contradicts itself, so the TRISA5 read-back is unresolved. | Table 14-8, p.98 vs Table 3-2, p.16; Example 5-1, p.29 | note | **decide** |
+| P6-023 | **Brown-out naming and current.** The feature is called BOD ("Brown-out Detect"): config bit BODEN, PCON bit 0 BOD, and VBOD/TBOD. VBOD is 3.65 / 4.0 / 4.35 V. Extended: 3.65 / — / 4.4 V (no typical given). ΔIBOD is 75 µA typ and 125 µA max at VDD = 5.0 V. A: called BOR / BOREN / VBOR, extended typical 4.0 V, ΔIBOR 29/52 µA at 4.5 V and 30/55 µA at 5.0 V. | D005, p.130; D023 ΔIBOD, p.131; Register 3-6, p.24 | electrical | done (SoC) |
+| P6-024 | **PCON register.** It sits at 8Eh; the Register 3-6 heading "ADDRESS: 0Ch" is a documentation error, and Table 3-2 says 8Eh. Bits: OSCF R/W-1 ("INTRC/ER oscillator frequency"), POR R/W-q, BOD R/W-q. Reset value is ---- 1-0x. The BOD bit is "unknown on Power-on Reset" and "not necessarily predictable" when BODEN = 0. A: POR R/W-0, BOR R/W-x, same reset value, OSCF is INTOSC-only. | Register 3-6, p.24; Table 3-2, p.16; §14.5.6, p.97 | register | done (SoC) |
+| P6-025 | **TRISA reset value in Table 14-8.** POR gives 11-1 1111. MCLR, WDT and BOD resets give 11-- 1111. Wake-up gives uu-u uuuu. The bit 5 position (RA5 is input only) is shown as '-'. Tables 3-2, 5-2, 6-1 and 9-1 of the same sheet give 1111 1111 / 1111 1111, and Example 5-1 says "TRISA<5> always read as '1'". A: 1111 1111 everywhere. The original sheet contradicts itself, so the TRISA5 read-back is unresolved. | Table 14-8, p.98 vs Table 3-2, p.16; Example 5-1, p.29 | note | D41 |
 | P6-026 | **PORTA reset value.** Table 14-8 gives POR xxxx 0000, MCLR/WDT/BOD xxxx u000 and wake-up xxxx 0000. Table 5-2 gives "All other RESETS" as xxxu 0000. A: xxxx 0000 / xxxx 0000 / uuuu uuuu. The two tables in DS40300C conflict on which bit is 'u'. | Table 14-8, p.98; Table 5-2, p.34 | note | info |
-| P6-027 | **RCSTA reset value.** Every register table and Table 14-8 give POR and other resets as 0000 -00x and wake-up as uuuu -uuu, showing bit 3 (ADEN) as unimplemented. Register 12-2 defines ADEN as R/W-0. A: 0000 000x / uuuu uuuu. The likely model is ADEN = 0 on reset, but the read-back on the original is not stated. | Tables 3-1, 12-2, 12-6..12-12, 14-8; Register 12-2, p.68 | note | **decide** |
+| P6-027 | **RCSTA reset value.** Every register table and Table 14-8 give POR and other resets as 0000 -00x and wake-up as uuuu -uuu, showing bit 3 (ADEN) as unimplemented. Register 12-2 defines ADEN as R/W-0. A: 0000 000x / uuuu uuuu. The likely model is ADEN = 0 on reset, but the read-back on the original is not stated. | Tables 3-1, 12-2, 12-6..12-12, 14-8; Register 12-2, p.68 | note | D41 |
 | P6-028 | **Wake-up columns of Table 14-8.** STATUS is uuuq quuu (A: uuuq 0uuu). PIR1 is -q-- ---- with Note 5: "If wake-up was due to comparator input changing, then Bit 6 = 1. All other interrupts generating a wake-up will cause Bit 6 = u." A: qqqq -qqq. PCON is ---- --uu (A: ---- u-uu, which leaves OSCF unchanged). CMCON is uu-- uuuu on both. | Table 14-8 and Notes 2, 5, p.98 | note | info |
 | P6-029 | **EECON1.RD access type.** Register 13-2 gives RD as "R/S-x". A: R/S-0. Both give the EECON1 reset value as ---- x000, so RD resets to 0 in either case. | Register 13-2, p.88; Table 13-1, p.90 | note | info |
-| P6-030 | **Data EEPROM endurance.** D120 ED: 1M min (characterised), 10M typ E/W, "25°C at 5V". D122 TDEW: 4 ms typ, 8 ms max (same as A). There is no D123 retention spec and no D124 refresh spec or refresh procedure. A: 100K min / 1M typ (-40 to 85 °C), 10K / 100K (85 to 125 °C), 40-year retention, and a D124 array refresh after 1M/10M total cycles. Any wear-out model has to use different limits per part. | Table 17-3 D120/D122, p.135 | failure-mode | todo |
+| P6-030 | **Data EEPROM endurance.** D120 ED: 1M min (characterised), 10M typ E/W, "25°C at 5V". D122 TDEW: 4 ms typ, 8 ms max (same as A). There is no D123 retention spec and no D124 refresh spec or refresh procedure. A: 100K min / 1M typ (-40 to 85 °C), 10K / 100K (85 to 125 °C), 40-year retention, and a D124 array refresh after 1M/10M total cycles. Any wear-out model has to use different limits per part. | Table 17-3 D120/D122, p.135 | failure-mode | D37 |
 | P6-031 | **PWRT blocks EEPROM writes.** "The Power-up Timer (72 ms duration) prevents EEPROM write", with no condition attached. Because of P6-005, PWRT is also active whenever BODEN = 1. A: "when enabled, the Power-up Timer (72 ms duration) prevents EEPROM write." | §13.6, p.89 | behaviour | done (SoC) |
 | P6-032 | **Program flash electrical limits (programming only).** D130 EP: 1000 min (characterised), 10000 typ E/W. D132 VPEW: VDD 4.5-5.5 V for erase and for write. D133 TPEW: 4 ms typ, 8 ms max. A: endurance 10K/100K (-40 to 85 °C) and 1000/10K (85 to 125 °C). Block erase needs 4.5-5.5 V and takes 4/8 ms. Write works from VMIN to 5.5 V and takes 2/4 ms. The A-part errata restricts the write voltage on early silicon (E-002). | Table 17-3 D130-D133, p.135 | memory | todo |
 | P6-033 | **LVP supply.** Note 2: "VDD must be 5.0V +10% during erase/program operations while in low voltage Programming mode." Also: "once the LVP bit is programmed to 0, High voltage Programming mode can be used to program the device." A: "+10% during erase operations", and "only High-Voltage Programming mode can be used". The DS40300C wording does not say "only". | §14.13 and Note 2, p.106 | note | info |
-| P6-034 | **Frequency and VDD grades.** PIC16F627/628 runs at 3.0-5.5 V and PIC16LF627/628 at 2.0-5.5 V, the same as the A parts. Table 4-1 gives the maximum frequency as 20 MHz for PIC16F627/628 and 4 MHz for PIC16LF627/628. Ordering grades: -04 = 4 MHz (XT and ER osc) or 200 kHz (LP osc), and -20 = 20 MHz (HS osc). The voltage-frequency graphs are split by temperature: Fig. 17-1/17-2 for 16F62X and Fig. 17-3/17-4 for 16LF62X, at 0 to +70 °C and at -40 to 0 °C / +70 to +85 °C. A: every part, LF included, is 20 MHz, with no frequency grade. An LF non-A profile should reject or flag FOSC > 4 MHz. | Table 4-1, p.27; Product ID, p.167; Fig. 17-1..17-4, p.128-129 | electrical | todo |
+| P6-034 | **Frequency and VDD grades.** PIC16F627/628 runs at 3.0-5.5 V and PIC16LF627/628 at 2.0-5.5 V, the same as the A parts. Table 4-1 gives the maximum frequency as 20 MHz for PIC16F627/628 and 4 MHz for PIC16LF627/628. Ordering grades: -04 = 4 MHz (XT and ER osc) or 200 kHz (LP osc), and -20 = 20 MHz (HS osc). The voltage-frequency graphs are split by temperature: Fig. 17-1/17-2 for 16F62X and Fig. 17-3/17-4 for 16LF62X, at 0 to +70 °C and at -40 to 0 °C / +70 to +85 °C. A: every part, LF included, is 20 MHz, with no frequency grade. An LF non-A profile should reject or flag FOSC > 4 MHz. | Table 4-1, p.27; Product ID, p.167; Fig. 17-1..17-4, p.128-129 | electrical | D38 |
 | P6-035 | **Temperature grades.** Commercial "-" (0 to +70 °C), I (-40 to +85 °C) and E (-40 to +125 °C). The LF parts come in Commercial and Industrial only. Params 30, 31 and 33 at extended temperature are "TBD". A: Industrial and Extended only, with no commercial grade. | §17.1 header, p.130; Product ID, p.167; Table 17-6, p.138 | electrical | todo |
 | P6-036 | **IDD (active supply current).** PIC16LF62X: D010 0.30 mA typ / 0.6 mA max at 4.0 MHz and 2.0 V, 1.10 / 2.0 mA at 4.0 MHz and 5.5 V. D013 4.0 / 7.0 mA at 20 MHz and 5.5 V, 3.80 / 6.0 mA at 20 MHz and 4.5 V, max 2.0 mA at 10 MHz and 3.0 V (commercial only), 20 / 30 µA at 32 kHz and 2.0 V. PIC16F62X: D010 0.60 / 0.7 mA at 4.0 MHz and 3.0 V, 1.10 / 2.0 mA at 4.0 MHz and 5.5 V. D013 4.0 / 7.0 mA at 20 MHz and 5.5 V, 3.80 / 6.0 mA at 20 MHz and 4.5 V, max 2.0 mA at 10 MHz and 3.0 V. D014 20 / 30 µA at 32 kHz and 3.0 V. A: different tables, for example D012 450/600 µA at 4 MHz XT and 3.0 V, D013 2.75/3.3 mA at 20 MHz and 5.0 V. | §17.1 D010/D013/D014, p.130 | electrical | todo |
 | P6-037 | **IPD (sleep current).** PIC16LF62X: 0.20 µA typ, 2.0 µA max at 2.0 V; 0.20 / 2.2 µA at 5.5 V. PIC16F62X: 0.20 / 2.2 µA at 3.0 V; 0.20 / 5.0 µA at 4.5 V; 0.20 / 9.0 µA at 5.5 V; 2.70 / 15.0 µA at 5.5 V Extended. A: 0.01 / 0.80 µA at 2.0 V, 0.01 / 0.85 µA at 3.0 V, 0.02 / 2.7 µA at 5.0 V (industrial). | §17.1 D020, p.131 | electrical | todo |
