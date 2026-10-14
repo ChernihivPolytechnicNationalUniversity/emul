@@ -208,7 +208,9 @@ function build(chip: string, family: string, device: string, core: string) {
 for (const target of readdirSync(targetsDir)) {
   const spec = join(targetsDir, target, "target.json")
   if (!existsSync(spec)) continue
-  const t = JSON.parse(readFileSync(spec, "utf8")) as { family: string; cpu: string[]; defines: string[] }
+  const t = JSON.parse(readFileSync(spec, "utf8")) as { family?: string; cpu: string[]; defines: string[] }
+  // An AVR target has no ST device header to read registers from.
+  if (!t.family) continue
   const device = t.defines.map((d) => /^-D(STM32F\w+xx)$/.exec(d)?.[1]).find(Boolean)
   const core = t.cpu.map((c) => /^-mcpu=cortex-(m\d+)/.exec(c)?.[1]).find(Boolean) ?? "m4"
   if (device) build(target, t.family, `${device.toLowerCase()}.h`, `core_c${core}.h`)

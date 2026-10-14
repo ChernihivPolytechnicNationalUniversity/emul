@@ -48,7 +48,9 @@ const devices = new Set<string>()
 for (const target of readdirSync(targetsDir)) {
   const spec = join(targetsDir, target, "target.json")
   if (!existsSync(spec)) continue
-  const t = JSON.parse(readFileSync(spec, "utf8")) as { family: string; defines: string[] }
+  const t = JSON.parse(readFileSync(spec, "utf8")) as { family?: string; defines?: string[] }
+  // An AVR target names no ST family: nothing of ST's to ship for it.
+  if (!t.family || !t.defines) continue
   families.add(t.family)
   // -DSTM32F746xx names the device header stm32f746xx.h.
   for (const d of t.defines) {

@@ -7,7 +7,7 @@
  *
  *   pnpm symbols <st root> <out dir>      e.g. pnpm symbols /tmp/st public/symbols
  */
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 type Param = { type: string; name: string; doc?: string }
@@ -217,4 +217,9 @@ function build(target: string) {
   console.log(`${target}: ${index.symbols.length} symbols (${by("function")} functions, ${by("macro")} macros, ${by("type")} types, ${by("enumerator")} enumerators), ${(json.length / 1024).toFixed(0)} KB`)
 }
 
-for (const target of readdirSync(targetsDir)) if (target !== "common") build(target)
+// An AVR target names no ST family: its index would be avr-libc's, which is not built here.
+const stTarget = (target: string) => {
+  const spec = join(targetsDir, target, "target.json")
+  return existsSync(spec) && "family" in JSON.parse(readFileSync(spec, "utf8"))
+}
+for (const target of readdirSync(targetsDir)) if (stTarget(target)) build(target)
