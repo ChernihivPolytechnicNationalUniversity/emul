@@ -77,6 +77,8 @@ export class PicCpu {
   readonly pcMask: number
   /** Data storage by canonical address (mirrors fold onto one). */
   readonly ram = new Uint8Array(512)
+  /** RAM written since power-on (by canonical address): the rest still holds its power-up value. */
+  private readonly touched = new Uint8Array(512)
   /** Canonical address of every 9-bit file address. */
   private readonly canon = new Uint16Array(512)
   private readonly kind = new Uint8Array(512)
@@ -156,14 +158,38 @@ export class PicCpu {
     return this.kind[this.canon[a & 0x1ff]] !== Kind.None
   }
 
-  /** Reset state of the core registers (Table 14-6): PC and PCLATH zero, bank 0, TO and PD set. */
+  /**
+   * Power-on: what Table 14-7 gives as "x" — W, FSR, C/DC/Z, the RAM and the (unreadable) stack
+   * pointer — comes up as the cells happen to settle (decision D2, docs/pic16-checklist.md), then the
+   * reset state of the rest.
+   */
+  powerOn(random: () => number) {
+    const byte = () => Math.floor(random() * 256) & 0xff
+    this.w = byte()
+    this.fsr = byte()
+    this.status = byte() & 0x07
+    for (let a = 0; a < 512; a++) if (this.kind[a] === Kind.Ram && this.canon[a] === a) this.ram[a] = byte()
+    for (let i = 0; i < 8; i++) this.stack[i] = (byte() << 8 | byte()) & 0x1fff
+    this.sp = byte() & 7
+    this.touched.fill(0)
+    this.reset()
+  }
+  /** Whether the program has written this RAM location since power-on. */
+  written(a: number): boolean {
+    return this.touched[this.canon[a & 0x1ff]] !== 0
+  }
+
+  /**
+   * Reset state of the core registers (Table 14-6): PC and PCLATH zero, bank 0, TO and PD set. W,
+   * FSR, the RAM and the stack pointer keep what they held (Table 14-7 "u"; the stack pointer is not
+   * documented, decision D2).
+   */
   reset() {
     this.pc = 0
     this.opPc = 0
     this.opStart = 0
     this.pclath = 0
     this.status = (this.status & 0x07) | STATUS_TO | STATUS_PD
-    this.sp = 0
     this.cycles = 0
     this.instructions = 0
     this.sleeping = false
@@ -218,6 +244,7 @@ export class PicCpu {
     switch (this.kind[c]) {
       case Kind.Ram:
         this.ram[c] = v
+        this.touched[c] = 1
         return
       case Kind.Hook:
         this.at = this.cycles + 0.75

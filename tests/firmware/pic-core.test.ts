@@ -139,6 +139,47 @@ describe("PIC16 core: data memory (§4.2, Figures 4-2/4-3, Table 4-1)", () => {
   })
 })
 
+describe("PIC16 core: read-modify-write (§15.1, DS33023A §29.6 vs §29.5 Q-cycles)", () => {
+  it("every instruction naming a file register reads it, CLRF and MOVWF included", () => {
+    const { cpu } = core()
+    let reads = 0
+    const writes: number[] = []
+    cpu.hook([0x06, 0x106], { name: "PORTB", read: () => (reads++, 0x5a), write: (v) => void writes.push(v) })
+    load(cpu, A.prog(A.clrf(0x06), A.movlw(0x33), A.movwf(0x06), A.bsf(0x06, 0), A.movf(0x06, 0)))
+    cpu.run(5)
+    expect(reads).toBe(4)
+    expect(writes).toEqual([0x00, 0x33, 0x5b])
+  })
+})
+
+describe("PIC16 core: power-on values (Table 14-7 'x', decision D2 in docs/pic16-checklist.md)", () => {
+  it("W, FSR, C/DC/Z, the RAM and the stack pointer come up unknown at power-on and are kept by other resets", () => {
+    const { cpu } = core()
+    const seeds = [1, 2].map((seed) => {
+      let x = seed
+      const rnd = () => ((x = (x * 1103515245 + 12345) >>> 0), x / 2 ** 32)
+      cpu.powerOn(rnd)
+      return [cpu.w, cpu.peek(A.FSR), cpu.peek(A.STATUS) & 7, ...Array.from({ length: 16 }, (_, i) => cpu.peek(0x20 + i))]
+    })
+    expect(seeds[0]).not.toEqual(seeds[1])
+    // TO and PD are set and the bank bits clear on power-on, whatever came up (Table 14-6).
+    expect(cpu.peek(A.STATUS) & 0xf8).toBe(0x18)
+    cpu.poke(0x20, 0x77)
+    cpu.w = 0x12
+    cpu.reset()
+    expect([cpu.peek(0x20), cpu.w]).toEqual([0x77, 0x12])
+  })
+
+  it("tracks which RAM the program has written since power-on (for the inspector)", () => {
+    const { cpu } = core()
+    cpu.powerOn(() => 0.5)
+    load(cpu, A.prog(A.movlw(1), A.movwf(0x21)))
+    cpu.run(2)
+    expect(cpu.written(0x21)).toBe(true)
+    expect(cpu.written(0x22)).toBe(false)
+  })
+})
+
 describe("PIC16 core: STATUS as a destination (§4.2.2.1, Register 4-1)", () => {
   it("CLRF STATUS clears the upper three bits and sets Z: 000uu1uu", () => {
     const { cpu } = core()

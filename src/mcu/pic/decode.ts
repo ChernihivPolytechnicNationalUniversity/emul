@@ -44,15 +44,20 @@ function byteOp(word: number): PicOp {
   const f = word & 0x7f
   switch (op) {
     case 0x0:
+      // MOVWF reads f too: every instruction naming a file register does (§15.1, DS33023A §29.5 Q2).
       if (d)
         return (c) => {
-          c.write(c.addr(f), c.w, false)
+          const a = c.addr(f)
+          c.read(a)
+          c.write(a, c.w, false)
         }
       return special(word)
     case 0x1:
       if (d)
         return (c) => {
-          c.write(c.addr(f), 0, true)
+          const a = c.addr(f)
+          c.read(a)
+          c.write(a, 0, true)
           c.status |= STATUS_Z
         }
       // CLRW: 00 0001 0xxx xxxx.
