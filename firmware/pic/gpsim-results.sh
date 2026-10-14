@@ -1,9 +1,10 @@
 #!/bin/sh
 # Run a test image on gpsim (an independent PIC simulator) and print the results it leaves at 0A0h,
 # in the host's .expect format: the second opinion where SDCC's code and the C semantics part ways.
+# Some cells come out as four digits (gpsim shows more than the byte for them): the byte is the last two.
 hex="$1"
 printf 'break c 50000000\nrun\ndump r\nquit\n' | gpsim -i -p p16f648a "$hex" 2>&1 | tr -cd '[:print:]\n' |
-  awk '/^00a0:|^00b0:/ { for (i = 2; i <= 17; i++) b[n++] = $i }
+  awk '/^00a0:|^00b0:/ { for (i = 2; i <= 17; i++) b[n++] = substr($i, length($i) - 1) }
        END {
          hdr = b[3] b[2] b[1] b[0]
          if (substr(hdr, 1, 6) != "c0ffee") { print "no result header" > "/dev/stderr"; exit 1 }

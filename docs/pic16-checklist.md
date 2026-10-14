@@ -25,11 +25,12 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 
 | Status | Rows |
 |---|---|
-| todo | 847 |
-| done (SoC) | 569 |
+| todo | 790 |
+| done (SoC) | 620 |
 | done (core) | 171 |
 | info | 166 |
-| **decide** | 27 |
+| **decide** | 24 |
+| D37 | 7 |
 | **check PDF** | 6 |
 | D19 | 3 |
 | D21 | 2 |
@@ -40,6 +41,8 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 | D4 | 2 |
 | D27 | 1 |
 | D13 | 1 |
+| D33 | 1 |
+| D34 | 1 |
 | D14 | 1 |
 | D15 | 1 |
 | D12 | 1 |
@@ -183,6 +186,30 @@ transmitter drives DT again and sends what TXREG holds.
 §12.3.1 and Register 12-2 say) and RCIF is cleared by reading RCREG, not by software; Table 12-10's "EPIE"
 is EEIE, PIE1 resets to 0000 -000 (Register 4-4).
 
+**D33. EEADR<7> on the 128-byte parts** (P3-181): the documents only say the bit "is address decoded" and
+must be 0. A 128-cell array has a 7-bit decoder, so the bit is taken as ignored: 80h–FFh reach 00h–7Fh. The
+use is reported, since a part that does decode it would answer differently.
+
+**D34. WRERR** (P3-185, P3-186): set by any reset that cuts a write short — MCLR, WDT and, as Register 13-3
+says, BOR (§13.2 leaves BOR out); a POR leaves it unknown (---- x000). A write that completes clears it
+(Register 13-3: "0 = the write operation completed"). The bit is R/W, so firmware can clear it too.
+
+**D35. The unlock sequence** (P3-195…P3-198): "a cycle count is executed": 55h written to EECON2 at cycle a,
+AAh at a + 2 and WR set at a + 3 — the five instructions of Example 13-2 back to back. A different value,
+any other cycle count (an interrupt in between, a bank switch, a NOP) or WREN = 0 leaves WR clear and nothing
+is written. EEADR and EEDATA are latched when WR sets; changing them during the write does not change it.
+
+**D36. The write** (P3-173, P3-174, P3-187, P3-199, P3-200): 4 ms (D122 typ) on the module's own timer, so
+it runs on in Sleep and EEIF wakes the part; EEDATA keeps what was written, a read during the write returns
+the cell's old byte. A reset or power loss during the write leaves the byte half-done: in the erase half its
+bits partly set (old | random), in the write half partly programmed (new | random bits of the zeros); WR
+clears; EEDATA/EEADR are kept. A write with VDD under the operating minimum (D121 VDRW) at either end gives
+the same half-done byte, reported (the documents only give the range).
+
+**D37. Wear** (P3-203, P3-204, P5-122…P5-127): the E/W cycles of each byte are counted and a byte past the
+D120 minimum (100 000; original part 1 000 000) is reported; its writes still succeed — the documents give a
+statistical limit, not a failure pattern. The D124 refresh limit is not tracked.
+
 **D8. The 48 rows marked decide** are settled the same way, block by block, before each block is
 written; the decision is added here.
 
@@ -213,7 +240,7 @@ written; the decision is added here.
 | P1-021 | Brown-out Reset, Power-on Reset, Power-up Timer, Oscillator Start-up Timer present | Front page p.3 | behaviour | todo |
 | P1-022 | Wide operating voltage range 2.0-5.5V (feature list) | Front page p.3 | electrical | todo |
 | P1-023 | Industrial and extended temperature range | Front page p.3 | electrical | todo |
-| P1-024 | Flash endurance 100,000 writes; EEPROM endurance 1,000,000 writes; 40 year data retention | Front page p.3 | memory | todo |
+| P1-024 | Flash endurance 100,000 writes; EEPROM endurance 1,000,000 writes; 40 year data retention | Front page p.3 | memory | D37 |
 | P1-025 | 16 I/O pins with individual direction control | Front page p.3; Table 1-1 | pin | todo |
 | P1-026 | High current sink/source for direct LED drive | Front page p.3 | electrical | todo |
 | P1-027 | Analog comparator module: two analog comparators; programmable on-chip VREF; selectable internal or external reference; comparator outputs externally accessible | Front page p.3 | behaviour | todo |
@@ -243,7 +270,7 @@ written; the decision is added here.
 | P1-051 | W register is 8-bit and NOT an addressable register | §3 p.11 | register | todo |
 | P1-052 | Two-operand instructions: one operand W, other a file register or immediate; single-operand: W or file register | §3 p.11 | behaviour | todo |
 | P1-053 | ALU may affect C, DC, Z in STATUS; C and DC act as Borrow and Digit Borrow (inverted polarity) in subtraction (SUBLW, SUBWF) | §3 p.11; §4.2.2.1 Note p.24 | behaviour | todo |
-| P1-054 | EEPROM data retained without power; RAM lost when power removed | §3 p.11 | memory | todo |
+| P1-054 | EEPROM data retained without power; RAM lost when power removed | §3 p.11 | memory | done (SoC) |
 | P1-055 | Block diagram: 13-bit PC, 8-level x 13-bit stack, 14-bit program bus, RAM address 9 bits via Addr MUX from 7-bit direct address or 8-bit FSR indirect address; higher-order address bits come from STATUS | Figure 3-1 + Note 1 p.12 | memory | todo |
 | P1-056 | Pin RA0/AN0: RA0 input ST, output CMOS (bidirectional I/O); AN0 analog comparator input | Table 3-2 p.13; Table 5-1 p.37 | pin | todo |
 | P1-057 | Pin RA1/AN1: RA1 ST/CMOS; AN1 analog comparator input | Table 3-2; Table 5-1 | pin | todo |
@@ -320,9 +347,9 @@ written; the decision is added here.
 | P1-128 | PR2 92h Timer2 period register POR 1111 1111 | Table 4-4 | register | todo |
 | P1-129 | TXSTA 98h: CSRC TX9 TXEN SYNC — BRGH TRMT TX9D; POR 0000 -010 | Table 4-4 | register | todo |
 | P1-130 | SPBRG 99h POR 0000 0000 | Table 4-4 | register | todo |
-| P1-131 | EEDATA 9Ah POR xxxx xxxx; EEADR 9Bh POR xxxx xxxx | Table 4-4 | register | todo |
-| P1-132 | EECON1 9Ch: — — — — WRERR WREN WR RD; POR ---- x000 | Table 4-4 | register | todo |
-| P1-133 | EECON2 9Dh: not a physical register; POR ---- ---- | Table 4-4; Fig 4-2 Note 1 | register | todo |
+| P1-131 | EEDATA 9Ah POR xxxx xxxx; EEADR 9Bh POR xxxx xxxx | Table 4-4 | register | done (SoC) |
+| P1-132 | EECON1 9Ch: — — — — WRERR WREN WR RD; POR ---- x000 | Table 4-4 | register | done (SoC) |
+| P1-133 | EECON2 9Dh: not a physical register; POR ---- ---- | Table 4-4; Fig 4-2 Note 1 | register | done (SoC) |
 | P1-134 | VRCON 9Fh: VREN VROE VRR — VR3 VR2 VR1 VR0; POR 000- 0000, other resets 000- 0000 | Table 4-4; Table 5-2 | register | todo |
 | P1-135 | Bank0-only peripheral SFRs (PIR1, TMR1L/H, T1CON, TMR2, T2CON, CCPR1L/H, CCP1CON, RCSTA, TXREG, RCREG, CMCON) are NOT mirrored in Bank2 (10Ch–11Fh unimplemented); Bank1-only SFRs (PIE1, PCON, PR2, TXSTA, SPBRG, EE*, VRCON) not mirrored in Bank3 | Tables 4-5, 4-6 | memory | todo |
 | P1-136 | SFR register legend: '-' = unimplemented read as '0', u unchanged, x unknown, q depends on condition. Full reset initialisation in Table 14-6 and 14-7 | Tables 4-3..4-6 legend + Note 1 | note | info |
@@ -355,7 +382,7 @@ written; the decision is added here.
 | P1-163 | Interrupt flag bits are set when the condition occurs regardless of the corresponding enable bit or GIE | §4.2.2.3 Note p.26; §4.2.2.5 Note p.28 | behaviour | todo |
 | P1-164 | User software should clear the appropriate flag before enabling an interrupt (a stale flag fires immediately on enable) | §4.2.2.5 Note p.28 | failure-mode | todo |
 | P1-165 | PIE1 bit7 EEIE EE write complete; bit6 CMIE comparator; bit5 RCIE USART receive; bit4 TXIE USART transmit; bit3 unimplemented read '0'; bit2 CCP1IE; bit1 TMR2IE TMR2-to-PR2 match; bit0 TMR1IE TMR1 overflow; all implemented bits R/W-0 | Register 4-4 p.27 | register | done (SoC) |
-| P1-166 | PIR1 bit7 EEIF (R/W-0): EEPROM write completed, cleared in software | Register 4-5 p.28 | register | todo |
+| P1-166 | PIR1 bit7 EEIF (R/W-0): EEPROM write completed, cleared in software | Register 4-5 p.28 | register | done (SoC) |
 | P1-167 | PIR1 bit6 CMIF (R/W-0): comparator output has changed | Register 4-5 | register | todo |
 | P1-168 | PIR1 bit5 RCIF (R-0, read-only): 1 = USART receive buffer full, 0 = empty | Register 4-5 | register | done (SoC) |
 | P1-169 | PIR1 bit4 TXIF (R-0, read-only): 1 = USART transmit buffer empty, 0 = full | Register 4-5 | register | done (SoC) |
@@ -807,42 +834,42 @@ written; the decision is added here.
 | P3-168 | Sync slave RX in Sleep: if CREN set before SLEEP, a word may be received; RSR->RCREG and, if RCIE set, interrupt wakes chip; branches to 0004h if GIE set | §12.5.2, p90 | behaviour | done (SoC) |
 | P3-169 | Sync slave RX setup: TRIS, SYNC+SPEN with CSRC=0, RCIE, RX9, CREN, RCIF, read RCSTA, read RCREG, OERR -> clear CREN (text step 2 erroneously says "synchronous master serial port") | §12.5.2 steps, p90 | behaviour | done (SoC) |
 | P3-170 | No FERR behaviour is described for synchronous modes (§12.4.2 only mentions 9th bit buffering) | §12.4.2, p88 | note | info |
-| P3-171 | Data EEPROM readable and writable during normal operation over full VDD range; not directly mapped; accessed via EECON1, EECON2 (not physical), EEDATA, EEADR | §13.0, p91 | memory | todo |
-| P3-172 | PIC16F627A/628A: 128 bytes data EEPROM, 0h–7Fh; PIC16F648A: 256 bytes, 0h–FFh | §13.0, p91 | memory | todo |
-| P3-173 | Byte write auto-erases location then writes (erase before write) | §13.0, p91 | memory | todo |
-| P3-174 | Write time controlled by on-chip timer; varies with voltage, temperature and chip-to-chip; limits in AC specifications | §13.0, p91 | timing | todo |
-| P3-175 | Code-protected device: CPU can still read and write data EEPROM; device programmer can no longer access it | §13.0 p91; §13.8 p95 | behaviour | todo |
+| P3-171 | Data EEPROM readable and writable during normal operation over full VDD range; not directly mapped; accessed via EECON1, EECON2 (not physical), EEDATA, EEADR | §13.0, p91 | memory | done (SoC) |
+| P3-172 | PIC16F627A/628A: 128 bytes data EEPROM, 0h–7Fh; PIC16F648A: 256 bytes, 0h–FFh | §13.0, p91 | memory | done (SoC) |
+| P3-173 | Byte write auto-erases location then writes (erase before write) | §13.0, p91 | memory | done (SoC) |
+| P3-174 | Write time controlled by on-chip timer; varies with voltage, temperature and chip-to-chip; limits in AC specifications | §13.0, p91 | timing | done (SoC) |
+| P3-175 | Code-protected device: CPU can still read and write data EEPROM; device programmer can no longer access it | §13.0 p91; §13.8 p95 | behaviour | done (SoC) |
 | P3-176 | No CPD configuration bit is named in this range; data-EEPROM protection is only described as "when the device is code-protected" | §13.0, §13.8 | note | info |
-| P3-177 | EEDATA at 9Ah: EEDAT7..0 all R/W-x; reset POR xxxx xxxx, other uuuu uuuu | Register 13-1 p91; Table 13-1 p95 | register | todo |
-| P3-178 | EEADR at 9Bh: EADR7..0 all R/W-x; reset POR xxxx xxxx, other uuuu uuuu | Register 13-2 p91; Table 13-1 p95 | register | todo |
-| P3-179 | EEADR bit 7: 627A/628A "Unimplemented Address: Must be set to '0'"; 648A selects top 128 locations (128–255); bits 6-0 select one of 128 locations | Register 13-2, p91 | register | todo |
-| P3-180 | §13.1: 648A uses all 8 bits; 627A/628A use EEADR<6:0>, "upper bit is address decoded", should always be '0' to stay in 128-byte space | §13.1, p92 | memory | todo |
-| P3-181 | AMBIGUITY: behaviour when EEADR<7>=1 on 627A/628A is undefined ("address decoded", "must be set to '0'") — doc does not say whether it wraps, is ignored, or fails | Register 13-2 p91; §13.1 p92 | note | **decide** |
-| P3-182 | EECON1 at 9Ch: bits 7-4 unimplemented read '0'; bit3 WRERR R/W-x; bit2 WREN R/W-0; bit1 WR R/S-0; bit0 RD R/S-0 | Register 13-3, p92 | register | todo |
-| P3-183 | EECON1 reset: POR ---- x000; other Resets ---- q000 (q = depends on condition) | Table 13-1, p95 | register | todo |
-| P3-184 | RD and WR can only be set in software, not cleared; cleared by hardware at completion of read/write; prevents premature termination of a write | §13.2 p92; Register 13-3 | register | todo |
-| P3-185 | WRERR = 1: write prematurely terminated; register text: any MCLR Reset, any WDT Reset during normal operation, or BOR Reset; 0 = write completed | Register 13-3 bit 3, p92 | register | todo |
-| P3-186 | INCONSISTENCY: §13.2 lists only MCLR Reset or WDT Time-out Reset during normal operation for WRERR; Register 13-3 also lists BOR Reset | §13.2 vs Register 13-3, p92 | note | **decide** |
-| P3-187 | After a write interrupted by reset, EEDATA and EEADR are unchanged so the user can check WRERR and rewrite | §13.2, p92 | behaviour | todo |
-| P3-188 | WREN: 1 = allows write cycles, 0 = inhibits writes; WREN clear on power-up | Register 13-3 bit 2; §13.2, p92 | register | todo |
-| P3-189 | WR: 1 initiates write; 0 = write complete | Register 13-3 bit 1, p92 | register | todo |
-| P3-190 | RD: 1 initiates read; read takes one cycle; RD cleared in hardware | Register 13-3 bit 0, p92 | register | todo |
-| P3-191 | EEIF (PIR1<7>) set when write complete; must be cleared in software | §13.2 p92; §13.4 p93 | behaviour | todo |
-| P3-192 | EECON2 (9Dh) not a physical register; reads all '0's; used only in write sequence; Table 13-1 reset ---- ---- | §13.2 p92; Table 13-1 p95 | register | todo |
-| P3-193 | Read: write EEADR, set RD; data available in EEDATA in the very next cycle (readable by next instruction) | §13.3, Example 13-1, p93 | timing | todo |
-| P3-194 | EEDATA holds read value until another read or until user writes it (during a write operation) | §13.3, p93 | behaviour | todo |
-| P3-195 | Write: load EEADR and EEDATA, then per byte: WREN=1, (disable GIE with BTFSC loop per AN576), MOVLW 55h/MOVWF EECON2, MOVLW AAh/MOVWF EECON2, BSF EECON1,WR, re-enable GIE | §13.4, Example 13-2, p93 | behaviour | todo |
-| P3-196 | Write does not initiate unless sequence followed exactly (55h to EECON2, AAh to EECON2, then set WR) for each byte | §13.4, p93 | failure-mode | todo |
-| P3-197 | A cycle count is executed during the required sequence; any number of cycles not equal to the required count causes data not to be written (interrupts strongly recommended disabled) | §13.4, p93 | failure-mode | todo |
-| P3-198 | WR cannot be set unless WREN is set | §13.4, p93 | failure-mode | todo |
-| P3-199 | WREN not cleared by hardware; clearing WREN after write initiated does not affect that write | §13.4, p93 | behaviour | todo |
-| P3-200 | Write completion: WR cleared by hardware, EEIF set (enable interrupt or poll) | §13.4, p93 | behaviour | todo |
-| P3-201 | Write verify: read back (BSF EECON1,RD) and compare with intended value (SUBWF EEDATA,W; BTFSS STATUS,Z) | §13.5, Example 13-3, p93 | behaviour | todo |
-| P3-202 | Spurious-write protection: WREN cleared on power-up; Power-up Timer (72 ms duration), when enabled, prevents EEPROM write; sequence + WREN protect against brown-out/glitch/software malfunction | §13.6, p93 | failure-mode | todo |
-| P3-203 | Endurance: per-byte write cycles specs D120 and D120A; total array write cycles D124; exceeding D124 without exceeding D120 requires an array refresh | §13.7, p94 | electrical | todo |
-| P3-204 | Note: if data EEPROM stores rarely changed data, refresh likely not required (see D124); infrequently changed variables should be stored in Flash program memory | §13.7 Note, p94 | note | **decide** |
-| P3-205 | Example 13-4 refresh routine: per address RD then 55h/AAh/WR, poll WR (BTFSC EECON1,WR / GOTO $-1) until clear; 648A loop ends with INCFSZ EEADR wrap at 256; 627A/628A ends when EEADR bit 7 sets (128) | Example 13-4, p94 | behaviour | todo |
-| P3-206 | Data EEPROM register summary: 9Ah EEDATA, 9Bh EEADR, 9Ch EECON1, 9Dh EECON2 (Note 1: not a physical register) | Table 13-1, p95 | register | todo |
+| P3-177 | EEDATA at 9Ah: EEDAT7..0 all R/W-x; reset POR xxxx xxxx, other uuuu uuuu | Register 13-1 p91; Table 13-1 p95 | register | done (SoC) |
+| P3-178 | EEADR at 9Bh: EADR7..0 all R/W-x; reset POR xxxx xxxx, other uuuu uuuu | Register 13-2 p91; Table 13-1 p95 | register | done (SoC) |
+| P3-179 | EEADR bit 7: 627A/628A "Unimplemented Address: Must be set to '0'"; 648A selects top 128 locations (128–255); bits 6-0 select one of 128 locations | Register 13-2, p91 | register | done (SoC) |
+| P3-180 | §13.1: 648A uses all 8 bits; 627A/628A use EEADR<6:0>, "upper bit is address decoded", should always be '0' to stay in 128-byte space | §13.1, p92 | memory | done (SoC) |
+| P3-181 | AMBIGUITY: behaviour when EEADR<7>=1 on 627A/628A is undefined ("address decoded", "must be set to '0'") — doc does not say whether it wraps, is ignored, or fails | Register 13-2 p91; §13.1 p92 | note | D33 |
+| P3-182 | EECON1 at 9Ch: bits 7-4 unimplemented read '0'; bit3 WRERR R/W-x; bit2 WREN R/W-0; bit1 WR R/S-0; bit0 RD R/S-0 | Register 13-3, p92 | register | done (SoC) |
+| P3-183 | EECON1 reset: POR ---- x000; other Resets ---- q000 (q = depends on condition) | Table 13-1, p95 | register | done (SoC) |
+| P3-184 | RD and WR can only be set in software, not cleared; cleared by hardware at completion of read/write; prevents premature termination of a write | §13.2 p92; Register 13-3 | register | done (SoC) |
+| P3-185 | WRERR = 1: write prematurely terminated; register text: any MCLR Reset, any WDT Reset during normal operation, or BOR Reset; 0 = write completed | Register 13-3 bit 3, p92 | register | done (SoC) |
+| P3-186 | INCONSISTENCY: §13.2 lists only MCLR Reset or WDT Time-out Reset during normal operation for WRERR; Register 13-3 also lists BOR Reset | §13.2 vs Register 13-3, p92 | note | D34 |
+| P3-187 | After a write interrupted by reset, EEDATA and EEADR are unchanged so the user can check WRERR and rewrite | §13.2, p92 | behaviour | done (SoC) |
+| P3-188 | WREN: 1 = allows write cycles, 0 = inhibits writes; WREN clear on power-up | Register 13-3 bit 2; §13.2, p92 | register | done (SoC) |
+| P3-189 | WR: 1 initiates write; 0 = write complete | Register 13-3 bit 1, p92 | register | done (SoC) |
+| P3-190 | RD: 1 initiates read; read takes one cycle; RD cleared in hardware | Register 13-3 bit 0, p92 | register | done (SoC) |
+| P3-191 | EEIF (PIR1<7>) set when write complete; must be cleared in software | §13.2 p92; §13.4 p93 | behaviour | done (SoC) |
+| P3-192 | EECON2 (9Dh) not a physical register; reads all '0's; used only in write sequence; Table 13-1 reset ---- ---- | §13.2 p92; Table 13-1 p95 | register | done (SoC) |
+| P3-193 | Read: write EEADR, set RD; data available in EEDATA in the very next cycle (readable by next instruction) | §13.3, Example 13-1, p93 | timing | done (SoC) |
+| P3-194 | EEDATA holds read value until another read or until user writes it (during a write operation) | §13.3, p93 | behaviour | done (SoC) |
+| P3-195 | Write: load EEADR and EEDATA, then per byte: WREN=1, (disable GIE with BTFSC loop per AN576), MOVLW 55h/MOVWF EECON2, MOVLW AAh/MOVWF EECON2, BSF EECON1,WR, re-enable GIE | §13.4, Example 13-2, p93 | behaviour | done (SoC) |
+| P3-196 | Write does not initiate unless sequence followed exactly (55h to EECON2, AAh to EECON2, then set WR) for each byte | §13.4, p93 | failure-mode | done (SoC) |
+| P3-197 | A cycle count is executed during the required sequence; any number of cycles not equal to the required count causes data not to be written (interrupts strongly recommended disabled) | §13.4, p93 | failure-mode | done (SoC) |
+| P3-198 | WR cannot be set unless WREN is set | §13.4, p93 | failure-mode | done (SoC) |
+| P3-199 | WREN not cleared by hardware; clearing WREN after write initiated does not affect that write | §13.4, p93 | behaviour | done (SoC) |
+| P3-200 | Write completion: WR cleared by hardware, EEIF set (enable interrupt or poll) | §13.4, p93 | behaviour | done (SoC) |
+| P3-201 | Write verify: read back (BSF EECON1,RD) and compare with intended value (SUBWF EEDATA,W; BTFSS STATUS,Z) | §13.5, Example 13-3, p93 | behaviour | done (SoC) |
+| P3-202 | Spurious-write protection: WREN cleared on power-up; Power-up Timer (72 ms duration), when enabled, prevents EEPROM write; sequence + WREN protect against brown-out/glitch/software malfunction | §13.6, p93 | failure-mode | done (SoC) |
+| P3-203 | Endurance: per-byte write cycles specs D120 and D120A; total array write cycles D124; exceeding D124 without exceeding D120 requires an array refresh | §13.7, p94 | electrical | D37 |
+| P3-204 | Note: if data EEPROM stores rarely changed data, refresh likely not required (see D124); infrequently changed variables should be stored in Flash program memory | §13.7 Note, p94 | note | D37 |
+| P3-205 | Example 13-4 refresh routine: per address RD then 55h/AAh/WR, poll WR (BTFSC EECON1,WR / GOTO $-1) until clear; 648A loop ends with INCFSZ EEADR wrap at 256; 627A/628A ends when EEADR bit 7 sets (128) | Example 13-4, p94 | behaviour | done (SoC) |
+| P3-206 | Data EEPROM register summary: 9Ah EEDATA, 9Bh EEADR, 9Ch EECON1, 9Dh EECON2 (Note 1: not a physical register) | Table 13-1, p95 | register | done (SoC) |
 
 ## Cross-references
 - Table 17-2 (p142): comparator mode-change delay, response time, input offset, Common Mode voltage, comparator current.
@@ -1315,12 +1342,12 @@ written; the decision is added here.
 | P5-119 | §17.4 Note 3: negative current is defined as coming out of the pin | §17.4 Note 3, p.140 | note | info |
 | P5-120 | §17.4 Note 4: "I/O ports"/PORTA rows include OSC1 and OSC2 when configured as I/O pins, CLKIN or CLKOUT | §17.4 Note 4, p.140 | note | info |
 | P5-121 | §17.4 header (and Table 17-1 header) say "Operating voltage VDD range as described in DC specification Table 17-2 and Table 17-3", but Tables 17-2/17-3 are Comparator/VREF specs; the VDD range is in §17.2/§17.3 D001 | §17.4 p.140, Table 17-1 p.141 | note | info |
-| P5-122 | D120 ED data EEPROM endurance: min 100K, typ 1M E/W, -40°C ≤ TA ≤ 85°C | Table 17-1, p.141 | electrical | todo |
-| P5-123 | D120A ED data EEPROM endurance: min 10K, typ 100K E/W, 85°C ≤ TA ≤ 125°C | Table 17-1, p.141 | electrical | todo |
-| P5-124 | D121 VDRW VDD for data EEPROM read/write: min VMIN, max 5.5 V (VMIN = minimum operating voltage) | Table 17-1, p.141 | electrical | todo |
-| P5-125 | D122 TDEW data EEPROM erase/write cycle time: typ 4, max 8* ms | Table 17-1, p.141 | timing | todo |
+| P5-122 | D120 ED data EEPROM endurance: min 100K, typ 1M E/W, -40°C ≤ TA ≤ 85°C | Table 17-1, p.141 | electrical | D37 |
+| P5-123 | D120A ED data EEPROM endurance: min 10K, typ 100K E/W, 85°C ≤ TA ≤ 125°C | Table 17-1, p.141 | electrical | D37 |
+| P5-124 | D121 VDRW VDD for data EEPROM read/write: min VMIN, max 5.5 V (VMIN = minimum operating voltage) | Table 17-1, p.141 | electrical | done (SoC) |
+| P5-125 | D122 TDEW data EEPROM erase/write cycle time: typ 4, max 8* ms | Table 17-1, p.141 | timing | done (SoC) |
 | P5-126 | D123 TRETD data EEPROM characteristic retention: min 40 year, provided no other specifications are violated | Table 17-1, p.141 | electrical | todo |
-| P5-127 | D124 TREF number of total erase/write cycles before refresh(1): min 1M, typ 10M E/W, -40°C to +85°C (Note 1: see §13.7 "Using the Data EEPROM") | Table 17-1, p.141 | electrical | todo |
+| P5-127 | D124 TREF number of total erase/write cycles before refresh(1): min 1M, typ 10M E/W, -40°C to +85°C (Note 1: see §13.7 "Using the Data EEPROM") | Table 17-1, p.141 | electrical | D37 |
 | P5-128 | D130 EP program flash endurance: min 10K, typ 100K E/W, -40°C ≤ TA ≤ 85°C | Table 17-1, p.141 | electrical | todo |
 | P5-129 | D130A EP program flash endurance: min 1000, typ 10K E/W, 85°C ≤ TA ≤ 125°C | Table 17-1, p.141 | electrical | todo |
 | P5-130 | D131 VPR VDD for flash read: min VMIN, max 5.5 V | Table 17-1, p.141 | electrical | todo |
@@ -1329,7 +1356,7 @@ written; the decision is added here.
 | P5-133 | D133 TIE flash block erase cycle time: typ 4, max 8* ms, VDD > 4.5 V | Table 17-1, p.141 | timing | todo |
 | P5-134 | D133A TPEW flash write cycle time: typ 2, max 4* ms | Table 17-1, p.141 | timing | todo |
 | P5-135 | D134 TRETP flash characteristic retention: min 40 year, provided no other specifications are violated | Table 17-1, p.141 | electrical | todo |
-| P5-136 | Endurance exhaustion is a wear-out failure mode: data EEPROM beyond D120/D120A and flash beyond D130/D130A cycles (temperature-dependent); flash block erase below 4.5 V (D132) is outside spec | Table 17-1 | failure-mode | todo |
+| P5-136 | Endurance exhaustion is a wear-out failure mode: data EEPROM beyond D120/D120A and flash beyond D130/D130A cycles (temperature-dependent); flash block erase below 4.5 V (D132) is outside spec | Table 17-1 | failure-mode | D37 |
 | P5-137 | Table 17-1 conditions column says "-40°C ≤ TA ≤ 85°C"/"85°C ≤ TA ≤ 125°C" (overlapping at 85°C); D120A max column blank (other rows show "—") | Table 17-1, p.141 | note | info |
 | P5-138 | Table 17-2 operating conditions: 2.0 V < VDD < 5.5 V, -40°C < TA < +125°C unless otherwise stated | Table 17-2, p.142 | note | info |
 | P5-139 | D300 VIOFF comparator input offset voltage: typ ±5.0, max ±10 mV | Table 17-2, p.142 | electrical | todo |
@@ -1520,7 +1547,7 @@ written; the decision is added here.
 | P6-028 | **Wake-up columns of Table 14-8.** STATUS is uuuq quuu (A: uuuq 0uuu). PIR1 is -q-- ---- with Note 5: "If wake-up was due to comparator input changing, then Bit 6 = 1. All other interrupts generating a wake-up will cause Bit 6 = u." A: qqqq -qqq. PCON is ---- --uu (A: ---- u-uu, which leaves OSCF unchanged). CMCON is uu-- uuuu on both. | Table 14-8 and Notes 2, 5, p.98 | note | info |
 | P6-029 | **EECON1.RD access type.** Register 13-2 gives RD as "R/S-x". A: R/S-0. Both give the EECON1 reset value as ---- x000, so RD resets to 0 in either case. | Register 13-2, p.88; Table 13-1, p.90 | note | info |
 | P6-030 | **Data EEPROM endurance.** D120 ED: 1M min (characterised), 10M typ E/W, "25°C at 5V". D122 TDEW: 4 ms typ, 8 ms max (same as A). There is no D123 retention spec and no D124 refresh spec or refresh procedure. A: 100K min / 1M typ (-40 to 85 °C), 10K / 100K (85 to 125 °C), 40-year retention, and a D124 array refresh after 1M/10M total cycles. Any wear-out model has to use different limits per part. | Table 17-3 D120/D122, p.135 | failure-mode | todo |
-| P6-031 | **PWRT blocks EEPROM writes.** "The Power-up Timer (72 ms duration) prevents EEPROM write", with no condition attached. Because of P6-005, PWRT is also active whenever BODEN = 1. A: "when enabled, the Power-up Timer (72 ms duration) prevents EEPROM write." | §13.6, p.89 | behaviour | todo |
+| P6-031 | **PWRT blocks EEPROM writes.** "The Power-up Timer (72 ms duration) prevents EEPROM write", with no condition attached. Because of P6-005, PWRT is also active whenever BODEN = 1. A: "when enabled, the Power-up Timer (72 ms duration) prevents EEPROM write." | §13.6, p.89 | behaviour | done (SoC) |
 | P6-032 | **Program flash electrical limits (programming only).** D130 EP: 1000 min (characterised), 10000 typ E/W. D132 VPEW: VDD 4.5-5.5 V for erase and for write. D133 TPEW: 4 ms typ, 8 ms max. A: endurance 10K/100K (-40 to 85 °C) and 1000/10K (85 to 125 °C). Block erase needs 4.5-5.5 V and takes 4/8 ms. Write works from VMIN to 5.5 V and takes 2/4 ms. The A-part errata restricts the write voltage on early silicon (E-002). | Table 17-3 D130-D133, p.135 | memory | todo |
 | P6-033 | **LVP supply.** Note 2: "VDD must be 5.0V +10% during erase/program operations while in low voltage Programming mode." Also: "once the LVP bit is programmed to 0, High voltage Programming mode can be used to program the device." A: "+10% during erase operations", and "only High-Voltage Programming mode can be used". The DS40300C wording does not say "only". | §14.13 and Note 2, p.106 | note | info |
 | P6-034 | **Frequency and VDD grades.** PIC16F627/628 runs at 3.0-5.5 V and PIC16LF627/628 at 2.0-5.5 V, the same as the A parts. Table 4-1 gives the maximum frequency as 20 MHz for PIC16F627/628 and 4 MHz for PIC16LF627/628. Ordering grades: -04 = 4 MHz (XT and ER osc) or 200 kHz (LP osc), and -20 = 20 MHz (HS osc). The voltage-frequency graphs are split by temperature: Fig. 17-1/17-2 for 16F62X and Fig. 17-3/17-4 for 16LF62X, at 0 to +70 °C and at -40 to 0 °C / +70 to +85 °C. A: every part, LF included, is 20 MHz, with no frequency grade. An LF non-A profile should reject or flag FOSC > 4 MHz. | Table 4-1, p.27; Product ID, p.167; Fig. 17-1..17-4, p.128-129 | electrical | todo |
@@ -1654,7 +1681,7 @@ DS80151B applies to "all PIC16F627A and PIC16F628A devices", meaning Rev. A sili
 | P7-105 | Reg 3-1 Note 2: only a Bulk Erase will reset the Configuration Word, including the CP bits (bits cannot be returned to '1' by programming). | Reg 3-1 Note 2, p.17 | failure-mode | todo |
 | P7-106 | Reg 3-1 Note 3: while MCLR is asserted in INTOSC mode, the internal clock oscillator is disabled. | Reg 3-1 Note 3, p.17 | note | info |
 | P7-107 | Hex file: programmer must read the Configuration Word and ID locations from the hex file; if Configuration Word is absent a simple warning may be issued; when saving, Config Word and ID information must be included (option to omit may be provided). EEPROM data memory should also be embedded. | §3.8, p.18 | behaviour | todo |
-| P7-108 | Hex file: data EEPROM mapped logically starting at address 0x2100, one data byte per address location, LSB aligned; programmer should read it and optionally write it. | §3.9, p.19 | memory | todo |
+| P7-108 | Hex file: data EEPROM mapped logically starting at address 0x2100, one data byte per address location, LSB aligned; programmer should read it and optionally write it. | §3.9, p.19 | memory | done (SoC) |
 | P7-109 | Checksum: sum of all program memory locations up to max user-addressable location (e.g. 0x7FF for PIC16F628A) + Configuration Word (masked) + masked ID locations (when applicable); carries beyond 16 bits neglected; least significant 16 bits is the checksum. | §3.10.1, p.19 | behaviour | todo |
 | P7-110 | Checksum note: calculation differs with code-protect setting since program memory reads out differently when protected; when reading a device, entire program memory can simply be read and summed; Configuration Word and ID locations can always be read. | §3.10.1 Note, p.19 | note | info |
 | P7-111 | NOTE: the spec does not state what value a code-protected program-memory location reads out as over ICSP (only that it reads "differently"). | §3.10.1 Note, p.19 | note | info |
@@ -1782,20 +1809,20 @@ DS80151B applies to "all PIC16F627A and PIC16F628A devices", meaning Rev. A sili
 | P8-085 | Manual Example 6-4 tests "BTFSS STATUS, C ; End of current bank? (FSR = 00h, C = 1)" after INCF FSR, but per the manual's own Table 5-1 INCF affects only Z, never C, so that loop would not terminate on C; the correct end test after FFh -> 00h is Z. The emulator must keep INCF from touching C even though the example implies it. | Manual Example 6-4 p. 6-15 vs Table 5-1 p. 5-3 | note | info |
 | P8-086 | Bank switching examples: CLRF STATUS selects bank 0 (and clears IRP); BSF/BCF STATUS,RP0 toggles bank 0/1; MOVLW 0x60 / XORWF STATUS,F sets RP1:RP0 = 11 (bank 3) leaving other bits unchanged (XORWF affects Z only, and Z write to STATUS is from ALU logic). | §6.4 Example 6-3 p. 6-14 | behaviour | done (core) |
 | P8-087 | Design tip: on devices with more than 2K words, load PCLATH before CALL/GOTO (MOVLW HIGH(SUB_1); MOVWF PCLATH; CALL SUB_1) or execution "gets lost" in the wrong page. | §6.5 Q1 p. 6-16 | failure-mode | todo |
-| P8-088 | Data EEPROM is readable and writable at run time over the full VDD range; it is not mapped into the register file but accessed through EECON1, EECON2 (not a physical register), EEDATA and EEADR. Byte writes auto-erase the location first (erase-before-write). Write time is set by an on-chip timer and varies with voltage, temperature and part. | §7.1 p. 7-2 | memory | todo |
+| P8-088 | Data EEPROM is readable and writable at run time over the full VDD range; it is not mapped into the register file but accessed through EECON1, EECON2 (not a physical register), EEDATA and EEADR. Byte writes auto-erase the location first (erase-before-write). Write time is set by an on-chip timer and varies with voltage, temperature and part. | §7.1 p. 7-2 | memory | done (SoC) |
 | P8-089 | The manual says only 64-byte data EEPROM parts exist (Table 7-1 note) and that the unused EEADR bits must be 0. DS40044G: 627A/628A have 128 bytes (EEADR<6:0>, bit 7 address-decoded and must be 0), 648A has 256 bytes (all 8 bits). Use DS40044G sizes. | Manual Table 7-1, §7.3 p. 7-2/7-4 vs DS40044G §13.1, Register 13-2 | note | info |
 | P8-090 | Manual EECON1 has five bits: EEIF (bit 4, shown R/W-1), WRERR (bit 3), WREN (bit 2), WR (bit 1, set-only), RD (bit 0, set-only). DS40044G EECON1 has only four bits (WRERR, WREN, WR, RD; upper four read 0) and EEIF lives in PIR1<7>. Model EEIF in PIR1. | Manual Register 7-1, §7.4 p. 7-3/7-4 vs DS40044G Register 13-3, §13.2, PIR1 | note | info |
-| P8-091 | RD and WR can only be set by software, never cleared by software (writes of 0 are ignored); hardware clears them when the read or write completes. This prevents premature termination of a write. WR cannot be set unless WREN = 1. | §7.2 Register 7-1, §7.4 p. 7-3/7-4; §7.6 p. 7-5 | register | todo |
-| P8-092 | WREN is cleared on power-up and is never cleared by hardware (firmware should keep it clear except while writing). Clearing WREN after a write has started does not affect that write. | §7.4 p. 7-4; §7.6 p. 7-5 | register | todo |
-| P8-093 | WRERR is set when a write is interrupted by MCLR reset or WDT time-out reset during normal operation; after reset, EEDATA and EEADR still hold the data and address, so firmware can check WRERR and rewrite. | §7.2, §7.4 p. 7-3/7-4 | failure-mode | todo |
-| P8-094 | Reading EECON2 returns 00h; EECON2 is used only by the write unlock sequence. | §7.4 p. 7-4 | register | todo |
-| P8-095 | EEPROM read: write EEADR, set EECON1.RD; data is in EEDATA in the very next instruction cycle (readable by the next instruction); RD takes one cycle and is cleared in hardware. EEDATA keeps the value until another read or until firmware writes it. | §7.5, Example 7-1 p. 7-5 | timing | todo |
-| P8-096 | EEPROM write: load EEADR and EEDATA, set WREN, then exactly: MOVLW 55h; MOVWF EECON2; MOVLW AAh; MOVWF EECON2; BSF EECON1,WR - for every byte. If the sequence is not followed exactly the write does not start. Interrupts should be disabled during the sequence. On completion hardware clears WR and sets EEIF (must be cleared by software; can be polled or used as an interrupt). | §7.6, Example 7-2 p. 7-5 | behaviour | todo |
+| P8-091 | RD and WR can only be set by software, never cleared by software (writes of 0 are ignored); hardware clears them when the read or write completes. This prevents premature termination of a write. WR cannot be set unless WREN = 1. | §7.2 Register 7-1, §7.4 p. 7-3/7-4; §7.6 p. 7-5 | register | done (SoC) |
+| P8-092 | WREN is cleared on power-up and is never cleared by hardware (firmware should keep it clear except while writing). Clearing WREN after a write has started does not affect that write. | §7.4 p. 7-4; §7.6 p. 7-5 | register | done (SoC) |
+| P8-093 | WRERR is set when a write is interrupted by MCLR reset or WDT time-out reset during normal operation; after reset, EEDATA and EEADR still hold the data and address, so firmware can check WRERR and rewrite. | §7.2, §7.4 p. 7-3/7-4 | failure-mode | done (SoC) |
+| P8-094 | Reading EECON2 returns 00h; EECON2 is used only by the write unlock sequence. | §7.4 p. 7-4 | register | done (SoC) |
+| P8-095 | EEPROM read: write EEADR, set EECON1.RD; data is in EEDATA in the very next instruction cycle (readable by the next instruction); RD takes one cycle and is cleared in hardware. EEDATA keeps the value until another read or until firmware writes it. | §7.5, Example 7-1 p. 7-5 | timing | done (SoC) |
+| P8-096 | EEPROM write: load EEADR and EEDATA, set WREN, then exactly: MOVLW 55h; MOVWF EECON2; MOVLW AAh; MOVWF EECON2; BSF EECON1,WR - for every byte. If the sequence is not followed exactly the write does not start. Interrupts should be disabled during the sequence. On completion hardware clears WR and sets EEIF (must be cleared by software; can be polled or used as an interrupt). | §7.6, Example 7-2 p. 7-5 | behaviour | done (SoC) |
 | P8-097 | DS40044G Example 13-2 adds "BCF INTCON,GIE; BTFSC INTCON,GIE; GOTO $-2" (re-check GIE, see AN576) before the 55h/AAh sequence; the manual's Example 7-2 just does BCF INTCON,GIE. The emulator must model the GIE/interrupt race that makes the re-check necessary (see P8-104). | Manual Example 7-2 p. 7-5 vs DS40044G Example 13-2 | note | info |
-| P8-098 | Spurious-write protection: WREN cleared at power-up, the 72 ms Power-up Timer blocks EEPROM writes while it runs, and the unlock sequence + WREN guard against writes during brown-out, glitches or runaway code. | §7.8 p. 7-7 | behaviour | todo |
-| P8-099 | With code protection on, the CPU can still read and write data EEPROM; the device programmer can no longer access it. | §7.1 p. 7-2; §7.9 p. 7-7 | behaviour | todo |
-| P8-100 | Write verify: read back the location after the write (BSF EECON1,RD then SUBWF EEDATA,W; BTFSS STATUS,Z) when a cell may be stressed near its endurance limit. | §7.7, Example 7-3 p. 7-6 | behaviour | todo |
-| P8-101 | Design tips: data not written - most likely the unlock sequence was not followed exactly or an interrupt hit during it. Data corrupted - inadvertent writes can happen during brown-out if the device is not held in reset; enable BOR or an external reset circuit so no EEPROM write occurs out of the operating range. | §7.11 Q1, Q2 p. 7-8 | failure-mode | todo |
+| P8-098 | Spurious-write protection: WREN cleared at power-up, the 72 ms Power-up Timer blocks EEPROM writes while it runs, and the unlock sequence + WREN guard against writes during brown-out, glitches or runaway code. | §7.8 p. 7-7 | behaviour | done (SoC) |
+| P8-099 | With code protection on, the CPU can still read and write data EEPROM; the device programmer can no longer access it. | §7.1 p. 7-2; §7.9 p. 7-7 | behaviour | done (SoC) |
+| P8-100 | Write verify: read back the location after the write (BSF EECON1,RD then SUBWF EEDATA,W; BTFSS STATUS,Z) when a cell may be stressed near its endurance limit. | §7.7, Example 7-3 p. 7-6 | behaviour | done (SoC) |
+| P8-101 | Design tips: data not written - most likely the unlock sequence was not followed exactly or an interrupt hit during it. Data corrupted - inadvertent writes can happen during brown-out if the device is not held in reset; enable BOR or an external reset circuit so no EEPROM write occurs out of the operating range. | §7.11 Q1, Q2 p. 7-8 | failure-mode | done (SoC) |
 | P8-102 | GIE (INTCON<7>) enables all unmasked interrupts and is cleared on reset. On an interrupt response the core clears GIE, pushes the return address, and loads PC = 0004h. RETFIE returns and sets GIE, so any still-pending interrupt is taken immediately. PEIE (INTCON<6>) must be set for any peripheral (PIE/PIR) interrupt to vector. | §8.1 p. 8-3; §8.2.2 p. 8-6 | behaviour | done (SoC) |
 | P8-103 | Interrupt flag bits (INTCON T0IF/INTF/RBIF and PIR bits) are set when the condition occurs regardless of their enable bit or GIE, allowing polling. Flags must be cleared in software before re-enabling GIE (and before enabling an interrupt) to avoid recursive interrupts. | §8.1 note 1 p. 8-3; §8.2.1 note p. 8-5; §8.2.3 notes p. 8-8 | behaviour | done (SoC) |
 | P8-104 | When an instruction that clears GIE executes, any interrupt that was pending for execution in the next cycle is ignored; the CPU executes a NOP in the cycle immediately after the GIE-clearing instruction. The ignored interrupts stay pending and are serviced when GIE is set again. | §8.1 note 2 p. 8-3 | timing | D3 |

@@ -18,6 +18,7 @@ import { Timer1, type T1Oscillator } from "./periph/timer1"
 import { Ccp1, Timer2 } from "./periph/ccp"
 import { Comparators } from "./periph/comparator"
 import { Usart } from "./periph/usart"
+import { DataEeprom } from "./periph/eeprom"
 
 export type PicResetCause = "power-on" | "brown-out" | "mclr" | "mclr-sleep" | "wdt"
 
@@ -39,15 +40,6 @@ const PCON = 0x8e
 /** Comparator modes: which of RA0–RA3 are analog inputs (Figure 10-1: "A" pins read 0). */
 const ANALOG_BY_CM = [0b1111, 0b1111, 0b1111, 0b0111, 0b1111, 0b0110, 0b0111, 0b0000]
 
-/** Registers of blocks this file does not model yet, with their reset values (Table 14-7). */
-type Pending = { name: string; addr: number; block: string; por: number | "x"; reset: number | "u"; mask?: number }
-const PENDING: Pending[] = [
-  { name: "EEDATA", addr: 0x9a, block: "Data EEPROM", por: "x", reset: "u" },
-  { name: "EEADR", addr: 0x9b, block: "Data EEPROM", por: "x", reset: "u" },
-  { name: "EECON1", addr: 0x9c, block: "Data EEPROM", por: 0x00, reset: 0x00, mask: 0x0f },
-  { name: "EECON2", addr: 0x9d, block: "Data EEPROM", por: 0x00, reset: 0x00, mask: 0x00 },
-]
-
 export class PicMcu implements PicBus, PicSystem {
   readonly chip: PicProfile
   readonly cpu: PicCpu
@@ -61,6 +53,7 @@ export class PicMcu implements PicBus, PicSystem {
   readonly ccp: Ccp1
   readonly comparators: Comparators
   readonly usart: Usart
+  readonly dataEeprom: DataEeprom
   /** The voltage on each pad as the circuit last solved it (comparator inputs). */
   private readonly analog = new Map<number, number>()
   readonly eeprom: Uint8Array
@@ -77,7 +70,6 @@ export class PicMcu implements PicBus, PicSystem {
   pie1 = 0
   optionReg = 0xff
   pcon = 0x08
-  private readonly pending = new Map<number, number>()
 
   /** Simulated time at the start of the current slice, and the cycle it began at. */
   time = 0
@@ -210,6 +202,18 @@ export class PicMcu implements PicBus, PicSystem {
         },
         pinAt: (pin, at) => this.portb.pinAt(pin, at),
         pinsChanged: (cycle) => this.portb.refresh(cycle),
+      }),
+    )
+    this.dataEeprom = this.attach(
+      new DataEeprom(this, {
+        cells: this.eeprom,
+        get vdd() {
+          return host.vdd
+        },
+        vddMin: chip.electrical.vddMin,
+        writeTime: chip.electrical.eeWrite.typ,
+        endurance: chip.electrical.eeEndurance,
+        setEeif: (cycle) => this.setFlag("pir1", 0x80, cycle),
       }),
     )
     this.registers()
@@ -388,27 +392,12 @@ export class PicMcu implements PicBus, PicSystem {
     this.register(0x1a, { name: "RCREG", read: () => u.readRcreg(), peek: () => u.peekRcreg(), write: () => {} })
     this.register(0x98, { name: "TXSTA", read: () => u.readTxsta(), peek: () => u.peekTxsta(), write: (v) => u.writeTxsta(v) })
     this.register(0x99, { name: "SPBRG", read: () => u.spbrg, write: (v) => u.writeSpbrg(v) })
-    for (const p of PENDING) {
-      this.register(p.addr, {
-        name: p.name,
-        read: () => {
-          this.unhandled(p.block, false)
-          return this.pending.get(p.addr) ?? 0
-        },
-        peek: () => this.pending.get(p.addr) ?? 0,
-        write: (v) => {
-          this.unhandled(p.block, true)
-          this.pending.set(p.addr, v & (p.mask ?? 0xff))
-        },
-      })
-    }
-  }
-
-  private unhandled(block: string, write: boolean) {
-    const hit = this.unmodelled.get(block) ?? { reads: 0, writes: 0 }
-    if (write) hit.writes++
-    else hit.reads++
-    this.unmodelled.set(block, hit)
+    const ee = this.dataEeprom
+    this.register(0x9a, { name: "EEDATA", read: () => ee.eedata, write: (v) => (ee.eedata = v & 0xff) })
+    this.register(0x9b, { name: "EEADR", read: () => ee.eeadr, write: (v) => (ee.eeadr = v & 0xff) })
+    this.register(0x9c, { name: "EECON1", read: () => ee.readEecon1(), write: (v) => ee.writeEecon1(v) })
+    // EECON2 is not a physical register: it reads 0 (P3-192).
+    this.register(0x9d, { name: "EECON2", read: () => 0, write: (v) => ee.writeEecon2(v) })
   }
 
   private writeOption(v: number, at: number) {
@@ -604,7 +593,6 @@ export class PicMcu implements PicBus, PicSystem {
     this.portb.latch = Math.floor(this.random() * 256)
     this.pcon = 0x08 | (this.random() < 0.5 ? 1 : 0)
     this.intcon = this.random() < 0.5 ? 1 : 0
-    for (const p of PENDING) this.pending.set(p.addr, p.por === "x" ? Math.floor(this.random() * 256) : p.por)
     this.applyReset("power-on")
   }
 
@@ -616,6 +604,7 @@ export class PicMcu implements PicBus, PicSystem {
     this.lastReset = cause
     this.resets = cause === "power-on" ? 0 : this.resets + 1
     const wasSleeping = this.cpu.sleeping
+    this.dataEeprom.interrupt(this.time)
     this.cpu.reset()
     const s = this.cpu.status
     switch (cause) {
@@ -649,7 +638,6 @@ export class PicMcu implements PicBus, PicSystem {
     this.porta.latch &= 0xf0
     this.porta.tris = 0xff
     this.portb.tris = 0xff
-    for (const p of PENDING) if (cause !== "power-on" && p.reset !== "u") this.pending.set(p.addr, p.reset)
     this.wdtWake = false
     this.resetRequest = null
     this.haltedUntil = 0
@@ -735,8 +723,7 @@ export class PicMcu implements PicBus, PicSystem {
     // POR re-arms when VDD has gone back under its level (D003: a POR is ensured from VSS; decision D10).
     if (volts < e.por) {
       this.porHeld = true
-      this.porta.tris = this.portb.tris = 0xff
-      this.pinsChanged(this.cpu.cycles)
+      this.holdInReset()
       return
     }
     if (this.config & 0x40) {
@@ -746,8 +733,7 @@ export class PicMcu implements PicBus, PicSystem {
         // A dip shorter than TBOR does not assure a reset (param 35): it resets once it has lasted TBOR.
         if (this.time - this.borLowSince >= e.borTime) {
           this.borHeld = true
-          this.porta.tris = this.portb.tris = 0xff
-          this.pinsChanged(this.cpu.cycles)
+          this.holdInReset()
         }
       } else if (volts >= vbor) {
         this.borLowSince = null
@@ -794,8 +780,7 @@ export class PicMcu implements PicBus, PicSystem {
     if (this.mclrLowSince === null || this.mclrInReset) return
     if (this.time - this.mclrLowSince >= this.chip.electrical.mclrPulse - 1e-12) {
       this.mclrInReset = true
-      this.porta.tris = this.portb.tris = 0xff
-      this.pinsChanged(this.cpu.cycles)
+      this.holdInReset()
     }
   }
   /** VDD has stayed under VBOR for TBOR: brown-out reset, held until VDD is back over VBOR (§14.4.4). */
@@ -803,8 +788,7 @@ export class PicMcu implements PicBus, PicSystem {
     if (this.borLowSince === null || this.borHeld) return
     if (this.time - this.borLowSince >= this.chip.electrical.borTime - 1e-12) {
       this.borHeld = true
-      this.porta.tris = this.portb.tris = 0xff
-      this.pinsChanged(this.cpu.cycles)
+      this.holdInReset()
     }
   }
   /** A reset released: MCLR resets have no start-up timer (Table 14-3 lists POR, BOR and wake-up only). */
@@ -826,10 +810,16 @@ export class PicMcu implements PicBus, PicSystem {
     if (this.programmingMode) return
     this.programmingMode = true
     this.programmingEntry = how
-    this.porta.tris = this.portb.tris = 0xff
-    this.pinsChanged(this.cpu.cycles)
+    this.holdInReset()
     this.cpu.stop = true
     this.feature("ICSP: Program/Verify mode entered — the programming protocol (DS41196G) is not modelled; the part waits for a reset")
+  }
+
+  /** A reset takes hold: the pins go to inputs, a data EEPROM write under way is cut (D36). */
+  private holdInReset() {
+    this.dataEeprom.interrupt(this.time)
+    this.porta.tris = this.portb.tris = 0xff
+    this.pinsChanged(this.cpu.cycles)
   }
 
   requestReset(cause: PicResetCause) {

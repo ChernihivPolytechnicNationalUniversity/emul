@@ -62,6 +62,9 @@ export type PicElectrical = {
   ipd: [number, number][]
   iwdt: [number, number][]
   ibor: number
+  /** Data EEPROM erase/write cycle time, s (D122 TDEW: typ 4, max 8 ms); per-byte endurance, E/W cycles (D120 min). */
+  eeWrite: Spec
+  eeEndurance: number
 }
 
 export type OscMode = "LP" | "XT" | "HS" | "EC" | "INTOSC" | "RC"
@@ -193,6 +196,8 @@ const ELECTRICAL_A: PicElectrical = {
     [5.0, 9e-6],
   ],
   ibor: 30e-6,
+  eeWrite: { typ: 4e-3, max: 8e-3 },
+  eeEndurance: 100_000,
 }
 
 /** DS40300C §17: where the original differs (P6 rows). */
@@ -210,6 +215,8 @@ const ELECTRICAL_ORIGINAL: PicElectrical = {
     [4.0, 6e-6],
   ],
   ibor: 75e-6,
+  // D120: 1M min at 25 °C, 5 V (P6-030).
+  eeEndurance: 1_000_000,
 }
 
 const GPR_224: [number, number][] = [
