@@ -82,6 +82,40 @@ Copyright (c) 2020 Uri Shaked:
 above and GNU Arm Embedded Toolchain (newlib-nano). newlib is distributed under a
 collection of BSD-style licenses; see https://sourceware.org/newlib/COPYING.NEWLIB.
 
+`firmware/examples/avr-*.elf` are builds of `firmware/avr/examples/*.c` with Debian's gcc-avr
+and avr-libc. avr-libc is distributed under a modified three-clause BSD license, Copyright (c)
+the avr-libc authors; see https://github.com/avrdudes/avr-libc/blob/main/LICENSE. libgcc is
+linked under the GCC Runtime Library Exception.
+
+## Arduino AVR core and libraries in the build worker image
+
+The worker image fetches these at the pinned tags (`backend/worker/toolchain/stage-arduino.sh`)
+to compile Arduino sketches; the sources are not in this repository and are carried in the
+image unmodified, with their license files. A sketch built by the service links them into the
+user's own firmware.
+
+- **arduino/ArduinoCore-avr** 1.8.6 — the core, the Nano variant and the bundled EEPROM,
+  SoftwareSerial and Wire libraries: GNU Lesser General Public License 2.1 or later, Copyright
+  (c) 2005–2006 David A. Mellis, 2006 Nicholas Zambetti, Arduino LLC and contributors. SPI: GNU
+  GPL 2 or LGPL 2.1, Copyright (c) 2010 Cristian Maglie, 2014 Paul Stoffregen, 2014 Matthijs
+  Kooijman. HID: ISC-style permission notice, Copyright (c) 2015 Arduino LLC, 2011 Peter
+  Barrett.
+- **arduino-libraries/Servo** 1.2.2 — LGPL 2.1, Copyright (c) 2009 Michael Margolis.
+- **arduino-libraries/LiquidCrystal** 1.0.7 — LGPL 2.1 or later, Copyright (c) 2006–2008
+  Hans-Christoph Steiner, 2010 Arduino LLC.
+- **adafruit/Adafruit_NeoPixel** 1.15.5 — GNU Lesser General Public License 3, Copyright (c)
+  Adafruit Industries.
+- **adafruit/Adafruit_SSD1306** 2.5.17 and **adafruit/Adafruit-GFX-Library** 1.12.6 — BSD
+  License (text below, with "Adafruit Industries" as the holder), Copyright (c) 2012 Adafruit
+  Industries.
+- **adafruit/Adafruit_BusIO** 1.17.4 — MIT License (text above), Copyright (c) 2017 Adafruit
+  Industries.
+- **Chris--A/Keypad** 3.1.1 — LGPL 2.1 as its sources state (the repository's LICENSE file is
+  GPL 3), by Mark Stanley and Alexander Brevig.
+
+The license texts: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html,
+https://www.gnu.org/licenses/lgpl-3.0.html, https://www.gnu.org/licenses/old-licenses/gpl-2.0.html.
+
 ## npm dependencies
 
 Listed with their licenses by `pnpm licenses list`. All are under MIT, Apache-2.0, ISC,
