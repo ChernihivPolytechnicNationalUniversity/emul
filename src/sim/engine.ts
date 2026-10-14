@@ -16,7 +16,7 @@ import { GROUND, type GpioState, type Netlist, type Resolved } from "./netlist"
 import { bias, dischargeSink, nextLatch, NE555, outputSink, outputSource, quiescent, supplyShare } from "./ne555"
 import { SparseLU } from "./sparse-lu"
 import { formatSI } from "./units"
-import { pulseHigh } from "./pulse"
+import { nextPulseEdge, pulseHigh, pulseTiming } from "./pulse"
 
 const VT = 0.025852
 /** Leak from every node to ground; keeps floating nodes solvable. */
@@ -124,8 +124,9 @@ type OperatingPoint = { v: Float64Array; x: Float64Array; region: Uint8Array; jA
 type Timer = Extract<Resolved, { kind: "TMR" }>
 type Pad = Extract<Resolved, { kind: "GPIO" }>
 const NONLINEAR_KINDS = new Set<Resolved["kind"]>(["D", "Q", "REG", "CHG", "BOOST", "TMR", "M"])
+const isPulse = (el: Resolved) => el.kind === "V" && el.amplitude > 0 && el.shape === "pulse"
 const switchesMask = (el: Resolved) =>
-  el.kind === "SW" || el.kind === "GPIO" || (el.kind === "R" && el.live) || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR"
+  isPulse(el) || el.kind === "SW" || el.kind === "GPIO" || (el.kind === "R" && el.live) || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR"
 const SURGE = 20
 /** Averaging window for RMS readings in AC circuits: at least this long, and a few periods of the slowest source. */
 const RMS_MIN_TAU = 0.05
@@ -181,6 +182,15 @@ export type Reading = {
 
 const Q_IS = 1e-14
 const Q_VCRIT = VT * Math.log(VT / (Math.SQRT2 * Q_IS))
+
+/**
+ * Highest exponent a diode's current is evaluated at: 80 keeps a runaway iterate finite, but a
+ * junction with a tiny saturation current (a 4 V LED, a steep green die) only starts to conduct
+ * near its critical voltage, which can lie past e^80 — so the cap sits at least 10 above it.
+ */
+function diodeExpCap(vcritOverNvt: number) {
+  return Math.max(80, vcritOverNvt + 10)
+}
 const Q_BR = 3
 const BJT_REGIONS = ["cut-off", "saturation", "reverse", "active"] as const
 const MOS_REGIONS = ["off", "ohmic", "reverse", "saturation"] as const
@@ -264,6 +274,8 @@ export class Engine {
   readonly failures: Failure[] = []
   /** True when any source has an AC component; RMS readings are then kept. */
   readonly ac: boolean
+  /** A sine source: the inputs move every step, so no operating point is ever met again. */
+  private readonly sine: boolean
   /** Running mean of the squared node voltages (AC only). */
   readonly v2: Float64Array
 
@@ -401,10 +413,15 @@ export class Engine {
   private readonly partKeys: string[]
   /** Indices of the elements read from pads each step: GPIO drivers and live resistors. */
   private readonly padElements: Int32Array
-  /** Elements whose exact value the switch mask does not carry: live resistors and DAC-driven pads. */
+  /** Elements whose exact value the switch mask does not carry: live resistors, DAC-driven pads and pulse sources. */
   private readonly liveElements: Int32Array
   /** No capacitor, inductor or battery: the operating point is a function of the inputs alone. */
   private readonly stateless: boolean
+  /** The span the solve in progress is for (a pulse source's level is the one at its end). */
+  private solveDt = 0
+  /** Where the step in progress ends: the switch mask carries the pulse sources' levels there. */
+  private stepEnd = 0
+  private readonly pulseElements: Int32Array
   /** Diodes (their eye average moves every step) and, after each full update, the parts under load or still hot. */
   private readonly diodeElements: Int32Array
   private loadedElements: number[] = []
@@ -443,11 +460,14 @@ export class Engine {
 
     let minFreq = Infinity
     let linear = true
+    let sine = false
     for (const el of net.elements) {
+      if (el.kind === "V" && el.amplitude > 0 && el.shape !== "pulse") sine = true
       if (el.kind === "V" && el.amplitude > 0 && el.frequency < minFreq) minFreq = el.frequency
       if (el.kind === "D" || el.kind === "Q" || el.kind === "M" || el.kind === "REG" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "BOOST" || el.kind === "TMR") linear = false
     }
     this.ac = minFreq < Infinity
+    this.sine = sine
     this.tau = this.ac ? Math.max(RMS_MIN_TAU, RMS_PERIODS / minFreq) : 0
     this.linear = linear
     this.partKeys = net.elements.map((el) => (el.kind === "SW" ? partKey(el.object, el.part) : ""))
@@ -460,8 +480,9 @@ export class Engine {
     this.junctionElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "D" || el.kind === "Q" || el.kind === "TMR" ? [i] : [])))
     this.nonlinearElements = Int32Array.from(net.elements.flatMap((el, i) => (NONLINEAR_KINDS.has(el.kind) ? [i] : [])))
     this.strikeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "SW" && el.strike !== Infinity ? [i] : [])))
+    this.pulseElements = Int32Array.from(net.elements.flatMap((el, i) => (isPulse(el) ? [i] : [])))
     this.maskElements = Int32Array.from(net.elements.flatMap((el, i) => (switchesMask(el) ? [i] : [])))
-    this.liveElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) ? [i] : [])))
+    this.liveElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) || (el.kind === "V" && el.amplitude > 0) ? [i] : [])))
     this.stateless = !net.elements.some((el) => el.kind === "C" || el.kind === "L" || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR")
     this.drifting = net.elements.some((el) => el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT")
 
@@ -938,6 +959,17 @@ export class Engine {
     this.failures.length = 0
     const loaded = this.loadedElements
     const elements = this.net.elements
+    // The RMS averages of a pulsed circuit keep moving toward the step's values; one crossing a
+    // surge rating is for the full update to record.
+    if (this.ac) {
+      for (let i = 0; i < elements.length; i++) {
+        const lim = elements[i].limits
+        if (!lim || elements[i].kind === "R" || elements[i].kind === "L" || elements[i].kind === "SW") continue
+        const cur = this.rCurrent[i]
+        if (lim.current !== undefined && lim.surge === undefined && this.ema(this.msI[i], cur * cur, dt) > (SURGE * lim.current) ** 2) return false
+        if (lim.power !== undefined && this.ema(this.msP[i], this.rPower[i], dt) > SURGE * lim.power) return false
+      }
+    }
     for (let j = 0; j < loaded.length; j++) {
       const i = loaded[j]
       const lim = elements[i].limits
@@ -948,6 +980,14 @@ export class Engine {
     }
     const diodes = this.diodeElements
     for (let j = 0; j < diodes.length; j++) this.see(diodes[j], this.rCurrent[diodes[j]], dt)
+    if (this.ac)
+      for (let i = 0; i < elements.length; i++) {
+        const cur = this.rCurrent[i]
+        const v = this.rVoltage[i]
+        this.msI[i] = this.ema(this.msI[i], cur * cur, dt)
+        this.msV[i] = this.ema(this.msV[i], v * v, dt)
+        this.msP[i] = this.ema(this.msP[i], this.rPower[i], dt)
+      }
     return true
   }
 
@@ -981,6 +1021,13 @@ export class Engine {
   settledFor(dt: number): number {
     if (this.settledRun < SETTLED_STEPS) return 0
     let steps = Infinity
+    // Not past a pulse source's next edge: a core running ahead would miss it.
+    const pulses = this.pulseElements
+    for (let k = 0; k < pulses.length; k++) {
+      const el = this.net.elements[pulses[k]] as Extract<Resolved, { kind: "V" }>
+      const edge = nextPulseEdge(this.time, pulseTiming(el))
+      if (edge) steps = Math.min(steps, Math.floor((edge.time - this.time) / dt) - 2)
+    }
     const loaded = this.loadedElements
     const elements = this.net.elements
     for (let j = 0; j < loaded.length; j++) {
@@ -996,12 +1043,13 @@ export class Engine {
 
   /**
    * Whether the step just taken left the circuit where it was: converged, no strike, no AC
-   * source, nothing stored moving (a capacitor still charging or an inductor's current
+   * source (a pulse source between edges is DC), nothing stored moving (a capacitor still charging or an inductor's current
    * ramping would drift over the steps skipped), no battery (its state drifts by design),
    * and the node voltages within tolerance of the step before.
    */
   private settledAfter(dt: number): boolean {
-    if (!this.converged || this.struck || this.ac || this.drifting || this.eventful) return false
+    // A pulse source between its edges is a DC one: its edge changes the switch mask, which ends the run.
+    if (!this.converged || this.struck || this.sine || this.drifting || this.eventful) return false
     const n = this.net.nodes
     for (let i = 0; i < n; i++) if (Math.abs(this.v[i] - this.prevV[i]) > SETTLED_DV) return false
     const elements = this.net.elements
@@ -1027,6 +1075,7 @@ export class Engine {
       else if (el.kind === "R" && el.live) mask = (mask * 31 + (this.ohms[i] | 0)) | 0
       else if (el.kind === "BAT") mask = (mask * 31 + this.batStep[i]) | 0
       else if (el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR") mask = (mask * 31 + this.ctl[i]) | 0
+      else if (el.kind === "V") mask = (mask * 31 + (pulseHigh(this.stepEnd, el) ? 1 : 0)) | 0
     }
     return mask
   }
@@ -1038,6 +1087,7 @@ export class Engine {
   step(dt: number, parts: PartReader, pins: PinReader = NO_PINS, refreshPins = true) {
     const n = this.net.nodes
     const elements = this.net.elements
+    this.stepEnd = this.time + dt
 
     // Pad states are read once per step: the MCU may change them between steps, not within.
     let disturbed = false
@@ -1078,6 +1128,7 @@ export class Engine {
       this.struck = false
       this.converged = true
       if (!this.settledTick(dt)) this.updateState(dt, parts)
+      else if (this.ac) for (let i = 0; i < n; i++) this.v2[i] = this.ema(this.v2[i], this.v[i] * this.v[i], dt)
       this.updateProbes(dt)
       this.time += dt
       return
@@ -1355,6 +1406,7 @@ export class Engine {
   /** One solve of the step from the current state; returns whether Newton settled. */
   private solve(dt: number, parts: PartReader): boolean {
     const { A, z, x, guess } = this
+    this.solveDt = dt
     const n = this.net.nodes
     const elements = this.net.elements
     // Junction voltages start from the previous solution.
@@ -1386,7 +1438,8 @@ export class Engine {
     // stored energy it is the answer (the same inputs give the same fixed point); on one
     // with, it is where the iteration starts, which spares it the junction limiting of a
     // cold start. A PWM dithering a pad flips between two such points every step.
-    const memo = this.linear || this.ac ? undefined : this.memo.get(mask)
+    // A pulse source holds its level between edges, so its points recur: its voltage is matched as a live value.
+    const memo = this.linear || this.sine ? undefined : this.memo.get(mask)
     if (memo !== undefined && this.memoMatches(memo)) {
       if (this.stateless) {
         this.v.set(memo.v)
@@ -1440,7 +1493,7 @@ export class Engine {
             let vd = limit(g(el.anode) - g(el.cathode), this.jA[i], nvt, vcrit)
             if (el.zener) vd = Math.max(vd, -el.zener - 1)
             this.jA[i] = vd
-            const ef = Math.exp(Math.min(vd / nvt, 80))
+            const ef = Math.exp(Math.min(vd / nvt, diodeExpCap(vcrit / nvt)))
             let id = el.is * (ef - 1)
             let gd = (el.is / nvt) * ef
             if (el.zener) {
@@ -1545,7 +1598,7 @@ export class Engine {
 
     this.v.set(guess.subarray(0, n))
     if (this.linear) for (let i = 0; i < n; i++) this.v[i] = x[i]
-    if (converged && !this.linear && !this.ac) this.remember(mask)
+    if (converged && !this.linear && !this.sine) this.remember(mask)
     return converged
   }
 
@@ -1792,7 +1845,9 @@ export class Engine {
   }
 
   private liveValue(i: number): number {
-    return this.net.elements[i].kind === "GPIO" ? this.gpioVolts[i] : this.ohms[i]
+    const el = this.net.elements[i]
+    if (el.kind === "V") return this.sourceVoltage(el, this.time + this.solveDt)
+    return el.kind === "GPIO" ? this.gpioVolts[i] : this.ohms[i]
   }
 
   /**
@@ -2164,7 +2219,7 @@ export class Engine {
         case "D": {
           const vd = this.vol(el.anode, this.v) - this.vol(el.cathode, this.v)
           const nvt = el.n * VT
-          let cur = el.is * (Math.exp(Math.min(vd / nvt, 80)) - 1)
+          let cur = el.is * (Math.exp(Math.min(vd / nvt, diodeExpCap(Math.log(nvt / (Math.SQRT2 * el.is))))) - 1)
           if (el.zener) cur -= el.is * (Math.exp(Math.min(-(vd + el.zener) / nvt, 80)) - 1)
           this.diodeI[i] = cur
           this.see(i, cur, dt)

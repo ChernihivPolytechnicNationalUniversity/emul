@@ -120,6 +120,15 @@ const XYZ_TO_LINEAR_SRGB = [
   [0.0557, -0.204, 1.057],
 ] as const
 
+/** The colour of a light at CIE 1931 chromaticity (x, y), brightest channel at full, as CSS. */
+export function chromaticityColor([x, y]: readonly [number, number]): string {
+  const xyz = [x / y, 1, (1 - x - y) / y]
+  const linear = XYZ_TO_LINEAR_SRGB.map((row) => Math.max(0, row[0] * xyz[0] + row[1] * xyz[1] + row[2] * xyz[2]))
+  const peak = Math.max(...linear)
+  const [r, g, b] = linear.map((c) => Math.round(255 * srgbEncode(c / peak)))
+  return `rgb(${r} ${g} ${b})`
+}
+
 export type DieLight = { level: number; amps?: number } | undefined
 
 export function rgbLedGlow(lights: readonly DieLight[], celsius = AMBIENT.reference, dies: readonly RgbDie[] = L154A4SURKQBDZGW): { color: string; level: number } | null {

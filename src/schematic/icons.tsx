@@ -301,3 +301,55 @@ export const PixelStickIcon = make(
     ))}
   </>,
 )
+
+export const SevenSegmentIcon = make(
+  "SevenSegmentIcon",
+  <>
+    <rect x={4} y={2} width={16} height={20} rx={1.5} />
+    <path d="M9 6h6M8.5 7l-.5 4M15.5 7l-.5 4M8.5 12h6M8 13l-.5 4M15 13l-.5 4M8 18h6" />
+    <circle cx={17} cy={18} r={0.8} fill="currentColor" stroke="none" />
+  </>,
+)
+
+export const KeypadIcon = make(
+  "KeypadIcon",
+  <>
+    <rect x={3} y={2} width={18} height={20} rx={1.5} />
+    {[6.5, 10.5, 14.5, 18.5].flatMap((y) => [7, 12, 17].map((x) => <rect key={`${x}-${y}`} x={x - 1.5} y={y - 1.3} width={3} height={2.6} rx={0.5} />))}
+  </>,
+)
+
+export const EncoderIcon = make(
+  "EncoderIcon",
+  <>
+    <circle cx={12} cy={11} r={6} />
+    <path d="M12 11V6M8 20v2M12 20v2M16 20v2M3.5 7.5a9.5 9.5 0 0 1 3-4M20.5 7.5a9.5 9.5 0 0 0-3-4" />
+  </>,
+)
+
+export const ServoIcon = make(
+  "ServoIcon",
+  <>
+    <rect x={3} y={9} width={18} height={10} rx={1} />
+    <circle cx={8} cy={9} r={2.5} />
+    <path d="M8 9 15 4M2 19h2M5 21h3" />
+  </>,
+)
+
+export const CharacterLcdIcon = make(
+  "CharacterLcdIcon",
+  <>
+    <rect x={2} y={5} width={20} height={14} rx={1.5} />
+    <rect x={4.5} y={8} width={15} height={8} rx={0.5} />
+    <path d="M6.5 10.5h2M10 10.5h2M13.5 10.5h2M6.5 13.5h2M10 13.5h2" />
+  </>,
+)
+
+export const OledIcon = make(
+  "OledIcon",
+  <>
+    <rect x={3} y={4} width={18} height={16} rx={1.5} />
+    <rect x={5} y={7} width={14} height={9} rx={0.5} />
+    <path d="M7 10h4M7 13h8M8 4V2M11 4V2M14 4V2M17 4V2" />
+  </>,
+)

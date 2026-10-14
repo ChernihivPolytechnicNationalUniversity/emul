@@ -54,6 +54,28 @@ BSD-3-Clause:
 `cmsis-core` v5.9.0 (https://github.com/STMicroelectronics/cmsis-core), fetched at build
 time, Apache License 2.0. Copyright (c) Arm Limited.
 
+## wokwi-elements — HD44780 A00 character ROM
+
+`src/sim/hd44780-a00.ts` is the 5×8 A00 character table of
+https://github.com/wokwi/wokwi-elements/blob/main/src/lcd1602-font-a00.ts (rasterised from the
+Hitachi HD44780U datasheet), its bits mirrored to put the leftmost column in bit 4. MIT License,
+Copyright (c) 2020 Uri Shaked:
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+    and associated documentation files (the "Software"), to deal in the Software without
+    restriction, including without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all copies or
+    substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+    BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+    DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 ## Built example firmware
 
 `firmware/examples/*.elf` are builds of the sources in `firmware/` against the ST HAL

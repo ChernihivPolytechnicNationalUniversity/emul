@@ -213,3 +213,26 @@ describe("lab 2 variant 7 at 25 Hz: the flicker a real one shows", () => {
     expect.soft(s.min, "never dark").toBeGreaterThan(0)
   })
 })
+
+describe("a pulse source between its edges is DC to the solver", () => {
+  /** The LED after 1 s of a slow pulse, with the settled and memo paths (true) or a full solve every step. */
+  const run = (fast: boolean) => {
+    const { bench, key } = pulsedLed({ freq: "5 Hz", duty: "30" })
+    if (!fast) (bench as unknown as { loop: { engine: { sine: boolean } } }).loop.engine.sine = true
+    const snap = bench.run(1.03)
+    bench.dispose()
+    const rms = Object.values(snap.pinVoltageRms ?? {}).filter((v) => v > 0)
+    return { ...snap.parts[key]!, rms }
+  }
+
+  it("the skipped steps leave the eye's level, the current and the RMS readings as full solves would (to Newton's tolerance)", () => {
+    const fast = run(true)
+    const full = run(false)
+    const near = (a: number, b: number) => Math.abs(a - b) / Math.abs(b)
+    expect(near(fast.level, full.level)).toBeLessThan(1e-3)
+    expect(near(fast.amps ?? 0, full.amps ?? 1)).toBeLessThan(1e-3)
+    expect(fast.rms.length).toBeGreaterThan(0)
+    expect(fast.rms.length).toBe(full.rms.length)
+    fast.rms.forEach((v, i) => expect(near(v, full.rms[i])).toBeLessThan(1e-3))
+  })
+})

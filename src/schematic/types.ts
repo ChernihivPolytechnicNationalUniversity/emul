@@ -82,8 +82,13 @@ export type PartDef =
       x: number
       y: number
       color: string
-      /** "glow" draws only the halo (for schematic symbols); default draws an SMD package. */
-      style?: "package" | "glow"
+      /**
+       * "glow" draws only the halo (for schematic symbols); "segment" fills the outline `d` (a
+       * seven-segment display's bar or point) in the colour as it lights; default draws an SMD package.
+       */
+      style?: "package" | "glow" | "segment"
+      /** The lit area's outline for `style: "segment"`, an SVG path in cells. */
+      d?: string
       mix?: string[]
       /** Pin id on this component the LED is tied to, if it is exposed. */
       pin?: string
@@ -98,6 +103,8 @@ export type PartDef =
       y: number
       /** Cap size in cells (default 1.6). */
       size?: number
+      /** Legend printed on the cap itself (a keypad's "1", "A", "#"). */
+      face?: string
       pin?: string
       mcu?: string
       printed?: boolean
@@ -167,6 +174,53 @@ export type PartDef =
       side: Side
       /** State before the user touches it (a board ships plugged in). */
       initial?: PartState
+    }
+  | {
+      /**
+       * A shaft turned by hand in detents (a rotary encoder): the wheel over it, or the arrows
+       * beside it, turn it one detent at a time; its state's `turns` counts detents clockwise.
+       */
+      type: "knob"
+      id: string
+      label: string
+      x: number
+      y: number
+      /** Radius in cells. */
+      r: number
+      /**
+       * The two contacts the shaft works (switch part ids for `SW` elements), in the order they
+       * close turning clockwise: the first leads by a quarter of a cycle.
+       */
+      contacts: [string, string]
+      /** Quarter-cycles of the contacts' code per detent: 4 when every detent is a full cycle, 2 when it is half. */
+      phases: number | ((props: Record<string, string>) => number)
+      /** Seconds between two quarter-cycles as the shaft is turned. */
+      quarter: number | ((props: Record<string, string>) => number)
+    }
+  | {
+      /** A servo's output horn: drawn at the angle the component's digital model reports. */
+      type: "horn"
+      id: string
+      label: string
+      x: number
+      y: number
+      /** Arm length from the spline, in cells. */
+      r: number
+    }
+  | {
+      /**
+       * A passive LCD or OLED glass drawn from the screen its digital model reports (a character
+       * LCD's dots, an OLED's pixels): w × h cells at (x, y).
+       */
+      type: "screen"
+      id: string
+      label: string
+      x: number
+      y: number
+      w: number
+      h: number
+      /** An LED part whose level lights the glass (the screen's `unlit` colours at 0). */
+      backlight?: string
     }
   | {
       type: "sound"
@@ -477,8 +531,8 @@ export type Wire = {
   color?: WireColorKey
 }
 
-/** `x`/`y`: where a panel was pressed, in its own pixels. */
-export type PartState = { on?: boolean; pressed?: boolean; x?: number; y?: number }
+/** `x`/`y`: where a panel was pressed, in its own pixels. `turns`: detents a knob has been turned clockwise. */
+export type PartState = { on?: boolean; pressed?: boolean; x?: number; y?: number; turns?: number }
 
 /** A component destroyed by the simulation. Lives in the simulation, not the document. */
 /** One broken model element: what it became and why. */

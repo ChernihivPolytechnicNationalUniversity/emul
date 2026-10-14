@@ -23,6 +23,15 @@ import type { BreakpointSpec, CoreDebugCommand, DebugStop, InspectReply, Inspect
  * between two solver batches; a finger on a real button cannot, so the release is held back.
  */
 const MIN_PRESS = 0.05
+
+/** An encoder shaft: its contacts' part keys, quarter-cycles per detent, seconds per quarter, bounce time (0: none). */
+type Knob = { a: string; b: string; phases: number; quarter: number; bounce: number; seedKey: string }
+
+/** The contacts of a quadrature encoder at quarter-cycle `p`: 00, 10, 11, 01, the first leading turning forward. */
+function quadrature(p: number): { a: boolean; b: boolean } {
+  const q = ((p % 4) + 4) % 4
+  return { a: q === 1 || q === 2, b: q === 2 || q === 3 }
+}
 /** STM32 power-on reset threshold (DS9405/DS10916 VPOR/PDR ≈ 1.7 V); below it the core is held in reset. */
 const VDD_POR = 1.7
 /** NRST input low threshold: the reset pin is a Schmitt input like any other (VIL 0.3 VDD). */
@@ -421,6 +430,13 @@ export class SimLoop {
   private bounceTime = new Map<string, { time: number; field: "pressed" | "on"; seedKey: string }>()
   private bounceTransitions = new Map<string, number>()
   private bouncing = new Map<string, { state: PartState; field: "pressed" | "on"; flips: number[] }>()
+  /** Encoder shafts by knob part key: the contacts they work and how. */
+  private knobs = new Map<string, Knob>()
+  /** Contact states the shafts have set (they are not the UI's), and the changes still to come, in time order. */
+  private contactStates = new Map<string, PartState>()
+  private contactPlan: { key: string; at: number; on: boolean }[] = []
+  /** When the last scheduled quarter-cycle of each knob lands: the next turn queues after it. */
+  private knobBusyUntil = new Map<string, number>()
   private probes: Probe[] = []
   private mcus = new Map<string, McuInstance>()
   private terminals = new Map<string, TerminalInstance>()
@@ -504,6 +520,7 @@ export class SimLoop {
       for (const p of def.parts) if ("initial" in p && p.initial) this.partDefaults[partKey(obj.id, p.id)] = p.initial
     }
     this.syncBounce()
+    this.syncKnobs()
     this.syncFirmware()
     this.syncTerminals()
     this.syncDigitalParts()
@@ -753,8 +770,38 @@ export class SimLoop {
       for (const { pad, node } of inst.inputs) padsByNet.set(root(node), [...(padsByNet.get(root(node)) ?? []), { inst, pad }])
     const shared = new Set<number>()
     for (const [node, pads] of padsByNet) if (pads.length > 1) shared.add(node)
+    // Cores a switch could couple (a keypad's key between two of its pads): in this thread from
+    // the start, since moving a running core here reloads it and loses its state mid-press.
+    const loose = new Map<number, number>()
+    const looseRoot = (n: number) => {
+      n = root(n)
+      while (loose.has(n)) n = loose.get(n)!
+      return n
+    }
+    for (const l of this.links) {
+      if (l.a === GROUND || l.b === GROUND) continue
+      const x = looseRoot(l.a)
+      const y = looseRoot(l.b)
+      if (x !== y) loose.set(Math.max(x, y), Math.min(x, y))
+    }
+    const couplable = new Map<number, McuInstance[]>()
+    for (const [node, pads] of padsByNet) {
+      const r = looseRoot(node)
+      couplable.set(r, [...(couplable.get(r) ?? []), ...pads.map((p) => p.inst)])
+    }
+    for (const insts of couplable.values()) if (insts.length > 1) for (const inst of insts) inst.relocate()
     for (const node of shared) netFor(node)
-    const pulseSources = engine ? this.logicPulseSources(engine).filter((s) => padsByNet.has(root(s.node)) && this.followsItsSource(engine, s.el, root(s.node), root)) : []
+    // Nets with a digital part's pin: a pulse source there reaches the part at its edges' exact times too.
+    const partPinNets = new Set<number>()
+    if (engine)
+      for (const part of this.digitalParts.values())
+        for (const pin of part.pins) {
+          const node = engine.net.pinNet.get(pinKey(part.object, pin))
+          if (node !== undefined) partPinNets.add(root(node))
+        }
+    const pulseSources = engine
+      ? this.logicPulseSources(engine).filter((s) => (padsByNet.has(root(s.node)) || partPinNets.has(root(s.node))) && this.followsItsSource(engine, s.el, root(s.node), root))
+      : []
     for (const s of pulseSources) netFor(root(s.node)).source = true
     for (const t of this.terminals.values()) {
       t.rxNet = engine?.net.pinNet.get(pinKey(t.object, "RX"))
@@ -1395,7 +1442,13 @@ export class SimLoop {
 
   setParts(parts: Record<string, PartState>) {
     const now = this.engine?.time ?? 0
+    for (const [key, knob] of this.knobs) {
+      const was = this.parts[key]?.turns ?? 0
+      const is = parts[key]?.turns ?? 0
+      if (is !== was) this.turnKnob(key, knob, was, is, now)
+    }
     const next: Record<string, PartState> = { ...parts }
+    for (const [key, state] of this.contactStates) next[key] = state
     for (const key of new Set([...Object.keys(parts), ...Object.keys(this.parts)])) {
       const was = (this.bouncing.get(key)?.state ?? this.parts[key])?.pressed ?? false
       const is = parts[key]?.pressed ?? false
@@ -1440,6 +1493,70 @@ export class SimLoop {
     }
   }
 
+  /**
+   * A shaft turned from detent `from` to `to`: its contacts walk the quadrature code one
+   * quarter-cycle at a time, `quarter` seconds apart, after whatever turn is still under way.
+   */
+  private turnKnob(key: string, knob: Knob, from: number, to: number, now: number) {
+    let at = Math.max(now, this.knobBusyUntil.get(key) ?? now)
+    const dir = Math.sign(to - from)
+    for (let p = from * knob.phases; p !== to * knob.phases; p += dir) {
+      at += knob.quarter
+      const before = quadrature(p)
+      const after = quadrature(p + dir)
+      if (before.a !== after.a) this.planContact(knob, knob.a, at, after.a)
+      if (before.b !== after.b) this.planContact(knob, knob.b, at, after.b)
+    }
+    this.contactPlan.sort((x, y) => x.at - y.at)
+    this.knobBusyUntil.set(key, at)
+  }
+
+  /** One contact making or breaking at `at`, with its bounce burst when the part bounces. */
+  private planContact(knob: Knob, key: string, at: number, on: boolean) {
+    const transition = this.bounceTransitions.get(key) ?? 0
+    this.bounceTransitions.set(key, transition + 1)
+    const flips = knob.bounce > 0 ? bounceFlips(bounceSeed(knob.seedKey + key, transition), at, knob.bounce) : []
+    // Each flip toggles the contact; the last leaves it where the shaft put it.
+    this.contactPlan.push({ key, at, on: flips.length % 2 ? !on : on })
+    flips.forEach((t, k) => this.contactPlan.push({ key, at: t, on: (flips.length - 1 - k) % 2 ? !on : on }))
+  }
+
+  /** Contact changes whose time has come. */
+  private applyContacts(now: number) {
+    let i = 0
+    while (i < this.contactPlan.length && this.contactPlan[i].at <= now) {
+      const { key, on } = this.contactPlan[i++]
+      const state = { on }
+      this.contactStates.set(key, state)
+      this.parts = { ...this.parts, [key]: state }
+      this.padsDirty = true
+    }
+    if (i) this.contactPlan = this.contactPlan.slice(i)
+  }
+
+  private syncKnobs() {
+    this.knobs.clear()
+    for (const obj of this.doc.objects) {
+      const def = getDef(obj.def)
+      if (!def) continue
+      const props = { ...def.defaults, ...obj.props }
+      for (const p of def.parts) {
+        if (p.type !== "knob") continue
+        const phases = typeof p.phases === "function" ? p.phases(props) : p.phases
+        const quarter = typeof p.quarter === "function" ? p.quarter(props) : p.quarter
+        const bounce = props.bounce === "on" ? parseValue(props.tbounce ?? "") : 0
+        this.knobs.set(partKey(obj.id, p.id), {
+          a: partKey(obj.id, p.contacts[0]),
+          b: partKey(obj.id, p.contacts[1]),
+          phases,
+          quarter,
+          bounce: bounce > 0 ? bounce : 0,
+          seedKey: `${props.ref ?? obj.id}:`,
+        })
+      }
+    }
+  }
+
   private settleBounces() {
     for (const [key, b] of this.bouncing) this.parts = { ...this.parts, [key]: b.state }
     this.bouncing.clear()
@@ -1447,6 +1564,13 @@ export class SimLoop {
 
   private settleContacts() {
     this.settleBounces()
+    // A turn under way lands where it is going.
+    for (const { key, on } of this.contactPlan) {
+      this.contactStates.set(key, { on })
+      this.parts = { ...this.parts, [key]: { on } }
+    }
+    this.contactPlan = []
+    this.knobBusyUntil.clear()
     for (const [key, state] of this.heldReleases) this.parts = { ...this.parts, [key]: state }
     this.heldReleases.clear()
     this.pressedAt.clear()
@@ -1805,6 +1929,7 @@ export class SimLoop {
     for (let i = 0; i < steps; i++) {
       if (this.heldReleases.size) this.releaseHeld(engine.time)
       if (this.bouncing.size) this.applyBounce(engine.time)
+      if (this.contactPlan.length) this.applyContacts(engine.time)
       if (this.links.length && this.linkKey() !== this.linkState) this.mapInputs(true)
       // The cores run ahead of the solver by one step, then the step sees their pads. A core
       // whose VDD is below the power-on threshold sits in reset until the rail comes back.
@@ -1979,7 +2104,7 @@ export class SimLoop {
    * a part's scan), no pad sampled at random from a duty. 1 when it must go step by step.
    */
   private quietSteps(engine: Engine, inst: McuInstance, left: number): number {
-    if (left < 2 || this.padsDirty || this.heldReleases.size || this.bouncing.size || !inst.padsLive) return 1
+    if (left < 2 || this.padsDirty || this.heldReleases.size || this.bouncing.size || this.contactPlan.length || !inst.padsLive) return 1
     // An in-process core's PWM pads are sampled step by step as they run (`quietDuty`); a worker's are not.
     if (inst.sampled.size && !(inst.mcu instanceof LocalCore)) return 1
     for (const t of this.terminals.values()) if (t.txEdges.length) return 1

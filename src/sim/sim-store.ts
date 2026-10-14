@@ -2,6 +2,7 @@ import * as React from "react"
 import type { Damage, PartState } from "@/schematic/types"
 import type { Reading } from "./engine"
 import type { DisplayFrame, SimReadout } from "./use-simulation"
+import { angleOf, screenOf, type Screen } from "./screen"
 
 type LivePart = PartState & { level: number; amps?: number }
 
@@ -12,11 +13,15 @@ export type ObjectSim = {
   display: DisplayFrame | undefined
   /** Colours (0xRRGGBB) of the pixels an addressable-LED model shows, by chip. */
   pixels: readonly number[] | undefined
+  /** The glass a character LCD or OLED model reports. */
+  screen: Screen | undefined
+  /** A servo model's horn angle, degrees. */
+  angle: number | undefined
 }
 
 const NO_PARTS: Record<string, LivePart> = {}
 const NO_READINGS: readonly Reading[] = []
-const IDLE: ObjectSim = { live: false, parts: NO_PARTS, damage: undefined, display: undefined, pixels: undefined }
+const IDLE: ObjectSim = { live: false, parts: NO_PARTS, damage: undefined, display: undefined, pixels: undefined, screen: undefined, angle: undefined }
 
 function samePixels(a: readonly number[] | undefined, b: readonly number[] | undefined) {
   if (a === b) return true
@@ -47,7 +52,13 @@ function sameParts(a: Record<string, LivePart>, b: Record<string, LivePart>) {
 }
 
 const sameView = (a: ObjectSim, b: ObjectSim) =>
-  a.live === b.live && a.damage === b.damage && a.display === b.display && samePixels(a.pixels, b.pixels) && sameParts(a.parts, b.parts)
+  a.live === b.live &&
+  a.damage === b.damage &&
+  a.display === b.display &&
+  a.screen?.version === b.screen?.version &&
+  a.angle === b.angle &&
+  samePixels(a.pixels, b.pixels) &&
+  sameParts(a.parts, b.parts)
 
 const sameReading = (a: Reading, b: Reading) =>
   a.element === b.element &&
@@ -159,12 +170,15 @@ export class SimStore {
   private buildView(objectId: string): ObjectSim {
     const readout = this.readout
     if (!readout?.live) return IDLE
+    const digital = readout.digital(objectId)
     return {
       live: true,
       parts: this.partsByObject.get(objectId) ?? NO_PARTS,
       damage: readout.damage[objectId],
       display: readout.display(objectId),
-      pixels: pixelsOf(readout.digital(objectId)),
+      pixels: pixelsOf(digital),
+      screen: screenOf(digital),
+      angle: angleOf(digital),
     }
   }
 }
