@@ -5,6 +5,7 @@
 import { ATMEGA328P } from "./chip"
 import { AvrMcu, clockKind } from "./mcu"
 import type { PinOverride } from "./port"
+import { ANALOG_PORT } from "../pads"
 import { ExtInt } from "./periph/extint"
 import { Usart } from "./periph/usart"
 import { Spi } from "./periph/spi"
@@ -239,7 +240,8 @@ export function createAtmega328p(): AvrMcu {
   wire(C, 5, (o) => twi.override(o, "scl", bit(portC, 5), portC.pud))
   const adc = m.attach(
     new Adc(m, m, {
-      channels: [0, 1, 2, 3, 4, 5].map((pin) => ({ port: C, pin })).concat([null, null] as never[]),
+      // ADC6/ADC7 are analog-only pins of the 32-pin packages; on PDIP-28 nothing is bonded there.
+      channels: [...[0, 1, 2, 3, 4, 5].map((pin) => ({ port: C, pin })), { port: ANALOG_PORT, pin: 6 }, { port: ANALOG_PORT, pin: 7 }],
       vector: 22,
       prr: 0,
     }),

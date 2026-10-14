@@ -175,3 +175,39 @@ describe("RESET as I/O or dW line: grounding PC6 does not reset the part", () =>
     expect(loop.snapshot()!.terminals[b.term.id].text).toMatch(/^tick 0\r\n/)
   })
 })
+
+describe("ATmega328P in TQFP-32: the analog-only ADC6 reads its net", () => {
+  it("a 10 k / 10 k divider on ADC6 and 5 V on ADC0 read 512 and 1023 against AVCC", () => {
+    const { doc, place, wire } = builder(GRID)
+    const chip = getDef("atmega328p-au")!
+    const y = (pin: string) => chip.pins.find((p) => p.id === pin)!.y
+    const R = chip.width
+    const dd = place("atmega328p-au", 0, 0, { firmware: "avr-adc.elf", firmwareData: exampleBase64("avr-adc.elf") })
+    const v5 = place("supply", -9, y("VCC") - 3, { value: "+5V", voltage: "5 V" })
+    const gnd = place("ground", -9, y("GND") + 2)
+    wire(v5, "V", dd, "VCC")
+    wire(v5, "V", dd, "AVCC")
+    wire(dd, "GND", gnd, "GND")
+    wire(v5, "V", dd, "PC0")
+    const top = place("resistor", -12, y("ADC6") - 3, { ref: "R1", value: "10 kΩ", power: "0.25" }, 90)
+    const bottom = place("resistor", -12, y("ADC6") + 1, { ref: "R2", value: "10 kΩ", power: "0.25" }, 90)
+    wire(v5, "V", top, "1")
+    wire(top, "2", dd, "ADC6")
+    wire(dd, "ADC6", bottom, "1")
+    wire(bottom, "2", gnd, "GND")
+    const zq = place("crystal", R + 6, y("PB6") - 2, { ref: "ZQ1", value: "16 MHz" }, 90)
+    wire(dd, "PB6", zq, "1")
+    wire(dd, "PB7", zq, "2")
+    const term = place("serial-terminal", R + 6, y("PD1") + 2, { baud: "9600" })
+    wire(dd, "PD1", term, "RX")
+    const { loop, state } = start(doc)
+    run(loop, state, 0.5)
+    const lines = loop.snapshot()!.terminals[term.id].text.split("\r\n").filter((l) => l.startsWith("A0="))
+    expect(lines.length).toBeGreaterThan(2)
+    const last = lines[lines.length - 1]
+    const [, a0, a6] = /^A0=(\d+) A6=(\d+)$/.exec(last)!.map(Number)
+    expect(a0).toBe(1023)
+    // ±2 LSB: the divider's own resistance against the ADC's sample-and-hold and the 10-bit step.
+    expect(Math.abs(a6 - 512)).toBeLessThanOrEqual(2)
+  })
+})

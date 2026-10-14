@@ -43,13 +43,15 @@ const ALT: Record<string, string> = {
   PD7: "AIN1 / PCINT23",
   AVCC: "Supply of the ADC and of PC0–PC6: connect to VCC (through an LC filter if the ADC is used)",
   AREF: "ADC reference input",
+  ADC6: "ADC6: analog input only, no port behind it (32-pin packages)",
+  ADC7: "ADC7: analog input only, no port behind it (32-pin packages)",
 }
 /** Short names shown inside the body next to the port name. */
 const SHORT: Record<string, string> = { PB6: "XTAL1", PB7: "XTAL2", PC6: "RESET", PD0: "RXD", PD1: "TXD" }
 
 type Group = { names: string[]; kind?: PinKind }
 
-export function avrChip(chip: AvrProfile, pkg: Package, description: string): ComponentDef {
+export function avrChip(chip: AvrProfile, pkg: Package, description: string, id = chip.id.toLowerCase()): ComponentDef {
   const byName = new Map<string, number[]>()
   for (const [n, name] of pkg.pins) byName.set(name, [...(byName.get(name) ?? []), n])
   const port = (letter: string): Group => ({
@@ -58,7 +60,8 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string): Co
       .filter((n) => new RegExp(`^P${letter}\\d$`).test(n))
       .sort(),
   })
-  const left: Group[] = [{ names: ["VCC", "AVCC"], kind: "power" }, { names: ["AREF"] }, { names: ["GND"], kind: "gnd" }, port("C")]
+  const analogOnly = ["ADC6", "ADC7"].filter((n) => byName.has(n))
+  const left: Group[] = [{ names: ["VCC", "AVCC"], kind: "power" }, { names: ["AREF"] }, { names: ["GND"], kind: "gnd" }, port("C"), ...(analogOnly.length ? [{ names: analogOnly, kind: "analog" as PinKind }] : [])]
   const right: Group[] = [port("B"), port("D")]
 
   const decorations: BodyShape[] = []
@@ -70,7 +73,7 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string): Co
       if (gi > 0) decorations.push({ type: "path", d: `M${x} ${y - 0.5} h${out * -1.5}`, muted: true })
       for (const name of g.names) {
         const nums = byName.get(name) ?? []
-        const isPort = /^P[B-D]\d$/.test(name)
+        const isPort = /^(P[B-D]\d|ADC\d)$/.test(name)
         pins.push({
           id: name,
           label: SHORT[name] ? `${name}/${SHORT[name]}` : name,
@@ -104,13 +107,13 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string): Co
     ...decorations,
   ]
   const pads = pins.filter((p) => p.mcu)
-  const model: Element[] = [{ kind: "GND", node: "GND" }, ...avrMcuModel(chip, { vcc: "VCC", avcc: "AVCC", gnd: "GND", pads: pads.map((p) => ({ node: p.id, avcc: /^PC/.test(p.id), reset: p.id === "PC6" })) })]
+  const model: Element[] = [{ kind: "GND", node: "GND" }, ...avrMcuModel(chip, { vcc: "VCC", avcc: "AVCC", gnd: "GND", pads: pads.map((p) => ({ node: p.id, avcc: /^(PC|ADC)/.test(p.id), reset: p.id === "PC6" })) })]
   const e = chip.electrical
   const f = chip.factoryFuses
   const hex = (v: number) => `0x${v.toString(16).toUpperCase().padStart(2, "0")}`
   return {
-    id: chip.id.toLowerCase(),
-    name: chip.name,
+    id,
+    name: pkg.name === "PDIP-28" ? chip.name : `${chip.name} ${pkg.name}`,
     description,
     keywords: ["AVR", "ATmega", "Arduino", "328P"],
     category: "Chips",
@@ -188,4 +191,17 @@ const PDIP28: Package = {
   ],
 }
 
-export const atmega328p = avrChip(ATMEGA328P, PDIP28, "8-bit AVR MCU, PDIP-28 — the Arduino Uno/Nano chip")
+// TQFP-32 (DS40002061B Figure 1-1, 32 TQFP; the 32 MLF/VQFN of the Arduino Nano numbers its pins the same).
+const TQFP32: Package = {
+  name: "TQFP-32",
+  source: "Microchip DS40002061B Figure 1-1 (32 TQFP), §1.1",
+  pins: [
+    [1, "PD3"], [2, "PD4"], [3, "GND"], [4, "VCC"], [5, "GND"], [6, "VCC"], [7, "PB6"], [8, "PB7"],
+    [9, "PD5"], [10, "PD6"], [11, "PD7"], [12, "PB0"], [13, "PB1"], [14, "PB2"], [15, "PB3"], [16, "PB4"],
+    [17, "PB5"], [18, "AVCC"], [19, "ADC6"], [20, "AREF"], [21, "GND"], [22, "ADC7"], [23, "PC0"], [24, "PC1"],
+    [25, "PC2"], [26, "PC3"], [27, "PC4"], [28, "PC5"], [29, "PC6"], [30, "PD0"], [31, "PD1"], [32, "PD2"],
+  ],
+}
+
+export const atmega328p = avrChip(ATMEGA328P, PDIP28, "8-bit AVR MCU, PDIP-28 — the Arduino Uno chip")
+export const atmega328pAu = avrChip(ATMEGA328P, TQFP32, "8-bit AVR MCU, TQFP-32 — the Arduino Nano chip, with the analog-only ADC6/ADC7", "atmega328p-au")

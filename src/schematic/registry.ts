@@ -6,7 +6,7 @@ import { nucleoF429zi } from "./components/nucleo-f429zi"
 import { open746ic } from "./components/open746i-c"
 import { lcd7f } from "./components/lcd7-f"
 import { stm32f429zi, stm32f746ig } from "./components/stm32-chip"
-import { atmega328p } from "./components/avr-chip"
+import { atmega328p, atmega328pAu } from "./components/avr-chip"
 import { eeprom24c } from "./components/eeprom"
 import { crystal, oscillator } from "./components/clock"
 import { meterComponents } from "./components/meters"
@@ -25,7 +25,7 @@ import { lcdModules } from "./components/lcd1602"
 import { oledModules } from "./components/oled"
 
 /** Every component the palette can place. Add a definition file and list it here. */
-export const registry: ComponentDef[] = [open746ic, nucleoF429zi, stm32f746ig, stm32f429zi, atmega328p, crystal, oscillator, eeprom24c, hc595, hct595, ne555, lcd7f, ...buzzers, ...addressableComponents, chargeBoostModule, ...powerIcs, ...meterComponents, ...basicComponents, ...rgbLeds, ...sevenSegmentComponents, keypad4x4, ...encoderComponents, servoSg90, ...lcdModules, ...oledModules].map(withPadClasses)
+export const registry: ComponentDef[] = [open746ic, nucleoF429zi, stm32f746ig, stm32f429zi, atmega328p, atmega328pAu, crystal, oscillator, eeprom24c, hc595, hct595, ne555, lcd7f, ...buzzers, ...addressableComponents, chargeBoostModule, ...powerIcs, ...meterComponents, ...basicComponents, ...rgbLeds, ...sevenSegmentComponents, keypad4x4, ...encoderComponents, servoSg90, ...lcdModules, ...oledModules].map(withPadClasses)
 
 const byId = new Map(registry.map((d) => [d.id, d]))
 

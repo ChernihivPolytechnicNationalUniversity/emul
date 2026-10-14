@@ -27,7 +27,7 @@ panel says which blocks the program touched that are missing**, so it is never a
 |---|---|---|
 | STM32F429ZIT6 (Cortex-M4F, 2 MB / 256 KB) | `STM32F429ZI` LQFP144 | Nucleo-144 (NUCLEO-F429ZI) |
 | STM32F746IGT6 (Cortex-M7, 1 MB / 320 KB) | `STM32F746IG` LQFP176 | Open746I-C (Waveshare, with the Core746I module) |
-| ATmega328P (AVRe+, 32 KB / 2 KB / 1 KB EEPROM) | `ATmega328P` PDIP-28 (`src/mcu/avr/chip.ts`) | — (Arduino Nano next) |
+| ATmega328P (AVRe+, 32 KB / 2 KB / 1 KB EEPROM) | `ATmega328P` PDIP-28, `ATmega328P TQFP-32` with the analog-only ADC6/ADC7 (`src/mcu/avr/chip.ts`) | — (Arduino Nano next) |
 
 ## AVR (ATmega328P)
 

@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest"
 import { createAtmega328p } from "@/mcu/avr/atmega328p"
 import type { AvrMcu } from "@/mcu/avr/mcu"
+import { ANALOG_PORT, padName, parsePad } from "@/mcu/pads"
 import type { PadRef } from "@/mcu/pads"
 
 const ADCL = 0x78
@@ -64,6 +65,14 @@ describe("conversion result: ADC = Vin·1024/Vref (§24.7, Tables 24-3, 24-4)", 
   ])("Vin = %f V, ADMUX REFS = 0x%s → %i", (vin, refs, want) => {
     const m = part((pad) => (pad.port === 2 && pad.pin === 0 ? vin : 0))
     expect(convert(m, refs).value).toBe(want)
+  })
+
+  it("channels 6 and 7 are the analog-only ADC6/ADC7 pins of the 32-pin packages (Figure 1-1)", () => {
+    const m = part((pad) => (pad.port === ANALOG_PORT ? (pad.pin === 6 ? 1.25 : pad.pin === 7 ? 3.75 : 0) : 0))
+    expect(convert(m, 0x46).value).toBe(256)
+    expect(convert(m, 0x47).value).toBe(768)
+    expect(parsePad("ADC7")).toEqual({ port: ANALOG_PORT, pin: 7 })
+    expect(padName({ port: ANALOG_PORT, pin: 6 })).toBe("ADC6")
   })
 
   it("AREF (REFS = 00) uses the voltage on the AREF pin", () => {
