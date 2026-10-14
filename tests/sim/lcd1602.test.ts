@@ -100,7 +100,8 @@ describe("HD44780 controller", () => {
     h.nibble(true, 0x1)
     h.wait(2e-3)
     const s = h.snap()
-    expect(s.ignoredWhileBusy).toBe(1)
+    // Both halves of the "A" land while busy: two transfers lost, the next nibble a high one again.
+    expect(s.ignoredWhileBusy).toBe(2)
     expect(row(s, 0)).toBe("")
     expect(s.warnings.join(" ")).toMatch(/busy flag/)
   })
@@ -278,6 +279,55 @@ describe("PCF8574 backpack", () => {
     expect(s.address).toBe(0x27)
     expect(row(s, 0)).toBe("I2C ok")
     expect(lcd.backlightOn()).toBe(true)
+  })
+
+  /** A powered backpack at 0x27 and its bus, the supply up over 1 ms. */
+  function powered() {
+    const lcd = new LcdBackpack("DS1", { chip: "PCF8574T" })
+    for (let k = 1; k <= 50; k++) lcd.sense((pin) => (pin === "VCC" ? (5 * k) / 50 : pin === "$v0" ? (0.8 * k) / 50 : 0), (k * 1e-3) / 50)
+    const bus = i2c(lcd, 1e-3)
+    const wait = (s: number) => {
+      bus.wait(s)
+      lcd.sense((pin) => (pin === "VCC" ? 5 : pin === "$v0" ? 0.8 : 0), bus.now())
+    }
+    return { lcd, bus, wait }
+  }
+
+  it("E comes up high with the PCF8574's ports: the first write's falling E latches an instruction, with no timing reported for it", () => {
+    const { lcd, bus, wait } = powered()
+    wait(50e-3)
+    expect(lcd.snapshot().twoLines, "one line after the internal reset").toBe(false)
+    // 0x38: D7–D4 = 3, backlight, E low. In 8-bit mode D3–D0 (unwired, pulled up) make it 3Fh.
+    bus.send([0x27 << 1, 0x38])
+    const s = lcd.snapshot()
+    expect(s.twoLines, "3Fh: function set, two lines").toBe(true)
+    expect(s.warnings).toEqual([])
+  })
+
+  it("instructions sent as two nibbles from the start (30h ×3, 20h, 28h…): the half sent while the return home runs is lost and the pairing comes back", () => {
+    const { lcd, bus, wait } = powered()
+    const BL = 0x08
+    const E = 0x04
+    // Each instruction or character in one transfer: high nibble with E high, E low, low nibble likewise.
+    const send = (rs: boolean, b: number) => {
+      const hi = (b & 0xf0) | BL | (rs ? 1 : 0)
+      const lo = ((b << 4) & 0xf0) | BL | (rs ? 1 : 0)
+      bus.send([0x27 << 1, hi | E, hi, lo | E, lo])
+    }
+    wait(50e-3)
+    for (const [b, w] of [[0x30, 5e-3], [0x30, 1e-3], [0x30, 10e-3], [0x20, 10e-3], [0x28, 1e-3], [0x08, 1e-3], [0x01, 2e-3], [0x06, 1e-3], [0x0c, 1e-3], [0x80, 1e-3]] as const) {
+      send(false, b)
+      wait(w)
+    }
+    for (const ch of "HELLO") {
+      send(true, ch.charCodeAt(0))
+      wait(100e-6)
+    }
+    const s = lcd.snapshot()
+    // 20h's low 0 pairs with 28h's 2 into 02h (return home, 1.52 ms); 28h's 8 lands while it runs.
+    expect(s.ignoredWhileBusy).toBe(1)
+    expect(row(s, 0)).toBe("HELLO")
+    expect(s.display).toBe(true)
   })
 
   it("a PCF8574AT with A0 bridged is 0x3E", () => {

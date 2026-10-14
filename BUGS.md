@@ -135,3 +135,21 @@ as a live value against a remembered point, the RMS averages move on through the
 and a lone core runs ahead no further than the next edge. The bench takes 0.87 s for 1 s.
 `tests/sim/led-eye.test.ts` checks the LED's eye level, current and RMS readings against full
 solves.
+
+## Widely used I²C LCD code prints garbage
+
+Found 2026-10-14 running ControllersTech's i2c-lcd (the LCD1602 I²C tutorial code) unmodified
+on the backpack: both lines filled with stray characters. The same code works on real modules.
+
+**Cause**
+
+Two things. The PCF8574 comes up with every port high, E included, but the module's bus started
+with E low, so the first write's falling E latched nothing. And in 4-bit mode a nibble sent while
+the controller was busy still counted as a half. That code sends 20h as a whole byte: its low 0
+becomes the first half of the next instruction, 28h's 2 completes 02h (return home), and 28h's 8
+lands while that runs. On a module the 8 is lost and the pairing comes back; here it was kept as
+a half, and every instruction and character after it was split across two.
+
+**Fixed** (2026-10-14): the backpack primes the module's lines high at power-on (the first
+write's timing is not reported, no program set it up), and a nibble sent while busy is dropped
+without counting as a half. `tests/sim/lcd1602.test.ts` replays both on the backpack.

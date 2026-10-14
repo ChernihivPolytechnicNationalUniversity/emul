@@ -381,6 +381,12 @@ export class LcdBus {
   private warnings = new Map<string, LcdWarning>()
   vcc = 0
   powered = false
+  /**
+   * E has stood high since power-on (a PCF8574's ports come up high): the first write's lines
+   * change under it and its fall latches them, as on the module, but no program set that up, so
+   * its timing is not reported.
+   */
+  highSincePowerOn = false
 
   constructor(core: Hd44780Core) {
     this.core = core
@@ -400,6 +406,7 @@ export class LcdBus {
   }
 
   reset() {
+    this.highSincePowerOn = false
     this.lowNibble = false
     this.pending = 0
     this.eRise = -Infinity
@@ -427,7 +434,7 @@ export class LcdBus {
     }
     if (pin.startsWith("D") && time > this.eFall && time - this.eFall < this.t("th") && !this.level.RW)
       this.warn(`hold ${pin}`, `${pin} changed ${formatNs(time - this.eFall)} after E fell; it must hold ${formatNs(this.t("th"))} (tH)`, time)
-    if ((pin === "RS" || pin === "RW") && this.level.E) this.warn(`rs-${pin}`, `${pin === "RW" ? "R/W" : "RS"} changed while E was high`, time)
+    if ((pin === "RS" || pin === "RW") && this.level.E && !this.highSincePowerOn) this.warn(`rs-${pin}`, `${pin === "RW" ? "R/W" : "RS"} changed while E was high`, time)
   }
 
   private rise(time: number) {
@@ -448,6 +455,8 @@ export class LcdBus {
   }
 
   private fall(time: number, rose: number) {
+    const fromPowerOn = this.highSincePowerOn
+    this.highSincePowerOn = false
     if (time - rose < this.t("pweh")) this.warn("pweh", `E high for ${formatNs(time - rose)}; PWEH is ${formatNs(this.t("pweh"))}`, time)
     this.eFall = time
     if (this.level.RW) {
@@ -455,7 +464,7 @@ export class LcdBus {
       this.release(time + this.t("tdhr"))
       return
     }
-    const lines = this.core.eightBit ? DATA : DATA.slice(4)
+    const lines = fromPowerOn ? [] : this.core.eightBit ? DATA : DATA.slice(4)
     for (const d of lines) {
       const at = this.changedAt[d] ?? -Infinity
       if (time - at < this.t("tdsw")) this.warn(`tdsw ${d}`, `${d} set up ${formatNs(time - at)} before E fell; tDSW is ${formatNs(this.t("tdsw"))}`, time)
@@ -464,6 +473,15 @@ export class LcdBus {
     DATA.forEach((d, i) => {
       if (this.level[d]) byte |= 1 << i
     })
+    // A half written while busy is not taken and does not count as a half: the next nibble is a
+    // high one again. Initialisations that send 20h as a whole byte rely on it (the low 0 lands
+    // as the first half of the next instruction, the return home it makes keeps the controller
+    // busy through that instruction's second half, and the pairing comes back).
+    if (!this.core.eightBit && this.core.busy(time)) {
+      this.core.ignoredWhileBusy++
+      this.warn("busy", `${this.level.RS ? "Data" : "An instruction"} sent while the busy flag was set was ignored (${this.core.ignoredWhileBusy} transfers so far, a nibble each in 4-bit mode)`, time)
+      return
+    }
     if (!this.core.eightBit) {
       if (!this.lowNibble) {
         this.pending = byte & 0xf0
@@ -756,7 +774,12 @@ export class LcdBackpack extends I2cSlave {
     this.time = Math.max(this.time, time)
     const wasRunning = this.power.running
     this.power.sense(volts("VCC") - volts("GND"), time, this.bus)
-    if (this.power.running && !wasRunning) this.port = 0xff
+    if (this.power.running && !wasRunning) {
+      // PCF8574: at power-on every port is high (input with its weak pull-up), E included.
+      this.port = 0xff
+      for (const p of ["RS", "RW", "E", "D4", "D5", "D6", "D7"]) this.bus.prime(p, true, time)
+      this.bus.highSincePowerOn = true
+    }
     this.vlcd = volts("VCC") - volts("$v0")
   }
 

@@ -86,3 +86,38 @@ collection of BSD-style licenses; see https://sourceware.org/newlib/COPYING.NEWL
 
 Listed with their licenses by `pnpm licenses list`. All are under MIT, Apache-2.0, ISC,
 BSD, MPL-2.0, 0BSD, BlueOak-1.0.0, OFL-1.1 (Geist font) or CC-BY-4.0 terms.
+
+## Libraries in the third-party test firmware
+
+`firmware/examples/tp-*.elf` are built from these, unmodified, by `make thirdparty` in
+`firmware/hal` (commits listed there); the sources are not in this repository.
+
+- **afiskon/stm32-ssd1306** (`tp-afiskon-ssd1306.elf`) — MIT License, Copyright (c) 2018
+  Aleksander Alekseev.
+- **4ilo/HD44780-Stm32HAL** (`tp-4ilo-hd44780.elf`) — MIT License, Copyright (c) 2018 Olivier
+  Van den Eede.
+- **olikraus/u8g2** (`tp-u8g2-ssd1306.elf`) — two-clause BSD License, Copyright (c) 2016, olikraus@gmail.com.
+  Its `ncenB08` font is derived from the X11 New Century Schoolbook bitmap, Copyright 1984–1989,
+  1994 Adobe Systems Incorporated and 1988, 1994 Digital Equipment Corporation, distributed under
+  their permission notice reproduced in u8g2's LICENSE.
+
+The MIT License text is reproduced above (wokwi-elements). The two-clause BSD License:
+
+    Redistribution and use in source and binary forms, with or without modification, are
+    permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this list of
+      conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice, this list of
+      conditions and the following disclaimer in the documentation and/or other materials
+      provided with the distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS
+    OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+    MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+    COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+    EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+    GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+    AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+    NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
+    OF THE POSSIBILITY OF SUCH DAMAGE.

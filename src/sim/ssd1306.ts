@@ -153,6 +153,8 @@ export class Ssd1306Core {
     } else if (byte === 0x2f) {
       if (this.scroll) {
         this.scrolling = true
+        // The frame rate times only the scroll; the sheet gives Fosc for the reset setting alone.
+        if ((this.clock >> 4) !== 0x8) this.unsupported.add("scroll speed with an oscillator setting other than the reset one (the sheet gives Fosc only for it): it scrolls at the reset frequency")
         this.nextScroll = time + this.scroll.frames * this.framePeriod()
       }
     } else if (byte >= 0x40 && byte <= 0x7f) this.startLine = byte & 0x3f
@@ -197,7 +199,6 @@ export class Ssd1306Core {
         break
       case 0xd5:
         this.clock = a
-        if ((a >> 4) !== 0x8) this.unsupported.add("oscillator frequency other than the reset setting (the sheet gives Fosc only for it)")
         break
       case 0xd9:
         this.precharge = a
