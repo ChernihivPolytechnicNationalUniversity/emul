@@ -131,6 +131,34 @@ export const capacitor = base({
   model: [{ kind: "C", a: "1", b: "2", value: "{value}", limits: { voltage: "{vmax}", fail: "short" } }],
 })
 
+/**
+ * Nichicon UVR (CAT.8100L), "Tangent of loss angle (tan δ)", max at 120 Hz, 20 °C, by rated
+ * voltage; a rating between rows takes the row below it. Over 1000 µF add 0.02 for every
+ * 1000 µF more.
+ */
+const UVR_TAN_DELTA: [volts: number, tanDelta: number][] = [
+  [350, 0.25],
+  [160, 0.2],
+  [100, 0.08],
+  [63, 0.1],
+  [50, 0.12],
+  [35, 0.14],
+  [25, 0.16],
+  [16, 0.2],
+  [10, 0.24],
+  [6.3, 0.28],
+]
+/** ESR typed in, else from the UVR loss angle: tan δ / (2π · 120 Hz · C). */
+const electrolyticEsr = (p: Record<string, string>) => {
+  const typed = parseValue(p.esr)
+  if (Number.isFinite(typed) && typed >= 0) return Math.max(1e-3, typed)
+  const c = parseValue(p.value) || 10e-6
+  const v = parseValue(p.vmax) || 16
+  const row = UVR_TAN_DELTA.find(([rated]) => v >= rated - 1e-9)
+  const tanDelta = (row ? row[1] : 0.28) + (c > 1000e-6 ? 0.02 * Math.floor((c - 1000e-6) / 1000e-6 + 1e-9) : 0)
+  return tanDelta / (2 * Math.PI * 120 * c)
+}
+
 export const capacitorPolarized = base({
   id: "capacitor-polarized",
   name: "Electrolytic capacitor",
@@ -142,6 +170,7 @@ export const capacitorPolarized = base({
     VALUE_FIELD("Capacitance", "F"),
     { key: "vmax", label: "Voltage rating", type: "quantity", unit: "V" },
     { key: "vrev", label: "Max reverse voltage", type: "quantity", unit: "V" },
+    { key: "esr", label: "ESR", type: "quantity", unit: "Ω", placeholder: "tan δ at 120 Hz (Nichicon UVR)" },
   ],
   pins: twoPin({ label: "+" }, { label: "−" }),
   body: [
@@ -149,7 +178,12 @@ export const capacitorPolarized = base({
     ...labels(),
   ],
   // Over-voltage or reverse polarity beyond a volt or two punctures the oxide; pin 1 is the anode.
-  model: [{ kind: "C", a: "1", b: "2", value: "{value}", limits: { voltage: "{vmax}", reverse: "{vrev}", fail: "short" } }],
+  // The ESR in series is what holds a discharged one's inrush to amps rather than kiloamps; it
+  // stays a conductor when the oxide punches through, so the dead part is a short pin to pin.
+  model: [
+    { kind: "C", a: "$c", b: "2", value: "{value}", limits: { voltage: "{vmax}", reverse: "{vrev}", fail: "short" } },
+    { kind: "R", a: "1", b: "$c", value: electrolyticEsr, hidden: true, supply: true },
+  ],
 })
 
 export const inductor = base({
@@ -717,11 +751,12 @@ export const supply: ComponentDef = {
   name: "Power rail",
   category: "Power",
   icon: SupplyIcon,
-  defaults: { value: "+3V3", voltage: "3.3 V", imax: "1 A" },
+  defaults: { value: "+3V3", voltage: "3.3 V", imax: "1 A", rint: "15 mΩ" },
   fields: [
     { key: "value", label: "Label", type: "text", placeholder: "e.g. VCC" },
     { key: "voltage", label: "Voltage", type: "quantity", unit: "V" },
     { key: "imax", label: "Max current", type: "quantity", unit: "A" },
+    { key: "rint", label: "Output resistance", type: "quantity", unit: "Ω" },
   ],
   width: 2,
   height: 2,
@@ -731,9 +766,12 @@ export const supply: ComponentDef = {
     { type: "path", d: "M1 2 V1.1 M0.4 1.1 H1.6" },
     { type: "text", x: 1, y: 0.6, text: "{value}", size: 0.35 },
   ],
-  // The supply behind the rail trips past its rating and the rail goes dead.
+  // The supply behind the rail trips past its rating and the rail goes dead. It is a regulator:
+  // 15 mΩ out is the LM7805's (Fairchild LM78XX © 2006: output resistance 15 mΩ at 1 kHz), and its
+  // protection trips on heat, so the µs inrush of the caps across it is ridden out and a short is not.
   model: [
-    { kind: "V", plus: "V", minus: "$gnd", value: "{voltage}", limits: { current: "{imax}" } },
+    { kind: "V", plus: "$reg", minus: "$gnd", value: "{voltage}", limits: { current: "{imax}", slow: true } },
+    { kind: "R", a: "$reg", b: "V", value: (p) => Math.max(1e-3, parseValue(p.rint) || 0.015), hidden: true },
     { kind: "GND", node: "$gnd" },
   ],
 }
