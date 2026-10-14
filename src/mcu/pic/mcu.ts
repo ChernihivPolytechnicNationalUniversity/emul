@@ -19,6 +19,7 @@ import { Ccp1, Timer2 } from "./periph/ccp"
 import { Comparators } from "./periph/comparator"
 import { Usart } from "./periph/usart"
 import { DataEeprom } from "./periph/eeprom"
+import { Icsp } from "./icsp"
 
 export type PicResetCause = "power-on" | "brown-out" | "mclr" | "mclr-sleep" | "wdt"
 
@@ -54,6 +55,8 @@ export class PicMcu implements PicBus, PicSystem {
   readonly comparators: Comparators
   readonly usart: Usart
   readonly dataEeprom: DataEeprom
+  /** The programming module in Program/Verify mode (DS41196G; the A parts only, decision D48). */
+  readonly icsp: Icsp
   /** The voltage on each pad as the circuit last solved it (comparator inputs). */
   private readonly analog = new Map<number, number>()
   readonly eeprom: Uint8Array
@@ -216,6 +219,31 @@ export class PicMcu implements PicBus, PicSystem {
         setEeif: (cycle) => this.setFlag("pir1", 0x80, cycle),
       }),
     )
+    this.icsp = new Icsp({
+      chip,
+      flash: this.cpu.flash,
+      ids: this.ids,
+      eeprom: this.eeprom,
+      get config() {
+        return host.config
+      },
+      set config(v: number) {
+        host.config = v & 0x3fff
+      },
+      get vdd() {
+        return host.vdd
+      },
+      get time() {
+        return host.time
+      },
+      get entry() {
+        return host.programmingEntry
+      },
+      feature: (what) => this.feature(what),
+      random: () => this.random(),
+      flashChanged: () => this.cpu.invalidate(),
+      dataChanged: () => this.portb.refresh(this.cpu.cycles),
+    })
     this.registers()
     this.powerOnReset()
   }
@@ -557,6 +585,14 @@ export class PicMcu implements PicBus, PicSystem {
   /** PORTB pins: weak pull-ups, RB4 as PGM with LVP (§5.2, Figures 5-8…5-15). */
   private modeB(p: number): PinMode {
     const m: PinMode = { digital: true, output: true, openDrain: false, pullUp: false }
+    // Program/Verify: RB7 is DATA, driven by the programming module during a read (D49); the rest held in reset.
+    if (this.programmingMode) {
+      if (p === 7 && this.icsp?.driving) {
+        m.outEnable = true
+        m.outValue = this.icsp.out
+      }
+      return m
+    }
     const pgm = p === 4 && this.lvp
     if (pgm) m.output = false
     // T1OSCEN: RB7/RB6 are the Timer1 oscillator's — no output, the digital input off (§7.0, P2-041; D17).
@@ -590,6 +626,13 @@ export class PicMcu implements PicBus, PicSystem {
   }
 
   private inputChanged(port: number, pin: number, level: boolean, cycle: number) {
+    if (this.programmingMode) {
+      // Only CLOCK, DATA and PGM mean anything to a part in Program/Verify; the original parts' commands are not modelled (D48).
+      if (port !== 1 || !this.chip.revisionA) return
+      if (pin === 6) this.icsp.clock(level, this.portb.pin(7))
+      if (pin === 4 && this.lvp && this.programmingEntry === "high-voltage") this.icsp.pgmEdge()
+      return
+    }
     if (port === 0 && pin === 4) this.timer0.pinEdge(level, cycle)
     if (port === 1) {
       // RB0/INT: the edge INTEDG selects (§14.5.1).
@@ -836,7 +879,11 @@ export class PicMcu implements PicBus, PicSystem {
     this.programmingEntry = how
     this.holdInReset()
     this.cpu.stop = true
-    this.feature("ICSP: Program/Verify mode entered — the programming protocol (DS41196G) is not modelled; the part waits for a reset")
+    if (this.chip.revisionA) this.icsp.enter()
+    else
+      this.feature(
+        `ICSP: Program/Verify mode entered — the ${this.chip.name}'s programming specification is not among the documents, so its commands are not modelled; the part waits for a reset (decision D48)`,
+      )
   }
 
   /** A reset takes hold: the pins go to inputs, a data EEPROM write under way is cut (D36). */
@@ -887,7 +934,20 @@ export class PicMcu implements PicBus, PicSystem {
       while (this.time < end) {
         this.checkMclr()
         this.checkBor()
-        if (this.porHeld || this.borHeld || this.mclrInReset || this.programmingMode) {
+        if (this.programmingMode) {
+          // The programming module answers each edge at its own time (its cycle timers count seconds).
+          const q = this.padQueue
+          while (q.length && q[0].time <= end) {
+            const e = q.shift()!
+            this.time = Math.max(this.time, e.time)
+            this.portOf(e.pad)!.setExternal(e.pad.pin, e.level, this.cpu.cycles, undefined)
+          }
+          this.time = end
+          this.checkMclr()
+          this.checkBor()
+          break
+        }
+        if (this.porHeld || this.borHeld || this.mclrInReset) {
           this.time = end
           this.checkMclr()
           this.checkBor()
@@ -1167,6 +1227,7 @@ export class PicMcu implements PicBus, PicSystem {
     const st = { high: e.schmittOfVdd.vih * vdd, low: e.schmittOfVdd.vil * vdd }
     if (p.port === 0) return st
     const schmitt =
+      (this.programmingMode && (p.pin === 6 || p.pin === 7)) ||
       (p.pin === 0 && (this.intcon & 0x10) !== 0) ||
       ((p.pin === 1 || p.pin === 2) && this.usart.spen) ||
       (p.pin === 3 && this.ccp.capture) ||

@@ -116,7 +116,7 @@ describe("PIC16F628A on the bench: INTOSC, LED, serial terminal", () => {
 })
 
 describe("13 V on MCLR/VPP", () => {
-  it("enters Program/Verify mode (RB6/RB7 low) and says the programming protocol is not modelled", () => {
+  it("enters Program/Verify mode (RB6/RB7 low): the program stops, the programming module waits for commands on RB6/RB7", () => {
     const b = bench()
     // RB6 and RB7 to ground, MCLR to a 13 V supply instead of through R1 to +5 V.
     const gnd = b.doc.objects.find((o) => o.def === "ground")!
@@ -132,6 +132,6 @@ describe("13 V on MCLR/VPP", () => {
     run(loop, state, 0.2)
     const st = loop.snapshot()!.mcus[b.dd.id]
     expect(st.labels?.power).toBe("Program/Verify mode")
-    expect(st.unmodelled.map((u) => u.block).join()).toMatch(/ICSP/)
+    expect(st.unmodelled).toEqual([])
   })
 })

@@ -25,16 +25,18 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 
 | Status | Rows |
 |---|---|
-| todo | 720 |
-| done (SoC) | 657 |
+| done (SoC) | 751 |
+| todo | 603 |
+| info | 178 |
 | done (core) | 171 |
-| info | 166 |
-| **decide** | 21 |
 | D38 | 19 |
+| D49 | 16 |
 | D44 | 12 |
+| **decide** | 9 |
 | D37 | 8 |
 | **check PDF** | 3 |
 | D19 | 3 |
+| D51 | 3 |
 | D21 | 2 |
 | D24 | 2 |
 | D32 | 2 |
@@ -55,6 +57,10 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 | D43 | 1 |
 | D42 | 1 |
 | D22 | 1 |
+| D53 | 1 |
+| D50 | 1 |
+| D56 | 1 |
+| D11 | 1 |
 | D2 | 1 |
 | D3 | 1 |
 | D20 | 1 |
@@ -267,6 +273,58 @@ VDD and temperature are not taken into account.
 **D47. Output drivers** (P5-1xx D080/D090): the circuit engine gives a pad one resistance both ways;
 the sink figure, 0.6 V at 8.5 mA (≈ 70 Ω), is taken. D090's 0.7 V at 3 mA is a guaranteed minimum at a
 light load, far weaker than the 25 mA a pin is rated to source.
+
+**D48. Which parts take ICSP commands**: DS41196G covers the A parts (P7-001). The original
+PIC16F627/628 have their own programming specification, which is not among the documents (P6-045):
+their Program/Verify mode is entered, and the commands are not answered — reported.
+
+**D49. The ICSP serial frame** (P7-030…P7-035, P7-046, P7-069, P7-071): bits are taken at the falling
+edges of CLOCK, LSb first: 6 for the command, then 16 for a data word (a start bit, 14 bits, a stop bit;
+data memory: 8 bits and 6 zeros). A read presents bit k of the word at the k-th rising edge of its data
+phase; DATA drives from the 2nd rising edge (bit 1, the LSb) to the 16th falling edge (after the stop
+bit), the start bit never driven. TSET1/THLD1/TDLY1/TDLY2 are not checked, nor the entry timings (TVHHR,
+TPPDP, TLVPP, TSET0, THLD0): the frame follows the edges as they come (a programmer that clocks too
+fast is not caught). A frame left unfinished goes on with the
+next edges (P7-060). The TDLY3 label of Figure 3-2 is a drawing artefact (P7-084).
+
+**D50. Command codes** (P7-036…P7-045): only the low 4 bits are decoded where Table 2-3 marks the upper
+ones X (Begin Programming also needs bit 4 = 0). Any other code is ignored and reported. A command (or a
+read) arriving while a programming or erase cycle still runs is ignored and reported: the documents give
+no behaviour, and a programmer that does not wait has to fail somewhere.
+
+**D51. Cycle times** (P7-137…P7-139, P6-032): Table 4-1 gives only maxima (TPROG 4 ms, TDPROG 6 ms, TERA
+6 ms). The data sheet's typical figures are used — a flash word 2 ms (D133A TPEW), a data EEPROM byte 4 ms
+(D122), a bulk erase 4 ms (D133) — so a programmer that waits the maxima always succeeds.
+
+**D52. Programming and erasing** (P7-062…P7-065, P7-073…P7-083, P7-105): Begin Programming Only writes
+the word from the last Load into the memory that Load addressed. In flash and configuration memory it does
+not erase first: bits can only go from 1 to 0 (stored = old AND new), which is why the part must be bulk
+erased first and why only a Bulk Erase returns the configuration word to 1. A data EEPROM byte is erased
+and written by its cycle, as at run time (its TDPROG is the longer one, and Figure 3-5 programs data
+memory with no erase step). Without a Load since the last program cycle it does nothing,
+reported (P7-063). Bulk Erase Program Memory follows Table 3-1: program memory and the configuration word
+always; the user IDs when the PC is in configuration memory; the data EEPROM when CPD is on. Bulk Erase
+Data Memory erases the data EEPROM only. The preceding Load of 3FFFh is not required.
+
+**D53. Configuration memory** (P7-015…P7-021, P7-026, P7-091): 2000h–200Fh are implemented (§2.1, over
+Figure 2-1's 2008h): 2000h–2003h the IDs, 2004h/2005h and 2008h–200Fh reserved cells that hold what is
+programmed (erased 3FFFh), 2006h the device ID (read-only, revision 0), 2007h the configuration word.
+2010h–3FFFh reach program memory at the PC's low bits (§2.1 "physically access user memory"). The
+configuration word programmed here takes effect at the reset that leaves Program/Verify mode.
+
+**D54. Code protection over ICSP** (P4-194, P7-110, P7-111): with CP = 0 program memory reads as 0 and is
+not programmed; with CPD = 0 the data EEPROM reads as 0 and is not programmed; the IDs, the device ID and
+the configuration word always read. A Bulk Erase lifts both (P4-195).
+
+**D55. Supply limits** (P7-072, P7-120…P7-122, P5-131, P5-132, E-002, E-003): a bulk erase under 4.5 V, or a flash word
+written under 4.5 V on the PIC16F627A/628A (E-002: revisions A2–A4, the ones the errata cover), is
+reported and left half-done (erase: old | random bits; write: some of the bits to clear left at 1), as
+D36 does for the data EEPROM. Word writes on the PIC16F648A and data memory writes go down to 2.0 V.
+
+**D56. LVP specifics** (P7-054, E-001): with the LVP bit set, an edge on RB4/PGM during Program/Verify
+resets the PC to 0 (reported). In low-voltage entry the PIC16F627A/628A cannot reach the data EEPROM
+(E-001, Rev. A3; the revision is not known here, so it applies): data memory loads, reads (00h) and erases
+do nothing, reported.
 
 **D8. The 48 rows marked decide** are settled the same way, block by block, before each block is
 written; the decision is added here.
@@ -959,7 +1017,7 @@ written; the decision is added here.
 | P4-010 | CP (bit13) for PIC16F648A: 1 = off; 0 = 0000h–0FFFh code-protected | Register 14-1, p.98 | register | todo |
 | P4-011 | CP (bit13) for PIC16F628A: 1 = off; 0 = 0000h–07FFh code-protected | Register 14-1, p.98 | register | todo |
 | P4-012 | CP (bit13) for PIC16F627A: 1 = off; 0 = 0000h–03FFh code-protected | Register 14-1, p.98 | register | todo |
-| P4-013 | CPD (bit8): 1 = data memory code protection off; 0 = data memory (EEPROM) code-protected | Register 14-1, p.98 | register | todo |
+| P4-013 | CPD (bit8): 1 = data memory code protection off; 0 = data memory (EEPROM) code-protected | Register 14-1, p.98 | register | done (SoC) |
 | P4-014 | LVP (bit7): 1 = RB4/PGM pin has PGM function, LVP enabled; 0 = RB4/PGM is digital I/O, HV on MCLR must be used for programming | Register 14-1, p.98 | register | done (SoC) |
 | P4-015 | BOREN (bit6): 1 = BOR enabled; 0 = BOR disabled | Register 14-1, p.98 | register | done (SoC) |
 | P4-016 | MCLRE (bit5): 1 = RA5/MCLR/VPP pin is MCLR; 0 = pin is digital input and MCLR is internally tied to VDD | Register 14-1, p.98 | pin | done (SoC) |
@@ -975,7 +1033,7 @@ written; the decision is added here.
 | P4-026 | FOSC<2:0> = 000: LP, low-power crystal on RA6/OSC2 and RA7/OSC1 | Register 14-1, p.98 | pin | done (SoC) |
 | P4-027 | Enabling BOR does NOT automatically enable PWRT (differs from PIC16F627/628) | Register 14-1 Note 1, p.98 | behaviour | todo |
 | P4-028 | Setting CP (turning code protection off) requires a bulk erase of the entire Flash program memory (scheme differs from PIC16F627/628) | Register 14-1 Note 2, p.98 | memory | todo |
-| P4-029 | Setting CPD (turning data protection off) requires a bulk erase of the entire data EEPROM | Register 14-1 Note 3, p.98 | memory | todo |
+| P4-029 | Setting CPD (turning data protection off) requires a bulk erase of the entire data EEPROM | Register 14-1 Note 3, p.98 | memory | done (SoC) |
 | P4-030 | When MCLR is asserted in INTOSC mode, the internal clock oscillator is disabled | Register 14-1 Note 4, p.98 | behaviour | todo |
 | P4-031 | Eight oscillator options: LP, XT, HS, RC (2 modes), INTOSC (2 modes), EC | §14.2.1, p.99 | behaviour | todo |
 | P4-032 | XT/LP/HS: crystal or ceramic resonator between OSC1 and OSC2; parallel-cut crystal required; series-cut may give out-of-spec frequency | §14.2.2, p.99 | electrical | todo |
@@ -1140,12 +1198,12 @@ written; the decision is added here.
 | P4-191 | WDT is cleared when the device wakes from Sleep, regardless of wake source | §14.8.1, p.113 | behaviour | done (SoC) |
 | P4-192 | Figure 14-17 wake via interrupt: Inst(PC)=SLEEP executes while Inst(PC+1) fetched; processor in Sleep; on INT, after TOST (1024 TOSC, XT/HS/LP) Inst(PC+1) executes (fetching PC+2), then two dummy cycles, then Inst(0004h) fetched/executed (GIE=1); with GIE=0 continues in-line | Fig 14-17 + Notes 1–3, p.113 | timing | done (SoC) |
 | P4-193 | Figure 14-17 Note 4: CLKOUT not available in XT/HS/LP oscillator modes (shown only for timing reference) | Fig 14-17 Note 4, p.113 | pin | todo |
-| P4-194 | Code protection: with CP cleared, program memory locations read out as '0' (via programming interface) | §14.9, p.113 | memory | todo |
-| P4-195 | Only a Bulk Erase can set CP and CPD (turn protection off); it erases entire data EEPROM and Flash program memory | §14.9 Note, p.113 | memory | todo |
-| P4-196 | User ID locations 2000h–2003h (four); not accessible in normal execution; readable/writable during Program/Verify; 14 bits each but only the LS 4 bits used in checksum | §14.10, p.113 | memory | todo |
-| P4-197 | ICSP uses clock, data, power, ground and programming voltage lines; devices can be programmed in-circuit | §14.11, p.114 | behaviour | todo |
+| P4-194 | Code protection: with CP cleared, program memory locations read out as '0' (via programming interface) | §14.9, p.113 | memory | done (SoC) |
+| P4-195 | Only a Bulk Erase can set CP and CPD (turn protection off); it erases entire data EEPROM and Flash program memory | §14.9 Note, p.113 | memory | done (SoC) |
+| P4-196 | User ID locations 2000h–2003h (four); not accessible in normal execution; readable/writable during Program/Verify; 14 bits each but only the LS 4 bits used in checksum | §14.10, p.113 | memory | done (SoC) |
+| P4-197 | ICSP uses clock, data, power, ground and programming voltage lines; devices can be programmed in-circuit | §14.11, p.114 | behaviour | done (SoC) |
 | P4-198 | High-voltage Program/Verify entry: hold RB6 and RB7 low while raising MCLR/VPP from VIL to VIHH | §14.11, p.114 | pin | done (SoC) |
-| P4-199 | In Program/Verify mode RB6 = programming clock (PGC), RB7 = programming data (PGD); both Schmitt-trigger inputs | §14.11, Fig 14-18, p.114 | pin | todo |
+| P4-199 | In Program/Verify mode RB6 = programming clock (PGC), RB7 = programming data (PGD); both Schmitt-trigger inputs | §14.11, Fig 14-18, p.114 | pin | done (SoC) |
 | P4-200 | After entering Program/Verify, PC is at 00h; a 6-bit command is supplied, then 14 bits of data to or from the device depending on load vs read | §14.11, p.114 | behaviour | todo |
 | P4-201 | Fig 14-18 ICSP connection: +5V→VDD, 0V→VSS, VPP→RA5/MCLR/VPP, CLK→RB6/PGC, Data I/O→RB7/PGD | Fig 14-18, p.114 | pin | todo |
 | P4-202 | LVP: programming via ICSP using only a 5 V source, no VIHH on MCLR; LVP bit erased state is '1' (LVP enabled by default) | §14.12, p.114 | behaviour | done (SoC) |
@@ -1621,9 +1679,9 @@ written; the decision is added here.
 | P6-044 | **In-circuit debug.** DS40300C describes no debug header or debug resources. A: debugging uses a PIC16F648A-ICD header that takes ICDCLK/ICDDATA, 1 stack level, address 0h (must be NOP) and 300h-3FEh. That is irrelevant for a non-A profile. | §14 (absence) | note | info |
 | P6-045 | **Device ID and revision.** DS40300C gives no device-ID word or revision values and refers to the Programming Specification (DS40044G doesn't give them either). An emulator that answers ICSP reads of 2006h needs that external document. | §14.1, §14.12, p.91/106 | note | info |
 | P6-046 | **Documentation errors in DS40300C (do not model literally).** (a) Register 7-1 TMR1ON reads "1 = Disables Timer1, 0 = Stops Timer1"; the A sheet has 1 = enables. (b) Table 3-3 row 101h "TMR0" lists the OPTION bit names. (c) The Register 3-6 address is given as 0Ch (see P6-024). (d) The USART baud tables head a column "32.768 MHz" where the A sheet says 32.768 kHz. (e) Table 11-5 gives T2CON other-resets as "uuuu" and Table 12-10 gives PIE1 as "-000 0000". (f) Param 15 for 16LF62X reads "Tosc=400 ns" (A: TOSC+400 ns). (g) Param 2 TCY min is "1.0 TCY" (A: 200 ns). (h) §8.2 mentions a "Synchronous Serial Port", which neither part has; the A sheet repeats this. | Register 7-1, p.46; Table 3-3, p.17; Tables 11-5/12-10; Table 17-4/17-5, p.136-137; §8.2, p.50 | note | info |
-| E-001 | **Data EEPROM cannot be reached in LVP mode.** "The data EEPROM memory cannot be accessed when programming in LVP mode." Flash program memory and the configuration bits can be accessed properly in LVP mode. | PIC16F627A/628A Rev. A3 | No. The errata states: "Run-time reading and writing of the data EEPROM memory functions correctly." It only shows up through an emulated LVP (RB4/PGM) programming interface. | todo |
-| E-002 | **Flash programming needs VDD 4.5-5.5 V.** "FLASH program memory can only be programmed with a VDD of 4.5V - 5.5V." Future revisions are to allow 2.0-5.5 V. This contradicts DS40044G D132A (write at VMIN-5.5 V) for these revisions. | PIC16F627A/628A Rev. A2, A3 and A4 | No. It concerns ICSP programming only; the parts have no run-time self-write. A programmer model should reject or flag writes below 4.5 V on A2-A4 silicon. | todo |
-| E-003 | **Flash erase is Bulk Erase only, at 4.5-5.5 V.** "In all current and future revisions of the PIC16F627A/628A silicon, the FLASH program memory can only be erased using the Bulk Erase command. The Bulk Erase function requires a VDD of 4.5V - 5.5V." | All PIC16F627A/628A revisions, current and future | No. Programming only. It matches DS40044G D132 (block erase 4.5-5.5 V) and the CP rule that only a Bulk Erase can turn protection off. | todo |
+| E-001 | **Data EEPROM cannot be reached in LVP mode.** "The data EEPROM memory cannot be accessed when programming in LVP mode." Flash program memory and the configuration bits can be accessed properly in LVP mode. | PIC16F627A/628A Rev. A3 | No. The errata states: "Run-time reading and writing of the data EEPROM memory functions correctly." It only shows up through an emulated LVP (RB4/PGM) programming interface. | done (SoC) |
+| E-002 | **Flash programming needs VDD 4.5-5.5 V.** "FLASH program memory can only be programmed with a VDD of 4.5V - 5.5V." Future revisions are to allow 2.0-5.5 V. This contradicts DS40044G D132A (write at VMIN-5.5 V) for these revisions. | PIC16F627A/628A Rev. A2, A3 and A4 | No. It concerns ICSP programming only; the parts have no run-time self-write. A programmer model should reject or flag writes below 4.5 V on A2-A4 silicon. | done (SoC) |
+| E-003 | **Flash erase is Bulk Erase only, at 4.5-5.5 V.** "In all current and future revisions of the PIC16F627A/628A silicon, the FLASH program memory can only be erased using the Bulk Erase command. The Bulk Erase function requires a VDD of 4.5V - 5.5V." | All PIC16F627A/628A revisions, current and future | No. Programming only. It matches DS40044G D132 (block erase 4.5-5.5 V) and the CP rule that only a Bulk Erase can turn protection off. | done (SoC) |
 
 ## 2. Errata DS80151B (PIC16F627A/628A Rev. A silicon)
 DS80151B applies to "all PIC16F627A and PIC16F628A devices", meaning Rev. A silicon checked against data sheet DS40044A. It does not cover PIC16F648A or the original PIC16F627/628. Its "Clarifications/Corrections to the Data Sheet" section says "None". No separate errata for the original PIC16F627/628 was supplied; that part's only documented silicon defect is the CM = 001 comparator mode (P6-019).
@@ -1633,144 +1691,144 @@ DS80151B applies to "all PIC16F627A and PIC16F628A devices", meaning Rev. A sili
 | ID | Item | Source | Kind | Status |
 |---|---|---|---|---|
 | P7-001 | Spec covers PIC16F627A, PIC16F628A, PIC16F648A, PIC16LF627A, PIC16LF628A, PIC16LF648A. All references to PIC16F627A/628A/648A also apply to PIC16LF62XA devices. | Front list + Note, p.1 | note | info |
-| P7-002 | Device is programmed by a serial method; Serial mode allows programming in the user's system (in-circuit). The spec applies to the devices in all packages. | §1.0, p.1 | behaviour | todo |
-| P7-003 | Hardware: one programmable power supply for VDD (2.0V to 5.5V) and a VPP of 12V to 14V, or VPP of 4.5V to 5.5V when using low voltage. Both supplies should have a minimum resolution of 0.25V. | §1.1, p.1 | electrical | todo |
-| P7-004 | Programming mode allows programming of user program memory, data memory, special locations used for ID, and the Configuration Word. | §1.2, p.1 | behaviour | todo |
+| P7-002 | Device is programmed by a serial method; Serial mode allows programming in the user's system (in-circuit). The spec applies to the devices in all packages. | §1.0, p.1 | behaviour | done (SoC) |
+| P7-003 | Hardware: one programmable power supply for VDD (2.0V to 5.5V) and a VPP of 12V to 14V, or VPP of 4.5V to 5.5V when using low voltage. Both supplies should have a minimum resolution of 0.25V. | §1.1, p.1 | electrical | info |
+| P7-004 | Programming mode allows programming of user program memory, data memory, special locations used for ID, and the Configuration Word. | §1.2, p.1 | behaviour | done (SoC) |
 | P7-005 | PDIP/SOIC 18-pin: 1 RA2/AN2/VREF, 2 RA3/AN3/CMP1, 3 RA4/T0CKI/CMP2, 4 RA5/MCLR/VPP, 5 VSS, 6 RB0/INT, 7 RB1/RX/DT, 8 RB2/TX/CK, 9 RB3/CCP1, 10 RB4/PGM, 11 RB5, 12 RB6/CLOCK/T1OSO/T1CKI, 13 RB7/DATA/T1OSI, 14 VDD, 15 RA6/OSC2/CLKOUT, 16 RA7/OSC1/CLKIN, 17 RA0/AN0, 18 RA1/AN1. | Fig 1-1, p.1 | pin | todo |
 | P7-006 | SSOP 20-pin: 1 RA2/AN2/VREF, 2 RA3/AN3/CMP1, 3 RA4/T0CKI/CMP2, 4 RA5/MCLR/VPP, 5 VSS, 6 VSS, 7 RB0/INT, 8 RB1/RX/DT, 9 RB2/TX/CK, 10 RB3/CCP1, 11 RB4/PGM, 12 RB5, 13 RB6/CLOCK/T1OSO/T1CKI, 14 RB7/DATA/T1OSI, 15 VDD, 16 VDD, 17 RA6/OSC2/CLKOUT, 18 RA7/OSC1/CLKIN, 19 RA0/AN0, 20 RA1/AN1. | Fig 1-1, p.1 | pin | todo |
 | P7-007 | 28-pin QFN (side pins legible): 1 RA5/MCLR/VPP, 2 NC, 3 VSS, 4 NC, 5 VSS, 6 NC, 7 RB0/INT; 15 RB6/CLOCK/T1OSO/T1CKI, 16 RB7/DATA/T1OSI, 17 VDD, 18 NC, 19 VDD, 20 RA6/OSC2/CLKOUT, 21 RA7/OSC1/CLKIN. Pins 8–14 carry RB1/RX/DT, RB2/TX/CK, RB3/CCP1, RB4/PGM, RB5 and NC; pins 22–28 carry RA4/T0CKI/CMP2, RA3/AN3/CMP1, RA2/AN2/VREF, RA1/AN1, RA0/AN0 and NC. | Fig 1-2, p.2 | pin | todo |
 | P7-008 | NOTE/ambiguity: the text extraction of Fig 1-2 scrambles the bottom (8–14) and top (22–28) QFN pin numbering; the exact QFN pin numbers for RB1..RB5 (incl. RB4/PGM) and RA0..RA4 cannot be read reliably from this source; check the PDF figure. | Fig 1-2, p.2 | note | **check PDF** |
-| P7-009 | Pin RB4 during programming: function PGM, type I — "Low-voltage programming input if Configuration bit equals 1" (LVP bit). | Table 1-1, p.2 | pin | todo |
-| P7-010 | Pin RB6 during programming: function CLOCK, type I — clock input. | Table 1-1, p.2 | pin | todo |
-| P7-011 | Pin RB7 during programming: function DATA, type I/O — data input/output. | Table 1-1, p.2 | pin | todo |
-| P7-012 | Pin MCLR/VPP during programming: function Programming Mode, type P(1) — Program Mode Select. | Table 1-1, p.2 | pin | todo |
-| P7-013 | Pins VDD (P, power supply) and VSS (P, ground). Legend: I = Input, O = Output, P = Power. | Table 1-1, p.2 | pin | todo |
-| P7-014 | Table 1-1 Note 1: programming high voltage is internally generated; to activate Programming mode, high voltage needs to be applied to MCLR input; MCLR is used as a level source, so MCLR does not draw any significant current (model MCLR/VPP as a high-impedance level sense, no programming current). | Table 1-1 Note 1, p.2 | electrical | todo |
-| P7-015 | User memory space 0x0000–0x1FFF. In Programming mode the program memory space is 0x0000–0x3FFF: first half 0x0000–0x1FFF user program memory, second half 0x2000–0x3FFF configuration memory. | §2.1, p.3 | memory | todo |
-| P7-016 | PC in user space increments from 0x0000 to the end of implemented user program memory and wraps around to 0x0000 (end = 0x3FF for 1K, 0x7FF for 2K, 0xFFF for 4K per Fig 2-1). | §2.1 + Fig 2-1, p.3–4 | behaviour | todo |
-| P7-017 | The high-order PC bit is not affected by Increment Address: in configuration memory the PC increments 0x2000→0x3FFF and wraps to 0x2000 (not 0x0000). | §2.1, p.3 | behaviour | todo |
-| P7-018 | The only way to set the PC back to user program memory is to reset the part and re-enter Program/Verify mode. | §2.1 / §2.4.3, p.3, p.8 | behaviour | todo |
-| P7-019 | Configuration memory is entered via the Load Configuration command. | §2.1, p.3 | behaviour | todo |
-| P7-020 | Only 0x2000–0x200F of configuration memory are physically implemented; only 0x2000–0x2007 are available; other locations are reserved. Locations beyond 0x200F physically access user memory (aliasing). | §2.1, p.3 | memory | todo |
-| P7-021 | NOTE/contradiction: Fig 2-1 marks configuration space "Implemented" from 2000 to 2008 and "Not Implemented" above (up to 3FFF), while §2.1 says 0x2000–0x200F are physically implemented and addresses beyond 0x200F alias user memory. | Fig 2-1 vs §2.1, p.3–4 | note | **decide** |
-| P7-022 | Program Flash size: PIC16F627A 1K, PIC16F628A 2K, PIC16F648A 4K words (implemented to 0x3FF / 0x7FF / 0xFFF). | Table 2-2 + Fig 2-1, p.3–4 | memory | todo |
-| P7-023 | User ID: four user ID locations mapped at [0x2000:0x2003]; they read out normally even after code protection is enabled. | §2.2, p.3 | memory | todo |
+| P7-009 | Pin RB4 during programming: function PGM, type I — "Low-voltage programming input if Configuration bit equals 1" (LVP bit). | Table 1-1, p.2 | pin | done (SoC) |
+| P7-010 | Pin RB6 during programming: function CLOCK, type I — clock input. | Table 1-1, p.2 | pin | done (SoC) |
+| P7-011 | Pin RB7 during programming: function DATA, type I/O — data input/output. | Table 1-1, p.2 | pin | done (SoC) |
+| P7-012 | Pin MCLR/VPP during programming: function Programming Mode, type P(1) — Program Mode Select. | Table 1-1, p.2 | pin | done (SoC) |
+| P7-013 | Pins VDD (P, power supply) and VSS (P, ground). Legend: I = Input, O = Output, P = Power. | Table 1-1, p.2 | pin | done (SoC) |
+| P7-014 | Table 1-1 Note 1: programming high voltage is internally generated; to activate Programming mode, high voltage needs to be applied to MCLR input; MCLR is used as a level source, so MCLR does not draw any significant current (model MCLR/VPP as a high-impedance level sense, no programming current). | Table 1-1 Note 1, p.2 | electrical | done (SoC) |
+| P7-015 | User memory space 0x0000–0x1FFF. In Programming mode the program memory space is 0x0000–0x3FFF: first half 0x0000–0x1FFF user program memory, second half 0x2000–0x3FFF configuration memory. | §2.1, p.3 | memory | done (SoC) |
+| P7-016 | PC in user space increments from 0x0000 to the end of implemented user program memory and wraps around to 0x0000 (end = 0x3FF for 1K, 0x7FF for 2K, 0xFFF for 4K per Fig 2-1). | §2.1 + Fig 2-1, p.3–4 | behaviour | done (SoC) |
+| P7-017 | The high-order PC bit is not affected by Increment Address: in configuration memory the PC increments 0x2000→0x3FFF and wraps to 0x2000 (not 0x0000). | §2.1, p.3 | behaviour | done (SoC) |
+| P7-018 | The only way to set the PC back to user program memory is to reset the part and re-enter Program/Verify mode. | §2.1 / §2.4.3, p.3, p.8 | behaviour | done (SoC) |
+| P7-019 | Configuration memory is entered via the Load Configuration command. | §2.1, p.3 | behaviour | done (SoC) |
+| P7-020 | Only 0x2000–0x200F of configuration memory are physically implemented; only 0x2000–0x2007 are available; other locations are reserved. Locations beyond 0x200F physically access user memory (aliasing). | §2.1, p.3 | memory | done (SoC) |
+| P7-021 | NOTE/contradiction: Fig 2-1 marks configuration space "Implemented" from 2000 to 2008 and "Not Implemented" above (up to 3FFF), while §2.1 says 0x2000–0x200F are physically implemented and addresses beyond 0x200F alias user memory. | Fig 2-1 vs §2.1, p.3–4 | note | D53 |
+| P7-022 | Program Flash size: PIC16F627A 1K, PIC16F628A 2K, PIC16F648A 4K words (implemented to 0x3FF / 0x7FF / 0xFFF). | Table 2-2 + Fig 2-1, p.3–4 | memory | done (SoC) |
+| P7-023 | User ID: four user ID locations mapped at [0x2000:0x2003]; they read out normally even after code protection is enabled. | §2.2, p.3 | memory | done (SoC) |
 | P7-024 | §2.2 Note 1: all other locations in configuration memory are reserved and should not be programmed. | §2.2 Note 1, p.3 | note | info |
 | P7-025 | §2.2 Note 2: only the low-order 4 bits of the user ID locations may be included in the device checksum (see §3.10). | §2.2 Note 2, p.3 | note | info |
-| P7-026 | Configuration memory map: 2000–2003 User ID Location, 2004 Reserved, 2005 Reserved, 2006 Device ID, 2007 Configuration Word. | Fig 2-1, p.4 | memory | todo |
-| P7-027 | EE Data memory space 0x00–0xFF, separate from both program memory space and RAM space. | §2.3, p.3 | memory | todo |
-| P7-028 | EE Data implemented: PIC16F627A/628A lower 128 bytes, 7 PC bits decoded; PIC16F648A full 256 bytes, 8 PC bits decoded. | §2.3 + Table 2-1, p.3 | memory | todo |
-| P7-029 | Programming the EE Data memory uses the same PC as program memory; only the lower bits are decoded and used (so data-EE address wraps by the decoded width). | §2.3, p.3 | behaviour | todo |
-| P7-030 | Programming module operates on serial command sequences; data latched on the falling edge of the clock. | §2.4, p.5 | behaviour | todo |
-| P7-031 | CLOCK and DATA are Schmitt Trigger inputs in Program/Verify mode (VIH1 0.8 VDD min, VIL1 0.2 VDD max). | §2.4 + Table 4-1, p.5, p.20 | electrical | todo |
-| P7-032 | Command sequence = 6-bit command plus, conditionally, a 16-bit data word; both command and data word are clocked LSb first. | §2.4, p.5 | behaviour | todo |
-| P7-033 | DATA must meet minimum setup and hold time with respect to the falling clock edge (TSET1, THLD1). | §2.4, p.5 | timing | todo |
-| P7-034 | Commands with data (Read and Load) require a minimum delay of TDLY1 between the command and the data (text). | §2.4, p.5 | timing | todo |
-| P7-035 | NOTE/contradiction: §2.4 text says the command→data gap is TDLY1, but Figs 2-4…2-6, 2-9, 2-10 label the command→data gap TDLY2 (clock↓ to next clock↑, 1.0 µs min); TDLY1 appears in Figs 2-8/2-9/2-10 differently. Both minima are 1.0 µs. | §2.4 vs Figs 2-4..2-10 | note | **decide** |
-| P7-036 | Command Load Configuration: mapping (MSb…LSb) X X 0 0 0 0 (= xx0000b, 0x00); data: 0, data(14), 0. | Table 2-3, p.5 | behaviour | todo |
-| P7-037 | Command Load Data for Program Memory: X X 0 0 1 0 (0x02); data: 0, data(14), 0. | Table 2-3, p.5 | behaviour | todo |
-| P7-038 | Command Load Data for Data Memory: X X 0 0 1 1 (0x03); data: 0, data(8), zero(6), 0. | Table 2-3, p.5 | behaviour | todo |
-| P7-039 | Command Increment Address: X X 0 1 1 0 (0x06); no data. | Table 2-3, p.5 | behaviour | todo |
-| P7-040 | Command Read Data from Program Memory: X X 0 1 0 0 (0x04); data: 0, data(14), 0. | Table 2-3, p.5 | behaviour | todo |
-| P7-041 | Command Read Data from Data Memory: X X 0 1 0 1 (0x05); data: 0, data(8), zero(6), 0. | Table 2-3, p.5 | behaviour | todo |
-| P7-042 | Command Begin Programming Only Cycle: X 0 1 0 0 0 (0x08; bit 4 must be 0, only bit 5 is don't-care); no data. | Table 2-3, p.5 | behaviour | todo |
-| P7-043 | Command Bulk Erase Program Memory: X X 1 0 0 1 (0x09); no data. | Table 2-3, p.5 | behaviour | todo |
-| P7-044 | Command Bulk Erase Data Memory: X X 1 0 1 1 (0x0B); no data. | Table 2-3, p.5 | behaviour | todo |
-| P7-045 | NOTE: no other 6-bit command codes are defined in Table 2-3 (no End Programming, no Begin Erase/Program cycle, no Chip Erase); behaviour on an undefined code is not specified. | Table 2-3 / §2.4.4, p.5, p.8 | note | **decide** |
-| P7-046 | 16-bit data word is an input (Load Data commands) or an output (Read Data commands). It contains 14 data bits centred in 16 bits, padded with a leading and trailing zero (start bit, 14 bits LSb first, stop bit). | §2.4, p.6 + Figs 2-4/2-9 | behaviour | todo |
-| P7-047 | High-voltage Program/Verify entry: hold CLOCK and DATA low while raising MCLR first, then VDD (Fig 2-2, timing labels TPPDP, THLD0). | §2.4 + Fig 2-2, p.6 | behaviour | todo |
+| P7-026 | Configuration memory map: 2000–2003 User ID Location, 2004 Reserved, 2005 Reserved, 2006 Device ID, 2007 Configuration Word. | Fig 2-1, p.4 | memory | done (SoC) |
+| P7-027 | EE Data memory space 0x00–0xFF, separate from both program memory space and RAM space. | §2.3, p.3 | memory | done (SoC) |
+| P7-028 | EE Data implemented: PIC16F627A/628A lower 128 bytes, 7 PC bits decoded; PIC16F648A full 256 bytes, 8 PC bits decoded. | §2.3 + Table 2-1, p.3 | memory | done (SoC) |
+| P7-029 | Programming the EE Data memory uses the same PC as program memory; only the lower bits are decoded and used (so data-EE address wraps by the decoded width). | §2.3, p.3 | behaviour | done (SoC) |
+| P7-030 | Programming module operates on serial command sequences; data latched on the falling edge of the clock. | §2.4, p.5 | behaviour | done (SoC) |
+| P7-031 | CLOCK and DATA are Schmitt Trigger inputs in Program/Verify mode (VIH1 0.8 VDD min, VIL1 0.2 VDD max). | §2.4 + Table 4-1, p.5, p.20 | electrical | done (SoC) |
+| P7-032 | Command sequence = 6-bit command plus, conditionally, a 16-bit data word; both command and data word are clocked LSb first. | §2.4, p.5 | behaviour | done (SoC) |
+| P7-033 | DATA must meet minimum setup and hold time with respect to the falling clock edge (TSET1, THLD1). | §2.4, p.5 | timing | D49 |
+| P7-034 | Commands with data (Read and Load) require a minimum delay of TDLY1 between the command and the data (text). | §2.4, p.5 | timing | D49 |
+| P7-035 | NOTE/contradiction: §2.4 text says the command→data gap is TDLY1, but Figs 2-4…2-6, 2-9, 2-10 label the command→data gap TDLY2 (clock↓ to next clock↑, 1.0 µs min); TDLY1 appears in Figs 2-8/2-9/2-10 differently. Both minima are 1.0 µs. | §2.4 vs Figs 2-4..2-10 | note | D49 |
+| P7-036 | Command Load Configuration: mapping (MSb…LSb) X X 0 0 0 0 (= xx0000b, 0x00); data: 0, data(14), 0. | Table 2-3, p.5 | behaviour | done (SoC) |
+| P7-037 | Command Load Data for Program Memory: X X 0 0 1 0 (0x02); data: 0, data(14), 0. | Table 2-3, p.5 | behaviour | done (SoC) |
+| P7-038 | Command Load Data for Data Memory: X X 0 0 1 1 (0x03); data: 0, data(8), zero(6), 0. | Table 2-3, p.5 | behaviour | done (SoC) |
+| P7-039 | Command Increment Address: X X 0 1 1 0 (0x06); no data. | Table 2-3, p.5 | behaviour | done (SoC) |
+| P7-040 | Command Read Data from Program Memory: X X 0 1 0 0 (0x04); data: 0, data(14), 0. | Table 2-3, p.5 | behaviour | done (SoC) |
+| P7-041 | Command Read Data from Data Memory: X X 0 1 0 1 (0x05); data: 0, data(8), zero(6), 0. | Table 2-3, p.5 | behaviour | done (SoC) |
+| P7-042 | Command Begin Programming Only Cycle: X 0 1 0 0 0 (0x08; bit 4 must be 0, only bit 5 is don't-care); no data. | Table 2-3, p.5 | behaviour | done (SoC) |
+| P7-043 | Command Bulk Erase Program Memory: X X 1 0 0 1 (0x09); no data. | Table 2-3, p.5 | behaviour | done (SoC) |
+| P7-044 | Command Bulk Erase Data Memory: X X 1 0 1 1 (0x0B); no data. | Table 2-3, p.5 | behaviour | done (SoC) |
+| P7-045 | NOTE: no other 6-bit command codes are defined in Table 2-3 (no End Programming, no Begin Erase/Program cycle, no Chip Erase); behaviour on an undefined code is not specified. | Table 2-3 / §2.4.4, p.5, p.8 | note | D50 |
+| P7-046 | 16-bit data word is an input (Load Data commands) or an output (Read Data commands). It contains 14 data bits centred in 16 bits, padded with a leading and trailing zero (start bit, 14 bits LSb first, stop bit). | §2.4, p.6 + Figs 2-4/2-9 | behaviour | done (SoC) |
+| P7-047 | High-voltage Program/Verify entry: hold CLOCK and DATA low while raising MCLR first, then VDD (Fig 2-2, timing labels TPPDP, THLD0). | §2.4 + Fig 2-2, p.6 | behaviour | done (SoC) |
 | P7-048 | Fig 2-2 Note: if the LVP fuse is enabled, PGM should be held low to prevent inadvertent entry into LVP mode (HV flowchart step "Set PGM = VSS", then "Set MCLR = VIHH", then "Set VDD = VDD"). | Fig 2-2 Note + Fig 3-3, p.6, p.13 | note | info |
-| P7-049 | NOTE: Fig 2-2 draws a trace labelled "LVP" (not "PGM") among MCLR, VDD, DATA, CLOCK; presumably the PGM pin. | Fig 2-2, p.6 | note | **decide** |
-| P7-050 | Low-voltage Program/Verify entry: raise VDD, then MCLR and PGM (Fig 2-3, timing labels THLD0, TLVPP, TPPDP). Flowchart order: Set VDD = VDD, Set PGM = VDD, Set MCLR = VDD. | §2.4 + Fig 2-3 + Fig 3-3, p.6, p.13 | behaviour | todo |
+| P7-049 | NOTE: Fig 2-2 draws a trace labelled "LVP" (not "PGM") among MCLR, VDD, DATA, CLOCK; presumably the PGM pin. | Fig 2-2, p.6 | note | info |
+| P7-050 | Low-voltage Program/Verify entry: raise VDD, then MCLR and PGM (Fig 2-3, timing labels THLD0, TLVPP, TPPDP). Flowchart order: Set VDD = VDD, Set PGM = VDD, Set MCLR = VDD. | §2.4 + Fig 2-3 + Fig 3-3, p.6, p.13 | behaviour | done (SoC) |
 | P7-051 | Fig 2-3 Note: if the device is in LVP mode, raising VPP to VIHH will override LVP mode. | Fig 2-3 Note, p.6 | note | info |
-| P7-052 | PC is set to '0' upon entering Program/Verify mode. PC changes only by Increment Address or Load Configuration (sets PC to 0x2000). | §2.4, p.6 | behaviour | todo |
-| P7-053 | All other logic is held in Reset while in Program/Verify mode: all I/O are in the Reset state (high-impedance inputs); user code does not run. | §2.4, p.6 | behaviour | todo |
-| P7-054 | If LVP is not used but the LVP Configuration bit is set, PGM must not toggle during programming: PGM is edge sensitive and a detected edge may cause the PC to reset. | §2.4, p.6 | failure-mode | todo |
-| P7-055 | If the LVP feature is disabled (LVP=0), the PGM pin has no effect on programming. | §2.4, p.6 | behaviour | todo |
+| P7-052 | PC is set to '0' upon entering Program/Verify mode. PC changes only by Increment Address or Load Configuration (sets PC to 0x2000). | §2.4, p.6 | behaviour | done (SoC) |
+| P7-053 | All other logic is held in Reset while in Program/Verify mode: all I/O are in the Reset state (high-impedance inputs); user code does not run. | §2.4, p.6 | behaviour | done (SoC) |
+| P7-054 | If LVP is not used but the LVP Configuration bit is set, PGM must not toggle during programming: PGM is edge sensitive and a detected edge may cause the PC to reset. | §2.4, p.6 | failure-mode | D56 |
+| P7-055 | If the LVP feature is disabled (LVP=0), the PGM pin has no effect on programming. | §2.4, p.6 | behaviour | done (SoC) |
 | P7-056 | Note: the LVP feature is enabled by default when the LVP bit of the Configuration Word is set (erased value of the bit is 1). | §2.4 Note, p.6 + Reg 3-1 | note | info |
-| P7-057 | NOTE: exit from Program/Verify mode is not described explicitly; only "reset the part and re-enter" / "exiting and re-entering" is mentioned; no exit timing given. | §2.1, §2.4.3 | note | **decide** |
-| P7-058 | Load Data for Program Memory: receives a 14-bit word and readies it to be programmed at the PC location. Waveform: 6 command clocks (DATA 0,1,0,0,0,0 LSb first), TDLY2, then 16 data clocks: strt_bit, LSb … MSb, stp_bit; TSET1/THLD1 at clock↓. | §2.4.1 + Fig 2-4, p.7 | behaviour | todo |
-| P7-059 | Load Data for Data Memory: receives an 8-bit byte, readies it for data memory. Although the byte is 8 bits wide, all 16 clock cycles are required to allow the programming module to reset properly. Waveform command bits 1,1,0,0,0,0. | §2.4.2 + Fig 2-5, p.7 | behaviour | todo |
-| P7-060 | Failure mode: a data phase cut short of 16 clocks on Load Data for Data Memory leaves the programming module not reset properly (behaviour undefined by spec). | §2.4.2, p.7 | failure-mode | todo |
-| P7-061 | Load Configuration: advances PC to start of configuration memory (0x2000–0x200F) and loads the data for the first ID location (0x2000). Once in the configuration region, only exiting and re-entering Program/Verify mode resets PC to user space. Waveform command bits 0,0,0,0,0,0, TDLY2, "First Data Word" 16 clocks. | §2.4.3 + Fig 2-6, p.8 | behaviour | todo |
-| P7-062 | Begin Programming Only Cycle: programs the previously loaded word into the appropriate memory (user program, data, or configuration memory, per PC/last load). Programming begins after the command is received and decoded; an internal timer executes the write. | §2.4.4, p.8 | behaviour | todo |
-| P7-063 | A Load command must be given before every Programming command. | §2.4.4, p.8 | behaviour | todo |
-| P7-064 | User must allow the program cycle time before issuing the next command: TPROG (program memory) or TDPROG (data memory) after the 6th clock of Begin Programming (Fig 2-7). No "End Programming" command is required. | §2.4.4 + Fig 2-7, p.8 | timing | todo |
-| P7-065 | The device must be Bulk Erased before starting a series of Programming Only cycles (programming only, no erase-before-write: model programming as clearing bits on an erased word / failure if not erased). | §2.4.4, p.8 | failure-mode | todo |
-| P7-066 | Begin Programming waveform DATA bits 0,0,0,1,0,0 (LSb first). | Fig 2-7, p.8 | behaviour | todo |
-| P7-067 | Increment Address: PC incremented when command received. Waveform DATA 0,1,1,0,X,X; then TDLY2 (and TDLY1) to next command. | §2.4.5 + Fig 2-8, p.9 | behaviour | todo |
-| P7-068 | Read Data from Program Memory: reads the word addressed by the PC and transmits it on DATA during the data phase; reports words from user or configuration memory depending on PC. Waveform command DATA 0,0,1,0,X,X. | §2.4.6 + Fig 2-9, p.9 | behaviour | todo |
-| P7-069 | Read Data: DATA pin goes into Output mode on the second rising clock edge (of the data phase) and reverts to Input mode (high-impedance) after the 16th rising edge. Output: strt_bit, LSb…MSb, stp_bit; data valid TDLY3 (≤80 ns) after clock↑. | §2.4.6 + Fig 2-9, p.9 | behaviour | todo |
-| P7-070 | Read Data from Data Memory: reads the byte addressed by the low-order bits of PC; same output window (2nd rising edge to after 16th rising edge); only 8 bits transmitted, last 8 bits zero padded. Waveform command DATA 1,0,1,0,X,X. | §2.4.7 + Fig 2-10, p.10 | behaviour | todo |
-| P7-071 | NOTE/ambiguity: §2.4.7 says "last 8 bits are zero padded" while Table 2-3 framing is 0, data(8), zero(6), 0 (i.e. 6 zeros + stop bit = 7 trailing, plus start bit). | §2.4.7 vs Table 2-3 | note | **decide** |
-| P7-072 | All Bulk Erase operations must take place with VDD between 4.5–5.5V. | §3.1 Note, §3.2 Note, p.11–12; Table 4-1 | electrical | todo |
-| P7-073 | Bulk Erase Program Memory sequence: (1) Load Data for Program Memory with data word all '1's (0x3FFF); (2) Bulk Erase Program Memory command; (3) wait TERA for erase to complete. | §3.1, p.11 | behaviour | todo |
-| P7-074 | If the address is pointing to configuration memory (0x2000–0x200F) when Bulk Erase Program Memory is issued, both user ID locations and program memory are erased. | §3.1, p.11 | behaviour | todo |
-| P7-075 | Bulk Erase Program Memory waveform DATA 1,0,0,1,0,0 then TERA before next command. | Fig 3-1, p.11 | timing | todo |
-| P7-076 | Table 3-1 (CP column "X" in all rows): Bulk Erase Data Memory, CPD OFF, PC any → Program Unaffected, Data EE Erased, Config Word Unaffected, User ID Unaffected. | Table 3-1, p.11 | behaviour | todo |
-| P7-077 | Table 3-1: Bulk Erase Data Memory, CPD ON, PC any → Program Unaffected, Data EE Erased, Config Word Unaffected, User ID Unaffected; comment "CPD=ON" (CPD bit itself not cleared by data erase). | Table 3-1, p.11 | behaviour | todo |
-| P7-078 | Table 3-1: Bulk Erase Program Memory, CPD ON, PC=Config YES → Program Erased, Data EE Erased, Config Word Erased, User ID Erased. | Table 3-1, p.11 | behaviour | todo |
-| P7-079 | Table 3-1: Bulk Erase Program Memory, CPD OFF, PC=Config YES → Program Erased, Data EE Unaffected, Config Word Erased, User ID Erased. | Table 3-1, p.11 | behaviour | todo |
-| P7-080 | Table 3-1: Bulk Erase Program Memory, CPD ON, PC=Config NO → Program Erased, Data EE Erased, Config Word Erased, User ID Unaffected. | Table 3-1, p.11 | behaviour | todo |
-| P7-081 | Table 3-1: Bulk Erase Program Memory, CPD OFF, PC=Config NO → Program Erased, Data EE Unaffected, Config Word Erased, User ID Unaffected. | Table 3-1, p.11 | behaviour | todo |
+| P7-057 | NOTE: exit from Program/Verify mode is not described explicitly; only "reset the part and re-enter" / "exiting and re-entering" is mentioned; no exit timing given. | §2.1, §2.4.3 | note | D11 |
+| P7-058 | Load Data for Program Memory: receives a 14-bit word and readies it to be programmed at the PC location. Waveform: 6 command clocks (DATA 0,1,0,0,0,0 LSb first), TDLY2, then 16 data clocks: strt_bit, LSb … MSb, stp_bit; TSET1/THLD1 at clock↓. | §2.4.1 + Fig 2-4, p.7 | behaviour | done (SoC) |
+| P7-059 | Load Data for Data Memory: receives an 8-bit byte, readies it for data memory. Although the byte is 8 bits wide, all 16 clock cycles are required to allow the programming module to reset properly. Waveform command bits 1,1,0,0,0,0. | §2.4.2 + Fig 2-5, p.7 | behaviour | done (SoC) |
+| P7-060 | Failure mode: a data phase cut short of 16 clocks on Load Data for Data Memory leaves the programming module not reset properly (behaviour undefined by spec). | §2.4.2, p.7 | failure-mode | D49 |
+| P7-061 | Load Configuration: advances PC to start of configuration memory (0x2000–0x200F) and loads the data for the first ID location (0x2000). Once in the configuration region, only exiting and re-entering Program/Verify mode resets PC to user space. Waveform command bits 0,0,0,0,0,0, TDLY2, "First Data Word" 16 clocks. | §2.4.3 + Fig 2-6, p.8 | behaviour | done (SoC) |
+| P7-062 | Begin Programming Only Cycle: programs the previously loaded word into the appropriate memory (user program, data, or configuration memory, per PC/last load). Programming begins after the command is received and decoded; an internal timer executes the write. | §2.4.4, p.8 | behaviour | done (SoC) |
+| P7-063 | A Load command must be given before every Programming command. | §2.4.4, p.8 | behaviour | done (SoC) |
+| P7-064 | User must allow the program cycle time before issuing the next command: TPROG (program memory) or TDPROG (data memory) after the 6th clock of Begin Programming (Fig 2-7). No "End Programming" command is required. | §2.4.4 + Fig 2-7, p.8 | timing | done (SoC) |
+| P7-065 | The device must be Bulk Erased before starting a series of Programming Only cycles (programming only, no erase-before-write: model programming as clearing bits on an erased word / failure if not erased). | §2.4.4, p.8 | failure-mode | done (SoC) |
+| P7-066 | Begin Programming waveform DATA bits 0,0,0,1,0,0 (LSb first). | Fig 2-7, p.8 | behaviour | done (SoC) |
+| P7-067 | Increment Address: PC incremented when command received. Waveform DATA 0,1,1,0,X,X; then TDLY2 (and TDLY1) to next command. | §2.4.5 + Fig 2-8, p.9 | behaviour | done (SoC) |
+| P7-068 | Read Data from Program Memory: reads the word addressed by the PC and transmits it on DATA during the data phase; reports words from user or configuration memory depending on PC. Waveform command DATA 0,0,1,0,X,X. | §2.4.6 + Fig 2-9, p.9 | behaviour | done (SoC) |
+| P7-069 | Read Data: DATA pin goes into Output mode on the second rising clock edge (of the data phase) and reverts to Input mode (high-impedance) after the 16th rising edge. Output: strt_bit, LSb…MSb, stp_bit; data valid TDLY3 (≤80 ns) after clock↑. | §2.4.6 + Fig 2-9, p.9 | behaviour | done (SoC) |
+| P7-070 | Read Data from Data Memory: reads the byte addressed by the low-order bits of PC; same output window (2nd rising edge to after 16th rising edge); only 8 bits transmitted, last 8 bits zero padded. Waveform command DATA 1,0,1,0,X,X. | §2.4.7 + Fig 2-10, p.10 | behaviour | done (SoC) |
+| P7-071 | NOTE/ambiguity: §2.4.7 says "last 8 bits are zero padded" while Table 2-3 framing is 0, data(8), zero(6), 0 (i.e. 6 zeros + stop bit = 7 trailing, plus start bit). | §2.4.7 vs Table 2-3 | note | D49 |
+| P7-072 | All Bulk Erase operations must take place with VDD between 4.5–5.5V. | §3.1 Note, §3.2 Note, p.11–12; Table 4-1 | electrical | done (SoC) |
+| P7-073 | Bulk Erase Program Memory sequence: (1) Load Data for Program Memory with data word all '1's (0x3FFF); (2) Bulk Erase Program Memory command; (3) wait TERA for erase to complete. | §3.1, p.11 | behaviour | done (SoC) |
+| P7-074 | If the address is pointing to configuration memory (0x2000–0x200F) when Bulk Erase Program Memory is issued, both user ID locations and program memory are erased. | §3.1, p.11 | behaviour | done (SoC) |
+| P7-075 | Bulk Erase Program Memory waveform DATA 1,0,0,1,0,0 then TERA before next command. | Fig 3-1, p.11 | timing | done (SoC) |
+| P7-076 | Table 3-1 (CP column "X" in all rows): Bulk Erase Data Memory, CPD OFF, PC any → Program Unaffected, Data EE Erased, Config Word Unaffected, User ID Unaffected. | Table 3-1, p.11 | behaviour | done (SoC) |
+| P7-077 | Table 3-1: Bulk Erase Data Memory, CPD ON, PC any → Program Unaffected, Data EE Erased, Config Word Unaffected, User ID Unaffected; comment "CPD=ON" (CPD bit itself not cleared by data erase). | Table 3-1, p.11 | behaviour | done (SoC) |
+| P7-078 | Table 3-1: Bulk Erase Program Memory, CPD ON, PC=Config YES → Program Erased, Data EE Erased, Config Word Erased, User ID Erased. | Table 3-1, p.11 | behaviour | done (SoC) |
+| P7-079 | Table 3-1: Bulk Erase Program Memory, CPD OFF, PC=Config YES → Program Erased, Data EE Unaffected, Config Word Erased, User ID Erased. | Table 3-1, p.11 | behaviour | done (SoC) |
+| P7-080 | Table 3-1: Bulk Erase Program Memory, CPD ON, PC=Config NO → Program Erased, Data EE Erased, Config Word Erased, User ID Unaffected. | Table 3-1, p.11 | behaviour | done (SoC) |
+| P7-081 | Table 3-1: Bulk Erase Program Memory, CPD OFF, PC=Config NO → Program Erased, Data EE Unaffected, Config Word Erased, User ID Unaffected. | Table 3-1, p.11 | behaviour | done (SoC) |
 | P7-082 | Table 3-1 header "Serial & Parallel Operation"; CP ON=0 / OFF=1, CPD ON=0 / OFF=1; CP state does not change outcome (X). | Table 3-1, p.11 | note | info |
-| P7-083 | Bulk Erase Data Memory sequence: (1) Bulk Erase Data Memory command; (2) wait TERA. (No preceding Load required.) Waveform DATA 1,1,0,1,0,0. | §3.2 + Fig 3-2, p.12 | behaviour | todo |
-| P7-084 | NOTE: Fig 3-2 shows a TDLY3 label after the next command's clock 2 (no read is involved) — likely drawing artefact. | Fig 3-2, p.12 | note | **decide** |
-| P7-085 | Program memory flow (HV): Set PGM = VSS → Set MCLR = VIHH → Set VDD = VDD; (LV): Set VDD = VDD → Set PGM = VDD → Set MCLR = VDD. Per location: Load Data for Program Memory → Begin Programming → Wait TPROG → Read Data from Program Memory → if wrong "Report Programming Failure"; Increment Address until all locations done; then verify all locations; error → "Report Verify Error @ VDDNOM". | Fig 3-3, p.13 | behaviour | todo |
-| P7-086 | Configuration memory flow: Load Configuration Data → if Program ID Location: Program Cycle, Read Data, verify (else Report Programming Failure) → Increment Address → loop until Address = 0x2004 → Increment Address ×3 (to 0x2007) → Program Cycle (Config. Word) → Set VDD = VDDNOM → Read Data → if wrong "Report Program Configuration Word Error". | Fig 3-4, p.14 | behaviour | todo |
-| P7-087 | Data memory flow: Load Data for Data Memory → Begin Programming → Wait TDPROG → Read Data from Data Memory → verify (Report Programming Failure) → Increment Address until all done → final verify (Report Verify Error). | Fig 3-5, p.15 | behaviour | todo |
-| P7-088 | Programming a range: after entry, Increment Address until Address = Start Address, then program cycle per location with Wait TPROG, read-back verify, and final "Verify all Locations @ VDDNOM". | Fig 3-6, p.16 | behaviour | todo |
+| P7-083 | Bulk Erase Data Memory sequence: (1) Bulk Erase Data Memory command; (2) wait TERA. (No preceding Load required.) Waveform DATA 1,1,0,1,0,0. | §3.2 + Fig 3-2, p.12 | behaviour | done (SoC) |
+| P7-084 | NOTE: Fig 3-2 shows a TDLY3 label after the next command's clock 2 (no read is involved) — likely drawing artefact. | Fig 3-2, p.12 | note | D49 |
+| P7-085 | Program memory flow (HV): Set PGM = VSS → Set MCLR = VIHH → Set VDD = VDD; (LV): Set VDD = VDD → Set PGM = VDD → Set MCLR = VDD. Per location: Load Data for Program Memory → Begin Programming → Wait TPROG → Read Data from Program Memory → if wrong "Report Programming Failure"; Increment Address until all locations done; then verify all locations; error → "Report Verify Error @ VDDNOM". | Fig 3-3, p.13 | behaviour | done (SoC) |
+| P7-086 | Configuration memory flow: Load Configuration Data → if Program ID Location: Program Cycle, Read Data, verify (else Report Programming Failure) → Increment Address → loop until Address = 0x2004 → Increment Address ×3 (to 0x2007) → Program Cycle (Config. Word) → Set VDD = VDDNOM → Read Data → if wrong "Report Program Configuration Word Error". | Fig 3-4, p.14 | behaviour | done (SoC) |
+| P7-087 | Data memory flow: Load Data for Data Memory → Begin Programming → Wait TDPROG → Read Data from Data Memory → verify (Report Programming Failure) → Increment Address until all done → final verify (Report Verify Error). | Fig 3-5, p.15 | behaviour | done (SoC) |
+| P7-088 | Programming a range: after entry, Increment Address until Address = Start Address, then program cycle per location with Wait TPROG, read-back verify, and final "Verify all Locations @ VDDNOM". | Fig 3-6, p.16 | behaviour | done (SoC) |
 | P7-089 | NOTE: VDDNOM (nominal VDD for verify) is used in flowcharts but not given a value in this spec. | Figs 3-3,3-4,3-6 | note | info |
-| P7-090 | Configuration bits can be set (reads '0') or left unchanged (reads '1'). | §3.6, p.17 | register | todo |
-| P7-091 | Device ID word is hard coded at 2006h (read-only). | §3.7, p.17 | memory | todo |
-| P7-092 | Device ID values (Dev 9 bits + Rev 5 bits): PIC16F627A 01 0000 010 x xxxx; PIC16F628A 01 0000 011 x xxxx; PIC16F648A 01 0001 000 x xxxx (i.e. 0x1040/0x1060/0x1100 with rev in bits 4:0). Revision value not given. | Table 3-2, p.17 | memory | todo |
-| P7-093 | Configuration Word at 2007h, 14 bits, all bits R/P-1 except bits 12–9 U-1. Layout bit13..0: CP, —, —, —, —, CPD, LVP, BOREN, MCLRE, FOSC2, PWRTE, WDTE, FOSC1, FOSC0. Legend: U = unimplemented, read as '1'; -n = value at POR. | Reg 3-1, p.17 | register | todo |
-| P7-094 | Bit 13 CP: 1 = code protection off; 0 = protected range PIC16F648A 0000h–0FFFh, PIC16F628A 0000h–07FFh, PIC16F627A 0000h–03FFh. | Reg 3-1, p.17 | register | todo |
-| P7-095 | Bits 12–9 unimplemented: read as '1'. | Reg 3-1, p.17 | register | todo |
-| P7-096 | Bit 8 CPD (Data Code Protection, footnote 2): 1 = data memory code protection off; 0 = data memory code-protected. | Reg 3-1, p.17 | register | todo |
-| P7-097 | Bit 7 LVP: 1 = RB4/PGM pin has PGM function, low-voltage programming enabled; 0 = RB4/PGM is digital I/O, HV on MCLR must be used for programming. | Reg 3-1, p.17 | register | todo |
-| P7-098 | Bit 6 BOREN (footnote 1): 1 = BOR enabled; 0 = BOR disabled. | Reg 3-1, p.17 | register | todo |
-| P7-099 | Bit 5 MCLRE: 1 = RA5/MCLR pin function is MCLR; 0 = RA5/MCLR is digital I/O, MCLR internally tied to VDD. | Reg 3-1, p.17 | register | todo |
-| P7-100 | Bit 3 PWRTE (footnote 1): 1 = PWRT disabled; 0 = PWRT enabled. | Reg 3-1, p.17 | register | todo |
-| P7-101 | Bit 2 WDTE: 1 = WDT enabled; 0 = WDT disabled. | Reg 3-1, p.17 | register | todo |
-| P7-102 | Bits 4,1-0 FOSC<2:0> (footnote 3): 111 RC, CLKOUT on RA6, R&C on RA7; 110 RC, I/O on RA6, R&C on RA7; 101 INTOSC, CLKOUT on RA6, I/O on RA7; 100 INTOSC, I/O on RA6 and RA7; 011 EXTCLK, I/O on RA6, (text) I/O on RA7/OSC1/CLKIN; 010 HS crystal/resonator on RA6 and RA7; 001 XT crystal/resonator on RA6 and RA7; 000 LP low-power crystal on RA6 and RA7. | Reg 3-1, p.17 | register | todo |
-| P7-103 | NOTE/ambiguity: FOSC=011 EXTCLK text says "I/O function on RA7/OSC1/CLKIN", although EXTCLK is clocked through CLKIN; quoted as printed. | Reg 3-1, p.17 | note | **decide** |
+| P7-090 | Configuration bits can be set (reads '0') or left unchanged (reads '1'). | §3.6, p.17 | register | done (SoC) |
+| P7-091 | Device ID word is hard coded at 2006h (read-only). | §3.7, p.17 | memory | done (SoC) |
+| P7-092 | Device ID values (Dev 9 bits + Rev 5 bits): PIC16F627A 01 0000 010 x xxxx; PIC16F628A 01 0000 011 x xxxx; PIC16F648A 01 0001 000 x xxxx (i.e. 0x1040/0x1060/0x1100 with rev in bits 4:0). Revision value not given. | Table 3-2, p.17 | memory | done (SoC) |
+| P7-093 | Configuration Word at 2007h, 14 bits, all bits R/P-1 except bits 12–9 U-1. Layout bit13..0: CP, —, —, —, —, CPD, LVP, BOREN, MCLRE, FOSC2, PWRTE, WDTE, FOSC1, FOSC0. Legend: U = unimplemented, read as '1'; -n = value at POR. | Reg 3-1, p.17 | register | done (SoC) |
+| P7-094 | Bit 13 CP: 1 = code protection off; 0 = protected range PIC16F648A 0000h–0FFFh, PIC16F628A 0000h–07FFh, PIC16F627A 0000h–03FFh. | Reg 3-1, p.17 | register | done (SoC) |
+| P7-095 | Bits 12–9 unimplemented: read as '1'. | Reg 3-1, p.17 | register | done (SoC) |
+| P7-096 | Bit 8 CPD (Data Code Protection, footnote 2): 1 = data memory code protection off; 0 = data memory code-protected. | Reg 3-1, p.17 | register | done (SoC) |
+| P7-097 | Bit 7 LVP: 1 = RB4/PGM pin has PGM function, low-voltage programming enabled; 0 = RB4/PGM is digital I/O, HV on MCLR must be used for programming. | Reg 3-1, p.17 | register | done (SoC) |
+| P7-098 | Bit 6 BOREN (footnote 1): 1 = BOR enabled; 0 = BOR disabled. | Reg 3-1, p.17 | register | done (SoC) |
+| P7-099 | Bit 5 MCLRE: 1 = RA5/MCLR pin function is MCLR; 0 = RA5/MCLR is digital I/O, MCLR internally tied to VDD. | Reg 3-1, p.17 | register | done (SoC) |
+| P7-100 | Bit 3 PWRTE (footnote 1): 1 = PWRT disabled; 0 = PWRT enabled. | Reg 3-1, p.17 | register | done (SoC) |
+| P7-101 | Bit 2 WDTE: 1 = WDT enabled; 0 = WDT disabled. | Reg 3-1, p.17 | register | done (SoC) |
+| P7-102 | Bits 4,1-0 FOSC<2:0> (footnote 3): 111 RC, CLKOUT on RA6, R&C on RA7; 110 RC, I/O on RA6, R&C on RA7; 101 INTOSC, CLKOUT on RA6, I/O on RA7; 100 INTOSC, I/O on RA6 and RA7; 011 EXTCLK, I/O on RA6, (text) I/O on RA7/OSC1/CLKIN; 010 HS crystal/resonator on RA6 and RA7; 001 XT crystal/resonator on RA6 and RA7; 000 LP low-power crystal on RA6 and RA7. | Reg 3-1, p.17 | register | done (SoC) |
+| P7-103 | NOTE/ambiguity: FOSC=011 EXTCLK text says "I/O function on RA7/OSC1/CLKIN", although EXTCLK is clocked through CLKIN; quoted as printed. | Reg 3-1, p.17 | note | info |
 | P7-104 | Reg 3-1 Note 1: enabling Brown-out Reset does not automatically enable the Power-up Timer (PWRT). | Reg 3-1 Note 1, p.17 | note | info |
-| P7-105 | Reg 3-1 Note 2: only a Bulk Erase will reset the Configuration Word, including the CP bits (bits cannot be returned to '1' by programming). | Reg 3-1 Note 2, p.17 | failure-mode | todo |
+| P7-105 | Reg 3-1 Note 2: only a Bulk Erase will reset the Configuration Word, including the CP bits (bits cannot be returned to '1' by programming). | Reg 3-1 Note 2, p.17 | failure-mode | done (SoC) |
 | P7-106 | Reg 3-1 Note 3: while MCLR is asserted in INTOSC mode, the internal clock oscillator is disabled. | Reg 3-1 Note 3, p.17 | note | info |
-| P7-107 | Hex file: programmer must read the Configuration Word and ID locations from the hex file; if Configuration Word is absent a simple warning may be issued; when saving, Config Word and ID information must be included (option to omit may be provided). EEPROM data memory should also be embedded. | §3.8, p.18 | behaviour | todo |
+| P7-107 | Hex file: programmer must read the Configuration Word and ID locations from the hex file; if Configuration Word is absent a simple warning may be issued; when saving, Config Word and ID information must be included (option to omit may be provided). EEPROM data memory should also be embedded. | §3.8, p.18 | behaviour | done (SoC) |
 | P7-108 | Hex file: data EEPROM mapped logically starting at address 0x2100, one data byte per address location, LSB aligned; programmer should read it and optionally write it. | §3.9, p.19 | memory | done (SoC) |
-| P7-109 | Checksum: sum of all program memory locations up to max user-addressable location (e.g. 0x7FF for PIC16F628A) + Configuration Word (masked) + masked ID locations (when applicable); carries beyond 16 bits neglected; least significant 16 bits is the checksum. | §3.10.1, p.19 | behaviour | todo |
+| P7-109 | Checksum: sum of all program memory locations up to max user-addressable location (e.g. 0x7FF for PIC16F628A) + Configuration Word (masked) + masked ID locations (when applicable); carries beyond 16 bits neglected; least significant 16 bits is the checksum. | §3.10.1, p.19 | behaviour | info |
 | P7-110 | Checksum note: calculation differs with code-protect setting since program memory reads out differently when protected; when reading a device, entire program memory can simply be read and summed; Configuration Word and ID locations can always be read. | §3.10.1 Note, p.19 | note | info |
 | P7-111 | NOTE: the spec does not state what value a code-protected program-memory location reads out as over ICSP (only that it reads "differently"). | §3.10.1 Note, p.19 | note | info |
-| P7-112 | Checksum PIC16F627A: CP OFF SUM[0x0000:0x03FF] + CFGW & 0x21FF, blank 1DFF, with 0x25E6 at 0 and max address E9CD; CP ON CFGW & 0x21FF + SUM_ID, blank 1FFE, 0x25E6 case EBCC. | Table 3-3, p.19 | behaviour | todo |
-| P7-113 | Checksum PIC16F628A: CP OFF SUM[0x0000:0x7FF] + CFGW & 0x21FF, blank 19FF, 0x25E6 case E5CD; CP ON CFGW & 0x21FF + SUM_ID, blank 1BFE, 0x25E6 case E7CC. | Table 3-3, p.19 | behaviour | todo |
-| P7-114 | Checksum PIC16F648A: CP OFF SUM[0x0000:0x0FFF] + CFGW & 0x21FF, blank 11FF, 0x25E6 case DDCD; CP ON CFGW & 0x21FF + SUM_ID, blank 13FE, 0x25E6 case DFCC. | Table 3-3, p.19 | behaviour | todo |
-| P7-115 | SUM_ID = ID locations masked by 0xF, assembled into a 16-bit value with ID0 as most significant nibble (example gives SUM_ID = 0x1234 for IDs 1,2,3,4). SUM[a:b] inclusive; + addition; & bitwise AND. | Table 3-3 legend, p.19 | behaviour | todo |
-| P7-116 | NOTE/typo: SUM_ID example names the IDs "ID0, ID1, ID3, ID4" (skips ID2). | Table 3-3 legend, p.19 | note | **decide** |
-| P7-117 | NOTE/contradiction: footnote says "Checksum = [Sum …] MODULO [0xFFFF]" whereas §3.10.1 says the least significant 16 bits (i.e. modulo 0x10000) is the checksum. | Table 3-3 vs §3.10.1, p.19 | note | **decide** |
-| P7-118 | NOTE/contradiction: the CP ON blank and 0x25E6 values differ per device and differ from the CP OFF values by the same program-memory contribution (e.g. E9CD vs EBCC), so the printed CP ON formula "CFGW & 0x21FF + SUM_ID" alone does not reproduce the table values; program memory appears still to contribute. | Table 3-3, p.19 | note | **decide** |
-| P7-119 | Table 4-1 standard conditions: 0°C ≤ TA ≤ +70°C; operating voltage 4.5V ≤ VDD ≤ 5.5V (unless otherwise stated). | Table 4-1, p.20 | electrical | todo |
-| P7-120 | VDD level for word operations, program memory: min 2.0V, max 5.5V. | Table 4-1, p.20 | electrical | todo |
-| P7-121 | VDD level for word operations, data memory: min 2.0V, max 5.5V. | Table 4-1, p.20 | electrical | todo |
-| P7-122 | VDD level for Bulk Erase operations (program and data memory): min 4.5V, max 5.5V (failure-mode: bulk erase below 4.5V out of spec). | Table 4-1, p.20 | electrical | todo |
-| P7-123 | VIHH, high voltage on MCLR: min 10.0V, max 13.5V. | Table 4-1, p.20 | electrical | todo |
-| P7-124 | NOTE/contradiction: §1.1 specifies VPP of 12V to 14V, but Table 4-1 VIHH is 10.0V–13.5V. | §1.1 vs Table 4-1 | note | **decide** |
-| P7-125 | TVHHR, MCLR rise time (VSS to VIHH) for Programming mode entry: max 1.0 µs. | Table 4-1, p.20 | timing | todo |
-| P7-126 | TPPDP, hold time after MCLR↑: min 5 µs. | Table 4-1, p.20 | timing | todo |
-| P7-127 | TLVPP, hold time after LVP↑ (PGM↑): min 5 µs. | Table 4-1, p.20 | timing | todo |
-| P7-128 | VIH1, (CLOCK, DATA) input high level: min 0.8 VDD, Schmitt Trigger input. | Table 4-1, p.20 | electrical | todo |
-| P7-129 | VIL1, (CLOCK, DATA) input low level: max 0.2 VDD, Schmitt Trigger input. | Table 4-1, p.20 | electrical | todo |
-| P7-130 | TSET0, CLOCK, DATA setup time before MCLR↑: min 100 ns. | Table 4-1, p.20 | timing | todo |
-| P7-131 | THLD0, hold time after VDD↑: min 5 µs. | Table 4-1, p.20 | timing | todo |
-| P7-132 | TSET1, data in setup time before clock↓: min 100 ns. | Table 4-1, p.20 | timing | todo |
-| P7-133 | THLD1, data in hold time after clock↓: min 100 ns. | Table 4-1, p.20 | timing | todo |
-| P7-134 | TDLY1, data input not driven to next clock input (delay required between command/data or command/command): min 1.0 µs. | Table 4-1, p.20 | timing | todo |
-| P7-135 | TDLY2, delay between clock↓ to clock↑ of next command or data: min 1.0 µs. | Table 4-1, p.20 | timing | todo |
-| P7-136 | TDLY3, clock↑ to data out valid (during read data): max 80 ns. | Table 4-1, p.20 | timing | todo |
-| P7-137 | TPROG, programming cycle time (program memory): max 4 ms. | Table 4-1, p.20 | timing | todo |
-| P7-138 | TDPROG, Data EEPROM programming cycle time: max 6 ms. | Table 4-1, p.20 | timing | todo |
-| P7-139 | TERA, Bulk Erase cycle time: max 6 ms. | Table 4-1, p.20 | timing | todo |
+| P7-112 | Checksum PIC16F627A: CP OFF SUM[0x0000:0x03FF] + CFGW & 0x21FF, blank 1DFF, with 0x25E6 at 0 and max address E9CD; CP ON CFGW & 0x21FF + SUM_ID, blank 1FFE, 0x25E6 case EBCC. | Table 3-3, p.19 | behaviour | info |
+| P7-113 | Checksum PIC16F628A: CP OFF SUM[0x0000:0x7FF] + CFGW & 0x21FF, blank 19FF, 0x25E6 case E5CD; CP ON CFGW & 0x21FF + SUM_ID, blank 1BFE, 0x25E6 case E7CC. | Table 3-3, p.19 | behaviour | info |
+| P7-114 | Checksum PIC16F648A: CP OFF SUM[0x0000:0x0FFF] + CFGW & 0x21FF, blank 11FF, 0x25E6 case DDCD; CP ON CFGW & 0x21FF + SUM_ID, blank 13FE, 0x25E6 case DFCC. | Table 3-3, p.19 | behaviour | info |
+| P7-115 | SUM_ID = ID locations masked by 0xF, assembled into a 16-bit value with ID0 as most significant nibble (example gives SUM_ID = 0x1234 for IDs 1,2,3,4). SUM[a:b] inclusive; + addition; & bitwise AND. | Table 3-3 legend, p.19 | behaviour | info |
+| P7-116 | NOTE/typo: SUM_ID example names the IDs "ID0, ID1, ID3, ID4" (skips ID2). | Table 3-3 legend, p.19 | note | info |
+| P7-117 | NOTE/contradiction: footnote says "Checksum = [Sum …] MODULO [0xFFFF]" whereas §3.10.1 says the least significant 16 bits (i.e. modulo 0x10000) is the checksum. | Table 3-3 vs §3.10.1, p.19 | note | info |
+| P7-118 | NOTE/contradiction: the CP ON blank and 0x25E6 values differ per device and differ from the CP OFF values by the same program-memory contribution (e.g. E9CD vs EBCC), so the printed CP ON formula "CFGW & 0x21FF + SUM_ID" alone does not reproduce the table values; program memory appears still to contribute. | Table 3-3, p.19 | note | info |
+| P7-119 | Table 4-1 standard conditions: 0°C ≤ TA ≤ +70°C; operating voltage 4.5V ≤ VDD ≤ 5.5V (unless otherwise stated). | Table 4-1, p.20 | electrical | done (SoC) |
+| P7-120 | VDD level for word operations, program memory: min 2.0V, max 5.5V. | Table 4-1, p.20 | electrical | done (SoC) |
+| P7-121 | VDD level for word operations, data memory: min 2.0V, max 5.5V. | Table 4-1, p.20 | electrical | done (SoC) |
+| P7-122 | VDD level for Bulk Erase operations (program and data memory): min 4.5V, max 5.5V (failure-mode: bulk erase below 4.5V out of spec). | Table 4-1, p.20 | electrical | done (SoC) |
+| P7-123 | VIHH, high voltage on MCLR: min 10.0V, max 13.5V. | Table 4-1, p.20 | electrical | done (SoC) |
+| P7-124 | NOTE/contradiction: §1.1 specifies VPP of 12V to 14V, but Table 4-1 VIHH is 10.0V–13.5V. | §1.1 vs Table 4-1 | note | info |
+| P7-125 | TVHHR, MCLR rise time (VSS to VIHH) for Programming mode entry: max 1.0 µs. | Table 4-1, p.20 | timing | D49 |
+| P7-126 | TPPDP, hold time after MCLR↑: min 5 µs. | Table 4-1, p.20 | timing | D49 |
+| P7-127 | TLVPP, hold time after LVP↑ (PGM↑): min 5 µs. | Table 4-1, p.20 | timing | D49 |
+| P7-128 | VIH1, (CLOCK, DATA) input high level: min 0.8 VDD, Schmitt Trigger input. | Table 4-1, p.20 | electrical | done (SoC) |
+| P7-129 | VIL1, (CLOCK, DATA) input low level: max 0.2 VDD, Schmitt Trigger input. | Table 4-1, p.20 | electrical | done (SoC) |
+| P7-130 | TSET0, CLOCK, DATA setup time before MCLR↑: min 100 ns. | Table 4-1, p.20 | timing | D49 |
+| P7-131 | THLD0, hold time after VDD↑: min 5 µs. | Table 4-1, p.20 | timing | D49 |
+| P7-132 | TSET1, data in setup time before clock↓: min 100 ns. | Table 4-1, p.20 | timing | D49 |
+| P7-133 | THLD1, data in hold time after clock↓: min 100 ns. | Table 4-1, p.20 | timing | D49 |
+| P7-134 | TDLY1, data input not driven to next clock input (delay required between command/data or command/command): min 1.0 µs. | Table 4-1, p.20 | timing | D49 |
+| P7-135 | TDLY2, delay between clock↓ to clock↑ of next command or data: min 1.0 µs. | Table 4-1, p.20 | timing | D49 |
+| P7-136 | TDLY3, clock↑ to data out valid (during read data): max 80 ns. | Table 4-1, p.20 | timing | D49 |
+| P7-137 | TPROG, programming cycle time (program memory): max 4 ms. | Table 4-1, p.20 | timing | D51 |
+| P7-138 | TDPROG, Data EEPROM programming cycle time: max 6 ms. | Table 4-1, p.20 | timing | D51 |
+| P7-139 | TERA, Bulk Erase cycle time: max 6 ms. | Table 4-1, p.20 | timing | D51 |
 | P7-140 | NOTE: no typ values are given for any Table 4-1 parameter; no min/max for clock period/frequency, no explicit exit timing, and no spec of what happens if a command arrives before TPROG/TDPROG/TERA elapse. | Table 4-1, p.20 | note | info |
 | P7-141 | NOTE: the configuration-word / ID programming cycle wait is not named separately; Fig 3-4 uses a generic "Program Cycle" (by implication TPROG). | Fig 3-4, p.14 | note | info |
 | P7-142 | NOTE: the spec's word-operation VDD minimum (2.0V) is below the Table 4-1 standard operating range (4.5V–5.5V) — LV word operations are allowed while the table header states 4.5V min. | Table 4-1, p.20 | note | info |
