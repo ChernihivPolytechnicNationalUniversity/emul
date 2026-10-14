@@ -259,8 +259,9 @@ export class AvrCore implements CoreHost {
   dropPanel() {}
   /** The debugger speaks ARM (registers, DWARF for Cortex-M): not available for AVR yet. */
   debug(cmd: CoreDebugCommand) {
-    void cmd
-    this.mcu.feature("Debugger (breakpoints, stepping) on AVR")
+    // The editor sends its (often empty) breakpoint list and fault catch with every load: only a real request is a gap.
+    const asked = cmd.op === "breakpoints" ? cmd.list.some((b) => b.enabled) : cmd.op === "step" || cmd.op === "resume"
+    if (asked) this.mcu.feature("Debugger (breakpoints, stepping) on AVR")
   }
   readonly debugStop: DebugStop | null = null
   inspect(req: InspectRequest): Promise<InspectReply> {
