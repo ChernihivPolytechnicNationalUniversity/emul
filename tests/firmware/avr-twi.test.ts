@@ -35,7 +35,11 @@ class Bus {
   devScl = false
   devSda = false
   sclEdges: { t: number; level: boolean }[] = []
-  constructor(readonly m: AvrMcu, readonly device: Device) {
+  readonly m: AvrMcu
+  readonly device: Device
+  constructor(m: AvrMcu, device: Device) {
+    this.m = m
+    this.device = device
     m.setWiredPads([SDA.port * 16 + SDA.pin, SCL.port * 16 + SCL.pin])
     m.setPad(SDA, true)
     m.setPad(SCL, true)
@@ -87,7 +91,9 @@ class RefSlave implements Device {
   /** Hold SCL low this long after each ACK clock (clock stretching). */
   stretch = 0
   private stretchUntil = 0
-  constructor(readonly address: number, toSend: number[] = []) {
+  readonly address: number
+  constructor(address: number, toSend: number[] = []) {
+    this.address = address
     this.toSend = [...toSend]
   }
   lines(bus: Bus, sclChanged: boolean, sdaChanged: boolean) {

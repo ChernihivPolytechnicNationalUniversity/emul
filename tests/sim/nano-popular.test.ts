@@ -247,7 +247,7 @@ describe("toneMelody (built-in example): a passive piezo on D8", () => {
     const notes: number[] = []
     for (const h of heard) if (!notes.length || Math.abs(h.tone - notes.at(-1)!) / h.tone > 0.02) notes.push(h.tone)
     const expected = [262, 196, 220, 196, 247, 262]
-    expect(notes.length, heard.filter((h, i) => i % 5 === 0).map((h) => `${h.t.toFixed(2)}:${h.tone.toFixed(0)}`).join(" ")).toBe(expected.length)
+    expect(notes.length, heard.filter((_, i) => i % 5 === 0).map((h) => `${h.t.toFixed(2)}:${h.tone.toFixed(0)}`).join(" ")).toBe(expected.length)
     notes.forEach((n, i) => expect(Math.abs(n - expected[i]) / expected[i], `note ${i + 1}: ${n.toFixed(1)} Hz`).toBeLessThan(0.01))
     // It plays once, in setup(): silent afterwards.
     t.run(0.5)

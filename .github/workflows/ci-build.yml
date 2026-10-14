@@ -36,6 +36,7 @@ jobs:
       - run: make -C firmware -j"$(nproc)" all expect TOOL="$TOOL"
       - run: make -C firmware/hal -j"$(nproc)" TOOL="$TOOL" HAL="$ST/f4/hal" CMSIS_DEV="$ST/f4/cmsis" CMSIS_CORE="$ST/core"
       - run: corepack enable && pnpm install --frozen-lockfile
+      - run: pnpm firmware-avr
       - run: pnpm firmware-arduino
       - run: pnpm exec tsc -p tsconfig.test.json
       - run: pnpm test
