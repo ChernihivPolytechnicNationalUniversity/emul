@@ -139,7 +139,7 @@ export class Adc extends Peripheral {
   muxOff = false
   private writeB(v: number) {
     const before = this.triggerFlagSet()
-    if (v & 0x40 && !(this.adcsrb & 0x40) && this.admux & 0x08) {
+    if (v & 0x40 && !(this.adcsrb & 0x40) && this.admux & 0x08 && this.mcu.hasErratum("2.4.1")) {
       this.muxOff = true
       this.mcu.feature("ADC/AC: analog MUX off — silicon erratum 2.4.1 (ACME set while MUX3 = 1)")
     }

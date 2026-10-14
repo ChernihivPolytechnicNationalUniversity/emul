@@ -99,7 +99,12 @@ export class Twi extends Peripheral {
     }
     this.twcr &= ~TWWC
     this.twdr = v
+    this.twdrAt = this.mcu.cycleTime(this.now)
   }
+  /** Time of the last TWDR write by the CPU, s. */
+  private twdrAt = -Infinity
+  /** Erratum 2.3.1: the first data bit reaches SDA late, at this cycle. */
+  private lateSda: number | null = null
 
   private writeTwcr(v: number, m: number) {
     v = (this.twcr & ~m) | (v & m)
@@ -165,7 +170,18 @@ export class Twi extends Peripheral {
         this.shift = this.twdr
         this.bits = 0
         this.slave = "tx"
-        this.sdaLow = (this.shift & 0x80) === 0
+        const low = (this.shift & 0x80) === 0
+        // Silicon erratum 2.3.1 (Rev. A, B, above 2 MHz): the first bit after the ACK can reach SDA
+        // after SCL is released — a false START. The errata gives no figures; the TWDR → SDA path is
+        // taken as one 2 MHz cycle (500 ns), so TWCR written sooner after TWDR (only possible above
+        // 2 MHz) lets SCL go first, and the work-around (a delay between the two writes) avoids it.
+        const ready = this.twdrAt + 0.5e-6
+        if (low && this.mcu.hasErratum("2.3.1") && this.bus.hz > 2e6 && ready > this.mcu.cycleTime(this.now + 1)) {
+          this.sdaLow = false
+          this.lateSda = this.mcu.timeCycle(ready)
+          this.mcu.feature(`TWI: silicon erratum 2.3.1 — slave data set up after SCL was released (false START); delay TWCR after TWDR (Rev. ${this.mcu.revision})`)
+          this.plan()
+        } else this.sdaLow = low
       } else if (this.status === 0xa0 || this.status === 0x88 || this.status === 0x98 || this.status === 0xc0 || this.status === 0xc8) {
         this.slave = c & TWEA ? "idle" : "off"
       } else {
@@ -185,6 +201,8 @@ export class Twi extends Peripheral {
   }
 
   reset() {
+    this.lateSda = null
+    this.twdrAt = -Infinity
     this.twbr = this.twps = 0
     this.status = 0xf8
     this.twdr = 0xff
@@ -478,10 +496,19 @@ export class Twi extends Peripheral {
     this.plan()
   }
   private plan() {
-    this.due = this.seq && this.wait && "cycles" in this.wait ? this.waitUntil : Infinity
+    this.due = Math.min(this.seq && this.wait && "cycles" in this.wait ? this.waitUntil : Infinity, this.lateSda === null ? Infinity : Math.ceil(this.lateSda))
     this.bus.reschedule()
   }
   override service(cycle: number) {
+    if (this.lateSda !== null && cycle >= this.lateSda) {
+      const at = this.lateSda
+      this.lateSda = null
+      if (this.slave === "tx" && this.bits === 0) {
+        this.sdaLow = true
+        this.mcu.pinsChangedAt(at)
+      }
+      this.plan()
+    }
     this.step(cycle)
     this.bus.irq.update()
   }

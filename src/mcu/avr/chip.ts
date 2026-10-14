@@ -70,6 +70,10 @@ export type AvrProfile = {
   factoryFuses: { low: number; high: number; extended: number; lock: number }
   /** Factory OSCCAL calibration byte (the value that gives 8.0 MHz at 3 V, 25 °C). */
   osccal: number
+  /** Silicon revisions released to production, oldest first (the last is the current one). */
+  revisions: string[]
+  /** Errata by number (DS80000855C), with the revisions they apply to. */
+  errata: Record<string, string[]>
   electrical: AvrElectrical
 }
 
@@ -121,6 +125,9 @@ export const ATMEGA328P: AvrProfile = {
   // High 0xD9: SPIEN programmed, BOOTSZ 00, BOOTRST unprogrammed. Extended 0xFF: BOD off.
   factoryFuses: { low: 0x62, high: 0xd9, extended: 0xff, lock: 0xff },
   osccal: 0x80,
+  // Silicon Errata DS80000855C §1: Rev. A, B, D (C was never released); §2 per erratum.
+  revisions: ["A", "B", "D"],
+  errata: { "2.2.1": ["D"], "2.3.1": ["A", "B"], "2.4.1": ["A", "B", "D"] },
   electrical: {
     vdd: 5,
     vddMax: 6,

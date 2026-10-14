@@ -361,6 +361,8 @@ export class TimerCounter extends Peripheral {
       this.io = this.mcu.ioClock
       if (this.async && this.spec.async!.conflict())
         this.mcu.feature(`${this.name}: AS2 with the system clock on XTAL1/XTAL2 — TOSC1/TOSC2 are the system oscillator's pins, the timer gets no clock`)
+      else if (this.async && this.mcu.hasErratum("2.2.1"))
+        this.mcu.feature(`${this.name}: silicon erratum 2.2.1 — the 32 kHz timer oscillator is inaccurate on Rev. ${this.mcu.revision} by an amount the errata does not give; counted exactly here`)
     }
     this.changed()
   }

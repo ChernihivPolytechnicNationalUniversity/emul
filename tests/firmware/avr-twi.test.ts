@@ -501,3 +501,60 @@ describe("pins (Table 14-7)", () => {
     expect(m.read(TWAR)).toBe(0xfe)
   })
 })
+
+describe("silicon erratum 2.3.1 (DS80000855C): TWI slave data setup time can be too short", () => {
+  /**
+   * The part as slave transmitter after its own SLA+R: TWDR is written, then TWINT cleared
+   * `delay` seconds later. Returns how long after SCL is released SDA goes low for the first
+   * (zero) data bit: positive means SDA fell while SCL was high — a false START on the bus.
+   */
+  function firstBitAfterAck(revision: string, delay: number, clkps = 0) {
+    const m = part()
+    m.revision = revision
+    if (clkps) {
+      m.poke(0x61, 0x80)
+      m.poke(0x61, clkps)
+    }
+    const master = new RefMaster()
+    const bus = new Bus(m, master)
+    m.poke(TWAR, 0x29 << 1)
+    m.poke(TWCR, EA | EN)
+    m.digitalWatch.add(SDA.port * 16 + SDA.pin)
+    m.digitalWatch.add(SCL.port * 16 + SCL.pin)
+    let from = -1
+    const origRun = bus.run.bind(bus)
+    bus.run = (s: number, step?: number) => {
+      origRun(s, step)
+      if (from < 0 && m.read(TWCR) & INT && (m.read(TWSR) & 0xf8) === 0xa8) {
+        m.poke(TWDR, 0x11)
+        if (delay) m.runUntil(m.time + delay)
+        from = m.digitalOut.length
+        go(m, EA)
+      }
+    }
+    master.start(bus)
+    master.write(bus, (0x29 << 1) | 1)
+    master.read(bus, false)
+    const e = m.digitalOut.slice(from)
+    const at = (p: { port: number; pin: number }, low: boolean) => e.find((x) => x.pad.port === p.port && x.pad.pin === p.pin && (x.level === false) === low)!.time
+    return { lag: at(SDA, true) - at(SCL, false), m }
+  }
+
+  it("Rev. B above 2 MHz, TWCR written right after TWDR: SDA changes after SCL is released — a false START, reported", () => {
+    const { lag, m } = firstBitAfterAck("B", 0)
+    expect(lag).toBeGreaterThan(0)
+    expect([...m.unmodelled.keys()].some((k) => k.includes("2.3.1"))).toBe(true)
+  })
+
+  it("Rev. B with the work-around (a delay between TWDR and TWCR): SDA is set up when SCL is released", () => {
+    expect(firstBitAfterAck("B", 1e-6).lag).toBeLessThanOrEqual(0)
+  })
+
+  it("Rev. B at 2 MHz is not affected", () => {
+    expect(firstBitAfterAck("B", 0, 3).lag).toBeLessThanOrEqual(0)
+  })
+
+  it("Rev. D is not affected", () => {
+    expect(firstBitAfterAck("D", 0).lag).toBeLessThanOrEqual(0)
+  })
+})

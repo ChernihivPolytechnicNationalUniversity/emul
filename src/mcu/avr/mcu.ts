@@ -86,6 +86,8 @@ export class AvrMcu implements AvrBus, AvrSystem {
   readonly peripherals: Peripheral[] = []
   readonly eeprom: Uint8Array
   fuses: AvrFuses
+  /** Silicon revision: which errata apply (DS80000855C). */
+  revision: string
   firmware: Firmware | null = null
   firmwareName = ""
 
@@ -229,6 +231,7 @@ export class AvrMcu implements AvrBus, AvrSystem {
     this.irq = new Interrupts(this.cpu)
     this.eeprom = new Uint8Array(chip.eepromBytes).fill(0xff)
     this.fuses = { ...chip.factoryFuses }
+    this.revision = chip.revisions[chip.revisions.length - 1]
     this.osccal = chip.osccal
     for (let a = 0x20; a < 0x100; a++) {
       this.cpu.ioRead[a] = (x) => this.unhandled(x, false)
@@ -265,6 +268,11 @@ export class AvrMcu implements AvrBus, AvrSystem {
       if (this.debugWire) throw new CpuHalt("bkpt", "break", pc * 2)
     }
     this.reset("power-on")
+  }
+
+  /** Whether a silicon erratum applies to this part's revision. */
+  hasErratum(id: string): boolean {
+    return this.chip.errata[id]?.includes(this.revision) ?? false
   }
 
   /** debugWIRE is on: DWEN programmed and no lock bit programmed (§25.3). */
@@ -466,6 +474,10 @@ export class AvrMcu implements AvrBus, AvrSystem {
         return this.clockFeed?.kind === "clock" ? this.clockFeed.hz : null
       case "reserved":
         return null
+      case "low-frequency-crystal":
+        // Erratum 2.2.1: the 32 kHz oscillator does not work as a system clock (Rev. D).
+        if (this.hasErratum("2.2.1")) return null
+        return this.clockFeed ? this.clockFeed.hz : null
       default:
         // Crystal oscillators need a crystal (or resonator) across XTAL1/XTAL2; an external clock on XTAL1 also drives the amplifier.
         return this.clockFeed ? this.clockFeed.hz : null
@@ -476,6 +488,8 @@ export class AvrMcu implements AvrBus, AvrSystem {
     const kind = clockKind(this.fuses.low & 0x0f)
     if (this.sourceFromFuses() !== null) return null
     if (kind === "reserved") return "CKSEL selects a reserved clock option"
+    if (kind === "low-frequency-crystal" && this.hasErratum("2.2.1") && this.clockFeed)
+      return `silicon erratum 2.2.1: the 32 kHz oscillator does not work as a system clock on Rev. ${this.revision}`
     if (kind === "external") return "fuses select an external clock on XTAL1, and nothing drives it"
     return `fuses select a ${kind.replace(/-/g, " ")} oscillator, and there is no crystal on XTAL1/XTAL2`
   }
