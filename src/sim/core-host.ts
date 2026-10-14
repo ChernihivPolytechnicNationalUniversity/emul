@@ -18,7 +18,9 @@
  * Transport is a SharedArrayBuffer with Atomics: the loop and the core each write their own
  * side, double-banked by run parity so a bank being read is never the one being written.
  */
-import { chipById, STM32F429ZI, type ChipProfile, type MemoryRegion } from "@/mcu/chip"
+import { chipById, STM32F429ZI, type ChipProfile, type McuProfile, type MemoryRegion } from "@/mcu/chip"
+import { avrChipById } from "@/mcu/avr/chip"
+import { AvrCore } from "./avr-core"
 import { CpuHalt } from "@/mcu/faults"
 import type { PadDrive } from "@/mcu/periph/gpio"
 import type { ClockSource } from "@/mcu/periph/rcc"
@@ -56,6 +58,8 @@ export type CoreStatus = {
    * and pin levels cross with 20 µs of latency), or in a worker in step with it.
    */
   host: "in-process" | "worker (pipelined)" | "worker (in step)"
+  /** Wording a core family needs instead of the STM32 one (the AVR's clock, sleep modes, reset causes). */
+  labels?: { clock?: string; power?: string; reset?: string; noClock?: string; fuses?: string }
 }
 
 /** An exact-time edge a core put on a pad. */
@@ -65,7 +69,7 @@ export type OutEdge = { pad: PadRef; level: boolean | null; time: number }
 export type PanelWiring = { object: string; spec: PanelSpec; wired: Map<PanelSignal, { host: CoreHost; pad: PadRef }> }
 
 export interface CoreHost {
-  readonly chip: ChipProfile
+  readonly chip: McuProfile
   /** Firmware is loaded (the core can run). */
   readonly loaded: boolean
   readonly ready: boolean
@@ -81,6 +85,15 @@ export interface CoreHost {
   /** Runs in step with the loop rather than pipelined (a remote core with digital traffic to answer). */
   readonly sync: boolean
   load(data: ArrayBuffer, name: string): void
+  /** The reset pin resets the part (false: a fuse made it an I/O or debug pin — RSTDISBL, DWEN on an AVR). */
+  readonly resetPin?: boolean
+  /**
+   * What is wrong with the voltage on the reference pin, in this part's own terms; absent, the
+   * STM32 rules for VREF+ apply. `wired`: something besides the board's own parts is on the pin.
+   */
+  referenceProblem?(volts: number, wiring: { grounded: boolean; wired: boolean }): string | null
+  /** Settings the part keeps outside its program (an AVR's fuses), from the object's props. */
+  configure?(props: Record<string, string>): void
   /** Restart the core; `backup` keeps the RTC and backup registers (VBAT held them). */
   reset(opts?: { backup?: boolean; supplyKept?: boolean }): void
   /** Time VDD was off with VBAT on, to count the RTC through before the next reset. */
@@ -123,6 +136,8 @@ export interface CoreHost {
   dutyPads(): Iterable<number>
   /** Fraction of the last interval a peripheral-driven pad was high; null when nothing drives it that way. */
   takeDuty(pad: PadRef, interval: number): number | null
+  /** What `takeDuty` would return now, the accounting left as it is (a core in this thread; a remote one has no such view). */
+  peekDuty?(pad: PadRef, interval: number): number | null
   /** Edges made since the last drain (own time). */
   drainEdges(): OutEdge[]
   supplyCurrent(): number
@@ -939,6 +954,8 @@ export class RemoteCore implements CoreHost {
 
 /** A core for a board: remote when a spawner is at hand, else in this thread. */
 export function makeCore(chipId: string | undefined, external: MemoryRegion[] | undefined, spawn: (() => CoreTransport) | null): CoreHost {
+  const avr = chipId ? avrChipById(chipId) : undefined
+  if (avr) return new AvrCore(avr)
   const chip = (chipId && chipById(chipId)) || STM32F429ZI
   if (spawn) {
     try {

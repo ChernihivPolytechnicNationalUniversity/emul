@@ -1,0 +1,1 @@
+{ "name": "ATmega328P", "toolchain": "avr", "mcu": "atmega328p" }

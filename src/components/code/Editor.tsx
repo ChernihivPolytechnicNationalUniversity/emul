@@ -216,7 +216,8 @@ export function Editor({ ref, objectId, files, docs, active, target, diagnostics
       if (model) leaving.delete(model)
       // LF whatever the browser's platform: the file goes to a Linux build, and the document's
       // text has to match the model's byte for byte or this effect would keep resetting it.
-      if (!model) monaco.editor.createModel(content, undefined, uri).setEOL(monaco.editor.EndOfLineSequence.LF)
+      // An Arduino sketch (.ino, the old .pde) is C++ to the compiler: Monaco does not know the extension.
+      if (!model) monaco.editor.createModel(content, /\.(ino|pde)$/i.test(id) ? "cpp" : undefined, uri).setEOL(monaco.editor.EndOfLineSequence.LF)
       else if (model.getValue() !== content) {
         model.setValue(content)
         model.setEOL(monaco.editor.EndOfLineSequence.LF)

@@ -359,6 +359,9 @@ export class Engine {
   private readonly rVbe: Float64Array
   private readonly rIb: Float64Array
   private readonly rRegion: Uint8Array
+  /** Regulators, and their regions as the step in progress began. */
+  private readonly regulators: Int32Array
+  private readonly regionAtStart: Uint8Array
   /** Pad state of every GPIO element for the step in progress, and the volts when it sources a voltage. */
   private readonly gpioState: Uint8Array
   /** While the open gap of a switch element carries an arc: 1 struck with a positive voltage a→b, 2 negative. */
@@ -508,6 +511,8 @@ export class Engine {
     this.rVbe = new Float64Array(m)
     this.rIb = new Float64Array(m)
     this.rRegion = new Uint8Array(m)
+    this.regulators = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "REG" ? [i] : [])))
+    this.regionAtStart = new Uint8Array(m)
     this.gpioState = new Uint8Array(m)
     this.arc = new Uint8Array(m)
     this.prevV = new Float64Array(n)
@@ -1147,7 +1152,18 @@ export class Engine {
       this.subV.set(this.v)
       if (this.timers.length) this.arcStart.set(this.arc)
       const wasStruck: boolean = this.struck
+      this.regionAtStart.set(this.rRegion)
       this.solveFrom(span, parts)
+      // A regulator that started or stopped conducting cut a current off mid-step. The
+      // trapezoid carries a capacitor's current over the step, so a capacitor that was being
+      // charged through it would jump by i·dt/2C (a 100 nF output charging at 30 mA in 20 µs:
+      // 3 V above the set point) and nothing would bring it back: the step is redone
+      // backward Euler, which carries no current over.
+      if (this.theta !== 1 && this.converged && this.conductionChanged()) {
+        this.theta = 1
+        this.v.set(this.subV)
+        this.solveFrom(span, parts)
+      }
       if (events >= TMR_MAX_EVENTS * this.timers.length || !this.converged || !this.findTimerEvent()) {
         if (span === left) break
         this.updateState(span, parts)
@@ -1200,6 +1216,14 @@ export class Engine {
       for (let i = 0; i < n; i++) this.v2[i] = this.msPrimed ? this.ema(this.v2[i], this.v[i] * this.v[i], dt) : this.v[i] * this.v[i]
     }
     this.msPrimed = true
+  }
+
+  private conductionChanged() {
+    for (let k = 0; k < this.regulators.length; k++) {
+      const i = this.regulators[k]
+      if ((this.regionAtStart[i] === REG_OPEN) !== (this.rRegion[i] === REG_OPEN)) return true
+    }
+    return false
   }
 
   private restartStiffCapacitors(dt: number) {

@@ -3,10 +3,14 @@ import type { SourceFile, Target } from "emul-shared/source"
 /**
  * What a board's project starts as: the CubeIDE layout (`Core/Inc`, `Core/Src`) around the
  * repo's own Nucleo-F429ZI HAL blink (`firmware/hal/Src/main.c`), or an Open746I-C one for the
- * F746, so the first build has something to show on the board's LEDs.
+ * F746, so the first build has something to show on the board's LEDs. An ATmega328P (the
+ * Arduino Nano) starts as an Arduino sketch, built against ArduinoCore-avr (a project of .c
+ * files with no .ino builds on avr-libc alone).
  */
 export const template = (target: Target): SourceFile[] =>
-  target === "stm32f746ig"
+  target === "atmega328p"
+    ? [{ path: "Blink.ino", content: NANO_SKETCH }]
+    : target === "stm32f746ig"
     ? [
         { path: "Core/Inc/main.h", content: F7_MAIN_H },
         { path: "Core/Src/main.c", content: F7_MAIN_C },
@@ -206,5 +210,32 @@ void HAL_SYSTICK_Callback(void)
     n = 0;
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
   }
+}
+`
+
+const NANO_SKETCH = `// Arduino Nano: L blinks, the USB serial counts the seconds and echoes what you type.
+//
+//   L (D13)       toggles every 500 ms
+//   USB serial    9600 baud: "tick N" every second, and whatever arrives comes back upper-cased
+//                 (wire a serial terminal to the TX/RX pins by the USB connector)
+
+unsigned long last;
+unsigned ticks;
+
+void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+  Serial.begin(9600);
+}
+
+void loop() {
+  if (millis() - last >= 500) {
+    last += 500;
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+    if (digitalRead(LED_BUILTIN)) {
+      Serial.print("tick ");
+      Serial.println(ticks++);
+    }
+  }
+  while (Serial.available()) Serial.write(toupper(Serial.read()));
 }
 `

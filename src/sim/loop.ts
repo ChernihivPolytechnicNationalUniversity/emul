@@ -14,7 +14,7 @@ import { nextPulseEdge, pulseHigh, pulseTiming, type PulseEdge, type PulseTiming
 import { createDigitalPart, type DigitalPart } from "./digital"
 import { PanelInstance } from "./display"
 import { isAdcPad } from "@/mcu/periph/adc"
-import { LocalCore, makeCore, PAD_KEYS, type CoreHost, type CoreStatus, type CoreTransport, type PanelWiring } from "./core-host"
+import { makeCore, PAD_KEYS, RemoteCore, type CoreHost, type CoreStatus, type CoreTransport, type PanelWiring } from "./core-host"
 import { NO_READBACK, PadRelease, releaseKind, Surroundings } from "./readback"
 import type { BreakpointSpec, CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 
@@ -236,12 +236,13 @@ class McuInstance {
   readonly partPads = new Set<number>()
   /** A remote core with part traffic runs in step with the loop for this many runs after the last edge. */
   keepInStep() {
-    if (this.mcu instanceof LocalCore) return
+    if (!(this.mcu instanceof RemoteCore)) return
     ;(this.mcu as { keepInStep?: (runs: number) => void }).keepInStep?.(IN_STEP_RUNS)
   }
   /** Bring a remote core back into this thread (a peer to run in lockstep with turned up). */
   relocate() {
-    if (this.mcu instanceof LocalCore) return
+    // Only a core in a worker moves; one in this thread (an STM32's LocalCore, an AVR) already is here.
+    if (!(this.mcu instanceof RemoteCore)) return
     const remote = this.mcu
     remote.dispose()
     const def = getDef(this.defId)
@@ -308,7 +309,8 @@ class McuInstance {
   }
 
   status(): McuStatus {
-    const reference = this.vref === undefined || this.vrefNet === undefined ? null : referenceProblem(this.vref, this.vdda, { grounded: this.vrefNet === GROUND, wired: this.vrefWired })
+    const wiring = { grounded: this.vrefNet === GROUND, wired: this.vrefWired }
+    const reference = this.vref === undefined || this.vrefNet === undefined ? null : this.mcu.referenceProblem ? this.mcu.referenceProblem(this.vref, wiring) : referenceProblem(this.vref, this.vdda, wiring)
     return { ...this.mcu.status(), firmware: this.name, powered: this.powered, reference }
   }
 
@@ -440,6 +442,10 @@ export class SimLoop {
   private probes: Probe[] = []
   private mcus = new Map<string, McuInstance>()
   private terminals = new Map<string, TerminalInstance>()
+  /** A bridge's TXD pin (pin key) → the terminal standing in for the PC behind it. */
+  private readonly bridgeTerminal = new Map<string, TerminalInstance>()
+  /** Terminals on a bridge's PC end: the PC is on USB, so their own drivers stay off the lines. */
+  private readonly hostedTerminals = new Set<string>()
   private digitalParts = new Map<string, DigitalPart>()
   /** Solved nodes of the pins each sensing part reads, refreshed with the digital nets. */
   private senseNodes = new Map<DigitalPart, Map<string, number>>()
@@ -668,6 +674,7 @@ export class SimLoop {
         inst.base = this.engine?.time ?? 0
         this.mapInputs()
       }
+      inst.mcu.configure?.({ ...getDef(obj.def)?.defaults, ...obj.props })
     }
     for (const id of [...this.mcus.keys()])
       if (!seen.has(id)) {
@@ -727,8 +734,10 @@ export class SimLoop {
       inst.vrefNet = vrefPin ? engine.net.pinNet.get(vrefPin) : undefined
       inst.vrefWired = inst.vrefNet !== undefined && [...engine.net.pinNet].some(([key, net]) => net === inst.vrefNet && key !== vrefPin)
       if (def) {
-        inst.hse = def.mcuClocks ? { source: def.mcuClocks.hse } : this.oscillatorFeed(inst.object, def, "PH0", "PH1")
-        inst.lse = def.mcuClocks ? { source: def.mcuClocks.lse } : this.oscillatorFeed(inst.object, def, "PC14", "PC15")
+        // The oscillator pin pairs: OSC_IN/OSC_OUT and OSC32 on an STM32, XTAL1/XTAL2 (PB6/PB7) on an AVR.
+        const avr = inst.mcu.chip.family === "avr"
+        inst.hse = def.mcuClocks ? { source: def.mcuClocks.hse } : this.oscillatorFeed(inst.object, def, avr ? "PB6" : "PH0", avr ? "PB7" : "PH1")
+        inst.lse = def.mcuClocks ? { source: def.mcuClocks.lse } : avr ? { source: null } : this.oscillatorFeed(inst.object, def, "PC14", "PC15")
       }
       inst.padNode.clear()
       inst.inputByPad.clear()
@@ -809,6 +818,25 @@ export class SimLoop {
       if (t.txNet !== undefined) netFor(root(t.txNet)).terminal = true
       if (t.rxNet !== undefined) netFor(root(t.rxNet)).rx.push(t)
     }
+    // Terminals wired to a bridge's PC end: the bridge's TXD sends what they type, and they load neither line.
+    this.bridgeTerminal.clear()
+    this.hostedTerminals.clear()
+    if (engine)
+      for (const obj of this.doc.objects) {
+        const def = getDef(obj.def)
+        for (const pin of def?.pins ?? []) {
+          if (!pin.hostSerial) continue
+          const net = engine.net.pinNet.get(pinKey(obj.id, pin.id))
+          if (net === undefined) continue
+          for (const t of this.terminals.values()) {
+            if (pin.hostSerial === "out" && t.txNet === net) {
+              this.bridgeTerminal.set(pinKey(obj.id, pin.id), t)
+              this.hostedTerminals.add(t.object)
+            }
+            if (pin.hostSerial === "in" && t.rxNet === net) this.hostedTerminals.add(t.object)
+          }
+        }
+      }
     // The analyser's probes: their nets travel exactly too. A net with nothing digital on it
     // (an analog source, a gate's output) is thresholded from the solution each step.
     this.logicLevel = new Uint8Array(this.probes.length).fill(LOGIC_UNKNOWN)
@@ -1074,7 +1102,7 @@ export class SimLoop {
 
   /** Whether any core runs in a worker pipelined behind the loop (its edges arrive a step late). */
   private get pipelined() {
-    for (const inst of this.mcus.values()) if (!(inst.mcu instanceof LocalCore)) return true
+    for (const inst of this.mcus.values()) if (inst.mcu instanceof RemoteCore) return true
     return false
   }
 
@@ -1358,6 +1386,15 @@ export class SimLoop {
   }
   private pinReaders: (() => GpioState)[] = []
   private resolvePin(object: string, node: string): () => GpioState {
+    // A bridge's TXD sends what the PC (the terminal behind it) types, and idles high.
+    const bridge = getDef(this.doc.objects.find((o) => o.id === object)?.def ?? "")?.pins.find((p) => p.hostSerial === "out" && (p.hostDriver ?? p.id) === node)
+    if (bridge) {
+      const key = pinKey(object, bridge.id)
+      return () => {
+        const t = this.bridgeTerminal.get(key)
+        return !t || t.txLevel ? "high" : "low"
+      }
+    }
     const inst = this.mcus.get(object)
     if (inst?.mcu.loaded) {
       // The supply load follows the power mode: the resistance that draws the mode's current.
@@ -1383,7 +1420,10 @@ export class SimLoop {
       }
     }
     const term = this.terminals.get(object)
-    if (term) return node === "TX" ? () => (term.txLevel ? "high" : "low") : node === "RX" ? () => "pullup" : () => null
+    if (term) {
+      const hosted = () => this.hostedTerminals.has(object)
+      return node === "TX" ? () => (hosted() ? null : term.txLevel ? "high" : "low") : node === "RX" ? () => (hosted() ? null : "pullup") : () => null
+    }
     const part = this.digitalParts.get(object)
     if (part) {
       if (part.analog?.(node) !== undefined) return () => part.analog!(node) ?? null
@@ -1943,10 +1983,11 @@ export class SimLoop {
         // Reset is held while VDD is below the POR threshold or NRST is pulled low; the core
         // starts from the vector table when both are released.
         const vdd = inst.powerNet === undefined ? Infinity : inst.powerNet === GROUND ? 0 : engine.v[inst.powerNet]
-        const nrst = inst.resetNet === undefined ? Infinity : inst.resetNet === GROUND ? 0 : engine.v[inst.resetNet]
+        const nrst = inst.resetNet === undefined || inst.mcu.resetPin === false ? Infinity : inst.resetNet === GROUND ? 0 : engine.v[inst.resetNet]
         // The backup domain lives on VBAT: with it up through an outage the RTC keeps counting.
         const vbatUp = inst.vbatNet !== undefined && inst.vbatNet !== GROUND && engine.v[inst.vbatNet] > VBAT_MIN
-        const outage = vdd < Math.max(VDD_POR, inst.mcu.porThreshold)
+        // An AVR has its own power-on threshold (VPOT) and brown-out detector, handled in its model.
+        const outage = vdd < (inst.mcu.chip.family === "avr" ? inst.mcu.porThreshold : Math.max(VDD_POR, inst.mcu.porThreshold))
         if (outage || nrst < NRST_LOW) {
           if (inst.powered) {
             inst.powered = false
@@ -2106,7 +2147,7 @@ export class SimLoop {
   private quietSteps(engine: Engine, inst: McuInstance, left: number): number {
     if (left < 2 || this.padsDirty || this.heldReleases.size || this.bouncing.size || this.contactPlan.length || !inst.padsLive) return 1
     // An in-process core's PWM pads are sampled step by step as they run (`quietDuty`); a worker's are not.
-    if (inst.sampled.size && !(inst.mcu instanceof LocalCore)) return 1
+    if (inst.sampled.size && inst.mcu instanceof RemoteCore) return 1
     for (const t of this.terminals.values()) if (t.txEdges.length) return 1
     let n = Math.min(left, this.quietMax, engine.settledFor(DT) + 1)
     for (const part of this.digitalParts.values()) {
@@ -2125,7 +2166,7 @@ export class SimLoop {
    * if not, nothing is touched and the step is the core's last, for `advance` to take.
    */
   private quietDuty(inst: McuInstance): boolean {
-    const core = inst.mcu as LocalCore
+    const core = inst.mcu
     const drive = (key: string) => {
       const pad = inst.pads.get(key)
       return pad ? core.padDrive(pad) : null
@@ -2136,7 +2177,7 @@ export class SimLoop {
     for (const padKey of core.dutyPads()) {
       const input = inst.inputByPad.get(padKey)
       if (input === undefined) continue
-      const d = core.peekDuty(input.pad, DT)
+      const d = core.peekDuty?.(input.pad, DT) ?? null
       if (d !== null && d > 0 && d < 1) {
         state = (Math.imul(state, 1664525) + 1013904223) >>> 0
         now.set(input.key, state / 4294967296 < d ? "high" : "low")

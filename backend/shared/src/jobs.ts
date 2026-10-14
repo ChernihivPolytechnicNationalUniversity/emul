@@ -4,7 +4,7 @@ import { connect } from "./redis.ts"
 import type { SynthOptions } from "./hdl.ts"
 import type { BuildOptions, Target } from "./source.ts"
 
-export { DEFAULT_OPT, OPT_LEVELS, SOURCE_LIMITS, TARGETS, isOptLevel, sourcePath, type BuildOptions, type OptLevel, type SourceFile, type Target } from "./source.ts"
+export { DEFAULT_OPT, FCPU_RANGE, OPT_LEVELS, SOURCE_LIMITS, STM32_TARGETS, TARGETS, isOptLevel, sourcePath, type BuildOptions, type OptLevel, type SourceFile, type Stm32Target, type Target } from "./source.ts"
 
 /** The contract between the API (producer) and the worker (consumer). */
 export const QUEUE = "jobs"

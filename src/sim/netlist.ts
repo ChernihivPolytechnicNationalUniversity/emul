@@ -365,6 +365,11 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
     return root === groundRoot ? GROUND : (index.get(root) ?? GROUND)
   }
 
+  // Nets with a USB-serial bridge's PC end on them: a terminal there is the PC on USB, whose
+  // driver is the bridge's; its own pins carry nothing to rate.
+  const hostRoots = new Set<string>()
+  for (const obj of doc.objects) for (const pin of getDef(obj.def)?.pins ?? []) if (pin.hostSerial) hostRoots.add(uf.find(pinKey(obj.id, pin.id)))
+
   const nodeNet = new Map<string, number>()
   const elements: Resolved[] = []
   let sources = 0
@@ -498,6 +503,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
       }
       case "GPIO": {
         if (!active.has(uf.find(node(obj, el.node)))) break
+        if (obj.def === "serial-terminal" && hostRoots.has(uf.find(node(obj, el.node)))) base.limits = undefined
         const pin = node(obj, el.node)
         const keys = [pin, el.vddNode ? node(obj, el.vddNode) : pin, el.gndNode ? node(obj, el.gndNode) : pin]
         const ohms = el.drive ? resolveValue(el.drive.ohms, props) : NaN

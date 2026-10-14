@@ -410,7 +410,25 @@ const pins: PinDef[] = [
       return { id: `${connector}-${pin}`, label: pin === 4 ? label : "", x: S.rails.x + pin - 1, y: S.rails.y + row, side: "top", labelAt: "right", kind: row === 1 ? "gnd" : "power", stub: 1 + row, connector, connectorPin: pin, note: `${label} rail`, printed: true }
     }),
   ),
-  ...USART1_BRIDGE_SIDE.map(([id, label, mcu, signal, note], row): PinDef => ({ id, label, x: S.usart1Jmp.x + 1, y: S.usart1Jmp.y + row, side: "right", labelAt: "right", kind: "digital", stub: 2, mcu, signal, fn: signal, connector: "JMP2", connectorPin: 2 * (row + 1), note, printed: true })),
+  ...USART1_BRIDGE_SIDE.map(([id, label, mcu, signal, note], row): PinDef => ({
+    id,
+    label,
+    x: S.usart1Jmp.x + 1,
+    y: S.usart1Jmp.y + row,
+    side: "right",
+    labelAt: "right",
+    kind: "digital",
+    stub: 2,
+    mcu,
+    signal,
+    fn: signal,
+    connector: "JMP2",
+    connectorPin: 2 * (row + 1),
+    note,
+    printed: true,
+    // A terminal on the CP2102's TXD/RXD is the PC on the USART1 USB: the bridge drives the line.
+    ...(id === "VCP-RX" ? { hostSerial: "out" as const, hostDriver: "$cp2102txd" } : id === "VCP-TX" ? { hostSerial: "in" as const } : {}),
+  })),
   ...line("P6", [SDMMC], countup(1, 9), { x: S.sdmmc.x, y: S.sdmmc.y, side: "top", stub: 5, labelAt: "bottom" }),
   ...line("P3", [QSPI], countup(1, 8), { x: S.qspi.x, y: S.qspi.y, side: "top", stub: 5, labelAt: "bottom" }),
   ...line("P5", [I2S2], countup(2, 16, 2), { x: S.i2s.x, y: S.i2s.y, side: "top", stub: 5, labelAt: "bottom" }),
@@ -563,8 +581,9 @@ const PE3_ON_THE_PIN_LAB_2026_10_12 = 0.8035
 const MIC2025_FLAG_SINK_FIT = (AMS1117_VOLTS - PE3_ON_THE_PIN_LAB_2026_10_12) / FLG_PULL_UP_OHMS
 const MIC2025_FLAG_GATE_FIT = MIC2025_FLAG_VTH + Math.sqrt(MIC2025_FLAG_SINK_FIT / MIC2025_FLAG_K)
 
-const cp2102Pin = (name: string, net: string, ohms: number): Element[] => [
-  { kind: "R", a: CP2102_VDD, b: `$cp2102${name}`, value: ohms },
+const cp2102Pin = (name: string, net: string, ohms: number, output = false): Element[] => [
+  // An output (TXD, RTS) is a driver the loop sets, high at idle; an input a weak pull-up.
+  output ? { kind: "GPIO", node: `$cp2102${name}`, vddNode: CP2102_VDD, drive: { ohms } } : { kind: "R", a: CP2102_VDD, b: `$cp2102${name}`, value: ohms },
   { kind: "SW", a: `$cp2102${name}`, b: net, part: "USB", closed: "on" },
   { kind: "SW", a: net, b: `$cp2102${name}clamp`, part: "USB", closed: "off" },
   { kind: "D", anode: `$cp2102${name}clamp`, cathode: CP2102_VDD, ...CP2102_UNPOWERED_CLAMP },
@@ -574,7 +593,7 @@ const cp2102: Element[] = [
   { kind: "REG", in: "$u5vlim", out: CP2102_VDD, gnd: GND, value: 3.3, dropout: 0.7, imax: 0.1 },
   { kind: "R", a: CP2102_VDD, b: GND, value: CP2102_NORMAL_SUPPLY_OHMS },
   ...cp2102Pin("rxd", "VCP-TX", CP2102_INPUT_PULL_UP_OHMS),
-  ...cp2102Pin("txd", "VCP-RX", CP2102_OUTPUT_HIGH_OHMS),
+  ...cp2102Pin("txd", "VCP-RX", CP2102_OUTPUT_HIGH_OHMS, true),
   ...cp2102Pin("cts", "VCP-CTS", CP2102_INPUT_PULL_UP_OHMS),
   ...cp2102Pin("rts", "VCP-RTS", CP2102_OUTPUT_HIGH_OHMS),
 ]

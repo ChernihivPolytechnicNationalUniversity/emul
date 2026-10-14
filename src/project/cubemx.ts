@@ -1,4 +1,4 @@
-import { SOURCE_LIMITS, TARGETS, sourcePath, type SourceFile, type Target } from "emul-shared/source"
+import { SOURCE_LIMITS, STM32_TARGETS, sourcePath, type SourceFile, type Stm32Target } from "emul-shared/source"
 import { chipById } from "@/mcu/chip"
 import { builder } from "@/schematic/builder"
 import { getDef } from "@/schematic/registry"
@@ -15,13 +15,13 @@ export type CubeProject = {
   root: string
   ioc: string | null
   mcu: string | null
-  target: Target | null
+  target: Stm32Target | null
   files: SourceFile[]
   vendorFiles: number
   refused: Refusal[]
 }
 
-export const BOARD_FOR: Record<Target, string> = { stm32f429zi: "nucleo-f429zi", stm32f746ig: "open746i-c" }
+export const BOARD_FOR: Record<Stm32Target, string> = { stm32f429zi: "nucleo-f429zi", stm32f746ig: "open746i-c" }
 
 const BUILD_FILE = /\.(c|h|cpp|hpp|cc|s|ld)$/i
 const JUNK = /(^|\/)(\.|__MACOSX\/)/
@@ -50,18 +50,18 @@ export function parseIoc(text: string): Map<string, string> {
   return keys
 }
 
-export function targetOf(mcu: string): Target | null {
+export function targetOf(mcu: string): Stm32Target | null {
   const part = mcu.toUpperCase()
-  return TARGETS.find((t) => part.startsWith(familyOf(t))) ?? null
+  return STM32_TARGETS.find((t) => part.startsWith(familyOf(t))) ?? null
 }
 
 const FAMILY_LENGTH = "STM32F746".length
 const PART_LENGTH = "STM32F746IG".length
-export const partOf = (target: Target) => chipById(target)!.name
-const familyOf = (target: Target) => partOf(target).slice(0, FAMILY_LENGTH)
-const boardName = (target: Target) => getDef(BOARD_FOR[target])?.name ?? BOARD_FOR[target]
+export const partOf = (target: Stm32Target) => chipById(target)!.name
+const familyOf = (target: Stm32Target) => partOf(target).slice(0, FAMILY_LENGTH)
+const boardName = (target: Stm32Target) => getDef(BOARD_FOR[target])?.name ?? BOARD_FOR[target]
 
-export function couldBePart(mcu: string, target: Target): boolean {
+export function couldBePart(mcu: string, target: Stm32Target): boolean {
   const named = mcu.toUpperCase().slice(0, PART_LENGTH)
   return named.length < PART_LENGTH || named === partOf(target).slice(0, PART_LENGTH)
 }
@@ -184,14 +184,14 @@ function partFromFiles(files: SourceFile[]): string | null {
   return null
 }
 
-export function cubeBench(project: CubeProject & { target: Target }, grid: number): { doc: Schematic; board: PlacedObject } {
+export function cubeBench(project: CubeProject & { target: Stm32Target }, grid: number): { doc: Schematic; board: PlacedObject } {
   const { doc, place } = builder(grid)
   const board = place(BOARD_FOR[project.target], 0, 0)
   board.project = project.files
   return { doc, board }
 }
 
-export function importNotes(project: CubeProject, target: Target): string[] {
+export function importNotes(project: CubeProject, target: Stm32Target): string[] {
   const notes: string[] = []
   if (project.mcu && !couldBePart(project.mcu, target)) {
     notes.push(`Project is for ${project.mcu}, runs on the ${partOf(target)}. Pins missing on the ${partOf(target)} do nothing.`)
@@ -210,7 +210,7 @@ export function importNotes(project: CubeProject, target: Target): string[] {
 }
 
 export function unsupportedChip(project: CubeProject): { title: string; description: string } {
-  const boards = TARGETS.map((t) => `${partOf(t)} (${boardName(t)})`).join(", ")
+  const boards = STM32_TARGETS.map((t) => `${partOf(t)} (${boardName(t)})`).join(", ")
   return project.mcu
     ? { title: `${project.mcu} not supported`, description: `Supported: ${boards}.` }
     : { title: "Unknown chip", description: `${project.name} has no .ioc or startup file. Open the folder that contains the .ioc.` }

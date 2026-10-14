@@ -3,9 +3,12 @@
  * No Node imports here — the site bundles this file to validate a project before sending it.
  */
 
-/** Chips the emulator has a profile for (`src/mcu/chip.ts`); a job targets one of them. */
-export const TARGETS = ["stm32f429zi", "stm32f746ig"] as const
+/** Chips the emulator has a profile for (`src/mcu/chip.ts`, `src/mcu/avr/chip.ts`); a job targets one of them. */
+export const STM32_TARGETS = ["stm32f429zi", "stm32f746ig"] as const
+export const TARGETS = [...STM32_TARGETS, "atmega328p"] as const
 export type Target = (typeof TARGETS)[number]
+/** The targets an STM32CubeMX/CubeIDE project can be for. */
+export type Stm32Target = (typeof STM32_TARGETS)[number]
 
 /** A source file as the client sends it: a relative path inside the project and its text. */
 export type SourceFile = { path: string; content: string }
@@ -20,10 +23,15 @@ export type OptLevel = (typeof OPT_LEVELS)[number]
 export const DEFAULT_OPT: OptLevel = "-O2"
 export const isOptLevel = (v: unknown): v is OptLevel => typeof v === "string" && (OPT_LEVELS as readonly string[]).includes(v)
 
-/** How a build job compiles; anything left out is the service's default. */
-export type BuildOptions = { opt?: OptLevel }
+/**
+ * How a build job compiles; anything left out is the service's default. `fcpu` is the clock
+ * an AVR program is built for (F_CPU, which avr-libc's delays and baud macros count in): the
+ * board's, as its crystal and fuses make it.
+ */
+export type BuildOptions = { opt?: OptLevel; fcpu?: number }
+export const FCPU_RANGE = { min: 1_000, max: 32_000_000 } as const
 
-const SOURCE_EXTENSIONS = new Set([".c", ".h", ".cpp", ".hpp", ".cc", ".s", ".S", ".ld", ".ioc", ".txt", ".md", ".vhd", ".vhdl", ".v", ".sv"])
+const SOURCE_EXTENSIONS = new Set([".ino", ".pde", ".c", ".h", ".cpp", ".hpp", ".cc", ".s", ".S", ".ld", ".ioc", ".txt", ".md", ".vhd", ".vhdl", ".v", ".sv"])
 export const SOURCE_LIMITS = { files: 200, fileBytes: 1024 * 1024 }
 
 /**

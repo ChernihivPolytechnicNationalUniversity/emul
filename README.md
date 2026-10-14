@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  A circuit simulator for microcontroller labs that runs your real STM32 firmware.<br>
+  A circuit simulator for microcontroller labs that runs your real STM32 and Arduino firmware.<br>
   <a href="https://emul.digituni.org/"><b>emul.digituni.org</b></a>
 </p>
 
@@ -14,6 +14,7 @@
   <a href="https://emul.digituni.org/"><img alt="Live" src="https://img.shields.io/badge/live-emul.digituni.org-7c3aed.svg"></a>
   <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
   <img alt="STM32 F429 · F746" src="https://img.shields.io/badge/STM32-F429%20%C2%B7%20F746-03234B.svg">
+  <img alt="Arduino Nano" src="https://img.shields.io/badge/Arduino-Nano%20(ATmega328P)-00878F.svg">
 </p>
 
 <a href="https://emul.digituni.org/"><img src="docs/assets/bench.png" alt="An Open746I-C with its 7″ LCD running a C++ cube renderer, three Nucleo-F429ZI boards on I²C, UART and ADC, and analog benches: a mains rectifier, a battery, Lissajous sources"></a>
@@ -23,6 +24,10 @@ an emulated Cortex-M4/M7 while a nodal solver works out the bench around it: tim
 I²C, DMA, ADC/DAC, sleep and wake-up, flash, an SDRAM-backed LTDC panel, all against real parts
 with real ratings. Two boards on one net run in lockstep; a shorted output or 12 V on a GPIO does
 what it does on the desk. A Monaco editor and a build service compile a project the way CubeIDE would.
+
+An Arduino Nano 3.x runs on an emulated ATmega328P: drop an AVR `.elf` on it, or write a sketch in the
+editor and the build service compiles it as the Arduino IDE does (ArduinoCore-avr 1.8.6, Servo,
+LiquidCrystal, Adafruit NeoPixel/SSD1306/GFX, Keypad).
 
 ```sh
 pnpm install && pnpm dev     # http://localhost:5173

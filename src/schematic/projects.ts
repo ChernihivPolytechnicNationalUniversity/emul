@@ -25,6 +25,7 @@ const lab1 = glob(() => import.meta.glob("../../firmware/lab1/Core/{Inc,Src}/*.{
 const lab1RunningLightFiles = glob(() => import.meta.glob("../../firmware/lab1-running-light/{Core,App}/{Inc,Src}/*.{c,cpp,h}", { query: "?raw", import: "default" }) as Raw)
 const lcd = glob(() => import.meta.glob("../../firmware/lcd/{display,touch,cube}/{Src,Inc,BSP,Fonts}/*.{c,cpp,h}", { query: "?raw", import: "default" }) as Raw)
 const cubeTexture = glob(() => import.meta.glob("../../firmware/lcd/cube/texture.c", { query: "?raw", import: "default" }) as Raw)
+const sketches = glob(() => import.meta.glob("../../firmware/arduino/examples/*/*.{ino,h,cpp}", { query: "?raw", import: "default" }) as Raw)
 const retarget = glob(() => import.meta.glob("../../firmware/lcd/retarget.c", { query: "?raw", import: "default" }) as Raw)
 
 const MAIN_H = '#ifndef MAIN_H\n#define MAIN_H\n\n#include "stm32f4xx_hal.h"\n\n#endif /* MAIN_H */\n'
@@ -67,3 +68,6 @@ export const lcdProject = (name: "display" | "touch" | "cube"): ProjectLoader =>
   if (name === "cube") files.push({ path: "texture.c", content: await cubeTexture["../../firmware/lcd/cube/texture.c"]!() })
   return files
 }
+
+/** One of the Arduino sketches (`firmware/arduino/examples/<name>`), its files as the sketch folder has them. */
+export const arduinoSketch = (name: string): ProjectLoader => () => under(sketches, `../../firmware/arduino/examples/${name}/`)

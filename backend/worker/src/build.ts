@@ -4,10 +4,14 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
 import { DEFAULT_OPT, type BuildOptions, type SourceFile, type Target } from "emul-shared/source"
+import { ARDUINO_DEFINES, coreFor, INO, librariesFor, sketchToCpp } from "./arduino.ts"
 
 /**
  * Compile a project for its chip with GCC, the way STM32CubeIDE would: the program's own
- * sources, ST's HAL and CMSIS, a startup file and a linker script for the chip.
+ * sources, ST's HAL and CMSIS, a startup file and a linker script for the chip. An AVR target
+ * (`"toolchain": "avr"` in its target.json) is avr-gcc with avr-libc instead, which brings its
+ * own startup, vectors and linker script for the `-mmcu` it is given: the project's sources are
+ * all there is.
  *
  * The image lays the pieces out as (see the Dockerfile and toolchain/):
  *   targets/<target>/   target.json, the linker script, startup, system_*.c, *_it.c,
@@ -24,11 +28,16 @@ const TARGETS_DIR = process.env.TARGETS_DIR ?? new URL("../targets/", import.met
 const ST_ROOT = process.env.ST_ROOT ?? "/opt/st"
 const HAL_ROOT = process.env.HAL_ROOT ?? "/opt/hal"
 const GCC = process.env.ARM_GCC ?? "arm-none-eabi-"
+const AVR_GCC = process.env.AVR_GCC ?? "avr-"
+/** F_CPU when the job names none: an Arduino board's 16 MHz. */
+const DEFAULT_FCPU = 16_000_000
 /** A build over this is not a build anyone waits for. */
 const TIMEOUT_MS = 120_000
 const MAX_LOG = 4 * 1024 * 1024
 
-type TargetSpec = { name: string; family: string; cpu: string[]; defines: string[]; linker: string }
+type ArmSpec = { name: string; toolchain?: "arm"; family: string; cpu: string[]; defines: string[]; linker: string }
+type AvrSpec = { name: string; toolchain: "avr"; mcu: string }
+type TargetSpec = ArmSpec | AvrSpec
 
 export type BuildOutput = {
   ok: boolean
@@ -57,6 +66,7 @@ export async function build(target: Target, files: SourceFile[], options: BuildO
   } catch {
     return { ok: false, log: "", error: `no such target: ${target}` }
   }
+  if (spec.toolchain === "avr") return buildAvr(spec, files, options)
   const family = path.join(ST_ROOT, spec.family)
 
   const dir = await mkdtemp(path.join(tmpdir(), "emul-build-"))
@@ -162,6 +172,136 @@ export async function build(target: Target, files: SourceFile[], options: BuildO
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+}
+
+async function buildAvr(spec: AvrSpec, files: SourceFile[], options: BuildOptions): Promise<BuildOutput> {
+  const dir = await mkdtemp(path.join(tmpdir(), "emul-build-"))
+  const src = path.join(dir, "src")
+  try {
+    for (const f of files) {
+      const p = path.join(src, f.path)
+      await mkdir(path.dirname(p), { recursive: true })
+      await writeFile(p, f.content)
+    }
+    if (files.some((f) => INO.test(f.path))) return await buildSketch(spec, files, options, src)
+    const sources = files.filter((f) => C.test(f.path) || CXX.test(f.path) || ASM.test(f.path)).map((f) => f.path)
+    if (!sources.length) return { ok: false, log: "", error: "no source files to compile" }
+    const includes = [...new Set(files.filter((f) => HEADER.test(f.path)).map((f) => path.dirname(f.path)))]
+    const fcpu = options.fcpu ?? DEFAULT_FCPU
+    const opt = options.opt ?? DEFAULT_OPT
+    const common = [
+      `-mmcu=${spec.mcu}`,
+      `-DF_CPU=${fcpu}UL`,
+      opt,
+      "-g3",
+      "-Wall",
+      "-ffunction-sections",
+      "-fdata-sections",
+      "-fdiagnostics-color=never",
+      "-fmax-errors=50",
+      ...includes.map((i) => `-I${i}`),
+    ]
+    const driver = `${AVR_GCC}gcc`
+    const lines = [`# ${spec.name}, ${opt}, F_CPU ${fcpu} Hz`, `# ${path.basename(driver)} ${sources.join(" ")} (avr-libc)`, ""]
+    const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: dir, LANG: "C" }
+
+    // C++ on its own, as for ARM; avr-gcc has no libstdc++, and a program that throws or asks
+    // for a type at run time has nothing to link against anyway.
+    const cxxObjects: string[] = []
+    for (const source of sources.filter((s) => CXX.test(s))) {
+      const object = path.join("obj", `${source.replace(/[\\/]/g, "__")}.o`)
+      await mkdir(path.join(src, "obj"), { recursive: true })
+      const compile = await exec(driver, [...common, "-x", "c++", "-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics", "-c", source, "-o", object], src, env)
+      lines.push(compile.output)
+      if (compile.error) return { ok: false, log: lines.join("\n"), error: compile.error }
+      cxxObjects.push(object)
+    }
+    const args = [
+      ...common,
+      ...withLanguages(sources.filter((s) => !CXX.test(s))),
+      ...(cxxObjects.length ? ["-x", "none", ...cxxObjects] : []),
+      "-o",
+      "firmware.elf",
+      "-Wl,--gc-sections",
+      "-Wl,-Map=firmware.map",
+      "-lm",
+    ]
+    const compile = await exec(driver, args, src, env)
+    lines.push(compile.output)
+    if (compile.error) return { ok: false, log: lines.join("\n"), error: compile.error }
+    const size = await exec(`${AVR_GCC}size`, ["firmware.elf"], src, env)
+    lines.push(size.output)
+    return { ok: true, log: lines.join("\n"), elf: await readFile(path.join(src, "firmware.elf")), map: await readFile(path.join(src, "firmware.map")) }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+/** Compile jobs at once: the core and a library are a few dozen files each. */
+const PARALLEL = 4
+
+/**
+ * An Arduino sketch: the .ino files as one C++ file (`arduino.ts`), the project's other sources,
+ * the libraries they #include and the core, with platform.txt's switches — the core and the
+ * libraries at -Os with warnings off, as the IDE builds them; the sketch at the board's level
+ * with -Wall, so a student sees the warnings about their own code. Linked as the IDE links:
+ * the core as an archive, --gc-sections.
+ */
+async function buildSketch(spec: AvrSpec, files: SourceFile[], options: BuildOptions, src: string): Promise<BuildOutput> {
+  const fcpu = options.fcpu ?? DEFAULT_FCPU
+  const opt = options.opt ?? "-Os"
+  const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: path.dirname(src), LANG: "C" }
+  const driver = `${AVR_GCC}gcc`
+  const sketch = path.join("sketch", "sketch.ino.cpp")
+  await mkdir(path.join(src, "sketch"), { recursive: true })
+  await writeFile(path.join(src, sketch), sketchToCpp(files))
+  const own = files.filter((f) => !INO.test(f.path) && (C.test(f.path) || CXX.test(f.path) || ASM.test(f.path))).map((f) => f.path)
+  const core = await coreFor()
+  const libs = await librariesFor(files.map((f) => f.content))
+  const projectIncludes = [...new Set(files.filter((f) => HEADER.test(f.path)).map((f) => path.dirname(f.path)))]
+  const includes = [...projectIncludes, ...core.includes, ...libs.flatMap((l) => l.includes)].map((i) => `-I${i}`)
+  const base = [`-mmcu=${spec.mcu}`, `-DF_CPU=${fcpu}L`, ...ARDUINO_DEFINES, "-g", "-ffunction-sections", "-fdata-sections", "-fdiagnostics-color=never", "-fmax-errors=50", ...includes]
+  const flags = (file: string, quiet: boolean) => {
+    const level = quiet ? ["-Os", "-w"] : [opt, "-Wall"]
+    if (ASM.test(file)) return [...base, "-x", "assembler-with-cpp"]
+    if (C.test(file)) return [...base, ...level, "-std=gnu11"]
+    return [...base, ...level, "-x", "c++", "-std=gnu++11", "-fpermissive", "-fno-exceptions", "-fno-threadsafe-statics", "-Wno-error=narrowing"]
+  }
+  const lines = [`# ${spec.name} (Arduino Nano), ${opt}, F_CPU ${fcpu} Hz`, `# sketch: ${files.filter((f) => INO.test(f.path)).map((f) => f.path).join(" ")}${own.length ? ` + ${own.join(" ")}` : ""}`, `# libraries: ${libs.map((l) => l.name).join(", ") || "none"}; core: ArduinoCore-avr 1.8.6`, ""]
+  await mkdir(path.join(src, "obj"), { recursive: true })
+  const object = (file: string, i: number) => path.join("obj", `${i}-${path.basename(file)}.o`)
+  type Job = { file: string; quiet: boolean; out: string }
+  const jobs: Job[] = [
+    ...[sketch, ...own].map((file, i) => ({ file, quiet: false, out: object(file, i) })),
+    ...libs.flatMap((l) => l.sources).map((file, i) => ({ file, quiet: true, out: object(file, 1000 + i) })),
+  ]
+  const coreJobs: Job[] = core.sources.map((file, i) => ({ file, quiet: true, out: object(file, 5000 + i) }))
+  let failed: string | undefined
+  const run = async (list: Job[]) => {
+    let next = 0
+    await Promise.all(
+      Array.from({ length: PARALLEL }, async () => {
+        while (next < list.length && !failed) {
+          const job = list[next++]
+          const compile = await exec(driver, [...flags(job.file, job.quiet), "-c", job.file, "-o", job.out], src, env)
+          if (compile.output.trim()) lines.push(compile.output)
+          if (compile.error) failed ??= compile.error
+        }
+      }),
+    )
+  }
+  await run(jobs)
+  if (failed) return { ok: false, log: lines.join("\n"), error: failed }
+  await run(coreJobs)
+  if (failed) return { ok: false, log: lines.join("\n"), error: failed }
+  const archive = await exec(`${AVR_GCC}ar`, ["rcs", "core.a", ...coreJobs.map((j) => j.out)], src, env)
+  if (archive.error) return { ok: false, log: lines.join("\n") + archive.output, error: archive.error }
+  const link = await exec(driver, [`-mmcu=${spec.mcu}`, "-w", "-Os", "-g", "-Wl,--gc-sections", ...jobs.map((j) => j.out), "core.a", "-o", "firmware.elf", "-Wl,-Map=firmware.map", "-lm"], src, env)
+  if (link.output.trim()) lines.push(link.output)
+  if (link.error) return { ok: false, log: lines.join("\n"), error: link.error }
+  const size = await exec(`${AVR_GCC}size`, ["firmware.elf"], src, env)
+  lines.push(size.output)
+  return { ok: true, log: lines.join("\n"), elf: await readFile(path.join(src, "firmware.elf")), map: await readFile(path.join(src, "firmware.map")) }
 }
 
 /** `-x` switches so the driver compiles each file as what it is, whichever driver links. */
