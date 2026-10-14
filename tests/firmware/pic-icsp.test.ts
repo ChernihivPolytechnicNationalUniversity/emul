@@ -408,6 +408,44 @@ describe("the original PIC16F627/628 by DS30034D (D57, D60)", () => {
     expect(m.eeprom.every((b) => b === 0xff)).toBe(true)
   })
 
+  it("with the PC in configuration memory the bulk erase takes the IDs too, never the configuration word (P10-012)", () => {
+    const m = part(PIC16F628, [0x1234], CONFIG)
+    m.ids[0] = 0x0005
+    const p = new Programmer(m)
+    p.load(CMD.loadConfig, 0x3fff)
+    p.command(CMD.eraseProg)
+    p.command(ORIG.programOnly)
+    p.wait(6e-3)
+    expect([m.cpu.flash[0], m.ids[0], m.config]).toEqual([0x3fff, 0x3fff, CONFIG])
+  })
+
+  it("Bulk Erase Data Memory runs on the next Begin Programming; with CPD on it does nothing (P10-013)", () => {
+    const m = part(PIC16F628, [0x3fff], CONFIG)
+    m.eeprom.fill(0x00)
+    const p = new Programmer(m)
+    p.load(CMD.loadData, 0xff)
+    p.command(CMD.eraseData)
+    p.command(ORIG.programOnly)
+    p.wait(6e-3)
+    expect(m.eeprom.every((b) => b === 0xff)).toBe(true)
+    const q = part(PIC16F628, [0x3fff], CONFIG & ~0x100)
+    q.eeprom.fill(0x00)
+    const r = new Programmer(q)
+    r.load(CMD.loadData, 0xff)
+    r.command(CMD.eraseData)
+    r.command(ORIG.programOnly)
+    r.wait(6e-3)
+    expect(q.eeprom[0]).toBe(0x00)
+    expect([...q.unmodelled.keys()].join()).toMatch(/data-protected/)
+  })
+
+  it("in low-voltage programming, VPP at VIHH does not change the mode (P10-007)", () => {
+    const m = part(PIC16F628, [0x1234], CONFIG | 0x80)
+    new Programmer(m, { lowVoltage: true })
+    m.setMclrVoltage(13)
+    expect(m.programmingEntry).toBe("low-voltage")
+  })
+
   it("VIHH is VDD + 3.5 V on the original part: 9 V at VDD 5 V enters, as 10 V does on the A part (P10-018)", () => {
     const o = part(PIC16F627)
     o.setWiredPads([22, 23])

@@ -347,7 +347,10 @@ by §3.3: with the PC at 2007h, Bulk Erase Setup 1, Setup 2, then Begin Erase/Pr
 data and configuration memory (IDs and the configuration word too). Cycle times are Table 4-1's
 typicals: Tera 2 ms, Tprog 4 ms. CP pairs: a protected range reads 0 and is not written; when the two
 pairs differ (Note 2 asks for them equal), the more protective one applies, reported. VIHH is VDD + 3.5 V
-to 13.5 V for these parts. The device IDs are 07A0h (627) and 07C0h (628), revision 0.
+to 13.5 V for these parts; Table 4-1 names "MCLR and RA4/T0CKI" for it, but no other line of either
+document (pin table, entry figures, flowcharts) puts VPP on RA4, so RA4 is not a programming entry here.
+Tdis (0.5 µs HV discharge) is not checked, like the other timing minima (D49). The device IDs are 07A0h
+(627) and 07C0h (628), revision 0.
 
 **D58. TRISB on the original part** (E2-001): a read returns what each pin is doing — 0 for a pin
 driving out, 1 for an input or a released pin — whatever the latch holds. DS80073F covers Rev. A, the
