@@ -12,6 +12,8 @@ Documents (text copies are kept outside the repository):
 | DS40300C | PIC16F62X (PIC16F627/628) Data Sheet (2003) |
 | DS41196G | PIC16F627A/628A/648A EEPROM Memory Programming Specification (2006) |
 | DS80151B | PIC16F627A/628A Rev. A Silicon Errata (2003) |
+| DS30034D | PIC16F62X (PIC16F627/628) EEPROM Memory Programming Specification (2002) |
+| DS80073F | PIC16F62X (PIC16F627/628) Rev. A Silicon/Data Sheet Errata (2002) |
 | DS33023A | PICmicro Mid-Range MCU Family Reference Manual (1997), the sections the data sheet refers to |
 
 Status: **done (core)** — modelled and tested (`tests/firmware/pic-core.test.ts`, `pic-flags.test.ts`);
@@ -25,9 +27,9 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 
 | Status | Rows |
 |---|---|
-| done (SoC) | 751 |
+| done (SoC) | 769 |
 | todo | 603 |
-| info | 178 |
+| info | 182 |
 | done (core) | 171 |
 | D38 | 19 |
 | D49 | 16 |
@@ -57,6 +59,12 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 | D43 | 1 |
 | D42 | 1 |
 | D22 | 1 |
+| D57 | 1 |
+| D58 | 1 |
+| D59 | 1 |
+| D60 | 1 |
+| D61 | 1 |
+| D62 | 1 |
 | D53 | 1 |
 | D50 | 1 |
 | D56 | 1 |
@@ -64,7 +72,7 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 | D2 | 1 |
 | D3 | 1 |
 | D20 | 1 |
-| total | 1810 |
+| total | 1838 |
 
 ## Decisions where the documents are silent or contradict each other
 
@@ -144,8 +152,8 @@ Table 9-4's uuuu uuuu: two against one.
 and DS33023A, which put outputs on RA3/RA4 in 110 only; the PDF's figure shows RA3 as C1's switched
 VIN- input in 001 — 110 only.
 
-**D22. Mode 001 on the original PIC16F627/628** ("disfunctional", DS40300C Figure 9-1, nothing more): the
-outputs read 0 and the inspector says why.
+**D22. Mode 001 on the original PIC16F627/628** ("disfunctional", DS40300C Figure 9-1): the errata
+DS80073F (item 2) says what goes wrong — only CIS = 1 is affected; see D59.
 
 **D23. VREF with VREN = 0**: the ladder is unpowered — 0 V to the comparators, nothing on RA2. On RA2 the
 reference is seen through the ladder's Thevenin resistance (Figure 11-1, R = 2 kΩ, D312); the circuit
@@ -274,9 +282,8 @@ VDD and temperature are not taken into account.
 the sink figure, 0.6 V at 8.5 mA (≈ 70 Ω), is taken. D090's 0.7 V at 3 mA is a guaranteed minimum at a
 light load, far weaker than the 25 mA a pin is rated to source.
 
-**D48. Which parts take ICSP commands**: DS41196G covers the A parts (P7-001). The original
-PIC16F627/628 have their own programming specification, which is not among the documents (P6-045):
-their Program/Verify mode is entered, and the commands are not answered — reported.
+**D48. Which parts take ICSP commands**: DS41196G covers the A parts (P7-001); the original
+PIC16F627/628 follow their own specification, DS30034D (found later and added as the P10 rows; D57).
 
 **D49. The ICSP serial frame** (P7-030…P7-035, P7-046, P7-069, P7-071): bits are taken at the falling
 edges of CLOCK, LSb first: 6 for the command, then 16 for a data word (a start bit, 14 bits, a stop bit;
@@ -325,6 +332,39 @@ D36 does for the data EEPROM. Word writes on the PIC16F648A and data memory writ
 resets the PC to 0 (reported). In low-voltage entry the PIC16F627A/628A cannot reach the data EEPROM
 (E-001, Rev. A3; the revision is not known here, so it applies): data memory loads, reads (00h) and erases
 do nothing, reported.
+
+**D57. ICSP of the original PIC16F627/628** (P10-001…P10-018): the same frame and PC as the A parts
+(D49, D53), with DS30034D's commands. Begin Erase/Programming (001000) erases the word at the PC and
+writes the loaded one (flash, configuration memory or a data EEPROM byte): Tera + Tprog. Begin
+Programming Only (011000) only clears bits: Tprog. A bulk erase is the Bulk Erase command followed by a
+Begin Programming (§3.1 step 3; either programming command): the erase runs then, Tera; program memory
+(and the IDs when the PC is in 2000h–200Fh) or the data EEPROM — never the configuration word; it does
+nothing while CP (program memory) or CPD (data memory) protects, reported. The protection comes off only
+by §3.3: with the PC at 2007h, Bulk Erase Setup 1, Setup 2, then Begin Erase/Programming erases program,
+data and configuration memory (IDs and the configuration word too). Cycle times are Table 4-1's
+typicals: Tera 2 ms, Tprog 4 ms. CP pairs: a protected range reads 0 and is not written; when the two
+pairs differ (Note 2 asks for them equal), the more protective one applies, reported. VIHH is VDD + 3.5 V
+to 13.5 V for these parts. The device IDs are 07A0h (627) and 07C0h (628), revision 0.
+
+**D58. TRISB on the original part** (E2-001): a read returns what each pin is doing — 0 for a pin
+driving out, 1 for an input or a released pin — whatever the latch holds. DS80073F covers Rev. A, the
+only revision documented, so it applies to every PIC16F627/628 here.
+
+**D59. Comparator mode 001 on the original part** (E2-002, refines D22): with CIS = 0 (AN0) it works as
+the A part; with CIS = 1 AN3 is "not completely connected" to C1's (-) input: C1's output is not
+defined — it keeps the last value it had — and the use is reported. C2 is unaffected.
+
+**D60. LVP on the original part** (E2-003, P10-007): with the LVP bit set, RB4 going high during
+high-voltage programming interrupts it — the programming module starts over (PC 0, a new command), as
+the A part's PGM edge does (D56); in low-voltage programming, VPP at VIHH does not change the mode.
+
+**D61. The CCP compare erratum** (E2-004): counted from the last time CCP1CON<3> was clear, an iteration
+is a change between 1000 and 1001 followed by a TMR1 match. The change that starts the third iteration
+sets the output latch at once to the inverse of CCP1CON<0>, and from then every match drives the
+opposite level, until CCP1CON<3> is cleared. Interrupts are unaffected. "CCPR1<0>" in the text is read
+as CCP1CON<0>, the bit that tells 1000 from 1001.
+
+**D62. MCLR with LVP on the original part** (E2-005): with the LVP bit set, RA5 is MCLR whatever MCLRE says.
 
 **D8. The 48 rows marked decide** are settled the same way, block by block, before each block is
 written; the decision is added here.
@@ -1685,6 +1725,37 @@ written; the decision is added here.
 
 ## 2. Errata DS80151B (PIC16F627A/628A Rev. A silicon)
 DS80151B applies to "all PIC16F627A and PIC16F628A devices", meaning Rev. A silicon checked against data sheet DS40044A. It does not cover PIC16F648A or the original PIC16F627/628. Its "Clarifications/Corrections to the Data Sheet" section says "None". No separate errata for the original PIC16F627/628 was supplied; that part's only documented silicon defect is the CM = 001 comparator mode (P6-019).
+
+
+## DS30034D: PIC16F62X (original PIC16F627/628) programming specification; errata DS80073F
+
+| ID | What the document says | Where | Kind | Status |
+|---|---|---|---|---|
+| P10-001 | Covers PIC16F627, PIC16F628, PIC16LF627, PIC16LF628; programmed serially in-circuit, also from a single +5 V supply (LVP) | §1.0, p.1 | note | info |
+| P10-002 | Hardware: VDD 4.5–5.5 V programmable, VPP 12–14 V (or 4.5–5.5 V for LVP); verification at VDDMIN and VDDMAX | §1.1/1.2, p.1 | electrical | info |
+| P10-003 | During programming: RB4 = PGM (LVP input when the LVP bit is 1), RB6 = CLOCK in, RB7 = DATA in/out, MCLR = program mode select drawing no significant current (VPP generated internally) | Table 1-1, p.2 | pin | done (SoC) |
+| P10-004 | Memory map: user 0000h–1FFFh, configuration 2000h–3FFFh; the PC wraps 1FFFh→0000h and 3FFFh→2000h; 2000h–200Fh implemented, 2000h–2007h available, beyond 200Fh reaches user memory; IDs 2000h–2003h read even when protected | §2.1/2.2, Fig 2-1, p.3 | memory | done (SoC) |
+| P10-005 | Commands: 6 bits + optional 16-bit word, LSb first, latched on the falling clock edge; CLOCK/DATA Schmitt inputs | §2.3, p.4 | behaviour | done (SoC) |
+| P10-006 | Table 2-1 codes (MSb…LSb): Load Configuration xx0000; Load Data Program xx0010; Load Data Data xx0011; Increment Address xx0110; Read Data Program xx0100; Read Data Data xx0101; Begin Erase/Programming Cycle 001000; Begin Programming Only Cycle 011000; Bulk Erase Program xx1001; Bulk Erase Data xx1011; Bulk Erase Setup 1 000001; Bulk Erase Setup 2 000111 | Table 2-1, p.4 | behaviour | done (SoC) |
+| P10-007 | HV entry: CLOCK and DATA low, VPP raised first, then VDD; LV entry: VDD, then MCLR and PGM; PC = 0 on entry; all other logic held in reset; note: in LVP mode raising VPP to VIHH does not override LVP | §2.3, Figs 2-2/2-3, p.5 | behaviour | done (SoC) |
+| P10-008 | Load Data for Data Memory: 8-bit byte at the location of the PC's lower 7 bits; all 16 clocks needed for the module to reset properly | §2.3.2, p.6 | behaviour | done (SoC) |
+| P10-009 | Begin Programming Only: programs the loaded word without a word erase; a Load before every programming command; bulk erase recommended first; Tprog | §2.3.4, p.7 | behaviour | done (SoC) |
+| P10-010 | Begin Erase/Programming: erases the word at the PC and programs the loaded word; Tera + Tprog | §2.3.5, p.8 | behaviour | done (SoC) |
+| P10-011 | Read Data: DATA output from the 2nd rising clock edge, back to input after the 16th rising edge; data memory: 8 bits then zero padding | §2.3.7/2.3.8, p.9 | behaviour | done (SoC) |
+| P10-012 | Bulk Erase Program Memory (not code protected): Load Data Program 3FFFh, Bulk Erase Program, Begin Programming, wait Tera; PC in 2000h–200Fh erases IDs and program memory but not the configuration word; does not work on a code-protected device; VDD 4.5–5.5 V | §3.1, p.11 | behaviour | done (SoC) |
+| P10-013 | Bulk Erase Data Memory: Load Data Data 3FFFh, Bulk Erase Data, Begin Programming, wait Tera; does not work when protected; VDD 4.5–5.5 V | §3.2, p.12 | behaviour | done (SoC) |
+| P10-014 | Disabling code protection: Load Configuration (0000h), 7 × Increment Address (PC 2007h), Setup 1, Setup 2, Begin Erase/Programming, wait Tera + Tprog, Setup 1, Setup 2: erases program, data and configuration memory; protected regions read zeros and cannot be written until then | §3.3, p.12 | behaviour | done (SoC) |
+| P10-015 | Device IDs: PIC16F627 00 0111 101 x xxxx (07A0h + rev), PIC16F628 00 0111 110 x xxxx (07C0h + rev); revision not given | Table 3-1, p.17 | memory | done (SoC) |
+| P10-016 | Configuration word: CP1:CP0 pairs at bits 13:12 and 11:10 (2K: 11 off, 10 0400h–07FFh, 01 0200h–07FFh, 00 all; 1K: 11/10 off, 01 0200h–03FFh, 00 all); bit 9 reads 1 (legend: '0'); CPD, LVP, BOREN, MCLRE, FOSC2, PWRTEN, WDTEN, FOSC1:0; resetting CP erases program and data memory | Register 3-1, p.18 | register | done (SoC) |
+| P10-017 | Checksum table for 627/628 (CP off/partial/all) — a programmer computation | Table 3-2, p.19 | note | info |
+| P10-018 | Timing: VIHH VDD + 3.5 V min, 13.5 V max ("MCLR and RA4/T0CKI"); TVHHR 1 µs max; Tppdp 5 µs; Tset0 100 ns; Thld0 5 µs; Tset1/Thld1 100 ns; Tdly1/Tdly2 1 µs; Tdly3 80 ns; Tera 2 typ / 5 max ms; Tprog 4 typ / 8 max ms; Tdis 0.5 µs; word operations at VDD 2.0–5.5 V, bulk erase/write 4.5–5.5 V | Table 4-1, p.20 | timing | D57 |
+| P10-019 | Hex file: data EEPROM at 2100h, one byte per address | §3.9, §4.1, p.19/20 | memory | done (SoC) |
+| E2-001 | **TRISB read returns the pins' direction state, not the TRISB latch** ("returns the Data Direction state on the port pins themselves") | DS80073F 1, p.1 | register | D58 |
+| E2-002 | **Comparator mode 1 (CM = 001): with CIS = 1 AN3 is not completely connected to C1's (-) input — incorrect behaviour; CIS = 0 (AN0) works; mode 2 works** | DS80073F 2, p.9 | failure-mode | D59 |
+| E2-003 | **LVP: the high-voltage override does not work: with LVP enabled, RB4 going high during high-voltage programming interrupts the programming** (work-around: RB4 to ground) | DS80073F 3, p.9 | failure-mode | D60 |
+| E2-004 | **CCP compare: after a CCP reset, on the third iteration of {CCP1CON<3:0> changed 1001↔1000; TMR1 matches CCPR1} the output latch changes at once to the inverse of CCP1CON<0> and the response stays inverted until CCP1CON<3> is cleared; interrupts unaffected** (work-around: toggle mode 0010 or clear CCP1CON between) | DS80073F 4, p.9 | failure-mode | D61 |
+| E2-005 | **With LVP enabled, MCLR is always enabled, regardless of MCLRE** | DS80073F 5, p.9 | behaviour | D62 |
+| E2-006 | Clarifications: T1SYNC is active low (T1SYNC-bar); RCSTA bit 3 named ADDEN, reset table 0000 -00x | DS80073F p.10 | note | info |
 
 ## DS41196G: programming specification (high-voltage and low-voltage entry, ICSP protocol)
 

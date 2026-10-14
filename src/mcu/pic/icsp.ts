@@ -8,6 +8,10 @@
  * Programming only clears bits in flash and the configuration word (a bulk erase sets them); a data
  * EEPROM byte is erased and written by its own cycle. Cycle times run in simulated seconds; a command
  * that arrives during one is ignored and reported.
+ *
+ * The original PIC16F627/628 (DS30034D; P10 rows, decision D57) add Begin Erase/Programming (001000),
+ * take Begin Programming Only as 011000, run a bulk erase on the programming command that follows it,
+ * protect by CP pairs, and lift protection only by the Bulk Erase Setup 1/2 sequence at 2007h.
  */
 import type { PicProfile } from "./chip"
 
@@ -29,12 +33,17 @@ export interface IcspHost {
 }
 
 const C = { loadConfig: 0x00, loadProg: 0x02, loadData: 0x03, readProg: 0x04, readData: 0x05, inc: 0x06, program: 0x08, eraseProg: 0x09, eraseData: 0x0b }
+/** The original part's own codes, all six bits decoded (DS30034D Table 2-1). */
+const O = { eraseProgram: 0x08, programOnly: 0x18, setup1: 0x01, setup2: 0x07 }
 /** Commands followed by a 16-bit data word (Table 2-3). */
 const WITH_DATA = new Set([C.loadConfig, C.loadProg, C.loadData, C.readProg, C.readData])
 /** Typical cycle times, s (D51): a flash word D133A, a data EEPROM byte D122, a bulk erase D133. */
 const T_WORD = 2e-3
 const T_BYTE = 4e-3
 const T_ERASE = 4e-3
+/** The original part's Table 4-1 typicals (D57): Tera 2 ms, Tprog 4 ms. */
+const O_TERA = 2e-3
+const O_TPROG = 4e-3
 const hex = (v: number, n = 2) => `${v.toString(16).toUpperCase().padStart(n, "0")}h`
 
 export class Icsp {
@@ -52,6 +61,9 @@ export class Icsp {
   private readWord = 0
   private latch: { word: number; kind: "prog" | "data" } | null = null
   private busyUntil = -Infinity
+  /** Original part: the bulk erase a Begin Programming will run, and the last two commands (the §3.3 sequence). */
+  private bulk: "prog" | "data" | null = null
+  private recent: number[] = []
   /** DATA as an output (Read Data, D49). */
   driving = false
   out = false
@@ -62,8 +74,25 @@ export class Icsp {
   private get flashMask() {
     return this.host.chip.flashWords - 1
   }
+  private get original() {
+    return !this.host.chip.revisionA
+  }
+  /** The first protected program address (Infinity: none). A: CP protects all; original: the CP1:CP0 pairs (D57). */
+  private get protectedFrom(): number {
+    const cfg = this.host.config
+    if (!this.original) return cfg & 0x2000 ? Infinity : 0
+    const k2 = this.host.chip.flashWords > 1024
+    const from = (pair: number) => (pair === 3 ? Infinity : pair === 2 ? (k2 ? 0x400 : Infinity) : pair === 1 ? 0x200 : 0)
+    const a = (cfg >> 12) & 3
+    const b = (cfg >> 10) & 3
+    if (a !== b) this.host.feature("CP1:CP0 pairs of the configuration word differ (DS30034D Register 3-1 Note 2): the more protective one taken (decision D57)")
+    return Math.min(from(a), from(b))
+  }
+  private protects(addr: number) {
+    return addr >= this.protectedFrom
+  }
   private get cp() {
-    return (this.host.config & 0x2000) === 0
+    return this.protectedFrom !== Infinity
   }
   private get cpd() {
     return (this.host.config & 0x0100) === 0
@@ -82,11 +111,16 @@ export class Icsp {
     this.bits = this.shift = 0
     this.latch = null
     this.busyUntil = -Infinity
+    this.bulk = null
+    this.recent = []
     this.setDrive(false, false)
   }
   /** An edge on RB4/PGM with the LVP bit set resets the PC (P7-054; D56). */
   pgmEdge() {
     this.pc = 0
+    this.phase = "cmd"
+    this.bits = this.shift = 0
+    this.setDrive(false, false)
     this.host.feature("RB4/PGM toggled during Program/Verify with the LVP bit set: the PC went back to 0 (DS41196G §2.4; decision D56)")
   }
 
@@ -124,8 +158,9 @@ export class Icsp {
   }
 
   private decode(code: number) {
+    if (this.original && [O.eraseProgram, O.programOnly, O.setup1, O.setup2].includes(code)) return this.decodeOriginal(code)
     const c = code & 0x0f
-    const known = c === C.program ? (code & 0x10) === 0 : [C.loadConfig, C.loadProg, C.loadData, C.readProg, C.readData, C.inc, C.eraseProg, C.eraseData].includes(c)
+    const known = c === C.program ? (code & 0x10) === 0 && !this.original : [C.loadConfig, C.loadProg, C.loadData, C.readProg, C.readData, C.inc, C.eraseProg, C.eraseData].includes(c)
     if (!known) {
       this.host.feature(`ICSP command ${hex(code)}: not defined in DS41196G Table 2-3, ignored (decision D50)`)
       return
@@ -142,10 +177,47 @@ export class Icsp {
       return
     }
     if (busy) return
+    this.remember(c)
     if (c === C.inc) this.pc = this.pc < 0x2000 ? (this.pc + 1) & this.flashMask : 0x2000 + ((this.pc + 1 - 0x2000) & 0x1fff)
     else if (c === C.program) this.program()
-    else if (c === C.eraseProg) this.eraseProgram()
-    else if (c === C.eraseData) this.eraseData()
+    // On the original part the bulk erase runs on the next Begin Programming (DS30034D §3.1/3.2).
+    else if (c === C.eraseProg) this.original ? (this.bulk = "prog") : this.eraseProgram()
+    else if (c === C.eraseData) this.original ? (this.bulk = "data") : this.eraseData()
+  }
+  private remember(code: number) {
+    this.recent = [...this.recent.slice(-1), code]
+  }
+
+  /** DS30034D's own commands (D57). */
+  private decodeOriginal(code: number) {
+    if (this.host.time < this.busyUntil) {
+      this.host.feature(`ICSP command ${hex(code)} while a programming or erase cycle is still running: ignored (Tera/Tprog, decision D50)`)
+      return
+    }
+    const prev = this.recent
+    this.remember(code)
+    if (code === O.setup1 || code === O.setup2) return
+    const erase = code === O.eraseProgram
+    // §3.3: Setup 1, Setup 2, then Begin Erase/Programming at 2007h lifts the protection by erasing everything.
+    if (erase && this.pc === 0x2007 && prev[0] === O.setup1 && prev[1] === O.setup2) return this.chipErase()
+    if (this.bulk) {
+      const what = this.bulk
+      this.bulk = null
+      this.latch = null
+      return what === "prog" ? this.eraseProgram() : this.eraseData()
+    }
+    this.program(erase)
+  }
+  /** §3.3: program, data and configuration memory erased, the protection with them. */
+  private chipErase() {
+    this.busyUntil = this.host.time + O_TERA + O_TPROG
+    this.latch = null
+    this.host.flash.fill(0x3fff)
+    this.host.eeprom.fill(0xff)
+    this.host.ids.fill(0x3fff)
+    this.reserved.fill(0x3fff)
+    this.host.config = 0x3fff
+    this.host.flashChanged()
   }
 
   private dataDone(frame: number) {
@@ -176,15 +248,16 @@ export class Icsp {
       return this.reserved[off]
     }
     // Past 200Fh the configuration space reaches program memory (§2.1).
-    return this.cp ? 0 : this.host.flash[pc & this.flashMask]
+    const a = pc & this.flashMask
+    return this.protects(a) ? 0 : this.host.flash[a]
   }
   private readData(): number {
     if (this.dataBlocked || this.cpd) return 0
     return this.host.eeprom[this.pc & (this.host.eeprom.length - 1)]
   }
 
-  /** Begin Programming Only Cycle (§2.4.4; D52, D55). */
-  private program() {
+  /** Begin Programming Only Cycle (§2.4.4; D52, D55); `erase`: the original's Begin Erase/Programming (D57). */
+  private program(erase = false) {
     const latch = this.latch
     if (!latch) {
       this.host.feature("ICSP Begin Programming without a Load since the last cycle: nothing written (DS41196G §2.4.4; decision D52)")
@@ -193,7 +266,7 @@ export class Icsp {
     this.latch = null
     const vdd = this.host.vdd
     if (latch.kind === "data") {
-      this.busyUntil = this.host.time + T_BYTE
+      this.busyUntil = this.host.time + (this.original ? (erase ? O_TERA : 0) + O_TPROG : T_BYTE)
       if (this.dataBlocked) return
       if (this.cpd) {
         this.host.feature("ICSP data EEPROM write with CPD on: not written (decision D54)")
@@ -201,15 +274,18 @@ export class Icsp {
       }
       const a = this.pc & (this.host.eeprom.length - 1)
       if (vdd < 2.0) this.host.feature(`ICSP data EEPROM write at VDD ${vdd.toFixed(2)} V, under 2.0 V (Table 4-1): left half-done (decision D55)`)
-      this.host.eeprom[a] = vdd < 2.0 ? latch.word | (Math.floor(this.host.random() * 256) & ~latch.word & 0xff) : latch.word
+      const old = this.host.eeprom[a]
+      // The original's Begin Programming Only does no erase: bits only cleared (D57); otherwise erase and write.
+      const target = this.original && !erase ? old & latch.word : latch.word
+      this.host.eeprom[a] = vdd < 2.0 ? target | (Math.floor(this.host.random() * 256) & ~target & 0xff) : target
       return
     }
-    this.busyUntil = this.host.time + T_WORD
+    this.busyUntil = this.host.time + (this.original ? (erase ? O_TERA : 0) + O_TPROG : T_WORD)
     const pc = this.pc
     const write = (old: number) => {
-      const target = old & latch.word
+      const target = erase ? latch.word : old & latch.word
       // E-002: the 627A/628A write flash only at 4.5–5.5 V; any part under the 2.0 V of Table 4-1.
-      const min = this.host.chip.flashWords <= 2048 ? 4.5 : 2.0
+      const min = this.host.chip.revisionA && this.host.chip.flashWords <= 2048 ? 4.5 : 2.0
       if (vdd >= min) return target
       this.host.feature(`ICSP flash word written at VDD ${vdd.toFixed(2)} V, under ${min} V (${min === 4.5 ? "errata E-002" : "DS41196G Table 4-1"}): left half-done (decision D55)`)
       return target | (Math.floor(this.host.random() * 0x4000) & old & ~target)
@@ -221,35 +297,44 @@ export class Icsp {
       else if (off !== 6) this.reserved[off] = write(this.reserved[off])
       return
     }
-    if (this.cp) {
-      this.host.feature("ICSP program memory write with CP on: not written (decision D54)")
+    const a = pc & this.flashMask
+    if (this.protects(a)) {
+      this.host.feature("ICSP program memory write to a code-protected address: not written (decision D54)")
       return
     }
-    const a = pc & this.flashMask
     this.host.flash[a] = write(this.host.flash[a])
     this.host.flashChanged()
   }
 
   /** Bulk Erase Program Memory by Table 3-1 (D52, D55). */
   private eraseProgram() {
-    this.busyUntil = this.host.time + T_ERASE
+    if (this.original && this.cp) {
+      this.host.feature("ICSP bulk erase on a code-protected PIC16F627/628: does not work (DS30034D §3.1); use the §3.3 sequence (decision D57)")
+      return
+    }
+    this.busyUntil = this.host.time + (this.original ? O_TERA : T_ERASE)
     const low = this.host.vdd < 4.5
     if (low) this.host.feature(`ICSP bulk erase at VDD ${this.host.vdd.toFixed(2)} V: needs 4.5–5.5 V (Table 4-1, errata E-003); left half-done (decision D55)`)
     const erase = (old: number, bits: number) => (low ? old | (Math.floor(this.host.random() * (bits + 1)) & bits) : bits)
     const cpdOn = this.cpd
     const inConfig = this.pc >= 0x2000
     for (let i = 0; i < this.host.flash.length; i++) this.host.flash[i] = erase(this.host.flash[i], 0x3fff)
-    this.host.config = erase(this.host.config, 0x3fff)
+    // The original part's bulk erase leaves the configuration word (DS30034D §3.1) and never the data EEPROM.
+    if (!this.original) this.host.config = erase(this.host.config, 0x3fff)
     if (inConfig) {
       for (let i = 0; i < 4; i++) this.host.ids[i] = erase(this.host.ids[i], 0x3fff)
       for (let i = 0; i < 16; i++) this.reserved[i] = erase(this.reserved[i], 0x3fff)
     }
-    if (cpdOn) for (let i = 0; i < this.host.eeprom.length; i++) this.host.eeprom[i] = erase(this.host.eeprom[i], 0xff)
+    if (cpdOn && !this.original) for (let i = 0; i < this.host.eeprom.length; i++) this.host.eeprom[i] = erase(this.host.eeprom[i], 0xff)
     this.host.flashChanged()
   }
   /** Bulk Erase Data Memory (§3.2). */
   private eraseData() {
-    this.busyUntil = this.host.time + T_ERASE
+    if (this.original && this.cpd) {
+      this.host.feature("ICSP bulk erase of a data-protected PIC16F627/628 EEPROM: does not work (DS30034D §3.2); use the §3.3 sequence (decision D57)")
+      return
+    }
+    this.busyUntil = this.host.time + (this.original ? O_TERA : T_ERASE)
     if (this.dataBlocked) return
     const low = this.host.vdd < 4.5
     if (low) this.host.feature(`ICSP bulk erase at VDD ${this.host.vdd.toFixed(2)} V: needs 4.5–5.5 V (Table 4-1); left half-done (decision D55)`)

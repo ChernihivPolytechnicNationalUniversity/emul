@@ -181,6 +181,7 @@ export class PicMcu implements PicBus, PicSystem {
           return host.cpu.sleeping
         },
         pinChanged: (cycle) => this.portb.refresh(cycle),
+        compareErratum: !chip.revisionA,
       }),
     )
     this.comparators = this.attach(
@@ -381,7 +382,13 @@ export class PicMcu implements PicBus, PicSystem {
         this.portb.writeLatch(v, Math.ceil(at()))
       },
     })
-    this.register(TRISB, { name: "TRISB", read: () => this.portb.tris, write: (v) => this.writeTrisB(v, at()) })
+    this.register(TRISB, {
+      name: "TRISB",
+      // The original part's Rev. A reads the pins' direction, not the latch (errata DS80073F item 1; decision D58).
+      read: () => (this.chip.revisionA ? this.portb.tris : this.trisbAsPins()),
+      peek: () => this.portb.tris,
+      write: (v) => this.writeTrisB(v, at()),
+    })
     const cmp = this.comparators
     this.register(0x1f, {
       name: "CMCON",
@@ -437,6 +444,15 @@ export class PicMcu implements PicBus, PicSystem {
     this.wdt.plan()
     if ((was ^ v) & 0x80) this.pinsChanged(Math.ceil(at))
     this.reschedule()
+  }
+  /** What each PORTB pin is doing: 0 driving out, 1 an input or released. */
+  private trisbAsPins() {
+    let v = 0
+    for (let p = 0; p < 8; p++) {
+      const d = this.portb.drive[p]
+      if (!(d === "high" || d === "low" || typeof d === "number")) v |= 1 << p
+    }
+    return v
   }
   /** SPEN with TRISB<2:1> not both set: §12.0 asks for them set (decision D28). */
   private checkUsartTris() {
@@ -547,8 +563,9 @@ export class PicMcu implements PicBus, PicSystem {
   private get lvp() {
     return (this.config & 0x80) !== 0
   }
+  /** MCLR is the reset input: MCLRE, or on the original part also LVP (errata DS80073F item 5; decision D62). */
   private get mclre() {
-    return (this.config & 0x20) !== 0
+    return (this.config & 0x20) !== 0 || (!this.chip.revisionA && this.lvp)
   }
   /** PORTA pins: comparator inputs/outputs, RA4 open drain, RA5 input only, RA6/RA7 by FOSC (§5.1, Figures 5-1…5-7). */
   private modeA(p: number): PinMode {
@@ -627,10 +644,11 @@ export class PicMcu implements PicBus, PicSystem {
 
   private inputChanged(port: number, pin: number, level: boolean, cycle: number) {
     if (this.programmingMode) {
-      // Only CLOCK, DATA and PGM mean anything to a part in Program/Verify; the original parts' commands are not modelled (D48).
-      if (port !== 1 || !this.chip.revisionA) return
+      // Only CLOCK, DATA and PGM mean anything to a part in Program/Verify.
+      if (port !== 1) return
       if (pin === 6) this.icsp.clock(level, this.portb.pin(7))
-      if (pin === 4 && this.lvp && this.programmingEntry === "high-voltage") this.icsp.pgmEdge()
+      // With LVP set a PGM edge during high-voltage programming restarts the module (A: P7-054; original: RB4 going high, E2-003).
+      if (pin === 4 && this.lvp && this.programmingEntry === "high-voltage" && (this.chip.revisionA || level)) this.icsp.pgmEdge()
       return
     }
     if (port === 0 && pin === 4) this.timer0.pinEdge(level, cycle)
@@ -825,7 +843,8 @@ export class PicMcu implements PicBus, PicSystem {
   setMclrVoltage(volts: number) {
     this.mclrVolts = volts
     const e = this.chip.electrical
-    if (volts >= e.vihh.min && !this.portb.pin(6) && !this.portb.pin(7)) {
+    const vihh = e.vihh.aboveVdd !== undefined ? this.vdd + e.vihh.aboveVdd : e.vihh.min
+    if (volts >= vihh && !this.portb.pin(6) && !this.portb.pin(7)) {
       this.enterProgramming("high-voltage")
       return
     }
@@ -879,11 +898,7 @@ export class PicMcu implements PicBus, PicSystem {
     this.programmingEntry = how
     this.holdInReset()
     this.cpu.stop = true
-    if (this.chip.revisionA) this.icsp.enter()
-    else
-      this.feature(
-        `ICSP: Program/Verify mode entered — the ${this.chip.name}'s programming specification is not among the documents, so its commands are not modelled; the part waits for a reset (decision D48)`,
-      )
+    this.icsp.enter()
   }
 
   /** A reset takes hold: the pins go to inputs, a data EEPROM write under way is cut (D36). */

@@ -141,10 +141,12 @@ describe("comparator interrupt (§10.6)", () => {
     expect(m.peekFile(CMCON)).toBe(0)
   })
 
-  it("mode 001 is defective on the original PIC16F627 (DS40300C Figure 9-1): reported, outputs held at 0 (decision D22)", () => {
+  it("mode 001 on the original PIC16F627 works with CIS = 0 and is reported with CIS = 1 (DS80073F item 2; decisions D22, D59)", () => {
     const m = part(0x01, [1.0, 3.0, 2.0, 2.5], [], PIC16F627)
-    expect(outs(m)).toBe(0)
-    expect([...m.unmodelled.keys()].join()).toMatch(/defective/)
+    expect(outs(m)).toBe(0b01)
+    expect(m.unmodelled.size).toBe(0)
+    const c = part(0x09, [1.0, 3.0, 2.0, 2.5], [], PIC16F627)
+    expect([...c.unmodelled.keys()].join()).toMatch(/E2-002/)
   })
 })
 

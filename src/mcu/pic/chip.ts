@@ -43,8 +43,8 @@ export type PicElectrical = {
   ttl: { vil: number; vih: number }
   /** Schmitt inputs (PORTA, INT, T0CKI, MCLR): fractions of VDD (D031, D041, D042). */
   schmittOfVdd: { vil: number; vih: number }
-  /** Programming voltage on MCLR/VPP that enters Program/Verify (DS41196G Table 4-1 VIHH). */
-  vihh: { min: number; max: number }
+  /** Programming voltage on MCLR/VPP that enters Program/Verify (DS41196G Table 4-1 VIHH; DS30034D: VDD + 3.5 V min, `aboveVdd`). */
+  vihh: { min: number; max: number; aboveVdd?: number }
   /** VDD rise detected by the power-on reset (§14.4.1: 1.2–1.7 V; decision D9 takes the middle). */
   por: number
   /** Brown-out reset voltage, V (D005), and the minimum time below it that resets, s (param 35). */
@@ -293,6 +293,7 @@ const ELECTRICAL_A: PicElectrical = {
 const ELECTRICAL_ORIGINAL: PicElectrical = {
   ...ELECTRICAL_A,
   intoscSlow: 37e3,
+  vihh: { min: 0, max: 13.5, aboveVdd: 3.5 },
   // Fig 14-17 note 2 gives ~1 µs for ER; Table 14-4 gives no delay for INTRC (P6-013).
   intoscWake: [[5.0, 0]],
   ipd: [
@@ -323,13 +324,12 @@ const COMMON = [0xf0, 0x170, 0x1f0]
 const A = { family: "pic", revisionA: true, lowVoltage: false, grade: 20e6, commonMirrors: COMMON, borForcesPwrt: false, rcKind: "RC", comparator001Defective: false, electrical: ELECTRICAL_A } as const
 const ORIGINAL = { family: "pic", revisionA: false, lowVoltage: false, grade: 20e6, commonMirrors: COMMON, borForcesPwrt: true, rcKind: "ER", comparator001Defective: true, electrical: ELECTRICAL_ORIGINAL } as const
 
-// Device IDs: DS41196G Table 3-2 (P7-092), revision bits <4:0> not given (0 here). The original parts' IDs are in their own
-// programming specification, not among the documents: 0 (P6-045).
+// Device IDs: DS41196G Table 3-2 (P7-092) and DS30034D Table 3-1 (P10-015); revision bits <4:0> not given (0 here).
 export const PIC16F627A: PicProfile = { ...A, id: "PIC16F627A", name: "PIC16F627A", flashWords: 1024, eepromBytes: 128, gpr: GPR_224, deviceId: 0x1040 }
 export const PIC16F628A: PicProfile = { ...A, id: "PIC16F628A", name: "PIC16F628A", flashWords: 2048, eepromBytes: 128, gpr: GPR_224, deviceId: 0x1060 }
 export const PIC16F648A: PicProfile = { ...A, id: "PIC16F648A", name: "PIC16F648A", flashWords: 4096, eepromBytes: 256, gpr: GPR_256, deviceId: 0x1100 }
-export const PIC16F627: PicProfile = { ...ORIGINAL, id: "PIC16F627", name: "PIC16F627", flashWords: 1024, eepromBytes: 128, gpr: GPR_224, deviceId: 0 }
-export const PIC16F628: PicProfile = { ...ORIGINAL, id: "PIC16F628", name: "PIC16F628", flashWords: 2048, eepromBytes: 128, gpr: GPR_224, deviceId: 0 }
+export const PIC16F627: PicProfile = { ...ORIGINAL, id: "PIC16F627", name: "PIC16F627", flashWords: 1024, eepromBytes: 128, gpr: GPR_224, deviceId: 0x07a0 }
+export const PIC16F628: PicProfile = { ...ORIGINAL, id: "PIC16F628", name: "PIC16F628", flashWords: 2048, eepromBytes: 128, gpr: GPR_224, deviceId: 0x07c0 }
 
 export const PIC16LF627A: PicProfile = { ...PIC16F627A, id: "PIC16LF627A", name: "PIC16LF627A", lowVoltage: true }
 export const PIC16LF628A: PicProfile = { ...PIC16F628A, id: "PIC16LF628A", name: "PIC16LF628A", lowVoltage: true }

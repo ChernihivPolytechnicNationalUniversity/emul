@@ -164,6 +164,8 @@ export interface CcpHost {
   readonly asleep: boolean
   /** RB3's level now (for capture prescaler resets and the pin's own drive). */
   pinChanged(cycle: number): void
+  /** The original part's compare erratum (DS80073F item 4; decision D61). */
+  readonly compareErratum: boolean
 }
 
 export class Ccp1 extends Peripheral {
@@ -179,6 +181,10 @@ export class Ccp1 extends Peripheral {
   private captureCount = 0
   /** PWM: cycle (fractional) the pin falls in the current period. */
   private fallAt = Infinity
+  /** E2-004 (D61): iterations (a 1000↔1001 change, then a match) since CCP1CON<3> was clear; one under way; inverted. */
+  private iterations = 0
+  private changed = false
+  private inverted = false
 
   constructor(bus: PicBus, host: CcpHost) {
     super(bus)
@@ -217,6 +223,9 @@ export class Ccp1 extends Peripheral {
     this.output = false
     this.captureCount = 0
     this.fallAt = Infinity
+    this.iterations = 0
+    this.changed = false
+    this.inverted = false
     this.due = Infinity
   }
 
@@ -232,6 +241,7 @@ export class Ccp1 extends Peripheral {
     if (mode === 0) this.output = false
     if (mode === 8 && was !== 8) this.output = false
     if (mode === 9 && was !== 9) this.output = true
+    if (this.host.compareErratum) this.erratum(was, mode)
     if (this.pwm && !(was >= 12)) {
       this.output = false
       this.fallAt = Infinity
@@ -250,11 +260,36 @@ export class Ccp1 extends Peripheral {
     if (this.compare) this.host.timer1.compareChanged()
   }
 
+  /**
+   * The original part's compare erratum (DS80073F item 4; D61): the third change between 1000 and 1001
+   * since CCP1CON<3> was clear, each earlier one followed by a match, sets the latch at once to the
+   * inverse of CCP1CON<0> and inverts every later match until CCP1CON<3> is cleared.
+   */
+  private erratum(was: number, mode: number) {
+    if (!(mode & 8)) {
+      this.iterations = 0
+      this.changed = false
+      this.inverted = false
+      return
+    }
+    if (!((was === 8 && mode === 9) || (was === 9 && mode === 8))) return
+    if (this.iterations >= 2 && !this.inverted) {
+      this.inverted = true
+      this.bus.feature("CCP compare: third change between 1000 and 1001 on the original PIC16F627/628 — the output latch inverts (errata DS80073F item 4, E2-004; decision D61)")
+    }
+    if (this.inverted) this.output = (mode & 1) === 0
+    this.changed = true
+  }
+
   /** A compare match at cycle c: CCP1IF, and the pin per the mode (§9.2). */
   onCompare(c: number) {
     this.host.setCcp1if(c)
-    if (this.mode === 8) this.output = true
-    else if (this.mode === 9) this.output = false
+    if (this.changed) {
+      this.iterations++
+      this.changed = false
+    }
+    if (this.mode === 8) this.output = !this.inverted
+    else if (this.mode === 9) this.output = this.inverted
     else return
     this.host.pinChanged(c)
   }

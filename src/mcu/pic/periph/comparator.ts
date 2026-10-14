@@ -102,18 +102,19 @@ export class Comparators extends Peripheral {
   private compute(): number {
     const cm = this.mode
     const [m1, p1, m2, p2] = inputs(cm, (this.cmcon & 0x08) !== 0)
-    if (cm === 1 && this.host.defective001) {
-      if (!this.reported001) {
-        this.reported001 = true
-        this.bus.feature("Comparator mode 001: defective on the original PIC16F627/628 (DS40300C Figure 9-1) — outputs held at 0 (decision D22)")
-      }
-      return 0
+    // Mode 001 with CIS = 1 on the original part: AN3 is not completely connected to C1's (-) input (errata
+    // DS80073F 2): C1 keeps its last output (decision D59); CIS = 0 works.
+    const broken = cm === 1 && this.host.defective001 && (this.cmcon & 0x08) !== 0
+    if (broken && !this.reported001) {
+      this.reported001 = true
+      this.bus.feature("Comparator mode 001 with CIS = 1 on the original PIC16F627/628: AN3 not completely connected to C1 (errata DS80073F item 2, E2-002) — C1 keeps its last output (decision D59)")
     }
     let o = 0
-    if (m1 !== null && this.level(p1) > this.level(m1)) o |= 1
+    if (broken) o |= this.out & 1
+    else if (m1 !== null && this.level(p1) > this.level(m1)) o |= 1
     if (m2 !== null && this.level(p2) > this.level(m2)) o |= 2
     // CnINV (bits 4, 5) invert each output; an off comparator reads 0 either way (Figure 10-1).
-    if (m1 !== null && this.cmcon & 0x10) o ^= 1
+    if (m1 !== null && !broken && this.cmcon & 0x10) o ^= 1
     if (m2 !== null && this.cmcon & 0x20) o ^= 2
     return o
   }

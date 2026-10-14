@@ -4,7 +4,7 @@
  * erasing, writing, reading back and verifying, then letting the part run what it wrote.
  */
 import { describe, expect, it } from "vitest"
-import { PIC16F627, PIC16F627A, PIC16F628A, PIC16F648A, type PicProfile } from "@/mcu/pic/chip"
+import { PIC16F627, PIC16F627A, PIC16F628, PIC16F628A, PIC16F648A, type PicProfile } from "@/mcu/pic/chip"
 import type { PicMcu } from "@/mcu/pic/mcu"
 import { createPic } from "@/mcu/pic/parts"
 import * as A from "../lib/pic-asm"
@@ -336,12 +336,99 @@ describe("supply and LVP (D55, D56)", () => {
   })
 })
 
-describe("the original PIC16F627 (D48)", () => {
-  it("enters Program/Verify but its programming commands are not modelled (its specification is not among the documents)", () => {
-    const m = part(PIC16F627, [0x3005])
+describe("the original PIC16F627/628 by DS30034D (D57, D60)", () => {
+  const ORIG = { eraseProgram: 0x08, programOnly: 0x18, setup1: 0x01, setup2: 0x07 }
+  it("device IDs 07A0h (627) and 07C0h (628) at 2006h (P10-015)", () => {
+    for (const [chip, id] of [
+      [PIC16F627, 0x07a0],
+      [PIC16F628, 0x07c0],
+    ] as const) {
+      const m = part(chip)
+      const p = new Programmer(m)
+      p.load(CMD.loadConfig, 0x3fff)
+      for (let i = 0; i < 6; i++) p.command(CMD.inc)
+      expect(p.read(CMD.readProg).word, chip.name).toBe(id)
+    }
+  })
+
+  it("Begin Erase/Programming writes the word whatever was there; Begin Programming Only clears bits (P10-009, P10-010)", () => {
+    const m = part(PIC16F628, [0x00ff, 0x00ff])
     const p = new Programmer(m)
-    expect(m.programmingMode).toBe(true)
-    expect(p.read(CMD.readProg).seen.every((b) => b === null)).toBe(true)
-    expect(reports(m)).toMatch(/not modelled/)
+    p.load(CMD.loadProg, 0x3f0f)
+    p.command(ORIG.eraseProgram)
+    p.wait(8e-3)
+    expect(p.read(CMD.readProg).word).toBe(0x3f0f)
+    p.command(CMD.inc)
+    p.load(CMD.loadProg, 0x3f0f)
+    p.command(ORIG.programOnly)
+    p.wait(8e-3)
+    expect(p.read(CMD.readProg).word).toBe(0x000f)
+    expect(reports(m)).toBe("")
+  })
+
+  it("a bulk erase runs on the Begin Programming that follows it, and leaves the configuration word (P10-012)", () => {
+    const m = part(PIC16F628, [0x1234, 0x0000], CONFIG)
+    const p = new Programmer(m)
+    p.load(CMD.loadProg, 0x3fff)
+    p.command(CMD.eraseProg)
+    p.wait(6e-3)
+    expect(p.read(CMD.readProg).word).toBe(0x1234)
+    p.command(ORIG.programOnly)
+    p.wait(6e-3)
+    expect(p.read(CMD.readProg).word).toBe(0x3fff)
+    expect(m.config).toBe(CONFIG)
+  })
+
+  it("CP pairs protect a range: it reads 0, bulk erase refuses; §3.3's sequence erases everything, the configuration word too (P10-014, P10-016)", () => {
+    const words = new Array(2048).fill(0x1111)
+    // CP1:CP0 = 01 in both pairs: 0200h–07FFh protected.
+    const cp = (CONFIG & ~0x3c00) | 0x1400
+    const m = part(PIC16F628, words, cp)
+    m.eeprom.fill(0x22)
+    const p = new Programmer(m)
+    expect(p.read(CMD.readProg).word).toBe(0x1111)
+    for (let i = 0; i < 0x200; i++) p.command(CMD.inc)
+    expect(p.read(CMD.readProg).word).toBe(0)
+    p.load(CMD.loadProg, 0x3fff)
+    p.command(CMD.eraseProg)
+    p.command(ORIG.programOnly)
+    p.wait(6e-3)
+    expect(reports(m)).toMatch(/code-protected|protect/)
+    expect(m.cpu.flash[0]).toBe(0x1111)
+    p.load(CMD.loadConfig, 0x0000)
+    for (let i = 0; i < 7; i++) p.command(CMD.inc)
+    p.command(ORIG.setup1)
+    p.command(ORIG.setup2)
+    p.command(ORIG.eraseProgram)
+    p.wait(10e-3)
+    p.command(ORIG.setup1)
+    p.command(ORIG.setup2)
+    expect(m.config).toBe(0x3fff)
+    expect(m.cpu.flash.every((w) => w === 0x3fff)).toBe(true)
+    expect(m.eeprom.every((b) => b === 0xff)).toBe(true)
+  })
+
+  it("VIHH is VDD + 3.5 V on the original part: 9 V at VDD 5 V enters, as 10 V does on the A part (P10-018)", () => {
+    const o = part(PIC16F627)
+    o.setWiredPads([22, 23])
+    o.setPad(RB(6), false)
+    o.setPad(RB(7), false)
+    o.setMclrVoltage(9)
+    expect(o.programmingMode).toBe(true)
+    const a = part(PIC16F628A)
+    a.setWiredPads([22, 23])
+    a.setPad(RB(6), false)
+    a.setPad(RB(7), false)
+    a.setMclrVoltage(9)
+    expect(a.programmingMode).toBe(false)
+  })
+
+  it("with the LVP bit set, RB4 going high interrupts high-voltage programming (errata E2-003)", () => {
+    const m = part(PIC16F628, [0x1111, 0x2222], CONFIG | 0x80)
+    const p = new Programmer(m)
+    p.command(CMD.inc)
+    m.setPadAt(RB(4), true, (p.t += 2e-6))
+    p.wait(2e-6)
+    expect(p.read(CMD.readProg).word).toBe(0x1111)
   })
 })
