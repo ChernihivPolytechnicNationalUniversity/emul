@@ -10,7 +10,7 @@
  */
 import { createHash } from "node:crypto"
 import { execFileSync } from "node:child_process"
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -18,7 +18,7 @@ const AE = "https://raw.githubusercontent.com/arduino/arduino-examples/50b66a3ce
 const DOCS = "https://raw.githubusercontent.com/arduino/docs-content/c220122bbfa28da3f61a7547d089524386d34a29/content"
 const GH = "https://raw.githubusercontent.com"
 
-type Source = { url: string; as: string; extract?: "first-arduino-block" | "first-pre"; sha256?: string }
+type Source = { url: string; as: string; local?: boolean; extract?: "first-arduino-block" | "first-pre"; sha256?: string }
 type Sketch = { name: string; files: Source[] }
 
 const SKETCHES: Sketch[] = [
@@ -43,6 +43,8 @@ const SKETCHES: Sketch[] = [
   { name: "ssd1306", files: [{ url: `${GH}/adafruit/Adafruit_SSD1306/2.5.17/examples/ssd1306_128x64_i2c/ssd1306_128x64_i2c.ino`, as: "ssd1306_128x64_i2c.ino" }] },
   { name: "keypad-hello", files: [{ url: `${GH}/Chris--A/Keypad/3.1.1/examples/HelloKeypad/HelloKeypad.ino`, as: "HelloKeypad.ino" }] },
   { name: "shiftout-hello", files: [{ url: `${DOCS}/tutorials/communication/guide-to-shift-out/guide-to-shift-out.md`, as: "ShftOut11.ino", extract: "first-arduino-block" }] },
+  // The palette's own example (src/schematic/examples/nano-dimmer.ts), from this repository.
+  { name: "dimmer", files: [{ url: "examples/dimmer/Dimmer.ino", as: "Dimmer.ino", local: true }] },
   {
     name: "rotary-encoder",
     files: [{ url: "https://lastminuteengineers.com/rotary-encoder-arduino-tutorial/", as: "RotaryEncoder.ino", extract: "first-pre" }],
@@ -63,6 +65,7 @@ const decode = (s: string) =>
     .replace(/&amp;/g, "&")
 
 async function fetchSource(s: Source): Promise<string> {
+  if (s.local) return readFileSync(path.join(import.meta.dirname, s.url), "utf8")
   const res = await fetch(s.url)
   if (!res.ok) throw new Error(`${s.url}: ${res.status}`)
   const text = await res.text()
