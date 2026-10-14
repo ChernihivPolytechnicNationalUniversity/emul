@@ -17,6 +17,7 @@ import { Timer0, Watchdog } from "./periph/timer0"
 import { Timer1, type T1Oscillator } from "./periph/timer1"
 import { Ccp1, Timer2 } from "./periph/ccp"
 import { Comparators } from "./periph/comparator"
+import { Usart } from "./periph/usart"
 
 export type PicResetCause = "power-on" | "brown-out" | "mclr" | "mclr-sleep" | "wdt"
 
@@ -41,11 +42,6 @@ const ANALOG_BY_CM = [0b1111, 0b1111, 0b1111, 0b0111, 0b1111, 0b0110, 0b0111, 0b
 /** Registers of blocks this file does not model yet, with their reset values (Table 14-7). */
 type Pending = { name: string; addr: number; block: string; por: number | "x"; reset: number | "u"; mask?: number }
 const PENDING: Pending[] = [
-  { name: "RCSTA", addr: 0x18, block: "USART", por: 0x00, reset: 0x00 },
-  { name: "TXREG", addr: 0x19, block: "USART", por: 0x00, reset: 0x00 },
-  { name: "RCREG", addr: 0x1a, block: "USART", por: 0x00, reset: 0x00 },
-  { name: "TXSTA", addr: 0x98, block: "USART", por: 0x02, reset: 0x02, mask: 0xf7 },
-  { name: "SPBRG", addr: 0x99, block: "USART", por: 0x00, reset: 0x00 },
   { name: "EEDATA", addr: 0x9a, block: "Data EEPROM", por: "x", reset: "u" },
   { name: "EEADR", addr: 0x9b, block: "Data EEPROM", por: "x", reset: "u" },
   { name: "EECON1", addr: 0x9c, block: "Data EEPROM", por: 0x00, reset: 0x00, mask: 0x0f },
@@ -64,6 +60,7 @@ export class PicMcu implements PicBus, PicSystem {
   readonly timer2: Timer2
   readonly ccp: Ccp1
   readonly comparators: Comparators
+  readonly usart: Usart
   /** The voltage on each pad as the circuit last solved it (comparator inputs). */
   private readonly analog = new Map<number, number>()
   readonly eeprom: Uint8Array
@@ -200,6 +197,19 @@ export class PicMcu implements PicBus, PicSystem {
         setCmif: (cycle) => this.setFlag("pir1", 0x40, cycle),
         pinsChanged: (cycle) => this.porta.refresh(cycle),
         defective001: chip.comparator001Defective,
+      }),
+    )
+    this.usart = this.attach(
+      new Usart(this, {
+        flag: (mask, on, cycle) => {
+          if (on) this.setFlag("pir1", mask, cycle)
+          else {
+            this.pir1 &= ~mask
+            this.irqChanged(cycle)
+          }
+        },
+        pinAt: (pin, at) => this.portb.pinAt(pin, at),
+        pinsChanged: (cycle) => this.portb.refresh(cycle),
       }),
     )
     this.registers()
@@ -364,6 +374,20 @@ export class PicMcu implements PicBus, PicSystem {
     this.register(0x15, { name: "CCPR1L", read: () => ccp.ccpr1l, write: (v) => ccp.writeL(v) })
     this.register(0x16, { name: "CCPR1H", read: () => ccp.ccpr1h, write: (v) => ccp.writeH(v) })
     this.register(0x17, { name: "CCP1CON", read: () => ccp.ccp1con, write: (v) => ccp.writeCon(v) })
+    const u = this.usart
+    this.register(0x18, {
+      name: "RCSTA",
+      read: () => u.readRcsta(),
+      peek: () => u.peekRcsta(),
+      write: (v) => {
+        u.writeRcsta(v)
+        this.checkUsartTris()
+      },
+    })
+    this.register(0x19, { name: "TXREG", read: () => u.txreg, write: (v) => u.writeTxreg(v) })
+    this.register(0x1a, { name: "RCREG", read: () => u.readRcreg(), peek: () => u.peekRcreg(), write: () => {} })
+    this.register(0x98, { name: "TXSTA", read: () => u.readTxsta(), peek: () => u.peekTxsta(), write: (v) => u.writeTxsta(v) })
+    this.register(0x99, { name: "SPBRG", read: () => u.spbrg, write: (v) => u.writeSpbrg(v) })
     for (const p of PENDING) {
       this.register(p.addr, {
         name: p.name,
@@ -397,8 +421,14 @@ export class PicMcu implements PicBus, PicSystem {
     if ((was ^ v) & 0x80) this.pinsChanged(Math.ceil(at))
     this.reschedule()
   }
+  /** SPEN with TRISB<2:1> not both set: §12.0 asks for them set (decision D28). */
+  private checkUsartTris() {
+    if (this.usart.spen && (this.portb.tris & 0x06) !== 0x06)
+      this.feature("USART enabled (SPEN) with TRISB<1> or TRISB<2> = 0: §12.0 asks for both set — the pin drives the USART's output (decision D28)")
+  }
   private writeTrisB(v: number, at: number) {
     this.portb.writeTris(v, Math.ceil(at))
+    this.checkUsartTris()
     // An RB<7:4> pin turned input joins the comparison (P1-225).
     if (this.rbMismatch()) this.setFlag("intcon", 0x01, Math.ceil(at))
   }
@@ -526,8 +556,16 @@ export class PicMcu implements PicBus, PicSystem {
     }
     // RB3/CCP1: compare and PWM output through the pin's mux; TRISB<3> still enables it (Figure 5-11, §9.2.1, §9.3).
     if (p === 3 && this.ccp?.drivesPin) m.outValue = this.ccp.output
+    // RB1/RX/DT and RB2/TX/CK with SPEN: the USART's output through the mux, its output enable besides TRIS, no pull-up
+    // (Figures 5-9/5-10, decision D28).
+    const usart = (p === 1 || p === 2) && this.usart?.spen
+    if (usart) {
+      const o = this.usart.pinOut(p as 1 | 2)
+      m.outEnable = o.enable || ((this.portb.tris >> p) & 1) === 0
+      m.outValue = o.value
+    }
     const input = !m.output || ((this.portb.tris >> p) & 1) === 1
-    m.pullUp = !(this.optionReg & 0x80) && input && !pgm
+    m.pullUp = !(this.optionReg & 0x80) && input && !pgm && !usart
     return m
   }
 
@@ -547,6 +585,8 @@ export class PicMcu implements PicBus, PicSystem {
       // RB0/INT: the edge INTEDG selects (§14.5.1).
       if (pin === 0 && level === ((this.optionReg & 0x40) !== 0)) this.setFlag("intcon", 0x02, cycle)
       if (pin === 6) this.timer1.pinEdge(level, cycle)
+      if (pin === 1) this.usart.rxEdge(level, cycle)
+      if (pin === 2) this.usart.ckEdge(level, cycle)
       if (pin === 3) this.ccp.pinEdge(level, cycle)
       if (pin >= 4 && this.rbMismatch()) this.setFlag("intcon", 0x01, cycle)
       if (pin === 4 && this.lvp && level) this.enterProgramming("low-voltage")

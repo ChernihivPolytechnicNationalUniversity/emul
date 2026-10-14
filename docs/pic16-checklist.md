@@ -25,16 +25,20 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 
 | Status | Rows |
 |---|---|
-| todo | 1004 |
-| done (SoC) | 416 |
+| todo | 847 |
+| done (SoC) | 569 |
 | done (core) | 171 |
 | info | 166 |
-| **decide** | 32 |
-| **check PDF** | 7 |
+| **decide** | 27 |
+| **check PDF** | 6 |
 | D19 | 3 |
 | D21 | 2 |
+| D24 | 2 |
+| D32 | 2 |
 | D1 | 2 |
+| D25 | 2 |
 | D4 | 2 |
+| D27 | 1 |
 | D13 | 1 |
 | D14 | 1 |
 | D15 | 1 |
@@ -43,7 +47,7 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 | D2 | 1 |
 | D3 | 1 |
 | D20 | 1 |
-| total | 1813 |
+| total | 1810 |
 
 ## Decisions where the documents are silent or contradict each other
 
@@ -130,6 +134,55 @@ outputs read 0 and the inspector says why.
 reference is seen through the ladder's Thevenin resistance (Figure 11-1, R = 2 kΩ, D312); the circuit
 engine still drives every analog pad through 100 Ω (P3-072, P9-190: to do with the integration).
 
+**D24. The baud-rate tables against the formulas** (P3-104, P3-106, P6-046 d): the formulas of Table 12-1
+rule; the table cells that disagree with them (Table 12-3 at 4 MHz, Table 12-4 at 4 MHz, the unit and sign
+typos) are misprints. The tests take the formula and the table cells that agree with it.
+
+**D25. Where RX is sampled** (P3-101, P6-043, P9-156): Figure 18-6 of DS33023A, read from the PDF — three
+samples on x16 clocks 7, 8 and 9 of every bit, majority vote, the x16 clock counted from the first x16 tick
+after the start bit's falling edge. The x16 ticks run from the BRG, which is free-running and restarts on an
+SPBRG write; one x16 tick is (SPBRG + 1) TOSC with BRGH = 1 and 4·(SPBRG + 1) TOSC with BRGH = 0. The original
+PIC16F627/628 gets the same positions: its BRGH = 0 text ("seventh, eighth and ninth … x16 clock") is the
+same scheme, and DS40300C §12.3 says its USART has the "BRGH = 1 fix" that the new scheme is.
+
+**D26. Start and stop bits** (not in the documents): a start bit whose samples vote high is a glitch and the
+receiver goes back to waiting; it waits for a falling edge, not a low level, so a held-low line (break)
+gives one frame with FERR. A frame is complete at the third sample of its stop bit; that is when RCREG,
+RCIF, FERR and OERR change.
+
+**D27. TXIF and the TXREG → TSR transfer** (P1-173, P3-114…P3-122): TXIF is TXEN · "TXREG empty" — 0 after
+reset (PIR1 0000 -000), set by setting TXEN, cleared by clearing it. A TXREG write with the TSR empty
+moves the word and the present TX9D into the TSR at the write; TXIF sets one TCY later. The start bit
+begins at the next bit-clock tick of the BRG (16 x16 ticks). Clearing TXEN drops the word in the TSR
+(TRMT = 1) and keeps what is in TXREG, so "load TXREG, then set TXEN" works.
+
+**D28. RB1/RB2 with SPEN = 1** (P1-234, P1-235, P3-074): Figures 5-9/5-10 read from the PDF — the
+pin drives when TRIS = 0 or the USART's output enable is on; with SPEN the mux puts the USART's output on
+it, and SPEN turns the weak pull-up off. The USART enables TX in async with TXEN, CK as a sync master with
+TXEN/CREN/SREN, and DT while it transmits in sync. A TRISB<2:1> bit left 0 under SPEN is what §12 says
+not to do: it drives the USART's output (TX/CK, and DT high in async) and is reported.
+
+**D29. The receive FIFO** (P3-130…P3-134, P9-149…P9-151): FERR and RX9D show the word at the head of the
+FIFO and keep their values when it empties; reading an empty RCREG returns the last word again. While OERR
+is set the receiver still shifts words in and throws them away. Clearing CREN clears OERR and drops the
+word being shifted; the FIFO keeps its words.
+
+**D30. The synchronous clock** (P3-148, P3-155, P3-156, P9-162, P9-172): CK idles low. A master's clock
+period is (SPBRG + 1) TCY with rising edges on BRG ticks; the BRG restarts when TXEN/CREN/SREN leave the
+all-clear state (P3-149) or SPBRG is written. Each bit goes out at a rising edge and is sampled at the
+falling edge half a period later; words follow each other with no gap (Figure 12-8); after the last word
+DT holds its last bit. A slave counts the same edges on its CK pin. In Sleep the asynchronous and
+master modes stop with the clock and carry on after the wake-up from where they were (P3-112); a slave
+keeps working (§12.5).
+
+**D31. CREN/SREN during a sync master transmission** (P3-151, P3-152): the word in the TSR is dropped
+(the transmission "aborts"), TXREG keeps its word; when the reception ends and TXEN is still set, the
+transmitter drives DT again and sends what TXREG holds.
+
+**D32. Misprints in §12** (P3-145, P3-163): address detection works in async mode only (SYNC = 0, as
+§12.3.1 and Register 12-2 say) and RCIF is cleared by reading RCREG, not by software; Table 12-10's "EPIE"
+is EEIE, PIE1 resets to 0000 -000 (Register 4-4).
+
 **D8. The 48 rows marked decide** are settled the same way, block by block, before each block is
 written; the decision is added here.
 
@@ -168,7 +221,7 @@ written; the decision is added here.
 | P1-029 | Timer1: 16-bit timer/counter with external crystal/clock capability | Front page p.3 | behaviour | todo |
 | P1-030 | Timer2: 8-bit timer/counter with 8-bit period register, prescaler and postscaler | Front page p.3 | behaviour | todo |
 | P1-031 | CCP module: 16-bit Capture/Compare, 10-bit PWM | Front page p.3 | behaviour | todo |
-| P1-032 | Addressable USART/SCI | Front page p.3 | behaviour | todo |
+| P1-032 | Addressable USART/SCI | Front page p.3 | behaviour | done (SoC) |
 | P1-033 | Memory sizes: 627A Flash 1024 words, SRAM 224 B, EEPROM 128 B; 628A 2048 / 224 / 128; 648A 4096 / 256 / 256. All: 16 I/O, 1 CCP, USART Y, 2 comparators, timers 2/1 (8/16-bit) | Front page device table p.3; Table 1-1 p.7; Table 3-1 p.11; Table B-1 p.171 | memory | todo |
 | P1-034 | Program memory word width 14 bits; data 8 bits (e.g. 1024 x 14, 224 x 8, 128 x 8) | Table 3-1 p.11; Table B-1 | memory | todo |
 | P1-035 | LF variants (PIC16LF627A/628A/648A) have identical memory sizes to F variants | Table 1-1 p.7; Table 3-1 | memory | todo |
@@ -252,17 +305,17 @@ written; the decision is added here.
 | P1-113 | Unimplemented SFR addresses: 07h–09h, 0Dh, 13h, 14h, 1Bh–1Eh; 87h–89h, 8Dh, 8Fh–91h, 93h–97h, 9Eh; 105h, 107h–109h, 10Ch–11Fh; 185h, 187h–189h, 18Ch–19Fh | Tables 4-3..4-6 | register | todo |
 | P1-114 | PCLATH at 0Ah/8Ah/10Ah/18Ah: bits 7:5 unimplemented (read 0), bits 4:0 write buffer for upper 5 bits of PC; POR ---0 0000 | Tables 4-3..4-6 | register | done (core) |
 | P1-115 | INTCON at 0Bh/8Bh/10Bh/18Bh; POR 0000 000x | Tables 4-3..4-6; Register 4-3 | register | todo |
-| P1-116 | PIR1 at 0Ch (bank0 only); bits EEIF CMIF RCIF TXIF — CCP1IF TMR2IF TMR1IF; POR 0000 -000 | Table 4-3; Register 4-5 | register | todo |
+| P1-116 | PIR1 at 0Ch (bank0 only); bits EEIF CMIF RCIF TXIF — CCP1IF TMR2IF TMR1IF; POR 0000 -000 | Table 4-3; Register 4-5 | register | done (SoC) |
 | P1-117 | TMR1L 0Eh, TMR1H 0Fh: holding registers for LSB/MSB of 16-bit TMR1; POR xxxx xxxx | Table 4-3 | register | todo |
 | P1-118 | T1CON 10h: — — T1CKPS1 T1CKPS0 T1OSCEN T1SYNC TMR1CS TMR1ON; POR --00 0000 | Table 4-3 | register | todo |
 | P1-119 | TMR2 11h POR 0000 0000 | Table 4-3 | register | todo |
 | P1-120 | T2CON 12h: — TOUTPS3 TOUTPS2 TOUTPS1 TOUTPS0 TMR2ON T2CKPS1 T2CKPS0; POR -000 0000 | Table 4-3 | register | todo |
 | P1-121 | CCPR1L 15h, CCPR1H 16h POR xxxx xxxx | Table 4-3 | register | todo |
 | P1-122 | CCP1CON 17h: — — CCP1X CCP1Y CCP1M3 CCP1M2 CCP1M1 CCP1M0; POR --00 0000 | Table 4-3 | register | todo |
-| P1-123 | RCSTA 18h: SPEN RX9 SREN CREN ADEN FERR OERR RX9D; POR 0000 000x | Table 4-3 | register | todo |
+| P1-123 | RCSTA 18h: SPEN RX9 SREN CREN ADEN FERR OERR RX9D; POR 0000 000x | Table 4-3 | register | done (SoC) |
 | P1-124 | TXREG 19h POR 0000 0000; RCREG 1Ah POR 0000 0000 | Table 4-3 | register | todo |
 | P1-125 | CMCON 1Fh: C2OUT C1OUT C2INV C1INV CIS CM2 CM1 CM0; POR 0000 0000, other resets 0000 0000 | Table 4-3; Table 5-2 | register | todo |
-| P1-126 | PIE1 8Ch: EEIE CMIE RCIE TXIE — CCP1IE TMR2IE TMR1IE; POR 0000 -000 | Table 4-4; Register 4-4 | register | todo |
+| P1-126 | PIE1 8Ch: EEIE CMIE RCIE TXIE — CCP1IE TMR2IE TMR1IE; POR 0000 -000 | Table 4-4; Register 4-4 | register | done (SoC) |
 | P1-127 | PCON 8Eh: — — — — OSCF — POR BOR; POR ---- 1-0x | Table 4-4; Register 4-6 | register | todo |
 | P1-128 | PR2 92h Timer2 period register POR 1111 1111 | Table 4-4 | register | todo |
 | P1-129 | TXSTA 98h: CSRC TX9 TXEN SYNC — BRGH TRMT TX9D; POR 0000 -010 | Table 4-4 | register | todo |
@@ -301,15 +354,15 @@ written; the decision is added here.
 | P1-162 | INTCON bit0 RBIF (R/W-x): 1 when at least one of RB<7:4> changed state, cleared in software | Register 4-3 | register | todo |
 | P1-163 | Interrupt flag bits are set when the condition occurs regardless of the corresponding enable bit or GIE | §4.2.2.3 Note p.26; §4.2.2.5 Note p.28 | behaviour | todo |
 | P1-164 | User software should clear the appropriate flag before enabling an interrupt (a stale flag fires immediately on enable) | §4.2.2.5 Note p.28 | failure-mode | todo |
-| P1-165 | PIE1 bit7 EEIE EE write complete; bit6 CMIE comparator; bit5 RCIE USART receive; bit4 TXIE USART transmit; bit3 unimplemented read '0'; bit2 CCP1IE; bit1 TMR2IE TMR2-to-PR2 match; bit0 TMR1IE TMR1 overflow; all implemented bits R/W-0 | Register 4-4 p.27 | register | todo |
+| P1-165 | PIE1 bit7 EEIE EE write complete; bit6 CMIE comparator; bit5 RCIE USART receive; bit4 TXIE USART transmit; bit3 unimplemented read '0'; bit2 CCP1IE; bit1 TMR2IE TMR2-to-PR2 match; bit0 TMR1IE TMR1 overflow; all implemented bits R/W-0 | Register 4-4 p.27 | register | done (SoC) |
 | P1-166 | PIR1 bit7 EEIF (R/W-0): EEPROM write completed, cleared in software | Register 4-5 p.28 | register | todo |
 | P1-167 | PIR1 bit6 CMIF (R/W-0): comparator output has changed | Register 4-5 | register | todo |
-| P1-168 | PIR1 bit5 RCIF (R-0, read-only): 1 = USART receive buffer full, 0 = empty | Register 4-5 | register | todo |
-| P1-169 | PIR1 bit4 TXIF (R-0, read-only): 1 = USART transmit buffer empty, 0 = full | Register 4-5 | register | todo |
+| P1-168 | PIR1 bit5 RCIF (R-0, read-only): 1 = USART receive buffer full, 0 = empty | Register 4-5 | register | done (SoC) |
+| P1-169 | PIR1 bit4 TXIF (R-0, read-only): 1 = USART transmit buffer empty, 0 = full | Register 4-5 | register | done (SoC) |
 | P1-170 | PIR1 bit3 unimplemented, reads '0' | Register 4-5 | register | todo |
 | P1-171 | PIR1 bit2 CCP1IF (R/W-0): capture mode = TMR1 capture occurred; compare mode = TMR1 compare match; PWM mode unused; cleared in software | Register 4-5 | register | todo |
 | P1-172 | PIR1 bit1 TMR2IF TMR2-to-PR2 match; bit0 TMR1IF TMR1 overflow; both R/W-0, cleared in software | Register 4-5 | register | todo |
-| P1-173 | Note: PIR1 POR value 0000 -000 implies TXIF reads 0 after POR (transmit buffer "full"), while TXSTA TRMT POR = 1 (shift register empty); check against §12 | Table 4-3 vs Table 4-4 | note | info |
+| P1-173 | Note: PIR1 POR value 0000 -000 implies TXIF reads 0 after POR (transmit buffer "full"), while TXSTA TRMT POR = 1 (shift register empty); check against §12 | Table 4-3 vs Table 4-4 | note | D27 |
 | P1-174 | PCON bits 7:4 unimplemented, read '0'; bit2 unimplemented, read '0' | Register 4-6 p.29 | register | todo |
 | P1-175 | PCON bit3 OSCF (R/W-1): INTOSC frequency 1 = 4 MHz typical, 0 = 48 kHz typical | Register 4-6 | register | todo |
 | P1-176 | PCON bit1 POR (R/W-0): 0 = Power-on Reset occurred, must be set in software afterwards; 1 = no POR | Register 4-6 | register | todo |
@@ -370,8 +423,8 @@ written; the decision is added here.
 | P1-231 | Polling PORTB is not recommended while using the IOC feature (reads reset the mismatch reference) | §5.2 p.38 | failure-mode | todo |
 | P1-232 | IOC + pull-ups intended for keypad wake-up on key press (AN552) | §5.2 p.38 | note | info |
 | P1-233 | RB0/INT: port buffer TTL; INT path through Schmitt Trigger; weak P-ch pull-up gated by RBPU | Figure 5-8 p.38 | pin | todo |
-| P1-234 | RB1/RX/DT: output mux selects USART data output when peripheral selected (SPEN); Peripheral OE drives the pin direction only when peripheral select active; USART receive input via Schmitt Trigger; RBPU and SPEN shown controlling pull-up | Figure 5-9 + Note 1 p.39 | pin | todo |
-| P1-235 | RB2/TX/CK: output mux selects USART TX/CK output when SPEN set; Peripheral OE active only with peripheral select; USART slave clock input via Schmitt Trigger | Figure 5-10 + Note 1 p.39 | pin | todo |
+| P1-234 | RB1/RX/DT: output mux selects USART data output when peripheral selected (SPEN); Peripheral OE drives the pin direction only when peripheral select active; USART receive input via Schmitt Trigger; RBPU and SPEN shown controlling pull-up | Figure 5-9 + Note 1 p.39 | pin | done (SoC) |
+| P1-235 | RB2/TX/CK: output mux selects USART TX/CK output when SPEN set; Peripheral OE active only with peripheral select; USART slave clock input via Schmitt Trigger | Figure 5-10 + Note 1 p.39 | pin | done (SoC) |
 | P1-236 | RB3/CCP1: CCP1CON selects CCP output into output mux; Peripheral OE; CCP input via Schmitt Trigger; weak pull-up gated by RBPU | Figure 5-11 p.40 | pin | todo |
 | P1-237 | Note: Fig 5-11 labels the mux inputs reversed relative to Figs 5-9/5-10 (CCP output on '0', data latch on '1'), and the OE signal carries footnote (2) while only Note 1 exists | Figure 5-11 p.40 | note | info |
 | P1-238 | RB4/PGM: LVP configuration bit routes pin to PGM input (Schmitt) and disables RB4 IOC and weak pull-up | Figure 5-12 + Note p.41 | pin | done (SoC) |
@@ -489,8 +542,8 @@ written; the decision is added here.
 | P2-070 | TMR1H/TMR1L not reset to 00h on POR or any Reset (only CCP1 special event trigger resets them) | §7.6, p.53 | register | done (SoC) |
 | P2-071 | T1CON reset to 00h on POR or BOR (timer off, 1:1 prescale); unaffected by all other resets | §7.6, p.53 | register | done (SoC) |
 | P2-072 | Timer1 prescaler counter cleared on writes to TMR1H or TMR1L | §7.7, p.53 | behaviour | done (SoC) |
-| P2-073 | PIR1 at 0Ch: EEIF CMIF RCIF TXIF — CCP1IF TMR2IF TMR1IF; POR 0000 -000; other 0000 -000 | Table 7-2, 8-1, 9-2, 9-4 | register | todo |
-| P2-074 | PIE1 at 8Ch: EEIE CMIE RCIE TXIE — CCP1IE TMR2IE TMR1IE; POR 0000 -000; other 0000 -000 | Table 7-2, 8-1, 9-2, 9-4 | register | todo |
+| P2-073 | PIR1 at 0Ch: EEIF CMIF RCIF TXIF — CCP1IF TMR2IF TMR1IF; POR 0000 -000; other 0000 -000 | Table 7-2, 8-1, 9-2, 9-4 | register | done (SoC) |
+| P2-074 | PIE1 at 8Ch: EEIE CMIE RCIE TXIE — CCP1IE TMR2IE TMR1IE; POR 0000 -000; other 0000 -000 | Table 7-2, 8-1, 9-2, 9-4 | register | done (SoC) |
 | P2-075 | TMR1L at 0Eh, TMR1H at 0Fh: POR xxxx xxxx; other resets uuuu uuuu | Table 7-2, p.53; Table 9-2 p.59 | register | done (SoC) |
 | P2-076 | T1CON at 10h: POR --00 0000; other resets --uu uuuu | Table 7-2, p.53; Table 9-2 | register | done (SoC) |
 | P2-077 | Timer2: 8-bit timer with prescaler and postscaler; can be PWM time base for CCP | §8.0, p.54 | behaviour | done (SoC) |
@@ -656,103 +709,103 @@ written; the decision is added here.
 | P3-070 | VREF output connected to RA2 if TRISA<2> = 1 and VROE = 1 | §11.5, p70 | pin | done (SoC) |
 | P3-071 | VROE with an input signal present on RA2 increases current; RA2 as digital output with VREF enabled also increases current | §11.5, p70 | electrical | todo |
 | P3-072 | RA2 as simple D/A output has limited drive; buffer (op amp) required for external use; VREF output impedance R depends on VRCON<3:0> and VRCON<5> | §11.5, Figure 11-2 Note 1, p70-71 | electrical | todo |
-| P3-073 | USART (SCI) modes: Asynchronous full-duplex; Synchronous Master half-duplex; Synchronous Slave half-duplex | §12.0, p73 | behaviour | todo |
-| P3-074 | SPEN (RCSTA<7>) and TRISB<2:1> must be set to configure RB2/TX/CK and RB1/RX/DT as USART pins | §12.0, p73; Register 12-2 bit 7, p74 | pin | todo |
-| P3-075 | TXSTA at 98h: bit7 CSRC R/W-0, bit6 TX9 R/W-0, bit5 TXEN R/W-0, bit4 SYNC R/W-0, bit3 unimplemented '0', bit2 BRGH R/W-0, bit1 TRMT R-1, bit0 TX9D R/W-0 | Register 12-1, p73 | register | todo |
-| P3-076 | TXSTA reset: POR 0000 -010, other Resets 0000 -010 (TRMT=1) | Table 12-2, p75 | register | todo |
-| P3-077 | CSRC: async don't care; sync 1 = Master (clock from BRG), 0 = Slave (external clock) | Register 12-1 bit 7, p73 | register | todo |
-| P3-078 | TX9: 1 = 9-bit transmission, 0 = 8-bit | Register 12-1 bit 6, p73 | register | todo |
-| P3-079 | TXEN: 1 = transmit enabled; Note 1: SREN/CREN overrides TXEN in SYNC mode | Register 12-1 bit 5 + Note 1, p73 | register | todo |
-| P3-080 | SYNC: 1 = Synchronous, 0 = Asynchronous | Register 12-1 bit 4, p73 | register | todo |
-| P3-081 | BRGH: async 1 = high speed, 0 = low speed; sync: unused | Register 12-1 bit 2, p73 | register | todo |
-| P3-082 | TRMT: 1 = TSR empty, 0 = TSR full; read-only | Register 12-1 bit 1, p73 | register | todo |
-| P3-083 | TX9D: 9th bit of transmit data (can be parity) | Register 12-1 bit 0, p73 | register | todo |
-| P3-084 | RCSTA at 18h: bit7 SPEN R/W-0, bit6 RX9 R/W-0, bit5 SREN R/W-0, bit4 CREN R/W-0, bit3 ADEN R/W-0, bit2 FERR R-0, bit1 OERR R-0, bit0 RX9D R-x | Register 12-2, p74 | register | todo |
-| P3-085 | RCSTA reset: POR 0000 000x, other Resets 0000 000x | Table 12-2, p75 | register | todo |
-| P3-086 | SPEN: 1 = serial port enabled (pins configured as serial port when TRISB<2:1> set), 0 = disabled | Register 12-2 bit 7, p74 | register | todo |
-| P3-087 | RX9: 1 = 9-bit reception, 0 = 8-bit | Register 12-2 bit 6, p74 | register | todo |
-| P3-088 | SREN: async don't care; sync master 1 = enable single receive, cleared after reception complete; sync slave unused | Register 12-2 bit 5, p74 | register | todo |
-| P3-089 | CREN: async 1 = continuous receive; sync 1 = continuous receive until CREN cleared (CREN overrides SREN) | Register 12-2 bit 4, p74 | register | todo |
-| P3-090 | ADEN: async 9-bit (RX9=1): 1 = address detect, interrupt and load of receive buffer only when RSR<8> set; 0 = all bytes received, 9th bit usable as parity; unused in async 8-bit and sync | Register 12-2 bit 3, p74 | register | todo |
-| P3-091 | FERR: 1 = framing error (updated by reading RCREG and receiving next valid byte) | Register 12-2 bit 2, p74 | register | todo |
-| P3-092 | OERR: 1 = overrun error (cleared by clearing CREN) | Register 12-2 bit 1, p74 | register | todo |
-| P3-093 | RX9D: 9th bit of received data (can be parity) | Register 12-2 bit 0, p74 | register | todo |
-| P3-094 | SPBRG at 99h, reset 0000 0000 (POR and other); TXREG at 19h reset 0000 0000; RCREG at 1Ah reset 0000 0000 | Tables 12-2, 12-6, 12-7, p75/81/84 | register | todo |
-| P3-095 | BRG: dedicated 8-bit, SPBRG sets period of a free-running 8-bit timer; serves async and sync | §12.1, p75 | behaviour | todo |
-| P3-096 | Baud formula: SYNC=0 BRGH=0: FOSC/(64(X+1)); SYNC=0 BRGH=1: FOSC/(16(X+1)); SYNC=1: FOSC/(4(X+1)), BRGH=1 NA in sync; X = SPBRG 0..255; formulas apply only in Master mode (internal clock) | Table 12-1, p75; §12.1 | behaviour | todo |
-| P3-097 | Example 12-1: FOSC=16 MHz, 9600 baud, BRGH=0, SYNC=0 -> x=25.042, SPBRG=25, calculated 9615, error 0.16% | Equation/Example 12-1, p75 | behaviour | todo |
-| P3-098 | Error = (Calculated − Desired)/Desired | Equation 12-1, p75 | behaviour | todo |
+| P3-073 | USART (SCI) modes: Asynchronous full-duplex; Synchronous Master half-duplex; Synchronous Slave half-duplex | §12.0, p73 | behaviour | done (SoC) |
+| P3-074 | SPEN (RCSTA<7>) and TRISB<2:1> must be set to configure RB2/TX/CK and RB1/RX/DT as USART pins | §12.0, p73; Register 12-2 bit 7, p74 | pin | done (SoC) |
+| P3-075 | TXSTA at 98h: bit7 CSRC R/W-0, bit6 TX9 R/W-0, bit5 TXEN R/W-0, bit4 SYNC R/W-0, bit3 unimplemented '0', bit2 BRGH R/W-0, bit1 TRMT R-1, bit0 TX9D R/W-0 | Register 12-1, p73 | register | done (SoC) |
+| P3-076 | TXSTA reset: POR 0000 -010, other Resets 0000 -010 (TRMT=1) | Table 12-2, p75 | register | done (SoC) |
+| P3-077 | CSRC: async don't care; sync 1 = Master (clock from BRG), 0 = Slave (external clock) | Register 12-1 bit 7, p73 | register | done (SoC) |
+| P3-078 | TX9: 1 = 9-bit transmission, 0 = 8-bit | Register 12-1 bit 6, p73 | register | done (SoC) |
+| P3-079 | TXEN: 1 = transmit enabled; Note 1: SREN/CREN overrides TXEN in SYNC mode | Register 12-1 bit 5 + Note 1, p73 | register | done (SoC) |
+| P3-080 | SYNC: 1 = Synchronous, 0 = Asynchronous | Register 12-1 bit 4, p73 | register | done (SoC) |
+| P3-081 | BRGH: async 1 = high speed, 0 = low speed; sync: unused | Register 12-1 bit 2, p73 | register | done (SoC) |
+| P3-082 | TRMT: 1 = TSR empty, 0 = TSR full; read-only | Register 12-1 bit 1, p73 | register | done (SoC) |
+| P3-083 | TX9D: 9th bit of transmit data (can be parity) | Register 12-1 bit 0, p73 | register | done (SoC) |
+| P3-084 | RCSTA at 18h: bit7 SPEN R/W-0, bit6 RX9 R/W-0, bit5 SREN R/W-0, bit4 CREN R/W-0, bit3 ADEN R/W-0, bit2 FERR R-0, bit1 OERR R-0, bit0 RX9D R-x | Register 12-2, p74 | register | done (SoC) |
+| P3-085 | RCSTA reset: POR 0000 000x, other Resets 0000 000x | Table 12-2, p75 | register | done (SoC) |
+| P3-086 | SPEN: 1 = serial port enabled (pins configured as serial port when TRISB<2:1> set), 0 = disabled | Register 12-2 bit 7, p74 | register | done (SoC) |
+| P3-087 | RX9: 1 = 9-bit reception, 0 = 8-bit | Register 12-2 bit 6, p74 | register | done (SoC) |
+| P3-088 | SREN: async don't care; sync master 1 = enable single receive, cleared after reception complete; sync slave unused | Register 12-2 bit 5, p74 | register | done (SoC) |
+| P3-089 | CREN: async 1 = continuous receive; sync 1 = continuous receive until CREN cleared (CREN overrides SREN) | Register 12-2 bit 4, p74 | register | done (SoC) |
+| P3-090 | ADEN: async 9-bit (RX9=1): 1 = address detect, interrupt and load of receive buffer only when RSR<8> set; 0 = all bytes received, 9th bit usable as parity; unused in async 8-bit and sync | Register 12-2 bit 3, p74 | register | done (SoC) |
+| P3-091 | FERR: 1 = framing error (updated by reading RCREG and receiving next valid byte) | Register 12-2 bit 2, p74 | register | done (SoC) |
+| P3-092 | OERR: 1 = overrun error (cleared by clearing CREN) | Register 12-2 bit 1, p74 | register | done (SoC) |
+| P3-093 | RX9D: 9th bit of received data (can be parity) | Register 12-2 bit 0, p74 | register | done (SoC) |
+| P3-094 | SPBRG at 99h, reset 0000 0000 (POR and other); TXREG at 19h reset 0000 0000; RCREG at 1Ah reset 0000 0000 | Tables 12-2, 12-6, 12-7, p75/81/84 | register | done (SoC) |
+| P3-095 | BRG: dedicated 8-bit, SPBRG sets period of a free-running 8-bit timer; serves async and sync | §12.1, p75 | behaviour | done (SoC) |
+| P3-096 | Baud formula: SYNC=0 BRGH=0: FOSC/(64(X+1)); SYNC=0 BRGH=1: FOSC/(16(X+1)); SYNC=1: FOSC/(4(X+1)), BRGH=1 NA in sync; X = SPBRG 0..255; formulas apply only in Master mode (internal clock) | Table 12-1, p75; §12.1 | behaviour | done (SoC) |
+| P3-097 | Example 12-1: FOSC=16 MHz, 9600 baud, BRGH=0, SYNC=0 -> x=25.042, SPBRG=25, calculated 9615, error 0.16% | Equation/Example 12-1, p75 | behaviour | done (SoC) |
+| P3-098 | Error = (Calculated − Desired)/Desired | Equation 12-1, p75 | behaviour | done (SoC) |
 | P3-099 | BRGH=1 may reduce baud error even at slow rates | §12.1, p75 | note | info |
-| P3-100 | Writing SPBRG resets (clears) the BRG timer, so the new rate is output without waiting for overflow | §12.1, p75 | timing | todo |
-| P3-101 | RX pin data sampled three times by a majority-detect circuit | §12.1, p75 | behaviour | todo |
-| P3-102 | Table 12-3 (Synchronous baud rates): columns FOSC = 20, 16, 10, 7.15909, 5.0688, 4, 3.579545, 1 MHz, 32.768 kHz; rows 0.3,1.2,2.4,9.6,19.2,76.8,96,300,500 K, HIGH (SPBRG=0), LOW (SPBRG=255) | Table 12-3, p76 | timing | todo |
-| P3-103 | Table 12-3 vectors: 20 MHz 19.2K -> 19.53 KBAUD +1.73% SPBRG 255; 20 MHz 500K -> 500, 0%, 9; 20 MHz HIGH 5000 (0), LOW 19.53 (255); 16 MHz 19.2K -> 19.23 +0.16% 207; 10 MHz 9.6K -> 9.766 +1.73% 255; 1 MHz HIGH 250, LOW 0.9766; 32.768 kHz 0.3K -> 0.303 +1.14% 26, HIGH 8.192, LOW 0.032 | Table 12-3, p76 | timing | todo |
-| P3-104 | ERRATUM Table 12-3: at 4 MHz the 96K row reads "1000 +4.17% 9" and HIGH reads "100"; formula FOSC/(4(X+1)) gives HIGH = 1000 at SPBRG=0 and 100 at SPBRG=9 (values look swapped/typo). Also 7.15909/5.0688 rows have errors without '%' and 5.0688 300K error "5.60%" unsigned | Table 12-3, p76 | note | **decide** |
-| P3-105 | Table 12-4 (Async BRGH=0) same FOSC columns; vectors: 20 MHz 9.6K -> 9.469 −1.36% 32; 20 MHz 300K -> 312.5 +4.17% 0; 20 MHz HIGH 312.5 / LOW 1.221; 16 MHz 9.6K -> 9.615 +0.16% 25; 4 MHz 2.4K -> 2.404 25; 4 MHz HIGH 62.500; 5.0688 MHz 9.6K -> 9.9 +3.13% 7; 1 MHz 0.3K -> 0.300 +0.16% 51; 32.768 kHz 0.3K -> 0.256 −14.67% 1, HIGH 0.512, LOW 0.0020 | Table 12-4, p77 | timing | todo |
-| P3-106 | ERRATUM Table 12-4: 4 MHz 1.2K/2.4K error shown "+1.67%" (formula gives ~+0.16%); 4 MHz LOW shown 3.906 (formula FOSC/(64·256) = 0.244); 10 MHz 19.2K error "+1.73V" | Table 12-4, p77 | note | **decide** |
-| P3-107 | Table 12-5 (Async BRGH=1): rows 9600,19200,38400,57600,115200,250000,625000,1250000; vectors: 20 MHz 9600 -> 9.615 +0.16% 129; 20 MHz 115200 -> 113.636 −1.36% 10; 20 MHz 1250000 -> 1250 0% 0; 16 MHz 250000 -> 250 0% 3; 10 MHz 625000 -> 625 0% 0; 4 MHz 9600 -> 9615.385 0.160% 25; 4 MHz 250000 -> 250000 0.000% 0; 5.068 MHz 250000 -> 316750 26.700% 0; 1 MHz 9600 -> 8.928 −6.994% 6; 32.768 kHz all NA | Table 12-5, p78 | timing | todo |
+| P3-100 | Writing SPBRG resets (clears) the BRG timer, so the new rate is output without waiting for overflow | §12.1, p75 | timing | done (SoC) |
+| P3-101 | RX pin data sampled three times by a majority-detect circuit | §12.1, p75 | behaviour | done (SoC) |
+| P3-102 | Table 12-3 (Synchronous baud rates): columns FOSC = 20, 16, 10, 7.15909, 5.0688, 4, 3.579545, 1 MHz, 32.768 kHz; rows 0.3,1.2,2.4,9.6,19.2,76.8,96,300,500 K, HIGH (SPBRG=0), LOW (SPBRG=255) | Table 12-3, p76 | timing | done (SoC) |
+| P3-103 | Table 12-3 vectors: 20 MHz 19.2K -> 19.53 KBAUD +1.73% SPBRG 255; 20 MHz 500K -> 500, 0%, 9; 20 MHz HIGH 5000 (0), LOW 19.53 (255); 16 MHz 19.2K -> 19.23 +0.16% 207; 10 MHz 9.6K -> 9.766 +1.73% 255; 1 MHz HIGH 250, LOW 0.9766; 32.768 kHz 0.3K -> 0.303 +1.14% 26, HIGH 8.192, LOW 0.032 | Table 12-3, p76 | timing | done (SoC) |
+| P3-104 | ERRATUM Table 12-3: at 4 MHz the 96K row reads "1000 +4.17% 9" and HIGH reads "100"; formula FOSC/(4(X+1)) gives HIGH = 1000 at SPBRG=0 and 100 at SPBRG=9 (values look swapped/typo). Also 7.15909/5.0688 rows have errors without '%' and 5.0688 300K error "5.60%" unsigned | Table 12-3, p76 | note | D24 |
+| P3-105 | Table 12-4 (Async BRGH=0) same FOSC columns; vectors: 20 MHz 9.6K -> 9.469 −1.36% 32; 20 MHz 300K -> 312.5 +4.17% 0; 20 MHz HIGH 312.5 / LOW 1.221; 16 MHz 9.6K -> 9.615 +0.16% 25; 4 MHz 2.4K -> 2.404 25; 4 MHz HIGH 62.500; 5.0688 MHz 9.6K -> 9.9 +3.13% 7; 1 MHz 0.3K -> 0.300 +0.16% 51; 32.768 kHz 0.3K -> 0.256 −14.67% 1, HIGH 0.512, LOW 0.0020 | Table 12-4, p77 | timing | done (SoC) |
+| P3-106 | ERRATUM Table 12-4: 4 MHz 1.2K/2.4K error shown "+1.67%" (formula gives ~+0.16%); 4 MHz LOW shown 3.906 (formula FOSC/(64·256) = 0.244); 10 MHz 19.2K error "+1.73V" | Table 12-4, p77 | note | D24 |
+| P3-107 | Table 12-5 (Async BRGH=1): rows 9600,19200,38400,57600,115200,250000,625000,1250000; vectors: 20 MHz 9600 -> 9.615 +0.16% 129; 20 MHz 115200 -> 113.636 −1.36% 10; 20 MHz 1250000 -> 1250 0% 0; 16 MHz 250000 -> 250 0% 3; 10 MHz 625000 -> 625 0% 0; 4 MHz 9600 -> 9615.385 0.160% 25; 4 MHz 250000 -> 250000 0.000% 0; 5.068 MHz 250000 -> 316750 26.700% 0; 1 MHz 9600 -> 8.928 −6.994% 6; 32.768 kHz all NA | Table 12-5, p78 | timing | done (SoC) |
 | P3-108 | Table 12-5 mixes units (KBAUD for some columns, baud for others) | Table 12-5, p78 | note | info |
-| P3-109 | Async format: NRZ, 1 Start bit, 8 or 9 data bits, 1 Stop bit; LSb first; TX and RX independent but share format and baud rate | §12.2, p79 | behaviour | todo |
-| P3-110 | BRG produces clock x16 or x64 of bit shift rate depending on BRGH | §12.2, p79 | timing | todo |
-| P3-111 | No hardware parity; can be implemented in software as 9th bit | §12.2, p79 | behaviour | todo |
-| P3-112 | Asynchronous mode is stopped during Sleep | §12.2, p79 | behaviour | todo |
-| P3-113 | Async selected by clearing SYNC (TXSTA<4>) | §12.2, p79 | behaviour | todo |
-| P3-114 | TSR loaded from TXREG only after Stop bit of previous load transmitted; transfer takes one TCY, then TXREG empty and TXIF (PIR1<4>) set | §12.2.1, p79 | timing | todo |
-| P3-115 | TXIF set regardless of TXIE; cannot be cleared in software; resets only when new data loaded into TXREG | §12.2.1, p79 | behaviour | todo |
-| P3-116 | Note 2: TXIF is set when TXEN is set | §12.2.1 Note 2, p79 | behaviour | todo |
-| P3-117 | TRMT read-only, set when TSR empty; no interrupt logic tied to it (poll only) | §12.2.1, p79 | behaviour | todo |
-| P3-118 | Note 1: TSR is not mapped in data memory | §12.2.1 Note 1, p79 | memory | todo |
-| P3-119 | Transmission does not occur until TXREG loaded and BRG produced a shift clock; can also load TXREG first then set TXEN | §12.2.1, p79 | timing | todo |
-| P3-120 | When TSR empty, write to TXREG transfers immediately to TSR leaving TXREG empty; back-to-back transfers possible (Figure 12-3) | §12.2.1, p79; Figure 12-3, p81 | behaviour | todo |
-| P3-121 | Clearing TXEN during transmission aborts it and resets transmitter; RB2/TX/CK reverts to high-impedance | §12.2.1, p79 | pin | todo |
-| P3-122 | 9-bit TX: set TX9; write TX9D before TXREG, else immediate TXREG->TSR transfer can load an incorrect 9th bit | §12.2.1, p79 | failure-mode | todo |
-| P3-123 | Async TX setup: (1) TRISB<1>,<2>=1 (output drive controlled by peripheral); (2) SPBRG, BRGH; (3) SYNC=0, SPEN=1; (4) TXIE; (5) TX9; (6) TXEN (sets TXIF); (7) TX9D; (8) load TXREG (starts transmission) | §12.2.1 steps, p80 | behaviour | todo |
-| P3-124 | Figure 12-1: TX block: TXREG -> TSR (8 bits + TX9D as bit 8 when TX9) -> pin buffer controlled by SPEN; TXIF/TXIE interrupt; TRMT from TSR; BRG clocks TSR when TXEN | Figure 12-1, p80 | behaviour | todo |
-| P3-125 | Figure 12-2/12-3 waveforms: Start bit, bit0..bit7/8, Stop bit; TXIF and TRMT timing for single and back-to-back words | Figures 12-2, 12-3, p80-81 | timing | todo |
-| P3-126 | Async RX: data recovery block is a high-speed shifter at x16 the baud rate; main receive shifter operates at the bit rate or at FOSC | §12.2.2, p82 | timing | todo |
-| P3-127 | Async reception enabled by setting CREN (RCSTA<4>) | §12.2.2, p82 | behaviour | todo |
-| P3-128 | After sampling the Stop bit, RSR data transferred to RCREG (if empty); on completion RCIF (PIR1<5>) set; RCIE (PIE1<5>) enables interrupt | §12.2.2, p82 | behaviour | todo |
-| P3-129 | RCIF read-only, cleared by hardware when RCREG read and empty | §12.2.2, p82 | register | todo |
-| P3-130 | RCREG is double-buffered two-deep FIFO; two bytes can be held while a third shifts into RSR; RCREG can be read twice | §12.2.2, p82 | memory | todo |
-| P3-131 | Overrun: on Stop bit detection of third byte with RCREG still full, OERR set and RSR word lost | §12.2.2, p82 | failure-mode | todo |
-| P3-132 | OERR cleared only by resetting receive logic (CREN cleared then set); while OERR set, RSR->RCREG transfers are inhibited | §12.2.2, p82 | failure-mode | todo |
-| P3-133 | FERR set if Stop bit detected as clear | §12.2.2, p82 | failure-mode | todo |
-| P3-134 | FERR and RX9D are buffered with the data (FIFO); reading RCREG loads new RX9D and FERR; read RCSTA before RCREG to keep old values | §12.2.2, p82 | behaviour | todo |
-| P3-135 | Figure 12-4 RX block: SPBRG -> ÷64 or ÷16, data recovery, RSR (Start, bits 0..7, Stop (8)), RX9/ADEN/RSR<8> gate "Enable Load of Receive Buffer", RX9D+RCREG 2-level FIFO, RCIF/RCIE | Figure 12-4, p82 | behaviour | todo |
-| P3-136 | Async RX setup: (1) TRISB<1>,<2>=1; (2) SPBRG/BRGH; (3) SYNC=0, SPEN=1; (4) RCIE; (5) RX9; (6) CREN; (7) RCIF on completion; (8) read RCSTA (9th bit, errors); (9) read RCREG; (10) OERR -> clear CREN | §12.2.2 steps, p84 | behaviour | todo |
-| P3-137 | Address detect: with RX9=1 and ADEN=1, on last bit RSR -> receive buffer, RSR<8> -> RX9D, receive interrupt set if and only if RSR<8>=1 | §12.3.1, p85 | behaviour | todo |
-| P3-138 | Address byte identified by 9th bit = 1, data byte by 9th bit = 0 | §12.3.1, p85 | behaviour | todo |
-| P3-139 | ADEN=1: data bytes ignored — not loaded into receive buffer, no interrupt; if another byte shifts into RSR, previous data byte lost | §12.3.1, p85 | behaviour | todo |
-| P3-140 | ADEN takes effect only when RX9=1; ADEN=0: all bytes received, 9th bit usable as parity | §12.3.1, p85 | behaviour | todo |
-| P3-141 | Figure 12-5: data byte (bit8=0) then address byte (bit8=1) with ADEN=1 -> only address byte reaches RCREG and sets RCIF | Figure 12-5, p83 | behaviour | todo |
-| P3-142 | Figure 12-6: address byte then data byte with ADEN still 1 -> data byte not loaded | Figure 12-6, p83 | behaviour | todo |
-| P3-143 | Figure 12-7: address byte, then ADEN cleared -> following data byte loaded into RCREG regardless of bit 8 | Figure 12-7, p83 | behaviour | todo |
-| P3-144 | Address detect setup steps: TRIS, SPBRG/BRGH, SYNC, SPEN, RCIE, RX9, ADEN, CREN or SREN, RCIF, read RCREG, OERR clear by CREN, if addressed clear ADEN and RCIF | §12.3.1.1, p85 | behaviour | todo |
-| P3-145 | AMBIGUITY: §12.3.1.1 step 3 says "setting or clearing bit SYNC" and step 7 "CREN or SREN", though async requires SYNC=0 and SREN is don't-care in async; step 11 says clear RCIF though RCIF is read-only (cleared by reading RCREG) | §12.3.1.1, p85; §12.2.2 | note | **decide** |
-| P3-146 | Sync master: half-duplex (TX and RX not simultaneous); SYNC=1, SPEN=1 (RB2=CK, RB1=DT), CSRC=1 for master (clock out on CK) | §12.4, p86 | behaviour | todo |
-| P3-147 | Sync master TX: TSR loaded after last bit of previous load; TXREG->TSR in one Tcycle then TXIF set; TXIF not software-clearable; TRMT poll | §12.4.1, p86 | timing | todo |
-| P3-148 | Sync master TX: first data bit shifted out on next available rising edge of CK; data out stable around falling edge | §12.4.1, p86; Figure 12-8, p87 | timing | todo |
-| P3-149 | BRG kept in Reset when TXEN, CREN and SREN all clear; setting TXEN starts BRG and creates shift clock immediately (load TXREG then set TXEN, Figure 12-9) | §12.4.1, p86; Figure 12-9, p87 | timing | todo |
-| P3-150 | Sync master: clearing TXEN during transmission aborts, resets transmitter; DT and CK revert to high-impedance | §12.4.1, p86 | pin | todo |
-| P3-151 | Sync master: setting CREN or SREN during transmission aborts it, DT goes hi-Z (for reception); CK remains output if CSRC=1; transmitter logic not reset (only disconnected); clear TXEN to reset it | §12.4.1, p86 | behaviour | todo |
-| P3-152 | If SREN set to interrupt an on-going TX, after the single word is received SREN clears and port reverts to transmitting (TXEN still set); DT immediately switches from hi-Z to driving; clear TXEN to avoid | §12.4.1, p86 | failure-mode | todo |
-| P3-153 | Sync 9-bit TX: write TX9D before TXREG; if TSR empty and TXREG written first, the "present" TX9D is loaded | §12.4.1, p86 | failure-mode | todo |
-| P3-154 | Sync master TX setup: TRIS, SPBRG, SYNC+SPEN+CSRC, TXIE, TX9, TXEN, TX9D, load TXREG per transmission | §12.4.1 steps, p86 | behaviour | todo |
-| P3-155 | Figure 12-8: sync master SPBRG=0, continuous TX of two 8-bit words; one bit per Q1–Q4 cycle shown | Figure 12-8, p87 | timing | todo |
-| P3-156 | Sync master RX enabled by SREN (RCSTA<5>) or CREN (RCSTA<4>); data sampled on RB1/RX/DT on falling edge of clock | §12.4.2, p88 | timing | todo |
-| P3-157 | SREN = single word; CREN = continuous until cleared; both set -> CREN takes precedence | §12.4.2, p88 | behaviour | todo |
-| P3-158 | Sync RX: after last bit, RSR -> RCREG (if empty), RCIF set; RCIF read-only, cleared when RCREG read and empty; 2-deep FIFO | §12.4.2, p88 | behaviour | todo |
-| P3-159 | Sync RX overrun: on clocking last bit of third byte with RCREG full, OERR set, RSR word lost; clear by clearing CREN; OERR inhibits RSR->RCREG | §12.4.2, p88 | failure-mode | todo |
-| P3-160 | Sync RX: 9th bit buffered with data; reading RCREG loads new RX9D; read RCSTA first | §12.4.2, p88 | behaviour | todo |
-| P3-161 | Sync master RX setup: TRIS, SPBRG, SYNC+SPEN+CSRC, ensure CREN and SREN clear, RCIE, RX9, SREN (single) or CREN (continuous), RCIF, read RCSTA, read RCREG, OERR -> clear CREN | §12.4.2 steps, p88 | behaviour | todo |
-| P3-162 | Figure 12-10: sync master RX with SREN=1 and "BRG = 0" (presumably SPBRG=0); SREN self-clears after bit 7; RCIF set | Figure 12-10, p89 | timing | todo |
-| P3-163 | Typo: Table 12-10 PIE1 bit 7 labelled "EPIE" and reset "-000 0000 / -000 -000" vs "0000 -000" elsewhere | Table 12-10, p88 | note | **decide** |
-| P3-164 | Sync slave: shift clock supplied externally on RB2/TX/CK; entered by clearing CSRC; allows transfer/receive during Sleep | §12.5, p89 | behaviour | todo |
-| P3-165 | Sync slave TX identical to master except in Sleep. Two words written to TXREG then SLEEP: (a) first word transfers to TSR and transmits; (b) second stays in TXREG; (c) TXIF not set; (d) when first word shifted out, second transfers to TSR and TXIF set; (e) if TXIE set, wakes chip; if GIE set, branches to 0004h | §12.5.1, p89 | behaviour | todo |
-| P3-166 | Sync slave TX setup: TRIS, SYNC+SPEN with CSRC=0, clear CREN and SREN, TXIE, TX9, TXEN, TX9D, load TXREG | §12.5.1 steps, p89 | behaviour | todo |
-| P3-167 | Sync slave RX: identical to master except Sleep; SREN is don't care in slave | §12.5.2, p90 | behaviour | todo |
-| P3-168 | Sync slave RX in Sleep: if CREN set before SLEEP, a word may be received; RSR->RCREG and, if RCIE set, interrupt wakes chip; branches to 0004h if GIE set | §12.5.2, p90 | behaviour | todo |
-| P3-169 | Sync slave RX setup: TRIS, SYNC+SPEN with CSRC=0, RCIE, RX9, CREN, RCIF, read RCSTA, read RCREG, OERR -> clear CREN (text step 2 erroneously says "synchronous master serial port") | §12.5.2 steps, p90 | behaviour | todo |
+| P3-109 | Async format: NRZ, 1 Start bit, 8 or 9 data bits, 1 Stop bit; LSb first; TX and RX independent but share format and baud rate | §12.2, p79 | behaviour | done (SoC) |
+| P3-110 | BRG produces clock x16 or x64 of bit shift rate depending on BRGH | §12.2, p79 | timing | done (SoC) |
+| P3-111 | No hardware parity; can be implemented in software as 9th bit | §12.2, p79 | behaviour | done (SoC) |
+| P3-112 | Asynchronous mode is stopped during Sleep | §12.2, p79 | behaviour | done (SoC) |
+| P3-113 | Async selected by clearing SYNC (TXSTA<4>) | §12.2, p79 | behaviour | done (SoC) |
+| P3-114 | TSR loaded from TXREG only after Stop bit of previous load transmitted; transfer takes one TCY, then TXREG empty and TXIF (PIR1<4>) set | §12.2.1, p79 | timing | done (SoC) |
+| P3-115 | TXIF set regardless of TXIE; cannot be cleared in software; resets only when new data loaded into TXREG | §12.2.1, p79 | behaviour | done (SoC) |
+| P3-116 | Note 2: TXIF is set when TXEN is set | §12.2.1 Note 2, p79 | behaviour | done (SoC) |
+| P3-117 | TRMT read-only, set when TSR empty; no interrupt logic tied to it (poll only) | §12.2.1, p79 | behaviour | done (SoC) |
+| P3-118 | Note 1: TSR is not mapped in data memory | §12.2.1 Note 1, p79 | memory | done (SoC) |
+| P3-119 | Transmission does not occur until TXREG loaded and BRG produced a shift clock; can also load TXREG first then set TXEN | §12.2.1, p79 | timing | done (SoC) |
+| P3-120 | When TSR empty, write to TXREG transfers immediately to TSR leaving TXREG empty; back-to-back transfers possible (Figure 12-3) | §12.2.1, p79; Figure 12-3, p81 | behaviour | done (SoC) |
+| P3-121 | Clearing TXEN during transmission aborts it and resets transmitter; RB2/TX/CK reverts to high-impedance | §12.2.1, p79 | pin | done (SoC) |
+| P3-122 | 9-bit TX: set TX9; write TX9D before TXREG, else immediate TXREG->TSR transfer can load an incorrect 9th bit | §12.2.1, p79 | failure-mode | done (SoC) |
+| P3-123 | Async TX setup: (1) TRISB<1>,<2>=1 (output drive controlled by peripheral); (2) SPBRG, BRGH; (3) SYNC=0, SPEN=1; (4) TXIE; (5) TX9; (6) TXEN (sets TXIF); (7) TX9D; (8) load TXREG (starts transmission) | §12.2.1 steps, p80 | behaviour | done (SoC) |
+| P3-124 | Figure 12-1: TX block: TXREG -> TSR (8 bits + TX9D as bit 8 when TX9) -> pin buffer controlled by SPEN; TXIF/TXIE interrupt; TRMT from TSR; BRG clocks TSR when TXEN | Figure 12-1, p80 | behaviour | done (SoC) |
+| P3-125 | Figure 12-2/12-3 waveforms: Start bit, bit0..bit7/8, Stop bit; TXIF and TRMT timing for single and back-to-back words | Figures 12-2, 12-3, p80-81 | timing | done (SoC) |
+| P3-126 | Async RX: data recovery block is a high-speed shifter at x16 the baud rate; main receive shifter operates at the bit rate or at FOSC | §12.2.2, p82 | timing | done (SoC) |
+| P3-127 | Async reception enabled by setting CREN (RCSTA<4>) | §12.2.2, p82 | behaviour | done (SoC) |
+| P3-128 | After sampling the Stop bit, RSR data transferred to RCREG (if empty); on completion RCIF (PIR1<5>) set; RCIE (PIE1<5>) enables interrupt | §12.2.2, p82 | behaviour | done (SoC) |
+| P3-129 | RCIF read-only, cleared by hardware when RCREG read and empty | §12.2.2, p82 | register | done (SoC) |
+| P3-130 | RCREG is double-buffered two-deep FIFO; two bytes can be held while a third shifts into RSR; RCREG can be read twice | §12.2.2, p82 | memory | done (SoC) |
+| P3-131 | Overrun: on Stop bit detection of third byte with RCREG still full, OERR set and RSR word lost | §12.2.2, p82 | failure-mode | done (SoC) |
+| P3-132 | OERR cleared only by resetting receive logic (CREN cleared then set); while OERR set, RSR->RCREG transfers are inhibited | §12.2.2, p82 | failure-mode | done (SoC) |
+| P3-133 | FERR set if Stop bit detected as clear | §12.2.2, p82 | failure-mode | done (SoC) |
+| P3-134 | FERR and RX9D are buffered with the data (FIFO); reading RCREG loads new RX9D and FERR; read RCSTA before RCREG to keep old values | §12.2.2, p82 | behaviour | done (SoC) |
+| P3-135 | Figure 12-4 RX block: SPBRG -> ÷64 or ÷16, data recovery, RSR (Start, bits 0..7, Stop (8)), RX9/ADEN/RSR<8> gate "Enable Load of Receive Buffer", RX9D+RCREG 2-level FIFO, RCIF/RCIE | Figure 12-4, p82 | behaviour | done (SoC) |
+| P3-136 | Async RX setup: (1) TRISB<1>,<2>=1; (2) SPBRG/BRGH; (3) SYNC=0, SPEN=1; (4) RCIE; (5) RX9; (6) CREN; (7) RCIF on completion; (8) read RCSTA (9th bit, errors); (9) read RCREG; (10) OERR -> clear CREN | §12.2.2 steps, p84 | behaviour | done (SoC) |
+| P3-137 | Address detect: with RX9=1 and ADEN=1, on last bit RSR -> receive buffer, RSR<8> -> RX9D, receive interrupt set if and only if RSR<8>=1 | §12.3.1, p85 | behaviour | done (SoC) |
+| P3-138 | Address byte identified by 9th bit = 1, data byte by 9th bit = 0 | §12.3.1, p85 | behaviour | done (SoC) |
+| P3-139 | ADEN=1: data bytes ignored — not loaded into receive buffer, no interrupt; if another byte shifts into RSR, previous data byte lost | §12.3.1, p85 | behaviour | done (SoC) |
+| P3-140 | ADEN takes effect only when RX9=1; ADEN=0: all bytes received, 9th bit usable as parity | §12.3.1, p85 | behaviour | done (SoC) |
+| P3-141 | Figure 12-5: data byte (bit8=0) then address byte (bit8=1) with ADEN=1 -> only address byte reaches RCREG and sets RCIF | Figure 12-5, p83 | behaviour | done (SoC) |
+| P3-142 | Figure 12-6: address byte then data byte with ADEN still 1 -> data byte not loaded | Figure 12-6, p83 | behaviour | done (SoC) |
+| P3-143 | Figure 12-7: address byte, then ADEN cleared -> following data byte loaded into RCREG regardless of bit 8 | Figure 12-7, p83 | behaviour | done (SoC) |
+| P3-144 | Address detect setup steps: TRIS, SPBRG/BRGH, SYNC, SPEN, RCIE, RX9, ADEN, CREN or SREN, RCIF, read RCREG, OERR clear by CREN, if addressed clear ADEN and RCIF | §12.3.1.1, p85 | behaviour | done (SoC) |
+| P3-145 | AMBIGUITY: §12.3.1.1 step 3 says "setting or clearing bit SYNC" and step 7 "CREN or SREN", though async requires SYNC=0 and SREN is don't-care in async; step 11 says clear RCIF though RCIF is read-only (cleared by reading RCREG) | §12.3.1.1, p85; §12.2.2 | note | D32 |
+| P3-146 | Sync master: half-duplex (TX and RX not simultaneous); SYNC=1, SPEN=1 (RB2=CK, RB1=DT), CSRC=1 for master (clock out on CK) | §12.4, p86 | behaviour | done (SoC) |
+| P3-147 | Sync master TX: TSR loaded after last bit of previous load; TXREG->TSR in one Tcycle then TXIF set; TXIF not software-clearable; TRMT poll | §12.4.1, p86 | timing | done (SoC) |
+| P3-148 | Sync master TX: first data bit shifted out on next available rising edge of CK; data out stable around falling edge | §12.4.1, p86; Figure 12-8, p87 | timing | done (SoC) |
+| P3-149 | BRG kept in Reset when TXEN, CREN and SREN all clear; setting TXEN starts BRG and creates shift clock immediately (load TXREG then set TXEN, Figure 12-9) | §12.4.1, p86; Figure 12-9, p87 | timing | done (SoC) |
+| P3-150 | Sync master: clearing TXEN during transmission aborts, resets transmitter; DT and CK revert to high-impedance | §12.4.1, p86 | pin | done (SoC) |
+| P3-151 | Sync master: setting CREN or SREN during transmission aborts it, DT goes hi-Z (for reception); CK remains output if CSRC=1; transmitter logic not reset (only disconnected); clear TXEN to reset it | §12.4.1, p86 | behaviour | done (SoC) |
+| P3-152 | If SREN set to interrupt an on-going TX, after the single word is received SREN clears and port reverts to transmitting (TXEN still set); DT immediately switches from hi-Z to driving; clear TXEN to avoid | §12.4.1, p86 | failure-mode | done (SoC) |
+| P3-153 | Sync 9-bit TX: write TX9D before TXREG; if TSR empty and TXREG written first, the "present" TX9D is loaded | §12.4.1, p86 | failure-mode | done (SoC) |
+| P3-154 | Sync master TX setup: TRIS, SPBRG, SYNC+SPEN+CSRC, TXIE, TX9, TXEN, TX9D, load TXREG per transmission | §12.4.1 steps, p86 | behaviour | done (SoC) |
+| P3-155 | Figure 12-8: sync master SPBRG=0, continuous TX of two 8-bit words; one bit per Q1–Q4 cycle shown | Figure 12-8, p87 | timing | done (SoC) |
+| P3-156 | Sync master RX enabled by SREN (RCSTA<5>) or CREN (RCSTA<4>); data sampled on RB1/RX/DT on falling edge of clock | §12.4.2, p88 | timing | done (SoC) |
+| P3-157 | SREN = single word; CREN = continuous until cleared; both set -> CREN takes precedence | §12.4.2, p88 | behaviour | done (SoC) |
+| P3-158 | Sync RX: after last bit, RSR -> RCREG (if empty), RCIF set; RCIF read-only, cleared when RCREG read and empty; 2-deep FIFO | §12.4.2, p88 | behaviour | done (SoC) |
+| P3-159 | Sync RX overrun: on clocking last bit of third byte with RCREG full, OERR set, RSR word lost; clear by clearing CREN; OERR inhibits RSR->RCREG | §12.4.2, p88 | failure-mode | done (SoC) |
+| P3-160 | Sync RX: 9th bit buffered with data; reading RCREG loads new RX9D; read RCSTA first | §12.4.2, p88 | behaviour | done (SoC) |
+| P3-161 | Sync master RX setup: TRIS, SPBRG, SYNC+SPEN+CSRC, ensure CREN and SREN clear, RCIE, RX9, SREN (single) or CREN (continuous), RCIF, read RCSTA, read RCREG, OERR -> clear CREN | §12.4.2 steps, p88 | behaviour | done (SoC) |
+| P3-162 | Figure 12-10: sync master RX with SREN=1 and "BRG = 0" (presumably SPBRG=0); SREN self-clears after bit 7; RCIF set | Figure 12-10, p89 | timing | done (SoC) |
+| P3-163 | Typo: Table 12-10 PIE1 bit 7 labelled "EPIE" and reset "-000 0000 / -000 -000" vs "0000 -000" elsewhere | Table 12-10, p88 | note | D32 |
+| P3-164 | Sync slave: shift clock supplied externally on RB2/TX/CK; entered by clearing CSRC; allows transfer/receive during Sleep | §12.5, p89 | behaviour | done (SoC) |
+| P3-165 | Sync slave TX identical to master except in Sleep. Two words written to TXREG then SLEEP: (a) first word transfers to TSR and transmits; (b) second stays in TXREG; (c) TXIF not set; (d) when first word shifted out, second transfers to TSR and TXIF set; (e) if TXIE set, wakes chip; if GIE set, branches to 0004h | §12.5.1, p89 | behaviour | done (SoC) |
+| P3-166 | Sync slave TX setup: TRIS, SYNC+SPEN with CSRC=0, clear CREN and SREN, TXIE, TX9, TXEN, TX9D, load TXREG | §12.5.1 steps, p89 | behaviour | done (SoC) |
+| P3-167 | Sync slave RX: identical to master except Sleep; SREN is don't care in slave | §12.5.2, p90 | behaviour | done (SoC) |
+| P3-168 | Sync slave RX in Sleep: if CREN set before SLEEP, a word may be received; RSR->RCREG and, if RCIE set, interrupt wakes chip; branches to 0004h if GIE set | §12.5.2, p90 | behaviour | done (SoC) |
+| P3-169 | Sync slave RX setup: TRIS, SYNC+SPEN with CSRC=0, RCIE, RX9, CREN, RCIF, read RCSTA, read RCREG, OERR -> clear CREN (text step 2 erroneously says "synchronous master serial port") | §12.5.2 steps, p90 | behaviour | done (SoC) |
 | P3-170 | No FERR behaviour is described for synchronous modes (§12.4.2 only mentions 9th bit buffering) | §12.4.2, p88 | note | info |
 | P3-171 | Data EEPROM readable and writable during normal operation over full VDD range; not directly mapped; accessed via EECON1, EECON2 (not physical), EEDATA, EEADR | §13.0, p91 | memory | todo |
 | P3-172 | PIC16F627A/628A: 128 bytes data EEPROM, 0h–7Fh; PIC16F648A: 256 bytes, 0h–FFh | §13.0, p91 | memory | todo |
@@ -1479,7 +1532,7 @@ written; the decision is added here.
 | P6-040 | **External clock timing formulas.** Param 42 Tt0P is "Greater of: (TCY + 40)/N" with no 20 ns term. Param 47 Tt1P (synchronous) is the same. A: "Greater of: 20 or (TCY + 40)/N". Params 40, 41, 45, 46, 48 and 50-54 match. | Table 17-7 params 42/47, p.140; Table 17-9, p.141 | timing | todo |
 | P6-041 | **Packages and pinout.** 18-lead PDIP (300 mil), 18-lead SOIC (300 mil) and 20-lead SSOP (209 mil / 5.30 mm). On the SSOP, pins 5 and 6 are VSS and pins 15 and 16 are VDD. There is no 28-pin QFN. A: adds a 28-pin QFN. 18-pin pin functions are identical. | Pin Diagrams, p.2; Table 4-1, p.27; §19, p.157-160 | pin | todo |
 | P6-042 | **Process and migration warning.** Device Differences table: process technology 0.7 µm. Note 1: "If you change from this device to another device, please verify oscillator characteristics in your application." The A sheet's Appendix C lists the migration differences: ER became RC, CP0/CP1 became CP, BOD became BOR, BOR no longer forces PWRT, INTRC became INTOSC, the T1 oscillator is 32.768 kHz only, and dual speed is INTOSC-only. Each of those has its own row here. | p.2 Device Differences | note | info |
-| P6-043 | **USART receive sampling (documented only in DS40300C).** BRGH = 0: RX is sampled "on the seventh, eighth and ninth falling edges of a x16 clock". BRGH = 1: "on the 3 clock edges preceding the second rising edge after the first falling edge of a x4 clock" (Figs. 12-1 to 12-4). §12.3: "The USART function is similar to that on the PIC16C74B, which includes the BRGH = 1 fix." A: says only that the pin "is sampled three times by a majority detect circuit". It is unclear whether the two parts actually differ. | §12.1, Figs. 12-1..12-4, p.73-74; §12.3, p.80 | note | **decide** |
+| P6-043 | **USART receive sampling (documented only in DS40300C).** BRGH = 0: RX is sampled "on the seventh, eighth and ninth falling edges of a x16 clock". BRGH = 1: "on the 3 clock edges preceding the second rising edge after the first falling edge of a x4 clock" (Figs. 12-1 to 12-4). §12.3: "The USART function is similar to that on the PIC16C74B, which includes the BRGH = 1 fix." A: says only that the pin "is sampled three times by a majority detect circuit". It is unclear whether the two parts actually differ. | §12.1, Figs. 12-1..12-4, p.73-74; §12.3, p.80 | note | D25 |
 | P6-044 | **In-circuit debug.** DS40300C describes no debug header or debug resources. A: debugging uses a PIC16F648A-ICD header that takes ICDCLK/ICDDATA, 1 stack level, address 0h (must be NOP) and 300h-3FEh. That is irrelevant for a non-A profile. | §14 (absence) | note | info |
 | P6-045 | **Device ID and revision.** DS40300C gives no device-ID word or revision values and refers to the Programming Specification (DS40044G doesn't give them either). An emulator that answers ICSP reads of 2006h needs that external document. | §14.1, §14.12, p.91/106 | note | info |
 | P6-046 | **Documentation errors in DS40300C (do not model literally).** (a) Register 7-1 TMR1ON reads "1 = Disables Timer1, 0 = Stops Timer1"; the A sheet has 1 = enables. (b) Table 3-3 row 101h "TMR0" lists the OPTION bit names. (c) The Register 3-6 address is given as 0Ch (see P6-024). (d) The USART baud tables head a column "32.768 MHz" where the A sheet says 32.768 kHz. (e) Table 11-5 gives T2CON other-resets as "uuuu" and Table 12-10 gives PIE1 as "-000 0000". (f) Param 15 for 16LF62X reads "Tosc=400 ns" (A: TOSC+400 ns). (g) Param 2 TCY min is "1.0 TCY" (A: 200 ns). (h) §8.2 mentions a "Synchronous Serial Port", which neither part has; the A sheet repeats this. | Register 7-1, p.46; Table 3-3, p.17; Tables 11-5/12-10; Table 17-4/17-5, p.136-137; §8.2, p.50 | note | info |
@@ -1748,7 +1801,7 @@ DS80151B applies to "all PIC16F627A and PIC16F628A devices", meaning Rev. A sili
 | P8-104 | When an instruction that clears GIE executes, any interrupt that was pending for execution in the next cycle is ignored; the CPU executes a NOP in the cycle immediately after the GIE-clearing instruction. The ignored interrupts stay pending and are serviced when GIE is set again. | §8.1 note 2 p. 8-3 | timing | D3 |
 | P8-105 | INTCON (all R/W-0): GIE, PEIE, T0IE, INTE, RBIE, T0IF, INTF, RBIF (bits 7..0). T0IF = TMR0 overflowed; INTF = INT edge occurred; RBIF = at least one of RB7:RB4 changed state; all flags cleared only by software. | §8.2.1 Register 8-1 p. 8-5 | register | done (SoC) |
 | P8-106 | Interrupt logic (Fig. 8-1): each source is flag AND enable; peripheral sources are ORed and gated by PEIE; INTCON sources and the PEIE term are ORed. The OR of enabled flags produces "Wake-up (if in SLEEP)" independent of GIE; the same term ANDed with GIE produces "Interrupt to CPU" and clears GIE. | §8.1 Fig. 8-1 p. 8-4 | behaviour | done (SoC) |
-| P8-107 | Generic PIR flag semantics relevant to the 62xA: RCIF = RCREG full, cleared when RCREG is read (not by software write); TXIF = TXREG empty, cleared when TXREG is written; TMR1IF, TMR2IF, CCP1IF, EEIF, CMIF must be cleared in software. | §8.2.3 Register 8-3 p. 8-8/8-9 | register | todo |
+| P8-107 | Generic PIR flag semantics relevant to the 62xA: RCIF = RCREG full, cleared when RCREG is read (not by software write); TXIF = TXREG empty, cleared when TXREG is written; TMR1IF, TMR2IF, CCP1IF, EEIF, CMIF must be cleared in software. | §8.2.3 Register 8-3 p. 8-8/8-9 | register | done (SoC) |
 | P8-108 | Interrupt latency (flag set -> first instruction at 0004h starts): synchronous (internal) interrupts 3 TCY; asynchronous external interrupts (INT, RB change) 3 to 3.75 TCY depending on when the event lands in the cycle. Latency is the same for one- and two-cycle instructions. | §8.3 p. 8-10 | timing | D4 |
 | P8-109 | INT timing (Fig. 8-2): INTF can be set any time during Q4-Q1; the interrupt condition is sampled every Q1. After sampling, the instruction in progress (Inst(PC)) completes, then two dummy cycles occur (Inst(PC+1) is fetched but not executed; PC+1 is pushed), then Inst(0004h) is fetched and executes on the next cycle. | §8.4 Fig. 8-2 and notes p. 8-10 | timing | done (SoC) |
 | P8-110 | Manual §8.3 text gives asynchronous latency as 3-3.75 TCY, while Fig. 8-2 note 2 in the same manual says 3-4 TCY; DS40044G §14.6 says three or four instruction cycles. Use 3-4 TCY. | Manual §8.3 vs Fig. 8-2 note 2 p. 8-10; DS40044G §14.6 | note | D4 |
@@ -1954,63 +2007,63 @@ DS80151B applies to "all PIC16F627A and PIC16F628A devices", meaning Rev. A sili
 | P9-120 | FAQ: CCPRxL > PR2 (e.g. PR2=7Eh, CCPRxL=7Fh) yields 100% duty | §14.7 Q7 item 1, p.14-16 | failure-mode | done (SoC) |
 | P9-121 | FAQ: PWM pin with TRIS=input is not driven and floats; observed duty may look 0%, 100% or random | §14.7 Q7 item 2, p.14-16 | failure-mode | todo |
 | P9-122 | FAQ: period measurement by subtraction of two captures works across TMR1 wrap (0001h − FFFEh = 3) as long as the timer does not wrap past the previous capture | §14.7 Q8, p.14-16 | behaviour | todo |
-| P9-123 | USART modes: asynchronous full duplex; synchronous master half duplex; synchronous slave half duplex. SPEN (RCSTA<7>) and the TRIS bits must be set to configure TX/CK and RX/DT | §18.1, p.18-2 | pin | todo |
-| P9-124 | TXSTA: CSRC (sync: 1 master/BRG clock, 0 slave; async don't care), TX9, TXEN, SYNC, bit3 unimplemented, BRGH (async only), TRMT (read-only, 1 = TSR empty, reset 1), TX9D. Reset 0000 -010 | Reg 18-1, Table 18-2, pp.18-3/18-5 | register | todo |
-| P9-125 | SREN/CREN override TXEN in synchronous mode | Reg 18-1 Note, p.18-3 | behaviour | todo |
-| P9-126 | RCSTA: SPEN, RX9, SREN (sync master single receive, cleared by hardware when reception completes; don't care async and sync slave), CREN (CREN overrides SREN in sync), bit3, FERR (R), OERR (R, cleared by clearing CREN), RX9D (R) | Reg 18-2, p.18-4 | register | todo |
+| P9-123 | USART modes: asynchronous full duplex; synchronous master half duplex; synchronous slave half duplex. SPEN (RCSTA<7>) and the TRIS bits must be set to configure TX/CK and RX/DT | §18.1, p.18-2 | pin | done (SoC) |
+| P9-124 | TXSTA: CSRC (sync: 1 master/BRG clock, 0 slave; async don't care), TX9, TXEN, SYNC, bit3 unimplemented, BRGH (async only), TRMT (read-only, 1 = TSR empty, reset 1), TX9D. Reset 0000 -010 | Reg 18-1, Table 18-2, pp.18-3/18-5 | register | done (SoC) |
+| P9-125 | SREN/CREN override TXEN in synchronous mode | Reg 18-1 Note, p.18-3 | behaviour | done (SoC) |
+| P9-126 | RCSTA: SPEN, RX9, SREN (sync master single receive, cleared by hardware when reception completes; don't care async and sync slave), CREN (CREN overrides SREN in sync), bit3, FERR (R), OERR (R, cleared by clearing CREN), RX9D (R) | Reg 18-2, p.18-4 | register | done (SoC) |
 | P9-127 | Manual shows RCSTA<3> unimplemented and RCSTA reset 0000 -00x; the 62xA implements RCSTA<3> = ADEN (address detect, R/W) with reset 0000 000x. Address-detect behaviour (receive/interrupt only when RSR<8>=1 in 9-bit async; data bytes dropped, previous byte lost if another shifts in) is only in DS40044G §12.3 | DS33023A Reg 18-2 p.18-4 vs DS40044G Reg 12-2 p.74, §12.3 p.85 | note | info |
-| P9-128 | FERR: set if stop bit is read low; "can be updated by reading RCREG and receiving the next valid byte" | Reg 18-2, §18.4.2, pp.18-4/18-11 | register | todo |
-| P9-129 | BRG: dedicated 8-bit free-running timer whose period is set by SPBRG; BRGH used in async only, ignored in sync. Formulas only apply to master (internal clock) | §18.3, p.18-5 | behaviour | todo |
-| P9-130 | Baud: async BRGH=0: FOSC/(64(X+1)); async BRGH=1: FOSC/(16(X+1)); sync: FOSC/(4(X+1)); X = SPBRG 0…255 | Table 18-1, p.18-5 | timing | todo |
-| P9-131 | Example: FOSC=16 MHz, 9600 baud, BRGH=0 → X=25, actual 9615 baud, error +0.16% | Ex 18-1, p.18-5 | timing | todo |
-| P9-132 | Writing SPBRG resets (clears) the BRG timer so the new rate takes effect without waiting for the old period to overflow | §18.3, p.18-5 | timing | todo |
-| P9-133 | SPBRG reset 0000 0000 on POR/BOR and all other resets | Table 18-2, p.18-5 | register | todo |
-| P9-134 | Sync-mode extremes (Table 18-3): SPBRG=0 gives FOSC/4 (5000 kbps at 20 MHz, 4000 at 16, 1000 at 4 MHz, 8.192 at 32.768 kHz); SPBRG=255 gives FOSC/1024 | Table 18-3, p.18-6 | timing | todo |
-| P9-135 | Async BRGH=0 extremes: SPBRG=0 → FOSC/64 (312.5 kbps at 20 MHz), SPBRG=255 → FOSC/16384 (1.221 kbps at 20 MHz); BRGH=1 SPBRG=0 → FOSC/16 (1250 kbps at 20 MHz) | Tables 18-4/18-5, p.18-7 | timing | todo |
-| P9-136 | Async format: NRZ, 1 start bit, 8 or 9 data bits, 1 stop bit, LSb first; TX and RX independent but share format and baud rate; BRG clock is x16 or x64 of bit rate per BRGH; no hardware parity (use 9th bit) | §18.4, p.18-8 | behaviour | todo |
-| P9-137 | Asynchronous mode is stopped during SLEEP | §18.4, p.18-8 | behaviour | todo |
-| P9-138 | Async TX: TSR is loaded from TXREG only after the stop bit of the previous word has been sent; the TXREG→TSR transfer takes one TCY, then TXREG is empty and TXIF sets | §18.4.1, p.18-8 | timing | todo |
-| P9-139 | TXIF is set regardless of TXIE, cannot be cleared by software, and clears only when TXREG is written | §18.4.1, p.18-8 | behaviour | todo |
-| P9-140 | Setting TXEN sets TXIF (transmit buffer not yet full) | §18.4.1 Note 2, p.18-8 | behaviour | todo |
-| P9-141 | TRMT (TXSTA<1>) read-only, set when TSR is empty; no interrupt tied to it (poll only). TSR not mapped in data memory | §18.4.1 + Note 1, p.18-8 | register | todo |
-| P9-142 | Transmission starts only when TXREG holds data and the BRG has produced a shift clock; alternatively load TXREG then set TXEN. With TSR empty, a TXREG write transfers immediately to TSR leaving TXREG empty → back-to-back writes possible (two-word buffering: TXREG + TSR) | §18.4.1, Fig 18-3, pp.18-8/18-10 | timing | todo |
-| P9-143 | Clearing TXEN during transmission aborts it and resets the transmitter; TX/CK pin reverts to hi-impedance | §18.4.1, p.18-8 | behaviour | todo |
-| P9-144 | 9-bit TX: TX9D must be written before TXREG, because a TXREG write may transfer to TSR immediately and the present (old) TX9D would be sent | §18.4.1, §18.5.1, pp.18-8/18-15 | failure-mode | todo |
-| P9-145 | Fig 18-2: TXIF drops on the TXREG write and returns high shortly after (TXREG→TSR); TRMT goes low for the whole word (start, data, stop) and returns high after the stop bit | Fig 18-2, p.18-9 | timing | todo |
-| P9-146 | Fig 18-3 back-to-back: Word 2 written while Word 1 in TSR keeps TXIF low until Word 1's stop bit ends and Word 2 moves to TSR; Word 2's start bit follows Word 1's stop bit directly; TRMT stays low across both words | Fig 18-3, p.18-10 | timing | todo |
-| P9-147 | Async RX: data recovery block is a x16 high-speed shifter; main receive shifter runs at the bit rate or FOSC. Reception enabled by CREN | §18.4.2, p.18-11 | behaviour | todo |
-| P9-148 | After the stop bit is sampled, RSR data transfers to RCREG if empty and RCIF sets; RCIF is read-only, cleared by hardware when RCREG has been read and is empty | §18.4.2, p.18-11 | behaviour | todo |
-| P9-149 | RCREG is a 2-deep FIFO: two received bytes can sit in the FIFO while a third shifts into RSR; RCREG can be read twice to get both | §18.4.2, p.18-11 | behaviour | todo |
-| P9-150 | Overrun: on detection of the third byte's stop bit with RCREG still full, OERR sets and the RSR word is lost. While OERR=1, RSR→RCREG transfers are inhibited (receiver stops delivering data) until OERR is cleared by clearing then setting CREN | §18.4.2, Fig 18-5, pp.18-11/18-12 | failure-mode | todo |
-| P9-151 | FERR and RX9D are buffered with each received byte (FIFO); reading RCREG loads the next byte's FERR/RX9D, so RCSTA must be read before RCREG | §18.4.2, p.18-11 | behaviour | todo |
-| P9-152 | Fig 18-4: RSR frame = start, bits 0-7, (bit 8 via RX9), stop; x64 baud clock, CREN gates the receiver; SPEN gates the pin buffer | Fig 18-4, p.18-11 | behaviour | todo |
-| P9-153 | Fig 18-5: three words received with no RCREG read → OERR sets at the third word; RCIF stays high while data is in the FIFO | Fig 18-5, p.18-12 | timing | todo |
+| P9-128 | FERR: set if stop bit is read low; "can be updated by reading RCREG and receiving the next valid byte" | Reg 18-2, §18.4.2, pp.18-4/18-11 | register | done (SoC) |
+| P9-129 | BRG: dedicated 8-bit free-running timer whose period is set by SPBRG; BRGH used in async only, ignored in sync. Formulas only apply to master (internal clock) | §18.3, p.18-5 | behaviour | done (SoC) |
+| P9-130 | Baud: async BRGH=0: FOSC/(64(X+1)); async BRGH=1: FOSC/(16(X+1)); sync: FOSC/(4(X+1)); X = SPBRG 0…255 | Table 18-1, p.18-5 | timing | done (SoC) |
+| P9-131 | Example: FOSC=16 MHz, 9600 baud, BRGH=0 → X=25, actual 9615 baud, error +0.16% | Ex 18-1, p.18-5 | timing | done (SoC) |
+| P9-132 | Writing SPBRG resets (clears) the BRG timer so the new rate takes effect without waiting for the old period to overflow | §18.3, p.18-5 | timing | done (SoC) |
+| P9-133 | SPBRG reset 0000 0000 on POR/BOR and all other resets | Table 18-2, p.18-5 | register | done (SoC) |
+| P9-134 | Sync-mode extremes (Table 18-3): SPBRG=0 gives FOSC/4 (5000 kbps at 20 MHz, 4000 at 16, 1000 at 4 MHz, 8.192 at 32.768 kHz); SPBRG=255 gives FOSC/1024 | Table 18-3, p.18-6 | timing | done (SoC) |
+| P9-135 | Async BRGH=0 extremes: SPBRG=0 → FOSC/64 (312.5 kbps at 20 MHz), SPBRG=255 → FOSC/16384 (1.221 kbps at 20 MHz); BRGH=1 SPBRG=0 → FOSC/16 (1250 kbps at 20 MHz) | Tables 18-4/18-5, p.18-7 | timing | done (SoC) |
+| P9-136 | Async format: NRZ, 1 start bit, 8 or 9 data bits, 1 stop bit, LSb first; TX and RX independent but share format and baud rate; BRG clock is x16 or x64 of bit rate per BRGH; no hardware parity (use 9th bit) | §18.4, p.18-8 | behaviour | done (SoC) |
+| P9-137 | Asynchronous mode is stopped during SLEEP | §18.4, p.18-8 | behaviour | done (SoC) |
+| P9-138 | Async TX: TSR is loaded from TXREG only after the stop bit of the previous word has been sent; the TXREG→TSR transfer takes one TCY, then TXREG is empty and TXIF sets | §18.4.1, p.18-8 | timing | done (SoC) |
+| P9-139 | TXIF is set regardless of TXIE, cannot be cleared by software, and clears only when TXREG is written | §18.4.1, p.18-8 | behaviour | done (SoC) |
+| P9-140 | Setting TXEN sets TXIF (transmit buffer not yet full) | §18.4.1 Note 2, p.18-8 | behaviour | done (SoC) |
+| P9-141 | TRMT (TXSTA<1>) read-only, set when TSR is empty; no interrupt tied to it (poll only). TSR not mapped in data memory | §18.4.1 + Note 1, p.18-8 | register | done (SoC) |
+| P9-142 | Transmission starts only when TXREG holds data and the BRG has produced a shift clock; alternatively load TXREG then set TXEN. With TSR empty, a TXREG write transfers immediately to TSR leaving TXREG empty → back-to-back writes possible (two-word buffering: TXREG + TSR) | §18.4.1, Fig 18-3, pp.18-8/18-10 | timing | done (SoC) |
+| P9-143 | Clearing TXEN during transmission aborts it and resets the transmitter; TX/CK pin reverts to hi-impedance | §18.4.1, p.18-8 | behaviour | done (SoC) |
+| P9-144 | 9-bit TX: TX9D must be written before TXREG, because a TXREG write may transfer to TSR immediately and the present (old) TX9D would be sent | §18.4.1, §18.5.1, pp.18-8/18-15 | failure-mode | done (SoC) |
+| P9-145 | Fig 18-2: TXIF drops on the TXREG write and returns high shortly after (TXREG→TSR); TRMT goes low for the whole word (start, data, stop) and returns high after the stop bit | Fig 18-2, p.18-9 | timing | done (SoC) |
+| P9-146 | Fig 18-3 back-to-back: Word 2 written while Word 1 in TSR keeps TXIF low until Word 1's stop bit ends and Word 2 moves to TSR; Word 2's start bit follows Word 1's stop bit directly; TRMT stays low across both words | Fig 18-3, p.18-10 | timing | done (SoC) |
+| P9-147 | Async RX: data recovery block is a x16 high-speed shifter; main receive shifter runs at the bit rate or FOSC. Reception enabled by CREN | §18.4.2, p.18-11 | behaviour | done (SoC) |
+| P9-148 | After the stop bit is sampled, RSR data transfers to RCREG if empty and RCIF sets; RCIF is read-only, cleared by hardware when RCREG has been read and is empty | §18.4.2, p.18-11 | behaviour | done (SoC) |
+| P9-149 | RCREG is a 2-deep FIFO: two received bytes can sit in the FIFO while a third shifts into RSR; RCREG can be read twice to get both | §18.4.2, p.18-11 | behaviour | done (SoC) |
+| P9-150 | Overrun: on detection of the third byte's stop bit with RCREG still full, OERR sets and the RSR word is lost. While OERR=1, RSR→RCREG transfers are inhibited (receiver stops delivering data) until OERR is cleared by clearing then setting CREN | §18.4.2, Fig 18-5, pp.18-11/18-12 | failure-mode | done (SoC) |
+| P9-151 | FERR and RX9D are buffered with each received byte (FIFO); reading RCREG loads the next byte's FERR/RX9D, so RCSTA must be read before RCREG | §18.4.2, p.18-11 | behaviour | done (SoC) |
+| P9-152 | Fig 18-4: RSR frame = start, bits 0-7, (bit 8 via RX9), stop; x64 baud clock, CREN gates the receiver; SPEN gates the pin buffer | Fig 18-4, p.18-11 | behaviour | done (SoC) |
+| P9-153 | Fig 18-5: three words received with no RCREG read → OERR sets at the third word; RCIF stays high while data is in the FIFO | Fig 18-5, p.18-12 | timing | done (SoC) |
 | P9-154 | Async RX steps include "if any error occurred, clear by clearing CREN" (manual says any error; DS40044G says OERR) | §18.4.2 steps, p.18-12; DS40044G §12.2.2 step 10 | note | info |
-| P9-155 | RX sampling: each bit is sampled three times by a majority-detect circuit; the scheme is the same for BRGH=0 and BRGH=1, only the x16 clock source differs | §18.4.3, p.18-13 | timing | todo |
-| P9-156 | Fig 18-6: the x16 clock runs 1…16 per bit; the three samples are taken around the middle of the bit (≈ x16 clocks 7, 8, 9); the baud clock is aligned to the start bit's falling edge ("baud CLK for all but start bit") | Fig 18-6, p.18-13 | timing | **check PDF** |
+| P9-155 | RX sampling: each bit is sampled three times by a majority-detect circuit; the scheme is the same for BRGH=0 and BRGH=1, only the x16 clock source differs | §18.4.3, p.18-13 | timing | done (SoC) |
+| P9-156 | Fig 18-6: the x16 clock runs 1…16 per bit; the three samples are taken around the middle of the bit (≈ x16 clocks 7, 8, 9); the baud clock is aligned to the start bit's falling edge ("baud CLK for all but start bit") | Fig 18-6, p.18-13 | timing | D25 |
 | P9-157 | Fig 18-6 is the scheme for all new devices; the older-scheme exceptions (7th/8th/9th falling edges of x16 for BRGH=0; Q2/Q4 samples before the second rising x4 edge for BRGH=1) apply only to PIC16C63/65/65A/73/73A/74/74A — not to the 62xA | §18.4.3.1, Figs 18-7..18-9, pp.18-13/18-14 | note | info |
 | P9-158 | Device data sheet only says "sampled three times by a majority detect circuit"; sample positions come from manual Fig 18-6 | DS40044G §12.1 p.75 vs DS33023A Fig 18-6 | note | info |
-| P9-159 | Register resets: TXREG and RCREG 0000 0000; TXSTA 0000 -010; RCSTA 0000 -00x (manual) | Tables 18-6/18-7, pp.18-10/18-14 | register | todo |
-| P9-160 | Sync master: half duplex (TX and RX never simultaneous); SYNC=1, SPEN=1 make TX/CK = CK and RX/DT = DT; CSRC=1 = master drives CK | §18.5, p.18-15 | behaviour | todo |
-| P9-161 | Sync master TX: TSR loaded after the last bit of the previous word; TXREG→TSR in one TCY; TXIF/TRMT behave as in async | §18.5.1, p.18-15 | timing | todo |
-| P9-162 | Sync master TX: first data bit shifts out on the next available rising edge of CK; data out is stable at the falling edge of CK | §18.5.1, Fig 18-10, p.18-15 | timing | todo |
-| P9-163 | The BRG is held in reset while TXEN, CREN and SREN are all clear; setting TXEN starts the BRG and creates a shift clock immediately (so load TXREG first, then set TXEN, at slow rates) | §18.5.1, Fig 18-11, p.18-15 | timing | todo |
-| P9-164 | Sync master TX: clearing TXEN aborts and resets the transmitter; DT and CK revert to hi-impedance | §18.5.1, p.18-15 | behaviour | todo |
-| P9-165 | Setting CREN or SREN during a sync transmission aborts the transmission: DT goes hi-Z for reception, CK stays output if CSRC=1, transmitter is not reset (only disconnected); clear TXEN to reset it | §18.5.1, p.18-15 | behaviour | todo |
-| P9-166 | If SREN interrupts an ongoing transmission, after the single word is received SREN clears and the port reverts to transmitting (TXEN still 1): DT immediately switches from hi-Z to driving. Clear TXEN to avoid this | §18.5.1, p.18-15 | failure-mode | todo |
-| P9-167 | Fig 18-10 (SPBRG=0): continuous transmission of two 8-bit words, back-to-back with no gap; Fig 18-11 shows transmission started by TXEN with TXREG already loaded | Figs 18-10/18-11, p.18-16 | timing | todo |
+| P9-159 | Register resets: TXREG and RCREG 0000 0000; TXSTA 0000 -010; RCSTA 0000 -00x (manual) | Tables 18-6/18-7, pp.18-10/18-14 | register | done (SoC) |
+| P9-160 | Sync master: half duplex (TX and RX never simultaneous); SYNC=1, SPEN=1 make TX/CK = CK and RX/DT = DT; CSRC=1 = master drives CK | §18.5, p.18-15 | behaviour | done (SoC) |
+| P9-161 | Sync master TX: TSR loaded after the last bit of the previous word; TXREG→TSR in one TCY; TXIF/TRMT behave as in async | §18.5.1, p.18-15 | timing | done (SoC) |
+| P9-162 | Sync master TX: first data bit shifts out on the next available rising edge of CK; data out is stable at the falling edge of CK | §18.5.1, Fig 18-10, p.18-15 | timing | done (SoC) |
+| P9-163 | The BRG is held in reset while TXEN, CREN and SREN are all clear; setting TXEN starts the BRG and creates a shift clock immediately (so load TXREG first, then set TXEN, at slow rates) | §18.5.1, Fig 18-11, p.18-15 | timing | done (SoC) |
+| P9-164 | Sync master TX: clearing TXEN aborts and resets the transmitter; DT and CK revert to hi-impedance | §18.5.1, p.18-15 | behaviour | done (SoC) |
+| P9-165 | Setting CREN or SREN during a sync transmission aborts the transmission: DT goes hi-Z for reception, CK stays output if CSRC=1, transmitter is not reset (only disconnected); clear TXEN to reset it | §18.5.1, p.18-15 | behaviour | done (SoC) |
+| P9-166 | If SREN interrupts an ongoing transmission, after the single word is received SREN clears and the port reverts to transmitting (TXEN still 1): DT immediately switches from hi-Z to driving. Clear TXEN to avoid this | §18.5.1, p.18-15 | failure-mode | done (SoC) |
+| P9-167 | Fig 18-10 (SPBRG=0): continuous transmission of two 8-bit words, back-to-back with no gap; Fig 18-11 shows transmission started by TXEN with TXREG already loaded | Figs 18-10/18-11, p.18-16 | timing | done (SoC) |
 | P9-168 | Device data sheet says data out is stable "around" the falling edge (manual: "at" the falling edge) | DS33023A §18.5.1 p.18-15 vs DS40044G §12.4.1 p.86 | note | info |
-| P9-169 | Sync master RX: enabled by SREN or CREN; data sampled on RX/DT on the falling edge of CK; SREN = single word, CREN = continuous until cleared; CREN takes precedence when both set | §18.5.2, p.18-17 | timing | todo |
-| P9-170 | Sync RX: after the last bit is clocked, RSR→RCREG (if empty) and RCIF sets; same 2-deep FIFO; OERR sets on clocking the last bit of a third byte with RCREG still full, RSR word lost; OERR inhibits transfers until CREN cleared | §18.5.2, p.18-17 | failure-mode | todo |
-| P9-171 | Sync RX: RX9D buffered with data; read RCSTA before RCREG | §18.5.2, p.18-17 | behaviour | todo |
-| P9-172 | Fig 18-12 (SREN, BRG=0): after the SREN write, 8 clocks shift bits 0-7; SREN self-clears at the end of the word, RCIF sets, reading RCREG clears RCIF; CREN stays 0 | Fig 18-12, p.18-18 | timing | todo |
-| P9-173 | Sync slave: shift clock supplied externally on TX/CK (CSRC=0); allows transmit or receive during SLEEP | §18.6, p.18-19 | behaviour | todo |
-| P9-174 | Sync slave TX in SLEEP with two words written: first word moves to TSR and transmits; second stays in TXREG; TXIF not set; when the first word finishes, the second moves to TSR and TXIF sets; with TXIE=1 this wakes the device (vectors to 0004h if GIE=1) | §18.6.1, p.18-19 | behaviour | todo |
-| P9-175 | Sync slave RX: SREN is don't care; with CREN set before SLEEP a word can be received in SLEEP; on completion RSR→RCREG and with RCIE=1 the interrupt wakes the device (vectors to 0004h if GIE) | §18.6.2, p.18-20 | behaviour | todo |
-| P9-176 | Design tip: async errors usually come from BRGH errata on PIC16C65/65A/73/73A/74/74A, wrong SPBRG, or summed TX+RX baud error too high | §18.8 Q1, p.18-22 | failure-mode | todo |
-| P9-177 | VREF: 16-tap resistor ladder, two ranges, power-down when unused; within each range the 16 steps are monotonic; limited drive capability (intended for comparator inputs) | §19.1, p.19-2 | electrical | todo |
-| P9-178 | Ladder (Fig 19-1): VREN switch, 8R top, 16 R stages, 8R bottom switched out by VRR, 16:1 analog mux by VR3:VR0; R = param D312 | Fig 19-1, p.19-2 | electrical | todo |
-| P9-179 | VRR=1: VREF = (VR/24)·VDD, range 0…0.625·VDD in VDD/24 steps; VRR=0: VREF = VDD/4 + (VR/32)·VDD, VDD/32 steps | Reg 19-1, §19.3, pp.19-3/19-4 | electrical | todo |
+| P9-169 | Sync master RX: enabled by SREN or CREN; data sampled on RX/DT on the falling edge of CK; SREN = single word, CREN = continuous until cleared; CREN takes precedence when both set | §18.5.2, p.18-17 | timing | done (SoC) |
+| P9-170 | Sync RX: after the last bit is clocked, RSR→RCREG (if empty) and RCIF sets; same 2-deep FIFO; OERR sets on clocking the last bit of a third byte with RCREG still full, RSR word lost; OERR inhibits transfers until CREN cleared | §18.5.2, p.18-17 | failure-mode | done (SoC) |
+| P9-171 | Sync RX: RX9D buffered with data; read RCSTA before RCREG | §18.5.2, p.18-17 | behaviour | done (SoC) |
+| P9-172 | Fig 18-12 (SREN, BRG=0): after the SREN write, 8 clocks shift bits 0-7; SREN self-clears at the end of the word, RCIF sets, reading RCREG clears RCIF; CREN stays 0 | Fig 18-12, p.18-18 | timing | done (SoC) |
+| P9-173 | Sync slave: shift clock supplied externally on TX/CK (CSRC=0); allows transmit or receive during SLEEP | §18.6, p.18-19 | behaviour | done (SoC) |
+| P9-174 | Sync slave TX in SLEEP with two words written: first word moves to TSR and transmits; second stays in TXREG; TXIF not set; when the first word finishes, the second moves to TSR and TXIF sets; with TXIE=1 this wakes the device (vectors to 0004h if GIE=1) | §18.6.1, p.18-19 | behaviour | done (SoC) |
+| P9-175 | Sync slave RX: SREN is don't care; with CREN set before SLEEP a word can be received in SLEEP; on completion RSR→RCREG and with RCIE=1 the interrupt wakes the device (vectors to 0004h if GIE) | §18.6.2, p.18-20 | behaviour | done (SoC) |
+| P9-176 | Design tip: async errors usually come from BRGH errata on PIC16C65/65A/73/73A/74/74A, wrong SPBRG, or summed TX+RX baud error too high | §18.8 Q1, p.18-22 | failure-mode | info |
+| P9-177 | VREF: 16-tap resistor ladder, two ranges, power-down when unused; within each range the 16 steps are monotonic; limited drive capability (intended for comparator inputs) | §19.1, p.19-2 | electrical | done (SoC) |
+| P9-178 | Ladder (Fig 19-1): VREN switch, 8R top, 16 R stages, 8R bottom switched out by VRR, 16:1 analog mux by VR3:VR0; R = param D312 | Fig 19-1, p.19-2 | electrical | done (SoC) |
+| P9-179 | VRR=1: VREF = (VR/24)·VDD, range 0…0.625·VDD in VDD/24 steps; VRR=0: VREF = VDD/4 + (VR/32)·VDD, VDD/32 steps | Reg 19-1, §19.3, pp.19-3/19-4 | electrical | done (SoC) |
 | P9-180 | Table 19-1 typical at VDD=5.0 V: VRR=1 → 0.00, 0.21, 0.42, 0.63, 0.83, 1.04, 1.25, 1.46, 1.67, 1.88, 2.08, 2.29, 2.50, 2.71, 2.92, 3.13 V; VRR=0 → 1.25, 1.41, 1.56, 1.72, 1.88, 2.03, 2.19, 2.34, 2.50, 2.66, 2.81, 2.97, 3.13, 3.28, 3.44, 3.59 V | Table 19-1, p.19-2 | electrical | done (SoC) |
 | P9-181 | VRCON: VREN (bit7), VROE (bit6), VRR (bit5), bit4 unimplemented, VR3:VR0. Reset 000- 0000 | Reg 19-1, Table 20-1, pp.19-3/20-10 | register | done (SoC) |
 | P9-182 | Manual Reg 19-1 says VROE=1 connects VREF internally to the comparator module AND outputs it on the VREF pin, VROE=0 disconnects it from both; DS40044G says VROE only switches the output to RA2. Manual §20.5.2 also says the internal reference "may be used in any comparator mode" while both documents say it is applied to VIN+ only in CM=010 | DS33023A Reg 19-1 p.19-3, §20.5.2 p.20-7 vs DS40044G Reg 11-1 p.69, §10.3.2 p.65 | note | info |
