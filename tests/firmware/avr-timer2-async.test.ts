@@ -280,4 +280,12 @@ describe("asynchronous Timer/Counter2 (§18.9)", () => {
     expect(m.read(R.TCNT2)).toBe(0)
     expect([...m.unmodelled.keys()].some((k) => k.includes("TOSC"))).toBe(true)
   })
+
+  it("a CPU clock not above four times the timer oscillator is reported (§18.9)", () => {
+    const m = part()
+    m.poke(R.CLKPR, 0x80)
+    m.poke(R.CLKPR, 0x08) // 8 MHz ÷ 256 = 31.25 kHz
+    m.poke(R.ASSR, 0x20)
+    expect([...m.unmodelled.keys()].some((k) => k.includes("four times"))).toBe(true)
+  })
 })
