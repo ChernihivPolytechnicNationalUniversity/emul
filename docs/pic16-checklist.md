@@ -25,12 +25,13 @@ figure, to be read from the PDF page; **info** — a note that changes no behavi
 
 | Status | Rows |
 |---|---|
-| todo | 753 |
-| done (SoC) | 636 |
+| todo | 720 |
+| done (SoC) | 657 |
 | done (core) | 171 |
 | info | 166 |
 | **decide** | 21 |
 | D38 | 19 |
+| D44 | 12 |
 | D37 | 8 |
 | **check PDF** | 3 |
 | D19 | 3 |
@@ -247,6 +248,26 @@ Either way it runs at the crystal's frequency.
 **D43. MCLR and the internal / ER oscillator** (P6-014): the clock stops while MCLR holds the part; the
 emulator runs no clock and puts out no CLKOUT in any reset, so there is nothing more to model.
 
+**D44. Input levels** (P1-056…P1-077, P5-089…P5-100): the circuit's voltage on a pad becomes a level
+with the guaranteed limits — VIH min to read high, VIL max to read low, the last level kept between
+(the switching point of a given part lies somewhere in there). PORTA is Schmitt (0.2/0.8 VDD, D031/D041;
+MCLR and RA4 D032/D042 the same); PORTB is TTL (0.8/2.0 V at 4.5–5.5 V, else 0.15 VDD / 0.25 VDD + 0.8 V,
+D030/D040) except while a Schmitt alternate input of the pin is in use: INT with INTE, RX/DT/CK with SPEN,
+CCP1 in capture, T1CKI as Timer1's clock, PGM with LVP (P1-077).
+
+**D45. Supply current** (P5-048…P5-079): the typical D012A (INTOSC 4 MHz) by VDD, scaled with FOSC as
+CMOS switching current is, while awake or in reset; IPD (D020) plus ΔIWDT (D021) and ΔIBOR (D022) when
+they run, asleep. The comparator and VREF currents (D023/D024) are not added.
+
+**D46. The A part's RC oscillator** (P4-046…P4-048): DS40044G gives no frequencies. DS33023A Table 31-1
+(the mid-range family's typical RC values at 5 V, 25 °C) is used: log f interpolated on log R and log C
+inside its grid, a fit of the same table (period = 1.246·R·(C + 6.3 pF) + 79 ns, within 8 %) outside;
+VDD and temperature are not taken into account.
+
+**D47. Output drivers** (P5-1xx D080/D090): the circuit engine gives a pad one resistance both ways;
+the sink figure, 0.6 V at 8.5 mA (≈ 70 Ω), is taken. D090's 0.7 V at 3 mA is a guaranteed minimum at a
+light load, far weaker than the 25 mA a pin is rated to source.
+
 **D8. The 48 rows marked decide** are settled the same way, block by block, before each block is
 written; the decision is added here.
 
@@ -309,29 +330,29 @@ written; the decision is added here.
 | P1-053 | ALU may affect C, DC, Z in STATUS; C and DC act as Borrow and Digit Borrow (inverted polarity) in subtraction (SUBLW, SUBWF) | §3 p.11; §4.2.2.1 Note p.24 | behaviour | todo |
 | P1-054 | EEPROM data retained without power; RAM lost when power removed | §3 p.11 | memory | done (SoC) |
 | P1-055 | Block diagram: 13-bit PC, 8-level x 13-bit stack, 14-bit program bus, RAM address 9 bits via Addr MUX from 7-bit direct address or 8-bit FSR indirect address; higher-order address bits come from STATUS | Figure 3-1 + Note 1 p.12 | memory | todo |
-| P1-056 | Pin RA0/AN0: RA0 input ST, output CMOS (bidirectional I/O); AN0 analog comparator input | Table 3-2 p.13; Table 5-1 p.37 | pin | todo |
-| P1-057 | Pin RA1/AN1: RA1 ST/CMOS; AN1 analog comparator input | Table 3-2; Table 5-1 | pin | todo |
-| P1-058 | Pin RA2/AN2/VREF: RA2 ST/CMOS; AN2 analog comparator input; VREF analog output | Table 3-2; Table 5-1 | pin | todo |
-| P1-059 | Pin RA3/AN3/CMP1: RA3 ST/CMOS; AN3 analog input; CMP1 = comparator 1 output, CMOS | Table 3-2; Table 5-1 | pin | todo |
-| P1-060 | Pin RA4/T0CKI/CMP2: RA4 input ST, output OD (open drain); T0CKI input ST; CMP2 comparator 2 output OD | Table 3-2; Table 5-1 | pin | todo |
-| P1-061 | Pin RA5/MCLR/VPP: RA5 is input-only, ST, no output driver; MCLR input ST, active-low Reset; VPP programming voltage input | Table 3-2; Table 5-1; §5.1 p.33 | pin | todo |
-| P1-062 | Voltage on MCLR/VPP must not exceed VDD during normal device operation | Table 3-2 p.13; Table 5-1 p.37 | electrical | todo |
-| P1-063 | Applying VPP voltage levels to RA5 makes the device enter Programming mode (an RA5 input driven above VDD exits normal run) | §5.1 Note 1 p.33; Fig 5-5 "HV Detect → Program mode" | failure-mode | todo |
+| P1-056 | Pin RA0/AN0: RA0 input ST, output CMOS (bidirectional I/O); AN0 analog comparator input | Table 3-2 p.13; Table 5-1 p.37 | pin | done (SoC) |
+| P1-057 | Pin RA1/AN1: RA1 ST/CMOS; AN1 analog comparator input | Table 3-2; Table 5-1 | pin | done (SoC) |
+| P1-058 | Pin RA2/AN2/VREF: RA2 ST/CMOS; AN2 analog comparator input; VREF analog output | Table 3-2; Table 5-1 | pin | done (SoC) |
+| P1-059 | Pin RA3/AN3/CMP1: RA3 ST/CMOS; AN3 analog input; CMP1 = comparator 1 output, CMOS | Table 3-2; Table 5-1 | pin | done (SoC) |
+| P1-060 | Pin RA4/T0CKI/CMP2: RA4 input ST, output OD (open drain); T0CKI input ST; CMP2 comparator 2 output OD | Table 3-2; Table 5-1 | pin | done (SoC) |
+| P1-061 | Pin RA5/MCLR/VPP: RA5 is input-only, ST, no output driver; MCLR input ST, active-low Reset; VPP programming voltage input | Table 3-2; Table 5-1; §5.1 p.33 | pin | done (SoC) |
+| P1-062 | Voltage on MCLR/VPP must not exceed VDD during normal device operation | Table 3-2 p.13; Table 5-1 p.37 | electrical | done (SoC) |
+| P1-063 | Applying VPP voltage levels to RA5 makes the device enter Programming mode (an RA5 input driven above VDD exits normal run) | §5.1 Note 1 p.33; Fig 5-5 "HV Detect → Program mode" | failure-mode | done (SoC) |
 | P1-064 | Note: VPP input type is "—" in Table 3-2 but "HV" in Table 5-1 | Table 3-2 p.13 vs Table 5-1 p.37 | note | info |
-| P1-065 | Pin RA6/OSC2/CLKOUT: RA6 ST/CMOS I/O; OSC2 crystal output (XTAL) in crystal modes; CLKOUT CMOS output in RC/INTOSC mode at 1/4 of OSC1 frequency | Table 3-2; Table 5-1 | pin | todo |
-| P1-066 | Pin RA7/OSC1/CLKIN: RA7 ST/CMOS I/O; OSC1 crystal input (XTAL); CLKIN ST external clock input, RC biasing pin | Table 3-2; Table 5-1 | pin | todo |
-| P1-067 | Pin RB0/INT: RB0 input TTL, output CMOS, weak pull-up programmable; INT external interrupt input ST | Table 3-2; Table 5-3 p.45 | pin | todo |
-| P1-068 | Pin RB1/RX/DT: RB1 TTL/CMOS with pull-up; RX USART receive input ST; DT synchronous data I/O, input ST, output CMOS | Table 3-2; Table 5-3 | pin | todo |
-| P1-069 | Pin RB2/TX/CK: RB2 TTL/CMOS; TX USART transmit output CMOS; CK synchronous clock I/O, input ST, output CMOS; weak pull-up | Table 3-2; Table 5-3 | pin | todo |
+| P1-065 | Pin RA6/OSC2/CLKOUT: RA6 ST/CMOS I/O; OSC2 crystal output (XTAL) in crystal modes; CLKOUT CMOS output in RC/INTOSC mode at 1/4 of OSC1 frequency | Table 3-2; Table 5-1 | pin | done (SoC) |
+| P1-066 | Pin RA7/OSC1/CLKIN: RA7 ST/CMOS I/O; OSC1 crystal input (XTAL); CLKIN ST external clock input, RC biasing pin | Table 3-2; Table 5-1 | pin | done (SoC) |
+| P1-067 | Pin RB0/INT: RB0 input TTL, output CMOS, weak pull-up programmable; INT external interrupt input ST | Table 3-2; Table 5-3 p.45 | pin | done (SoC) |
+| P1-068 | Pin RB1/RX/DT: RB1 TTL/CMOS with pull-up; RX USART receive input ST; DT synchronous data I/O, input ST, output CMOS | Table 3-2; Table 5-3 | pin | done (SoC) |
+| P1-069 | Pin RB2/TX/CK: RB2 TTL/CMOS; TX USART transmit output CMOS; CK synchronous clock I/O, input ST, output CMOS; weak pull-up | Table 3-2; Table 5-3 | pin | done (SoC) |
 | P1-070 | Note: Table 3-2 puts "Can be software programmed for internal weak pull-up" on the RB2 row, Table 5-3 puts it on the CK row instead (RB2 row says only "Bidirectional I/O port"). Fig 5-10 shows a weak pull-up on the pin, so treat RB2 as having a pull-up | Table 3-2 p.13 vs Table 5-3 p.45 | note | info |
-| P1-071 | Pin RB3/CCP1: RB3 TTL/CMOS with pull-up; CCP1 Capture/Compare/PWM I/O, input ST, output CMOS | Table 3-2; Table 5-3 | pin | todo |
-| P1-072 | Pin RB4/PGM: RB4 TTL/CMOS, interrupt-on-change, weak pull-up; PGM low-voltage programming input ST. When LVP enabled, interrupt-on-change and weak pull-up on RB4 are disabled | Table 3-2 p.14; Table 5-3; Fig 5-12 note | pin | todo |
-| P1-073 | Pin RB5: TTL/CMOS, interrupt-on-change, weak pull-up; no alternate function | Table 3-2; Table 5-3 | pin | todo |
-| P1-074 | Pin RB6/T1OSO/T1CKI/PGC: RB6 TTL/CMOS, IOC, pull-up; T1OSO Timer1 oscillator output (XTAL); T1CKI Timer1 clock input ST; PGC ICSP clock input ST | Table 3-2; Table 5-3 | pin | todo |
-| P1-075 | Pin RB7/T1OSI/PGD: RB7 TTL/CMOS, IOC, pull-up; T1OSI Timer1 oscillator input (XTAL); PGD ICSP data I/O, input ST, output CMOS | Table 3-2; Table 5-3 | pin | todo |
-| P1-076 | VSS ground for logic and I/O; VDD positive supply for logic and I/O | Table 3-2 p.14 | pin | todo |
-| P1-077 | PORTA port inputs are all Schmitt Trigger; PORTB port inputs are all TTL; PORTB alternate-function inputs (INT, RX, DT, CK, CCP1, T1CKI, PGM, PGC, PGD) are ST | Table 3-2; Tables 5-1, 5-3; Figs 5-8..5-15 | pin | todo |
-| P1-078 | PDIP-18/SOIC-18 pinout: 1 RA2/AN2/VREF, 2 RA3/AN3/CMP1, 3 RA4/T0CKI/CMP2, 4 RA5/MCLR/VPP, 5 VSS, 6 RB0/INT, 7 RB1/RX/DT, 8 RB2/TX/CK, 9 RB3/CCP1, 10 RB4/PGM, 11 RB5, 12 RB6/T1OSO/T1CKI/PGC, 13 RB7/T1OSI/PGD, 14 VDD, 15 RA6/OSC2/CLKOUT, 16 RA7/OSC1/CLKIN, 17 RA0/AN0, 18 RA1/AN1 | Pin Diagrams p.4 | pin | todo |
+| P1-071 | Pin RB3/CCP1: RB3 TTL/CMOS with pull-up; CCP1 Capture/Compare/PWM I/O, input ST, output CMOS | Table 3-2; Table 5-3 | pin | done (SoC) |
+| P1-072 | Pin RB4/PGM: RB4 TTL/CMOS, interrupt-on-change, weak pull-up; PGM low-voltage programming input ST. When LVP enabled, interrupt-on-change and weak pull-up on RB4 are disabled | Table 3-2 p.14; Table 5-3; Fig 5-12 note | pin | done (SoC) |
+| P1-073 | Pin RB5: TTL/CMOS, interrupt-on-change, weak pull-up; no alternate function | Table 3-2; Table 5-3 | pin | done (SoC) |
+| P1-074 | Pin RB6/T1OSO/T1CKI/PGC: RB6 TTL/CMOS, IOC, pull-up; T1OSO Timer1 oscillator output (XTAL); T1CKI Timer1 clock input ST; PGC ICSP clock input ST | Table 3-2; Table 5-3 | pin | done (SoC) |
+| P1-075 | Pin RB7/T1OSI/PGD: RB7 TTL/CMOS, IOC, pull-up; T1OSI Timer1 oscillator input (XTAL); PGD ICSP data I/O, input ST, output CMOS | Table 3-2; Table 5-3 | pin | done (SoC) |
+| P1-076 | VSS ground for logic and I/O; VDD positive supply for logic and I/O | Table 3-2 p.14 | pin | done (SoC) |
+| P1-077 | PORTA port inputs are all Schmitt Trigger; PORTB port inputs are all TTL; PORTB alternate-function inputs (INT, RX, DT, CK, CCP1, T1CKI, PGM, PGC, PGD) are ST | Table 3-2; Tables 5-1, 5-3; Figs 5-8..5-15 | pin | done (SoC) |
+| P1-078 | PDIP-18/SOIC-18 pinout: 1 RA2/AN2/VREF, 2 RA3/AN3/CMP1, 3 RA4/T0CKI/CMP2, 4 RA5/MCLR/VPP, 5 VSS, 6 RB0/INT, 7 RB1/RX/DT, 8 RB2/TX/CK, 9 RB3/CCP1, 10 RB4/PGM, 11 RB5, 12 RB6/T1OSO/T1CKI/PGC, 13 RB7/T1OSI/PGD, 14 VDD, 15 RA6/OSC2/CLKOUT, 16 RA7/OSC1/CLKIN, 17 RA0/AN0, 18 RA1/AN1 | Pin Diagrams p.4 | pin | done (SoC) |
 | P1-079 | SSOP-20 has two VSS and two VDD pins; signal set as PDIP. Pins 1–10 on one side carry RA2, RA3, RA4, RA5, VSS, VSS, RB0, RB1, RB2, RB3 and 11–20 carry RB4, RB5, RB6, RB7, VDD, VDD, RA6, RA7, RA0, RA1 (sets taken from the diagram; the per-pin order is scrambled in the text extraction) | Pin Diagrams p.4 | pin | todo |
 | P1-080 | Note: SSOP-20 pin-number-to-signal mapping cannot be read reliably from the pdftotext extraction (rotated labels); verify against the PDF before modelling an SSOP footprint | Pin Diagrams p.4 | note | **check PDF** |
 | P1-081 | QFN-28 pinout (readable part): 1 RA5/MCLR/VPP, 2 NC, 3 VSS, 4 NC, 5 VSS, 6 NC, 7 RB0/INT, 11 NC, 14 NC, 15 RB6/T1OSO/T1CKI/PGC, 16 RB7/T1OSI/PGD, 17 VDD, 18 NC, 19 VDD, 20 RA6/OSC2/CLKOUT, 21 RA7/OSC1/CLKIN, 22 NC, 25 NC. Pins 8,9,10,12,13 carry RB1..RB5 and 23,24,26,27,28 carry RA0..RA4 (exact order scrambled in extraction). Exposed pad on bottom | Pin Diagrams p.4; §19 QFN drawing p.168 | pin | todo |
@@ -1346,18 +1367,18 @@ written; the decision is added here.
 | P5-086 | D013E IDD HS, FOSC = 20 MHz, extended @ 4.5 V: typ 2.5, max 2.9 mA | §17.3, p.139 | electrical | todo |
 | P5-087 | D013E IDD HS, FOSC = 20 MHz, extended @ 5.0 V: typ 2.75, max 3.5 mA | §17.3, p.139 | electrical | todo |
 | P5-088 | Extended vs industrial differences: D024E typ 83 μA @5 V (industrial 80); D020E max 4/8 μA (ind 0.85/2.7); D021E max 9/20 μA (ind 3.4/17.0); D025E max 4/6 μA (ind 2.2/2.9); D010E max 28/54 μA (ind 25/48); D012E max 650 μA/1.1 mA (ind 600/995 μA); D013E max 3.5 mA @5 V (ind 3.3) — model must pick limits by temperature grade | §17.2 vs §17.3 | note | info |
-| P5-089 | D030 VIL I/O ports with TTL buffer: min VSS, max 0.8 V, VDD = 4.5 V to 5.5 V | §17.4, p.140 | electrical | todo |
-| P5-090 | D030 VIL I/O ports with TTL buffer: min VSS, max 0.15 VDD V, otherwise (VDD outside 4.5–5.5 V) | §17.4, p.140 | electrical | todo |
-| P5-091 | D031 VIL I/O ports with Schmitt Trigger input(4): min VSS, max 0.2 VDD V | §17.4, p.140 | electrical | todo |
-| P5-092 | D032 VIL MCLR, RA4/T0CKI, OSC1 (in RC mode): min VSS, max 0.2 VDD V (Note 1) | §17.4, p.140 | electrical | todo |
-| P5-093 | D033 VIL OSC1 (in HS): min VSS, max 0.3 VDD V | §17.4, p.140 | electrical | todo |
-| P5-094 | D033 VIL OSC1 (in LP and XT): min VSS, max 0.6 V | §17.4, p.140 | electrical | todo |
-| P5-095 | D040 VIH I/O ports with TTL buffer: min 2.0 V, max VDD, VDD = 4.5 V to 5.5 V | §17.4, p.140 | electrical | todo |
-| P5-096 | D040 VIH I/O ports with TTL buffer: min .25 VDD + 0.8 V, max VDD, otherwise | §17.4, p.140 | electrical | todo |
-| P5-097 | D041 VIH I/O ports with Schmitt Trigger input(4): min 0.8 VDD, max VDD V | §17.4, p.140 | electrical | todo |
-| P5-098 | D042 VIH MCLR, RA4/T0CKI: min 0.8 VDD, max VDD V | §17.4, p.140 | electrical | todo |
-| P5-099 | D043 VIH OSC1 (XT and LP): min 1.3, max VDD V | §17.4, p.140 | electrical | todo |
-| P5-100 | D043A VIH OSC1 (in RC mode): min 0.9 VDD, max VDD V (Note 1) | §17.4, p.140 | electrical | todo |
+| P5-089 | D030 VIL I/O ports with TTL buffer: min VSS, max 0.8 V, VDD = 4.5 V to 5.5 V | §17.4, p.140 | electrical | D44 |
+| P5-090 | D030 VIL I/O ports with TTL buffer: min VSS, max 0.15 VDD V, otherwise (VDD outside 4.5–5.5 V) | §17.4, p.140 | electrical | D44 |
+| P5-091 | D031 VIL I/O ports with Schmitt Trigger input(4): min VSS, max 0.2 VDD V | §17.4, p.140 | electrical | D44 |
+| P5-092 | D032 VIL MCLR, RA4/T0CKI, OSC1 (in RC mode): min VSS, max 0.2 VDD V (Note 1) | §17.4, p.140 | electrical | D44 |
+| P5-093 | D033 VIL OSC1 (in HS): min VSS, max 0.3 VDD V | §17.4, p.140 | electrical | D44 |
+| P5-094 | D033 VIL OSC1 (in LP and XT): min VSS, max 0.6 V | §17.4, p.140 | electrical | D44 |
+| P5-095 | D040 VIH I/O ports with TTL buffer: min 2.0 V, max VDD, VDD = 4.5 V to 5.5 V | §17.4, p.140 | electrical | D44 |
+| P5-096 | D040 VIH I/O ports with TTL buffer: min .25 VDD + 0.8 V, max VDD, otherwise | §17.4, p.140 | electrical | D44 |
+| P5-097 | D041 VIH I/O ports with Schmitt Trigger input(4): min 0.8 VDD, max VDD V | §17.4, p.140 | electrical | D44 |
+| P5-098 | D042 VIH MCLR, RA4/T0CKI: min 0.8 VDD, max VDD V | §17.4, p.140 | electrical | D44 |
+| P5-099 | D043 VIH OSC1 (XT and LP): min 1.3, max VDD V | §17.4, p.140 | electrical | D44 |
+| P5-100 | D043A VIH OSC1 (in RC mode): min 0.9 VDD, max VDD V (Note 1) | §17.4, p.140 | electrical | D44 |
 | P5-101 | D043B VIH OSC1 (in HS mode): min 0.7 VDD, max VDD V | §17.4, p.140 | electrical | todo |
 | P5-102 | Region between VIL max and VIH min (e.g. TTL 0.8–2.0 V at 4.5–5.5 V; ST 0.2–0.8 VDD) is unspecified (no hysteresis values given) — model as indeterminate/hysteresis band | §17.4 D030–D043B | note | info |
 | P5-103 | D070 IPURB PORTB weak pull-up current: min 50, typ 200, max 400 μA, VDD = 5.0 V, VPIN = VSS (only specified at 5.0 V) | §17.4, p.140 | electrical | todo |

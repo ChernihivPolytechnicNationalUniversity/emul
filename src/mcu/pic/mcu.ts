@@ -846,6 +846,19 @@ export class PicMcu implements PicBus, PicSystem {
     this.pinsChanged(this.cpu.cycles)
   }
 
+  /** Power applied from nothing (the loop's own power-on): a POR at time 0, the image kept. */
+  powerOn() {
+    this.time = 0
+    this.porHeld = this.borHeld = false
+    this.borLowSince = this.mclrLowSince = null
+    this.mclrInReset = false
+    this.programmingMode = false
+    this.programmingEntry = null
+    this.padQueue.length = 0
+    this.powerOnReset()
+    this.checkClock()
+  }
+
   requestReset(cause: PicResetCause) {
     this.resetRequest = cause
     this.cpu.stop = true
@@ -1060,10 +1073,107 @@ export class PicMcu implements PicBus, PicSystem {
   }
   private padChanged(port: number, pin: number, drive: PadDrive, cycle: number) {
     const key = port * 16 + pin
+    this.trackDuty(key, port, pin, drive, cycle)
     if (!this.digitalWatch.has(key)) return
     const level = drive === "high" ? true : drive === "low" ? false : null
     this.digitalOut.push({ pad: { port, pin }, level, time: this.cycleTime(cycle) })
     if (this.yieldOnOutput) this.cpu.stop = true
+  }
+
+  /** CCP1's PWM on RB3: its duty is averaged for the circuit (the analog step is far longer than its period). */
+  private dutySource(port: number, pin: number) {
+    return port === 1 && pin === 3 && this.ccp?.pwm === true
+  }
+  private readonly duty = new Map<number, { level: boolean; since: number; high: number }>()
+  private trackDuty(key: number, port: number, pin: number, drive: PadDrive, cycle: number) {
+    if (!this.dutySource(port, pin) || (drive !== "high" && drive !== "low")) {
+      this.duty.delete(key)
+      return
+    }
+    const t = this.cycleTime(cycle)
+    const d = this.duty.get(key)
+    const level = drive === "high"
+    if (!d) {
+      this.duty.set(key, { level, since: t, high: 0 })
+      return
+    }
+    if (d.level) d.high += t - d.since
+    d.since = t
+    d.level = level
+  }
+  dutyPads(): number[] {
+    const keys = [...this.duty.keys()]
+    if (this.clockOut({ port: 0, pin: 6 }) !== null) keys.push(6)
+    return keys
+  }
+  /** What `takeDuty` would return now, leaving the accounting as it is. */
+  peekDuty(p: PadRef, interval: number): number | null {
+    // CLKOUT is FOSC/4, high for half of each instruction cycle (Figure 14-15).
+    if (p.port === 0 && p.pin === 6 && this.clockOut(p) !== null) return 0.5
+    const d = this.duty.get(p.port * 16 + p.pin)
+    if (!d) return null
+    const high = d.level ? d.high + (this.now - d.since) : d.high
+    return interval > 0 ? Math.min(1, high / interval) : d.level ? 1 : 0
+  }
+  /** Fraction of the last `interval` a PWM-driven pad was high; null when nothing drives it that way. */
+  takeDuty(p: PadRef, interval: number): number | null {
+    if (p.port === 0 && p.pin === 6 && this.clockOut(p) !== null) return 0.5
+    const d = this.duty.get(p.port * 16 + p.pin)
+    if (!d) return null
+    const now = this.now
+    if (d.level) d.high += now - d.since
+    d.since = now
+    const v = interval > 0 ? Math.min(1, d.high / interval) : d.level ? 1 : 0
+    d.high = 0
+    return v
+  }
+
+  /**
+   * Typical supply current, A (decision D45): awake, D012A (INTOSC 4 MHz) by VDD, scaled with FOSC as
+   * CMOS switching current is; asleep, IPD (D020) plus the WDT (D021) and BOR (D022) when they run.
+   */
+  supplyCurrent(asleep: number): number {
+    const e = this.chip.electrical
+    const active = byVdd(e.iddIntosc, this.vdd) * (this.fosc / 4e6)
+    let sleeping = byVdd(e.ipd, this.vdd)
+    if (this.config & 0x04) sleeping += byVdd(e.iwdt, this.vdd)
+    if (this.config & 0x40) sleeping += e.ibor
+    if (this.inReset || !this.running) return active
+    return active * (1 - asleep) + sleeping * asleep
+  }
+
+  /** The clock for the inspector: the FOSC mode and what feeds it. */
+  clockLabel(): string {
+    const slow = !(this.pcon & 0x08)
+    switch (this.oscMode) {
+      case "INTOSC":
+        return `internal ${slow ? `${this.chip.electrical.intoscSlow / 1e3} kHz` : "4 MHz"}`
+      case "RC":
+        return this.chip.rcKind === "ER" ? (slow ? `ER, slow ${this.chip.electrical.intoscSlow / 1e3} kHz` : "ER (resistor on RA7)") : "RC (REXT/CEXT on RA7)"
+      case "EC":
+        return "external clock on RA7/CLKIN"
+      default:
+        return `${this.oscMode} ${this.clockFeed?.kind === "clock" ? "(clock into OSC1)" : "crystal"}`
+    }
+  }
+
+  /**
+   * Input thresholds of a pad, V (D030–D041, decision D44): PORTA and the PORTB alternate inputs in use
+   * are Schmitt triggers (0.2/0.8 VDD), the PORTB port inputs TTL (0.8/2.0 V at 4.5–5.5 V, else
+   * 0.15 VDD / 0.25 VDD + 0.8 V) — the guaranteed VIL max and VIH min; a level between keeps the last.
+   */
+  inputThresholds(p: PadRef, vdd: number): { high: number; low: number } {
+    const e = this.chip.electrical
+    const st = { high: e.schmittOfVdd.vih * vdd, low: e.schmittOfVdd.vil * vdd }
+    if (p.port === 0) return st
+    const schmitt =
+      (p.pin === 0 && (this.intcon & 0x10) !== 0) ||
+      ((p.pin === 1 || p.pin === 2) && this.usart.spen) ||
+      (p.pin === 3 && this.ccp.capture) ||
+      (p.pin === 6 && (this.timer1.t1con & 0x0a) === 0x02) ||
+      (p.pin === 4 && this.lvp)
+    if (schmitt) return st
+    return vdd >= 4.5 && vdd <= 5.5 ? { high: e.ttl.vih, low: e.ttl.vil } : { high: 0.25 * vdd + 0.8, low: 0.15 * vdd }
   }
 
   /** The crystal on RB7/T1OSI–RB6/T1OSO, from the circuit. */

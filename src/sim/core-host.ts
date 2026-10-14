@@ -21,6 +21,8 @@
 import { chipById, STM32F429ZI, type ChipProfile, type McuProfile, type MemoryRegion } from "@/mcu/chip"
 import { avrChipById } from "@/mcu/avr/chip"
 import { AvrCore } from "./avr-core"
+import { picChipById } from "@/mcu/pic/chip"
+import { PicCore } from "./pic-core"
 import { CpuHalt } from "@/mcu/faults"
 import type { PadDrive } from "@/mcu/periph/gpio"
 import type { ClockSource } from "@/mcu/periph/rcc"
@@ -92,6 +94,12 @@ export interface CoreHost {
    * STM32 rules for VREF+ apply. `wired`: something besides the board's own parts is on the pin.
    */
   referenceProblem?(volts: number, wiring: { grounded: boolean; wired: boolean }): string | null
+  /** The voltage on the reset pin, for a part that reads it itself (a PIC's MCLR/VPP: MCLRE, the HV detect). */
+  setResetVoltage?(volts: number): void
+  /** A pad's input switching levels at this VDD, V, when they differ by pin (a PIC's TTL and Schmitt buffers). */
+  inputThresholds?(pad: PadRef, vdd: number): { high: number; low: number }
+  /** The RC network on the oscillator pin (Hz from REXT/CEXT), or an ER resistor to VSS (Ω). */
+  setRcNetwork?(hz: number | null, erOhms: number | null): void
   /** Settings the part keeps outside its program (an AVR's fuses), from the object's props. */
   configure?(props: Record<string, string>): void
   /** Restart the core; `backup` keeps the RTC and backup registers (VBAT held them). */
@@ -956,6 +964,8 @@ export class RemoteCore implements CoreHost {
 export function makeCore(chipId: string | undefined, external: MemoryRegion[] | undefined, spawn: (() => CoreTransport) | null): CoreHost {
   const avr = chipId ? avrChipById(chipId) : undefined
   if (avr) return new AvrCore(avr)
+  const pic = chipId ? picChipById(chipId) : undefined
+  if (pic) return new PicCore(pic)
   const chip = (chipId && chipById(chipId)) || STM32F429ZI
   if (spawn) {
     try {

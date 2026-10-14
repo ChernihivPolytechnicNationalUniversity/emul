@@ -12,6 +12,10 @@
 export type Spec = { min?: number; typ: number; max?: number }
 
 export type PicElectrical = {
+  /** Nominal supply the circuit's load model starts from, V. */
+  vdd: number
+  /** Fallback input thresholds as fractions of VDD (Schmitt, D031/D041); per-pad ones come from `PicMcu.inputThresholds`. */
+  inputThresholdsOfVdd: { rising: number; falling: number }
   /** Operating VDD range of the F part (the LF part goes down to `vddMinLf`), V (D001). */
   vddMin: number
   vddMinLf: number
@@ -143,6 +147,36 @@ export function erFrequency(ohms: number): number | null {
   return f < ER_MIN_HZ ? null : f
 }
 
+/**
+ * RC oscillator frequency of the A parts from REXT (to VDD) and CEXT (to VSS) on RA7/OSC1. DS40044G
+ * gives no figures (§14.2.6: VDD, R, C, temperature, process); DS33023A Table 31-1 gives the family's
+ * typical values at 5 V, 25 °C. Inside its grid (3.3–100 kΩ, 22–300 pF) log f is interpolated
+ * bilinearly on log R and log C; outside, the fit period = 1.246·R·(C + 6.3 pF) + 79 ns of the same
+ * table (within 8 % of every point) carries on (decision D46).
+ */
+const RC_R = [3.3e3, 5e3, 10e3, 100e3]
+const RC_C = [22e-12, 100e-12, 300e-12]
+const rcModel = (r: number, c: number) => 1 / (1.2458 * r * (c + 6.33e-12) + 79.2e-9)
+const RC_F: number[][] = [
+  // 22 pF (3.3 kΩ not in the table: the fit), 100 pF, 300 pF; columns follow RC_R.
+  [rcModel(3.3e3, 22e-12), 4.12e6, 2.35e6, 268e3],
+  [1.8e6, 1.27e6, 688e3, 77.2e3],
+  [707e3, 501e3, 269e3, 28.3e3],
+]
+export function rcFrequency(ohms: number, farads: number): number {
+  if (ohms < RC_R[0] || ohms > RC_R[3] || farads < RC_C[0] || farads > RC_C[2]) return rcModel(ohms, farads)
+  const seg = (xs: number[], x: number) => {
+    let i = 0
+    while (i < xs.length - 2 && x > xs[i + 1]) i++
+    return { i, k: Math.log(x / xs[i]) / Math.log(xs[i + 1] / xs[i]) }
+  }
+  const r = seg(RC_R, ohms)
+  const c = seg(RC_C, farads)
+  const lf = (ci: number, ri: number) => Math.log(RC_F[ci][ri])
+  const row = (ci: number) => lf(ci, r.i) + (lf(ci, r.i + 1) - lf(ci, r.i)) * r.k
+  return Math.exp(row(c.i) + (row(c.i + 1) - row(c.i)) * c.k)
+}
+
 /** Lowest VDD the part is specified for, V (D001: F 3.0 V, LF 2.0 V). */
 export function vddMin(p: PicProfile): number {
   return p.lowVoltage ? p.electrical.vddMinLf : p.electrical.vddMin
@@ -201,6 +235,8 @@ export function byVdd(table: [number, number][], vdd: number): number {
 
 /** DS40044G §17 (P5 rows). */
 const ELECTRICAL_A: PicElectrical = {
+  vdd: 5,
+  inputThresholdsOfVdd: { rising: 0.8, falling: 0.2 },
   vddMin: 3.0,
   vddMinLf: 2.0,
   vddMax: 5.5,

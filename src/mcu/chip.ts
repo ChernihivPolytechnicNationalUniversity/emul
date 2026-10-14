@@ -360,4 +360,4 @@ export function internalChannelVolts(chip: ChipProfile, celsius: number): { vref
 }
 
 /** Any emulated MCU's profile: an STM32 one here, or an AVR one (`src/mcu/avr/chip.ts`). */
-export type McuProfile = ChipProfile | import("./avr/chip").AvrProfile
+export type McuProfile = ChipProfile | import("./avr/chip").AvrProfile | import("./pic/chip").PicProfile

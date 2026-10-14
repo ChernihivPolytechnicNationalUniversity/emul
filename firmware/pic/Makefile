@@ -11,7 +11,13 @@ HEXES := $(foreach t,$(TESTS),build/$(t).hex)
 
 $(shell mkdir -p build)
 
-all: $(HEXES) $(TESTS:%=build/%.expect) $(TESTS:%=build/%.gpsim)
+# Example programs for the schematic examples, built for the PIC16F628A and committed as firmware/examples/pic-*.hex.
+EXAMPLES := $(foreach e,$(basename $(notdir $(wildcard examples/*.c))),../examples/pic-$(e).hex)
+
+all: $(HEXES) $(TESTS:%=build/%.expect) $(TESTS:%=build/%.gpsim) $(EXAMPLES)
+
+../examples/pic-%.hex: examples/%.c
+	mkdir -p build/ex-$* && cd build/ex-$* && $(CC) -mpic14 -p16f628a --use-non-free ../../$< && cp $*.hex ../../$@
 
 build/%.hex: tests/%.c common/test.h
 	cd build && $(CC) $(CFLAGS) -I../common ../$<

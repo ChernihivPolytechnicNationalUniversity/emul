@@ -28,6 +28,7 @@ panel says which blocks the program touched that are missing**, so it is never a
 | STM32F429ZIT6 (Cortex-M4F, 2 MB / 256 KB) | `STM32F429ZI` LQFP144 | Nucleo-144 (NUCLEO-F429ZI) |
 | STM32F746IGT6 (Cortex-M7, 1 MB / 320 KB) | `STM32F746IG` LQFP176 | Open746I-C (Waveshare, with the Core746I module) |
 | ATmega328P (AVRe+, 32 KB / 2 KB / 1 KB EEPROM) | `ATmega328P` PDIP-28, `ATmega328P TQFP-32` with the analog-only ADC6/ADC7 (`src/mcu/avr/chip.ts`) | Arduino Nano 3.x (A000005) |
+| PIC16F627A/628A/648A, PIC16LF627A/628A/648A; the original PIC16F627/628 (-20 and -04 grades) and PIC16LF627/628 (mid-range PIC14, 1–4K words / 224–256 B / 128–256 B EEPROM) | PDIP-18 for each (`src/mcu/pic/chip.ts`, `src/schematic/components/pic-chip.ts`) | — |
 
 ## AVR (ATmega328P)
 
@@ -51,6 +52,27 @@ references DS40002061B (data sheet), DS40002198C (instruction set), DS80000855C 
 | AVR builds in the code editor: the board's chip is the target (`atmega328p`), the build service compiles with avr-gcc 5.4 and avr-libc (Debian's, as `firmware/avr`), F_CPU from the board (the Nano's 16 MHz resonator; a bare chip's fuses: the internal RC, CKDIV8), `-Os` unless the board says otherwise (avr-libc's delays are wrong at `-O0`, and it says so). A project with an `.ino` is an Arduino sketch built as the Arduino IDE builds it (`backend/worker/src/arduino.ts`): ArduinoCore-avr 1.8.6 with the Nano's `eightanaloginputs` variant and boards.txt's defines, the tabs joined with the one holding `setup()` first, prototypes for its functions, `#line` marks so errors point into the `.ino`, the libraries found by the headers it includes (and theirs): the core's Wire, SPI, EEPROM, SoftwareSerial, and Servo 1.2.2, LiquidCrystal 1.0.7, Adafruit NeoPixel 1.15.5, Adafruit SSD1306 2.5.17 with GFX 1.12.6 and BusIO 1.17.4, Keypad 3.1.1 (`backend/worker/toolchain/stage-arduino.sh`); the core and the libraries at -Os with warnings off, the sketch with -Wall. A new Nano starts from a sketch (L blinks, serial ticks and echo); `.c` files with no `.ino` build on avr-libc alone | done (`tests/firmware/arduino-sketch.test.ts`; sixteen published sketches built through it, `tests/sim/nano-popular.test.ts`). **Not there yet:** LiquidCrystal_I2C in the image (it carries no licence: the tests fetch it for themselves); no LTO (gcc 5.4), so code is ~15 % larger than the IDE's; completion and hover for the core and avr-libc (no symbol index for `atmega328p`); STM32 import and export are hidden for an AVR |
 | Popular Nano circuits, wired as published and running the published sketches unmodified (`tests/sim/nano-popular.test.ts`, sketches fetched and built by `pnpm firmware-arduino` at pinned commits and tags): Blink, AnalogReadSerial, Fade, Button, Debounce (with a bouncing contact), StateChangeDetection, toneMelody on a piezo, Servo Sweep and Knob on an SG90, LiquidCrystal HelloWorld on a parallel 1602, LiquidCrystal_I2C HelloWorld on a PCF8574 1602 at 0x27, NeoPixel simple on a 16-LED ring, SSD1306 128×64 at 0x3D (and silent at 0x3C: the library never checks the ACK), Keypad HelloKeypad, the 74HC595 counter of the shiftOut guide, the KY-040 sketch of lastminuteengineers.com | done; found and fixed on the way: an AVR timer interrupt that only its flag kept armed fired once (Arduino's `millis()` stopped), a timer left counting down in CTC after phase correct PWM (`tone()` after `noTone()` was silent), an AVR core restarted with its image's fuses when two of its own pins shared a net (a button to the board's 5 V), the SSD1306's inputs burnt by a 5 V Arduino's pull-ups. The KY-040 sketch counts a clockwise turn as CCW, as it does on the real module (it reads CLK's rising edge, where DT lags; its own text says the opposite). **Not modelled:** a press shorter than 50 ms cannot be made on the field (MIN_PRESS) |
 | Example "Arduino Nano dimmer" (`src/schematic/examples/nano-dimmer.ts`, sketch `firmware/arduino/examples/dimmer`): pot on A0, analogWrite on D9 into an LED, readings on the USB serial | done (`tests/sim/nano-dimmer.test.ts`, the palette's own layout and sketch) |
+
+## PIC16 (PIC16F62x)
+
+`src/mcu/pic`: the core, the two ports and one class per block, assembled from the chip profile;
+references DS40044G (A parts), DS40300C (PIC16F627/628), DS41196G (programming), DS80151B (errata),
+DS33023A (mid-range reference manual). Every documented fact is a row of
+[`docs/pic16-checklist.md`](pic16-checklist.md), with its status; where the documents are silent or
+contradict each other the row points to a decision (D1–D47) taken as real silicon most plausibly behaves.
+
+| | Status |
+|---|---|
+| PIC14 core: 35 instructions with their cycles and flags, PCLATH paging, the 8-level circular stack, banked and indirect data memory, Q-cycle read/write timing, interrupt latency, SLEEP | done (`tests/firmware/pic-core.test.ts`, `pic-flags.test.ts`; SDCC-built C in `firmware/pic/tests` against gpsim and host builds, `pic-firmware.test.ts`) |
+| Configuration word, oscillator modes (LP/XT/HS/EC, INTOSC 4 MHz / 48 kHz with OSCF, RC from REXT/CEXT, the original's ER from its resistor and 37 kHz), resets (POR, BOR, MCLR, WDT) with PWRT/OST, PCON, power-up values left random as on silicon | done (`pic-soc.test.ts`, `pic-clock.test.ts`). RC frequencies come from DS33023A Table 31-1 (the A sheet gives none; D46). Clocks outside the voltage–frequency region, the mode's range or the part's grade run and are reported (D38) |
+| Ports with every alternate function's override, interrupt-on-change, INT, weak pull-ups; TTL and Schmitt input levels by pin and function (D44) | done (`pic-soc.test.ts`) |
+| Timer0, watchdog, Timer1 (crystal on T1OSI/T1OSO, asynchronous counting in Sleep), Timer2, CCP1 capture/compare/PWM | done (`pic-timers.test.ts`) |
+| Comparators in all eight modes, the voltage reference | done (`pic-analog.test.ts`). **Not modelled:** VREF on RA2 is driven through the engine's fixed 100 Ω instead of the ladder's resistance (D23); comparator response time |
+| USART: asynchronous with the three-sample vote, 9-bit and address detection, the two-word FIFO and its errors; synchronous master and slave (slave in Sleep) | done (`pic-usart.test.ts`, `tests/sim/pic-bench.test.ts`) |
+| Data EEPROM: the counted 55h/AAh unlock, 4 ms writes on their own timer, WRERR, writes cut by resets or low VDD, per-byte wear reported | done (`pic-eeprom.test.ts`, `firmware/pic/tests/t_eeprom.c`) |
+| High-voltage (VPP 10–13.5 V with RB6/RB7 low) and low-voltage (LVP, RB4/PGM) entry into Program/Verify | done: the part stops and waits for a reset (`pic-soc.test.ts`, `pic-bench.test.ts`). **Not modelled:** the ICSP protocol itself (DS41196G commands, programming the flash through the pins), reported when the mode is entered |
+| Supply current: D012A scaled with FOSC awake, IPD + WDT + BOR asleep (D45) | done, typical figures only; comparator/VREF currents not added |
+| Debugger (breakpoints, stepping) for PIC; PIC builds in the code editor (SDCC) | **not modelled** — drop a `.hex` on the chip; the debugger speaks ARM only |
 
 ## Peripherals
 
