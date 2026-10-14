@@ -7,13 +7,12 @@ a firmware or circuit test, and its row in `docs/coverage.md` flipped; then it l
 - [ ] **Logic ICs** — 74HC00/04/08/32/86 gates, 74HC74 flip-flop, 74HC138 decoder, 4017 counter, with input
   thresholds and output drivers on the 74HC595's pattern (`src/sim/hc595.ts`: a digital part with VCC-referenced
   thresholds, timing checks and the pins as GPIO elements with a scaled CMOS drive).
-- [ ] **7-segment indicators** — single digit and 4-digit multiplexed, common anode/cathode.
-- [ ] **HD44780 character LCD** — 16×2 / 20×4 in 4- and 8-bit mode, drawn on the field. Parallel bus only.
-- [ ] **SSD1306 OLED** — I²C and SPI variants, 128×64 framebuffer drawn on the field.
-- [ ] **Keypad / button matrix** — 4×4 matrix.
 - [ ] **Op-amp, comparator** — ideal op-amp with rails, LM393-style comparator; a CMOS 555 (TLC555) beside the NE555.
-- [ ] **Relay, DC motor, servo** — relay coil + contacts, motor as R+L+back-EMF with an RPM readout, servo
-  decoding 50 Hz PWM to an angle.
+- [ ] **Relay, DC motor** — relay coil + contacts, motor as R+L+back-EMF with an RPM readout.
+- [ ] **Character LCD, the rest** — a 20×4 module (needs its own module sheet for the glass), the A00 font's
+  5×10 descenders (E0–FF), the HD44780's bias divider loading V0.
+- [ ] **OLED SH1106** — the 1.3" 128 × 64 board sold beside the SSD1306 ones: a 132-column RAM shown from
+  column 2, page addressing only, its own command set (Sino Wealth SH1106 sheet).
 - [ ] **Sensors** — potentiometer exists; add LDR/thermistor (parameter-driven resistors), DHT11/22 (one-wire
   protocol), HC-SR04 (trigger/echo timing), DS18B20 (1-Wire).
 - [ ] **SPI flash** — 25Qxx.

@@ -1,0 +1,14 @@
+{"file": "SA56-11CGKWA.json", "junctionVoltsAt10mA": 1.9488, "emission": 1.991, "seriesOhms": 4.935, "worstMissV": 0.0043, "points": 12}
+{"file": "SA56-11EWA.json", "junctionVoltsAt10mA": 1.8197, "emission": 3.04, "seriesOhms": 7.085, "worstMissV": 0.0143, "points": 18}
+{"file": "SA56-11GWA.json", "junctionVoltsAt10mA": 1.8739, "emission": 0.601, "seriesOhms": 15.767, "worstMissV": 0.0041, "points": 26}
+{"file": "SA56-11SRWA.json", "junctionVoltsAt10mA": 1.7887, "emission": 2.212, "seriesOhms": 1.15, "worstMissV": 0.0072, "points": 25}
+{"file": "SA56-11SYKWA.json", "junctionVoltsAt10mA": 1.9084, "emission": 1.101, "seriesOhms": 4.103, "worstMissV": 0.0023, "points": 15}
+{"file": "SC56-11CGKWA.json", "junctionVoltsAt10mA": 1.9488, "emission": 1.991, "seriesOhms": 4.934, "worstMissV": 0.0043, "points": 12}
+{"file": "SC56-11EWA.json", "junctionVoltsAt10mA": 1.8253, "emission": 3.102, "seriesOhms": 6.647, "worstMissV": 0.0157, "points": 16}
+{"file": "SC56-11GWA.json", "junctionVoltsAt10mA": 1.8734, "emission": 0.59, "seriesOhms": 15.82, "worstMissV": 0.0041, "points": 22}
+{"file": "SC56-11SRWA.json", "junctionVoltsAt10mA": 1.7854, "emission": 2.127, "seriesOhms": 1.44, "worstMissV": 0.0073, "points": 22}
+{"file": "SC56-11SYKWA.json", "junctionVoltsAt10mA": 1.9082, "emission": 1.107, "seriesOhms": 4.099, "worstMissV": 0.0021, "points": 15}
+{"file": "CA56-12EWA.json", "junctionVoltsAt10mA": 1.8197, "emission": 3.04, "seriesOhms": 7.085, "worstMissV": 0.0143, "points": 18}
+{"file": "CA56-12SRWA.json", "junctionVoltsAt10mA": 1.7887, "emission": 2.212, "seriesOhms": 1.148, "worstMissV": 0.0072, "points": 25}
+{"file": "CC56-12EWA.json", "junctionVoltsAt10mA": 1.8197, "emission": 3.04, "seriesOhms": 7.085, "worstMissV": 0.0143, "points": 18}
+{"file": "CC56-12SRWA.json", "junctionVoltsAt10mA": 1.7887, "emission": 2.212, "seriesOhms": 1.148, "worstMissV": 0.0072, "points": 25}

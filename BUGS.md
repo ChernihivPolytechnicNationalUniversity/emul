@@ -79,3 +79,77 @@ The clamp left two stalls (review, 2026-10-13): a wire-flow frame stamped before
 loop with the dash where it was, and a zoom stood still for as long as the stamps lagged. Both now
 time from the first frame's own stamp (`frameClock`), the flow's slide starts on the first frame
 after a push, and the loop runs until slide and width arrive.
+
+## A diode with a high forward voltage never conducts
+
+Found 2026-10-14 while bringing up the LCD 1602's backlight (Vishay: 4.2 V at 20 mA) in the
+"Nucleo I²C LCD 1602" example, in Chrome and in `pnpm vitest`.
+
+**What happens**
+
+The backlight LED, 5 V through 100 Ω, carried 0.7 µA with 4.99 V across it. The same happened
+to a GaP green seven-segment die (SA56-11GWA, fitted emission 0.6).
+
+**Cause**
+
+`engine.ts` evaluated a diode's current at `exp(min(v / nVt, 80))`. A junction whose saturation
+current is tiny — a high VF at a modest emission coefficient, or a very steep curve — only
+starts to conduct past e^80: 4.17 V / (1.8 × 25.85 mV) is 89.6. The cap held its current at
+Is·e^80, a fraction of a microamp, at any voltage.
+
+**Fixed** (2026-10-14): the cap is `max(80, vcrit / nVt + 10)` (`diodeExpCap`), so it moves only
+for junctions whose critical voltage lies past e^80 and every existing part keeps its 80.
+`tests/sim/seven-segment.test.ts` now drives a segment of every colour on the bench, and
+`tests/sim/nucleo-lcd-i2c.test.ts` checks the backlight's current, not just that it is above zero.
+
+## The first key press on a keypad prints a whole column
+
+Found 2026-10-14 in Chrome on the "Nucleo 4×4 keypad" example: the first press of `1` printed
+`147*`; later presses were right.
+
+**Cause**
+
+A pressed key joins a row pad and a column pad of one core into one net, which makes the core
+`coupled` and `mapInputs` moves it from its worker into the loop's thread (`relocate`). The move
+makes a fresh core and loads the image again, mid-press: the scan restarts against drivers
+left on the nets by the old core, and column 1 reads low for every row.
+
+**Fixed** (2026-10-14): a core that a switch could couple — a key, a button or a jumper between
+two of its pads — is moved when the document is mapped, before it runs, so a press never moves
+it. `tests/sim/nucleo-keypad.test.ts` presses `1` with the core in a worker thread.
+
+## A pulse source slows the whole bench to a crawl
+
+Found 2026-10-14: the tier-0 parts on one bench with a pulse source on the servo ran at 0.16×
+in Chrome, 0.26× in `vitest` (3.9 s for 1 s simulated), against 1.6× without it.
+
+**Cause**
+
+The engine treated any source with an AC component as a sine: no remembered operating points
+and no settled steps, so every 20 µs step took a full Newton solve, even across the 20 ms
+between a 50 Hz pulse's edges where the source is DC.
+
+**Fixed** (2026-10-14): only a sine keeps the solver from those paths. A pulse source's level is
+part of the switch mask (an edge ends a settled run as a switch does), its voltage is matched
+as a live value against a remembered point, the RMS averages move on through the settled steps,
+and a lone core runs ahead no further than the next edge. The bench takes 0.87 s for 1 s.
+`tests/sim/led-eye.test.ts` checks the LED's eye level, current and RMS readings against full
+solves.
+
+## Widely used I²C LCD code prints garbage
+
+Found 2026-10-14 running ControllersTech's i2c-lcd (the LCD1602 I²C tutorial code) unmodified
+on the backpack: both lines filled with stray characters. The same code works on real modules.
+
+**Cause**
+
+Two things. The PCF8574 comes up with every port high, E included, but the module's bus started
+with E low, so the first write's falling E latched nothing. And in 4-bit mode a nibble sent while
+the controller was busy still counted as a half. That code sends 20h as a whole byte: its low 0
+becomes the first half of the next instruction, 28h's 2 completes 02h (return home), and 28h's 8
+lands while that runs. On a module the 8 is lost and the pairing comes back; here it was kept as
+a half, and every instruction and character after it was split across two.
+
+**Fixed** (2026-10-14): the backpack primes the module's lines high at power-on (the first
+write's timing is not reported, no program set it up), and a nibble sent while busy is dropped
+without counting as a half. `tests/sim/lcd1602.test.ts` replays both on the backpack.

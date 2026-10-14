@@ -589,7 +589,7 @@ const pulseDuty = (p: Record<string, string>) => {
 export const pulseSource: ComponentDef = {
   id: "pulse-source",
   name: "Pulse source",
-  description: "Square wave between two levels at a set frequency and duty cycle, or pulse width, from an optional delay: a clock, a PWM output, a logic signal. Into an MCU input at logic levels its edges arrive at their exact times, while nothing on the net loads or slows it.",
+  description: "Square wave between two levels at a set frequency and duty cycle, or pulse width, from an optional delay: a clock, a PWM output, a logic signal. Into an MCU input or a digital part (a servo, a display) at logic levels its edges arrive at their exact times, while nothing on the net loads or slows it.",
   category: "Power",
   icon: PulseSourceIcon,
   prefix: "G",

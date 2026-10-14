@@ -1,0 +1,389 @@
+{
+ "SA56-11CGKWA": {
+  "spec": "DSAM8559",
+  "rev": "V.3A",
+  "date": "03/09/2020",
+  "pages": 4,
+  "PD_mW": 75.0,
+  "VR_V": 5.0,
+  "IF_mA": 30.0,
+  "IFM_mA": 150.0,
+  "Tj_C": 115.0,
+  "VF_V": [
+   2.0,
+   2.45
+  ],
+  "C_pF": null,
+  "domNm": null,
+  "peakNm": null,
+  "selection": "not parsed",
+  "ivAxis": [
+   1.7,
+   1.8,
+   1.9,
+   2.0,
+   2.1,
+   2.2
+  ]
+ },
+ "SA56-11EWA": {
+  "spec": "DSAP8372",
+  "rev": "V.1A",
+  "date": "03/09/2020",
+  "pages": 4,
+  "PD_mW": 75.0,
+  "VR_V": 5.0,
+  "IF_mA": 30.0,
+  "IFM_mA": 160.0,
+  "Tj_C": 125.0,
+  "VF_V": [
+   1.9,
+   2.3
+  ],
+  "C_pF": null,
+  "domNm": null,
+  "peakNm": null,
+  "selection": "not parsed",
+  "ivAxis": [
+   1.3,
+   1.5,
+   1.7,
+   1.9,
+   2.1,
+   2.3
+  ]
+ },
+ "SA56-11GWA": {
+  "spec": "DSAP8374",
+  "rev": "V.1A",
+  "date": "03/10/2020",
+  "pages": 4,
+  "PD_mW": 62.5,
+  "VR_V": 5.0,
+  "IF_mA": 25.0,
+  "IFM_mA": 140.0,
+  "Tj_C": 110.0,
+  "VF_V": [
+   2.0,
+   2.4
+  ],
+  "C_pF": 6.0,
+  "domNm": null,
+  "peakNm": null,
+  "selection": "not parsed",
+  "ivAxis": [
+   1.5,
+   1.7,
+   1.9,
+   2.1,
+   2.3,
+   2.5
+  ]
+ },
+ "SA56-11SRWA": {
+  "spec": "DSAP8375",
+  "rev": "V.1A",
+  "date": "03/10/2020",
+  "pages": 4,
+  "PD_mW": 75.0,
+  "VR_V": 5.0,
+  "IF_mA": 30.0,
+  "IFM_mA": 155.0,
+  "Tj_C": 115.0,
+  "VF_V": [
+   1.8,
+   2.3
+  ],
+  "C_pF": null,
+  "domNm": null,
+  "peakNm": null,
+  "selection": "not parsed",
+  "ivAxis": [
+   1.3,
+   1.5,
+   1.7,
+   1.9,
+   2.1,
+   2.3
+  ]
+ },
+ "SA56-11SYKWA": {
+  "spec": "DSAM8434",
+  "rev": "V.3A",
+  "date": "03/10/2020",
+  "pages": 4,
+  "PD_mW": 75.0,
+  "VR_V": 5.0,
+  "IF_mA": 30.0,
+  "IFM_mA": 175.0,
+  "Tj_C": 115.0,
+  "VF_V": [
+   1.95,
+   2.35
+  ],
+  "C_pF": null,
+  "domNm": null,
+  "peakNm": null,
+  "selection": "not parsed",
+  "ivAxis": [
+   1.7,
+   1.8,
+   1.9,
+   2.0,
+   2.1,
+   2.2
+  ]
+ },
+ "SC56-11CGKWA": {
+  "spec": "DSAM8448",
+  "rev": "V.3A",
+  "date": "03/12/2020",
+  "pages": 4,
+  "PD_mW": 75.0,
+  "VR_V": 5.0,
+  "IF_mA": 30.0,
+  "IFM_mA": 150.0,
+  "Tj_C": 115.0,
+  "VF_V": [
+   2.0,
+   2.45
+  ],
+  "C_pF": null,
+  "domNm": null,
+  "peakNm": null,
+  "selection": "not parsed",
+  "ivAxis": [
+   1.7,
+   1.8,
+   1.9,
+   2.0,
+   2.1,
+   2.2
+  ]
+ },
+ "SC56-11EWA": {
+  "spec": "DSAP6671",
+  "rev": "V.1A",
+  "date": "03/04/2019",
+  "pages": 4,
+  "PD_mW": 75.0,
+  "VR_V": 5.0,
+  "IF_mA": 30.0,
+  "IFM_mA": 160.0,
+  "Tj_C": 125.0,
+  "VF_V": [
+   1.9,
+   2.3
+  ],
+  "C_pF": 15.0,
+  "domNm": 617.0,
+  "peakNm": 627.0,
+  "material": "GaAsP/GaP",
+  "IvMin_ucd": 3600,
+  "IvTyp_ucd": 8000,
+  "common": "cathode",
+  "ivAxis": [
+   1.3,
+   1.5,
+   1.7,
+   1.9,
+   2.1,
+   2.3
+  ]
+ },
+ "SC56-11GWA": {
+  "spec": "DSAP6672",
+  "rev": "V.1A",
+  "date": "03/04/2019",
+  "pages": 4,
+  "PD_mW": 62.5,
+  "VR_V": 5.0,
+  "IF_mA": 25.0,
+  "IFM_mA": 140.0,
+  "Tj_C": 110.0,
+  "VF_V": [
+   2.0,
+   2.4
+  ],
+  "C_pF": 15.0,
+  "domNm": 568.0,
+  "peakNm": 565.0,
+  "material": "GaP",
+  "IvMin_ucd": 3600,
+  "IvTyp_ucd": 11000,
+  "common": "cathode",
+  "ivAxis": [
+   1.5,
+   1.7,
+   1.9,
+   2.1,
+   2.3,
+   2.5
+  ]
+ },
+ "SC56-11SRWA": {
+  "spec": "DSAP4629",
+  "rev": "V.1A",
+  "date": "04/23/2018",
+  "pages": 4,
+  "PD_mW": 75.0,
+  "VR_V": 5.0,
+  "IF_mA": 30.0,
+  "IFM_mA": 155.0,
+  "Tj_C": 115.0,
+  "VF_V": [
+   1.8,
+   2.3
+  ],
+  "C_pF": 45.0,
+  "domNm": 640.0,
+  "peakNm": 655.0,
+  "material": "GaAlAs",
+  "IvMin_ucd": 14000,
+  "IvTyp_ucd": 34000,
+  "common": "cathode",
+  "ivAxis": [
+   1.3,
+   1.5,
+   1.7,
+   1.9,
+   2.1,
+   2.3
+  ]
+ },
+ "SC56-11SYKWA": {
+  "spec": "DSAM8450",
+  "rev": "V.3A",
+  "date": "03/12/2020",
+  "pages": 4,
+  "PD_mW": 75.0,
+  "VR_V": 5.0,
+  "IF_mA": 30.0,
+  "IFM_mA": 175.0,
+  "Tj_C": 115.0,
+  "VF_V": [
+   1.95,
+   2.35
+  ],
+  "C_pF": null,
+  "domNm": null,
+  "peakNm": null,
+  "selection": "not parsed",
+  "ivAxis": [
+   1.7,
+   1.8,
+   1.9,
+   2.0,
+   2.1,
+   2.2
+  ]
+ },
+ "CA56-12EWA": {
+  "spec": "DSAP8253",
+  "rev": "V.1A",
+  "date": "02/26/2020",
+  "pages": 4,
+  "PD_mW": 75.0,
+  "VR_V": 5.0,
+  "IF_mA": 30.0,
+  "IFM_mA": 160.0,
+  "Tj_C": 125.0,
+  "VF_V": [
+   1.9,
+   2.3
+  ],
+  "C_pF": null,
+  "domNm": null,
+  "peakNm": null,
+  "selection": "not parsed",
+  "ivAxis": [
+   1.3,
+   1.5,
+   1.7,
+   1.9,
+   2.1,
+   2.3
+  ]
+ },
+ "CA56-12SRWA": {
+  "spec": "DSAP8254",
+  "rev": "V.1A",
+  "date": "02/26/2020",
+  "pages": 4,
+  "PD_mW": 75.0,
+  "VR_V": 5.0,
+  "IF_mA": 30.0,
+  "IFM_mA": 155.0,
+  "Tj_C": 115.0,
+  "VF_V": [
+   1.8,
+   2.3
+  ],
+  "C_pF": null,
+  "domNm": null,
+  "peakNm": null,
+  "selection": "not parsed",
+  "ivAxis": [
+   1.3,
+   1.5,
+   1.7,
+   1.9,
+   2.1,
+   2.3
+  ]
+ },
+ "CC56-12EWA": {
+  "spec": "DSAP8261",
+  "rev": "V.1A",
+  "date": "02/26/2020",
+  "pages": 4,
+  "PD_mW": 75.0,
+  "VR_V": 5.0,
+  "IF_mA": 30.0,
+  "IFM_mA": 160.0,
+  "Tj_C": 125.0,
+  "VF_V": [
+   1.9,
+   2.3
+  ],
+  "C_pF": null,
+  "domNm": null,
+  "peakNm": null,
+  "selection": "not parsed",
+  "ivAxis": [
+   1.3,
+   1.5,
+   1.7,
+   1.9,
+   2.1,
+   2.3
+  ]
+ },
+ "CC56-12SRWA": {
+  "spec": "DSAP4626",
+  "rev": "V.2A",
+  "date": "02/26/2020",
+  "pages": 4,
+  "PD_mW": 75.0,
+  "VR_V": 5.0,
+  "IF_mA": 30.0,
+  "IFM_mA": 155.0,
+  "Tj_C": 115.0,
+  "VF_V": [
+   1.8,
+   2.3
+  ],
+  "C_pF": null,
+  "domNm": null,
+  "peakNm": null,
+  "selection": "not parsed",
+  "ivAxis": [
+   1.3,
+   1.5,
+   1.7,
+   1.9,
+   2.1,
+   2.3
+  ]
+ }
+}

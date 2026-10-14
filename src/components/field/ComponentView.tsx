@@ -8,6 +8,7 @@ import { LED_COLORS } from "@/schematic/components/basic"
 import { grownAt, isPrintedName, printedGrowth } from "@/schematic/printed-text"
 import { ambientOf, rgbLedGlow } from "@/schematic/components/rgb-led"
 import type { DisplayFrame } from "@/sim/use-simulation"
+import { screenCanvas, type Screen } from "@/sim/screen"
 import { useObjectReadings, useObjectSim, type SimStore } from "@/sim/sim-store"
 import type { FieldDetail } from "./detail"
 import { formatSI } from "@/sim/units"
@@ -137,8 +138,18 @@ export const ComponentView = React.memo(function ComponentView({
               part={p.type === "led" ? { ...p, color: mixed?.color ?? resolveColor(template(p.color, props)) } : p}
               g={g}
               state={simulated ?? parts[key] ?? partInitial(def, p.id)}
-              level={p.type === "display" ? (live.live ? (p.backlight ? (live.parts[partKey(object.id, p.backlight)]?.level ?? 0) : 1) : 0) : simulated?.level}
+              level={
+                p.type === "display" || p.type === "screen"
+                  ? live.live
+                    ? p.backlight
+                      ? (live.parts[partKey(object.id, p.backlight)]?.level ?? 0)
+                      : 1
+                    : 0
+                  : simulated?.level
+              }
               display={p.type === "display" ? live.display : undefined}
+              screen={p.type === "screen" ? live.screen : undefined}
+              angle={p.type === "horn" ? live.angle : p.type === "knob" ? ((parts[key]?.turns ?? 0) * 360) / (Number(props.detents) || 20) : undefined}
               pixel={p.type === "pixel" ? (live.pixels?.[p.index] ?? (live.live ? 0 : undefined)) : undefined}
               mirror={mirror}
               textScale={detail.textScale}
@@ -449,6 +460,144 @@ function DisplayPanel({ part, g, level, display, mirror, onChange }: { part: Ext
   )
 }
 
+/**
+ * A passive LCD or OLED: the dots its model reports, each coloured between the glass and the
+ * ink by how strongly it is driven, character cells set apart by a dot-wide gap.
+ */
+function ScreenGlass({ part, g, screen, backlight }: { part: Extract<PartDef, { type: "screen" }>; g: (v: number) => number; screen: Screen | undefined; backlight: number }) {
+  const canvas = React.useRef<HTMLCanvasElement>(null)
+  const width = screen ? screenCanvas(screen).width : 1
+  const height = screen ? screenCanvas(screen).height : 1
+  React.useEffect(() => {
+    const c = canvas.current
+    const ctx = c?.getContext("2d")
+    if (!c || !ctx) return
+    if (!screen) {
+      ctx.clearRect(0, 0, c.width, c.height)
+      return
+    }
+    const img = ctx.createImageData(width, height)
+    // The backlight's level (as the eye sees it) moves the colours from unlit to lit.
+    const k = screen.unlit ? glowOf(backlight) : 1
+    const mix = (lit: string, unlit: string | undefined) => {
+      const a = parseColor(lit)
+      if (!unlit || k >= 1) return a
+      const b = parseColor(unlit)
+      return [b[0] + (a[0] - b[0]) * k, b[1] + (a[1] - b[1]) * k, b[2] + (a[2] - b[2]) * k] as [number, number, number]
+    }
+    const glass = mix(screen.glass, screen.unlit?.glass)
+    const ink = mix(screen.ink, screen.unlit?.ink)
+    const data = img.data
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = glass[0]
+      data[i + 1] = glass[1]
+      data[i + 2] = glass[2]
+      data[i + 3] = 255
+    }
+    const rowInk = Array.from({ length: screen.height }, (_, y) => {
+      const band = screen.bands?.filter((b) => b.from <= y).at(-1)
+      return band ? parseColor(band.ink) : ink
+    })
+    const cw = screen.cell?.w ?? screen.width
+    const ch = screen.cell?.h ?? screen.height
+    for (let y = 0; y < screen.height; y++) {
+      const py = y + Math.floor(y / ch) * (screen.cell ? 1 : 0)
+      for (let x = 0; x < screen.width; x++) {
+        const v = screen.dots[y * screen.width + x] / 255
+        if (!v) continue
+        const px = x + Math.floor(x / cw) * (screen.cell ? 1 : 0)
+        const o = (py * width + px) * 4
+        const c = rowInk[y]
+        data[o] = glass[0] + (c[0] - glass[0]) * v
+        data[o + 1] = glass[1] + (c[1] - glass[1]) * v
+        data[o + 2] = glass[2] + (c[2] - glass[2]) * v
+      }
+    }
+    ctx.putImageData(img, 0, 0)
+  }, [screen, width, height, backlight])
+  return (
+    <foreignObject x={g(part.x)} y={g(part.y)} width={g(part.w)} height={g(part.h)} pointerEvents="none">
+      <div className="h-full w-full bg-neutral-900">
+        <canvas ref={canvas} width={width} height={height} className="block h-full w-full" style={{ imageRendering: "pixelated" }} />
+      </div>
+    </foreignObject>
+  )
+}
+
+const colorCache = new Map<string, [number, number, number]>()
+
+/** "#rrggbb" → its channels (the screens' colours are always given this way). */
+function parseColor(css: string): [number, number, number] {
+  const known = colorCache.get(css)
+  if (known) return known
+  const n = Number.parseInt(css.slice(1), 16)
+  const rgb: [number, number, number] = [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff]
+  colorCache.set(css, rgb)
+  return rgb
+}
+
+/** A servo horn: a two-armed arm around the output spline, turned to the model's angle. */
+function Horn({ part, g, angle }: { part: Extract<PartDef, { type: "horn" }>; g: (v: number) => number; angle: number | undefined }) {
+  const cx = g(part.x)
+  const cy = g(part.y)
+  const r = g(part.r)
+  const w = g(0.32)
+  return (
+    <g pointerEvents="none" transform={`rotate(${angle ?? 0} ${cx} ${cy})`}>
+      <title>{`${part.label}${angle === undefined ? "" : ` · ${angle.toFixed(0)}°`}`}</title>
+      <path
+        d={`M${cx - w} ${cy} L${cx - w * 0.6} ${cy - r} A${w * 0.6} ${w * 0.6} 0 0 1 ${cx + w * 0.6} ${cy - r} L${cx + w} ${cy} L${cx + w * 0.6} ${cy + r * 0.45} A${w * 0.6} ${w * 0.6} 0 0 1 ${cx - w * 0.6} ${cy + r * 0.45} Z`}
+        className="fill-neutral-100 stroke-foreground/60 dark:fill-neutral-300"
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
+      />
+      {[0.35, 0.6, 0.85].map((k) => (
+        <circle key={k} cx={cx} cy={cy - r * k} r={g(0.07)} className="fill-foreground/50 stroke-none" />
+      ))}
+      <circle cx={cx} cy={cy} r={w * 0.9} className="fill-neutral-300 stroke-foreground/60 dark:fill-neutral-500" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+    </g>
+  )
+}
+
+/** A rotary encoder's shaft: a knob with a pointer at its detent, arrows either side turn it one detent. */
+function Knob({ part, g, angle, turns, title, onChange }: { part: Extract<PartDef, { type: "knob" }>; g: (v: number) => number; angle: number; turns: number; title: string; onChange?: (patch: PartState) => void }) {
+  const cx = g(part.x)
+  const cy = g(part.y)
+  const r = g(part.r)
+  // Clicks can come faster than the document re-renders: count from the last turn asked for.
+  const asked = React.useRef(turns)
+  React.useEffect(() => {
+    asked.current = turns
+  }, [turns])
+  const arrow = (dir: -1 | 1) => {
+    const ax = cx + dir * (r + g(0.75))
+    const turn = (e: React.MouseEvent) => {
+      e.stopPropagation()
+      asked.current += dir
+      onChange?.({ turns: asked.current })
+    }
+    // A curved arrow round the knob's edge: clockwise on the right, anticlockwise on the left.
+    const a = `M${ax - dir * g(0.25)} ${cy - g(0.35)} A${g(0.45)} ${g(0.45)} 0 0 ${dir > 0 ? 1 : 0} ${ax - dir * g(0.25)} ${cy + g(0.35)}`
+    const head = `M${ax - dir * g(0.25)} ${cy + g(0.35)} l${dir * g(0.3)} ${g(0.05)} M${ax - dir * g(0.25)} ${cy + g(0.35)} l${dir * g(0.05)} ${-g(0.3)}`
+    return (
+      <g className="cursor-pointer" onPointerDown={(e) => e.stopPropagation()} onClick={turn}>
+        <title>{dir > 0 ? "Turn one detent clockwise" : "Turn one detent anticlockwise"}</title>
+        <rect x={ax - g(0.55)} y={cy - g(0.6)} width={g(1.1)} height={g(1.2)} rx={g(0.2)} className="fill-transparent stroke-none hover:fill-foreground/10" />
+        <path d={`${a} ${head}`} className="fill-none stroke-foreground" strokeWidth={SYMBOL_STROKE} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      </g>
+    )
+  }
+  return (
+    <g>
+      <title>{`${title} · ${turns} detent${Math.abs(turns) === 1 ? "" : "s"}`}</title>
+      <circle cx={cx} cy={cy} r={r} className="fill-neutral-700 stroke-foreground/60 dark:fill-neutral-400" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+      <line x1={cx} y1={cy} x2={cx} y2={cy - r * 0.85} transform={`rotate(${angle} ${cx} ${cy})`} className="stroke-white dark:stroke-neutral-900" strokeWidth={g(0.12)} strokeLinecap="round" />
+      {arrow(-1)}
+      {arrow(1)}
+    </g>
+  )
+}
+
 const CHANGEOVER_REACH_CELLS = 0.4
 
 const degreesTo = (from: { x: number; y: number }, to: { x: number; y: number }) => (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI
@@ -527,6 +676,8 @@ function Part({
   level,
   display,
   pixel,
+  screen,
+  angle,
   mirror,
   textScale,
   partText,
@@ -541,6 +692,10 @@ function Part({
   display?: DisplayFrame
   /** The colour an addressable pixel shows (0xRRGGBB, 0 dark); undefined when not simulated. */
   pixel?: number
+  /** The glass a screen part shows. */
+  screen?: Screen
+  /** A horn's or knob's angle in degrees, clockwise from straight up. */
+  angle?: number
   mirror: boolean
   textScale: number
   partText: (x: number, y: number) => string | undefined
@@ -558,6 +713,12 @@ function Part({
 
   if (part.type === "sound") return level ? <SoundArcs cx={cx} cy={cy} g={g} level={level} /> : null
 
+  if (part.type === "screen") return <ScreenGlass part={part} g={g} screen={screen} backlight={level ?? 0} />
+
+  if (part.type === "horn") return <Horn part={part} g={g} angle={angle} />
+
+  if (part.type === "knob") return <Knob part={part} g={g} angle={angle ?? 0} turns={state.turns ?? 0} title={title} onChange={onChange} />
+
   if (part.type === "link")
     return (
       <g data-link={part.id} onPointerDown={stop}>
@@ -565,6 +726,18 @@ function Part({
         <rect x={cx - g(part.w / 2)} y={cy - g(part.h / 2)} width={g(part.w)} height={g(part.h)} className="fill-transparent stroke-none" />
       </g>
     )
+
+  if (part.type === "led" && part.style === "segment") {
+    const glow = glowOf(level ?? 0)
+    return (
+      <g pointerEvents="none">
+        <title>{title}</title>
+        {/* An unlit segment is the white diffuser of the face; lit, it takes the die's colour. */}
+        <path d={part.d} transform={`scale(${g(1)})`} className="fill-neutral-100 stroke-neutral-400 dark:fill-neutral-300" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+        {visible(glow) && <path d={part.d} transform={`scale(${g(1)})`} fill={part.color} opacity={glow} stroke="none" />}
+      </g>
+    )
+  }
 
   if (part.type === "led") {
     const glow = glowOf(level ?? (state.on ? 1 : 0))
@@ -754,10 +927,15 @@ function Part({
         cx={cx}
         cy={cy}
         r={half * (state.pressed ? 0.52 : 0.62)}
-        className={cn("stroke-foreground/40", part.id === "RESET" ? "fill-neutral-800" : "fill-blue-500")}
+        className={cn("stroke-foreground/40", part.face !== undefined ? (state.pressed ? "fill-neutral-400" : "fill-neutral-200 dark:fill-neutral-700") : part.id === "RESET" ? "fill-neutral-800" : "fill-blue-500")}
         strokeWidth={1}
         vectorEffect="non-scaling-stroke"
       />
+      {part.face !== undefined && (
+        <text x={cx} y={cy + g(0.03)} fontSize={g(size * 0.42)} textAnchor="middle" dominantBaseline="middle" transform={partText(cx, cy + g(0.03))} className="pointer-events-none fill-foreground stroke-none font-sans font-semibold">
+          {part.face}
+        </text>
+      )}
       {part.label && !part.printed && (
         <text x={cx} y={cy + half + g(0.4)} fontSize={g(0.28 * textScale)} textAnchor="middle" transform={partText(cx, cy + half + g(0.4))} className="fill-muted-foreground stroke-none font-mono">
           {part.label}

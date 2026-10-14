@@ -16,9 +16,15 @@ import { hc595, hct595 } from "./components/hc595"
 import { buzzers } from "./components/buzzer"
 import { addressableComponents } from "./components/addressable"
 import { rgbLeds } from "./components/rgb-led"
+import { sevenSegmentComponents } from "./components/seven-segment"
+import { keypad4x4 } from "./components/keypad"
+import { encoderComponents } from "./components/encoder"
+import { servoSg90 } from "./components/servo"
+import { lcdModules } from "./components/lcd1602"
+import { oledModules } from "./components/oled"
 
 /** Every component the palette can place. Add a definition file and list it here. */
-export const registry: ComponentDef[] = [open746ic, nucleoF429zi, stm32f746ig, stm32f429zi, crystal, oscillator, eeprom24c, hc595, hct595, ne555, lcd7f, ...buzzers, ...addressableComponents, chargeBoostModule, ...powerIcs, ...meterComponents, ...basicComponents, ...rgbLeds].map(withPadClasses)
+export const registry: ComponentDef[] = [open746ic, nucleoF429zi, stm32f746ig, stm32f429zi, crystal, oscillator, eeprom24c, hc595, hct595, ne555, lcd7f, ...buzzers, ...addressableComponents, chargeBoostModule, ...powerIcs, ...meterComponents, ...basicComponents, ...rgbLeds, ...sevenSegmentComponents, keypad4x4, ...encoderComponents, servoSg90, ...lcdModules, ...oledModules].map(withPadClasses)
 
 const byId = new Map(registry.map((d) => [d.id, d]))
 

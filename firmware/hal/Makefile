@@ -34,6 +34,22 @@ build/blink.elf: Src/main.c $(COMMON) Src/startup_stm32f429xx.s Inc/*.h STM32F42
 build/%.elf: Src/%.c $(COMMON) Src/startup_stm32f429xx.s Inc/*.h STM32F429ZITX_FLASH.ld
 	$(CC) $(CFLAGS) Src/$*.c $(COMMON) Src/startup_stm32f429xx.s -o $@ $(LDFLAGS)
 
+# Third-party libraries run unmodified (tests/sim/third-party-libraries.test.ts), checked out
+# under ~/tools/thirdparty at these commits:
+#   git clone https://github.com/afiskon/stm32-ssd1306 && git -C stm32-ssd1306 checkout 25bd2e9
+#   git clone https://github.com/olikraus/u8g2 && git -C u8g2 checkout d6c8499
+#   git clone https://github.com/4ilo/HD44780-Stm32HAL && git -C HD44780-Stm32HAL checkout 72940b3
+TPL = $(HOME)/tools/thirdparty
+TP_BOARD = $(CC) $(CFLAGS) -ISrc/tp Src/tp/board.c $(COMMON) Src/startup_stm32f429xx.s
+TP_APPS = tp-afiskon-ssd1306 tp-u8g2-ssd1306 tp-4ilo-hd44780
+thirdparty: $(foreach a,$(TP_APPS),build/$(a).elf)
+build/tp-afiskon-ssd1306.elf: Src/tp/afiskon-ssd1306.c Src/tp/board.c Src/tp/ssd1306_conf.h
+	$(TP_BOARD) -I$(TPL)/stm32-ssd1306/ssd1306 $< $(TPL)/stm32-ssd1306/ssd1306/ssd1306.c $(TPL)/stm32-ssd1306/ssd1306/ssd1306_fonts.c -o $@ $(LDFLAGS)
+build/tp-u8g2-ssd1306.elf: Src/tp/u8g2-ssd1306.c Src/tp/board.c
+	$(TP_BOARD) -I$(TPL)/u8g2/csrc $< $(wildcard $(TPL)/u8g2/csrc/*.c) -o $@ $(LDFLAGS)
+build/tp-4ilo-hd44780.elf: Src/tp/4ilo-hd44780.c Src/tp/board.c
+	$(TP_BOARD) -I$(TPL)/HD44780-Stm32HAL/lcd_lib $< $(TPL)/HD44780-Stm32HAL/lcd_lib/lcd.c -o $@ $(LDFLAGS)
+
 build/%.hex: build/%.elf
 	$(OBJCOPY) -O ihex $< $@
 build/%.bin: build/%.elf
@@ -43,4 +59,4 @@ build/%.lst: build/%.elf
 
 clean:
 	rm -f build/*
-.PHONY: all clean
+.PHONY: all clean thirdparty
