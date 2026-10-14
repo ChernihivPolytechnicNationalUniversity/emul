@@ -500,6 +500,14 @@ function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { ob
               <dd className="text-right font-mono tabular-nums" title="System clock source; HSE/LSE come from the crystal or oscillator wired to the OSC pins (a board brings its own)">
                 {status.sysclk ? `${formatSI(status.sysclk, "Hz", 4)} · ${status.labels?.clock ?? clockLabel(status.clock)}` : "—"}
               </dd>
+              {status.labels?.fuses && (
+                <>
+                  <dt className="text-muted-foreground">Fuses</dt>
+                  <dd className="text-right font-mono tabular-nums" title="Low, high, extended fuse bytes (hex) in effect now: the .fuse section of the image, overridden by the fields below; the lock byte when any lock bit is programmed">
+                    {status.labels.fuses}
+                  </dd>
+                </>
+              )}
               <dt className="text-muted-foreground">PC</dt>
               <dd className="text-right font-mono tabular-nums">0x{status.pc.toString(16).padStart(8, "0")}</dd>
               <dt className="text-muted-foreground">Time</dt>

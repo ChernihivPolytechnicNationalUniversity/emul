@@ -59,7 +59,7 @@ export type CoreStatus = {
    */
   host: "in-process" | "worker (pipelined)" | "worker (in step)"
   /** Wording a core family needs instead of the STM32 one (the AVR's clock, sleep modes, reset causes). */
-  labels?: { clock?: string; power?: string; reset?: string; noClock?: string }
+  labels?: { clock?: string; power?: string; reset?: string; noClock?: string; fuses?: string }
 }
 
 /** An exact-time edge a core put on a pad. */

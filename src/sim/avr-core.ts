@@ -22,6 +22,7 @@ const SLEEP_LABEL: Record<SleepMode, string> = {
   standby: "Standby",
   "extended-standby": "Extended Standby",
 }
+const hex = (v: number) => v.toString(16).toUpperCase().padStart(2, "0")
 const RESET_LABEL = { "power-on": "power-on", external: "RESET pin", "brown-out": "brown-out", watchdog: "watchdog" } as const
 
 export class AvrCore implements CoreHost {
@@ -246,6 +247,7 @@ export class AvrCore implements CoreHost {
         clock: m.clockLabel(),
         power: m.sleepMode ? SLEEP_LABEL[m.sleepMode] : "active",
         reset: m.lastReset ? RESET_LABEL[m.lastReset] : undefined,
+        fuses: `L:${hex(m.fuses.low)} H:${hex(m.fuses.high)} E:${hex(m.fuses.extended)}${m.fuses.lock !== 0xff ? ` lock:${hex(m.fuses.lock)}` : ""}`,
         noClock: problem?.includes("erratum")
           ? "the errata give no work-around — program the fuses for another clock source"
           : "wire a crystal (with its two load capacitors) across XTAL1/XTAL2, drive XTAL1 from an oscillator, or program the fuses for the internal RC oscillator",
