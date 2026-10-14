@@ -3,6 +3,7 @@ import { toast } from "sonner"
 import { CpuIcon, HammerIcon, LoaderCircleIcon, TriangleAlertIcon, XIcon } from "lucide-react"
 import { OPT_LEVELS, SOURCE_LIMITS, TARGETS, type OptLevel, type SourceFile, type Stm32Target } from "emul-shared/source"
 import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { fetchArtifact, fetchText, submitBuild, waitForJob } from "@/project/api"
 import { parseDiagnostic, parseDiagnostics, type Diagnostic } from "@/project/diagnostics"
 import { createFile, mainFile, removeFile, renameFile, renameFolder, writeFile } from "@/project/files"
@@ -53,8 +54,20 @@ const EXPLORER_WIDTH = 200
 /** What a board compiles at until its project says otherwise: a Debug build, as CubeIDE starts one. */
 export const DEFAULT_BUILD_OPT: OptLevel = "-O0"
 const AVR_BUILD_OPT: OptLevel = "-Os"
-/** What each level is for, in the select's tooltip. */
-const OPT_HELP = "Optimization: -O0 is a Debug build (every line steps, every variable is visible); -Og debugs well and runs faster; -O2 is a Release build (fast, hard to follow); -O3 fastest; -Os smallest"
+/** What each level is for, beside it in the list. */
+const OPT_NOTES: Record<OptLevel, string> = {
+  "-O0": "no optimization: steps line by line, every variable visible",
+  "-Og": "debugs well, runs faster",
+  "-O1": "light optimization",
+  "-O2": "Release build: fast, hard to follow",
+  "-O3": "fastest, largest",
+  "-Os": "smallest",
+}
+/** The select's tooltip: what the field is, and for an Arduino sketch what it does not touch. */
+const optHelp = (avr: boolean, sketch: boolean) =>
+  "GCC optimization level" +
+  (sketch ? ". Applies to your sketch; the Arduino core and libraries are always built -Os" : "") +
+  (avr ? ". At -O0 avr-libc's _delay_ms/_delay_us are wrong (they need optimization)" : "")
 const DISASM = "@disasm"
 
 type CodePanelProps = Omit<React.ComponentProps<"div">, "ref"> & {
@@ -124,6 +137,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
   // An AVR builds at -Os as the Arduino IDE does: avr-libc's delays are only right when optimized.
   const opt = board?.build?.opt ?? (avr ? AVR_BUILD_OPT : DEFAULT_BUILD_OPT)
   const files = board?.project
+  const sketch = avr && !!files?.some((f) => /\.(ino|pde)$/i.test(f.path))
   const bps = React.useMemo(() => board?.debug?.breakpoints ?? [], [board?.debug?.breakpoints])
   const added = React.useMemo(() => board?.debug?.sources ?? [], [board?.debug?.sources])
   const watches = board?.debug?.watches ?? []
@@ -584,19 +598,22 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
               <div className="flex shrink-0 items-center gap-1.5 bg-sidebar pr-1 pl-2 text-xs">
                 <CpuIcon className="size-3.5 text-muted-foreground" />
                 <span className="font-medium">{boardName(board)}</span>
-                <select
-                  className="h-6 w-14 rounded-md border bg-background px-0.5 text-xs"
-                  value={opt}
-                  onChange={(e) => onBuild(id, { ...board.build, opt: e.target.value as OptLevel })}
-                  title={OPT_HELP}
-                  aria-label="Optimization level"
-                >
-                  {OPT_LEVELS.map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
+                <Select value={opt} items={OPT_LEVELS.map((o) => ({ value: o, label: o }))} onValueChange={(v) => v && onBuild(id, { ...board.build, opt: v })}>
+                  <SelectTrigger size="sm" className="h-6 gap-1 rounded-md bg-background px-1.5 font-mono text-xs" title={optHelp(avr, sketch)} aria-label="Optimization level">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="end" alignItemWithTrigger={false} className="w-auto">
+                    {OPT_LEVELS.map((o) => (
+                      <SelectItem key={o} value={o} className="text-xs">
+                        <span className="w-6 font-mono">{o}</span>
+                        <span className="text-muted-foreground">
+                          {OPT_NOTES[o]}
+                          {o === (avr ? AVR_BUILD_OPT : DEFAULT_BUILD_OPT) && (avr ? " · Arduino IDE default" : " · CubeIDE Debug default")}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Button size="xs" onClick={() => void compile()} disabled={!chip || !files || build?.phase === "running"}>
                   {build?.phase === "running" ? <LoaderCircleIcon className="animate-spin" /> : <HammerIcon />}
                   Compile
