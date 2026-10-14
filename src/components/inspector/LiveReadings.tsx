@@ -1,3 +1,4 @@
+import * as React from "react"
 import { cn } from "@/lib/utils"
 import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
@@ -40,14 +41,24 @@ const kindLabel = (def: { model?: { kind: string; live?: string; label?: string 
 /** Below this an element on a board counts as idle and is left out of the inspector. */
 const IDLE_CURRENT = 1e-6
 
+const NONE: ReadonlySet<number> = new Set()
+
 /** Live operating point of a selected component while the simulation runs. */
 export function LiveReadings({ object, sim, className, ...props }: LiveReadingsProps) {
+  // Elements that have been active since this part was selected: a blinking LED or a pin that
+  // toggles keeps its card through the off half, or the list (and the panel) jumps every edge.
+  const [active, setActive] = React.useState({ object: object.id, elements: NONE })
+  const known = active.object === object.id ? active.elements : NONE
   const def = getDef(object.def)
-  if (!def) return null
+  const all = def ? sim.readings(object.id).filter((r) => !r.hidden) : []
   // A board has dozens of internal elements; only the ones doing something are worth a card,
   // and its ground pins all read 0 V.
-  const idle = (r: Reading) => def.hideIdle && Math.abs(r.rms ? r.rms.current : r.current) < IDLE_CURRENT
-  const readings = sim.readings(object.id).filter((r) => !r.hidden && !idle(r))
+  const busy = (r: Reading) => Math.abs(r.rms ? r.rms.current : r.current) >= IDLE_CURRENT
+  const fresh = def?.hideIdle ? all.filter((r) => busy(r) && !known.has(r.element)).map((r) => r.element) : []
+  // Adjusting state while rendering, as React documents for "information from previous renders".
+  if (fresh.length) setActive({ object: object.id, elements: new Set([...known, ...fresh]) })
+  if (!def) return null
+  const readings = all.filter((r) => !def.hideIdle || known.has(r.element) || busy(r))
   const pins = def.pins
     .filter((p) => !(def.hideIdle && p.kind === "gnd"))
     .map((p) => ({ pin: orientPin(p, def, orientationOf(object)), v: sim.ac ? sim.pinVoltageRms(object.id, p.id) : sim.pinVoltage(object.id, p.id) }))

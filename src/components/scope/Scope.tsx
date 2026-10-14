@@ -758,7 +758,8 @@ export function Scope({
             >
               <span className="size-2 rounded-full" style={{ background: c.color }} />
               <span className="max-w-40 truncate font-mono text-muted-foreground">{c.label}</span>
-              {c.value !== undefined && <span>{formatSI(c.value, "V")}</span>}
+              {/* Fixed to the widest reading ("-999.99 mV"), so the chip does not jitter as the value moves. */}
+              {c.value !== undefined && <span className="w-[10ch] text-right font-mono whitespace-pre">{formatSI(c.value, "V")}</span>}
               {c.live ? (
                 <Tooltip>
                   <TooltipTrigger

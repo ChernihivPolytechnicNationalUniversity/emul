@@ -6,7 +6,7 @@ import { HC595_LINKS, isShiftRegisterDef } from "@/schematic/components/hc595"
 import { isBuzzerDef } from "@/schematic/components/buzzer"
 import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
-import { CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
+import { ChevronDownIcon, CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { chipById } from "@/mcu/chip"
 import { avrChipById } from "@/mcu/avr/chip"
@@ -14,6 +14,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
@@ -39,6 +40,7 @@ function powerLabel(p: PowerStatus): string {
   }
 }
 import { LiveReadings } from "./LiveReadings"
+import { useSectionsOpen, type SectionsOpen } from "./collapsed-sections"
 import { AddressablePanel } from "./AddressablePanel"
 import { isAddressableDef } from "@/schematic/components/addressable"
 
@@ -68,18 +70,42 @@ type InspectorProps = Omit<React.ComponentProps<typeof Card>, "onChange"> & {
   onDelete: () => void
 }
 
+/**
+ * One part of the inspector under a heading that folds it away; `open` is how it starts until
+ * someone folds it, `action` stays on the heading row, usable while the section is shut.
+ */
+function Section({ id, label, sections, open = true, action, children }: { id: string; label: string; sections: SectionsOpen; open?: boolean; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <Collapsible data-slot="inspector-section" open={sections.isOpen(id, open)} onOpenChange={(open) => sections.setOpen(id, open)} className="group/section flex flex-col gap-2">
+      <div className="flex min-h-6 items-center justify-between gap-2">
+        <CollapsibleTrigger className="-mx-1 flex items-center gap-1 rounded-sm px-1 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+          <ChevronDownIcon className="size-3.5 -rotate-90 transition-transform duration-200 ease-out group-data-open/section:rotate-0 motion-reduce:transition-none" />
+          {label}
+        </CollapsibleTrigger>
+        {action}
+      </div>
+      <CollapsibleContent className="flex flex-col gap-2">{children}</CollapsibleContent>
+    </Collapsible>
+  )
+}
+
 export function Inspector({ selected, damage, sim, onChange, onFirmware, onSerial, onCode, onHdl, onRotate, onFlip, onDelete, className, ...props }: InspectorProps) {
+  const sections = useSectionsOpen()
   if (selected.length === 0) return null
   const object = selected.length === 1 ? selected[0] : null
   const def = object && getDef(object.def)
+  const open = sections.isOpen("panel")
 
   return (
-    <Card data-slot="inspector" className={cn("max-h-[calc(100%-1.5rem)] w-72 gap-4 overflow-y-auto py-4 shadow-md", className)} {...props}>
+    <Card data-slot="inspector" className={cn("max-h-[calc(100%-1.5rem)] w-72 gap-4 overflow-y-auto py-4 shadow-md", !open && "py-3", className)} {...props}>
       <CardHeader className="px-4">
         <CardTitle className="text-sm">{def ? def.name : `${selected.length} components`}</CardTitle>
-        {def?.description && <CardDescription className="col-span-2">{def.description}</CardDescription>}
+        {open && def?.description && <CardDescription className="col-span-2">{def.description}</CardDescription>}
         <CardAction className="row-span-1">
           <ButtonGroup>
+            <Button variant="ghost" size="icon-sm" onClick={() => sections.setOpen("panel", !open)} aria-label={open ? "Collapse the inspector" : "Expand the inspector"} aria-expanded={open}>
+              <ChevronDownIcon className={cn("transition-transform duration-200 ease-out motion-reduce:transition-none", open && "rotate-180")} />
+            </Button>
             <Button variant="ghost" size="icon-sm" onClick={() => onRotate(-45)} aria-label="Rotate 45° counter-clockwise">
               <RotateCcwIcon />
             </Button>
@@ -98,7 +124,7 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
           </ButtonGroup>
         </CardAction>
       </CardHeader>
-      {object && def && (
+      {open && object && def && (
         <CardContent className="flex flex-col gap-4 px-4">
           {damage[object.id] && (
             <Alert variant="destructive">
@@ -114,35 +140,68 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
               </AlertDescription>
             </Alert>
           )}
-          {def.chip && <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? avrChipById(def.chip)?.name ?? def.chip} sim={sim} onChange={onChange} onFirmware={onFirmware} onCode={onCode} />}
-          {def.id === "serial-terminal" && <TerminalPanel object={object} sim={sim} onSend={(text) => onSerial?.(object.id, text)} />}
-          {def.id === "eeprom-24c" && <EepromPanel object={object} sim={sim} />}
-          {isShiftRegisterDef(def.id) && <ShiftRegisterPanel object={object} sim={sim} />}
-          {isBuzzerDef(def.id) && <BuzzerPanel object={object} sim={sim} />}
-          {isAddressableDef(def.id) && <AddressablePanel objectId={object.id} sim={sim} />}
-          {isHdlDef(def.id) && <HdlInfo defId={def.id} sim={sim} objectId={object.id} onHdl={onHdl} />}
-          {sim.live && !damage[object.id]?.fatal && <LiveReadings object={object} sim={sim} />}
-          <FieldGroup className="gap-4">
-            {def.prefix && (
-              <PropEditor
-                field={{ key: "ref", label: "Designator", type: "text", placeholder: `${def.prefix}1` }}
-                value={object.props?.ref ?? ""}
-                onChange={(v) => onChange(object.id, { ref: v })}
-              />
-            )}
-            {def.fields?.map((f) => (
-              <PropEditor
-                key={f.key}
-                field={f}
-                value={object.props?.[f.key] ?? def.defaults?.[f.key] ?? ""}
-                onChange={(v) => onChange(object.id, { [f.key]: v })}
-              />
-            ))}
-            <Field data-slot="orientation">
-              <FieldLabel>Orientation</FieldLabel>
-              <FieldDescription className="tabular-nums">{`Rotated ${object.rotation ?? 0}°${object.mirror ? " · mirrored" : ""}`}</FieldDescription>
-            </Field>
-          </FieldGroup>
+          {def.chip && (
+            <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? avrChipById(def.chip)?.name ?? def.chip} sim={sim} sections={sections} onChange={onChange} onFirmware={onFirmware} onCode={onCode} />
+          )}
+          {def.id === "serial-terminal" && (
+            <Section id="terminal" label="Terminal" sections={sections}>
+              <TerminalPanel object={object} sim={sim} onSend={(text) => onSerial?.(object.id, text)} />
+            </Section>
+          )}
+          {def.id === "eeprom-24c" && (
+            <Section id="memory" label="Memory" sections={sections}>
+              <EepromPanel object={object} sim={sim} />
+            </Section>
+          )}
+          {isShiftRegisterDef(def.id) && (
+            <Section id="outputs" label="Outputs" sections={sections}>
+              <ShiftRegisterPanel object={object} sim={sim} />
+            </Section>
+          )}
+          {isBuzzerDef(def.id) && (
+            <Section id="sound" label="Sound" sections={sections}>
+              <BuzzerPanel object={object} sim={sim} />
+            </Section>
+          )}
+          {isAddressableDef(def.id) && (
+            <Section id="leds" label="LEDs" sections={sections}>
+              <AddressablePanel objectId={object.id} sim={sim} />
+            </Section>
+          )}
+          {isHdlDef(def.id) && (
+            <Section id="hdl" label="HDL" sections={sections}>
+              <HdlInfo defId={def.id} sim={sim} objectId={object.id} onHdl={onHdl} />
+            </Section>
+          )}
+          <Section id="properties" label="Properties" sections={sections}>
+            <FieldGroup className="gap-4">
+              {def.prefix && (
+                <PropEditor
+                  field={{ key: "ref", label: "Designator", type: "text", placeholder: `${def.prefix}1` }}
+                  value={object.props?.ref ?? ""}
+                  onChange={(v) => onChange(object.id, { ref: v })}
+                />
+              )}
+              {def.fields?.map((f) => (
+                <PropEditor
+                  key={f.key}
+                  field={f}
+                  value={object.props?.[f.key] ?? def.defaults?.[f.key] ?? ""}
+                  onChange={(v) => onChange(object.id, { [f.key]: v })}
+                />
+              ))}
+              <Field data-slot="orientation">
+                <FieldLabel>Orientation</FieldLabel>
+                <FieldDescription className="tabular-nums">{`Rotated ${object.rotation ?? 0}°${object.mirror ? " · mirrored" : ""}`}</FieldDescription>
+              </Field>
+            </FieldGroup>
+          </Section>
+          {sim.live && !damage[object.id]?.fatal && (
+            // A board's readings are dozens of internal elements: there on request, not in the way.
+            <Section id={def.hideIdle ? "board-readings" : "readings"} label="Live readings" sections={sections} open={!def.hideIdle}>
+              <LiveReadings object={object} sim={sim} />
+            </Section>
+          )}
         </CardContent>
       )}
     </Card>
@@ -448,7 +507,7 @@ function HdlInfo({ defId, objectId, sim, onHdl }: { defId: string; objectId: str
   )
 }
 
-function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { object: PlacedObject; chip: string; sim: SimReadout; onChange: InspectorProps["onChange"]; onFirmware: InspectorProps["onFirmware"]; onCode?: (id: string) => void }) {
+function FirmwarePanel({ object, chip, sim, sections, onChange, onFirmware, onCode }: { object: PlacedObject; chip: string; sim: SimReadout; sections: SectionsOpen; onChange: InspectorProps["onChange"]; onFirmware: InspectorProps["onFirmware"]; onCode?: (id: string) => void }) {
   const input = React.useRef<HTMLInputElement>(null)
   const name = object.props?.firmware
   const data = object.props?.firmwareData
@@ -464,10 +523,11 @@ function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { ob
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-medium text-muted-foreground">Firmware</div>
-        <input ref={input} type="file" accept=".elf,.hex,.bin,.axf,.out" className="hidden" onChange={onFile} />
+    <Section
+      id="firmware"
+      label="Firmware"
+      sections={sections}
+      action={
         <ButtonGroup>
           {onCode && (
             <Button variant="outline" size="xs" onClick={() => onCode(object.id)} title="Source code (⌘J)">
@@ -485,7 +545,9 @@ function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { ob
             </Button>
           )}
         </ButtonGroup>
-      </div>
+      }
+    >
+      <input ref={input} type="file" accept=".elf,.hex,.bin,.axf,.out" className="hidden" onChange={onFile} />
       {data ? (
         <div className="flex flex-col gap-1.5 rounded-md border bg-muted/30 px-2.5 py-2 text-xs">
           <div className="flex items-center gap-1.5 font-mono">
@@ -528,14 +590,11 @@ function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { ob
               >
                 {status.host}
               </dd>
-              {status.running && status.powered && (
-                <>
-                  <dt className="text-muted-foreground">Power</dt>
-                  <dd className="text-right font-mono tabular-nums" title="Datasheet typical for the mode and clock, not a measurement of what the code does">
-                    {status.labels?.power ?? powerLabel(status.power)} · ≈{formatSI(status.power.current, "A", 2)}
-                  </dd>
-                </>
-              )}
+              {/* Always a row, so a core that stops and starts does not make the panel jump. */}
+              <dt className="text-muted-foreground">Power</dt>
+              <dd className="text-right font-mono tabular-nums" title="Datasheet typical for the mode and clock, not a measurement of what the code does">
+                {status.running && status.powered ? `${status.labels?.power ?? powerLabel(status.power)} · ≈${formatSI(status.power.current, "A", 2)}` : "—"}
+              </dd>
               {status.resets > 0 && (
                 <>
                   <dt className="text-muted-foreground">Resets</dt>
@@ -594,6 +653,6 @@ function FirmwarePanel({ object, chip, sim, onChange, onFirmware, onCode }: { ob
         </Alert>
       ) : null}
       {!data && <div className="text-xs text-muted-foreground">No program: the MCU pins float. Load an .elf, .hex or .bin built for the {chip}.</div>}
-    </div>
+    </Section>
   )
 }
