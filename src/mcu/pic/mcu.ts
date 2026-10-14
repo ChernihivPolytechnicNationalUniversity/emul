@@ -14,6 +14,8 @@ import { byVdd, clkoutOnRa6, fosc, oscMode, type OscMode, type PicProfile } from
 import type { Peripheral, PicBus } from "./io"
 import { PicPort, type PinMode } from "./port"
 import { Timer0, Watchdog } from "./periph/timer0"
+import { Timer1, type T1Oscillator } from "./periph/timer1"
+import { Ccp1, Timer2 } from "./periph/ccp"
 
 export type PicResetCause = "power-on" | "brown-out" | "mclr" | "mclr-sleep" | "wdt"
 
@@ -38,18 +40,9 @@ const ANALOG_BY_CM = [0b1111, 0b1111, 0b1111, 0b0111, 0b1111, 0b0110, 0b0111, 0b
 /** Registers of blocks this file does not model yet, with their reset values (Table 14-7). */
 type Pending = { name: string; addr: number; block: string; por: number | "x"; reset: number | "u"; mask?: number }
 const PENDING: Pending[] = [
-  { name: "TMR1L", addr: 0x0e, block: "Timer1", por: "x", reset: "u" },
-  { name: "TMR1H", addr: 0x0f, block: "Timer1", por: "x", reset: "u" },
-  { name: "T1CON", addr: 0x10, block: "Timer1", por: 0x00, reset: "u", mask: 0x3f },
-  { name: "TMR2", addr: 0x11, block: "Timer2", por: 0x00, reset: 0x00 },
-  { name: "T2CON", addr: 0x12, block: "Timer2", por: 0x00, reset: 0x00, mask: 0x7f },
-  { name: "CCPR1L", addr: 0x15, block: "CCP1", por: "x", reset: "u" },
-  { name: "CCPR1H", addr: 0x16, block: "CCP1", por: "x", reset: "u" },
-  { name: "CCP1CON", addr: 0x17, block: "CCP1", por: 0x00, reset: 0x00, mask: 0x3f },
   { name: "RCSTA", addr: 0x18, block: "USART", por: 0x00, reset: 0x00 },
   { name: "TXREG", addr: 0x19, block: "USART", por: 0x00, reset: 0x00 },
   { name: "RCREG", addr: 0x1a, block: "USART", por: 0x00, reset: 0x00 },
-  { name: "PR2", addr: 0x92, block: "Timer2", por: 0xff, reset: 0xff },
   { name: "TXSTA", addr: 0x98, block: "USART", por: 0x02, reset: 0x02, mask: 0xf7 },
   { name: "SPBRG", addr: 0x99, block: "USART", por: 0x00, reset: 0x00 },
   { name: "EEDATA", addr: 0x9a, block: "Data EEPROM", por: "x", reset: "u" },
@@ -67,6 +60,9 @@ export class PicMcu implements PicBus, PicSystem {
   readonly peripherals: Peripheral[] = []
   readonly timer0: Timer0
   readonly wdt: Watchdog
+  readonly timer1: Timer1
+  readonly timer2: Timer2
+  readonly ccp: Ccp1
   readonly eeprom: Uint8Array
   /** Configuration word at 2007h (Register 14-1); erased: 3FFFh (P8-162). */
   config = 0x3fff
@@ -159,6 +155,39 @@ export class PicMcu implements PicBus, PicSystem {
         },
         chip.electrical.wdt.typ,
       ),
+    )
+    this.timer1 = this.attach(
+      new Timer1(this, {
+        setTmr1if: (cycle) => this.setFlag("pir1", 0x01, cycle),
+        t1cki: () => this.portb.pin(6),
+        get asleep() {
+          return host.cpu.sleeping
+        },
+        get compareTarget() {
+          return host.ccp.compareTarget
+        },
+        onCompare: (cycle) => this.ccp.onCompare(cycle),
+        get specialEvent() {
+          return host.ccp.specialEvent
+        },
+      }),
+    )
+    this.timer2 = this.attach(
+      new Timer2(this, {
+        setTmr2if: (cycle) => this.setFlag("pir1", 0x02, cycle),
+        onPeriod: (cycle) => this.ccp.onPeriod(cycle),
+      }),
+    )
+    this.ccp = this.attach(
+      new Ccp1(this, {
+        timer1: this.timer1,
+        timer2: this.timer2,
+        setCcp1if: (cycle) => this.setFlag("pir1", 0x04, cycle),
+        get asleep() {
+          return host.cpu.sleeping
+        },
+        pinChanged: (cycle) => this.portb.refresh(cycle),
+      }),
     )
     this.registers()
     this.powerOnReset()
@@ -308,6 +337,18 @@ export class PicMcu implements PicBus, PicSystem {
         this.pinsChanged(Math.ceil(at()))
       },
     })
+    const t1 = this.timer1
+    const t2 = this.timer2
+    const ccp = this.ccp
+    this.register(0x0e, { name: "TMR1L", read: () => t1.readL(), peek: () => t1.peekValue() & 0xff, write: (v) => t1.write(false, v) })
+    this.register(0x0f, { name: "TMR1H", read: () => t1.readH(), peek: () => t1.peekValue() >> 8, write: (v) => t1.write(true, v) })
+    this.register(0x10, { name: "T1CON", read: () => t1.t1con, write: (v) => t1.writeT1con(v) })
+    this.register(0x11, { name: "TMR2", read: () => t2.read(), peek: () => t2.value(this.cpu.cycles), write: (v) => t2.write(v) })
+    this.register(0x12, { name: "T2CON", read: () => t2.t2con, write: (v) => t2.writeT2con(v) })
+    this.register(0x92, { name: "PR2", read: () => t2.pr2, write: (v) => t2.writePr2(v) })
+    this.register(0x15, { name: "CCPR1L", read: () => ccp.ccpr1l, write: (v) => ccp.writeL(v) })
+    this.register(0x16, { name: "CCPR1H", read: () => ccp.ccpr1h, write: (v) => ccp.writeH(v) })
+    this.register(0x17, { name: "CCP1CON", read: () => ccp.ccp1con, write: (v) => ccp.writeCon(v) })
     for (const p of PENDING) {
       this.register(p.addr, {
         name: p.name,
@@ -455,6 +496,13 @@ export class PicMcu implements PicBus, PicSystem {
     const m: PinMode = { digital: true, output: true, openDrain: false, pullUp: false }
     const pgm = p === 4 && this.lvp
     if (pgm) m.output = false
+    // T1OSCEN: RB7/RB6 are the Timer1 oscillator's — no output, the digital input off (§7.0, P2-041; D17).
+    if ((p === 6 || p === 7) && this.timer1?.oscEnabled) {
+      m.output = false
+      m.digital = false
+    }
+    // RB3/CCP1: compare and PWM output through the pin's mux; TRISB<3> still enables it (Figure 5-11, §9.2.1, §9.3).
+    if (p === 3 && this.ccp?.drivesPin) m.outValue = this.ccp.output
     const input = !m.output || ((this.portb.tris >> p) & 1) === 1
     m.pullUp = !(this.optionReg & 0x80) && input && !pgm
     return m
@@ -475,6 +523,8 @@ export class PicMcu implements PicBus, PicSystem {
     if (port === 1) {
       // RB0/INT: the edge INTEDG selects (§14.5.1).
       if (pin === 0 && level === ((this.optionReg & 0x40) !== 0)) this.setFlag("intcon", 0x02, cycle)
+      if (pin === 6) this.timer1.pinEdge(level, cycle)
+      if (pin === 3) this.ccp.pinEdge(level, cycle)
       if (pin >= 4 && this.rbMismatch()) this.setFlag("intcon", 0x01, cycle)
       if (pin === 4 && this.lvp && level) this.enterProgramming("low-voltage")
     }
@@ -538,7 +588,6 @@ export class PicMcu implements PicBus, PicSystem {
     this.porta.tris = 0xff
     this.portb.tris = 0xff
     for (const p of PENDING) if (cause !== "power-on" && p.reset !== "u") this.pending.set(p.addr, p.reset)
-    if (cause === "brown-out") this.pending.set(0x10, 0)
     this.wdtWake = false
     this.resetRequest = null
     this.haltedUntil = 0
@@ -546,6 +595,8 @@ export class PicMcu implements PicBus, PicSystem {
     this.sliceCycle = 0
     this.sliceTime = this.time
     for (const p of this.peripherals) p.reset(cause === "power-on")
+    // T1CON clears on a brown-out too (Table 14-7 note 6).
+    if (cause === "brown-out") this.timer1.brownOut()
     this.porta.refresh(0)
     this.portb.refresh(0)
     this.reschedule()
@@ -794,6 +845,11 @@ export class PicMcu implements PicBus, PicSystem {
           if (this.yieldOnOutput && this.digitalOut.length) return true
         }
       }
+      // Events due at the cycle the run stopped on have happened (they belong to its Q1): take them now.
+      if (this.cpu.nextEventCycle <= this.cpu.cycles && !this.cpu.halted) {
+        this.cpu.at = this.cpu.cycles
+        this.service()
+      }
     } catch (e) {
       if (!(e instanceof CpuHalt)) this.cpu.halted = emulatorError(e, this.cpu.opPc)
       return false
@@ -932,6 +988,16 @@ export class PicMcu implements PicBus, PicSystem {
     const level = drive === "high" ? true : drive === "low" ? false : null
     this.digitalOut.push({ pad: { port, pin }, level, time: this.cycleTime(cycle) })
     if (this.yieldOnOutput) this.cpu.stop = true
+  }
+
+  /** The crystal on RB7/T1OSI–RB6/T1OSO, from the circuit. */
+  setT1Oscillator(o: T1Oscillator) {
+    this.timer1.setOscillator(o)
+    this.reschedule()
+  }
+  /** CCP1's output latch (compare/PWM), before the pin's TRIS gate. */
+  get ccpOutput() {
+    return this.ccp.output
   }
 
   // --- inspection --------------------------------------------------------------------------------
