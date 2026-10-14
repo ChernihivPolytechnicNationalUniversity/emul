@@ -31,7 +31,7 @@ export const isOptLevel = (v: unknown): v is OptLevel => typeof v === "string" &
 export type BuildOptions = { opt?: OptLevel; fcpu?: number }
 export const FCPU_RANGE = { min: 1_000, max: 32_000_000 } as const
 
-const SOURCE_EXTENSIONS = new Set([".c", ".h", ".cpp", ".hpp", ".cc", ".s", ".S", ".ld", ".ioc", ".txt", ".md", ".vhd", ".vhdl", ".v", ".sv"])
+const SOURCE_EXTENSIONS = new Set([".ino", ".pde", ".c", ".h", ".cpp", ".hpp", ".cc", ".s", ".S", ".ld", ".ioc", ".txt", ".md", ".vhd", ".vhdl", ".v", ".sv"])
 export const SOURCE_LIMITS = { files: 200, fileBytes: 1024 * 1024 }
 
 /**

@@ -71,7 +71,7 @@ export function writeFile(files: SourceFile[], path: string, content: string): S
   return files.map((f) => (f.path === path ? { ...f, content } : f))
 }
 
-const MAIN = /(^|\/)main\.(c|cpp|cc)$/
+const MAIN = /(^|\/)main\.(c|cpp|cc)$|\.ino$/
 
 export function mainFile(files: SourceFile[]): string | null {
   return (files.find((f) => f.path === TEMPLATE_MAIN) ?? files.find((f) => MAIN.test(f.path)) ?? files[0])?.path ?? null
