@@ -1,6 +1,7 @@
 import { getDef, setLibrary } from "@/schematic/registry"
 import { partKey, pinKey, type ComponentDef, type Damage, type PartState, type Schematic } from "@/schematic/types"
 import { parsePad, type PadRef } from "@/mcu/stm32f429"
+import { rcFrequency } from "@/mcu/pic/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import { crystalStartup } from "@/schematic/components/clock"
 import { parseValue } from "./units"
@@ -713,6 +714,31 @@ export class SimLoop {
     return { source: null }
   }
 
+  /**
+   * A PIC's RC network on RA7/OSC1 for FOSC = 11x: REXT to VDD and CEXT to VSS on the A parts
+   * (DS40044G Figure 14-5), a resistor to VSS on the original's ER oscillator (DS40300C §14.2.4).
+   */
+  private rcNetwork(inst: McuInstance, def: ComponentDef) {
+    const engine = this.engine
+    const pin = def.pins.find((p) => p.mcu === "RA7")
+    if (!engine || !pin || !inst.mcu.setRcNetwork) return
+    const osc = engine.net.pinNet.get(pinKey(inst.object, pin.id))
+    const parallel = (a: number | null, b: number) => (a === null ? b : (a * b) / (a + b))
+    let toVdd: number | null = null
+    let toGnd: number | null = null
+    let farads = 0
+    if (osc !== undefined && osc !== GROUND)
+      for (const el of engine.net.elements) {
+        if ((el.kind !== "R" && el.kind !== "C") || el.object === inst.object) continue
+        const other = el.a === osc ? el.b : el.b === osc ? el.a : null
+        if (other === null) continue
+        if (el.kind === "C" && other === GROUND) farads += el.value
+        else if (el.kind === "R" && other === GROUND) toGnd = parallel(toGnd, el.value)
+        else if (el.kind === "R" && other === inst.powerNet) toVdd = parallel(toVdd, el.value)
+      }
+    inst.mcu.setRcNetwork(toVdd === null ? null : rcFrequency(toVdd, farads), toGnd)
+  }
+
   private boot0High(inst: McuInstance) {
     const engine = this.engine
     return !!engine && inst.boot0Net !== undefined && inst.boot0Net !== GROUND && engine.v[inst.boot0Net] > BOOT_HIGH
@@ -734,10 +760,19 @@ export class SimLoop {
       inst.vrefNet = vrefPin ? engine.net.pinNet.get(vrefPin) : undefined
       inst.vrefWired = inst.vrefNet !== undefined && [...engine.net.pinNet].some(([key, net]) => net === inst.vrefNet && key !== vrefPin)
       if (def) {
-        // The oscillator pin pairs: OSC_IN/OSC_OUT and OSC32 on an STM32, XTAL1/XTAL2 (PB6/PB7) on an AVR.
-        const avr = inst.mcu.chip.family === "avr"
-        inst.hse = def.mcuClocks ? { source: def.mcuClocks.hse } : this.oscillatorFeed(inst.object, def, avr ? "PB6" : "PH0", avr ? "PB7" : "PH1")
-        inst.lse = def.mcuClocks ? { source: def.mcuClocks.lse } : avr ? { source: null } : this.oscillatorFeed(inst.object, def, "PC14", "PC15")
+        // The oscillator pin pairs: OSC_IN/OSC_OUT and OSC32 on an STM32, XTAL1/XTAL2 (PB6/PB7) on an AVR,
+        // OSC1/OSC2 (RA7/RA6) and T1OSI/T1OSO (RB7/RB6) on a PIC.
+        const family = inst.mcu.chip.family
+        const [hseIn, hseOut] = family === "avr" ? ["PB6", "PB7"] : family === "pic" ? ["RA7", "RA6"] : ["PH0", "PH1"]
+        inst.hse = def.mcuClocks ? { source: def.mcuClocks.hse } : this.oscillatorFeed(inst.object, def, hseIn, hseOut)
+        inst.lse = def.mcuClocks
+          ? { source: def.mcuClocks.lse }
+          : family === "avr"
+            ? { source: null }
+            : family === "pic"
+              ? this.oscillatorFeed(inst.object, def, "RB7", "RB6")
+              : this.oscillatorFeed(inst.object, def, "PC14", "PC15")
+        if (family === "pic") this.rcNetwork(inst, def)
       }
       inst.padNode.clear()
       inst.inputByPad.clear()
@@ -1451,10 +1486,10 @@ export class SimLoop {
       if (!inst.mcu.loaded) continue
       const { rising, falling } = inst.mcu.chip.electrical.inputThresholdsOfVdd
       const supply = inst.powerNet === undefined ? inst.mcu.chip.electrical.vdd : inst.powerNet === GROUND ? 0 : engine.v[inst.powerNet]
-      const high = rising * supply
-      const low = falling * supply
+      const own = inst.mcu.inputThresholds
       for (const { pad, node, digital, key } of inst.inputs) {
         const v = node === GROUND ? 0 : engine.v[node]
+        const { high, low } = own ? own.call(inst.mcu, pad, supply) : { high: rising * supply, low: falling * supply }
         // The ADC samples the pad's net as the last solve left it (a step old at most).
         inst.mcu.setAnalog(pad, v)
         const padKey = pad.port * 16 + pad.pin
@@ -1987,7 +2022,7 @@ export class SimLoop {
         // The backup domain lives on VBAT: with it up through an outage the RTC keeps counting.
         const vbatUp = inst.vbatNet !== undefined && inst.vbatNet !== GROUND && engine.v[inst.vbatNet] > VBAT_MIN
         // An AVR has its own power-on threshold (VPOT) and brown-out detector, handled in its model.
-        const outage = vdd < (inst.mcu.chip.family === "avr" ? inst.mcu.porThreshold : Math.max(VDD_POR, inst.mcu.porThreshold))
+        const outage = vdd < (inst.mcu.chip.family === "avr" || inst.mcu.chip.family === "pic" ? inst.mcu.porThreshold : Math.max(VDD_POR, inst.mcu.porThreshold))
         if (outage || nrst < NRST_LOW) {
           if (inst.powered) {
             inst.powered = false
@@ -2021,6 +2056,8 @@ export class SimLoop {
           inst.vdda = vdd
           inst.mcu.setSupply(vdd)
         }
+        // A part that reads its reset pin itself (a PIC's MCLR/VPP) gets the voltage on it.
+        if (inst.mcu.setResetVoltage && inst.resetNet !== undefined) inst.mcu.setResetVoltage(inst.resetNet === GROUND ? 0 : engine.v[inst.resetNet])
         if (inst.vbatNet !== undefined) inst.mcu.setBattery(inst.vbatNet === GROUND ? 0 : engine.v[inst.vbatNet])
         if (inst.vrefNet !== undefined) inst.setReference(inst.vrefNet === GROUND ? 0 : engine.v[inst.vrefNet])
         // An oscillator module clocks only while its own supply is up.

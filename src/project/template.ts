@@ -1,14 +1,17 @@
-import type { SourceFile, Target } from "emul-shared/source"
+import { isPicTarget, type SourceFile, type Target } from "emul-shared/source"
 
 /**
  * What a board's project starts as: the CubeIDE layout (`Core/Inc`, `Core/Src`) around the
  * repo's own Nucleo-F429ZI HAL blink (`firmware/hal/Src/main.c`), or an Open746I-C one for the
  * F746, so the first build has something to show on the board's LEDs. An ATmega328P (the
  * Arduino Nano) starts as an Arduino sketch, built against ArduinoCore-avr (a project of .c
- * files with no .ino builds on avr-libc alone).
+ * files with no .ino builds on avr-libc alone). A PIC16F62x starts as C for SDCC (a project with
+ * an .asm file builds with gpasm instead).
  */
 export const template = (target: Target): SourceFile[] =>
-  target === "atmega328p"
+  isPicTarget(target)
+    ? [{ path: "main.c", content: PIC_MAIN_C }]
+    : target === "atmega328p"
     ? [{ path: "Blink.ino", content: NANO_SKETCH }]
     : target === "stm32f746ig"
     ? [
@@ -237,5 +240,93 @@ void loop() {
     }
   }
   while (Serial.available()) Serial.write(toupper(Serial.read()));
+}
+`
+
+const PIC_MAIN_C = `/*
+ * PIC16F62x on the internal 4 MHz oscillator (SDCC): an LED on RB3 toggled every 0.5 s by
+ * Timer1, "tick N" a second on the USART at 9600 baud (RB2/TX, RB1/RX), every received letter
+ * echoed upper-cased. Wire an LED through 220 R from RB3 to VSS, 10k from MCLR (RA5) to VDD,
+ * and a serial terminal on RB1/RB2.
+ *
+ * pic14regs.h brings the chip's registers by the target the build names (-p16f628a ...).
+ * SDCC does not clear static variables at start-up and RAM powers up random: set them in main.
+ */
+#include <pic14regs.h>
+#include <stdint.h>
+
+/* Configuration word at 2007h: internal oscillator with RA6/RA7 as I/O, no watchdog,
+   power-up timer on, MCLR as reset, no brown-out, no low-voltage programming. */
+static __code uint16_t __at(_CONFIG) config = _FOSC_INTOSCIO & _WDT_OFF & _PWRTE_ON & _MCLRE_ON & _BOREN_OFF & _LVP_OFF;
+
+#define RELOAD (65536u - 62500u) /* 0.5 s at 1 MHz / 8 */
+
+static volatile uint8_t halves;
+static volatile uint8_t rx_byte;
+static volatile uint8_t rx_ready;
+
+void isr(void) __interrupt {
+  if (TMR1IF) {
+    TMR1ON = 0;
+    TMR1H = RELOAD >> 8;
+    TMR1L = RELOAD & 0xff;
+    TMR1ON = 1;
+    TMR1IF = 0;
+    RB3 = !RB3;
+    halves++;
+  }
+  if (RCIF) {
+    rx_byte = RCREG;
+    rx_ready = 1;
+  }
+}
+
+static void put(char c) {
+  while (!TXIF)
+    ;
+  TXREG = c;
+}
+
+static void put_num(uint16_t n) {
+  char digits[5];
+  uint8_t i = 0;
+  do {
+    digits[i++] = (char)('0' + n % 10);
+    n /= 10;
+  } while (n);
+  while (i) put(digits[--i]);
+}
+
+void main(void) {
+  uint16_t ticks = 0;
+  halves = 0;
+  rx_ready = 0;
+  CMCON = 0x07; /* comparators off: PORTA digital */
+  TRISB = 0xf7; /* RB3 out; RB1/RB2 stay inputs for the USART */
+  PORTB = 0;
+  SPBRG = 25;   /* 9615 baud at 4 MHz with BRGH */
+  TXSTA = 0x24; /* TXEN, BRGH */
+  RCSTA = 0x90; /* SPEN, CREN */
+  TMR1H = RELOAD >> 8;
+  TMR1L = RELOAD & 0xff;
+  T1CON = 0x31; /* 1:8, FOSC/4, on */
+  TMR1IE = 1;
+  RCIE = 1;
+  PEIE = 1;
+  GIE = 1;
+  for (;;) {
+    if (halves >= 2) {
+      halves -= 2;
+      put('t'); put('i'); put('c'); put('k'); put(' ');
+      put_num(ticks++);
+      put('\\r'); put('\\n');
+    }
+    if (rx_ready) {
+      uint8_t c = rx_byte;
+      rx_ready = 0;
+      if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
+      put((char)c);
+    }
+  }
 }
 `

@@ -37,7 +37,9 @@ const MAX_LOG = 4 * 1024 * 1024
 
 type ArmSpec = { name: string; toolchain?: "arm"; family: string; cpu: string[]; defines: string[]; linker: string }
 type AvrSpec = { name: string; toolchain: "avr"; mcu: string }
-type TargetSpec = ArmSpec | AvrSpec
+/** A PIC16: `processor` as SDCC's -p and gpasm take it ("16f628a"); an LF part builds as its F part (gputils knows no LF processors, the silicon is the same). */
+type PicSpec = { name: string; toolchain: "pic"; processor: string }
+type TargetSpec = ArmSpec | AvrSpec | PicSpec
 
 export type BuildOutput = {
   ok: boolean
@@ -67,6 +69,7 @@ export async function build(target: Target, files: SourceFile[], options: BuildO
     return { ok: false, log: "", error: `no such target: ${target}` }
   }
   if (spec.toolchain === "avr") return buildAvr(spec, files, options)
+  if (spec.toolchain === "pic") return buildPic(spec, files)
   const family = path.join(ST_ROOT, spec.family)
 
   const dir = await mkdtemp(path.join(tmpdir(), "emul-build-"))
@@ -232,6 +235,65 @@ async function buildAvr(spec: AvrSpec, files: SourceFile[], options: BuildOption
     const size = await exec(`${AVR_GCC}size`, ["firmware.elf"], src, env)
     lines.push(size.output)
     return { ok: true, log: lines.join("\n"), elf: await readFile(path.join(src, "firmware.elf")), map: await readFile(path.join(src, "firmware.map")) }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+const PIC_ASM = /\.asm$/i
+
+/**
+ * A PIC16F62x project. With an `.asm` file it is assembly, as MPASM projects are: gpasm in absolute
+ * mode on the file holding the reset vector (`main.asm`, else the only one), the others pulled in
+ * with #include. Otherwise C with SDCC 4.4 for pic14 (its device headers and libraries are the
+ * "non-free" ones derived from Microchip's, `--use-non-free`): each .c compiled to an object, the
+ * objects linked by gplink through SDCC. The image is Intel HEX with the configuration word at
+ * 2007h; it goes back in the `elf` field, the loader telling the two apart by their first byte.
+ * SDCC has no -O levels of the GCC kind: the job's level is not used.
+ */
+async function buildPic(spec: PicSpec, files: SourceFile[]): Promise<BuildOutput> {
+  const SDCC = process.env.SDCC ?? "sdcc"
+  const GPASM = process.env.GPASM ?? "gpasm"
+  const dir = await mkdtemp(path.join(tmpdir(), "emul-build-"))
+  const src = path.join(dir, "src")
+  try {
+    for (const f of files) {
+      const p = path.join(src, f.path)
+      await mkdir(path.dirname(p), { recursive: true })
+      await writeFile(p, f.content)
+    }
+    const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: dir, LANG: "C" }
+    const includes = [...new Set(files.filter((f) => HEADER.test(f.path) || /\.inc$/i.test(f.path)).map((f) => path.dirname(f.path)))]
+    const asm = files.filter((f) => PIC_ASM.test(f.path)).map((f) => f.path)
+    if (asm.length) {
+      const main = asm.find((a) => /^main\.asm$/i.test(path.basename(a))) ?? (asm.length === 1 ? asm[0] : undefined)
+      if (!main) return { ok: false, log: "", error: "several .asm files and none is main.asm: name the one with the reset vector main.asm" }
+      const processor = `p${spec.processor}`
+      const lines = [`# ${spec.name}, gpasm (gputils) -p ${processor}`, `# ${main}${asm.length > 1 ? ` (the others through #include: ${asm.filter((a) => a !== main).join(" ")})` : ""}`, ""]
+      const out = await exec(GPASM, ["-p", processor, "-o", "firmware.hex", ...includes.map((i) => `-I${i}`), main], src, env)
+      lines.push(out.output)
+      if (out.error) return { ok: false, log: lines.join("\n"), error: out.error }
+      return { ok: true, log: lines.join("\n"), elf: await readFile(path.join(src, "firmware.hex")) }
+    }
+    const sources = files.filter((f) => C.test(f.path)).map((f) => f.path)
+    if (!sources.length) return { ok: false, log: "", error: "no source files to compile (.c for SDCC, or .asm for gpasm)" }
+    const common = ["-mpic14", `-p${spec.processor}`, "--use-non-free", ...includes.map((i) => `-I${i}`)]
+    const lines = [`# ${spec.name}, SDCC 4.4 pic14 (--use-non-free)`, `# sdcc ${sources.join(" ")}`, ""]
+    await mkdir(path.join(src, "obj"), { recursive: true })
+    const objects: string[] = []
+    // gpasm's notes on the code SDCC generated (bank selection, "Message[302]") are about no line of the project.
+    const own = (out: string) => out.split("\n").filter((l) => !/^obj\/[^:]*\.asm:\d+:Message\[/.test(l)).join("\n")
+    for (const source of sources) {
+      const object = path.join("obj", `${source.replace(/[\\/]/g, "__").replace(/\.c$/i, "")}.o`)
+      const compile = await exec(SDCC, [...common, "-c", source, "-o", object], src, env)
+      if (own(compile.output).trim()) lines.push(own(compile.output))
+      if (compile.error) return { ok: false, log: lines.join("\n"), error: compile.error }
+      objects.push(object)
+    }
+    const link = await exec(SDCC, [...common, "-o", "firmware.hex", ...objects], src, env)
+    if (link.output.trim()) lines.push(link.output)
+    if (link.error) return { ok: false, log: lines.join("\n"), error: link.error }
+    return { ok: true, log: lines.join("\n"), elf: await readFile(path.join(src, "firmware.hex")) }
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

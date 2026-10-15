@@ -10,11 +10,11 @@ export type PadRef = { port: number; pin: number }
 /** Analog-only pins with no port behind them (an AVR's ADC6/ADC7): "ADC6" is { port: 15, pin: 6 }. */
 export const ANALOG_PORT = 15
 
-/** "PA5" → { port: 0, pin: 5 }; "ADC6" → an analog-only pin. */
+/** "PA5" → { port: 0, pin: 5 }; a PIC's "RB3" → { port: 1, pin: 3 }; "ADC6" → an analog-only pin. */
 export function parsePad(name: string): PadRef | null {
   const a = /^ADC(\d{1,2})$/.exec(name)
   if (a) return Number(a[1]) < 16 ? { port: ANALOG_PORT, pin: Number(a[1]) } : null
-  const m = /^P([A-K])(\d{1,2})$/.exec(name)
+  const m = /^[PR]([A-K])(\d{1,2})$/.exec(name)
   if (!m) return null
   const pin = Number(m[2])
   if (pin > 15) return null

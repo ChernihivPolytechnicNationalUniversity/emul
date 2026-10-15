@@ -26,8 +26,9 @@
     "peripherals": "tsx --tsconfig tsconfig.app.json scripts/peripherals.ts",
     "strip-bench": "tsx --tsconfig tsconfig.app.json scripts/strip-bench.ts",
     "firmware": "make -C firmware all expect && make -C firmware/hal",
-    "firmware-avr": "docker build -q -t emul-avr firmware/avr && docker run --rm -u $(id -u):$(id -g) -v $PWD/firmware:/w -w /w/avr emul-avr make -j8",
-    "firmware-arduino": "docker build -q -t emul-arduino -f firmware/arduino/Dockerfile . && docker run --rm -u $(id -u):$(id -g) -v $PWD:/app -w /app emul-arduino node --experimental-strip-types firmware/arduino/build.ts"
+    "firmware-avr": "docker build -q --cache-from emul-avr --build-arg BUILDKIT_INLINE_CACHE=1 -t emul-avr firmware/avr && docker run --rm -u $(id -u):$(id -g) -v $PWD/firmware:/w -w /w/avr emul-avr make -j8",
+    "firmware-pic": "docker build -q --cache-from emul-pic --build-arg BUILDKIT_INLINE_CACHE=1 -t emul-pic firmware/pic && docker run --rm -u $(id -u):$(id -g) -v $PWD/firmware:/w -w /w/pic emul-pic make -j8",
+    "firmware-arduino": "docker build -q --cache-from emul-arduino --build-arg BUILDKIT_INLINE_CACHE=1 -t emul-arduino -f firmware/arduino/Dockerfile . && docker run --rm -u $(id -u):$(id -g) -v $PWD:/app -w /app emul-arduino node --experimental-strip-types firmware/arduino/build.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

@@ -14,7 +14,7 @@ async function collect(dir: string, prefix = ""): Promise<SourceFile[]> {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const rel = prefix ? `${prefix}/${entry.name}` : entry.name
     if (entry.isDirectory()) out.push(...(await collect(path.join(dir, entry.name), rel)))
-    else if (/\.(ino|pde|c|cpp|cc|h|hpp|s|S|ld)$/.test(entry.name)) out.push({ path: rel, content: await readFile(path.join(dir, entry.name), "utf8") })
+    else if (/\.(ino|pde|c|cpp|cc|h|hpp|s|S|ld|asm|inc)$/.test(entry.name)) out.push({ path: rel, content: await readFile(path.join(dir, entry.name), "utf8") })
   }
   return out
 }

@@ -1,7 +1,7 @@
 import * as React from "react"
 import { toast } from "sonner"
 import { CpuIcon, HammerIcon, LoaderCircleIcon, TriangleAlertIcon, XIcon } from "lucide-react"
-import { OPT_LEVELS, SOURCE_LIMITS, TARGETS, type OptLevel, type SourceFile, type Stm32Target } from "emul-shared/source"
+import { OPT_LEVELS, SOURCE_LIMITS, TARGETS, isPicTarget, type OptLevel, type SourceFile, type Stm32Target } from "emul-shared/source"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { fetchArtifact, fetchText, submitBuild, waitForJob } from "@/project/api"
@@ -134,7 +134,9 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
   // The build target is the chip's id (an AVR's, upper-case in its profile, too).
   const chip = TARGETS.find((t) => t === def?.chip?.toLowerCase())
   const avr = chip === "atmega328p"
-  const stm32 = avr ? undefined : (chip as Stm32Target | undefined)
+  // A PIC builds with SDCC or gpasm: no GCC -O levels, no CubeIDE import or export.
+  const pic = isPicTarget(chip)
+  const stm32 = avr || pic ? undefined : (chip as Stm32Target | undefined)
   // An AVR builds at -Os as the Arduino IDE does: avr-libc's delays are only right when optimized.
   const opt = board?.build?.opt ?? (avr ? AVR_BUILD_OPT : DEFAULT_BUILD_OPT)
   const files = board?.project
@@ -585,9 +587,9 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
               onCreate={create}
               onRename={rename}
               onRemove={remove}
-              onImport={avr ? undefined : () => void importFolder()}
-              onExport={avr ? undefined : () => void exportCubeIde()}
-              onImportDrop={avr ? undefined : (entries) => void importProject(entries)}
+              onImport={avr || pic ? undefined : () => void importFolder()}
+              onExport={avr || pic ? undefined : () => void exportCubeIde()}
+              onImportDrop={avr || pic ? undefined : (entries) => void importProject(entries)}
             />
             {info && (programSources.length > 0 || !dboard?.project) && (
               <ProgramSources className="max-h-[45%]" sources={programSources} active={active} tabOf={tabOfRef} onOpen={(r) => openSource(r.image)} onAdd={(f) => void addSources(f)} />
@@ -599,6 +601,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
               <div className="flex shrink-0 items-center gap-1.5 bg-sidebar pr-1 pl-2 text-xs">
                 <CpuIcon className="size-3.5 text-muted-foreground" />
                 <span className="font-medium">{boardName(board)}</span>
+                {!pic && (
                 <Select value={opt} items={OPT_LEVELS.map((o) => ({ value: o, label: o }))} onValueChange={(v) => v && onBuild(id, { ...board.build, opt: v })}>
                   <SelectTrigger size="sm" className="h-6 gap-1 rounded-md bg-background px-1.5 font-mono text-xs" title={optHelp(avr, sketch)} aria-label="Optimization level">
                     <SelectValue />
@@ -615,6 +618,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
                     ))}
                   </SelectContent>
                 </Select>
+                )}
                 <Button size="xs" onClick={() => void compile()} disabled={!chip || !files || build?.phase === "running"}>
                   {build?.phase === "running" ? <LoaderCircleIcon className="animate-spin" /> : <HammerIcon />}
                   Compile

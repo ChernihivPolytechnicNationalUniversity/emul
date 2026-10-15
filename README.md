@@ -15,6 +15,7 @@
   <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
   <img alt="STM32 F429 · F746" src="https://img.shields.io/badge/STM32-F429%20%C2%B7%20F746-03234B.svg">
   <img alt="Arduino Nano" src="https://img.shields.io/badge/Arduino-Nano%20(ATmega328P)-00878F.svg">
+  <img alt="PIC16F628A" src="https://img.shields.io/badge/PIC16-F627A%20%C2%B7%20F628A%20%C2%B7%20F648A-C1272D.svg">
 </p>
 
 <a href="https://emul.digituni.org/"><img src="docs/assets/bench.png" alt="An Open746I-C with its 7″ LCD running a C++ cube renderer, three Nucleo-F429ZI boards on I²C, UART and ADC, and analog benches: a mains rectifier, a battery, Lissajous sources"></a>
@@ -28,6 +29,12 @@ what it does on the desk. A Monaco editor and a build service compile a project 
 An Arduino Nano 3.x runs on an emulated ATmega328P: drop an AVR `.elf` on it, or write a sketch in the
 editor and the build service compiles it as the Arduino IDE does (ArduinoCore-avr 1.8.6, Servo,
 LiquidCrystal, Adafruit NeoPixel/SSD1306/GFX, Keypad).
+
+PIC16F627A/628A/648A and the original PIC16F627/628 run as bare PDIP-18 chips: drop a `.hex` (MPLAB,
+XC8, SDCC or gpasm) on one, or write C (SDCC) or assembly (gpasm) in the editor — timers, CCP/PWM,
+comparators, USART, data EEPROM, sleep, the configuration word's oscillators and resets, and ICSP:
+13 V on MCLR and the programming commands on RB6/RB7, so a programmer built on the bench can erase,
+write and verify the chip.
 
 ```sh
 pnpm install && pnpm dev     # http://localhost:5173

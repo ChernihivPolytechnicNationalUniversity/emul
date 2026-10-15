@@ -4,20 +4,74 @@ on:
   pull_request:
     branches:
       - main
+  push:
+    branches:
+      - main
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  TOOL: ${{ github.workspace }}/../tools/arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-
+  ST: ${{ github.workspace }}/../tools/st
+  SHARDS: 8
+
 jobs:
-  test:
-    name: Tests
+  firmware:
+    name: Firmware
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      TOOL: ${{ github.workspace }}/../tools/arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-
-      ST: ${{ github.workspace }}/../tools/st
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: firmware
+        with:
+          path: |
+            firmware/build
+            firmware/*/build
+          key: firmware-${{ hashFiles('firmware/**', 'backend/worker/**', 'backend/shared/**') }}
+      - if: steps.firmware.outputs.cache-hit != 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.x"
+      - if: steps.firmware.outputs.cache-hit != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: tools
+        with:
+          path: ${{ github.workspace }}/../tools
+          key: tools-arm-gnu-14.2.rel1-${{ hashFiles('backend/worker/toolchain/stage-st.sh') }}
+      - if: steps.firmware.outputs.cache-hit != 'true' && steps.tools.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ../tools
+          curl -fsSL https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi.tar.xz | tar -xJ -C ../tools
+          sh backend/worker/toolchain/stage-st.sh "$ST"
+      - if: steps.firmware.outputs.cache-hit != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: images
+        with:
+          path: ${{ runner.temp }}/images
+          key: images-${{ hashFiles('firmware/*/Dockerfile', 'backend/worker/toolchain/stage-arduino.sh') }}
+      - if: steps.firmware.outputs.cache-hit != 'true' && steps.images.outputs.cache-hit == 'true'
+        run: docker load -i "$RUNNER_TEMP/images/images.tar"
+      - if: steps.firmware.outputs.cache-hit != 'true'
+        run: |
+          corepack enable && pnpm install --frozen-lockfile
+          make -C firmware -j"$(nproc)" all expect TOOL="$TOOL" &
+          make -C firmware/hal -j"$(nproc)" TOOL="$TOOL" HAL="$ST/f4/hal" CMSIS_DEV="$ST/f4/cmsis" CMSIS_CORE="$ST/core" &
+          pnpm firmware-avr &
+          pnpm firmware-arduino &
+          pnpm firmware-pic &
+          for job in $(jobs -p); do wait "$job"; done
+      - if: steps.firmware.outputs.cache-hit != 'true' && steps.images.outputs.cache-hit != 'true'
+        run: mkdir -p "$RUNNER_TEMP/images" && docker save emul-avr emul-arduino emul-pic -o "$RUNNER_TEMP/images/images.tar"
+
+  toolchains:
+    name: Types and toolchain tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -33,10 +87,50 @@ jobs:
           mkdir -p ../tools
           curl -fsSL https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi.tar.xz | tar -xJ -C ../tools
           sh backend/worker/toolchain/stage-st.sh "$ST"
-      - run: make -C firmware -j"$(nproc)" all expect TOOL="$TOOL"
-      - run: make -C firmware/hal -j"$(nproc)" TOOL="$TOOL" HAL="$ST/f4/hal" CMSIS_DEV="$ST/f4/cmsis" CMSIS_CORE="$ST/core"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: pic
+        with:
+          path: ${{ runner.temp }}/pic
+          key: image-pic-${{ hashFiles('firmware/pic/Dockerfile') }}
+      - if: steps.pic.outputs.cache-hit == 'true'
+        run: docker load -i "$RUNNER_TEMP/pic/pic.tar"
+      - run: docker build -q --cache-from emul-pic --build-arg BUILDKIT_INLINE_CACHE=1 -t emul-pic firmware/pic
+      - if: steps.pic.outputs.cache-hit != 'true'
+        run: mkdir -p "$RUNNER_TEMP/pic" && docker save emul-pic -o "$RUNNER_TEMP/pic/pic.tar"
       - run: corepack enable && pnpm install --frozen-lockfile
-      - run: pnpm firmware-avr
-      - run: pnpm firmware-arduino
       - run: pnpm exec tsc -p tsconfig.test.json
-      - run: pnpm test
+      - run: pnpm exec vitest run tests/firmware/cubemx.test.ts tests/firmware/cubeide.test.ts tests/firmware/pic-build.test.ts
+
+  shard:
+    name: Shard ${{ matrix.shard }}
+    needs: firmware
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.x"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            firmware/build
+            firmware/*/build
+          key: firmware-${{ hashFiles('firmware/**', 'backend/worker/**', 'backend/shared/**') }}
+          fail-on-cache-miss: true
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run --shard=${{ matrix.shard }}/$SHARDS --exclude tests/firmware/cubemx.test.ts --exclude tests/firmware/cubeide.test.ts --exclude tests/firmware/pic-build.test.ts
+
+  tests:
+    name: Tests
+    needs: [firmware, toolchains, shard]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
