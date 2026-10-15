@@ -306,12 +306,15 @@ export class CoreDebugger {
     const key = lines.keyAt(pc)
     if (key === ph.key) return DBG_GO
     const fn = lines.functionAt(pc)
-    if (fn && pc === fn.start && this.calledFrom(ph.key, lines)) {
+    // Entered a function, or code with no line and no function symbol (libgcc's assembly routines, NOTYPE on the AVR).
+    const entered = fn ? pc === fn.start : key < 0
+    if (entered && this.calledFrom(ph.key, lines)) {
       const ret = cpu.callReturn()!
       if (!ph.into || key < 0) {
         this.setPhase({ kind: "return", addr: ret, sp: cpu.sp, ipsr: ph.ipsr, then: ph })
         return DBG_GO
       }
+      if (!fn) return this.finish("step")
       const body = lines.postPrologue(fn.start, fn.end)
       if (body === pc) return this.finish("step")
       this.setPhase({ kind: "until", addr: body, sp: null })

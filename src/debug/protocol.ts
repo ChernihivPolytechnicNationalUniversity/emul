@@ -51,8 +51,21 @@ export type CoreDebugCommand =
   | { op: "resume" }
   | { op: "step"; step: StepRequest }
 
-/** The core's registers at a stop. */
-export type CoreRegisters = {
+/** The core's registers at a stop, by architecture; `r` holds them by DWARF register number. */
+export type CoreRegisters = ArmRegisters | AvrRegisters
+
+type CommonRegisters = {
+  /** The next instruction, a byte address. */
+  pc: number
+  /** The active stack pointer. */
+  sp: number
+  cycles: number
+  instructions: number
+  sleeping: boolean
+}
+
+export type ArmRegisters = CommonRegisters & {
+  arch: "arm"
   /** r0–r15; r[13] is the active SP, r[15] the PC. */
   r: number[]
   xpsr: number
@@ -65,16 +78,21 @@ export type CoreRegisters = {
   /** Single-precision registers as bit patterns (d0–d15 overlay them); null without an FPU. */
   s: number[] | null
   fpscr: number
-  cycles: number
-  instructions: number
-  sleeping: boolean
+}
+
+export type AvrRegisters = CommonRegisters & {
+  arch: "avr"
+  /** r0–r31 (DWARF 0–31), then SP as DWARF 32 counts it. */
+  r: number[]
+  sreg: number
+  s: null
 }
 
 /**
  * A change the debugger makes at a stop: bytes stored into memory as the core's own stores
  * would go (RAM and peripherals; flash, ROM and memory not set up refuse), or a core register
- * by name (r0–r12, sp, lr, pc, xpsr for its flags, msp, psp, primask, basepri, faultmask,
- * control, fpscr, s0–s31).
+ * by name (ARM: r0–r12, sp, lr, pc, xpsr for its flags, msp, psp, primask, basepri, faultmask,
+ * control, fpscr, s0–s31; AVR: r0–r31, sp, pc, sreg).
  */
 export type DebugWrite = { kind: "memory"; addr: number; bytes: Uint8Array } | { kind: "register"; reg: string; value: number }
 

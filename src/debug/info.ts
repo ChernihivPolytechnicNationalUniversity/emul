@@ -4,7 +4,8 @@
  * variables in them, globals, types and (with -g3) macros. Built once per image on the UI
  * side; the core only needs the line table (`lines.ts`).
  */
-import { elfAllocRanges, elfSections, parseElf, type Firmware, type MappingSymbol, type Symbol } from "@/mcu/elf"
+import { EM_ARM, EM_AVR, elfAllocRanges, elfSections, parseElf, type Firmware, type MappingSymbol, type Symbol } from "@/mcu/elf"
+import { archOf, type DebugArch } from "./arch"
 import { DW_AT, DW_INL, DW_TAG } from "./dwarf/consts"
 import { DW_AT_GNU_MACROS, DW_AT_MACROS, dwarfSections, indexDies, numOf, parseUnits, refOf, secOf, strOf, type Die, type Sections, type Unit } from "./dwarf/info"
 import { parseLineProgram } from "./dwarf/line"
@@ -61,6 +62,8 @@ export function functionRanges(symbols: Symbol[]): FunctionRange[] {
 
 export class DebugInfo {
   readonly firmware: Firmware
+  /** What the image's core makes of addresses, pointers and registers. */
+  readonly arch: DebugArch
   readonly sections: Sections
   readonly units: Unit[]
   readonly byOffset: Map<number, Die>
@@ -84,7 +87,8 @@ export class DebugInfo {
   constructor(image: Uint8Array) {
     const t0 = performance.now()
     const buf = image.buffer.slice(image.byteOffset, image.byteOffset + image.byteLength) as ArrayBuffer
-    this.firmware = parseElf(buf)
+    this.firmware = parseElf(buf, [EM_ARM, EM_AVR])
+    this.arch = archOf(this.firmware.machine)
     const bytes = this.firmware.image ?? new Uint8Array(buf)
     this.sections = dwarfSections(elfSections(bytes))
     this.units = parseUnitsSafe(this.sections)
@@ -366,9 +370,12 @@ export class DebugInfo {
     return e ? { value: e.value, type: this.types.at(e.type) } : null
   }
 
-  /** Whether an address is inside one of the image's sections. */
+  /**
+   * Whether an address is inside one of the image's sections. Never 0: that is where the linker
+   * puts what it dropped, and on an AVR it is the vector table, inside .text.
+   */
   inImage(addr: number): boolean {
-    return this.alloc.some((r) => addr >= r.addr && addr < r.addr + r.size)
+    return addr !== 0 && this.alloc.some((r) => addr >= r.addr && addr < r.addr + r.size)
   }
 
   /** Every `#define` the image recorded (-g3), parsed on first use. */

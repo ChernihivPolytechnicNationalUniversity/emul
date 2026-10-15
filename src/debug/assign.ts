@@ -6,6 +6,7 @@
  * split up. A value the program computes (a constant, an expression the compiler kept instead of
  * the variable) is stored nowhere and cannot be set.
  */
+import { AVR_DW_SP } from "./arch"
 import { DW_ATE } from "./dwarf/consts"
 import { regName, type Piece } from "./dwarf/expr"
 import { castTo, evaluateExpression, tokenize, type EvalScope } from "./eval"
@@ -113,7 +114,7 @@ function writesFor(env: Env, target: Value, bytes: Uint8Array): DebugWrite[] {
     case "memory":
       return [{ kind: "memory", addr: loc.addr >>> 0, bytes }]
     case "register":
-      return registerWrites(env.frame, loc.reg, bytes, fillOf(target))
+      return env.info.arch.id === "avr" ? avrRegisterWrites(env.frame, loc.reg, bytes) : registerWrites(env.frame, loc.reg, bytes, fillOf(target))
     case "pieces":
       return pieceWrites(env, loc.pieces, bytes)
     case "bytes":
@@ -179,6 +180,21 @@ function registerWrites(frame: StackFrame | null, reg: number, bytes: Uint8Array
   return out
 }
 
+/** AVR registers are a byte each: a wider value goes on in the ones above (r24:r25 for an int). */
+function avrRegisterWrites(frame: StackFrame | null, reg: number, bytes: Uint8Array): DebugWrite[] {
+  if (reg + bytes.length > 32) throw new Unwritable(`r${reg} cannot hold ${bytes.length} bytes`)
+  return [...bytes].flatMap((b, i) => avrHomeWrites(frame, reg + i, b))
+}
+
+/** An AVR register of a frame (r0–r31, 32 for SP), set where the frame keeps it: the core's register or a callee's one-byte save slot. */
+function avrHomeWrites(frame: StackFrame | null, n: number, value: number): DebugWrite[] {
+  const name = n === AVR_DW_SP ? "sp" : `r${n}`
+  const home: RegHome | null = frame ? frame.regs.rHome[n] : { kind: "register", reg: n }
+  if (!home) throw new Unwritable(`${name} is not kept in this frame (#${frame?.index ?? 0}): the code it called did not save it`)
+  if (home.kind === "memory") return [{ kind: "memory", addr: home.addr, bytes: Uint8Array.of(value & 0xff) }]
+  return [{ kind: "register", reg: home.reg === AVR_DW_SP ? "sp" : `r${home.reg}`, value: n === AVR_DW_SP ? value & 0xffff : value & 0xff }]
+}
+
 /** A frame's register set: where the frame keeps it (the core's register, or a callee's save slot). */
 function homeWrites(frame: StackFrame | null, n: number, fp: boolean, value: number): DebugWrite[] {
   const home: RegHome | null = frame ? (fp ? (frame.regs.sHome?.[n] ?? null) : frame.regs.rHome[n]) : { kind: "register", reg: n }
@@ -201,6 +217,13 @@ const CORE = ["r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10",
 export function registerAssignment(env: Env, scope: EvalScope, name: string, text: string): DebugWrite[] {
   const reg = name.toLowerCase()
   const s = scalarOf(env, evaluateExpression(env, scope, text))
+  if (env.info.arch.id === "avr") {
+    const r = /^r(\d{1,2})$/.exec(reg)
+    if (r && Number(r[1]) < 32) return avrHomeWrites(env.frame, Number(r[1]), u32(s))
+    if (reg === "sp") return avrHomeWrites(env.frame, AVR_DW_SP, u32(s))
+    if ((reg === "pc" || reg === "sreg") && !env.frame?.index) return [{ kind: "register", reg, value: u32(s) }]
+    throw new Unwritable(`${name} cannot be set${reg === "pc" || reg === "sreg" ? " in a caller's frame" : ""}`)
+  }
   const fp = /^s(\d{1,2})$/.exec(reg)
   if (fp) return homeWrites(env.frame, Number(fp[1]), true, s.kind === "float" ? f32bits(s.value) : u32(s))
   const n = CORE.indexOf(reg)

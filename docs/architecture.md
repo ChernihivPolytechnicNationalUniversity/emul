@@ -321,6 +321,13 @@ to the return address under a temporary breakpoint, the stack pointer checked so
 interrupt taken mid-step runs to its return. A fault stops the core as it is entered (vector catch, on unless the board turns it
 off), and so does a `BKPT`.
 
+The unit knows a core only through `DebugTarget` (in `debugger.ts`): byte addresses, the stack pointer, the interrupt context,
+which instructions are calls and where a call returns to. The Cortex-M `Cpu` implements it itself; `src/mcu/avr/debug.ts` adapts
+the AVR core, whose program counter counts words and whose calls leave the return address on the stack. The UI's half takes
+what differs between images from `src/debug/arch.ts`: pointer width, and how a pointer the program holds maps onto the one
+address space the debugger reads (identity on ARM; avr-gdb's flash at 0, data space at 0x800000, EEPROM at 0x810000 on the
+AVR). Registers come as `ArmRegisters | AvrRegisters`, the unwinder and the registers pane branch on `arch`.
+
 A probe on a real board halts the core while the world runs on; here the bench is one machine. A stop on any core ends the
 solver step it happened in and pauses the loop (`SimLoop.debugStops`), so the circuit freezes with the program, and a step takes
 the whole bench along for as long as it runs: stepping over `HAL_Delay(500)` runs the circuit 500 ms. A core in a worker reports

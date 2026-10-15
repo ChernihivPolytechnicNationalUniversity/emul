@@ -10,7 +10,8 @@ import { EM_AVR, parseFirmware, type Firmware } from "../elf"
 import type { PadDrive } from "../periph/gpio"
 import type { PadRef } from "../pads"
 import { CoreDebugger } from "../debugger"
-import type { CoreDebugCommand, DebugStop } from "@/debug/protocol"
+import { AVR_DATA } from "@/debug/arch"
+import type { AvrRegisters, CoreDebugCommand, DebugStop, DebugWrite, InspectReply, InspectRequest, MemoryChunk } from "@/debug/protocol"
 import { AvrCpu, type AvrSystem } from "./cpu"
 import { AvrDebugTarget } from "./debug"
 import type { AvrProfile } from "./chip"
@@ -666,6 +667,101 @@ export class AvrMcu implements AvrBus, AvrSystem {
   /** Where the core is stopped for the debugger, when it is. */
   get debugStop(): DebugStop | null {
     return this.cpu.dbg?.stop ?? null
+  }
+
+  /**
+   * Registers and memory as they are, without side effects, in avr-gdb's addresses: flash
+   * from 0, data space at 0x800000, EEPROM at 0x810000. The request's writes come first.
+   */
+  inspect(req: InspectRequest): InspectReply {
+    const cpu = this.cpu
+    const writeErrors = req.write?.length ? req.write.map((w) => this.applyWrite(w)).filter((e): e is string => e !== null) : undefined
+    let regs: AvrRegisters | null = null
+    if (req.regs)
+      regs = { arch: "avr", r: [...cpu.data.subarray(0, 32), cpu.sp], pc: cpu.pc * 2, sp: cpu.sp, sreg: cpu.sreg, s: null, cycles: cpu.cycles, instructions: cpu.instructions, sleeping: cpu.sleeping }
+    return { regs, memory: (req.ranges ?? []).map((q) => this.peekRange(q.addr >>> 0, Math.max(0, Math.min(q.size, 1 << 20)))), stop: this.debugStop, time: this.time, halted: cpu.halted?.message ?? null, writeErrors }
+  }
+
+  /**
+   * I/O registers a read acts on (DS40002061B): reading UDR0 takes a byte from the receive
+   * buffer (§20.11.1), SPSR then SPDR clears SPIF (§19.5.2), ADCL locks the result until ADCH
+   * is read (§24.9.3), and the 16-bit timer's low bytes latch the high byte into TEMP (§15.3).
+   * The debugger leaves them unread.
+   */
+  private static readonly READ_ACTS = new Set(["UDR0", "SPSR", "SPDR", "ADCL", "ADCH", "TCNT1L", "TCNT1H", "ICR1L", "ICR1H"])
+
+  /** A data-space byte as the debugger may read it: null where a read would act or nothing is. */
+  peekData(a: number): number | null {
+    const cpu = this.cpu
+    if (a < 0x20 || a === SREG || a === 0x5d || a === 0x5e) return cpu.data[a]
+    if (a < 0x100) {
+      const name = this.names.get(a)
+      if (!name || AvrMcu.READ_ACTS.has(name)) return null
+      const at = cpu.at
+      cpu.at = cpu.cycles
+      try {
+        return cpu.ioRead[a](a) & 0xff
+      } finally {
+        cpu.at = at
+      }
+    }
+    return a <= cpu.ramEnd ? cpu.data[a] : null
+  }
+
+  private peekRange(addr: number, size: number): MemoryChunk {
+    const bytes = new Uint8Array(size)
+    const invalid: [number, number][] = []
+    const cpu = this.cpu
+    for (let i = 0; i < size; i++) {
+      const a = addr + i
+      let v: number | null = null
+      if (a < this.chip.flashBytes) v = (cpu.flash[a >> 1] >> ((a & 1) * 8)) & 0xff
+      else if (a >= AVR_DATA && a < AVR_DATA + 0x10000) v = this.peekData(a - AVR_DATA)
+      else if (a >= 0x810000 && a < 0x810000 + this.eeprom.length) v = this.eeprom[a - 0x810000]
+      if (v === null) {
+        const last = invalid[invalid.length - 1]
+        if (last && last[1] === a) last[1] = a + 1
+        else invalid.push([a, a + 1])
+      } else bytes[i] = v
+    }
+    return invalid.length ? { addr, bytes, invalid } : { addr, bytes }
+  }
+
+  /** One debugger change: a data-space store as the core would make it, EEPROM, or a register. */
+  private applyWrite(w: DebugWrite): string | null {
+    const cpu = this.cpu
+    const at = (a: number) => `0x${a.toString(16)}`
+    if (w.kind === "register") {
+      const v = w.value >>> 0
+      const r = /^r(\d{1,2})$/.exec(w.reg)
+      if (r && Number(r[1]) < 32) cpu.data[Number(r[1])] = v & 0xff
+      else if (w.reg === "sp") cpu.sp = v & 0xffff
+      else if (w.reg === "sreg") cpu.data[SREG] = v & 0xff
+      else if (w.reg === "pc") {
+        cpu.pc = (v >>> 1) & cpu.pcMask
+        // The stop is where the core now goes on from.
+        const d = cpu.dbg
+        if (d?.stop) d.stop = { ...d.stop, pc: cpu.pc * 2 }
+      } else return `${w.reg} is not a register of the AVR core`
+      return null
+    }
+    for (let i = 0; i < w.bytes.length; i++) {
+      const a = w.addr + i
+      const b = w.bytes[i]
+      if (a < AVR_DATA) return `${at(a)} is in flash, which only a new build changes`
+      if (a >= 0x810000 && a < 0x810000 + this.eeprom.length) {
+        this.eeprom[a - 0x810000] = b
+        continue
+      }
+      const d = a - AVR_DATA
+      if (d > cpu.ramEnd) return `nothing answers at ${at(a)}`
+      if (d >= 0x20 && d < 0x100 && !this.names.has(d) && d !== SREG && d !== 0x5d && d !== 0x5e) return `nothing answers at ${at(a)}`
+      const was = cpu.at
+      cpu.at = cpu.cycles
+      cpu.write(d, b)
+      cpu.at = was
+    }
+    return null
   }
 
   /** RESET pin level (unless RSTDISBL makes it PC6): low holds the core in reset, the rising edge starts the time-out. */

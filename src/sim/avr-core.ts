@@ -293,18 +293,7 @@ export class AvrCore implements CoreHost {
     return this.mcu.debugStop
   }
   inspect(req: InspectRequest): Promise<InspectReply> {
-    const data = this.mcu.cpu.data
-    const memory = (req.ranges ?? []).map((r) => {
-      const bytes = new Uint8Array(r.size)
-      const invalid: [number, number][] = []
-      for (let i = 0; i < r.size; i++) {
-        const a = r.addr + i
-        if (a < data.length) bytes[i] = data[a]
-        else invalid.push([a, a + 1])
-      }
-      return { addr: r.addr, bytes, invalid }
-    })
-    return Promise.resolve({ regs: null, memory, stop: this.mcu.debugStop, time: this.mcu.time, halted: this.mcu.cpu.halted?.message ?? null })
+    return Promise.resolve(this.mcu.inspect(req))
   }
   dispose() {}
 }

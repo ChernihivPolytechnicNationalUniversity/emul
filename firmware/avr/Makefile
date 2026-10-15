@@ -4,7 +4,8 @@ CC      = avr-gcc
 OBJDUMP = avr-objdump
 HOSTCC ?= gcc
 MCU     = -mmcu=atmega328p
-CFLAGS  = $(MCU) -std=gnu11 -Wall -Wextra -g -Icommon -ffunction-sections -fdata-sections -DF_CPU=16000000UL
+# Debian's avr-gcc 5.4 writes stabs for a bare -g: DWARF has to be asked for.
+CFLAGS  = $(MCU) -std=gnu11 -Wall -Wextra -gdwarf-4 -Icommon -ffunction-sections -fdata-sections -DF_CPU=16000000UL
 LDFLAGS = $(MCU) -Wl,--gc-sections -lm
 
 TESTS := $(basename $(notdir $(wildcard tests/*.c)))
@@ -17,7 +18,15 @@ $(shell mkdir -p build)
 # Example programs for the schematic examples: -Os, committed as firmware/examples/avr-*.elf.
 EXAMPLES := $(foreach e,$(basename $(notdir $(wildcard examples/*.c))),../examples/avr-$(e).elf)
 
-all: $(ELFS) $(HOSTS:.host=.expect) $(ELFS:.elf=.lst) $(EXAMPLES)
+# The debugger's test program, at the level a Debug build has and at -Os.
+DEBUG := build/debug-O0.elf build/debug-Os.elf
+
+all: $(ELFS) $(HOSTS:.host=.expect) $(ELFS:.elf=.lst) $(EXAMPLES) $(DEBUG) $(DEBUG:.elf=.lst)
+
+build/debug-O0.elf: debug/debug.c
+	$(CC) $(CFLAGS) -g3 -O0 $< -o $@ $(LDFLAGS)
+build/debug-Os.elf: debug/debug.c
+	$(CC) $(CFLAGS) -g3 -Os $< -o $@ $(LDFLAGS)
 
 ../examples/avr-%.elf: examples/%.c
 	$(CC) $(CFLAGS) -Os $< -o $@ $(LDFLAGS)

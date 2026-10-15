@@ -74,7 +74,7 @@ export function avrDisasm(w1: number, w2: number, addr: number): AvrInsn {
       return store ? one("std", `${ptr}+${q}, r${d5}`, hex2(q)) : one("ldd", `r${d5}, ${ptr}+${q}`, hex2(q))
     }
     case 0x9:
-      return group9(w1, w2, addr, one, d5, two, word)
+      return group9(w1, w2, one, d5, two, word)
     case 0xb: {
       const a = (w1 & 0x0f) | ((w1 >> 5) & 0x30)
       return w1 & 0x800 ? one("out", `${hex2(a)}, r${d5}`, String(a)) : one("in", `r${d5}, ${hex2(a)}`, String(a))
@@ -98,7 +98,7 @@ export function avrDisasm(w1: number, w2: number, addr: number): AvrInsn {
   return word()
 }
 
-function group9(w1: number, w2: number, addr: number, one: (m: string, o?: string, c?: string, t?: number | null) => AvrInsn, d5: number, two: string, word: () => AvrInsn): AvrInsn {
+function group9(w1: number, w2: number, one: (m: string, o?: string, c?: string, t?: number | null) => AvrInsn, d5: number, two: string, word: () => AvrInsn): AvrInsn {
   const low = w1 & 0xf
   switch ((w1 >> 9) & 7) {
     case 0: // 1001 000d: loads
