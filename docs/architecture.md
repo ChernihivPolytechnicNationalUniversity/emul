@@ -282,6 +282,20 @@ per-kind index lists instead of every element (strike checks, the switch mask, t
 operating-point memo's arrays, caching each part's heating factor per step length, and caching a wire's marker
 speed while its current holds within 0.1 %.
 
+Pads toggling into listen-only loads skip the solve too. A *leaf* is a pad's node with nothing but
+fixed resistors, capacitors and pads on it, every other end on ground or on a node that is not a
+leaf (an LCD's input with its pull-up and the pins' capacitance). Once the circuit has settled, a
+step whose only change is pads on leaves is taken in closed form (`Engine.takeLeaves`): each leaf's
+voltage from its conductances to its rails as they stand, its elements' readings with it, and the
+change in current it puts on each rail summed since the last full solve, which, times that rail's
+resistance through the circuit (`sourceAt`), must stay within 1 mV (`LEAF_DV`); a leaf whose own RC
+is not done within 5 % of the step, or an element on it that would fail, declines too. A full solve
+after that keeps the circuit settled as soon as what is left of the leaves' load step (node changes,
+and a capacitor's current by the resistance it sees) is within the same millivolt. Against the same
+circuit solved in full every step, nodes agree within 1.5 mV and currents within 1 % + 40 µA, with a
+fifth of the factorizations (`tests/sim/engine-leaf.test.ts`); a Nano writing a parallel 1602 runs
+2.4 times as fast (0.54× → 1.3× real time in Node, one thread).
+
 The same factors give the ADC its source. An ADC-capable pad's driving-point resistance is one
 substitution with a unit vector at its node (`Engine.sourceAt`), less the companion conductance of
 the capacitors on that node, whose capacitance is reported beside it; the loop hands both to the
