@@ -1124,8 +1124,7 @@ export class Engine {
     return dt > 0
   }
 
-  /** Hash of every switch and pad state, so a toggle invalidates the cached factorization. */
-  /** Also leaves the hash without the pads on leaves in `restMask`. */
+  /** Hash of every switch and pad state, so a toggle invalidates the cached factorization; the hash without the pads on leaves goes to `restMask`. */
   private switchMask(parts: PartReader) {
     let mask = 0
     let rest = 0
