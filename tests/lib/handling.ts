@@ -4,7 +4,7 @@ import { examples, type Example } from "@/schematic/examples"
 import { getDef } from "@/schematic/registry"
 import { partKey, type PartState, type PlacedObject, type Schematic } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
-import { exampleBase64 } from "../lib/firmware"
+import { exampleBase64 } from "./firmware"
 
 const FIRMWARE: Record<string, Record<string, string>> = {
   "nucleo-blink": { U1: "nucleo-blink.elf" },
@@ -183,13 +183,16 @@ function handleLikeAStudent(ex: Example, doc: Schematic, seconds: number) {
   return { burns, actions, controls: controls.length }
 }
 
-describe("a student at every example burns only what a real bench would", () => {
-  it.for(examples.map((ex) => [ex.id, ex] as const))("%s", ([, ex], { skip }) => {
-    const doc = ex.build(GRID)
-    if (!withFirmware(ex, doc)) return skip(`no image in firmware/examples for ${ex.id}`)
-    const { burns, actions, controls } = handleLikeAStudent(ex, doc, HANDLING_SECONDS)
-    if (controls) expect.soft(actions, "the student did something").toBeGreaterThan(3)
-    for (const b of burns)
-      expect.soft(BENCH_WOULD_BURN_TOO[ex.id]?.[b.ref], `${b.ref} (element ${b.element}) burnt at ${b.at.toFixed(3)} s while ${b.doing}: ${b.reason}`).toBeDefined()
+/** Every `of`-th example from the `part`-th on, so the examples split over several files that run side by side. */
+export function handlingSuite(part: number, of: number) {
+  describe("a student at every example burns only what a real bench would", () => {
+    it.for(examples.filter((_, i) => i % of === part).map((ex) => [ex.id, ex] as const))("%s", ([, ex], { skip }) => {
+      const doc = ex.build(GRID)
+      if (!withFirmware(ex, doc)) return skip(`no image in firmware/examples for ${ex.id}`)
+      const { burns, actions, controls } = handleLikeAStudent(ex, doc, HANDLING_SECONDS)
+      if (controls) expect.soft(actions, "the student did something").toBeGreaterThan(3)
+      for (const b of burns)
+        expect.soft(BENCH_WOULD_BURN_TOO[ex.id]?.[b.ref], `${b.ref} (element ${b.element}) burnt at ${b.at.toFixed(3)} s while ${b.doing}: ${b.reason}`).toBeDefined()
+    })
   })
-})
+}
