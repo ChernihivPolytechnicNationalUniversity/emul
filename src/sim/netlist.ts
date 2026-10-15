@@ -8,7 +8,7 @@ import { parseValue } from "./units"
 /** Net index; GROUND is the reference node and has no matrix row. */
 export const GROUND = -1
 
-export type ResolvedLimits = { power?: number; current?: number; voltage?: number; reverse?: number; surge?: number; tau: number; fail: "open" | "short"; fatal: boolean; aboveSupply?: number }
+export type ResolvedLimits = { power?: number; current?: number; voltage?: number; reverse?: number; surge?: number; tau: number; fail: "open" | "short"; fatal: boolean; aboveSupply?: number; slow?: boolean }
 
 export const DEFAULT_TAU = 0.035
 
@@ -172,7 +172,7 @@ function resolveLimits(l: Limits | undefined, props: Record<string, string>): Re
     const n = resolveValue(v, props)
     return Number.isFinite(n) && n > 0 ? n : undefined
   }
-  const out = { power: num(l.power), current: num(l.current), voltage: num(l.voltage), reverse: num(l.reverse), surge: num(l.surge), tau: num(l.tau) ?? DEFAULT_TAU, fail: l.fail ?? "open", fatal: l.fatal ?? true, aboveSupply: num(l.aboveSupply) }
+  const out = { power: num(l.power), current: num(l.current), voltage: num(l.voltage), reverse: num(l.reverse), surge: num(l.surge), tau: num(l.tau) ?? DEFAULT_TAU, fail: l.fail ?? "open", fatal: l.fatal ?? true, aboveSupply: num(l.aboveSupply), slow: l.slow }
   // Every rating left blank (a battery without a stated max current): the element is unrated.
   if (out.power === undefined && out.current === undefined && out.voltage === undefined && out.reverse === undefined && out.aboveSupply === undefined) return undefined
   return out
