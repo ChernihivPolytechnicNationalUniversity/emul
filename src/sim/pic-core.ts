@@ -1,7 +1,7 @@
 /**
  * A PIC16F62x as the simulation loop sees any core (`CoreHost`): run to a time, read the pads,
- * take the circuit's levels and voltages, report status. It runs in the loop's own thread, as
- * the AVR does: a 5 MIPS 8-bit core is a small share of a CPU thread.
+ * take the circuit's levels and voltages, report status. In the loop's own thread, or driven
+ * by `core-worker.ts` in a worker of its own.
  *
  * The part keeps its own power-on and brown-out logic and its MCLR input (the loop passes the
  * voltage on MCLR/VPP, which can also be the 13 V that enters Program/Verify mode); OSC1/OSC2

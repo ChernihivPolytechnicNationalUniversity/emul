@@ -11,8 +11,9 @@
  * the core sees (sampled pin levels, ADC voltages, VDD/NRST) reaches it one step later than
  * it would in-process: 20 µs of latency in both directions, invisible for LEDs, buttons, PWM
  * and ADC readings. Where the exact time of an answer matters — a digital part answering an
- * I²C edge — the proxy drops to a synchronous round trip per run (`sync`) while that traffic
- * lasts, so those exchanges keep their timing; and cores sharing a net with another core stay
+ * I²C edge — the proxy runs a synchronous round trip per run (`sync`) for as long as such a
+ * part is wired to it: the first exchange already needs its answer in time (an AVR's Wire
+ * waits for an ACK without a timeout); and cores sharing a net with another core stay
  * in-process altogether, in lockstep.
  *
  * Transport is a SharedArrayBuffer with Atomics: the loop and the core each write their own
@@ -27,6 +28,7 @@ import { CpuHalt } from "@/mcu/faults"
 import type { PadDrive } from "@/mcu/periph/gpio"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import { Stm32, type ClockStatus, type PadRef, type PowerStatus } from "@/mcu/stm32f429"
+import { ANALOG_PORT } from "@/mcu/pads"
 import type { CoreDebugCommand, DebugStop, InspectReply, InspectRequest, StopReason } from "@/debug/protocol"
 import type { PanelSignal, PanelSpec } from "@/schematic/types"
 import { PanelInstance } from "./display"
@@ -163,8 +165,8 @@ export interface CoreHost {
   dispose(): void
 }
 
-/** Pad keys (port·16 + pin) cover ports A–K. */
-export const PAD_KEYS = 11 * 16
+/** Pad keys (port·16 + pin) cover ports A–K and the analog-only pins (`ANALOG_PORT`). */
+export const PAD_KEYS = (ANALOG_PORT + 1) * 16
 
 /**
  * Wait until `ctl[index]` is no longer `value`: spinning first, since a futex wake-up costs
@@ -422,7 +424,11 @@ export const CTL = {
   READY: 8,
   /** Steps of a `CMD_STEPS` run the core is past without anything changing: the loop may take them meanwhile. */
   PROGRESS: 9,
-  WORDS: 10,
+  /** What the core's settings make of it, kept current by the worker as they change (`TRAIT_*`). */
+  TRAITS: 10,
+  /** Messages the worker has handled (against `MAIL`, those posted). */
+  TAKEN: 11,
+  WORDS: 12,
 } as const
 
 /** Command flags (per run, in the command bank). */
@@ -440,13 +446,16 @@ export const OUT_RUNNING = 2
 export const OUT_HALTED = 4
 /** Stopped for the debugger; the output bank has the PC and the reason. */
 export const OUT_STOPPED = 8
+/** Traits: the word is set; the reset pin does not reset the part (`CoreHost.resetPin` false: a fuse, or a part that reads MCLR itself). */
+export const TRAIT_KNOWN = 1
+export const TRAIT_NO_RESET_PIN = 2
 /** Stop reasons as the output bank codes them. */
 export const STOP_REASONS: StopReason[] = ["breakpoint", "step", "pause", "bkpt", "exception", "reset"]
 
 /** Command bank layout (Float64 offsets within the bank). */
-export const CMD = { TARGET: 0, FLAGS: 1, HSE_HZ: 2, HSE_KIND: 3, HSE_START: 4, LSE_HZ: 5, LSE_KIND: 6, LSE_START: 7, LEVELS: 8, ANALOG: 8 + PAD_KEYS, BATTERY: 8 + 2 * PAD_KEYS, BASE: 9 + 2 * PAD_KEYS, STEP: 10 + 2 * PAD_KEYS, STEPS: 11 + 2 * PAD_KEYS, IN_UPTO: 12 + 2 * PAD_KEYS, VDD: 13 + 2 * PAD_KEYS, VBAT: 14 + 2 * PAD_KEYS, READBACK: 15 + 2 * PAD_KEYS, SOURCE_OHMS: 15 + 3 * PAD_KEYS, SOURCE_FARADS: 15 + 4 * PAD_KEYS, VREF: 15 + 5 * PAD_KEYS, SIZE: 16 + 5 * PAD_KEYS } as const
+export const CMD = { TARGET: 0, FLAGS: 1, HSE_HZ: 2, HSE_KIND: 3, HSE_START: 4, LSE_HZ: 5, LSE_KIND: 6, LSE_START: 7, LEVELS: 8, ANALOG: 8 + PAD_KEYS, BATTERY: 8 + 2 * PAD_KEYS, BASE: 9 + 2 * PAD_KEYS, STEP: 10 + 2 * PAD_KEYS, STEPS: 11 + 2 * PAD_KEYS, IN_UPTO: 12 + 2 * PAD_KEYS, VDD: 13 + 2 * PAD_KEYS, VBAT: 14 + 2 * PAD_KEYS, READBACK: 15 + 2 * PAD_KEYS, SOURCE_OHMS: 15 + 3 * PAD_KEYS, SOURCE_FARADS: 15 + 4 * PAD_KEYS, VREF: 15 + 5 * PAD_KEYS, VRESET: 16 + 5 * PAD_KEYS, SIZE: 17 + 5 * PAD_KEYS } as const
 /** Output bank layout. */
-export const OUT = { TIME: 0, FLAGS: 1, IDD: 2, POR: 3, STEPS: 4, STOP_PC: 5, STOP_REASON: 6, DRIVE: 7, DUTY: 7 + PAD_KEYS, DUTY_BASE: 7 + 2 * PAD_KEYS, SIZE: 7 + 3 * PAD_KEYS } as const
+export const OUT = { TIME: 0, FLAGS: 1, IDD: 2, POR: 3, STEPS: 4, STOP_PC: 5, STOP_REASON: 6, DRIVE: 7, DUTY: 7 + PAD_KEYS, DUTY_BASE: 7 + 2 * PAD_KEYS, VIH: 7 + 3 * PAD_KEYS, VIL: 7 + 4 * PAD_KEYS, SIZE: 7 + 5 * PAD_KEYS } as const
 /** Edge rings: [time, code] pairs; code = key·4 + level (0 low, 1 high, 2 released). */
 export const OUT_RING = 8192
 export const IN_RING = 2048
@@ -499,6 +508,8 @@ export function decodeClock(bank: Float64Array, at: number): ClockSource | null 
 export type ToCore =
   | { t: "init"; chip: string; external: MemoryRegion[]; shm: SharedArrayBuffer }
   | { t: "load"; data: ArrayBuffer; name: string }
+  | { t: "configure"; props: Record<string, string> }
+  | { t: "rc"; hz: number | null; erOhms: number | null }
   | { t: "watch"; keys: number[] }
   | { t: "pads"; keys: number[] }
   | { t: "status"; seq: number }
@@ -507,11 +518,13 @@ export type ToCore =
   | { t: "drop"; object: string }
   | { t: "debug"; cmd: CoreDebugCommand }
   | { t: "inspect"; seq: number; req: InspectRequest }
+  | { t: "reference"; seq: number; volts: number; wiring: { grounded: boolean; wired: boolean } }
 /** Messages from the core worker. */
 export type FromCore =
   | { t: "status"; seq: number; status: CoreStatus }
   | { t: "frame"; object: string; frame: ArrayBuffer | null; status: string }
   | { t: "inspected"; seq: number; reply: InspectReply }
+  | { t: "reference"; seq: number; text: string | null }
 
 /** How a remote core's messages travel; the environment (browser or node) provides it. */
 export interface CoreTransport {
@@ -519,13 +532,15 @@ export interface CoreTransport {
   onMessage(cb: (msg: FromCore) => void): void
   /** Take replies that have arrived, synchronously, where the environment allows (node). */
   poll?(): void
+  /** The proxy may block until the worker has the core up (node's main thread can wait; a page's cannot). */
+  readonly blocking?: boolean
   terminate(): void
 }
 
 // --- the proxy of a core in a worker ------------------------------------------------------------
 
 export class RemoteCore implements CoreHost {
-  readonly chip: ChipProfile
+  readonly chip: McuProfile
   private readonly transport: CoreTransport
   private readonly ctl: Int32Array
   private readonly f64: Float64Array
@@ -558,18 +573,24 @@ export class RemoteCore implements CoreHost {
   private battery = 0
   private watch: number[] = []
   boot0 = false
+  /** Set by the loop while a part on the core's nets may answer its edges: then it also runs in step. */
   yieldOnOutput = false
-  /**
-   * Runs in step until this run count when something must answer an edge at the edge's own
-   * time; the loop extends it while such traffic lasts.
-   */
-  private syncUntil = 0
-  private runs = 0
 
   private readonly answersWithinMs: number
   private deaf = false
 
-  constructor(chip: ChipProfile, external: MemoryRegion[], transport: CoreTransport, answersWithinMs = WORKER_ANSWERS_WITHIN_MS) {
+  /** What the family's in-process host offers beyond the common interface, answered from the worker's reports. */
+  readonly referenceProblem?: (volts: number, wiring: { grounded: boolean; wired: boolean }) => string | null
+  readonly setResetVoltage?: (volts: number) => void
+  readonly inputThresholds?: (pad: PadRef, vdd: number) => { high: number; low: number }
+  readonly setRcNetwork?: (hz: number | null, erOhms: number | null) => void
+  readonly configure?: (props: Record<string, string>) => void
+  /** The reference verdict the worker last sent, and the queries asked and answered. */
+  private reference: string | null = null
+  private referenceAsked = 0
+  private referenceGot = 0
+
+  constructor(chip: McuProfile, external: MemoryRegion[], transport: CoreTransport, answersWithinMs = WORKER_ANSWERS_WITHIN_MS) {
     this.chip = chip
     this.transport = transport
     this.answersWithinMs = answersWithinMs
@@ -601,9 +622,66 @@ export class RemoteCore implements CoreHost {
         const done = this.inspecting.get(msg.seq)
         this.inspecting.delete(msg.seq)
         done?.(msg.reply)
+      } else if (msg.t === "reference") {
+        this.reference = msg.text
+        this.referenceGot = msg.seq
       }
     })
     this.post({ t: "init", chip: chip.id, external, shm })
+    // Where waiting is allowed, the core is up before the loop first asks: runs start at time 0 as in-process.
+    if (transport.blocking) awaitChange(this.ctl, CTL.READY, 0, 0, answersWithinMs)
+    const own = localHost(chip).prototype as Partial<CoreHost>
+    if (own.referenceProblem)
+      this.referenceProblem = (volts, wiring) => {
+        // The worker judges it by the core's ADC settings; the answer is the one before unless it comes at once (node).
+        const seq = ++this.referenceAsked
+        this.post({ t: "reference", seq, volts, wiring })
+        if (this.transport.poll) {
+          const deadline = performance.now() + 50
+          while (this.referenceGot < seq && performance.now() < deadline) this.transport.poll()
+        }
+        return this.reference
+      }
+    if (own.setResetVoltage) this.setResetVoltage = (volts) => void (this.next[CMD.VRESET] = volts)
+    if (own.inputThresholds)
+      this.inputThresholds = (pad, vdd) => {
+        // As the core judged them at its last run's VDD; before it ran, the chip's plain CMOS levels.
+        const key = pad.port * 16 + pad.pin
+        const high = this.outBank[OUT.VIH + key]
+        if (high > 0) return { high, low: this.outBank[OUT.VIL + key] }
+        const { rising, falling } = chip.electrical.inputThresholdsOfVdd
+        return { high: rising * vdd, low: falling * vdd }
+      }
+    if (own.setRcNetwork) {
+      let last = ""
+      this.setRcNetwork = (hz, erOhms) => {
+        const now = `${hz}/${erOhms}`
+        if (now === last) return
+        last = now
+        this.post({ t: "rc", hz, erOhms })
+      }
+    }
+    if (own.configure) {
+      let last = ""
+      this.configure = (props) => {
+        const now = JSON.stringify(props)
+        if (now === last) return
+        last = now
+        this.post({ t: "configure", props })
+        // Settings decide what the loop reads next (whether RESET resets): where waiting is allowed, have them applied.
+        if (this.transport.blocking) this.settle()
+      }
+    }
+  }
+  /** Wait until the worker has handled every message posted so far. */
+  private settle() {
+    const mail = Atomics.load(this.ctl, CTL.MAIL)
+    for (let taken; (taken = Atomics.load(this.ctl, CTL.TAKEN)) < mail; ) if (!awaitChange(this.ctl, CTL.TAKEN, taken, 0, this.answersWithinMs)) return
+  }
+  /** As the worker's core has it (an AVR's fuses); before it said, as the family's host starts (a PIC reads MCLR itself). */
+  get resetPin() {
+    const traits = Atomics.load(this.ctl, CTL.TRAITS)
+    return traits & TRAIT_KNOWN ? (traits & TRAIT_NO_RESET_PIN) === 0 : this.chip.family !== "pic"
   }
 
   private post(msg: ToCore, transfer?: ArrayBuffer[]) {
@@ -631,15 +709,12 @@ export class RemoteCore implements CoreHost {
     return this.inFlight ? this.targetTime : this.lastTime
   }
   get porThreshold() {
-    // Before the first run the option bytes are at their default (BOR off: 1.7 V).
-    return this.outBank[OUT.POR] || 1.7
+    // Before the first run: the part's own power-on threshold, an STM32's option bytes at their default (BOR off: 1.7 V).
+    if (this.outBank[OUT.POR]) return this.outBank[OUT.POR]
+    return this.chip.family === "avr" ? this.chip.electrical.por.falling : this.chip.family === "pic" ? this.chip.electrical.por : 1.7
   }
   get sync() {
-    return this.runs < this.syncUntil
-  }
-  /** Something on this core's nets needs edges answered at their own time: run in step for a while. */
-  keepInStep(runs: number) {
-    this.syncUntil = Math.max(this.syncUntil, this.runs + runs)
+    return this.yieldOnOutput
   }
 
   load(data: ArrayBuffer, name: string) {
@@ -830,7 +905,6 @@ export class RemoteCore implements CoreHost {
     this.resetPending = false
     this.battery = 0
     this.seq++
-    this.runs++
     this.targetTime = end
     this.inFlight = true
     Atomics.store(this.ctl, CTL.SEQ, this.seq)
@@ -960,13 +1034,18 @@ export class RemoteCore implements CoreHost {
   }
 }
 
+/** The in-process host of a chip's family. */
+function localHost(chip: McuProfile): typeof LocalCore | typeof AvrCore | typeof PicCore {
+  return chip.family === "avr" ? AvrCore : chip.family === "pic" ? PicCore : LocalCore
+}
+
+function chipOf(chipId: string | undefined): McuProfile {
+  return (chipId && (avrChipById(chipId) ?? picChipById(chipId) ?? chipById(chipId))) || STM32F429ZI
+}
+
 /** A core for a board: remote when a spawner is at hand, else in this thread. */
 export function makeCore(chipId: string | undefined, external: MemoryRegion[] | undefined, spawn: (() => CoreTransport) | null): CoreHost {
-  const avr = chipId ? avrChipById(chipId) : undefined
-  if (avr) return new AvrCore(avr)
-  const pic = chipId ? picChipById(chipId) : undefined
-  if (pic) return new PicCore(pic)
-  const chip = (chipId && chipById(chipId)) || STM32F429ZI
+  const chip = chipOf(chipId)
   if (spawn) {
     try {
       return new RemoteCore(chip, external ?? [], spawn())
@@ -974,5 +1053,7 @@ export function makeCore(chipId: string | undefined, external: MemoryRegion[] | 
       // No SharedArrayBuffer (not cross-origin isolated) or no worker: in-process it is.
     }
   }
+  if (chip.family === "avr") return new AvrCore(chip)
+  if (chip.family === "pic") return new PicCore(chip)
   return new LocalCore(chip, external ?? [])
 }

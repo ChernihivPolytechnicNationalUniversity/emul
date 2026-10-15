@@ -235,11 +235,6 @@ class McuInstance {
   coupled = false
   /** Pads (port·16 + pin) on nets with a digital part: traffic there needs answers at exact times. */
   readonly partPads = new Set<number>()
-  /** A remote core with part traffic runs in step with the loop for this many runs after the last edge. */
-  keepInStep() {
-    if (!(this.mcu instanceof RemoteCore)) return
-    ;(this.mcu as { keepInStep?: (runs: number) => void }).keepInStep?.(IN_STEP_RUNS)
-  }
   /** Bring a remote core back into this thread (a peer to run in lockstep with turned up). */
   relocate() {
     // Only a core in a worker moves; one in this thread (an STM32's LocalCore, an AVR) already is here.
@@ -250,7 +245,12 @@ class McuInstance {
     this.mcu = makeCore(def?.chip, def?.mcuMemory, null)
     this.applyDebug()
     if (this.data) this.mcu.load(this.data.slice(0), this.name)
+    if (this.settings) this.mcu.configure?.(this.settings)
+    if (this.rc) this.mcu.setRcNetwork?.(...this.rc)
   }
+  /** The part's own settings from the object (an AVR's fuses) and the RC network on its oscillator pin, for a new core. */
+  settings: Record<string, string> | null = null
+  rc: [hz: number | null, erOhms: number | null] | null = null
   /** What the debugger has set for this board: kept here so a new core (a relocation) gets it too. */
   debug: { breakpoints: BreakpointSpec[]; faults: boolean } = { breakpoints: [], faults: false }
   applyDebug() {
@@ -346,8 +346,6 @@ const LINK_OHMS = 1
 const SERIES_OHMS = 1000
 /** Most steps a core runs ahead of the solver in one go (`quietSteps`). */
 const QUIET_STEPS = 500
-/** Runs a remote core stays in step with the loop after traffic with a digital part (~2 ms of steps). */
-const IN_STEP_RUNS = 100
 /** Time constant of the achieved-speed average, wall-clock seconds. */
 const RATE_TAU = 0.5
 /** Diode current that counts as fully lit. */
@@ -675,7 +673,8 @@ export class SimLoop {
         inst.base = this.engine?.time ?? 0
         this.mapInputs()
       }
-      inst.mcu.configure?.({ ...getDef(obj.def)?.defaults, ...obj.props })
+      inst.settings = { ...getDef(obj.def)?.defaults, ...obj.props }
+      inst.mcu.configure?.(inst.settings)
     }
     for (const id of [...this.mcus.keys()])
       if (!seen.has(id)) {
@@ -736,7 +735,8 @@ export class SimLoop {
         else if (el.kind === "R" && other === GROUND) toGnd = parallel(toGnd, el.value)
         else if (el.kind === "R" && other === inst.powerNet) toVdd = parallel(toVdd, el.value)
       }
-    inst.mcu.setRcNetwork(toVdd === null ? null : rcFrequency(toVdd, farads), toGnd)
+    inst.rc = [toVdd === null ? null : rcFrequency(toVdd, farads), toGnd]
+    inst.mcu.setRcNetwork(...inst.rc)
   }
 
   private boot0High(inst: McuInstance) {
@@ -813,9 +813,15 @@ export class SimLoop {
     for (const inst of this.mcus.values())
       for (const { pad, node } of inst.inputs) padsByNet.set(root(node), [...(padsByNet.get(root(node)) ?? []), { inst, pad }])
     const shared = new Set<number>()
-    for (const [node, pads] of padsByNet) if (pads.length > 1) shared.add(node)
-    // Cores a switch could couple (a keypad's key between two of its pads): in this thread from
-    // the start, since moving a running core here reloads it and loses its state mid-press.
+    /** Nets with pads of two cores or more: those cores run in lockstep, in this thread. */
+    const peers = new Set<number>()
+    for (const [node, pads] of padsByNet) {
+      if (pads.length > 1) shared.add(node)
+      if (new Set(pads.map((p) => p.inst)).size > 1) peers.add(node)
+    }
+    // Cores a switch could couple with each other: in this thread from the start, since moving a
+    // running core here reloads it and loses its state mid-press. (A key between two pads of one
+    // core couples it with nobody: a worker in step hands each edge over.)
     const loose = new Map<number, number>()
     const looseRoot = (n: number) => {
       n = root(n)
@@ -833,7 +839,7 @@ export class SimLoop {
       const r = looseRoot(node)
       couplable.set(r, [...(couplable.get(r) ?? []), ...pads.map((p) => p.inst)])
     }
-    for (const insts of couplable.values()) if (insts.length > 1) for (const inst of insts) inst.relocate()
+    for (const insts of couplable.values()) if (new Set(insts).size > 1) for (const inst of insts) inst.relocate()
     for (const node of shared) netFor(node)
     // Nets with a digital part's pin: a pulse source there reaches the part at its edges' exact times too.
     const partPinNets = new Set<number>()
@@ -896,11 +902,12 @@ export class SimLoop {
     const partNets = new Set<number>()
     this.senseNodes.clear()
     for (const part of this.digitalParts.values()) {
+      const outputs = part.outputsWhenGrounded?.((pin) => engine?.net.pinNet.get(pinKey(part.object, pin)) === GROUND) ?? part.outputs
       for (const pin of part.pins) {
         const node = engine?.net.pinNet.get(pinKey(part.object, pin))
         if (node === undefined) continue
         netFor(root(node)).parts.push({ part, pin })
-        if (!part.outputs || part.outputs.includes(pin)) partNets.add(root(node))
+        if (!outputs || outputs.includes(pin)) partNets.add(root(node))
       }
       if (part.sense && part.senses && engine) {
         const nodes = new Map<string, number>()
@@ -952,6 +959,7 @@ export class SimLoop {
       inst.coupled = false
       inst.partPads.clear()
       const watch: number[] = []
+      let lockstep = false
       for (const i of inst.inputs) {
         const net = nets.get(root(i.node))
         i.digital = net !== undefined && !net.lone
@@ -959,10 +967,12 @@ export class SimLoop {
         // bit-banged UART into the terminal), so they keep their order against the serial ones.
         if (net) watch.push(i.pad.port * 16 + i.pad.pin)
         if (shared.has(root(i.node))) inst.coupled = true
+        if (peers.has(root(i.node))) lockstep = true
         if (partNets.has(root(i.node))) inst.partPads.add(i.pad.port * 16 + i.pad.pin)
       }
-      // Cores in lockstep with a peer run in this thread: a worker cannot yield per edge to another worker.
-      if (inst.coupled) inst.relocate()
+      // Cores in lockstep with a peer run in this thread: a worker cannot yield per edge to another
+      // worker. Two pads of one core on a net need no peer: a worker in step hands each edge over.
+      if (lockstep) inst.relocate()
       inst.mcu.setDigitalWatch(watch)
       inst.mcu.setPads(inst.inputs.map((i) => i.pad.port * 16 + i.pad.pin))
       // A part answers an edge at the edge's own time, so the core must hand edges over as it makes them.
@@ -1266,7 +1276,6 @@ export class SimLoop {
     for (const probe of net.logic) this.logEdge(probe, level, time)
     if (!net.lone)
       for (const p of net.pads) {
-        if (net.parts.length) p.inst.keepInStep()
         p.inst.drive(p.pad, level, time - p.inst.offset)
       }
     for (const t of net.rx) t.decoder.edge({ time, level })
@@ -1314,8 +1323,6 @@ export class SimLoop {
     this.dispatching++
     for (const e of out) {
       const key = e.pad.port * 16 + e.pad.pin
-      // Traffic with a part: a remote core answers in step until it is over.
-      if (inst.partPads.has(key)) inst.keepInStep()
       const node = inst.padNode.get(key)
       const net = this.digitalNet(node)
       const time = e.time + inst.offset

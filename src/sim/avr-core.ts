@@ -1,8 +1,7 @@
 /**
  * An AVR microcontroller as the simulation loop sees any core (`CoreHost`): run to a time, read
- * the pads, take the circuit's levels and voltages, report status. It runs in the loop's own
- * thread; the AVR is light enough (one 16 MHz 8-bit core is a few percent of a CPU thread)
- * that a worker of its own buys nothing yet.
+ * the pads, take the circuit's levels and voltages, report status. In the loop's own thread, or
+ * driven by `core-worker.ts` in a worker of its own.
  */
 import { CpuHalt } from "@/mcu/faults"
 import type { AvrProfile } from "@/mcu/avr/chip"

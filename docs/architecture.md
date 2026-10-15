@@ -297,8 +297,11 @@ The UI thread draws; the simulation worker runs the analog solver, the digital p
 loop; and, when the page is cross-origin isolated (the dev server and nginx send the COOP/COEP
 headers), every MCU core runs in a worker of its own, pipelined one 20 µs step ahead of the
 solver — pad and pin levels cross with 20 µs of latency, which the inspector says ("Runs:
-worker (pipelined)"). A core with a digital part on its nets (an I²C EEPROM, the GT911) drops
-into step with the loop while that traffic lasts, and two cores sharing a net stay in the
+worker (pipelined)"). Every family runs there: the worker drives the same in-process host the
+loop would (`LocalCore`, `AvrCore`, `PicCore`). A core with a digital part on its nets that can
+answer (an I²C EEPROM, the GT911; not an LCD whose R/W is grounded) runs in step with the loop
+for as long as the part is wired, since the first exchange already needs its answer in time,
+and so does a core with two of its own pads on one net; two cores sharing a net stay in the
 solver's thread in lockstep. Without isolation everything runs in the simulation worker.
 
 The loop waits on a worker's answer with `Atomics.wait`, so a worker that never answers would
