@@ -12,6 +12,7 @@ import { decode, jitHelpers, type Instr } from "./decode"
 import { compileBlock, type Compiled } from "./jit"
 import { CpuHalt, EXC, ExceptionRequest, excName } from "./faults"
 import { Scs } from "./scs"
+import { BreakpointSet } from "./breakpoints"
 import { DBG_STEP_QUIET, DBG_STOP, type CoreDebugger } from "./debugger"
 import { defaultMapExecutable, MemoryGuard, MPU_ENABLE, MPU_HFNMIENA, READ, WRITE } from "./mpu"
 
@@ -21,27 +22,7 @@ export { CpuHalt, EXC, ExceptionRequest, NUM_EXC, NUM_IRQ } from "./faults"
  * The addresses the run loop stops at. Blocks never run through one, so a change drops the
  * decoded blocks (through `onChange`) and they are built again around the new set.
  */
-export class BreakpointSet extends Set<number> {
-  onChange: (() => void) | null = null
-  add(addr: number) {
-    if (!this.has(addr)) {
-      super.add(addr >>> 0)
-      this.onChange?.()
-    }
-    return this
-  }
-  delete(addr: number) {
-    const had = super.delete(addr >>> 0)
-    if (had) this.onChange?.()
-    return had
-  }
-  clear() {
-    if (this.size) {
-      super.clear()
-      this.onChange?.()
-    }
-  }
-}
+export { BreakpointSet } from "./breakpoints"
 
 /** Thumb condition codes. */
 export const COND = ["eq", "ne", "cs", "cc", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al", "nv"]
@@ -208,6 +189,36 @@ export class Cpu {
     } catch {
       return null
     }
+  }
+
+  // --- the debug unit's view (DebugTarget) ------------------------------------
+
+  get sp() {
+    return this.r[13]
+  }
+  get context() {
+    return this.ipsr
+  }
+  setPc(addr: number) {
+    this.pc = this.nextPc = addr >>> 0
+  }
+  readonly callSizes = [4, 2] as const
+  callSize(addr: number): number {
+    const instr = this.instrAt(addr)
+    return instr && /^blx?\b/.test(instr.text) ? instr.size : 0
+  }
+  breakSize(addr: number): number {
+    return /^bkpt\b/.test(this.instrAt(addr)?.text ?? "") ? 2 : 0
+  }
+  /** LR after a BL/BLX: the Thumb bit set, and not an EXC_RETURN. */
+  callReturn(): number | null {
+    const lr = this.r[14]
+    if ((lr & 1) === 0 || lr >>> 0 >= 0xf0000000) return null
+    return (lr & ~1) >>> 0
+  }
+  caughtFault(exc: number): { detail?: string } | null {
+    if (exc !== EXC.HARD_FAULT && exc !== EXC.MEM_MANAGE && exc !== EXC.BUS_FAULT && exc !== EXC.USAGE_FAULT) return null
+    return { detail: this.scs.faults[this.scs.faults.length - 1]?.detail }
   }
 
   // --- reset --------------------------------------------------------------------

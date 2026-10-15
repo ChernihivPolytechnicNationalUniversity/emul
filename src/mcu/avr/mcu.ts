@@ -9,7 +9,10 @@ import { CpuHalt, emulatorError } from "../faults"
 import { EM_AVR, parseFirmware, type Firmware } from "../elf"
 import type { PadDrive } from "../periph/gpio"
 import type { PadRef } from "../pads"
+import { CoreDebugger } from "../debugger"
+import type { CoreDebugCommand, DebugStop } from "@/debug/protocol"
 import { AvrCpu, type AvrSystem } from "./cpu"
+import { AvrDebugTarget } from "./debug"
 import type { AvrProfile } from "./chip"
 import { Interrupts, type AvrBus, type Peripheral, type RegisterHooks } from "./io"
 import { Port } from "./port"
@@ -290,7 +293,7 @@ export class AvrMcu implements AvrBus, AvrSystem {
     return fromBoot ? !(this.fuses.lock & 0x08) : !(this.fuses.lock & 0x20)
   }
   /** Interrupts whose vectors sit in a read-protected section are held off while the other section runs. */
-  private interruptsHeld(): boolean {
+  interruptsHeld(): boolean {
     const vectorsInBoot = (this.mcucr & 0x02) !== 0
     const inBoot = this.cpu.pc >= this.bootStart
     if (vectorsInBoot === inBoot) return false
@@ -584,6 +587,7 @@ export class AvrMcu implements AvrBus, AvrSystem {
     this.division = 1 << this.clkpr
     const pc = this.fuses.high & 1 ? 0 : this.bootStart
     this.cpu.reset(pc)
+    this.cpu.dbg?.onReset()
     this.sliceCycle = 0
     this.sliceTime = t
     this.time = t
@@ -625,6 +629,43 @@ export class AvrMcu implements AvrBus, AvrSystem {
     this.firmwareName = name
     this.time = 0
     this.reset("power-on")
+    // Breakpoints go onto the new image before its first instruction runs.
+    this.cpu.dbg?.onLoad(this.firmware)
+  }
+
+  // --- debugging ---------------------------------------------------------------------------------
+
+  /** The debug unit, made the first time anything debugs this core (plain `cpu.breakpoints` halt it instead). */
+  get debugger(): CoreDebugger {
+    let d = this.cpu.dbg
+    if (!d) {
+      d = new CoreDebugger(new AvrDebugTarget(this.cpu))
+      this.cpu.dbg = d
+      d.onLoad(this.firmware)
+    }
+    return d
+  }
+
+  debug(cmd: CoreDebugCommand) {
+    const d = this.debugger
+    switch (cmd.op) {
+      case "breakpoints":
+        d.setBreakpoints(cmd.list)
+        break
+      case "catch":
+        break
+      case "resume":
+        d.resume()
+        break
+      case "step":
+        d.step(cmd.step)
+        break
+    }
+  }
+
+  /** Where the core is stopped for the debugger, when it is. */
+  get debugStop(): DebugStop | null {
+    return this.cpu.dbg?.stop ?? null
   }
 
   /** RESET pin level (unless RSTDISBL makes it PC6): low holds the core in reset, the rising edge starts the time-out. */
@@ -649,8 +690,9 @@ export class AvrMcu implements AvrBus, AvrSystem {
 
   // --- running -------------------------------------------------------------------------------
 
+  /** Firmware loaded, not halted, and not stopped by the debugger. */
   get running() {
-    return this.firmware !== null && this.cpu.halted === null
+    return this.firmware !== null && this.cpu.halted === null && !this.cpu.dbg?.stop
   }
   get inReset() {
     return this.resetPinLow || this.porHeld || this.bodHeld || this.time < this.resetUntil
@@ -691,6 +733,8 @@ export class AvrMcu implements AvrBus, AvrSystem {
         this.cpu.run(target)
         this.time = this.cycleTime(this.cpu.cycles)
         if (this.cpu.halted) return false
+        // Stopped for the debugger (a breakpoint, a finished step): the slice ends here.
+        if (this.cpu.dbg?.stop) return false
         if (this.resetRequest) {
           const cause = this.resetRequest
           this.reset(cause)

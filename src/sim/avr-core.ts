@@ -268,7 +268,7 @@ export class AvrCore implements CoreHost {
       backupKept: false,
       power: { mode: m.sleepMode ? (m.sleepMode === "idle" || m.sleepMode === "adc-noise" ? "sleep" : "stop") : "run", asleep, current, regulator: "main" },
       clock: { source: "HSI", pllSource: "HSI", sysclk: m.hz, hse: null, lse: null, problems: problem ? [problem] : [] },
-      debug: null,
+      debug: m.debugStop,
       host: "in-process",
       labels: {
         clock: m.clockLabel(),
@@ -286,13 +286,12 @@ export class AvrCore implements CoreHost {
     return { frame: null, status: "no display controller on this MCU" }
   }
   dropPanel() {}
-  /** The debugger speaks ARM (registers, DWARF for Cortex-M): not available for AVR yet. */
   debug(cmd: CoreDebugCommand) {
-    // The editor sends its (often empty) breakpoint list and fault catch with every load: only a real request is a gap.
-    const asked = cmd.op === "breakpoints" ? cmd.list.some((b) => b.enabled) : cmd.op === "step" || cmd.op === "resume"
-    if (asked) this.mcu.feature("Debugger (breakpoints, stepping) on AVR")
+    this.mcu.debug(cmd)
   }
-  readonly debugStop: DebugStop | null = null
+  get debugStop(): DebugStop | null {
+    return this.mcu.debugStop
+  }
   inspect(req: InspectRequest): Promise<InspectReply> {
     const data = this.mcu.cpu.data
     const memory = (req.ranges ?? []).map((r) => {
@@ -305,7 +304,7 @@ export class AvrCore implements CoreHost {
       }
       return { addr: r.addr, bytes, invalid }
     })
-    return Promise.resolve({ regs: null, memory, stop: null, time: this.mcu.time, halted: this.mcu.cpu.halted?.message ?? null })
+    return Promise.resolve({ regs: null, memory, stop: this.mcu.debugStop, time: this.mcu.time, halted: this.mcu.cpu.halted?.message ?? null })
   }
   dispose() {}
 }
