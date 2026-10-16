@@ -14,6 +14,7 @@ import {
 } from "./battery"
 import { GROUND, type GpioState, type Netlist, type Resolved } from "./netlist"
 import { bias, dischargeSink, nextLatch, NE555, outputSink, outputSource, quiescent, supplyShare } from "./ne555"
+import { curveAt, fromPositive, supplyDrive } from "./opamp"
 import { SparseLU } from "./sparse-lu"
 import { formatSI } from "./units"
 import { nextPulseEdge, pulseHigh, pulseTiming } from "./pulse"
@@ -104,6 +105,38 @@ const TMR_INPUT_MARGIN = 0.5
 const TMR_MARGINS = 4
 const TMR_SOURCE_VT = 0.05
 const TMR_SOURCE_KNEE = 1.25
+/** What an op amp's output target follows in one Newton iteration (`rRegion`). */
+const OA_LINEAR = 0
+const OA_SLEW_UP = 1
+const OA_SLEW_DOWN = 2
+const OA_HIGH = 3
+const OA_LOW = 4
+const OA_REGIONS = ["linear", "slewing up", "slewing down", "saturated high", "saturated low"] as const
+/**
+ * An op amp's loop through the circuit (`ctl`). Free, its region is whatever the solve finds.
+ * A loop whose positive feedback tips it over faster than a step can follow holds it at a rail
+ * until its input crosses over — an event the step is split at, as a 555's comparator is — and
+ * then tips it towards the other rail at its slew rate.
+ */
+const OA_FREE = 0
+const OA_HELD_HIGH = 1
+const OA_HELD_LOW = 2
+const OA_TIP_UP = 3
+const OA_TIP_DOWN = 4
+/** An op amp's output stage (`oaOut`): driving the target through its resistance, or held at a current limit. */
+const OA_DRIVEN = 0
+const OA_SOURCING = 1
+const OA_SINKING = 2
+/** The output stage's region next to `from`, by the current the target would drive through the output resistance. */
+function nextStage(from: number, demand: number, source: number, sink: number): number {
+  if (from === OA_SOURCING) return demand < source ? OA_DRIVEN : OA_SOURCING
+  if (from === OA_SINKING) return demand > -sink ? OA_DRIVEN : OA_SINKING
+  return demand > source ? OA_SOURCING : demand < -sink ? OA_SINKING : OA_DRIVEN
+}
+/** A drive at the start of a step closer to zero than this has no direction of its own. */
+const OA_BALANCED = 1e-12
+/** Inputs this far past the common-mode range before it is reported: an input tied to a rail is on it, not past it. */
+const OA_INPUT_SLACK = 0.01
 const CMOS_VT = 1
 const CMOS_STEP = Math.log(1.01)
 const MAX_ITER = 60
@@ -122,8 +155,9 @@ const SETTLED_DRIFT = 1e-3
 const MEMO_POINTS = 64
 type OperatingPoint = { v: Float64Array; x: Float64Array; region: Uint8Array; jA: Float64Array; jB: Float64Array; live: Float64Array }
 type Timer = Extract<Resolved, { kind: "TMR" }>
+type Opamp = Extract<Resolved, { kind: "OPAMP" }>
 type Pad = Extract<Resolved, { kind: "GPIO" }>
-const NONLINEAR_KINDS = new Set<Resolved["kind"]>(["D", "Q", "REG", "CHG", "BOOST", "TMR", "M"])
+const NONLINEAR_KINDS = new Set<Resolved["kind"]>(["D", "Q", "REG", "CHG", "BOOST", "TMR", "M", "OPAMP"])
 const isPulse = (el: Resolved) => el.kind === "V" && el.amplitude > 0 && el.shape === "pulse"
 const switchesMask = (el: Resolved) =>
   isPulse(el) || el.kind === "SW" || el.kind === "GPIO" || (el.kind === "R" && el.live) || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR"
@@ -377,6 +411,12 @@ export class Engine {
   private readonly ctlT: Float64Array
   private readonly subV: Float64Array
   private readonly timers: Int32Array
+  /** Op amps, the output target each one's last committed span left it at, and its output stage's region. */
+  private readonly opamps: Int32Array
+  private readonly oaV: Float64Array
+  private readonly oaOut: Uint8Array
+  /** The whole step in progress: an op amp's loop is judged by what it does over a step, whatever span is being solved. */
+  private stepDt = 0
   private readonly burst: Uint8Array
   private readonly burstSeen: Uint8Array
   private readonly capped: Uint8Array
@@ -467,7 +507,7 @@ export class Engine {
     for (const el of net.elements) {
       if (el.kind === "V" && el.amplitude > 0 && el.shape !== "pulse") sine = true
       if (el.kind === "V" && el.amplitude > 0 && el.frequency < minFreq) minFreq = el.frequency
-      if (el.kind === "D" || el.kind === "Q" || el.kind === "M" || el.kind === "REG" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "BOOST" || el.kind === "TMR") linear = false
+      if (el.kind === "D" || el.kind === "Q" || el.kind === "M" || el.kind === "REG" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "BOOST" || el.kind === "TMR" || el.kind === "OPAMP") linear = false
     }
     this.ac = minFreq < Infinity
     this.sine = sine
@@ -486,7 +526,7 @@ export class Engine {
     this.pulseElements = Int32Array.from(net.elements.flatMap((el, i) => (isPulse(el) ? [i] : [])))
     this.maskElements = Int32Array.from(net.elements.flatMap((el, i) => (switchesMask(el) ? [i] : [])))
     this.liveElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) || (el.kind === "V" && el.amplitude > 0) ? [i] : [])))
-    this.stateless = !net.elements.some((el) => el.kind === "C" || el.kind === "L" || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR")
+    this.stateless = !net.elements.some((el) => el.kind === "C" || el.kind === "L" || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR" || el.kind === "OPAMP")
     this.drifting = net.elements.some((el) => el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT")
 
     this.capV = new Float64Array(m)
@@ -522,6 +562,9 @@ export class Engine {
     this.ctlT = new Float64Array(m * 3)
     this.subV = new Float64Array(n)
     this.timers = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "TMR" ? [i] : [])))
+    this.opamps = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "OPAMP" ? [i] : [])))
+    this.oaV = new Float64Array(m)
+    this.oaOut = new Uint8Array(m)
     this.burst = new Uint8Array(m)
     this.burstSeen = new Uint8Array(m)
     this.capped = new Uint8Array(m)
@@ -595,6 +638,8 @@ export class Engine {
       this.eyeStages.set(prev.eyeStages.subarray(from * EYE_INNER_STAGES, (from + 1) * EYE_INNER_STAGES), to * EYE_INNER_STAGES)
       this.arc[to] = prev.arc[from]
       this.ctl[to] = prev.ctl[from]
+      this.oaV[to] = prev.oaV[from]
+      this.oaOut[to] = prev.oaOut[from]
       for (let k = 0; k < 3; k++) this.ctlT[to * 3 + k] = prev.ctlT[from * 3 + k]
       // A battery keeps draining across an edit — unless the edit was to the battery itself.
       // Its temperature, wear and mismatch may change under it: the charge stays, the cell
@@ -1093,6 +1138,7 @@ export class Engine {
     const n = this.net.nodes
     const elements = this.net.elements
     this.stepEnd = this.time + dt
+    this.stepDt = dt
 
     // Pad states are read once per step: the MCU may change them between steps, not within.
     let disturbed = false
@@ -1144,13 +1190,15 @@ export class Engine {
     this.failures.length = 0
     this.prevV.set(this.v)
     for (let k = 0; k < this.timers.length; k++) this.burst[this.timers[k]] = 0
+    for (let k = 0; k < this.opamps.length; k++) this.burst[this.opamps[k]] = 0
+    const latches = this.timers.length + this.opamps.length
     let left = dt
     for (let events = 0; ; ) {
       const controlled = this.subSpan > 0
       const span = controlled ? Math.min(left, this.subSpan) : left
       this.theta = controlled && this.subBackward ? 1 : THETA
       this.subV.set(this.v)
-      if (this.timers.length) this.arcStart.set(this.arc)
+      if (latches) this.arcStart.set(this.arc)
       const wasStruck: boolean = this.struck
       this.regionAtStart.set(this.rRegion)
       this.solveFrom(span, parts)
@@ -1164,7 +1212,11 @@ export class Engine {
         this.v.set(this.subV)
         this.solveFrom(span, parts)
       }
-      if (events >= TMR_MAX_EVENTS * this.timers.length || !this.converged || !this.findTimerEvent()) {
+      if (this.opamps.length && this.converged && this.opampsTip()) {
+        this.v.set(this.subV)
+        this.solveFrom(span, parts)
+      }
+      if (events >= TMR_MAX_EVENTS * latches || !this.converged || !this.findTimerEvent()) {
         if (span === left) break
         this.updateState(span, parts)
         this.time += span
@@ -1342,12 +1394,43 @@ export class Engine {
         this.eventTo = end[k]
       }
     }
+    // An op amp its own feedback holds at a rail lets go where its input crosses over.
+    for (let t = 0; t < this.opamps.length; t++) {
+      const i = this.opamps[t]
+      const st = this.ctl[i]
+      if ((st !== OA_HELD_HIGH && st !== OA_HELD_LOW) || this.burst[i] >= TMR_MAX_EVENTS) continue
+      const m0 = this.marginOf(i, 0, this.subV)
+      if (m0 <= 0) {
+        if (best > 0) {
+          best = 0
+          this.eventTimer = i
+          this.eventMargin = -1
+        }
+        continue
+      }
+      const m1 = this.marginOf(i, 0, this.v)
+      if (m1 > 0) continue
+      const f = m0 / (m0 - m1)
+      if (f >= best) continue
+      best = f
+      this.eventTimer = i
+      this.eventMargin = 0
+      this.eventFrom = m0
+      this.eventTo = m1
+    }
     this.eventFraction = best
     return best < Infinity
   }
 
+  /** Margin `k` of an event source at the node voltages `v`: a 555's comparators, or a held op amp's input drive towards its rail. */
+  private marginOf(i: number, k: number, v: Float64Array): number {
+    const el = this.net.elements[i]
+    if (el.kind === "OPAMP") return (this.ctl[i] === OA_HELD_HIGH ? 1 : -1) * this.opampDrive(el, v)
+    this.timerMargins(el as Timer, v, this.marginsAt)
+    return this.marginsAt[k]
+  }
+
   private settleEvent(left: number, parts: PartReader): number {
-    const el = this.net.elements[this.eventTimer] as Timer
     const k = this.eventMargin
     let lo = 0
     let hi = 1
@@ -1359,8 +1442,7 @@ export class Engine {
       this.v.set(this.subV)
       this.arc.set(this.arcStart)
       this.solveFrom(f * left, parts)
-      this.timerMargins(el, this.v, this.marginsAt)
-      const m = this.marginsAt[k]
+      const m = this.marginOf(this.eventTimer, k, this.v)
       if (crossed(m)) {
         if (Math.abs(m) <= TMR_TOLERANCE || round >= TMR_REFINE) return f
         hi = f
@@ -1381,7 +1463,14 @@ export class Engine {
   }
 
   private switchTimer(i: number, time: number) {
-    const el = this.net.elements[i] as Timer
+    const any = this.net.elements[i]
+    if (any.kind === "OPAMP") {
+      // The input has crossed over: the rail lets go and the loop tips the output the other way.
+      this.ctl[i] = this.ctl[i] === OA_HELD_HIGH ? OA_TIP_DOWN : OA_TIP_UP
+      this.burst[i]++
+      return
+    }
+    const el = any as Timer
     this.timerMargins(el, this.v, this.marginsAt)
     const st = this.ctl[i]
     const next = this.timerState(st, this.marginsAt)
@@ -1486,6 +1575,11 @@ export class Engine {
       }
     }
     guess.set(this.v)
+    // An op amp's target starts from where the span begins, whatever a discarded trial left it at.
+    for (let k = 0; k < this.opamps.length; k++) {
+      const i = this.opamps[k]
+      x[n + (elements[i] as Opamp).index] = this.oaV[i]
+    }
     if (this.linear && this.luValid && this.luDt === dt && this.luSwitches === mask) {
       z.fill(0)
       this.stampLinear(dt, parts, false, true)
@@ -1570,6 +1664,8 @@ export class Engine {
             if (this.boost(i, el)) clamped = true
           } else if (el.kind === "TMR") {
             if (this.timer(el, i)) clamped = true
+          } else if (el.kind === "OPAMP") {
+            if (this.opamp(el, i)) clamped = true
           } else if (el.kind === "M") {
             const s = el.polarity
             // Below zero Vds the roles of drain and source swap; nothing else changes.
@@ -1669,6 +1765,233 @@ export class Engine {
     this.addTerm(el.reset, el.reset, el.gnd, gr)
     this.addTerm(el.vcc, el.reset, el.gnd, -gr)
     return clamped
+  }
+
+  /** IN+ − IN− + VOS at the node voltages `v`: what the input stage amplifies. */
+  private opampDrive(el: Opamp, v: Float64Array): number {
+    return this.vol(el.inp, v) - this.vol(el.inn, v) + el.spec.vos
+  }
+
+  /**
+   * The region an op amp's output target is in over a span `dt`, at the node voltages `v`.
+   *
+   * Free, the target integrates the drive by backward Euler — GBW · 2π volts a second per volt,
+   * leaking back towards mid-supply at the open-loop pole, so that it settles at the open-loop
+   * gain times the drive — no faster than the slew rate, and stops short of either rail by its
+   * swing; a supply too low for any swing leaves it at mid-supply. A loop held at a rail, or
+   * tipping over, decides the region instead.
+   *
+   * The region moves from the one the last iteration solved in (`rRegion`) to a neighbour only,
+   * judged by the linear target at `v`: in the linear region that is the solution, in a
+   * saturated one it is the open-loop gain on a stale drive, which would throw a negative-feedback
+   * loop from rail to rail. Out of a rail or a slew it goes back to linear, and that region's own
+   * solve says where it belongs.
+   */
+  private opampRegion(el: Opamp, i: number, v: Float64Array, dt: number): number {
+    const s = el.spec
+    const vcc = this.vol(el.vcc, v)
+    const vee = this.vol(el.vee, v)
+    const mid = (vcc + vee) / 2
+    const collapsed = vcc - s.swing[0] < vee + s.swing[1]
+    const top = collapsed ? mid : vcc - s.swing[0]
+    const bottom = collapsed ? mid : vee + s.swing[1]
+    const held = this.oaV[i]
+    const up = held + s.slew * dt
+    const down = held - s.slew * dt
+    const st = this.ctl[i]
+    if (st === OA_HELD_HIGH) return OA_HIGH
+    if (st === OA_HELD_LOW) return OA_LOW
+    if (st === OA_TIP_UP) return up >= top ? OA_HIGH : OA_SLEW_UP
+    if (st === OA_TIP_DOWN) return down <= bottom ? OA_LOW : OA_SLEW_DOWN
+    const k = dt * 2 * Math.PI * s.gbw
+    const leak = k / s.gain
+    const linear = (held + k * this.opampDrive(el, v) + leak * mid) / (1 + leak)
+    switch (this.rRegion[i]) {
+      case OA_HIGH:
+        return linear >= top && up >= top ? OA_HIGH : OA_LINEAR
+      case OA_LOW:
+        return linear <= bottom && down <= bottom ? OA_LOW : OA_LINEAR
+      case OA_SLEW_UP:
+        return linear < up ? OA_LINEAR : up >= top ? OA_HIGH : OA_SLEW_UP
+      case OA_SLEW_DOWN:
+        return linear > down ? OA_LINEAR : down <= bottom ? OA_LOW : OA_SLEW_DOWN
+    }
+    if (linear > up) return up >= top ? OA_HIGH : OA_SLEW_UP
+    if (linear < down) return down <= bottom ? OA_LOW : OA_SLEW_DOWN
+    return linear > top ? OA_HIGH : linear < bottom ? OA_LOW : OA_LINEAR
+  }
+
+  /**
+   * The row of an op amp's target T, an unknown of its own, in `region`. Linear, the backward
+   * Euler step (1 + leak)·T − k·(V(IN+) − V(IN−)) − leak·(V(V+) + V(V−)) / 2 = held + k·VOS,
+   * divided through by k so its entries sit beside the circuit's conductances; otherwise the value
+   * a slew or a rail fixes it at. Every column is touched whatever the region, so the factor's
+   * pattern stays put as it changes.
+   */
+  private opampTargetRow(el: Opamp, i: number, r: number, region: number, dt: number) {
+    const { A, z } = this
+    const s = el.spec
+    const held = this.oaV[i]
+    const k = dt * 2 * Math.PI * s.gbw
+    const leak = k / s.gain
+    let self = 1
+    let input = 0
+    let pos = 0
+    let neg = 0
+    let rhs = 0
+    if (region === OA_LINEAR) {
+      self = 1 + leak
+      input = k
+      pos = neg = -leak / 2
+      rhs = held + k * s.vos
+    } else if (region === OA_SLEW_UP) rhs = held + s.slew * dt
+    else if (region === OA_SLEW_DOWN) rhs = held - s.slew * dt
+    else if (this.vol(el.vcc, this.guess) - s.swing[0] < this.vol(el.vee, this.guess) + s.swing[1]) pos = neg = -0.5
+    else if (region === OA_HIGH) {
+      pos = -1
+      rhs = -s.swing[0]
+    } else {
+      neg = -1
+      rhs = s.swing[1]
+    }
+    const scale = region === OA_LINEAR ? Math.max(k, 1) : 1
+    A[this.cell(r, r)] += self / scale
+    if (el.inp !== GROUND) A[this.cell(r, el.inp)] -= input / scale
+    if (el.inn !== GROUND) A[this.cell(r, el.inn)] += input / scale
+    if (el.vcc !== GROUND) A[this.cell(r, el.vcc)] += pos / scale
+    if (el.vee !== GROUND) A[this.cell(r, el.vee)] += neg / scale
+    z[r] += rhs / scale
+  }
+
+  /**
+   * One op amp for one Newton iteration: its quiescent and bias currents, its target's row, and
+   * the output stage driving the target through its resistance, or held at a current limit —
+   * what it sources taken from V+, what it sinks handed to V−. True when the guess put the target
+   * or the output stage in another region.
+   */
+  private opamp(el: Opamp, i: number): boolean {
+    const s = el.spec
+    const out = this.branchOut
+    const guess = this.guess
+    const r = this.net.nodes + el.index
+    const dt = this.solveDt
+    const vs = this.vol(el.vcc, guess) - this.vol(el.vee, guess)
+    const drive = supplyDrive(s, vs)
+    curveAt(s.iq, vs, out)
+    out[1] = out[1] * drive + (vs > 0 && vs < s.vsMin ? out[0] / s.vsMin : 0)
+    out[0] *= drive
+    this.addBranch(el.vcc, el.vee, vs, out)
+    const ib = s.ib * drive
+    if (ib > 0) {
+      this.addI(el.inp, el.vee, ib)
+      this.addI(el.inn, el.vee, ib)
+    } else if (ib < 0) {
+      this.addI(el.vcc, el.inp, -ib)
+      this.addI(el.vcc, el.inn, -ib)
+    }
+    const prev = this.rRegion[i]
+    const region = this.frozen ? prev : this.opampRegion(el, i, guess, dt)
+    this.rRegion[i] = region
+    this.opampTargetRow(el, i, r, region, dt)
+    curveAt(s.source, vs, out)
+    const source = out[0] * drive
+    curveAt(s.sink, vs, out)
+    const sink = out[0] * drive
+    const demand = (this.x[r] - this.vol(el.out, guess)) / s.rout
+    const was = this.oaOut[i]
+    const stage = this.frozen ? was : nextStage(was, demand, source, sink)
+    this.oaOut[i] = stage
+    // The output current is g · (T − V(OUT)) + c.
+    const g = stage === OA_DRIVEN ? 1 / s.rout : 0
+    const c = stage === OA_SOURCING ? source : stage === OA_SINKING ? -sink : 0
+    const io = stage === OA_DRIVEN ? demand : c
+    fromPositive(io, out)
+    const sp = out[0]
+    const dsp = out[1]
+    this.opampLeg(el.out, el, r, -1, g, c, 0)
+    this.opampLeg(el.vcc, el, r, dsp, g, c, sp - dsp * io)
+    this.opampLeg(el.vee, el, r, 1 - dsp, g, c, dsp * io - sp)
+    return region !== prev || stage !== was
+  }
+
+  /** `scale` times the output current, g · (T − V(OUT)) + c, leaving node `row`, and `extra` amps besides. */
+  private opampLeg(row: number, el: Opamp, r: number, scale: number, g: number, c: number, extra: number) {
+    if (row === GROUND) return
+    const { A, z } = this
+    A[this.cell(row, r)] += scale * g
+    if (el.out !== GROUND) A[this.cell(row, el.out)] -= scale * g
+    z[row] -= scale * c + extra
+  }
+
+  /** Volts an op amp's target moves over a whole step per volt of drive. */
+  private opampStepGain(el: Opamp): number {
+    const k = this.stepDt * 2 * Math.PI * el.spec.gbw
+    return k / (1 + k / el.spec.gain)
+  }
+
+  /**
+   * How much of a change in an op amp's target comes back as drive at its inputs through the
+   * circuit, as the last solve linearised it: a unit pushed into the target's row through the
+   * factors moves the target by its response there and the drive by its response at the inputs,
+   * and their ratio is the circuit's alone, whatever the row's own gain. Positive is positive
+   * feedback.
+   */
+  private opampFeedback(el: Opamp): number {
+    if (!this.luValid) return 0
+    const unit = (this.unitRhs ??= new Float64Array(this.size))
+    const resp = (this.unitOut ??= new Float64Array(this.size))
+    const r = this.net.nodes + el.index
+    unit.fill(0)
+    unit[r] = 1
+    if (!this.lu.solve(unit, resp)) return 0
+    const drive = (el.inp === GROUND ? 0 : resp[el.inp]) - (el.inn === GROUND ? 0 : resp[el.inn])
+    if (resp[r] !== 0) return drive / resp[r]
+    return drive > 0 ? Infinity : drive < 0 ? -Infinity : 0
+  }
+
+  /**
+   * After a span's solve: a free op amp left linear on a loop that tips over within a step sits
+   * at an equilibrium it cannot stay at. Backward Euler damps the growing mode the amplifier
+   * should follow and settles there instead; the amplifier tips the way its drive pushed it as
+   * the span began — the drive at the end, less what the target's move fed back. True when one
+   * tipped, for the span to be solved again.
+   */
+  private opampsTip(): boolean {
+    let tipped = false
+    const v = this.v
+    for (let k = 0; k < this.opamps.length; k++) {
+      const i = this.opamps[k]
+      if (this.ctl[i] !== OA_FREE || this.rRegion[i] !== OA_LINEAR) continue
+      const el = this.net.elements[i] as Opamp
+      if (this.vol(el.vcc, v) - this.vol(el.vee, v) < el.spec.vsMin / 2) continue
+      const feedback = this.opampFeedback(el)
+      if (!(feedback * this.opampStepGain(el) > 1)) continue
+      const start = this.opampDrive(el, v) - feedback * (this.x[this.net.nodes + el.index] - this.oaV[i])
+      const up = Math.abs(start) > OA_BALANCED ? start > 0 : el.spec.vos >= 0
+      this.ctl[i] = up ? OA_TIP_UP : OA_TIP_DOWN
+      tipped = true
+    }
+    return tipped
+  }
+
+  /**
+   * Where a committed span leaves an op amp's loop: one that tips over within a step is held once
+   * it reaches a rail, and free again once it would not; a linear one was judged as soon as it was
+   * solved (`opampsTip`). An amplifier without its supply holds nothing.
+   */
+  private opampLatch(el: Opamp, i: number, region: number, vs: number) {
+    const st = this.ctl[i]
+    if (vs < el.spec.vsMin / 2) {
+      this.ctl[i] = OA_FREE
+      return
+    }
+    if (st === OA_FREE && region === OA_LINEAR) return
+    const tips = this.opampFeedback(el) * this.opampStepGain(el) > 1
+    if (st === OA_FREE) {
+      if (tips) this.ctl[i] = region === OA_HIGH ? OA_HELD_HIGH : region === OA_LOW ? OA_HELD_LOW : region === OA_SLEW_UP ? OA_TIP_UP : OA_TIP_DOWN
+    } else if (!tips) this.ctl[i] = OA_FREE
+    else if (st === OA_TIP_UP && region === OA_HIGH) this.ctl[i] = OA_HELD_HIGH
+    else if (st === OA_TIP_DOWN && region === OA_LOW) this.ctl[i] = OA_HELD_LOW
   }
 
   private regulator(i: number, inN: number, outN: number, gndN: number, r: number, value: number, dropout: number, imax: number, enabled: boolean): boolean {
@@ -2240,6 +2563,9 @@ export class Engine {
         case "TMR":
           this.timerState555(el, i, dt, base)
           break
+        case "OPAMP":
+          this.opampState(el, i, dt, base)
+          break
         case "D": {
           const vd = this.vol(el.anode, this.v) - this.vol(el.cathode, this.v)
           const nvt = el.n * VT
@@ -2343,6 +2669,71 @@ export class Engine {
     tc[this.termOf[base + 6]] -= reset
     const power = iq * supply + source * (supply - vo) + sink * vo + discharge * vd + trig * (vcc - vtrig) + thres * vthres + reset * (supply - vreset)
     this.record(el, i, dt, source - sink, supply, power)
+  }
+
+  /**
+   * An op amp's committed span: its terminal currents (the output current from V+ or into V−,
+   * the quiescent current through, the bias currents), its dissipation, the target it ends at,
+   * and where its loop now stands.
+   */
+  private opampState(el: Opamp, i: number, dt: number, base: number) {
+    const tc = this.termCurrent
+    const s = el.spec
+    const out = this.branchOut
+    const v = this.v
+    const vcc = this.vol(el.vcc, v)
+    const vee = this.vol(el.vee, v)
+    const vo = this.vol(el.out, v)
+    const vs = vcc - vee
+    const drive = supplyDrive(s, vs)
+    curveAt(s.iq, vs, out)
+    const iq = out[0] * drive
+    const ib = s.ib * drive
+    const target = this.x[this.net.nodes + el.index]
+    const stage = this.oaOut[i]
+    curveAt(stage === OA_SINKING ? s.sink : s.source, vs, out)
+    const io = stage === OA_SOURCING ? out[0] * drive : stage === OA_SINKING ? -out[0] * drive : (target - vo) / s.rout
+    fromPositive(io, out)
+    const sp = out[0]
+    const sn = sp - io
+    tc[this.termOf[base]] += ib
+    tc[this.termOf[base + 1]] += ib
+    tc[this.termOf[base + 2]] -= io
+    tc[this.termOf[base + 3]] += sp + iq - Math.min(0, 2 * ib)
+    tc[this.termOf[base + 4]] -= sn + iq + Math.max(0, 2 * ib)
+    this.record(el, i, dt, io, vs, sp * (vcc - vo) + sn * (vo - vee) + iq * vs)
+    this.oaV[i] = target
+    if (this.converged) this.opampLatch(el, i, this.rRegion[i], vs)
+  }
+
+  private opampReadout(el: Opamp, i: number): Record<string, string> {
+    const s = el.spec
+    const v = this.v
+    const vcc = this.vol(el.vcc, v)
+    const vee = this.vol(el.vee, v)
+    const vs = vcc - vee
+    const inp = this.vol(el.inp, v)
+    const inn = this.vol(el.inn, v)
+    const extra: Record<string, string> = {}
+    if (vs < s.vsMin / 2) extra.Output = "no supply"
+    else {
+      const limited = this.oaOut[i] !== OA_DRIVEN ? ", current limited" : ""
+      const held = this.ctl[i] === OA_HELD_HIGH || this.ctl[i] === OA_HELD_LOW ? ", held there by its positive feedback" : ""
+      extra.Output = `${OA_REGIONS[this.rRegion[i]]}${limited}${held}`
+    }
+    extra["IN+ − IN−"] = formatSI(inp - inn, "V")
+    if (vs < s.vsMin) extra.Supply = `below the ${formatSI(s.vsMin, "V")} minimum`
+    else if (vs > s.vsMax) extra.Supply = `above the ${formatSI(s.vsMax, "V")} maximum`
+    const inputs = [
+      ["IN+", inp],
+      ["IN−", inn],
+    ] as const
+    const past = inputs.filter(([, x]) => x < vee - s.inputs[0] || x > vcc + s.inputs[1] || (s.inputMax !== undefined && x - vee > s.inputMax))
+    const outside = inputs.filter(([, x]) => x < vee + s.cm[0] - OA_INPUT_SLACK || x > vcc - s.cm[1] + OA_INPUT_SLACK)
+    const railed = (rail: string, by: number) => (by === 0 ? rail : `${rail} ${by > 0 ? "+" : "−"} ${formatSI(Math.abs(by), "V")}`)
+    if (past.length) extra.Inputs = `${past.map(([pin]) => pin).join(", ")} past the absolute maximum`
+    else if (outside.length) extra.Inputs = `${outside.map(([pin]) => pin).join(", ")} outside the common-mode range, ${railed("V−", s.cm[0])} to ${railed("V+", -s.cm[1])}`
+    return extra
   }
 
   private charger(el: Extract<Resolved, { kind: "CHG" }>, i: number, dt: number, vin: number, vb: number, ich: number, iprog: number) {
@@ -2535,6 +2926,9 @@ export class Engine {
         case "GPIO":
           mag = Math.abs(this.vol(el.node, v) - (el.gndNet === undefined ? 0 : this.vol(el.gndNet, v)))
           break
+        case "OPAMP":
+          mag = Math.abs(this.vol(el.vcc, v) - this.vol(el.vee, v))
+          break
         default:
           continue
       }
@@ -2599,6 +2993,8 @@ export class Engine {
         reading.extra = { mode: BOOST_MODES[this.rRegion[i]], "Input current": formatSI(this.rIb[i], "A") }
       } else if (el.kind === "TMR") {
         reading.extra = this.timerReadout(el, i)
+      } else if (el.kind === "OPAMP") {
+        reading.extra = this.opampReadout(el, i)
       } else if (el.kind === "V" && el.amplitude > 0) {
         reading.extra = { Frequency: formatSI(el.frequency, "Hz") }
         if (el.shape === "pulse") {
