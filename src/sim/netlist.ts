@@ -3,6 +3,7 @@ import { pinContacts } from "@/schematic/contacts"
 import { getDef } from "@/schematic/registry"
 import { pinKey, type Damage, type Element, type Limits, type NodeRef, type PlacedObject, type ProtChip, type Schematic, type Value } from "@/schematic/types"
 import { chemistryById, defaultResistance, type Chemistry } from "./battery"
+import { opampSpec, type OpampSpec } from "./opamp"
 import { parseValue } from "./units"
 
 /** Net index; GROUND is the reference node and has no matrix row. */
@@ -59,6 +60,8 @@ export type Resolved =
   | (Base & { kind: "PROT"; vdd: number; vss: number; cs: number; od: number; oc: number; spec: ProtSpec; keys: string[] })
   | (Base & { kind: "BOOST"; in: number; out: number; gnd: number; fb: number; vcc: number | undefined; en: number | undefined; vref: number; eff: number; ilim: number; uvlo: number; iq: number; index: number; keys: string[] })
   | (Base & { kind: "TMR"; vcc: number; gnd: number; trig: number; thres: number; ctrl: number; lo: number; reset: number; out: number; dis: number; keys: string[] })
+  /** `index` is the extra unknown, the output's target voltage. Keys in the order IN+, IN−, OUT, V+, V−. */
+  | (Base & { kind: "OPAMP"; inp: number; inn: number; out: number; vcc: number; vee: number; spec: OpampSpec; index: number; keys: string[] })
 
 export type ProtSpec = {
   overcharge: number
@@ -205,6 +208,8 @@ function shortPair(el: Element): [NodeRef, NodeRef] | null {
       return [el.vdd, el.vss]
     case "TMR":
       return [el.vcc, el.gnd]
+    case "OPAMP":
+      return [el.vcc, el.vee]
     // A pad's blown protection diode ties it to the rail it clamped to; without a rail node
     // there is nothing to short to and the driver is simply gone.
     case "GPIO":
@@ -336,6 +341,9 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         break
       case "TMR":
         for (const ref of [el.vcc, el.gnd, el.trig, el.thres, el.ctrl, el.lo, el.reset, el.out, el.dis]) touch(obj, ref)
+        break
+      case "OPAMP":
+        for (const ref of [el.inp, el.inn, el.out, el.vcc, el.vee]) touch(obj, ref)
         break
     }
   }
@@ -629,6 +637,22 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
           keys: [el.vcc, el.gnd, el.out, el.dis, el.trig, el.thres, el.reset].map((ref) => node(obj, ref)),
         })
         break
+      case "OPAMP": {
+        const num = (v: Value | undefined) => (v === undefined ? undefined : resolveValue(v, props))
+        elements.push({
+          ...base,
+          kind: "OPAMP",
+          inp: netOf(obj, el.inp),
+          inn: netOf(obj, el.inn),
+          out: netOf(obj, el.out),
+          vcc: netOf(obj, el.vcc),
+          vee: netOf(obj, el.vee),
+          spec: opampSpec(el.part, { gain: num(el.gain), gbw: num(el.gbw), slew: num(el.slew), vos: num(el.vos), rail: num(el.rail), isc: num(el.isc) }),
+          index: sources++,
+          keys: [el.inp, el.inn, el.out, el.vcc, el.vee].map((ref) => node(obj, ref)),
+        })
+        break
+      }
     }
   }
 
