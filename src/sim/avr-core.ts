@@ -13,6 +13,7 @@ import type { ClockSource } from "@/mcu/periph/rcc"
 import type { PadRef } from "@/mcu/pads"
 import type { CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 import type { CoreHost, CoreStatus, OutEdge, PanelWiring } from "./core-host"
+import { SupplyLoad } from "./supply-load"
 
 const SLEEP_LABEL: Record<SleepMode, string> = {
   idle: "Idle",
@@ -37,9 +38,11 @@ export class AvrCore implements CoreHost {
   /** Supply-current meter: core cycles and sleep cycles at the last read. */
   private meter = { cycles: 0, sleep: 0 }
   private statusMeter = { cycles: 0, sleep: 0 }
+  private readonly supplyLoad: SupplyLoad
 
   constructor(chip: AvrProfile) {
     this.chip = chip
+    this.supplyLoad = new SupplyLoad(chip.electrical.vdd)
     this.mcu = createAvr(chip)
     this.mcu.analogRead = (pad) => {
       const v = this.analog.get(pad.port * 16 + pad.pin)
@@ -135,6 +138,7 @@ export class AvrCore implements CoreHost {
     this.mcu.reset(opts.supplyKept ? "external" : "power-on")
     this.meter = { cycles: 0, sleep: 0 }
     this.statusMeter = { cycles: 0, sleep: 0 }
+    this.supplyLoad.reset()
   }
   runOnBattery() {}
   halt(reason: string) {
@@ -246,7 +250,8 @@ export class AvrCore implements CoreHost {
       this.stepIdd = null
       return v
     }
-    return this.current(this.meter, false).current
+    const { asleep } = this.current(this.meter, false)
+    return this.supplyLoad.next(asleep, this.mcu.time, this.mcu.vcc, (share, volts) => this.mcu.supplyCurrent(share, volts))
   }
 
   status(): CoreStatus {

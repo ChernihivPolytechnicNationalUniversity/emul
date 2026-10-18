@@ -1000,12 +1000,12 @@ export class AvrMcu implements AvrBus, AvrSystem {
   /**
    * Typical supply current, A (Table 29-8): active and idle scale with the clock (given at 5 V,
    * taken proportional to VCC as CMOS switching current is); the deep sleep modes use the
-   * Power-down and Power-save figures (3 V), with the watchdog's share when it runs.
+   * Power-down and Power-save figures (3 V), with the watchdog's share when it runs. At `vcc`, the part's own by default.
    */
-  supplyCurrent(asleep: number): number {
+  supplyCurrent(asleep: number, vcc = this.vcc): number {
     const e = this.chip.electrical.idd
     const mhz = this.hz / 1e6
-    const scale = this.vcc / 5
+    const scale = vcc / 5
     const active = e.activePerMHz * mhz * scale
     const m = this.sleepMode
     let sleeping = e.idlePerMHz * mhz * scale

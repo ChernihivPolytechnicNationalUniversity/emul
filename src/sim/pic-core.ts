@@ -16,6 +16,7 @@ import type { ClockSource } from "@/mcu/periph/rcc"
 import type { PadRef } from "@/mcu/pads"
 import type { CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 import type { CoreHost, CoreStatus, OutEdge, PanelWiring } from "./core-host"
+import { SupplyLoad } from "./supply-load"
 
 const RESET_LABEL = { "power-on": "power-on", "brown-out": "brown-out", mclr: "MCLR", "mclr-sleep": "MCLR in Sleep", wdt: "watchdog" } as const
 const hex4 = (v: number) => v.toString(16).toUpperCase().padStart(4, "0")
@@ -32,9 +33,11 @@ export class PicCore implements CoreHost {
   private meter = { cycles: 0, sleep: 0 }
   private statusMeter = { cycles: 0, sleep: 0 }
   private stepIdd: number | null = null
+  private readonly supplyLoad: SupplyLoad
 
   constructor(chip: PicProfile) {
     this.chip = chip
+    this.supplyLoad = new SupplyLoad(chip.electrical.vdd)
     this.mcu = createPic(chip)
   }
 
@@ -81,6 +84,7 @@ export class PicCore implements CoreHost {
     this.mcu.powerOn()
     this.meter = { cycles: 0, sleep: 0 }
     this.statusMeter = { cycles: 0, sleep: 0 }
+    this.supplyLoad.reset()
   }
   runOnBattery() {}
   halt(reason: string) {
@@ -199,7 +203,8 @@ export class PicCore implements CoreHost {
       this.stepIdd = null
       return v
     }
-    return this.current(this.meter).current
+    const { asleep } = this.current(this.meter)
+    return this.supplyLoad.next(asleep, this.mcu.time, this.mcu.vdd, (share, volts) => this.mcu.supplyCurrent(share, volts))
   }
 
   status(): CoreStatus {
