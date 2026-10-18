@@ -1045,17 +1045,6 @@ export class Cpu {
     this.spinSlow = this.slowAccesses
     this.spinServiced = this.serviced
   }
-  /** The block passes are counted at, whether all that ran since it was pollable, and how many blocks ran since. */
-  private spinAnchor: Block | null = null
-  private spinPure = true
-  private spinSteps = 0
-  private anchor(block: Block) {
-    this.spinAnchor = block
-    block.spin = 0
-    this.spinPure = true
-    this.spinSteps = 0
-    if (this.spying) this.spyOff()
-  }
   private spying = false
   private spyOff() {
     this.bus.spyStores(false)
@@ -1132,13 +1121,19 @@ export class Cpu {
    */
   private runCompiled(block: Block, target: number) {
     const bps = this.breakpoints
-    this.anchor(block)
+    // The busy-wait watch (`spinCheck`): the block passes are counted at, whether all that ran
+    // since it was pollable, and how many blocks ran since. Locals: the watch lasts one call.
+    let anchor = block
+    let pure = true
+    let steps = 0
+    block.spin = 0
+    if (this.spying) this.spyOff()
     try {
       for (;;) {
         const ran = this.instructions
         block.fn!(this, this.r, this.mem, this.s, block.instrs, jitHelpers, target)
         // Ending at its instruction i, the block ran its first i + 1 (a looping one ran it all).
-        if (this.instructions - ran > block.pollPrefix) this.spinPure = false
+        if (this.instructions - ran > block.pollPrefix) pure = false
         // A block leaving on a taken branch has not looked at the deadline since its last
         // instruction: what came due is taken now, as the run loop would. Then straight on to
         // the next block while nothing needs the run loop's attention — a breakpoint where the
@@ -1160,11 +1155,17 @@ export class Cpu {
         }
         if (next === null || next.fn === null || next.lineShift !== this.lineShift || (this.mem !== this.bus && next.fetchKey !== this.guard!.fetchKey && !this.fetchableBlock(next))) return
         // Back at the anchor: a pass, which is a busy-wait candidate if every block on it ran pollable instructions alone.
-        if (next === this.spinAnchor) {
-          if (this.spinPure) this.spinCheck(next, target)
-          this.spinPure = true
-          this.spinSteps = 0
-        } else if (++this.spinSteps > SPIN_SPAN) this.anchor(next)
+        if (next === anchor) {
+          if (pure) this.spinCheck(next, target)
+          pure = true
+          steps = 0
+        } else if (++steps > SPIN_SPAN) {
+          anchor = next
+          next.spin = 0
+          pure = true
+          steps = 0
+          if (this.spying) this.spyOff()
+        }
         block = next
       }
     } catch (e) {
