@@ -1,7 +1,7 @@
 /**
  * A PIC16F62x as the simulation loop sees any core (`CoreHost`): run to a time, read the pads,
- * take the circuit's levels and voltages, report status. It runs in the loop's own thread, as
- * the AVR does: a 5 MIPS 8-bit core is a small share of a CPU thread.
+ * take the circuit's levels and voltages, report status. In the loop's own thread, or driven
+ * by `core-worker.ts` in a worker of its own.
  *
  * The part keeps its own power-on and brown-out logic and its MCLR input (the loop passes the
  * voltage on MCLR/VPP, which can also be the 13 V that enters Program/Verify mode); OSC1/OSC2
@@ -16,6 +16,7 @@ import type { ClockSource } from "@/mcu/periph/rcc"
 import type { PadRef } from "@/mcu/pads"
 import type { CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 import type { CoreHost, CoreStatus, OutEdge, PanelWiring } from "./core-host"
+import { SupplyLoad } from "./supply-load"
 
 const RESET_LABEL = { "power-on": "power-on", "brown-out": "brown-out", mclr: "MCLR", "mclr-sleep": "MCLR in Sleep", wdt: "watchdog" } as const
 const hex4 = (v: number) => v.toString(16).toUpperCase().padStart(4, "0")
@@ -32,9 +33,11 @@ export class PicCore implements CoreHost {
   private meter = { cycles: 0, sleep: 0 }
   private statusMeter = { cycles: 0, sleep: 0 }
   private stepIdd: number | null = null
+  private readonly supplyLoad: SupplyLoad
 
   constructor(chip: PicProfile) {
     this.chip = chip
+    this.supplyLoad = new SupplyLoad(chip.electrical.vdd)
     this.mcu = createPic(chip)
   }
 
@@ -81,6 +84,7 @@ export class PicCore implements CoreHost {
     this.mcu.powerOn()
     this.meter = { cycles: 0, sleep: 0 }
     this.statusMeter = { cycles: 0, sleep: 0 }
+    this.supplyLoad.reset()
   }
   runOnBattery() {}
   halt(reason: string) {
@@ -199,7 +203,8 @@ export class PicCore implements CoreHost {
       this.stepIdd = null
       return v
     }
-    return this.current(this.meter).current
+    const { asleep } = this.current(this.meter)
+    return this.supplyLoad.next(asleep, this.mcu.time, this.mcu.vdd, (share, volts) => this.mcu.supplyCurrent(share, volts))
   }
 
   status(): CoreStatus {

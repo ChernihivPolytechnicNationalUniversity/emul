@@ -153,3 +153,16 @@ a half, and every instruction and character after it was split across two.
 **Fixed** (2026-10-14): the backpack primes the module's lines high at power-on (the first
 write's timing is not reported, no program set it up), and a nibble sent while busy is dropped
 without counting as a half. `tests/sim/lcd1602.test.ts` replays both on the backpack.
+
+## The call stack goes on below Reset_Handler
+
+Found 2026-10-15 on `feat/debug-target`, Chrome, the debugger's test program on a Nucleo: stopped
+in `factorial`, the call stack read `factorial ← main ← Reset_Handler`, then an "exception 0"
+marker, `Default_Handler` and `Reset_Handler` again.
+
+**Cause:** `src/debug/unwind.ts` took LR's reset value 0xFFFFFFFF, which Reset_Handler saves, for
+an EXC_RETURN and walked a hardware frame read from past the top of RAM. The tests never saw it:
+their stop view did not fetch the memory the unwinding missed, as the session does.
+
+**Fixed** (2026-10-15): an EXC_RETURN ends in 1, 9 or D (ARMv7-M B1.5.8); the tests' stop views
+fetch what the unwinding missed and walk again (`tests/sim/debug.test.ts`).

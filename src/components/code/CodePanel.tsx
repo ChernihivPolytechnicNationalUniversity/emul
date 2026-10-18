@@ -554,7 +554,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
           ? { kind: "missing", image: pendingSite, loading: site[pendingSite] === undefined && resolve(pendingSite).kind === "site" }
           : { kind: "editor" }
   const staleFile = dboard?.build && active && !active.startsWith("@") && dboard.build.files[active] !== undefined && dboard.build.files[active] !== contentHash(textOf(active) ?? "")
-  const where = frame?.file ? `${frame.file.split("/").pop()}:${frame.line}` : view.regs ? `0x${view.regs.r[15].toString(16).padStart(8, "0")}` : null
+  const where = frame?.file ? `${frame.file.split("/").pop()}:${frame.line}` : view.regs ? `0x${view.regs.pc.toString(16).padStart(view.regs.arch === "avr" ? 4 : 8, "0")}` : null
   const hasImage = !!board?.props?.firmwareData
 
   const output = build ? <Output build={build} onGoTo={(d) => {

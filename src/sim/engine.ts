@@ -117,6 +117,22 @@ const REL_TOL = 1e-3
  */
 const SETTLED_STEPS = 3
 const SETTLED_DV = 1e-6
+/**
+ * Capacitors still easing off a load step settle the circuit too, once what they have left to
+ * move any node by is under this (V): the deviation from the operating point they are heading
+ * for, from their currents through the circuit with them open (`tailUnder`). The strict drift
+ * bound alone holds a pin's picofarads to femtoamps and waits out nanoamp tails for many steps.
+ */
+const SETTLED_TAIL = 1e-5
+/**
+ * A leaf node's toggle is taken without a full solve while the change in current it puts on its
+ * rails, summed since the last full solve, moves no rail by more than this (V, by the rail's own
+ * resistance), and its own RC settles within a small share of the step.
+ */
+const LEAF_DV = 1e-3
+const LEAF_TAU_SHARE = 0.05
+/** `leafWas` of a pad that has not changed this step. */
+const LEAF_UNMARKED = 255
 const SETTLED_DRIFT = 1e-3
 /** Operating points remembered by switch/pad state (see `solve`). */
 const MEMO_POINTS = 64
@@ -425,7 +441,7 @@ export class Engine {
   /** Where the step in progress ends: the switch mask carries the pulse sources' levels there. */
   private stepEnd = 0
   private readonly pulseElements: Int32Array
-  /** Diodes (their eye average moves every step) and, after each full update, the parts under load or still hot. */
+  /** Diodes that are lights (their eye average moves every step) and, after each full update, the parts under load or still hot. */
   private readonly diodeElements: Int32Array
   private loadedElements: number[] = []
   private readonly strikeElements: Int32Array
@@ -441,9 +457,49 @@ export class Engine {
   /** Switch/pad hash of the current step, and how many steps in a row ended at a fixed point. */
   private stepMask = 0
   private settledRun = 0
+  /**
+   * Leaf nodes: only resistors, capacitors and pads on them, every other end on ground or a node
+   * that is not a leaf (a pad into an LCD's input with its pull-up and the pin's capacitance).
+   * In a settled circuit a pad toggling there changes nothing but the leaf and the small current
+   * its rails carry: the leaf is solved in closed form, the rails left as they are within
+   * `LEAF_DV` (`takeLeaves`). False solves every toggle in full.
+   */
+  leafPath = true
+  /**
+   * Settled with capacitors still easing off by under `SETTLED_TAIL` (`tailUnder`). False holds
+   * a circuit to the strict rule: every node within `SETTLED_DV`, every capacitor under `SETTLED_DRIFT`.
+   */
+  tailPath = true
+  /** The circuit with its capacitors open, as of factorization `tailAt`, for `tailUnder`. */
+  private tailA: Float64Array | null = null
+  private tailLu: SparseLU | null = null
+  private tailRhs: Float64Array | null = null
+  private tailOut: Float64Array | null = null
+  private tailAt = -1
+  private tailValid = false
+  /** Per node, the elements on it when it is a leaf; per pad element, its leaf node or -1. */
+  private readonly leafElements: (Int32Array | null)[]
+  private readonly leafOf: Int32Array
+  /** Leaf nodes whose pads changed this step, and each changed pad's state before it. */
+  private readonly leafDirty: number[] = []
+  private readonly leafMarked: Uint8Array
+  private readonly leafWas: Uint8Array
+  private readonly leafWasVolts: Float64Array
+  /** Rail current changes taken without a solve since the last one, per node (A); scratch for a step's. */
+  private readonly leafDrift: Float64Array
+  private readonly leafDelta: Float64Array
+  /** A node's resistance to ground through the circuit, as of factorization `railAt`. */
+  private readonly railOhms: Float64Array
+  private readonly railAt: Int32Array
+  /** Settled apart from its leaves since it last settled outright: what leaves do since then is all that moves. */
+  private leafSettled = false
+  /** The switch/pad hash without the pads on leaves. */
+  private restMask = 0
+  private stepRest = 0
   private readonly drifting: boolean
   /** The `dt` and switch states `lu` was factorized for; a change invalidates it. */
   private luDt = 0
+  private luTheta = THETA
   private luSwitches = 0
   private luValid = false
 
@@ -475,7 +531,7 @@ export class Engine {
     this.linear = linear
     this.partKeys = net.elements.map((el) => (el.kind === "SW" ? partKey(el.object, el.part) : ""))
     this.padElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) ? [i] : [])))
-    this.diodeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "D" ? [i] : [])))
+    this.diodeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "D" && el.part ? [i] : [])))
     this.limitsOf = net.elements.map((el) => el.limits)
     this.isDiode = Uint8Array.from(net.elements, (el) => (el.kind === "D" ? 1 : 0))
     this.heatDt = new Float64Array(net.elements.length)
@@ -488,6 +544,18 @@ export class Engine {
     this.liveElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) || (el.kind === "V" && el.amplitude > 0) ? [i] : [])))
     this.stateless = !net.elements.some((el) => el.kind === "C" || el.kind === "L" || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR")
     this.drifting = net.elements.some((el) => el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT")
+    this.leafElements = findLeaves(net)
+    this.leafOf = Int32Array.from(net.elements, (el) => (el.kind === "GPIO" && el.node !== GROUND && this.leafElements[el.node] ? el.node : -1))
+    this.leafMarked = new Uint8Array(n)
+    this.leafWas = new Uint8Array(net.elements.length).fill(LEAF_UNMARKED)
+    this.leafOldCurrent = new Float64Array(net.elements.length)
+    this.leafNext = new Float64Array(n)
+    this.leafBefore = new Float64Array(n)
+    this.leafWasVolts = new Float64Array(net.elements.length)
+    this.leafDrift = new Float64Array(n)
+    this.leafDelta = new Float64Array(n)
+    this.railOhms = new Float64Array(n)
+    this.railAt = new Int32Array(n).fill(-1)
 
     this.capV = new Float64Array(m)
     this.capI = new Float64Array(m)
@@ -979,7 +1047,11 @@ export class Engine {
       const i = loaded[j]
       const lim = elements[i].limits
       if (!lim) continue
-      const heat = this.stress[i] + (this.rRatio[i] - this.stress[i]) * -Math.expm1(-dt / lim.tau)
+      if (this.heatDt[i] !== dt) {
+        this.heatDt[i] = dt
+        this.heatShare[i] = -Math.expm1(-dt / lim.tau)
+      }
+      const heat = this.stress[i] + (this.rRatio[i] - this.stress[i]) * this.heatShare[i]
       if (heat > 1) return false
       this.stress[i] = heat
     }
@@ -1052,37 +1124,327 @@ export class Engine {
    * ramping would drift over the steps skipped), no battery (its state drifts by design),
    * and the node voltages within tolerance of the step before.
    */
-  private settledAfter(dt: number): boolean {
+  private settledAfter(dt: number, leaves: boolean): boolean {
     // A pulse source between its edges is a DC one: its edge changes the switch mask, which ends the run.
     if (!this.converged || this.struck || this.sine || this.drifting || this.eventful) return false
     const n = this.net.nodes
-    for (let i = 0; i < n; i++) if (Math.abs(this.v[i] - this.prevV[i]) > SETTLED_DV) return false
+    const tail = this.tailPath
+    // Within the strict rule: nodes still to a microvolt, capacitors under SETTLED_DRIFT.
+    let still = true
+    // With `leaves`, all that moved since the circuit settled is its leaves' load: the leaves are
+    // exact whatever they read, and what the rails still have to move by is held to `LEAF_DV`.
+    for (let i = 0; i < n; i++) {
+      if (leaves && this.fastLeaf(i, dt)) continue
+      const dv = Math.abs(this.v[i] - this.prevV[i])
+      if (dv > (leaves ? LEAF_DV : tail ? SETTLED_TAIL : SETTLED_DV)) return false
+      if (dv > SETTLED_DV) still = false
+    }
     const elements = this.net.elements
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i]
       // Drift bounds: at most SETTLED_DRIFT volts (or amps) per second if the state were frozen.
-      if (el.kind === "C" && Math.abs(this.capI[i]) > el.value * SETTLED_DRIFT) return false
+      if (el.kind === "C" && Math.abs(this.capI[i]) > el.value * SETTLED_DRIFT) {
+        // A fast leaf's capacitor is where its pads put it; another still settling from a leaf's
+        // load step has what it has left to move by the resistance it sees.
+        if (leaves && ((el.a !== GROUND && this.fastLeaf(el.a, dt)) || (el.b !== GROUND && this.fastLeaf(el.b, dt)))) continue
+        still = false
+        if (tail) continue
+        if (!leaves) return false
+        const node = el.a === GROUND ? el.b : el.a
+        if (node === GROUND || Math.abs(this.capI[i]) * this.railResistance(node) > LEAF_DV) return false
+      }
       if (el.kind === "L" && Math.abs(this.indV[i]) > el.value * SETTLED_DRIFT) return false
     }
+    if (tail && !still && !this.tailUnder(dt, leaves)) return false
     return dt > 0
   }
 
-  /** Hash of every switch and pad state, so a toggle invalidates the cached factorization. */
+  /**
+   * Whether the capacitors drifting past SETTLED_DRIFT have under `SETTLED_TAIL` left to move any
+   * node by. With the circuit linearized where the step left it, conductances G and the
+   * capacitors' currents J (C dv/dt), the operating point they head for is v − e with G e = −J,
+   * G being the step's matrix without the capacitors' companions: one solve, exact for a linear
+   * circuit, whatever the time constants and however the capacitors share the charge between them.
+   * With `leaves`, a fast leaf's capacitor is left out (it is where its pads put it) and the
+   * rails may have up to `LEAF_DV` to go, as a leaf's load step leaves them.
+   */
+  private tailUnder(dt: number, leaves: boolean): boolean {
+    if (!this.luValid) return false
+    const size = this.size
+    const elements = this.net.elements
+    if (this.tailAt !== this.factorizations) {
+      this.tailAt = this.factorizations
+      const G = (this.tailA ??= new Float64Array(size * size))
+      const lu = (this.tailLu ??= new SparseLU(size))
+      G.set(this.A)
+      lu.register(G)
+      for (let i = 0; i < elements.length; i++) {
+        const el = elements[i]
+        if (el.kind === "C") this.openCapacitor(G, el.a, el.b, el.value / ((el.euler ? 1 : this.luTheta) * this.luDt))
+      }
+      this.tailValid = lu.factorize(G)
+    }
+    if (!this.tailValid) return false
+    const rhs = (this.tailRhs ??= new Float64Array(size))
+    const e = (this.tailOut ??= new Float64Array(size))
+    rhs.fill(0)
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i]
+      if (el.kind !== "C" || Math.abs(this.capI[i]) <= el.value * SETTLED_DRIFT) continue
+      if (leaves && ((el.a !== GROUND && this.fastLeaf(el.a, dt)) || (el.b !== GROUND && this.fastLeaf(el.b, dt)))) continue
+      if (el.a !== GROUND) rhs[el.a] -= this.capI[i]
+      if (el.b !== GROUND) rhs[el.b] += this.capI[i]
+    }
+    if (!this.tailLu!.solve(rhs, e)) return false
+    const n = this.net.nodes
+    const limit = leaves ? LEAF_DV : SETTLED_TAIL
+    for (let i = 0; i < n; i++) if (!(Math.abs(e[i]) <= limit)) return false
+    return true
+  }
+
+  private openCapacitor(G: Float64Array, a: number, b: number, g: number) {
+    const size = this.size
+    if (a !== GROUND) G[a * size + a] -= g
+    if (b !== GROUND) G[b * size + b] -= g
+    if (a !== GROUND && b !== GROUND) {
+      G[a * size + b] += g
+      G[b * size + a] += g
+    }
+  }
+
+  /** Hash of every switch and pad state, so a toggle invalidates the cached factorization; the hash without the pads on leaves goes to `restMask`. */
   private switchMask(parts: PartReader) {
     let mask = 0
+    let rest = 0
     const elements = this.net.elements
     const masked = this.maskElements
     for (let k = 0; k < masked.length; k++) {
       const i = masked[k]
       const el = elements[i]
-      if (el.kind === "SW") mask = (mask * 31 + (switchClosed(el.closed, parts(this.partKeys[i])) ? 1 : this.arc[i] ? 2 : 0)) | 0
-      else if (el.kind === "GPIO") mask = (mask * 31 + this.gpioState[i] + 7 * this.padSteps[i]) | 0
-      else if (el.kind === "R" && el.live) mask = (mask * 31 + (this.ohms[i] | 0)) | 0
-      else if (el.kind === "BAT") mask = (mask * 31 + this.batStep[i]) | 0
-      else if (el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR") mask = (mask * 31 + this.ctl[i]) | 0
-      else if (el.kind === "V") mask = (mask * 31 + (pulseHigh(this.stepEnd, el) ? 1 : 0)) | 0
+      let t = 0
+      if (el.kind === "SW") t = switchClosed(el.closed, parts(this.partKeys[i])) ? 1 : this.arc[i] ? 2 : 0
+      else if (el.kind === "GPIO") {
+        mask = (mask * 31 + this.gpioState[i] + 7 * this.padSteps[i]) | 0
+        if (this.leafOf[i] < 0) rest = (rest * 31 + this.gpioState[i] + 7 * this.padSteps[i]) | 0
+        continue
+      } else if (el.kind === "R" && el.live) t = this.ohms[i] | 0
+      else if (el.kind === "BAT") t = this.batStep[i]
+      else if (el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR") t = this.ctl[i]
+      else if (el.kind === "V") t = pulseHigh(this.stepEnd, el) ? 1 : 0
+      mask = (mask * 31 + t) | 0
+      rest = (rest * 31 + t) | 0
     }
+    this.restMask = rest
     return mask
+  }
+
+  /** A pad on a leaf changed: note the leaf, and the pad's state before (once a step). */
+  private markLeaf(i: number) {
+    if (this.leafWas[i] === LEAF_UNMARKED) {
+      this.leafWas[i] = this.gpioState[i]
+      this.leafWasVolts[i] = this.gpioVolts[i]
+    }
+    const node = this.leafOf[i]
+    if (this.leafMarked[node]) return
+    this.leafMarked[node] = 1
+    this.leafDirty.push(node)
+  }
+
+  /** What a pad in state `st` (`volts` for a sourced voltage) ties its node to: sets `linkG`, and `linkNode` or the fixed `linkV`. */
+  private padLink(i: number, el: Pad, st: number, volts: number) {
+    this.linkNode = GROUND
+    this.linkV = 0
+    if (st === 0) {
+      this.linkG = 0
+      return
+    }
+    if (st === GPIO_VOLTS) {
+      this.linkG = 1 / R_DAC
+      this.linkV = volts
+      return
+    }
+    const r = st <= 2 ? this.ohms[i] : el.pull || R_PULL
+    this.linkG = 1 / r
+    if (st === 1 || st === 3) {
+      if (el.vddNet !== undefined) this.linkNode = el.vddNet
+      else this.linkV = el.vdd
+    } else this.linkNode = el.gndNet ?? GROUND
+  }
+  private linkG = 0
+  private linkNode = GROUND
+  private linkV = 0
+
+  /** A leaf whose RC settles within the step with its pads as they are: its voltage follows them at once. */
+  private fastLeaf(node: number, dt: number) {
+    return this.leafElements[node] !== null && !Number.isNaN(this.leafSolve(node, dt))
+  }
+
+  /** The leaf's voltage with its pads as they are and its other ends where the circuit has them; NaN if its RC is slow for the step. */
+  private leafSolve(node: number, dt: number): number {
+    const elements = this.net.elements
+    const v = this.v
+    let g = GMIN
+    let j = 0
+    let farads = 0
+    for (const i of this.leafElements[node]!) {
+      const el = elements[i]
+      if (el.kind === "C") farads += el.value
+      else if (el.kind === "R") {
+        const gi = 1 / this.ohms[i]
+        g += gi
+        j += gi * this.vol(el.a === node ? el.b : el.a, v)
+      } else if (el.kind === "GPIO") {
+        this.padLink(i, el, this.gpioState[i], this.gpioVolts[i])
+        g += this.linkG
+        j += this.linkG * (this.linkNode === GROUND ? this.linkV : v[this.linkNode])
+      }
+    }
+    return farads / g > LEAF_TAU_SHARE * dt ? NaN : j / g
+  }
+
+  /** Add `sign` × the current the leaf at `vl` draws from each of its rails (pads as they were with `before`) into `leafDelta`. */
+  private leafCurrents(node: number, vl: number, before: boolean, sign: number) {
+    const elements = this.net.elements
+    const v = this.v
+    for (const i of this.leafElements[node]!) {
+      const el = elements[i]
+      let rail = GROUND
+      let g = 0
+      if (el.kind === "R") {
+        rail = el.a === node ? el.b : el.a
+        g = 1 / this.ohms[i]
+      } else if (el.kind === "GPIO") {
+        const was = before && this.leafWas[i] !== LEAF_UNMARKED
+        this.padLink(i, el, was ? this.leafWas[i] : this.gpioState[i], was ? this.leafWasVolts[i] : this.gpioVolts[i])
+        rail = this.linkNode
+        g = this.linkG
+      }
+      if (rail === GROUND || g === 0) continue
+      if (!this.railMarked[rail]) {
+        this.railMarked[rail] = 1
+        this.railTouched.push(rail)
+      }
+      this.leafDelta[rail] += sign * g * (v[rail] - vl)
+    }
+  }
+  private readonly railTouched: number[] = []
+  private railMarked = new Uint8Array(0)
+
+  /** A node's resistance to ground through the circuit as last factorized (the rail's answer to a load change). */
+  private railResistance(node: number) {
+    if (this.railAt[node] !== this.factorizations) {
+      this.railAt[node] = this.factorizations
+      this.railOhms[node] = this.sourceAt(node)?.ohms ?? Infinity
+    }
+    return this.railOhms[node]
+  }
+
+  /**
+   * The step's pad toggles, all on leaves of a settled circuit, without a full solve: each leaf
+   * at its new voltage, its elements' readings with it, its rails as they are. Declined (false,
+   * nothing changed) when a leaf's RC is slow for the step, the rails' current has changed by
+   * more than `LEAF_DV` worth since the last full solve, or an element on a leaf would fail.
+   */
+  private takeLeaves(dt: number): boolean {
+    if (!this.luValid) return false
+    if (this.railMarked.length !== this.v.length) this.railMarked = new Uint8Array(this.v.length)
+    const v = this.v
+    const dirty = this.leafDirty
+    const next = this.leafNext
+    let ok = true
+    for (let k = 0; k < dirty.length && ok; k++) {
+      const node = dirty[k]
+      next[k] = this.leafSolve(node, dt)
+      if (Number.isNaN(next[k])) ok = false
+      this.leafCurrents(node, v[node], true, -1)
+      this.leafCurrents(node, next[k], false, 1)
+    }
+    const rails = this.railTouched
+    for (let k = 0; k < rails.length && ok; k++) if (Math.abs(this.leafDrift[rails[k]] + this.leafDelta[rails[k]]) * this.railResistance(rails[k]) > LEAF_DV) ok = false
+    if (ok) ok = this.commitLeaves()
+    if (ok) for (const r of rails) this.leafDrift[r] += this.leafDelta[r]
+    for (const r of rails) {
+      this.leafDelta[r] = 0
+      this.railMarked[r] = 0
+    }
+    rails.length = 0
+    return ok
+  }
+  private readonly leafNext: Float64Array
+
+  /** Move each dirty leaf to `leafNext` and its elements' readings with it; undone if one would fail. */
+  private commitLeaves(): boolean {
+    const elements = this.net.elements
+    const v = this.v
+    const dirty = this.leafDirty
+    const before = this.leafBefore
+    const failures = this.failures.length
+    for (let k = 0; k < dirty.length; k++) {
+      before[k] = v[dirty[k]]
+      v[dirty[k]] = this.leafNext[k]
+    }
+    const old = this.leafOldCurrent
+    for (const node of dirty)
+      for (const i of this.leafElements[node]!) {
+        old[i] = this.rCurrent[i]
+        const el = elements[i]
+        // As `updateState` reads them; dt 0: the settled step's own update moves heat and averages on.
+        if (el.kind === "R") {
+          const vd = this.vol(el.a, v) - this.vol(el.b, v)
+          const cur = vd / this.ohms[i]
+          this.record(el, i, 0, cur, vd, vd * cur)
+        } else if (el.kind === "C") this.record(el, i, 0, 0, this.vol(el.a, v) - this.vol(el.b, v), 0)
+        else if (el.kind === "GPIO") {
+          const vn = this.vol(el.node, v)
+          const rated = el.gndNet === undefined ? vn : vn - this.vol(el.gndNet, v)
+          this.padLink(i, el, this.gpioState[i], this.gpioVolts[i])
+          const to = this.linkNode === GROUND ? this.linkV : v[this.linkNode]
+          const cur = this.linkG === 0 ? 0 : (vn - to) * this.linkG
+          this.record(el, i, 0, cur, vn, this.linkG === 0 ? 0 : (cur * cur) / this.linkG, rated, this.padVoltageMax(el, v))
+        }
+      }
+    if (this.failures.length > failures) {
+      this.failures.length = failures
+      for (let k = 0; k < dirty.length; k++) v[dirty[k]] = before[k]
+      for (const node of dirty) for (const i of this.leafElements[node]!) this.rCurrent[i] = old[i]
+      return false
+    }
+    // The terminal currents move by each element's change; a capacitor ends the step at rest.
+    const tc = this.termCurrent
+    for (const node of dirty)
+      for (const i of this.leafElements[node]!) {
+        const el = elements[i]
+        const base = i * TERM_SLOTS
+        if (el.kind === "R" || el.kind === "C") {
+          const d = this.rCurrent[i] - old[i]
+          tc[this.termOf[base]] += d
+          tc[this.termOf[base + 1]] -= d
+          if (el.kind === "C") {
+            this.capV[i] = this.rVoltage[i]
+            this.capI[i] = 0
+          }
+        } else if (el.kind === "GPIO") {
+          const was = this.leafWas[i] !== LEAF_UNMARKED ? this.leafWas[i] : this.gpioState[i]
+          this.padTerms(i, el, was, -old[i])
+          this.padTerms(i, el, this.gpioState[i], this.rCurrent[i])
+        }
+        if (this.rRatio[i] !== 0 && !this.loadedElements.includes(i)) this.loadedElements.push(i)
+      }
+    return true
+  }
+  private readonly leafBefore: Float64Array
+  private readonly leafOldCurrent: Float64Array
+
+  /** A pad's current `cur` in state `st` into the terminal currents, as `updateState` adds it. */
+  private padTerms(i: number, el: Pad, st: number, cur: number) {
+    if (st === 0) return
+    const tc = this.termCurrent
+    const base = i * TERM_SLOTS
+    tc[this.termOf[base]] += cur
+    if (st === GPIO_VOLTS) return
+    const high = st === 1 || st === 3
+    if (high && el.vddNet !== undefined) tc[this.termOf[base + 1]] -= cur
+    if (!high && el.gndNet !== undefined) tc[this.termOf[base + 2]] -= cur
   }
 
   /**
@@ -1103,12 +1465,18 @@ export class Engine {
       if (el.kind === "GPIO") {
         const st = pins(i, el.object, el.nodeKey)
         if (typeof st === "number") {
-          if (this.gpioState[i] !== GPIO_VOLTS || this.gpioVolts[i] !== st) disturbed = true
+          if (this.gpioState[i] !== GPIO_VOLTS || this.gpioVolts[i] !== st) {
+            if (this.leafOf[i] < 0) disturbed = true
+            else this.markLeaf(i)
+          }
           this.gpioState[i] = GPIO_VOLTS
           this.gpioVolts[i] = st
         } else {
           const code = st ? GPIO_CODE[st] : 0
-          if (this.gpioState[i] !== code) disturbed = true
+          if (this.gpioState[i] !== code) {
+            if (this.leafOf[i] < 0) disturbed = true
+            else this.markLeaf(i)
+          }
           this.gpioState[i] = code
         }
       } else if (el.kind === "R" && el.live) {
@@ -1120,10 +1488,22 @@ export class Engine {
     }
     if (this.scaledPads.length && this.scalePads()) disturbed = true
     const mask = this.switchMask(parts)
-    if (mask !== this.stepMask) disturbed = true
+    if (mask !== this.stepMask && (this.restMask !== this.stepRest || !this.leafDirty.length)) disturbed = true
     this.stepMask = mask
+    this.stepRest = this.restMask
+    // Pads that toggled on leaves alone: taken in closed form if the circuit is settled and the rails can.
+    const leafOnly = this.leafDirty.length > 0 && !disturbed
+    if (this.leafDirty.length) {
+      if (!leafOnly || !(this.leafPath && this.settledRun >= SETTLED_STEPS && this.takeLeaves(dt))) disturbed = true
+      for (const node of this.leafDirty) {
+        this.leafMarked[node] = 0
+        for (const i of this.leafElements[node]!) this.leafWas[i] = LEAF_UNMARKED
+      }
+      this.leafDirty.length = 0
+    }
     if (disturbed) {
       this.settledRun = 0
+      if (!leafOnly) this.leafSettled = false
       this.restartStiffCapacitors(dt)
     }
 
@@ -1206,7 +1586,12 @@ export class Engine {
       if (this.capped[i] >= TMR_CAPPED_STEPS) this.burstSeen[i] = 1
     }
     this.updateProbes(dt)
-    this.settledRun = this.settledAfter(dt) ? this.settledRun + 1 : 0
+    // Settled apart from what leaves did to it: settled at once, as it was before they did.
+    if (this.leafSettled && this.leafPath) this.settledRun = this.settledAfter(dt, true) ? SETTLED_STEPS : 0
+    else this.settledRun = this.settledAfter(dt, false) ? this.settledRun + 1 : 0
+    if (this.settledRun >= SETTLED_STEPS) this.leafSettled = true
+    // A full solve took every leaf's load in.
+    this.leafDrift.fill(0)
     if (this.settledRun >= SETTLED_STEPS) {
       this.loadedElements = []
       for (let i = 0; i < this.rRatio.length; i++) if (this.rRatio[i] !== 0 || this.stress[i] !== 0) this.loadedElements.push(i)
@@ -1617,6 +2002,7 @@ export class Engine {
         guess.set(this.best.subarray(0, n))
       }
       this.luDt = dt
+      this.luTheta = this.theta
       this.luSwitches = mask
     }
 
@@ -2246,7 +2632,8 @@ export class Engine {
           let cur = el.is * (Math.exp(Math.min(vd / nvt, diodeExpCap(Math.log(nvt / (Math.SQRT2 * el.is))))) - 1)
           if (el.zener) cur -= el.is * (Math.exp(Math.min(-(vd + el.zener) / nvt, 80)) - 1)
           this.diodeI[i] = cur
-          this.see(i, cur, dt)
+          // What the eye makes of it, for the diodes that are lights.
+          if (el.part) this.see(i, cur, dt)
           tc[this.termOf[base]] += cur
           tc[this.termOf[base + 1]] -= cur
           const across = el.anodePin === undefined || el.anodePin === el.anode ? vd : this.vol(el.anodePin, this.v) - this.vol(el.cathode, this.v)
@@ -2741,3 +3128,64 @@ export class Engine {
 }
 
 export type { Resolved }
+
+/** The nodes an element's terminals are on. */
+function nodesOf(el: Resolved): (number | undefined)[] {
+  switch (el.kind) {
+    case "R":
+    case "C":
+    case "L":
+    case "SW":
+      return [el.a, el.b]
+    case "V":
+    case "BAT":
+      return [el.plus, el.minus]
+    case "XFMR":
+      return [el.p1, el.p2, el.s1, el.s2]
+    case "D":
+      return [el.anode, el.cathode, el.anodePin]
+    case "Q":
+      return [el.b, el.c, el.e, el.cPin]
+    case "M":
+      return [el.g, el.d, el.s]
+    case "GPIO":
+      return [el.node, el.vddNet, el.gndNet]
+    case "REG":
+      return [el.in, el.out, el.gnd]
+    case "CHG":
+      return [el.in, el.bat, el.gnd, el.progNet, el.chrg, el.stdby, el.ce, el.temp]
+    case "PROT":
+      return [el.vdd, el.vss, el.cs, el.od, el.oc]
+    case "BOOST":
+      return [el.in, el.out, el.gnd, el.fb, el.vcc, el.en]
+    case "TMR":
+      return [el.vcc, el.gnd, el.trig, el.thres, el.ctrl, el.lo, el.reset, el.out, el.dis]
+  }
+}
+
+/**
+ * Leaf nodes and their elements: a pad's node with only fixed resistors, capacitors and pads on
+ * it, whose resistors and capacitors end on ground or on a node that is not
+ * a leaf candidate. Everything a leaf carries then flows through its rails.
+ */
+function findLeaves(net: Netlist): (Int32Array | null)[] {
+  const on: number[][] = Array.from({ length: net.nodes }, () => [])
+  net.elements.forEach((el, i) => {
+    for (const node of new Set(nodesOf(el))) if (node !== undefined && node !== GROUND) on[node].push(i)
+  })
+  const fits = (node: number, i: number) => {
+    const el = net.elements[i]
+    return ((el.kind === "R" && !el.live) || el.kind === "C") ? el.a !== el.b : el.kind === "GPIO" && el.node === node && el.vddNet !== node && el.gndNet !== node
+  }
+  // A pad on it is what makes a leaf: a node of resistors and capacitors alone may be slow (a capacitor behind its ESR).
+  const candidate = on.map((els, node) => els.some((i) => net.elements[i].kind === "GPIO") && els.every((i) => fits(node, i)))
+  const other = (el: Resolved, node: number) => (el.kind === "R" || el.kind === "C" ? (el.a === node ? el.b : el.a) : GROUND)
+  return on.map((els, node) => {
+    if (!candidate[node]) return null
+    for (const i of els) {
+      const o = other(net.elements[i], node)
+      if (o !== GROUND && candidate[o]) return null
+    }
+    return Int32Array.from(els)
+  })
+}

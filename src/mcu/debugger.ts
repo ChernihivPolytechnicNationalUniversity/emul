@@ -19,11 +19,13 @@
  * fire again and a single step never lands in the SysTick handler. Otherwise an interrupt due
  * at a boundary goes first, as on the part: a breakpoint on the instruction after a WFI fires
  * once the handler that woke the core has returned.
+ *
+ * The unit knows cores only through `DebugTarget`: byte addresses, a stack that grows down,
+ * calls that leave a return address, so one unit serves every architecture.
  */
-import type { Cpu } from "./cpu"
+import type { BreakpointSet } from "./breakpoints"
 import type { Firmware } from "./elf"
 import { elfAllocRanges, elfSections } from "./elf"
-import { EXC } from "./faults"
 import { LineTable, type FunctionRange } from "@/debug/lines"
 import type { BreakpointSpec, DebugStop, StepRequest, StopReason } from "@/debug/protocol"
 
@@ -41,11 +43,47 @@ type Phase =
   | { kind: "return"; addr: number; sp: number; ipsr: number; then: Phase }
   | { kind: "until"; addr: number; sp: number | null }
 
+/**
+ * What the debug unit needs of a core. Addresses are byte addresses, whatever the core counts
+ * its program counter in; the stack grows down, so a deeper activation has a lower SP.
+ */
+export interface DebugTarget {
+  /** The next instruction. */
+  readonly pc: number
+  /** Go on from another instruction. */
+  setPc(addr: number): void
+  /** The active stack pointer. */
+  readonly sp: number
+  /** The exception or interrupt the core is in (IPSR); 0 for a core that does not say. */
+  readonly context: number
+  /** Where the run loop asks `check()` before executing. */
+  readonly breakpoints: BreakpointSet
+  /** Ask `check()` at every instruction boundary. */
+  dbgActive: boolean
+  /** While a line is stepped: whether compiled code starting at `start` must end before `addr`. */
+  dbgSplit: ((addr: number, start: number) => boolean) | null
+  /** End the current run at the next boundary. */
+  stop: boolean
+  /** Drop compiled code (it may run across a boundary the unit now needs to see). */
+  flushBlocks(): void
+  /** An interrupt is taken before the instruction at the PC. */
+  exceptionDue(): boolean
+  /** Bytes of the instruction at `addr` when it is a call (one that leaves a return address), else 0. */
+  callSize(addr: number): number
+  /** Bytes of a breakpoint instruction (BKPT, BREAK) at `addr`, else 0. */
+  breakSize(addr: number): number
+  /** Where the function just entered returns to, from the state a call leaves (LR, the stack's top); null when that state shows none. */
+  callReturn(): number | null
+  /** Byte sizes a call instruction comes in, longest first. */
+  readonly callSizes: readonly number[]
+  /** A fault exception the vector catch stops at: its description; null for any other exception. */
+  caughtFault(exc: number): { detail?: string } | null
+}
+
 const NONE: Phase = { kind: "none" }
-const FAULTS = new Set<number>([EXC.HARD_FAULT, EXC.MEM_MANAGE, EXC.BUS_FAULT, EXC.USAGE_FAULT])
 
 export class CoreDebugger {
-  readonly cpu: Cpu
+  readonly cpu: DebugTarget
   private firmware: Firmware | null = null
   private lineTable: LineTable | null = null
   private lineTableFor: Firmware | null = null
@@ -64,7 +102,7 @@ export class CoreDebugger {
   /** Called when the core stops (the SoC ends its slice). */
   onStop: (() => void) | null = null
 
-  constructor(cpu: Cpu) {
+  constructor(cpu: DebugTarget) {
     this.cpu = cpu
   }
 
@@ -133,11 +171,9 @@ export class CoreDebugger {
   /** Leave a stop: the next instruction runs, and the core goes on until something stops it. */
   resume() {
     const cpu = this.cpu
-    if (this.stop?.reason === "bkpt" && /^bkpt\b/.test(cpu.instrAt(cpu.pc)?.text ?? "")) {
-      // A BKPT stays where it is: going on means going past it (unless the PC was moved off it).
-      cpu.pc = (cpu.pc + 2) >>> 0
-      cpu.nextPc = cpu.pc
-    }
+    const brk = this.stop?.reason === "bkpt" ? cpu.breakSize(cpu.pc) : 0
+    // A BKPT stays where it is: going on means going past it (unless the PC was moved off it).
+    if (brk) cpu.setPc((cpu.pc + brk) >>> 0)
     this.stop = null
     this.pending = null
     this.resumeFrom = cpu.pc
@@ -149,14 +185,14 @@ export class CoreDebugger {
     const cpu = this.cpu
     switch (req.kind) {
       case "instruction":
-        this.setPhase({ kind: "instr", over: !!req.over, started: false, pc0: cpu.pc, sp0: cpu.r[13] })
+        this.setPhase({ kind: "instr", over: !!req.over, started: false, pc0: cpu.pc, sp0: cpu.sp })
         break
       case "into":
       case "over": {
         const key = this.lines?.keyAt(cpu.pc) ?? -1
         // No line here (startup code, a library routine): a step is an instruction step.
-        if (key <= 0) this.setPhase({ kind: "instr", over: req.kind === "over", started: false, pc0: cpu.pc, sp0: cpu.r[13] })
-        else this.setPhase({ kind: "line", into: req.kind === "into", key, sp: cpu.r[13], ipsr: cpu.ipsr })
+        if (key <= 0) this.setPhase({ kind: "instr", over: req.kind === "over", started: false, pc0: cpu.pc, sp0: cpu.sp })
+        else this.setPhase({ kind: "line", into: req.kind === "into", key, sp: cpu.sp, ipsr: cpu.context })
         break
       }
       case "until":
@@ -229,12 +265,12 @@ export class CoreDebugger {
     let ph = this.phase
     if (ph.kind === "return" && pc === ph.addr) {
       // Back where the call (or the interrupt) returns to, unless this is a deeper activation of the same code.
-      if (cpu.r[13] < ph.sp || cpu.ipsr !== ph.ipsr) return DBG_GO
+      if (cpu.sp < ph.sp || cpu.context !== ph.ipsr) return DBG_GO
       this.setPhase(ph.then)
       ph = this.phase
     }
     if (ph.kind === "until" && pc === ph.addr) {
-      if (ph.sp !== null && cpu.r[13] < ph.sp) return DBG_GO
+      if (ph.sp !== null && cpu.sp < ph.sp) return DBG_GO
       return this.finish("step")
     }
     if (ph.kind === "instr") return this.checkInstruction(ph)
@@ -251,9 +287,9 @@ export class CoreDebugger {
     }
     // One instruction ran. A call stepped over runs to its return.
     if (ph.over) {
-      const instr = cpu.instrAt(ph.pc0)
-      const next = (ph.pc0 + (instr?.size ?? 2)) >>> 0
-      if (instr && /^blx?\b/.test(instr.text) && cpu.pc !== next && (cpu.r[14] & ~1) >>> 0 === next) {
+      const call = cpu.callSize(ph.pc0)
+      const next = (ph.pc0 + call) >>> 0
+      if (call && cpu.pc !== next && cpu.callReturn() === next) {
         this.setPhase({ kind: "until", addr: next, sp: ph.sp0 })
         return DBG_GO
       }
@@ -266,16 +302,19 @@ export class CoreDebugger {
     const lines = this.lines
     if (!lines) return this.finish("step")
     const pc = cpu.pc
-    if (cpu.ipsr !== ph.ipsr) return DBG_GO
+    if (cpu.context !== ph.ipsr) return DBG_GO
     const key = lines.keyAt(pc)
     if (key === ph.key) return DBG_GO
     const fn = lines.functionAt(pc)
-    if (fn && pc === fn.start && this.calledFrom(ph.key, lines)) {
-      const ret = (cpu.r[14] & ~1) >>> 0
+    // Entered a function, or code with no line and no function symbol (libgcc's assembly routines, NOTYPE on the AVR).
+    const entered = fn ? pc === fn.start : key < 0
+    if (entered && this.calledFrom(ph.key, lines)) {
+      const ret = cpu.callReturn()!
       if (!ph.into || key < 0) {
-        this.setPhase({ kind: "return", addr: ret, sp: cpu.r[13], ipsr: ph.ipsr, then: ph })
+        this.setPhase({ kind: "return", addr: ret, sp: cpu.sp, ipsr: ph.ipsr, then: ph })
         return DBG_GO
       }
+      if (!fn) return this.finish("step")
       const body = lines.postPrologue(fn.start, fn.end)
       if (body === pc) return this.finish("step")
       this.setPhase({ kind: "until", addr: body, sp: null })
@@ -286,7 +325,7 @@ export class CoreDebugger {
     if (key < 0) return this.finish("step")
     if (!lines.isStmtStart(pc)) {
       // Returned into the caller, in the middle of its line: that is where it goes on from.
-      if (cpu.r[13] > ph.sp) return this.finish("step")
+      if (cpu.sp > ph.sp) return this.finish("step")
       ph.key = key
       return DBG_GO
     }
@@ -295,25 +334,23 @@ export class CoreDebugger {
 
   /**
    * Whether the core has just entered a function by a call made from the line being stepped:
-   * LR holds the address after a BL/BLX that belongs to that line.
+   * the return address follows a call that belongs to that line.
    */
   private calledFrom(key: number, lines: LineTable): boolean {
-    const lr = this.cpu.r[14]
-    if ((lr & 1) === 0 || lr >>> 0 >= 0xf0000000) return false
-    const ret = (lr & ~1) >>> 0
-    for (const size of [4, 2]) {
+    const ret = this.cpu.callReturn()
+    if (ret === null) return false
+    for (const size of this.cpu.callSizes) {
       const at = (ret - size) >>> 0
-      const instr = this.cpu.instrAt(at)
-      if (instr && instr.size === size && /^blx?\b/.test(instr.text)) return lines.keyAt(at) === key
+      if (this.cpu.callSize(at) === size) return lines.keyAt(at) === key
     }
     return false
   }
 
   /** The core is entering exception `exc` from a context that resumes at `ret` with SP `sp`. */
   onException(exc: number, ret: number, sp: number, ipsr: number) {
-    if (this.catchFaults && FAULTS.has(exc)) {
-      const fault = this.cpu.scs.faults[this.cpu.scs.faults.length - 1]
-      this.pending = { reason: "exception", pc: 0, exception: exc, detail: fault?.detail }
+    const fault = this.catchFaults ? this.cpu.caughtFault(exc) : null
+    if (fault) {
+      this.pending = { reason: "exception", pc: 0, exception: exc, detail: fault.detail }
       this.refresh()
       this.cpu.stop = true
       return

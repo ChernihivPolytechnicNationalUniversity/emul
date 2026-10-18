@@ -282,6 +282,35 @@ per-kind index lists instead of every element (strike checks, the switch mask, t
 operating-point memo's arrays, caching each part's heating factor per step length, and caching a wire's marker
 speed while its current holds within 0.1 %.
 
+Pads toggling into listen-only loads skip the solve too. A *leaf* is a pad's node with nothing but
+fixed resistors, capacitors and pads on it, every other end on ground or on a node that is not a
+leaf (an LCD's input with its pull-up and the pins' capacitance). Once the circuit has settled, a
+step whose only change is pads on leaves is taken in closed form (`Engine.takeLeaves`): each leaf's
+voltage from its conductances to its rails as they stand, its elements' readings with it, and the
+change in current it puts on each rail summed since the last full solve, which, times that rail's
+resistance through the circuit (`sourceAt`), must stay within 1 mV (`LEAF_DV`); a leaf whose own RC
+is not done within 5 % of the step, or an element on it that would fail, declines too. A full solve
+after that keeps the circuit settled as soon as what is left of the leaves' load step (node changes,
+and a capacitor's current by the resistance it sees) is within the same millivolt. Against the same
+circuit solved in full every step, nodes agree within 1.5 mV and currents within 1 % + 40 µA, with a
+fifth of the factorizations (`tests/sim/engine-leaf.test.ts`); a Nano writing a parallel 1602 runs
+2.4 times as fast (0.54× → 1.3× real time in Node, one thread).
+
+Capacitors still easing off a load step settle the circuit too, once what they have left to move
+any node by is under 10 µV (`SETTLED_TAIL`, `Engine.tailUnder`). With the circuit linearized where
+the step left it, conductances G and the capacitors' currents J, the operating point they head for
+is v − e with G e = −J, G being the step's matrix without the capacitors' companions: one more
+factorization per factorization the step took, then a substitution per check — exact for a linear
+circuit whatever the time constants and however capacitors share charge (an estimate per capacitor
+through the step's matrix sees its neighbours as near shorts and misses a slow common mode). The
+strict rule alone (every node within 1 µV a step, every capacitor drifting under 1 mV/s) holds a
+pin's 10 pF to 10 fA and waited out a Nano's DTR-to-RESET 100 nF for some sixteen steps after every
+PWM edge. A leaf-settled circuit uses the same solve with `LEAF_DV`. Against the strict rule, nodes
+agree within 50 µV and currents within 1 % + 5 µA, a 1 s RC is never frozen on its way, and a Nano's
+rail under a 490 Hz LED takes under a third of the factorizations (`tests/sim/engine-tail.test.ts`).
+With the AVR's supply current no longer moving with the rail (it was scaled with VCC and then drawn
+through a resistor, VCC² and a new resistor every step), the Nano dimmer went from 0.86× to 1.47×.
+
 The same factors give the ADC its source. An ADC-capable pad's driving-point resistance is one
 substitution with a unit vector at its node (`Engine.sourceAt`), less the companion conductance of
 the capacitors on that node, whose capacitance is reported beside it; the loop hands both to the
@@ -291,15 +320,45 @@ charges its sampling capacitor through them in closed form over the sampling tim
 in `src/mcu/periph/adc.ts`), so a source impedance the solver sees only at 20 µs still acts
 within the sub-microsecond window.
 
+## Busy-waits
+
+Firmware spends most of its time waiting: `HAL_Delay` calls `HAL_GetTick` and compares until the
+SysTick handler has moved `uwTick` far enough, some 20 cycles a pass, nine thousand passes a
+millisecond at 180 MHz; a main loop calling a function that returns at once until an interrupt
+sets its flag (the Open746I-C's touch demo) is the same with a push, a pop and a table copied
+onto the stack. The compiled core takes such a loop at once (`Cpu.spinCheck`): passes back to
+an anchor block (a loop of up to eight blocks) that ran nothing but branches, loads, stores and
+register-list pushes and pops (`pollPrefix`: a block whose rare path does more counts while the
+pass ends before it) are watched after a few, and two passes in a row that leave every register,
+flag and FP register as they were, store nothing that changes memory (`Bus.spyStores`, on only
+for those two passes), touch no peripheral (`slowAccesses`), see nothing come due (`serviced`)
+and cost the same cycles will repeat exactly until something outside the loop moves. Nothing does before the next deadline — SysTick, a peripheral event, the end of the
+slice — since only events change memory or raise an exception, so the passes up to just before
+it are counted (cycles, instructions) without running them, and the pass that reaches it runs as
+usual: the interrupt finds the core at the same instruction and cycle as without the skip
+(`tests/sim/mcu-spin.test.ts`, against the interpreter after every slice of uneven length).
+A loop polling a peripheral (a UART flag, `DWT->CYCCNT`) is run pass by pass. In Node the
+Nucleo blink went from 0.98× to 6–7× real time, the serial example from 0.85× to 5×, I²C and
+ADC from about 0.7× to 2.1–2.5×, the PWM example from 0.39× to 0.9× (a core alone in a lockstep
+group now runs to the end of the step, stopping at its own edges, instead of 1 µs at a time),
+the Open746I-C's touch demo from 0.86× to 1.26× and its lab 1 from 1.5× to 2.5×.
+
 ## Threads
 
 The UI thread draws; the simulation worker runs the analog solver, the digital parts and the
 loop; and, when the page is cross-origin isolated (the dev server and nginx send the COOP/COEP
 headers), every MCU core runs in a worker of its own, pipelined one 20 µs step ahead of the
 solver — pad and pin levels cross with 20 µs of latency, which the inspector says ("Runs:
-worker (pipelined)"). A core with a digital part on its nets (an I²C EEPROM, the GT911) drops
-into step with the loop while that traffic lasts, and two cores sharing a net stay in the
-solver's thread in lockstep. Without isolation everything runs in the simulation worker.
+worker (pipelined)"). Every family runs there: the worker drives the same in-process host the
+loop would (`LocalCore`, `AvrCore`, `PicCore`). A core with a digital part on its nets that can
+answer (an I²C EEPROM, the GT911; not an LCD whose R/W is grounded) must run in step with the
+loop, since the first exchange already needs its answer in time, and so must a core with two of
+its own pads on one net. A worker in step waits on the loop every step and measured 2–3 times
+slower than the same core in the simulation worker (Chrome: nucleo-pwm 0.16× against 0.49×,
+open746-lcd 0.82× against 1.67×), so such a core runs in the simulation worker from the start;
+one already running in its worker when the part is wired stays there, in step, since a move
+reloads it (`tests/sim/core-placement.test.ts`). Two cores sharing a net stay in the solver's
+thread in lockstep. Without isolation everything runs in the simulation worker.
 
 The loop waits on a worker's answer with `Atomics.wait`, so a worker that never answers would
 freeze the whole bench: no time, no Pause, no Start over. Two things keep that from happening.
@@ -320,6 +379,13 @@ runs until a statement of another line starts, with blocks split at line boundar
 to the return address under a temporary breakpoint, the stack pointer checked so a recursive call does not end them early; an
 interrupt taken mid-step runs to its return. A fault stops the core as it is entered (vector catch, on unless the board turns it
 off), and so does a `BKPT`.
+
+The unit knows a core only through `DebugTarget` (in `debugger.ts`): byte addresses, the stack pointer, the interrupt context,
+which instructions are calls and where a call returns to. The Cortex-M `Cpu` implements it itself; `src/mcu/avr/debug.ts` adapts
+the AVR core, whose program counter counts words and whose calls leave the return address on the stack. The UI's half takes
+what differs between images from `src/debug/arch.ts`: pointer width, and how a pointer the program holds maps onto the one
+address space the debugger reads (identity on ARM; avr-gdb's flash at 0, data space at 0x800000, EEPROM at 0x810000 on the
+AVR). Registers come as `ArmRegisters | AvrRegisters`, the unwinder and the registers pane branch on `arch`.
 
 A probe on a real board halts the core while the world runs on; here the bench is one machine. A stop on any core ends the
 solver step it happened in and pauses the loop (`SimLoop.debugStops`), so the circuit freezes with the program, and a step takes

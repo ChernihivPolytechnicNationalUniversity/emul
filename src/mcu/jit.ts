@@ -163,7 +163,8 @@ export function compileBlock(addrs: ArrayLike<number>, instrs: Instr[], lineShif
   if (last.jsBranch === undefined) out.push(`c.pc = ${(addrs[n - 1] + last.size) >>> 0}; c.instructions += ${n};`)
   else if (!loop) out.push(`c.instructions += ${n};`)
   if (loop) out.push("}")
-  const make = new Function("E", `return function (c, r, bus, s, I, H, target) { ${localise(out.join("\n"))} }`)
+  // Named by its address, so a profile says which block it is.
+  const make = new Function("E", `return function b${addrs[0].toString(16)}(c, r, bus, s, I, H, target) { ${localise(out.join("\n"))} }`)
   return make(new Float64Array(2 * sites).fill(-1)) as Compiled
 }
 

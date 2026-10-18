@@ -11,7 +11,8 @@ import { FIRMWARE, buffer } from "../lib/firmware"
 
 const BUILD = join(FIRMWARE, "avr", "build")
 const MAX_CYCLES = 400_000_000
-const elfs = existsSync(BUILD) ? readdirSync(BUILD).filter((f) => f.endsWith(".elf")).sort() : []
+// The test programs (t_*.c, with host results to compare); debug-*.elf is the debugger's program.
+const elfs = existsSync(BUILD) ? readdirSync(BUILD).filter((f) => f.startsWith("t_") && f.endsWith(".elf")).sort() : []
 
 /** A core with nothing around it: flash reads for LPM, no interrupts, no sleep. */
 function bareCore() {

@@ -1,8 +1,7 @@
 /**
  * An AVR microcontroller as the simulation loop sees any core (`CoreHost`): run to a time, read
- * the pads, take the circuit's levels and voltages, report status. It runs in the loop's own
- * thread; the AVR is light enough (one 16 MHz 8-bit core is a few percent of a CPU thread)
- * that a worker of its own buys nothing yet.
+ * the pads, take the circuit's levels and voltages, report status. In the loop's own thread, or
+ * driven by `core-worker.ts` in a worker of its own.
  */
 import { CpuHalt } from "@/mcu/faults"
 import type { AvrProfile } from "@/mcu/avr/chip"
@@ -14,6 +13,7 @@ import type { ClockSource } from "@/mcu/periph/rcc"
 import type { PadRef } from "@/mcu/pads"
 import type { CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 import type { CoreHost, CoreStatus, OutEdge, PanelWiring } from "./core-host"
+import { SupplyLoad } from "./supply-load"
 
 const SLEEP_LABEL: Record<SleepMode, string> = {
   idle: "Idle",
@@ -38,9 +38,11 @@ export class AvrCore implements CoreHost {
   /** Supply-current meter: core cycles and sleep cycles at the last read. */
   private meter = { cycles: 0, sleep: 0 }
   private statusMeter = { cycles: 0, sleep: 0 }
+  private readonly supplyLoad: SupplyLoad
 
   constructor(chip: AvrProfile) {
     this.chip = chip
+    this.supplyLoad = new SupplyLoad(chip.electrical.vdd)
     this.mcu = createAvr(chip)
     this.mcu.analogRead = (pad) => {
       const v = this.analog.get(pad.port * 16 + pad.pin)
@@ -136,6 +138,7 @@ export class AvrCore implements CoreHost {
     this.mcu.reset(opts.supplyKept ? "external" : "power-on")
     this.meter = { cycles: 0, sleep: 0 }
     this.statusMeter = { cycles: 0, sleep: 0 }
+    this.supplyLoad.reset()
   }
   runOnBattery() {}
   halt(reason: string) {
@@ -247,7 +250,8 @@ export class AvrCore implements CoreHost {
       this.stepIdd = null
       return v
     }
-    return this.current(this.meter, false).current
+    const { asleep } = this.current(this.meter, false)
+    return this.supplyLoad.next(asleep, this.mcu.time, this.mcu.vcc, (share, volts) => this.mcu.supplyCurrent(share, volts))
   }
 
   status(): CoreStatus {
@@ -268,7 +272,7 @@ export class AvrCore implements CoreHost {
       backupKept: false,
       power: { mode: m.sleepMode ? (m.sleepMode === "idle" || m.sleepMode === "adc-noise" ? "sleep" : "stop") : "run", asleep, current, regulator: "main" },
       clock: { source: "HSI", pllSource: "HSI", sysclk: m.hz, hse: null, lse: null, problems: problem ? [problem] : [] },
-      debug: null,
+      debug: m.debugStop,
       host: "in-process",
       labels: {
         clock: m.clockLabel(),
@@ -286,26 +290,14 @@ export class AvrCore implements CoreHost {
     return { frame: null, status: "no display controller on this MCU" }
   }
   dropPanel() {}
-  /** The debugger speaks ARM (registers, DWARF for Cortex-M): not available for AVR yet. */
   debug(cmd: CoreDebugCommand) {
-    // The editor sends its (often empty) breakpoint list and fault catch with every load: only a real request is a gap.
-    const asked = cmd.op === "breakpoints" ? cmd.list.some((b) => b.enabled) : cmd.op === "step" || cmd.op === "resume"
-    if (asked) this.mcu.feature("Debugger (breakpoints, stepping) on AVR")
+    this.mcu.debug(cmd)
   }
-  readonly debugStop: DebugStop | null = null
+  get debugStop(): DebugStop | null {
+    return this.mcu.debugStop
+  }
   inspect(req: InspectRequest): Promise<InspectReply> {
-    const data = this.mcu.cpu.data
-    const memory = (req.ranges ?? []).map((r) => {
-      const bytes = new Uint8Array(r.size)
-      const invalid: [number, number][] = []
-      for (let i = 0; i < r.size; i++) {
-        const a = r.addr + i
-        if (a < data.length) bytes[i] = data[a]
-        else invalid.push([a, a + 1])
-      }
-      return { addr: r.addr, bytes, invalid }
-    })
-    return Promise.resolve({ regs: null, memory, stop: null, time: this.mcu.time, halted: this.mcu.cpu.halted?.message ?? null })
+    return Promise.resolve(this.mcu.inspect(req))
   }
   dispose() {}
 }

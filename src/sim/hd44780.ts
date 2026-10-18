@@ -574,6 +574,10 @@ export class LcdParallel implements DigitalPart {
   readonly object: string
   readonly pins = ["RS", "RW", "E", ...DATA] as const
   readonly outputs = DATA
+  /** The data pins drive only for a read (R/W = 1): R/W on ground makes the module listen-only. */
+  outputsWhenGrounded(grounded: (pin: string) => boolean): readonly string[] {
+    return grounded("RW") ? [] : DATA
+  }
   readonly senses = ["VDD", "VSS", "V0"] as const
   readonly out: DigitalEdge[]
   private readonly core = new Hd44780Core(16, 2)

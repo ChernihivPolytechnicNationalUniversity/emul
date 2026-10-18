@@ -16,6 +16,11 @@ export type ExprContext = {
   frameBase?(): number | null
   /** The frame's canonical frame address (for `call_frame_cfa`). */
   cfa?(): number | null
+  /**
+   * An address computed from registers (a stack or frame pointer plus an offset) as the
+   * debugger reads it: the AVR's data space sits at 0x800000. Absent, addresses are as computed.
+   */
+  dataAddress?(raw: number): number
 }
 
 export type Piece = { loc: Loc | null; bits: number; offsetBits: number }
@@ -68,7 +73,13 @@ function run(expr: Uint8Array, ctx: ExprContext, push?: number): Loc {
     return v
   }
   const reg = (n: number) => need(ctx.reg(n), `register ${regName(n)} is not known in this frame`)
-  const deref = (addr: number, size: number) => need(ctx.read(addr, size), `memory at 0x${u32(addr).toString(16)} is not readable`)
+  // An address from DW_OP_addr is already the debugger's; one computed from registers is in the data space.
+  let absolute = false
+  const place = (addr: number) => (absolute || !ctx.dataAddress ? addr : ctx.dataAddress(addr))
+  const deref = (addr: number, size: number) => {
+    const at = ctx.dataAddress ? ctx.dataAddress(addr) : addr
+    return need(ctx.read(at, size), `memory at 0x${u32(at).toString(16)} is not readable`)
+  }
   while (!r.done) {
     const op = r.u8()
     if (op >= DW_OP.lit0 && op <= DW_OP.lit31) {
@@ -85,6 +96,7 @@ function run(expr: Uint8Array, ctx: ExprContext, push?: number): Loc {
     }
     switch (op) {
       case DW_OP.addr:
+        absolute = true
         stack.push(r.u32())
         break
       case DW_OP.deref:
@@ -274,7 +286,7 @@ function run(expr: Uint8Array, ctx: ExprContext, push?: number): Loc {
       }
       case DW_OP.piece: {
         const bytes = r.uleb()
-        pieces.push({ loc: current ?? (stack.length ? { kind: "memory", addr: pop() } : null), bits: bytes * 8, offsetBits: 0 })
+        pieces.push({ loc: current ?? (stack.length ? { kind: "memory", addr: place(pop()) } : null), bits: bytes * 8, offsetBits: 0 })
         current = null
         stack.length = 0
         break
@@ -282,7 +294,7 @@ function run(expr: Uint8Array, ctx: ExprContext, push?: number): Loc {
       case DW_OP.bit_piece: {
         const bits = r.uleb()
         const offsetBits = r.uleb()
-        pieces.push({ loc: current ?? (stack.length ? { kind: "memory", addr: pop() } : null), bits, offsetBits })
+        pieces.push({ loc: current ?? (stack.length ? { kind: "memory", addr: place(pop()) } : null), bits, offsetBits })
         current = null
         stack.length = 0
         break
@@ -334,7 +346,7 @@ function run(expr: Uint8Array, ctx: ExprContext, push?: number): Loc {
   }
   if (pieces.length) return { kind: "pieces", pieces }
   if (current) return current
-  if (stack.length) return { kind: "memory", addr: stack[stack.length - 1] }
+  if (stack.length) return { kind: "memory", addr: place(stack[stack.length - 1]) }
   return { kind: "unavailable", why: "optimized out" }
 }
 

@@ -609,6 +609,9 @@ export class Stm32 {
       const r = [...cpu.r]
       r[15] = cpu.pc
       regs = {
+        arch: "arm",
+        pc: cpu.pc,
+        sp: cpu.r[13],
         r,
         xpsr: cpu.xpsr,
         msp: cpu.getMsp(),
