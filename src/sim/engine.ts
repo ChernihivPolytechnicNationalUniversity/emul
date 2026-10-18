@@ -118,6 +118,13 @@ const REL_TOL = 1e-3
 const SETTLED_STEPS = 3
 const SETTLED_DV = 1e-6
 /**
+ * Capacitors still easing off a load step settle the circuit too, once what they have left to
+ * move any node by is under this (V): the deviation from the operating point they are heading
+ * for, from their currents through the circuit with them open (`tailUnder`). The strict drift
+ * bound alone holds a pin's picofarads to femtoamps and waits out nanoamp tails for many steps.
+ */
+const SETTLED_TAIL = 1e-5
+/**
  * A leaf node's toggle is taken without a full solve while the change in current it puts on its
  * rails, summed since the last full solve, moves no rail by more than this (V, by the rail's own
  * resistance), and its own RC settles within a small share of the step.
@@ -458,6 +465,18 @@ export class Engine {
    * `LEAF_DV` (`takeLeaves`). False solves every toggle in full.
    */
   leafPath = true
+  /**
+   * Settled with capacitors still easing off by under `SETTLED_TAIL` (`tailUnder`). False holds
+   * a circuit to the strict rule: every node within `SETTLED_DV`, every capacitor under `SETTLED_DRIFT`.
+   */
+  tailPath = true
+  /** The circuit with its capacitors open, as of factorization `tailAt`, for `tailUnder`. */
+  private tailA: Float64Array | null = null
+  private tailLu: SparseLU | null = null
+  private tailRhs: Float64Array | null = null
+  private tailOut: Float64Array | null = null
+  private tailAt = -1
+  private tailValid = false
   /** Per node, the elements on it when it is a leaf; per pad element, its leaf node or -1. */
   private readonly leafElements: (Int32Array | null)[]
   private readonly leafOf: Int32Array
@@ -480,6 +499,7 @@ export class Engine {
   private readonly drifting: boolean
   /** The `dt` and switch states `lu` was factorized for; a change invalidates it. */
   private luDt = 0
+  private luTheta = THETA
   private luSwitches = 0
   private luValid = false
 
@@ -1104,9 +1124,17 @@ export class Engine {
     // A pulse source between its edges is a DC one: its edge changes the switch mask, which ends the run.
     if (!this.converged || this.struck || this.sine || this.drifting || this.eventful) return false
     const n = this.net.nodes
+    const tail = this.tailPath
+    // Within the strict rule: nodes still to a microvolt, capacitors under SETTLED_DRIFT.
+    let still = true
     // With `leaves`, all that moved since the circuit settled is its leaves' load: the leaves are
     // exact whatever they read, and what the rails still have to move by is held to `LEAF_DV`.
-    for (let i = 0; i < n; i++) if (!(leaves && this.fastLeaf(i, dt)) && Math.abs(this.v[i] - this.prevV[i]) > (leaves ? LEAF_DV : SETTLED_DV)) return false
+    for (let i = 0; i < n; i++) {
+      if (leaves && this.fastLeaf(i, dt)) continue
+      const dv = Math.abs(this.v[i] - this.prevV[i])
+      if (dv > (leaves ? LEAF_DV : tail ? SETTLED_TAIL : SETTLED_DV)) return false
+      if (dv > SETTLED_DV) still = false
+    }
     const elements = this.net.elements
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i]
@@ -1114,14 +1142,70 @@ export class Engine {
       if (el.kind === "C" && Math.abs(this.capI[i]) > el.value * SETTLED_DRIFT) {
         // A fast leaf's capacitor is where its pads put it; another still settling from a leaf's
         // load step has what it has left to move by the resistance it sees.
+        if (leaves && ((el.a !== GROUND && this.fastLeaf(el.a, dt)) || (el.b !== GROUND && this.fastLeaf(el.b, dt)))) continue
+        still = false
+        if (tail) continue
         if (!leaves) return false
-        if ((el.a !== GROUND && this.fastLeaf(el.a, dt)) || (el.b !== GROUND && this.fastLeaf(el.b, dt))) continue
         const node = el.a === GROUND ? el.b : el.a
         if (node === GROUND || Math.abs(this.capI[i]) * this.railResistance(node) > LEAF_DV) return false
       }
       if (el.kind === "L" && Math.abs(this.indV[i]) > el.value * SETTLED_DRIFT) return false
     }
+    if (tail && !still && !this.tailUnder(dt, leaves)) return false
     return dt > 0
+  }
+
+  /**
+   * Whether the capacitors drifting past SETTLED_DRIFT have under `SETTLED_TAIL` left to move any
+   * node by. With the circuit linearized where the step left it, conductances G and the
+   * capacitors' currents J (C dv/dt), the operating point they head for is v − e with G e = −J,
+   * G being the step's matrix without the capacitors' companions: one solve, exact for a linear
+   * circuit, whatever the time constants and however the capacitors share the charge between them.
+   * With `leaves`, a fast leaf's capacitor is left out (it is where its pads put it) and the
+   * rails may have up to `LEAF_DV` to go, as a leaf's load step leaves them.
+   */
+  private tailUnder(dt: number, leaves: boolean): boolean {
+    if (!this.luValid) return false
+    const size = this.size
+    const elements = this.net.elements
+    if (this.tailAt !== this.factorizations) {
+      this.tailAt = this.factorizations
+      const G = (this.tailA ??= new Float64Array(size * size))
+      const lu = (this.tailLu ??= new SparseLU(size))
+      G.set(this.A)
+      lu.register(G)
+      for (let i = 0; i < elements.length; i++) {
+        const el = elements[i]
+        if (el.kind === "C") this.openCapacitor(G, el.a, el.b, el.value / ((el.euler ? 1 : this.luTheta) * this.luDt))
+      }
+      this.tailValid = lu.factorize(G)
+    }
+    if (!this.tailValid) return false
+    const rhs = (this.tailRhs ??= new Float64Array(size))
+    const e = (this.tailOut ??= new Float64Array(size))
+    rhs.fill(0)
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i]
+      if (el.kind !== "C" || Math.abs(this.capI[i]) <= el.value * SETTLED_DRIFT) continue
+      if (leaves && ((el.a !== GROUND && this.fastLeaf(el.a, dt)) || (el.b !== GROUND && this.fastLeaf(el.b, dt)))) continue
+      if (el.a !== GROUND) rhs[el.a] -= this.capI[i]
+      if (el.b !== GROUND) rhs[el.b] += this.capI[i]
+    }
+    if (!this.tailLu!.solve(rhs, e)) return false
+    const n = this.net.nodes
+    const limit = leaves ? LEAF_DV : SETTLED_TAIL
+    for (let i = 0; i < n; i++) if (!(Math.abs(e[i]) <= limit)) return false
+    return true
+  }
+
+  private openCapacitor(G: Float64Array, a: number, b: number, g: number) {
+    const size = this.size
+    if (a !== GROUND) G[a * size + a] -= g
+    if (b !== GROUND) G[b * size + b] -= g
+    if (a !== GROUND && b !== GROUND) {
+      G[a * size + b] += g
+      G[b * size + a] += g
+    }
   }
 
   /** Hash of every switch and pad state, so a toggle invalidates the cached factorization; the hash without the pads on leaves goes to `restMask`. */
@@ -1914,6 +1998,7 @@ export class Engine {
         guess.set(this.best.subarray(0, n))
       }
       this.luDt = dt
+      this.luTheta = this.theta
       this.luSwitches = mask
     }
 

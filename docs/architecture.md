@@ -296,6 +296,21 @@ circuit solved in full every step, nodes agree within 1.5 mV and currents within
 fifth of the factorizations (`tests/sim/engine-leaf.test.ts`); a Nano writing a parallel 1602 runs
 2.4 times as fast (0.54× → 1.3× real time in Node, one thread).
 
+Capacitors still easing off a load step settle the circuit too, once what they have left to move
+any node by is under 10 µV (`SETTLED_TAIL`, `Engine.tailUnder`). With the circuit linearized where
+the step left it, conductances G and the capacitors' currents J, the operating point they head for
+is v − e with G e = −J, G being the step's matrix without the capacitors' companions: one more
+factorization per factorization the step took, then a substitution per check — exact for a linear
+circuit whatever the time constants and however capacitors share charge (an estimate per capacitor
+through the step's matrix sees its neighbours as near shorts and misses a slow common mode). The
+strict rule alone (every node within 1 µV a step, every capacitor drifting under 1 mV/s) holds a
+pin's 10 pF to 10 fA and waited out a Nano's DTR-to-RESET 100 nF for some sixteen steps after every
+PWM edge. A leaf-settled circuit uses the same solve with `LEAF_DV`. Against the strict rule, nodes
+agree within 50 µV and currents within 1 % + 5 µA, a 1 s RC is never frozen on its way, and a Nano's
+rail under a 490 Hz LED takes under a third of the factorizations (`tests/sim/engine-tail.test.ts`).
+With the AVR's supply current no longer moving with the rail (it was scaled with VCC and then drawn
+through a resistor, VCC² and a new resistor every step), the Nano dimmer went from 0.86× to 1.47×.
+
 The same factors give the ADC its source. An ADC-capable pad's driving-point resistance is one
 substitution with a unit vector at its node (`Engine.sourceAt`), less the companion conductance of
 the capacitors on that node, whose capacitance is reported beside it; the loop hands both to the
