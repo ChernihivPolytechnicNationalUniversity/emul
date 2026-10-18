@@ -972,7 +972,10 @@ export class SimLoop {
       }
       // Cores in lockstep with a peer run in this thread: a worker cannot yield per edge to another
       // worker. Two pads of one core on a net need no peer: a worker in step hands each edge over.
-      if (lockstep) inst.relocate()
+      // A core that would run in its worker in step and has not started runs here instead: the
+      // worker would wait on the loop every step, 2–3 times slower than this thread. One already
+      // running stays where it is (a move reloads it).
+      if (lockstep || ((inst.coupled || inst.partPads.size > 0) && inst.mcu.time === 0)) inst.relocate()
       inst.mcu.setDigitalWatch(watch)
       inst.mcu.setPads(inst.inputs.map((i) => i.pad.port * 16 + i.pad.pin))
       // A part answers an edge at the edge's own time, so the core must hand edges over as it makes them.

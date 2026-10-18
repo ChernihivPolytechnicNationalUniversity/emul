@@ -328,10 +328,14 @@ headers), every MCU core runs in a worker of its own, pipelined one 20 µs step 
 solver — pad and pin levels cross with 20 µs of latency, which the inspector says ("Runs:
 worker (pipelined)"). Every family runs there: the worker drives the same in-process host the
 loop would (`LocalCore`, `AvrCore`, `PicCore`). A core with a digital part on its nets that can
-answer (an I²C EEPROM, the GT911; not an LCD whose R/W is grounded) runs in step with the loop
-for as long as the part is wired, since the first exchange already needs its answer in time,
-and so does a core with two of its own pads on one net; two cores sharing a net stay in the
-solver's thread in lockstep. Without isolation everything runs in the simulation worker.
+answer (an I²C EEPROM, the GT911; not an LCD whose R/W is grounded) must run in step with the
+loop, since the first exchange already needs its answer in time, and so must a core with two of
+its own pads on one net. A worker in step waits on the loop every step and measured 2–3 times
+slower than the same core in the simulation worker (Chrome: nucleo-pwm 0.16× against 0.49×,
+open746-lcd 0.82× against 1.67×), so such a core runs in the simulation worker from the start;
+one already running in its worker when the part is wired stays there, in step, since a move
+reloads it (`tests/sim/core-placement.test.ts`). Two cores sharing a net stay in the solver's
+thread in lockstep. Without isolation everything runs in the simulation worker.
 
 The loop waits on a worker's answer with `Atomics.wait`, so a worker that never answers would
 freeze the whole bench: no time, no Pause, no Start over. Two things keep that from happening.
