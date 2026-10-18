@@ -324,20 +324,24 @@ within the sub-microsecond window.
 
 Firmware spends most of its time waiting: `HAL_Delay` calls `HAL_GetTick` and compares until the
 SysTick handler has moved `uwTick` far enough, some 20 cycles a pass, nine thousand passes a
-millisecond at 180 MHz. The compiled core takes such a loop at once (`Cpu.spinCheck`): a block
-that goes round into itself and only reads memory and branches (no store, no call besides a
-branch: `pollable`) is watched after a few passes, and two passes in a row that leave every
-register, flag and FP register as they were, read no peripheral (`slowAccesses`), see nothing
-come due (`serviced`) and cost the same cycles will repeat exactly until something outside the
-loop moves. Nothing does before the next deadline — SysTick, a peripheral event, the end of the
+millisecond at 180 MHz; a main loop calling a function that returns at once until an interrupt
+sets its flag (the Open746I-C's touch demo) is the same with a push, a pop and a table copied
+onto the stack. The compiled core takes such a loop at once (`Cpu.spinCheck`): passes back to
+an anchor block (a loop of up to eight blocks) that ran nothing but branches, loads, stores and
+register-list pushes and pops (`pollPrefix`: a block whose rare path does more counts while the
+pass ends before it) are watched after a few, and two passes in a row that leave every register,
+flag and FP register as they were, store nothing that changes memory (`Bus.spyStores`, on only
+for those two passes), touch no peripheral (`slowAccesses`), see nothing come due (`serviced`)
+and cost the same cycles will repeat exactly until something outside the loop moves. Nothing does before the next deadline — SysTick, a peripheral event, the end of the
 slice — since only events change memory or raise an exception, so the passes up to just before
 it are counted (cycles, instructions) without running them, and the pass that reaches it runs as
 usual: the interrupt finds the core at the same instruction and cycle as without the skip
 (`tests/sim/mcu-spin.test.ts`, against the interpreter after every slice of uneven length).
 A loop polling a peripheral (a UART flag, `DWT->CYCCNT`) is run pass by pass. In Node the
-Nucleo blink went from 0.98× to 6.8× real time, the serial example from 0.85× to 4.7×, I²C and
-ADC from about 0.7× to 2.1–2.3×, the PWM example from 0.39× to 0.95× (a core alone in a lockstep
-group now runs to the end of the step, stopping at its own edges, instead of 1 µs at a time).
+Nucleo blink went from 0.98× to 6–7× real time, the serial example from 0.85× to 5×, I²C and
+ADC from about 0.7× to 2.1–2.5×, the PWM example from 0.39× to 0.9× (a core alone in a lockstep
+group now runs to the end of the step, stopping at its own edges, instead of 1 µs at a time),
+the Open746I-C's touch demo from 0.86× to 1.26× and its lab 1 from 1.5× to 2.5×.
 
 ## Threads
 

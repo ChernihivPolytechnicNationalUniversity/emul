@@ -441,7 +441,7 @@ export class Engine {
   /** Where the step in progress ends: the switch mask carries the pulse sources' levels there. */
   private stepEnd = 0
   private readonly pulseElements: Int32Array
-  /** Diodes (their eye average moves every step) and, after each full update, the parts under load or still hot. */
+  /** Diodes that are lights (their eye average moves every step) and, after each full update, the parts under load or still hot. */
   private readonly diodeElements: Int32Array
   private loadedElements: number[] = []
   private readonly strikeElements: Int32Array
@@ -531,7 +531,7 @@ export class Engine {
     this.linear = linear
     this.partKeys = net.elements.map((el) => (el.kind === "SW" ? partKey(el.object, el.part) : ""))
     this.padElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) ? [i] : [])))
-    this.diodeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "D" ? [i] : [])))
+    this.diodeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "D" && el.part ? [i] : [])))
     this.limitsOf = net.elements.map((el) => el.limits)
     this.isDiode = Uint8Array.from(net.elements, (el) => (el.kind === "D" ? 1 : 0))
     this.heatDt = new Float64Array(net.elements.length)
@@ -1047,7 +1047,11 @@ export class Engine {
       const i = loaded[j]
       const lim = elements[i].limits
       if (!lim) continue
-      const heat = this.stress[i] + (this.rRatio[i] - this.stress[i]) * -Math.expm1(-dt / lim.tau)
+      if (this.heatDt[i] !== dt) {
+        this.heatDt[i] = dt
+        this.heatShare[i] = -Math.expm1(-dt / lim.tau)
+      }
+      const heat = this.stress[i] + (this.rRatio[i] - this.stress[i]) * this.heatShare[i]
       if (heat > 1) return false
       this.stress[i] = heat
     }
@@ -2628,7 +2632,8 @@ export class Engine {
           let cur = el.is * (Math.exp(Math.min(vd / nvt, diodeExpCap(Math.log(nvt / (Math.SQRT2 * el.is))))) - 1)
           if (el.zener) cur -= el.is * (Math.exp(Math.min(-(vd + el.zener) / nvt, 80)) - 1)
           this.diodeI[i] = cur
-          this.see(i, cur, dt)
+          // What the eye makes of it, for the diodes that are lights.
+          if (el.part) this.see(i, cur, dt)
           tc[this.termOf[base]] += cur
           tc[this.termOf[base + 1]] -= cur
           const across = el.anodePin === undefined || el.anodePin === el.anode ? vd : this.vol(el.anodePin, this.v) - this.vol(el.cathode, this.v)

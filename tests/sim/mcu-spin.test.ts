@@ -1,22 +1,26 @@
 /**
- * Busy-waits skipped by the compiled core (`Cpu.spinCheck`): a loop that only reads memory and
- * branches, and goes round leaving every register and flag as it was, is taken up to the next
- * deadline at once. Against the interpreter — which runs every pass — the state after every
+ * Busy-waits skipped by the compiled core (`Cpu.spinCheck`): a loop that goes round leaving
+ * every register, flag and byte of memory as it was, touching no peripheral, is taken up to the
+ * next deadline at once. Against the interpreter — which runs every pass — the state after every
  * slice is the same: registers, flags, cycles, instructions, and RAM. The slices are of uneven
  * length (1–40 µs), so deadlines fall at every point of a pass. HAL_Delay polling uwTick (moved
- * by the SysTick handler) is skipped; a loop polling a peripheral flag (the UART's TXE) is not,
- * and agrees all the same.
+ * by the SysTick handler) is skipped, and so is a main loop calling a function that pushes,
+ * copies a table onto its stack and returns until an interrupt sets a flag (the Open746I-C's
+ * touch demo: two blocks, stores that change nothing); a loop polling a peripheral flag (the
+ * UART's TXE) is not, and agrees all the same.
  */
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { STM32F429ZI } from "@/mcu/chip"
+import { STM32F429ZI, STM32F746IG, type ChipProfile } from "@/mcu/chip"
 import { Stm32 } from "@/mcu/stm32f429"
 import { FIRMWARE } from "../lib/firmware"
 
-function race(name: string, seconds: number) {
+const SDRAM = [{ name: "SDRAM", base: 0xd0000000, size: 8 * 1024 * 1024, kind: "ram" as const, external: "sdram2" as const }]
+
+function race(name: string, seconds: number, chip: ChipProfile = STM32F429ZI) {
   const make = (jit: boolean) => {
-    const m = new Stm32(STM32F429ZI, [])
+    const m = new Stm32(chip, chip === STM32F746IG ? SDRAM : [])
     m.cpu.jit = jit
     m.load(readFileSync(join(FIRMWARE, "examples", name)).buffer as ArrayBuffer, name)
     return m
@@ -56,5 +60,13 @@ describe("busy-waits skipped by the compiled core", () => {
 
   it("nucleo-pwm (timers running beside the delay): as the interpreter", () => {
     race("nucleo-pwm.elf", 0.12)
+  })
+
+  it("open746-touch (GT911_Scan returning at once until its flag is set): as the interpreter, most of its cycles skipped", () => {
+    expect(race("open746-touch.elf", 0.12, STM32F746IG)).toBeGreaterThan(0.8)
+  })
+
+  it("lab1-f746 (the running light): as the interpreter", () => {
+    race("lab1-f746.elf", 0.12, STM32F746IG)
   })
 })

@@ -128,9 +128,23 @@ export class Memory {
   private wp = false
   /** RAM that is up and unprotected: the sized accessors take it without the generic checks. */
   plain = false
-  /** Set on every store into this block while `watch` is on (a display framebuffer). */
+  /** Whether anything wants to know of stores here (`stored`): a display's framebuffer (`shown`), a busy-wait check (`spy`). */
   watch = false
+  shown = false
+  spy = false
+  /** Set on a store into a shown block. */
   dirty = false
+  /** Set by a store that changed what a spied-on block held. */
+  changed = false
+
+  /** A store of `size` bytes of `v` at `off`, before it lands: flags the framebuffer, and a change while spied on. */
+  stored(off: number, v: number, size: 1 | 2 | 4) {
+    if (this.shown) this.dirty = true
+    if (this.spy && !this.changed) {
+      const old = size === 4 ? this.view.getUint32(off, true) : size === 2 ? this.view.getUint16(off, true) : this.bytes[off]
+      if (old !== (size === 4 ? v >>> 0 : size === 2 ? v & 0xffff : v & 0xff)) this.changed = true
+    }
+  }
 
   constructor(r: MemoryRegion) {
     this.name = r.name
@@ -338,7 +352,7 @@ export class Bus {
         return
       }
       if (mem.writeProtected) return
-      if (mem.watch) mem.dirty = true
+      if (mem.watch) mem.stored(off, value, size)
       if (size === 4) mem.view.setUint32(off, value >>> 0, true)
       else if (size === 2) mem.view.setUint16(off, value & 0xffff, true)
       else mem.bytes[off] = value & 0xff
@@ -417,6 +431,7 @@ export class Bus {
     if (!mem || !mem.enabled) return null
     const off = mem.offsetOf(addr)
     if (off + length > mem.bytes.length) return null
+    mem.shown = true
     mem.watch = true
     return { bytes: mem.bytes, offset: off }
   }
@@ -431,8 +446,24 @@ export class Bus {
     if (!mem || !mem.plain) return null
     const off = locOff
     if (off + length > mem.bytes.length) return null
-    if (write && mem.watch) mem.dirty = true
+    if (write && mem.watch) {
+      if (mem.shown) mem.dirty = true
+      if (mem.spy) mem.changed = true
+    }
     return { bytes: mem.bytes, offset: off }
+  }
+
+  /** Stores compared against what they overwrite (on), or not (off); `storesChanged` says whether one changed anything. */
+  spyStores(on: boolean) {
+    for (const m of this.memories) {
+      m.spy = on
+      m.changed = false
+      m.watch = m.shown || on
+    }
+  }
+  storesChanged(): boolean {
+    for (const m of this.memories) if (m.changed) return true
+    return false
   }
 
   /** Whether any watched block was stored into since the flags were last cleared. */
@@ -508,7 +539,7 @@ export class Bus {
     if (mem !== null && mem.plain && this.pageMixed[p] === 0) {
       const off = addr - this.pageBase[p]
       if (off < mem.bytes.length) {
-        if (mem.watch) mem.dirty = true
+        if (mem.watch) mem.stored(off, v, 1)
         mem.bytes[off] = v & 0xff
         return
       }
@@ -522,7 +553,7 @@ export class Bus {
     if (mem !== null && mem.plain && this.pageMixed[p] === 0) {
       const off = addr - this.pageBase[p]
       if (off + 2 <= mem.bytes.length) {
-        if (mem.watch) mem.dirty = true
+        if (mem.watch) mem.stored(off, v, 2)
         mem.view.setUint16(off, v & 0xffff, true)
         return
       }
@@ -536,7 +567,7 @@ export class Bus {
     if (mem !== null && mem.plain && this.pageMixed[p] === 0) {
       const off = addr - this.pageBase[p]
       if (off + 4 <= mem.bytes.length) {
-        if (mem.watch) mem.dirty = true
+        if (mem.watch) mem.stored(off, v, 4)
         mem.view.setUint32(off, v >>> 0, true)
         return
       }

@@ -53,8 +53,12 @@ type Block = {
   link: Block | null
   linkPc: number
   fetchKey: number
-  /** Whether one pass can only read and branch (`pollable`), and its passes into itself counted by `spin`. */
-  pollable: boolean
+  /**
+   * How many of its first instructions could be a busy-wait's (`pollable`): all of them, or a
+   * run that a rarely taken path ends; `n` for a block that loops on itself only if all are.
+   * Passes back to it, while it anchors the watch, counted by `spin`.
+   */
+  pollPrefix: number
   spin: number
 }
 /**
@@ -68,17 +72,30 @@ const emptyPage = (): CachePage => ({ instrs: [], blocks: [], inside: [], heat: 
 /** Entries at an address inside another block before it becomes a block start of its own. */
 const HOT = 32
 /**
- * A block going round into itself is watched for a busy-wait after SPIN_WARM passes: two more
+ * A loop of blocks going round to the same one (the anchor) is watched for a busy-wait after SPIN_WARM passes: two more
  * passes that leave every register and flag as they were, read nothing but memory and cost the
  * same cycles are a loop that cannot leave before something outside it moves (`spinCheck`).
  * A loop found to be doing work is left alone for SPIN_BACKOFF passes.
  */
 const SPIN_WARM = 4
 const SPIN_BACKOFF = 256
-/** A pollable block: static branches and snippets that store nothing and call nothing that changes state besides the PC. */
+/** Blocks a pass may run through before the watch moves to another block (a loop of up to this many blocks is seen). */
+const SPIN_SPAN = 8
+/**
+ * What a busy-wait may run: static branches, snippets that call nothing that changes state
+ * besides the PC, and the register-list loads and stores (a call's push and pop). Stores are
+ * watched while a pass is checked (`Bus.spyStores`): a pass that changed memory is doing work.
+ */
 const POLL_CALLS = /^c\.(branchTo|branchWritePc|readPc|fpDenied)\($/
-const pollable = (instrs: Instr[]) =>
-  instrs.every((x) => (x.js === undefined ? x.jsBranch !== undefined : !x.js.includes("bus.write") && (x.js.match(/\bc\.\w+\(/g) ?? []).every((m) => POLL_CALLS.test(m))))
+const POLL_CLOSURES = /^(?:push|pop|stm|ldm)/
+const pollable = (x: Instr) => (x.js === undefined ? x.jsBranch !== undefined || POLL_CLOSURES.test(x.text) : (x.js.match(/\bc\.\w+\(/g) ?? []).every((m) => POLL_CALLS.test(m)))
+function pollPrefix(addrs: number[], instrs: Instr[]) {
+  let k = 0
+  while (k < instrs.length && pollable(instrs[k])) k++
+  // A block looping on itself runs all of it every pass.
+  const loops = instrs[instrs.length - 1].jsBranch?.target === addrs[0]
+  return loops && k < instrs.length ? 0 : k
+}
 
 /** What a line fetch costs, as `fetchCost` found it (`Cpu.lineKind`). */
 export const LINE_FREE = 0
@@ -956,7 +973,7 @@ export class Cpu {
       }
       if (FLOW.test(instr.text)) break
     }
-    block = { addrs: Float64Array.from(addrs), instrs, n: instrs.length, fn: null, lineShift: this.lineShift, link: null, linkPc: -1, fetchKey: -1, pollable: pollable(instrs), spin: 0 }
+    block = { addrs: Float64Array.from(addrs), instrs, n: instrs.length, fn: null, lineShift: this.lineShift, link: null, linkPc: -1, fetchKey: -1, pollPrefix: pollPrefix(addrs, instrs), spin: 0 }
     if (this.jit) block.fn = compileBlock(addrs, instrs, this.lineShift)
     page.blocks[slot] = block
     for (let i = 1; i < addrs.length; i++) {
@@ -983,8 +1000,8 @@ export class Cpu {
   private spinDelta = 0
 
   /**
-   * A pollable block has just gone round into itself. Two passes in a row that changed no
-   * register or flag, read no peripheral, saw nothing come due and cost the same cycles will repeat exactly until
+   * The anchor has been reached again through pollable instructions alone. Two passes in a row that changed no
+   * register, flag or byte of memory, read no peripheral, saw nothing come due and cost the same cycles will repeat exactly until
    * something outside the loop moves — and nothing does before the next deadline (SysTick, a
    * peripheral event, the end of the slice), since only events change memory or raise an
    * exception. The passes up to just before it are taken at once: their cycles and
@@ -995,15 +1012,17 @@ export class Cpu {
     const k = ++block.spin
     if (k < SPIN_WARM) return
     if (k > SPIN_WARM) {
-      const same = this.spinSame()
+      const same = this.spinSame() && !this.bus.storesChanged()
       const dc = this.cycles - this.spinCycles
       const di = this.instructions - this.spinInstr
       if (!same) {
         block.spin = -SPIN_BACKOFF
+        this.spyOff()
         return
       }
       if (k === SPIN_WARM + 2) {
         block.spin = 0
+        this.spyOff()
         if (dc !== this.spinDelta || dc <= 0) return
         const passes = Math.floor((this.deadline(target) - 1 - this.cycles) / dc)
         if (passes > 0) {
@@ -1015,6 +1034,8 @@ export class Cpu {
       }
       this.spinDelta = dc
     }
+    this.bus.spyStores(true)
+    this.spying = true
     this.spinR.set(this.r)
     this.spinS.set(this.sBits)
     this.spinFlags = this.flagWord()
@@ -1023,6 +1044,22 @@ export class Cpu {
     this.spinInstr = this.instructions
     this.spinSlow = this.slowAccesses
     this.spinServiced = this.serviced
+  }
+  /** The block passes are counted at, whether all that ran since it was pollable, and how many blocks ran since. */
+  private spinAnchor: Block | null = null
+  private spinPure = true
+  private spinSteps = 0
+  private anchor(block: Block) {
+    this.spinAnchor = block
+    block.spin = 0
+    this.spinPure = true
+    this.spinSteps = 0
+    if (this.spying) this.spyOff()
+  }
+  private spying = false
+  private spyOff() {
+    this.bus.spyStores(false)
+    this.spying = false
   }
   private spinSame(): boolean {
     if (this.slowAccesses !== this.spinSlow || this.serviced !== this.spinServiced || this.flagWord() !== this.spinFlags || this.fpscr !== this.spinFpscr) return false
@@ -1069,7 +1106,8 @@ export class Cpu {
    * same line) pay again. The next deadline, or -1 when the block must leave.
    */
   slowTick(target: number, next: number): number {
-    this.slowAccesses++
+    // Compiled code comes here after every closure too: only a flagged access counts.
+    if (this.bus.slow || this.mem.slow) this.slowAccesses++
     this.bus.slow = false
     this.mem.slow = false
     if (next >= 0 && this.lastLine === -1 && this.timed) this.cycles += this.fetchCost(next, next >>> this.lineShift)
@@ -1094,10 +1132,13 @@ export class Cpu {
    */
   private runCompiled(block: Block, target: number) {
     const bps = this.breakpoints
-    block.spin = 0
+    this.anchor(block)
     try {
       for (;;) {
+        const ran = this.instructions
         block.fn!(this, this.r, this.mem, this.s, block.instrs, jitHelpers, target)
+        // Ending at its instruction i, the block ran its first i + 1 (a looping one ran it all).
+        if (this.instructions - ran > block.pollPrefix) this.spinPure = false
         // A block leaving on a taken branch has not looked at the deadline since its last
         // instruction: what came due is taken now, as the run loop would. Then straight on to
         // the next block while nothing needs the run loop's attention — a breakpoint where the
@@ -1118,8 +1159,12 @@ export class Cpu {
           block.linkPc = pc
         }
         if (next === null || next.fn === null || next.lineShift !== this.lineShift || (this.mem !== this.bus && next.fetchKey !== this.guard!.fetchKey && !this.fetchableBlock(next))) return
-        if (next !== block) next.spin = 0
-        else if (block.pollable) this.spinCheck(block, target)
+        // Back at the anchor: a pass, which is a busy-wait candidate if every block on it ran pollable instructions alone.
+        if (next === this.spinAnchor) {
+          if (this.spinPure) this.spinCheck(next, target)
+          this.spinPure = true
+          this.spinSteps = 0
+        } else if (++this.spinSteps > SPIN_SPAN) this.anchor(next)
         block = next
       }
     } catch (e) {
