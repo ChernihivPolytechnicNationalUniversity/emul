@@ -320,6 +320,25 @@ charges its sampling capacitor through them in closed form over the sampling tim
 in `src/mcu/periph/adc.ts`), so a source impedance the solver sees only at 20 µs still acts
 within the sub-microsecond window.
 
+## Busy-waits
+
+Firmware spends most of its time waiting: `HAL_Delay` calls `HAL_GetTick` and compares until the
+SysTick handler has moved `uwTick` far enough, some 20 cycles a pass, nine thousand passes a
+millisecond at 180 MHz. The compiled core takes such a loop at once (`Cpu.spinCheck`): a block
+that goes round into itself and only reads memory and branches (no store, no call besides a
+branch: `pollable`) is watched after a few passes, and two passes in a row that leave every
+register, flag and FP register as they were, read no peripheral (`slowAccesses`), see nothing
+come due (`serviced`) and cost the same cycles will repeat exactly until something outside the
+loop moves. Nothing does before the next deadline — SysTick, a peripheral event, the end of the
+slice — since only events change memory or raise an exception, so the passes up to just before
+it are counted (cycles, instructions) without running them, and the pass that reaches it runs as
+usual: the interrupt finds the core at the same instruction and cycle as without the skip
+(`tests/sim/mcu-spin.test.ts`, against the interpreter after every slice of uneven length).
+A loop polling a peripheral (a UART flag, `DWT->CYCCNT`) is run pass by pass. In Node the
+Nucleo blink went from 0.98× to 6.8× real time, the serial example from 0.85× to 4.7×, I²C and
+ADC from about 0.7× to 2.1–2.3×, the PWM example from 0.39× to 0.95× (a core alone in a lockstep
+group now runs to the end of the step, stopping at its own edges, instead of 1 µs at a time).
+
 ## Threads
 
 The UI thread draws; the simulation worker runs the analog solver, the digital parts and the

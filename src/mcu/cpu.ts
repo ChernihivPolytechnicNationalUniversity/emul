@@ -53,6 +53,9 @@ type Block = {
   link: Block | null
   linkPc: number
   fetchKey: number
+  /** Whether one pass can only read and branch (`pollable`), and its passes into itself counted by `spin`. */
+  pollable: boolean
+  spin: number
 }
 /**
  * Decoded instructions and blocks of one 4 KB page, indexed by halfword. `inside` names a
@@ -64,6 +67,18 @@ type CachePage = { instrs: (Instr | undefined)[]; blocks: (Block | undefined)[];
 const emptyPage = (): CachePage => ({ instrs: [], blocks: [], inside: [], heat: new Uint16Array(0) })
 /** Entries at an address inside another block before it becomes a block start of its own. */
 const HOT = 32
+/**
+ * A block going round into itself is watched for a busy-wait after SPIN_WARM passes: two more
+ * passes that leave every register and flag as they were, read nothing but memory and cost the
+ * same cycles are a loop that cannot leave before something outside it moves (`spinCheck`).
+ * A loop found to be doing work is left alone for SPIN_BACKOFF passes.
+ */
+const SPIN_WARM = 4
+const SPIN_BACKOFF = 256
+/** A pollable block: static branches and snippets that store nothing and call nothing that changes state besides the PC. */
+const POLL_CALLS = /^c\.(branchTo|branchWritePc|readPc|fpDenied)\($/
+const pollable = (instrs: Instr[]) =>
+  instrs.every((x) => (x.js === undefined ? x.jsBranch !== undefined : !x.js.includes("bus.write") && (x.js.match(/\bc\.\w+\(/g) ?? []).every((m) => POLL_CALLS.test(m))))
 
 /** What a line fetch costs, as `fetchCost` found it (`Cpu.lineKind`). */
 export const LINE_FREE = 0
@@ -941,7 +956,7 @@ export class Cpu {
       }
       if (FLOW.test(instr.text)) break
     }
-    block = { addrs: Float64Array.from(addrs), instrs, n: instrs.length, fn: null, lineShift: this.lineShift, link: null, linkPc: -1, fetchKey: -1 }
+    block = { addrs: Float64Array.from(addrs), instrs, n: instrs.length, fn: null, lineShift: this.lineShift, link: null, linkPc: -1, fetchKey: -1, pollable: pollable(instrs), spin: 0 }
     if (this.jit) block.fn = compileBlock(addrs, instrs, this.lineShift)
     page.blocks[slot] = block
     for (let i = 1; i < addrs.length; i++) {
@@ -952,14 +967,94 @@ export class Cpu {
     this.cachePageNo = -1
     return block
   }
+  /** Accesses compiled code found beyond plain memory (`slowTick`): a pass that made one read a peripheral. */
+  slowAccesses = 0
+  /** Cycles skipped over busy-waits (`spinCheck`). */
+  spunCycles = 0
+  /** The state at the start of the pass being watched by `spinCheck`. */
+  private readonly spinR = new Uint32Array(16)
+  private readonly spinS = new Uint32Array(32)
+  private spinFlags = 0
+  private spinFpscr = 0
+  private spinCycles = 0
+  private spinInstr = 0
+  private spinSlow = 0
+  private spinServiced = 0
+  private spinDelta = 0
+
+  /**
+   * A pollable block has just gone round into itself. Two passes in a row that changed no
+   * register or flag, read no peripheral, saw nothing come due and cost the same cycles will repeat exactly until
+   * something outside the loop moves — and nothing does before the next deadline (SysTick, a
+   * peripheral event, the end of the slice), since only events change memory or raise an
+   * exception. The passes up to just before it are taken at once: their cycles and
+   * instructions counted, the state as it is. The pass that reaches the deadline runs as usual,
+   * so whatever comes due finds the core at the same instruction and cycle as without the skip.
+   */
+  private spinCheck(block: Block, target: number) {
+    const k = ++block.spin
+    if (k < SPIN_WARM) return
+    if (k > SPIN_WARM) {
+      const same = this.spinSame()
+      const dc = this.cycles - this.spinCycles
+      const di = this.instructions - this.spinInstr
+      if (!same) {
+        block.spin = -SPIN_BACKOFF
+        return
+      }
+      if (k === SPIN_WARM + 2) {
+        block.spin = 0
+        if (dc !== this.spinDelta || dc <= 0) return
+        const passes = Math.floor((this.deadline(target) - 1 - this.cycles) / dc)
+        if (passes > 0) {
+          this.cycles += passes * dc
+          this.instructions += passes * di
+          this.spunCycles += passes * dc
+        }
+        return
+      }
+      this.spinDelta = dc
+    }
+    this.spinR.set(this.r)
+    this.spinS.set(this.sBits)
+    this.spinFlags = this.flagWord()
+    this.spinFpscr = this.fpscr
+    this.spinCycles = this.cycles
+    this.spinInstr = this.instructions
+    this.spinSlow = this.slowAccesses
+    this.spinServiced = this.serviced
+  }
+  private spinSame(): boolean {
+    if (this.slowAccesses !== this.spinSlow || this.serviced !== this.spinServiced || this.flagWord() !== this.spinFlags || this.fpscr !== this.spinFpscr) return false
+    const r = this.r
+    const sr = this.spinR
+    for (let i = 0; i < 16; i++) if (r[i] !== sr[i]) return false
+    const s = this.sBits
+    const ss = this.spinS
+    for (let i = 0; i < 32; i++) if (s[i] !== ss[i]) return false
+    return true
+  }
+  /** APSR, IT state and the masks in one number, for `spinSame` (FPSCR beside it). */
+  private flagWord() {
+    return this.n + 2 * this.z + 4 * this.c + 8 * this.v + 16 * this.q + 32 * this.ge + 512 * this.itstate + 2 ** 17 * (this.primask + 2 * this.faultmask + 4 * this.control) + 2 ** 20 * this.basepri
+  }
+
   /** Set by `blockAt` for an address it declined to start a block at: where to interpret from. */
   private coldEntry: { block: Block; index: number } | null = null
 
   /** Whatever came due by the current cycle count: the SysTick, a peripheral event. */
   service() {
-    if (this.cycles >= this.scs.systDue) this.scs.sync(this.cycles)
-    if (this.cycles >= this.nextEventCycle) this.onEvent()
+    if (this.cycles >= this.scs.systDue) {
+      this.scs.sync(this.cycles)
+      this.serviced++
+    }
+    if (this.cycles >= this.nextEventCycle) {
+      this.onEvent()
+      this.serviced++
+    }
   }
+  /** Times `service` found something due: a pass that saw one may have had memory change under it. */
+  serviced = 0
   /**
    * Compiled code at its deadline: take what came due, then the next deadline, or -1 when the
    * block must leave (the slice is over, a stop request, an exception pending).
@@ -974,6 +1069,7 @@ export class Cpu {
    * same line) pay again. The next deadline, or -1 when the block must leave.
    */
   slowTick(target: number, next: number): number {
+    this.slowAccesses++
     this.bus.slow = false
     this.mem.slow = false
     if (next >= 0 && this.lastLine === -1 && this.timed) this.cycles += this.fetchCost(next, next >>> this.lineShift)
@@ -998,6 +1094,7 @@ export class Cpu {
    */
   private runCompiled(block: Block, target: number) {
     const bps = this.breakpoints
+    block.spin = 0
     try {
       for (;;) {
         block.fn!(this, this.r, this.mem, this.s, block.instrs, jitHelpers, target)
@@ -1021,6 +1118,8 @@ export class Cpu {
           block.linkPc = pc
         }
         if (next === null || next.fn === null || next.lineShift !== this.lineShift || (this.mem !== this.bus && next.fetchKey !== this.guard!.fetchKey && !this.fetchableBlock(next))) return
+        if (next !== block) next.spin = 0
+        else if (block.pollable) this.spinCheck(block, target)
         block = next
       }
     } catch (e) {

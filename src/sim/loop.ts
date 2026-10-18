@@ -1359,7 +1359,8 @@ export class SimLoop {
       if (!lag) return
       let lead = lagNow
       for (const i of group) if (i !== lag && i.mcu.running) lead = Math.max(lead, i.mcu.time + i.offset)
-      const until = Math.min(end, Math.max(lead, lagNow + LOCKSTEP_LEAD))
+      // A core alone has no peer to keep pace with: it stops at each of its own edges (`yieldOnOutput`) and goes on.
+      const until = group.length === 1 ? end : Math.min(end, Math.max(lead, lagNow + LOCKSTEP_LEAD))
       lag.mcu.runUntil(until - lag.offset)
       // Edges out, and whatever the peers answered synchronously to a late-applied edge.
       for (let round = 0; round < 8; round++) {
