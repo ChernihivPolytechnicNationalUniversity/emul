@@ -32,6 +32,7 @@ const KIND_LABEL: Record<Reading["kind"], string> = {
   PROT: "Protection",
   BOOST: "Boost converter",
   TMR: "Timer",
+  OPAMP: "Op amp",
 }
 
 /** A resistor whose value the simulation sets each step is a chip's supply load, not a resistor on the board. */
