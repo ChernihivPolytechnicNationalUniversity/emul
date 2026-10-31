@@ -1,6 +1,6 @@
 import { Logo } from "./Logo"
 import { useConfig } from "@/hooks/use-config"
-import { CheckIcon } from "lucide-react"
+import { CheckIcon, Star } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   Menubar,
@@ -371,6 +371,23 @@ export function MenuBar({
             {people.length > 5 && <span className="pl-2.5 text-xs text-muted-foreground">+{people.length - 5}</span>}
           </button>
         )}
+        <Button
+          size="xs"
+          variant="ghost"
+          nativeButton={false}
+          className="h-5 gap-1 text-muted-foreground hover:text-foreground"
+          render={
+            <a
+              href="https://github.com/ChernihivPolytechnicNationalUniversity/emul"
+              target="_blank"
+              rel="noreferrer"
+              title="Star εmul on GitHub"
+            />
+          }
+        >
+          <Star className="size-3 fill-amber-400 text-amber-400" />
+          <span className="hidden sm:inline">Star on GitHub</span>
+        </Button>
         <Button size="xs" className="h-5" onClick={onShareDialog}>
           Share
         </Button>
