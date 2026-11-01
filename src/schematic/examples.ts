@@ -688,3 +688,11 @@ export const nucleoAdc: Example = {
 }
 
 export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoShiftRegister, nucleoWs2812, nucleoAdc, nucleoSevenSeg, nucleoKeypad, nucleoEncoder, nucleoServo, nucleoLcdI2c, nucleoOled, nanoDimmer, lab1Board, lab1RunningLight, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, chargeBoost, chargeBoostChips, ne555Flasher, metronome, ...buzzerExamples, systemExam, transistorLogic, lissajous, bridge]
+
+/** The example a first visit opens, programmed and running: the README's hero circuit. */
+export const showcase = nucleoShiftRegister
+
+/** Short names for links (`/?example=running-light`); every example's own id works as well. */
+const SLUGS: Record<string, Example> = { "running-light": nucleoShiftRegister, blink: nucleoBlink }
+
+export const exampleBySlug = (slug: string): Example | undefined => SLUGS[slug] ?? examples.find((e) => e.id === slug)
