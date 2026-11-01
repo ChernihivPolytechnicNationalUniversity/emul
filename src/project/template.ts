@@ -18,6 +18,16 @@ export const template = (target: Target): SourceFile[] =>
         { path: "Core/Inc/main.h", content: F7_MAIN_H },
         { path: "Core/Src/main.c", content: F7_MAIN_C },
       ]
+    : target === "stm32f407vg"
+    ? [
+        { path: "Core/Inc/main.h", content: MAIN_H },
+        { path: "Core/Src/main.c", content: DISCOVERY_MAIN_C },
+      ]
+    : target === "stm32f405rg"
+    ? [
+        { path: "Core/Inc/main.h", content: MAIN_H },
+        { path: "Core/Src/main.c", content: H405_MAIN_C },
+      ]
     : [
         { path: "Core/Inc/main.h", content: MAIN_H },
         { path: "Core/Src/main.c", content: MAIN_C },
@@ -215,6 +225,162 @@ void HAL_SYSTICK_Callback(void)
   }
 }
 `
+
+/** F407/F405 at 168 MHz from an 8 MHz HSE crystal: PLLM 8, PLLN 336, PLLP 2, PLLQ 7; VOS scale 1, 5 WS (RM0090 Table 11). */
+const F40X_CLOCK = `static void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef osc = {0};
+  RCC_ClkInitTypeDef clk = {0};
+
+  __HAL_RCC_PWR_CLK_ENABLE();
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+
+  osc.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  osc.HSEState = RCC_HSE_ON;
+  osc.PLL.PLLState = RCC_PLL_ON;
+  osc.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  osc.PLL.PLLM = 8;
+  osc.PLL.PLLN = 336;
+  osc.PLL.PLLP = RCC_PLLP_DIV2;
+  osc.PLL.PLLQ = 7;
+  if (HAL_RCC_OscConfig(&osc) != HAL_OK) Error_Handler();
+
+  clk.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+  clk.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  clk.APB1CLKDivider = RCC_HCLK_DIV4;
+  clk.APB2CLKDivider = RCC_HCLK_DIV2;
+  if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_5) != HAL_OK) Error_Handler();
+}
+
+void Error_Handler(void)
+{
+  __disable_irq();
+  while (1)
+  {
+    __asm volatile("bkpt 0xEE");
+  }
+}
+`
+
+const DISCOVERY_MAIN_C = `/*
+ * STM32F4-Discovery (MB997) on the ST HAL: 168 MHz from the 8 MHz crystal X2, SysTick at 1 kHz.
+ *
+ *   LD4 green (PD12), LD3 orange (PD13), LD5 red (PD14), LD6 blue (PD15): one lit at a time,
+ *   stepping every 150 ms around the board
+ *   B1 USER (PA0, high when pressed): each press reverses the direction (EXTI0, rising edge)
+ */
+#include "main.h"
+
+void Error_Handler(void);
+static void SystemClock_Config(void);
+static void GPIO_Init(void);
+
+static const uint16_t leds[] = {GPIO_PIN_12, GPIO_PIN_13, GPIO_PIN_14, GPIO_PIN_15};
+static volatile int step = 1;
+
+int main(void)
+{
+  int i = 0;
+
+  HAL_Init();
+  SystemClock_Config();
+  GPIO_Init();
+
+  while (1)
+  {
+    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOD, leds[i], GPIO_PIN_SET);
+    HAL_Delay(150);
+    i = (i + step + 4) % 4;
+  }
+}
+
+static void GPIO_Init(void)
+{
+  GPIO_InitTypeDef gpio = {0};
+
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
+
+  gpio.Pin = GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;
+  gpio.Mode = GPIO_MODE_OUTPUT_PP;
+  gpio.Pull = GPIO_NOPULL;
+  gpio.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOD, &gpio);
+
+  gpio.Pin = GPIO_PIN_0;
+  gpio.Mode = GPIO_MODE_IT_RISING;
+  gpio.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &gpio);
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 2, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+}
+
+void EXTI0_IRQHandler(void)
+{
+  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_0);
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t pin)
+{
+  static uint32_t last;
+  // B1 has no debounce capacitor (C38 not fitted): ignore edges within 50 ms of the last one.
+  if (pin == GPIO_PIN_0 && HAL_GetTick() - last > 50)
+  {
+    last = HAL_GetTick();
+    step = -step;
+  }
+}
+
+${F40X_CLOCK}`
+
+const H405_MAIN_C = `/*
+ * Olimex STM32-H405 (Rev. C) on the ST HAL: 168 MHz from the 8 MHz crystal Q1, SysTick at 1 kHz.
+ *
+ *   STAT LED (PC12, lit when low): blinks every 500 ms, every 100 ms while BUT is held
+ *   BUT (PA0, 10 kOhm pull-up, low when pressed)
+ */
+#include "main.h"
+
+void Error_Handler(void);
+static void SystemClock_Config(void);
+static void GPIO_Init(void);
+
+int main(void)
+{
+  HAL_Init();
+  SystemClock_Config();
+  GPIO_Init();
+
+  while (1)
+  {
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_12);
+    HAL_Delay(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET ? 100 : 500);
+  }
+}
+
+static void GPIO_Init(void)
+{
+  GPIO_InitTypeDef gpio = {0};
+
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_SET);
+  gpio.Pin = GPIO_PIN_12;
+  gpio.Mode = GPIO_MODE_OUTPUT_PP;
+  gpio.Pull = GPIO_NOPULL;
+  gpio.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &gpio);
+
+  gpio.Pin = GPIO_PIN_0;
+  gpio.Mode = GPIO_MODE_INPUT;
+  gpio.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &gpio);
+}
+
+${F40X_CLOCK}`
 
 const NANO_SKETCH = `// Arduino Nano: L blinks, the USB serial counts the seconds and echoes what you type.
 //

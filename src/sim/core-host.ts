@@ -67,7 +67,8 @@ export type CoreStatus = {
 }
 
 /** An exact-time edge a core put on a pad. */
-export type OutEdge = { pad: PadRef; level: boolean | null; time: number }
+/** `pull`: a released pad's weak pull, up (true) or down (false). */
+export type OutEdge = { pad: PadRef; level: boolean | null; time: number; pull?: boolean }
 
 /** A panel wired to cores: which host and pad drives each signal pin. */
 export type PanelWiring = { object: string; spec: PanelSpec; wired: Map<PanelSignal, { host: CoreHost; pad: PadRef }> }
@@ -833,9 +834,11 @@ export class RemoteCore implements CoreHost {
     for (; tail < head; tail++) {
       const at = SHM.outRing + (tail % OUT_RING) * 2
       const code = this.f64[at + 1]
-      const key = code >>> 2
-      const lv = code & 3
-      this.edges.push({ pad: { port: key >>> 4, pin: key & 15 }, level: lv === 2 ? null : lv === 1, time: this.f64[at] })
+      // code = pad × 8 + 0 low, 1 high, 2 released, 3 released and pulled up, 4 released and pulled down.
+      const key = Math.floor(code / 8)
+      const lv = code % 8
+      const pad = { port: key >>> 4, pin: key & 15 }
+      this.edges.push(lv < 2 ? { pad, level: lv === 1, time: this.f64[at] } : lv === 2 ? { pad, level: null, time: this.f64[at] } : { pad, level: null, time: this.f64[at], pull: lv === 3 })
     }
     Atomics.store(this.ctl, CTL.OUT_TAIL, tail)
   }

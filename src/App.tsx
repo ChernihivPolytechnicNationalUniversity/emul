@@ -8,7 +8,8 @@ import { ComponentsSidebar } from "@/components/palette/ComponentsSidebar"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import type { Example } from "@/schematic/examples"
+import { exampleBySlug, showcase, type Example } from "@/schematic/examples"
+import { exampleBench, programExample } from "@/project/prebuilt"
 import type { Schematic } from "@/schematic/types"
 import { HDL_ACCEPT, readHdlFiles } from "@/components/hdl/files"
 import { useEvent } from "@/hooks/use-event"
@@ -51,7 +52,40 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = React.useState(true)
   const isMobile = useIsMobile()
   const fileInput = React.useRef<HTMLInputElement>(null)
-  const store = useProjects(React.useCallback((doc: Schematic) => field.current?.load(doc), []))
+  /** Set while an example that came programmed is on its way to the field: it starts once loaded. */
+  const autorun = React.useRef(false)
+  const onLoad = React.useCallback((doc: Schematic) => {
+    field.current?.load(doc)
+    if (!autorun.current) return
+    autorun.current = false
+    field.current?.restart()
+  }, [])
+  /**
+   * An example as a project: its bench, its boards' sources, and the images prebuilt from them
+   * (src/project/prebuilt.ts). Programmed, it runs as soon as it is on the field; a board the
+   * images do not cover waits for Compile, with its code open.
+   */
+  const benchOf = React.useCallback(async (example: Example) => {
+    const { doc, boards, errors } = await exampleBench(example, GRID)
+    for (const e of errors) toast.error("Could not load the example's code", { description: e })
+    const programmed = await programExample(example.id, boards)
+    autorun.current = programmed
+    return { name: example.name, doc, programmed, code: example.projects?.[0]?.ref }
+  }, [])
+  /** What a visit opens when it brings no project of its own: the example a link names, else the showcase. */
+  const landing = React.useCallback(
+    async (slug: string | null) => {
+      const example = slug === null ? showcase : exampleBySlug(slug)
+      if (!example) {
+        toast(`There is no example “${slug}”`, { description: "Pick one from File → Examples." })
+        return null
+      }
+      const { name, doc } = await benchOf(example)
+      return { name, doc }
+    },
+    [benchOf],
+  )
+  const store = useProjects(onLoad, landing)
   const live = useLive(React.useCallback((doc: Schematic) => field.current?.merge(doc), []))
   const projects = React.useMemo(
     () => ({
@@ -180,23 +214,20 @@ export default function App() {
   const open = React.useCallback(() => fileInput.current?.click(), [])
 
   /**
-   * An example with code hands each board its sources and opens the editor on it: the program
-   * is the student's to read and compile, no image comes ready-made.
+   * An example with code comes programmed and running, its sources on the boards for reading
+   * and changing (Compile then builds them as usual). One whose images are missing opens on
+   * its code, for Compile.
    */
   const loadExample = async (example: Example) => {
-    const doc = example.build(GRID)
-    for (const p of example.projects ?? []) {
-      const board = doc.objects.find((o) => o.props?.ref === p.ref)
-      if (!board) continue
-      if (p.opt) board.build = { ...board.build, opt: p.opt }
-      try {
-        board.project = await p.load()
-      } catch (e) {
-        toast.error("Could not load the example's code", { description: `${p.ref}: ${(e as Error).message}` })
-      }
-    }
-    await projects.create(example.name, doc)
-    if (example.projects?.length) field.current?.openCode(example.projects[0]!.ref)
+    const { name, doc, programmed, code } = await benchOf(example)
+    await projects.create(name, doc)
+    autorun.current = false
+    if (!code) return
+    if (!programmed) return field.current?.openCode(code)
+    toast(`${example.name} is running`, {
+      description: "Its firmware came ready-built. Open the code to read or change it; Compile builds your version.",
+      action: { label: "Open code", onClick: () => field.current?.openCode(code) },
+    })
   }
 
   const openCubeProject = async (entries: Promise<ProjectEntry[]>) => {

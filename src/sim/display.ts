@@ -74,7 +74,10 @@ const DS10916_REV5_LTDC_PADS: Record<PanelSignal, string[]> = {
   DE: ["PE13/14", "PF10/14", "PK7/14"],
 }
 
-export const LTDC_PADS: Record<AfMap, Record<PanelSignal, string[]>> = { f42x: F42X_LTDC_PADS, f74x: DS10916_REV5_LTDC_PADS }
+/** The F405/F407 has no LTDC (RM0090 §16: "only STM32F429xx/439xx"). */
+const NO_LTDC_PADS = Object.fromEntries(Object.keys(F42X_LTDC_PADS).map((k) => [k, []])) as unknown as Record<PanelSignal, string[]>
+
+export const LTDC_PADS: Record<AfMap, Record<PanelSignal, string[]>> = { f40x: NO_LTDC_PADS, f42x: F42X_LTDC_PADS, f74x: DS10916_REV5_LTDC_PADS }
 
 function padsBySignal(table: Record<PanelSignal, string[]>) {
   const byPad = new Map<number, { signal: PanelSignal; af: number }[]>()
@@ -90,7 +93,7 @@ function padsBySignal(table: Record<PanelSignal, string[]>) {
 }
 
 /** Pad key (port*16+pin) → the LTDC signals it can carry, by AF. */
-const BY_PAD: Record<AfMap, Map<number, { signal: PanelSignal; af: number }[]>> = { f42x: padsBySignal(F42X_LTDC_PADS), f74x: padsBySignal(DS10916_REV5_LTDC_PADS) }
+const BY_PAD: Record<AfMap, Map<number, { signal: PanelSignal; af: number }[]>> = { f40x: padsBySignal(NO_LTDC_PADS), f42x: padsBySignal(F42X_LTDC_PADS), f74x: padsBySignal(DS10916_REV5_LTDC_PADS) }
 
 /** Bit index of a colour signal in a 24-bit RGB word (R7 is bit 23, B0 bit 0). */
 function colourBit(signal: PanelSignal): number {

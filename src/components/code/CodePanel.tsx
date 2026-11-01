@@ -1,14 +1,14 @@
 import * as React from "react"
 import { toast } from "sonner"
 import { CpuIcon, HammerIcon, LoaderCircleIcon, TriangleAlertIcon, XIcon } from "lucide-react"
-import { OPT_LEVELS, SOURCE_LIMITS, TARGETS, isPicTarget, type OptLevel, type SourceFile, type Stm32Target } from "emul-shared/source"
+import { OPT_LEVELS, SOURCE_LIMITS, isPicTarget, type OptLevel, type SourceFile, type Stm32Target } from "emul-shared/source"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { fetchArtifact, fetchText, submitBuild, waitForJob } from "@/project/api"
 import { parseDiagnostic, parseDiagnostics, type Diagnostic } from "@/project/diagnostics"
 import { createFile, mainFile, removeFile, renameFile, renameFolder, writeFile } from "@/project/files"
 import { template } from "@/project/template"
-import { avrFcpu } from "@/project/avr-clock"
+import { AVR_BUILD_OPT, DEFAULT_BUILD_OPT, buildOpt, buildOptions, buildTarget } from "@/project/board-build"
 import { importNotes, readCubeProject, unsupportedChip, type CubeProject, type ProjectEntry } from "@/project/cubemx"
 import { filesEntries, pickFolder } from "@/project/entries"
 import { cubeIdeProject } from "@/project/cubeide"
@@ -51,9 +51,6 @@ const MIN_WIDTH = 420
 const MAX_WIDTH = 0.7
 const DEFAULT_WIDTH = 640
 const EXPLORER_WIDTH = 200
-/** What a board compiles at until its project says otherwise: a Debug build, as CubeIDE starts one. */
-export const DEFAULT_BUILD_OPT: OptLevel = "-O0"
-const AVR_BUILD_OPT: OptLevel = "-Os"
 /** What each level is for, beside it in the list. */
 const OPT_NOTES: Record<OptLevel, string> = {
   "-O0": "none, best for stepping",
@@ -131,14 +128,12 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
 
   const id = board?.id ?? null
   const def = board ? getDef(board.def) : undefined
-  // The build target is the chip's id (an AVR's, upper-case in its profile, too).
-  const chip = TARGETS.find((t) => t === def?.chip?.toLowerCase())
+  const chip = buildTarget(def)
   const avr = chip === "atmega328p"
   // A PIC builds with SDCC or gpasm: no GCC -O levels, no CubeIDE import or export.
   const pic = isPicTarget(chip)
   const stm32 = avr || pic ? undefined : (chip as Stm32Target | undefined)
-  // An AVR builds at -Os as the Arduino IDE does: avr-libc's delays are only right when optimized.
-  const opt = board?.build?.opt ?? (avr ? AVR_BUILD_OPT : DEFAULT_BUILD_OPT)
+  const opt = buildOpt(board, chip)
   const files = board?.project
   const sketch = avr && !!files?.some((f) => /\.(ino|pde)$/i.test(f.path))
   const bps = React.useMemo(() => board?.debug?.breakpoints ?? [], [board?.debug?.breakpoints])
@@ -489,7 +484,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
 
   const build = id ? builds[id] : undefined
   const compile = async () => {
-    if (!id || !chip || !files || !board) return
+    if (!id || !chip || !files || !board || !def) return
     const startedAt = Date.now()
     setBuilds((b) => ({ ...b, [id]: { phase: "running", startedAt } }))
     setPanel((p) => ({ ...p, open: true, tab: "output" }))
@@ -498,7 +493,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
     let done: Build
     let flashed = false
     try {
-      const job = await waitForJob(await submitBuild(chip, files, avr && def ? { opt, fcpu: avrFcpu(def, board.props) } : { opt }))
+      const job = await waitForJob(await submitBuild(chip, files, buildOptions(board, def, chip)))
       const log = job.artifacts.find((a) => a.name === "build.log")
       const elf = job.artifacts.find((a) => a.name === "firmware.elf")
       const ok = !!job.result?.ok && !!elf

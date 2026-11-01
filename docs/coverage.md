@@ -23,12 +23,29 @@ panel says which blocks the program touched that are missing**, so it is never a
 
 `src/mcu/chip.ts` holds the profiles; a new part is a profile plus a package pin table.
 
+**F405/F407 against the F429 (RM0090 Rev 22, DS8626 Rev 12; `tests/sim/rm0090-f40x.test.ts`, `stm32f40x-pad-tables.test.ts`):** one profile field `line` picks what RM0090 gives per line: 82 interrupt lines (0–81), no SPI4–6, UART7/8, SAI, LTDC, DMA2D, I2C4, GPIOJ/K or SRAM3; the FSMC without SDRAM registers; FLASH with 3-bit LATENCY, no OPTCR1, RDERR, SPRMOD/DB1M/BFB2 or MER1; PWR_CR reset 0x4000 with one VOS bit and no over/under-drive; RCC without PLLSAI/DCKCFGR and the F40x reset values; SYSCFG MEMRMP/PMC masks; no I2C_FLTR; the temperature sensor on ADC1_IN16 and VBAT/2 on IN18; DEV_ID 0x413 with REV_ID 0x101F (rev 5/6; every revision from Z on has the same errata, ES0182 Table 3); SPI/I²C pads from DS8626 Table 9 (USART and timer pads are the F429's). **Not modelled** on any F4: the clock ceilings (168/84/42 MHz) and the wait-state table against HCLK, VOS limits; reads of reserved addresses answer like any unmodelled register; Ethernet, DCMI, USB OTG, CAN, SDIO, RNG, CRC on the F40x as on the F429.
+
 | Part | Package component | Board |
 |---|---|---|
 | STM32F429ZIT6 (Cortex-M4F, 2 MB / 256 KB) | `STM32F429ZI` LQFP144 | Nucleo-144 (NUCLEO-F429ZI) |
 | STM32F746IGT6 (Cortex-M7, 1 MB / 320 KB) | `STM32F746IG` LQFP176 | Open746I-C (Waveshare, with the Core746I module) |
+| STM32F407VGT6 (Cortex-M4F, 1 MB / 128 KB + 64 KB CCM) | — | STM32F4-Discovery (MB997, `stm32f4-discovery`) |
+| STM32F405RGT6 (Cortex-M4F, 1 MB / 128 KB + 64 KB CCM) | — | Olimex STM32-H405 Rev. C, Netduino Plus 2 Rev A |
 | ATmega328P (AVRe+, 32 KB / 2 KB / 1 KB EEPROM) | `ATmega328P` PDIP-28, `ATmega328P TQFP-32` with the analog-only ADC6/ADC7 (`src/mcu/avr/chip.ts`) | Arduino Nano 3.x (A000005) |
 | PIC16F627A/628A/648A, PIC16LF627A/628A/648A; the original PIC16F627/628 (-20 and -04 grades) and PIC16LF627/628 (mid-range PIC14, 1–4K words / 224–256 B / 128–256 B EEPROM) | PDIP-18 for each (`src/mcu/pic/chip.ts`, `src/schematic/components/pic-chip.ts`) | — |
+
+## On-board chips of the F4 boards
+
+Each is a digital part on its board's own nodes (`src/sim/boards.ts`), with its datasheet's register map and its gaps exported as `NOT_MODELLED` in its file.
+
+| Chip | Board | Status |
+|---|---|---|
+| LIS302DL / LIS3DSH accelerometer (`src/sim/lis-accel.ts`) | STM32F4-Discovery (Accelerometer field: rev A/B or C–E) | SPI mode 3, registers, data rates, sensitivities, BDU, status, data-ready on INT1, self-test; tilt from the inspector's Roll/Pitch. **Not modelled:** I²C and 3-wire modes, the LIS302DL's free-fall/click engines and high-pass filter, the LIS3DSH's state machines, FIFO and offsets, noise and offset spread (`tests/sim/lis-accel.test.ts`, `discovery-tilt.test.ts`) |
+| CS43L22 audio DAC (`src/sim/cs43l22.ts`) | STM32F4-Discovery | I²C control port at 0x4A behind RESET̅, every register, power codes and the §4.11 init, the MCLK/LRCK ratio, I²S/justified/DSP receive, the volume chain and beep, out to the bench speaker. **Not modelled:** master mode, the speaker path, tone/de-emphasis/limiter, soft ramp, analog passthrough, charge pump, pops (`tests/sim/cs43l22.test.ts`, `discovery-audio.test.ts`) |
+| MP45DT02 PDM microphone (`src/sim/mp45dt02.ts`) | STM32F4-Discovery (Sound/Tone fields) | 2nd-order sigma-delta at −26 dBFS / 94 dB SPL, 120 dB SPL overload, DOUT timing per LR, power-down and 10 ms wake-up. **Not modelled:** frequency response, THD, PSR, sensitivity spread (`tests/sim/mp45dt02.test.ts`) |
+| ENC28J60 Ethernet (`src/sim/enc28j60.ts`) | Netduino Plus 2, powered by PC15 | SPI instructions, four banks, CLKRDY, buffer, MII/PHY, transmit/receive with filters, INT, DMA, B7 errata, ACT LED. **Not modelled:** no cable to another host, collisions, flow control, loopback, the PHY's analog side (`tests/sim/enc28j60.test.ts`, `f405-boards-firmware.test.ts`) |
+
+The STM32F4's I²S (SPI2/SPI3, RM0090 §28.4) is modelled in master transmit and receive: Philips, MSB/LSB-justified, PCM short/long, 16/24/32-bit, the PLLI2S clock, flags, DMA and the I2S pads of DS8626 Table 9 (`tests/sim/stm32f4-i2s.test.ts`). MCK is held high rather than toggled at 256·Fs. **Not modelled:** slave modes, I2Sx_ext full duplex, I2S_CKIN.
 
 ## AVR (ATmega328P)
 

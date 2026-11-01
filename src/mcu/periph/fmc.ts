@@ -57,8 +57,12 @@ export class Fmc extends RegBlock {
   onUnsupported: ((what: string) => void) | null = null
   readonly banks: BankState[] = [Fmc.freshBank(), Fmc.freshBank()]
 
-  constructor() {
-    super("FMC", FMC_BASE, 0x1000, REGS)
+  /** SDRAM controller (SDCRx…SDSR): the F42x/F7 FMC; the F40x FSMC has none (RM0090 §36.6.9 Table 253 vs §37.8 Table 297). */
+  readonly sdram: boolean
+
+  constructor(sdram = true) {
+    super(sdram ? "FMC" : "FSMC", FMC_BASE, 0x1000, sdram ? REGS : REGS.filter((d) => d.offset < 0x140))
+    this.sdram = sdram
   }
 
   private static freshBank(): BankState {

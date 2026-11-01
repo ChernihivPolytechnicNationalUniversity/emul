@@ -70,16 +70,24 @@ export class FlashIf extends RegBlock {
   private readonly optcrReset: number
   private readonly optcr1Reset: number
 
-  constructor(map: "v1" | "v2", geometry: ChipProfile["flash"], flashBase: number) {
-    super("FLASH", 0x40023c00, 0x400, [
-      { name: "ACR", offset: 0x00, reset: 0, rw: 0x00001f0f },
+  /**
+   * `f40x`: the F405/F407 controller (RM0090 §3.9.x vs §3.9.(x+1)): no FLASH_OPTCR1, no RDERR, OPTCR without
+   * SPRMOD/DB1M/BFB2 (bit 4 reads 0), SNB[3:0] and no MER1.
+   */
+  readonly f40x: boolean
+
+  constructor(map: "v1" | "v2", geometry: ChipProfile["flash"], flashBase: number, f40x = false) {
+    const regs: RegDef[] = [
+      { name: "ACR", offset: 0x00, reset: 0, rw: 0x00001f00 | ((1 << geometry.latencyBits) - 1) },
       { name: "KEYR", offset: 0x04 },
       { name: "OPTKEYR", offset: 0x08 },
-      { name: "SR", offset: 0x0c, reset: 0, w1c: SR_ERRORS | SR_EOP | (1 << 8) },
+      { name: "SR", offset: 0x0c, reset: 0, w1c: SR_ERRORS | SR_EOP | (f40x ? 0 : 1 << 8) },
       { name: "CR", offset: 0x10, reset: CR_LOCK },
-      { name: "OPTCR", offset: 0x14, reset: map === "v1" ? 0x0fffaaed : 0xc0ffaafd },
-      { name: "OPTCR1", offset: 0x18, reset: map === "v1" ? 0x0fff0000 : 0x00400080 },
-    ])
+      f40x ? { name: "OPTCR", offset: 0x14, reset: 0x0fffaaed, rw: 0x0fffffef } : { name: "OPTCR", offset: 0x14, reset: map === "v1" ? 0x0fffaaed : 0xc0ffaafd },
+    ]
+    if (!f40x) regs.push({ name: "OPTCR1", offset: 0x18, reset: map === "v1" ? 0x0fff0000 : 0x00400080 })
+    super("FLASH", 0x40023c00, 0x400, regs)
+    this.f40x = f40x
     this.map = map
     this.geometry = geometry
     this.flashBase = flashBase
@@ -103,7 +111,7 @@ export class FlashIf extends RegBlock {
     this.onAcr(0, true)
     // Option bytes come back locked with what was programmed into them.
     this.regs[0x14 >>> 2] = (this.optcr | OPT_LOCK) >>> 0
-    this.regs[0x18 >>> 2] = this.optcr1 >>> 0
+    if (!this.f40x) this.regs[0x18 >>> 2] = this.optcr1 >>> 0
     this.publishOptions()
   }
 
@@ -200,7 +208,7 @@ export class FlashIf extends RegBlock {
         if (v & OPT_STRT) {
           v &= ~OPT_STRT
           this.optcr = v & ~OPT_LOCK
-          this.optcr1 = this.regs[0x18 >>> 2]
+          if (!this.f40x) this.optcr1 = this.regs[0x18 >>> 2]
           this.publishOptions()
           this.onOptions()
         }
@@ -272,16 +280,17 @@ export class FlashIf extends RegBlock {
   private erase(cr: number) {
     let targets: FlashSector[] = []
     if (cr & CR_SER) {
-      const snb = (cr >>> 3) & 0x1f
+      const snb = (cr >>> 3) & (this.f40x ? 0xf : 0x1f)
       const s = this.sectors.find((x) => x.snb === snb)
       if (!s) {
-        this.finish(SR_PGSERR)
+        // RM0090 §3.7.4: "a sector erase is requested and the Sector Number SNB field is not valid" → WRPERR.
+        this.finish(this.map === "v1" ? SR_WRPERR : SR_PGSERR)
         return
       }
       targets = [s]
     }
     if (cr & CR_MER) targets.push(...this.sectors.filter((s) => s.bank === 0))
-    if (this.map === "v1" && cr & CR_MER1) targets.push(...this.sectors.filter((s) => s.bank === 1))
+    if (this.map === "v1" && !this.f40x && cr & CR_MER1) targets.push(...this.sectors.filter((s) => s.bank === 1))
     if (!targets.length) {
       this.finish(SR_PGSERR)
       return

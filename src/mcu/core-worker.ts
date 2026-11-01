@@ -185,7 +185,7 @@ function publish(parity: number, running: boolean, idd: number) {
       }
       const at = SHM.outRing + (head % OUT_RING) * 2
       f64[at] = e.time
-      f64[at + 1] = (e.pad.port * 16 + e.pad.pin) * 4 + (e.level === null ? 2 : e.level ? 1 : 0)
+      f64[at + 1] = (e.pad.port * 16 + e.pad.pin) * 8 + (e.level !== null ? (e.level ? 1 : 0) : e.pull === true ? 3 : e.pull === false ? 4 : 2)
       head++
     }
     Atomics.store(ctl, CTL.OUT_HEAD, head)

@@ -63,11 +63,29 @@ function setTabProject(id: string) {
   }
 }
 
+/** `?example=<slug>`: a link that opens an example rather than the visitor's last project. */
+function exampleParam(): string | null {
+  return new URLSearchParams(location.search).get("example")
+}
+
+/** Drop `?example=` once it has been acted on, so a reload does not open the example again; utm_* and the rest stay. */
+function clearExampleParam() {
+  const url = new URL(location.href)
+  url.searchParams.delete("example")
+  history.replaceState(history.state, "", url)
+}
+
+/**
+ * What a visit opens when it comes without a project to go back to (or with `?example=`): a
+ * name and a bench to start a project from, or null for the empty one.
+ */
+export type Landing = (example: string | null) => Promise<{ name: string; doc: Schematic } | null>
+
 export function announceUpgrade(notes: readonly string[]) {
   if (notes.length) toast("Brought up to date from an older εmul", { description: notes.join(" "), duration: 15000 })
 }
 
-export function useProjects(load: (doc: Schematic) => void): Projects {
+export function useProjects(load: (doc: Schematic) => void, landing?: Landing): Projects {
   const [current, setCurrent] = React.useState<ProjectMeta | null>(null)
   const [list, setList] = React.useState<ProjectMeta[]>([])
   const [shared, setShared] = React.useState(false)
@@ -287,6 +305,26 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
     const shareId = sharedId()
     if (shareId && (await view(shareId))) return
     if (shareId) history.replaceState(null, "", "/")
+    // A live session's link joins the room over whatever is open: no example in its way.
+    const room = location.pathname.startsWith("/r/")
+    const fresh = async (slug: string | null) => {
+      const got = room ? null : await landing?.(slug).catch(() => null)
+      if (!got) return false
+      const now = Date.now()
+      const next: ProjectMeta = { id: newId(), name: uniqueName(got.name, all), created: now, at: now, thumb: thumbnail(got.doc) }
+      const text = schematicText(got.doc)
+      await writeProject(next, text).catch(warn)
+      post({ list: true })
+      setList(await listProjects())
+      enter(next, text, got.doc, true)
+      return true
+    }
+    // A link to an example opens it even for a returning visitor, as a project of its own.
+    const asked = exampleParam()
+    if (asked !== null) {
+      clearExampleParam()
+      if (await fresh(asked)) return
+    }
     for (const id of [tabProject(), await lastProject()]) {
       if (!id || !all.some((p) => p.id === id)) continue
       const p = await readProject(id)
@@ -299,6 +337,8 @@ export function useProjects(load: (doc: Schematic) => void): Projects {
         toast(`“${p.meta.name}” is back`, { description: "Projects are kept in this browser only. File → Save to file keeps a copy on disk." })
       return
     }
+    // A first visit opens on something running rather than an empty sheet.
+    if (asked === null && !all.length && (await fresh(null))) return
     const now = Date.now()
     enter({ id: newId(), name: uniqueName("Untitled", all), created: now, at: now }, null, emptySchematic(), false)
   })

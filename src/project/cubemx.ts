@@ -21,7 +21,7 @@ export type CubeProject = {
   refused: Refusal[]
 }
 
-export const BOARD_FOR: Record<Stm32Target, string> = { stm32f429zi: "nucleo-f429zi", stm32f746ig: "open746i-c" }
+export const BOARD_FOR: Record<Stm32Target, string> = { stm32f429zi: "nucleo-f429zi", stm32f746ig: "open746i-c", stm32f407vg: "stm32f4-discovery", stm32f405rg: "olimex-stm32-h405" }
 
 const BUILD_FILE = /\.(c|h|cpp|hpp|cc|s|ld)$/i
 const JUNK = /(^|\/)(\.|__MACOSX\/)/

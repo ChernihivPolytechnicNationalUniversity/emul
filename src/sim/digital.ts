@@ -18,6 +18,7 @@ import { Buzzer, buzzerOfDef } from "./buzzer"
 import { Servo } from "./servo"
 import { LcdBackpack, LcdParallel } from "./hd44780"
 import { OledI2c, OledSpi } from "./ssd1306"
+import { boardParts } from "./boards"
 
 export type { DigitalEdge, DigitalPart } from "./digital-part"
 export { I2cSlave } from "./digital-part"
@@ -492,6 +493,8 @@ export function createDigitalPart(def: string, object: string, props: Record<str
     case "oled-ssd1306-spi":
       return new OledSpi(object, props, { width: 128, height: 64 })
     default: {
+      const onboard = boardParts(def, object, props)
+      if (onboard) return onboard
       const shiftRegister = shiftRegisterOfDef(def)
       if (shiftRegister) return new ShiftRegister595(object, shiftRegister)
       const buzzer = buzzerOfDef(def)

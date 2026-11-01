@@ -54,9 +54,9 @@ export type ChipElectrical = {
    * DS10916 §6.3.6): run and sleep as [floor, per MHz of HCLK]; Stop with the main regulator,
    * the low-power regulator, and under-drive; Standby with the RTC running.
    */
-  idd: { run: [number, number]; sleep: [number, number]; stop: number; stopLp: number; stopUd: number; standby: number }
+  idd: { run: [number, number]; sleep: [number, number]; stop: number; stopLp: number; stopUd?: number; standby: number }
   /** Wake-up latency, s: leaving Stop on the main regulator, the low-power regulator, under-drive; leaving Standby. */
-  wakeup: { stop: number; stopLp: number; stopUd: number; standby: number }
+  wakeup: { stop: number; stopLp: number; stopUd?: number; standby: number }
   /** Internal pull-up on NRST, Ω. */
   nrstPullUp: number
   /** Internal pull-down on BOOT0, Ω, on parts that have one. */
@@ -78,7 +78,7 @@ export type PadClasses = {
   releaseFromHighDrainsAtSpeed: Record<string, number>
 }
 
-export type AfMap = "f42x" | "f74x"
+export type AfMap = "f40x" | "f42x" | "f74x"
 
 export type LptimProfile = {
   base: number
@@ -103,6 +103,8 @@ export type FactoryBytes = {
 export type NoiseMixture = { weights: number[]; sigmasLsb: number[] }
 
 export type AdcProfile = {
+  /** F40x: temperature sensor on ADC1_IN16 and VBAT/2 on IN18 (RM0090 §13.3.3, §13.11); else both on IN18, VBAT/4. */
+  tempOnIn16?: boolean
   regularTriggers: (string | null)[]
   injectedTriggers: (string | null)[]
   sampleHold?: { switchOhms: number; farads: number }
@@ -115,6 +117,11 @@ export type DacProfile = {
 
 export type ChipProfile = {
   family?: "stm32"
+  /**
+   * Which reference-manual variant the part follows where one manual covers several lines:
+   * F405/F407 vs F42x/F43x in RM0090 (blocks present, PWR/RCC/FLASH/SYSCFG/ADC/I²C/FSMC details), F7.
+   */
+  line: "f40x" | "f42x" | "f7"
   id: string
   /** Part number as printed on the package. */
   name: string
@@ -140,7 +147,13 @@ export type ChipProfile = {
     system: { base: number; size: number }
     /** Where the option bytes read back from. */
     optionBytes: number
+    /** Width of FLASH_ACR LATENCY: 3 bits on F40x, 4 on F42x and F7 (RM0090 §3.9.1/§3.9.2, RM0385 §3.7.1). */
+    latencyBits: 3 | 4
   }
+  /** RCC reset values that differ between parts (RM0090 §6.3 vs §7.3); absent → the RCC table default. */
+  rccResets?: Partial<Record<"AHB1LPENR" | "APB1LPENR" | "APB2LPENR" | "PLLI2SCFGR", number>>
+  /** I²C instances: I2C1–3 on F4 (RM0090 Table 1), I2C1–4 on F7 (RM0385 Table 1). */
+  i2cCount: 3 | 4
   /** USART register map: "v1" (F4: SR/DR) or "v2" (F7: ISR/ICR/RDR/TDR). */
   usart: "v1" | "v2"
   /** SPI register map: "v1" (F4: DFF, one-word holding registers) or "v2" (F7: DS, FIFOs). */
@@ -168,6 +181,9 @@ export const CORTEX_M4F: CoreProfile = {
   cache: false,
   bitBand: true,
 }
+
+/** The F405/F407's NVIC: 82 interrupt lines, 0–81, FPU last (RM0090 §12.1.1, Table 62). */
+export const CORTEX_M4F_F40X: CoreProfile = { ...CORTEX_M4F, irqCount: 82 }
 
 export const CORTEX_M7: CoreProfile = {
   name: "Cortex-M7",
@@ -213,6 +229,7 @@ const DAC_BUFFER_ON_THE_BENCH_2026_10_06 = { gain: 1.0165, offsetCodes: -29.6, f
 
 /** STM32F429ZIT6 (NUCLEO-F429ZI): 2 MB flash, 192 KB SRAM + 64 KB CCM. RM0090 §2.3.1. */
 export const STM32F429ZI: ChipProfile = {
+  line: "f42x",
   id: "stm32f429zi",
   name: "STM32F429ZIT6",
   core: CORTEX_M4F,
@@ -226,7 +243,10 @@ export const STM32F429ZI: ChipProfile = {
   idcode: 0x20016419, // STM32F42x/43x, rev 3
   bootVector: 0x08000000,
   boot: "pins",
-  flash: { map: "v1", sectors: [16, 16, 16, 16, 64, 128, 128, 128, 128, 128, 128, 128].map((k) => k * 1024), banks: 2, system: { base: 0x1fff0000, size: 30 * 1024 }, optionBytes: 0x1fffc000 },
+  flash: { map: "v1", sectors: [16, 16, 16, 16, 64, 128, 128, 128, 128, 128, 128, 128].map((k) => k * 1024), banks: 2, system: { base: 0x1fff0000, size: 30 * 1024 }, optionBytes: 0x1fffc000, latencyBits: 4 },
+  // RM0090 Rev 22 §6.3.15/§6.3.17/§6.3.18 (F42x).
+  rccResets: { AHB1LPENR: 0x7eef97ff, APB1LPENR: 0xf6fec9ff, APB2LPENR: 0x04777f33 },
+  i2cCount: 3,
   usart: "v1",
   spi: "v1",
   i2c: "v1",
@@ -252,12 +272,78 @@ export const STM32F429ZI: ChipProfile = {
   },
 }
 
+const DS8626_ELECTRICAL: ChipElectrical = {
+  vdd: 3.3,
+  // DS8626 Rev 12 §6.2 Tables 11–12, §6.3.1 Table 14.
+  vddMax: 4.0,
+  pinVoltageMax: 5.5,
+  pinCurrentMax: 0.025,
+  pinCapacitance: 5e-12,
+  // Tables 20/22 (all peripherals on, ART on), least-squares over 25–168 MHz; Table 23 (Stop, flash in
+  // Stop mode); Table 24 (Standby at 3.3 V, backup SRAM off, LSE + RTC on). No under-drive on F40x.
+  idd: { run: [0, 0.49e-3], sleep: [0, 0.335e-3], stop: 0.45e-3, stopLp: 0.31e-3, standby: 3.3e-6 },
+  // Table 29: Stop main/low-power regulator (flash in Stop), Standby typical.
+  wakeup: { stop: 13e-6, stopLp: 17e-6, standby: 375e-6 },
+  // Table 51; Table 48 (tested VIH 0.7 VDD, VIL 0.3 VDD).
+  nrstPullUp: 40e3,
+  inputThresholdsOfVdd: { rising: 0.7, falling: 0.3 },
+  // Tables 69, 72: V25, average slope, VREFINT.
+  adcInternal: DATASHEET_ADC_INTERNAL,
+  // Table 19 typical PVD thresholds, PLS 0–7.
+  pvd: {
+    rising: [2.14, 2.3, 2.45, 2.6, 2.76, 2.93, 3.03, 3.14],
+    falling: [2.04, 2.19, 2.35, 2.51, 2.66, 2.84, 2.93, 3.03],
+  },
+}
+
+/**
+ * The F405/F407 die (RM0090 Rev 22, DS8626 Rev 12): 1 MB flash in one bank of 12 sectors, SRAM1 112 KB +
+ * SRAM2 16 KB back to back at 0x2000_0000, CCM 64 KB. DEV_ID 0x413 (RM0090 §38.6.1); REV_ID 0x101F is
+ * silicon rev 5/6, the latest in ES0182 Rev 19 Table 2 (every rev from Z on has the same errata).
+ */
+const F40X_DIE = {
+  line: "f40x",
+  core: CORTEX_M4F_F40X,
+  memory: [
+    { name: "FLASH", base: 0x08000000, size: 1024 * 1024, kind: "flash", aliases: [0x00000000] },
+    { name: "SRAM", base: 0x20000000, size: 128 * 1024, kind: "ram" },
+    { name: "CCM", base: 0x10000000, size: 64 * 1024, kind: "ram" },
+    { name: "SYSTEM", base: 0x1fff0000, size: 30 * 1024, kind: "rom" },
+    { name: "OPT", base: 0x1fffc000, size: 16, kind: "rom" },
+  ],
+  idcode: 0x101f0413,
+  bootVector: 0x08000000,
+  boot: "pins",
+  flash: { map: "v1", sectors: [16, 16, 16, 16, 64, 128, 128, 128, 128, 128, 128, 128].map((k) => k * 1024), banks: 1, system: { base: 0x1fff0000, size: 30 * 1024 }, optionBytes: 0x1fffc000, latencyBits: 3 },
+  // RM0090 Rev 22 §7.3.15/§7.3.17/§7.3.18/§7.3.23 (F40x).
+  rccResets: { AHB1LPENR: 0x7e6791ff, APB1LPENR: 0x36fec9ff, APB2LPENR: 0x00075f33, PLLI2SCFGR: 0x20003000 },
+  i2cCount: 3,
+  usart: "v1",
+  spi: "v1",
+  i2c: "v1",
+  pwr: "v1",
+  tim: "v1",
+  af: "f40x",
+  rtcBackupRegisters: 20,
+  backupSram: BACKUP_SRAM_4KB,
+  adc: { ...RM0090_ADC_TRIGGERS, tempOnIn16: true },
+  dac: {},
+  electrical: DS8626_ELECTRICAL,
+} satisfies Omit<ChipProfile, "id" | "name">
+
+/** STM32F407VGT6 (STM32F4-Discovery): LQFP100, PA–PE + PH0/PH1 bonded (DS8626 Table 2, Table 7). */
+export const STM32F407VG: ChipProfile = { ...F40X_DIE, id: "stm32f407vg", name: "STM32F407VGT6" }
+
+/** STM32F405RGT6 (Olimex STM32-H405, Netduino Plus 2): LQFP64, PA–PC + PD2 + PH0/PH1 bonded, no ETH/DCMI. */
+export const STM32F405RG: ChipProfile = { ...F40X_DIE, id: "stm32f405rg", name: "STM32F405RGT6" }
+
 /**
  * STM32F746IGT6 (LQFP176): 1 MB flash on the AXI bus at 0x0800_0000 with its ITCM alias at
  * 0x0020_0000, 16 KB ITCM-RAM, and 320 KB of RAM at 0x2000_0000 that firmware sees as one
  * block (DTCM 64 KB, SRAM1 240 KB, SRAM2 16 KB back to back). RM0385 §2.3.1.
  */
 export const STM32F746IG: ChipProfile = {
+  line: "f7",
   id: "stm32f746ig",
   name: "STM32F746IGT6",
   core: CORTEX_M7,
@@ -273,7 +359,8 @@ export const STM32F746IG: ChipProfile = {
   // BOOT_ADD0 option bytes default to 0x0080 (× 16 KB): the ITCM alias of flash, same bytes as 0x0800_0000.
   bootVector: 0x00200000,
   boot: "options",
-  flash: { map: "v2", sectors: [32, 32, 32, 32, 128, 256, 256, 256].map((k) => k * 1024), banks: 1, system: { base: 0x00100000, size: 60 * 1024 }, optionBytes: 0x1fff0000 },
+  flash: { map: "v2", sectors: [32, 32, 32, 32, 128, 256, 256, 256].map((k) => k * 1024), banks: 1, system: { base: 0x00100000, size: 60 * 1024 }, optionBytes: 0x1fff0000, latencyBits: 4 },
+  i2cCount: 4,
   usart: "v2",
   spi: "v2",
   i2c: "v2",
@@ -338,7 +425,7 @@ export const STM32F746IG: ChipProfile = {
   },
 }
 
-export const CHIPS: ChipProfile[] = [STM32F429ZI, STM32F746IG]
+export const CHIPS: ChipProfile[] = [STM32F429ZI, STM32F746IG, STM32F407VG, STM32F405RG]
 
 export function chipById(id: string): ChipProfile | undefined {
   return CHIPS.find((c) => c.id === id)

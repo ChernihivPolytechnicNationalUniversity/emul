@@ -347,6 +347,11 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
     wanted.add(uf.find(pinKey(w.to.object, w.to.pin)))
   }
   for (const key of watched) wanted.add(uf.find(key))
+  // Two drivers on one net with no wire between them: a board's MCU pad and a chip of the same
+  // board on it (an accelerometer's SPI lines, a codec's I²C).
+  const gpioCount = new Map<string, number>()
+  for (const { obj, el } of gpios) if (el.kind === "GPIO") gpioCount.set(uf.find(node(obj, el.node)), (gpioCount.get(uf.find(node(obj, el.node))) ?? 0) + 1)
+  for (const [root, count] of gpioCount) if (count > 1) wanted.add(root)
   for (const { obj, el } of gpios) {
     if (el.kind !== "GPIO") continue
     const root = uf.find(node(obj, el.node))
