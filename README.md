@@ -25,7 +25,7 @@
     <img
       src=".github/assets/hero.webp"
       width="840"
-      alt="εmul running in a browser tab: a Nucleo-F429ZI board, a 74HC595 and eight LEDs are placed and wired into a running-light circuit; power enters from a +3.3 V rail, current marches along the wires as the LEDs chase, a real analog oscilloscope sweeps the probed signal, and a wired OLED shows 'try εmul!'.">
+      alt="εmul running in a browser tab: a Nucleo-F429ZI + 74HC595 running-light circuit with eight LEDs chases; then it is rebuilt step by step — parts are placed and wired, running_light.elf is dropped onto the board and flashed, Run is clicked, current spreads through the wires, the LEDs light up and the oscilloscope shows the QA–QD outputs pulsing in step with them.">
   </a>
 </p>
 
