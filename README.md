@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-    <img src="docs/assets/logo-light.svg" width="140" alt="εmul">
-  </picture>
+  <img src="docs/assets/logo.svg" width="140" alt="εmul">
 </p>
 
 <h3 align="center">real firmware + real circuits, in your browser</h3>
@@ -12,19 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://emul.digituni.org/"><picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/live-emul.digituni.org-e6edf3?style=for-the-badge&labelColor=e6edf3">
-    <img alt="Live demo" src="https://img.shields.io/badge/live-emul.digituni.org-000?style=for-the-badge&labelColor=000">
-  </picture></a>
-  <a href="LICENSE"><picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/license-Apache--2.0-e6edf3?style=for-the-badge&labelColor=e6edf3">
-    <img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-000?style=for-the-badge&labelColor=000">
-  </picture></a>
-  <a href="https://github.com/ChernihivPolytechnicNationalUniversity/emul/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/ChernihivPolytechnicNationalUniversity/emul/ci-build.yml?style=for-the-badge&label=CI"></a>
-  <a href="https://github.com/ChernihivPolytechnicNationalUniversity/emul/releases"><picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/github/v/release/ChernihivPolytechnicNationalUniversity/emul?style=for-the-badge&color=e6edf3&labelColor=e6edf3&label=release">
-    <img alt="Latest release" src="https://img.shields.io/github/v/release/ChernihivPolytechnicNationalUniversity/emul?style=for-the-badge&color=000&labelColor=000&label=release">
-  </picture></a>
+  <a href="https://emul.digituni.org/"><img alt="Live demo" src="https://img.shields.io/badge/live-emul.digituni.org-555?style=for-the-badge&labelColor=333"></a>
+  <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-555?style=for-the-badge&labelColor=333"></a>
+  <a href="https://github.com/ChernihivPolytechnicNationalUniversity/emul/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/ChernihivPolytechnicNationalUniversity/emul/ci-build.yml?style=for-the-badge&label=CI&labelColor=333"></a>
+  <a href="https://github.com/ChernihivPolytechnicNationalUniversity/emul/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/ChernihivPolytechnicNationalUniversity/emul?style=for-the-badge&color=555&labelColor=333&label=release"></a>
 </p>
 
 <p align="center">
