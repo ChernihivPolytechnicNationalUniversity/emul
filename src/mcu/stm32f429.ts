@@ -28,7 +28,7 @@ import { Dma2d } from "./periph/dma2d"
 import { Fmc } from "./periph/fmc"
 import { Ltdc } from "./periph/ltdc"
 import { I2c, I2C_SPECS, i2cPads, type I2cLine, type I2cPad } from "./periph/i2c"
-import { Spi, SPI_SPECS, spiPads, type SpiLine, type SpiPad } from "./periph/spi"
+import { i2sMckPads, Spi, SPI_SPECS, spiPads, type SpiLine, type SpiPad } from "./periph/spi"
 import { connectTimers, Tim, TIM_LINE, TIM_SPECS, timAuxPads, timPads, type TimPad } from "./periph/tim"
 import { Usart, USART_SPECS, usartPads, type UsartPad } from "./periph/usart"
 
@@ -117,7 +117,7 @@ export class Stm32 {
   readonly flash: FlashIf
   /** BOOT0 as the board has it at reset (BOOT1 is read off PB2). Nothing on the board: low, boot from flash. */
   boot0 = false
-  readonly syscfg = new Syscfg()
+  readonly syscfg: Syscfg
   readonly exti: Exti
   readonly gpio: Gpio[] = []
   readonly dwt: Dwt
@@ -133,7 +133,7 @@ export class Stm32 {
   readonly dac: Dac
   readonly rtc: Rtc
   readonly bkpsram: BackupSram
-  readonly fmc = new Fmc()
+  readonly fmc: Fmc
   readonly ltdc = new Ltdc()
   readonly dma2d = new Dma2d()
   readonly iwdg = new Iwdg()
@@ -190,13 +190,16 @@ export class Stm32 {
    * board uses to deliver bits to a terminal or another MCU without the analog time step
    * quantizing them. Drained by the owner.
    */
-  readonly digitalOut: { pad: PadRef; level: boolean | null; time: number }[] = []
+  /** `pull` on a released pad: its weak pull-up (true) or pull-down (false), which then sets the net's level. */
+  readonly digitalOut: { pad: PadRef; level: boolean | null; time: number; pull?: boolean }[] = []
   /**
    * Plain GPIO pads whose changes go through the digital fast path too (a bit-banged chip
    * select next to a hardware SPI must arrive in order with its clock). Set by the owner.
    */
   readonly digitalWatch = new Set<number>()
   private readonly digitalLevel = new Map<number, boolean | null>()
+  /** The pull last reported for a released watched pad. */
+  private readonly digitalPull = new Map<number, boolean | undefined>()
   /**
    * When set, emitting a digital edge ends the current `runUntil` early so the owner can hand
    * the edge to another core before this one runs on (lockstep for MCU-to-MCU links).
@@ -219,17 +222,20 @@ export class Stm32 {
   /** `external`: memory the board hangs on the FMC (an SDRAM), on top of the chip's own map. */
   constructor(chip: ChipProfile = STM32F429ZI, external: MemoryRegion[] = []) {
     this.chip = chip
-    this.rcc = new Rcc(chip.lptim)
+    const f40x = chip.line === "f40x"
+    this.syscfg = new Syscfg(chip.line)
+    this.fmc = new Fmc(!f40x)
+    this.rcc = new Rcc(chip.lptim, chip.rccResets, !f40x)
     this.rtc = new Rtc(chip.rtcBackupRegisters)
     this.lptim = chip.lptim ? new Lptim(chip.lptim) : null
     this.vdda = chip.electrical.vdd
     this.bus = new Bus([...chip.memory, ...external], chip.core.bitBand)
     this.cpu = new Cpu(this.bus, chip.core)
     this.dbgmcu = new Dbgmcu(chip.idcode)
-    this.pwr = new Pwr(chip.pwr, chip.electrical.pvd ?? null, chip.electrical.vdd)
+    this.pwr = new Pwr(chip.pwr, chip.electrical.pvd ?? null, chip.electrical.vdd, !f40x)
     const bus = this.bus
     const flashRegion = chip.memory.find((m) => m.kind === "flash")!
-    this.flash = new FlashIf(chip.flash.map, chip.flash, flashRegion.base)
+    this.flash = new FlashIf(chip.flash.map, chip.flash, flashRegion.base, f40x)
     this.flash.bus = bus
     bus.flashWriter = (addr, value, size) => this.flash.programWrite(addr, value, size)
     this.flash.onBusy = (seconds) => {
@@ -242,7 +248,7 @@ export class Stm32 {
     this.flash.onAcr = (acr, resetCaches) => {
       const v1 = chip.flash.map === "v1"
       this.cpu.flashTiming = {
-        latency: acr & (v1 ? 7 : 0xf),
+        latency: acr & ((1 << chip.flash.latencyBits) - 1),
         prefetch: (acr & (1 << 8)) !== 0,
         cache: (acr & (1 << 9)) !== 0,
         lineBytes: v1 ? 16 : 32,
@@ -263,6 +269,7 @@ export class Stm32 {
     bus.attach(this.rcc)
     bus.attach(this.pwr)
     this.pwr.onUnsupported = (what) => this.unmodelled.feature(what)
+    this.rcc.onUnsupported = (what) => this.unmodelled.feature(what)
     this.pwr.onPvdOutput = (vddBelow) => this.exti.edge(PVD_EXTI_LINE, vddBelow)
     this.bkpsram = new BackupSram(chip.backupSram.base, chip.backupSram.size)
     this.bkpsram.interfaceClocked = () => this.rcc.enabled("AHB1ENR", AHB1ENR_BKPSRAMEN)
@@ -289,7 +296,8 @@ export class Stm32 {
     this.cpu.onDeepWake = () => this.leaveDeepSleep()
     this.cpu.onUnsupported = (what) => this.unmodelled.feature(what)
     const drainSpeeds = Object.entries(chip.electrical.pads?.releaseFromHighDrainsAtSpeed ?? {}).map(([pad, speed]) => ({ ref: parsePad(pad)!, speed }))
-    for (let i = 0; i < GPIO_PORTS; i++) {
+    // GPIOA–GPIOI on F40x, A–K on F42x/F7 (RM0090 Table 35 has no GPIOJ/K enable bits).
+    for (let i = 0; i < (f40x ? 9 : GPIO_PORTS); i++) {
       const drainSpeed: number[] = []
       for (const { ref, speed } of drainSpeeds) if (ref.port === i) drainSpeed[ref.pin] = speed
       const g = new Gpio(i, drainSpeed)
@@ -393,7 +401,8 @@ export class Stm32 {
       }
       this.schedule()
     }
-    for (const spec of USART_SPECS) {
+    // UART7/UART8 and SPI4–6 are F42x/F7 only (RM0090 Table 35, Table 62).
+    for (const spec of USART_SPECS.filter((u) => !f40x || (u.name !== "UART7" && u.name !== "UART8"))) {
       const u = new Usart(spec, chip.usart)
       const pads = usartPads(spec.name)
       u.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
@@ -411,15 +420,16 @@ export class Stm32 {
       this.usart.push(u)
       bus.attach(u)
     }
-    for (const spec of SPI_SPECS) {
+    for (const spec of SPI_SPECS.slice(0, f40x ? 3 : SPI_SPECS.length)) {
       const x = new Spi(spec, chip.spi)
-      const pads = spiPads(spec.name, chip.af)
+      const pads = [...spiPads(spec.name, chip.af), ...i2sMckPads(spec.name, chip.af)]
       x.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
       x.onDmaRequest = (line) => this.dmaRequest(`${spec.name}_${line.toUpperCase()}`)
       x.sync = () => this.sync(x)
       x.reschedule = () => this.schedule()
       x.onActive = (on) => this.setActive(x, on)
-      x.onOut = (line, level) => this.driveSpi(pads, line, level)
+      x.onOut = (line, level, lag) => this.driveSpi(pads, line, level, lag)
+      x.i2sClock = () => this.i2sClock()
       x.onUnsupported = (what) => this.unmodelled.feature(what)
       for (const p of pads) {
         if (p.line === "MOSI" || p.line === "SCK" || p.line === "MISO" || p.line === "NSS") {
@@ -430,8 +440,8 @@ export class Stm32 {
       this.spi.push(x)
       bus.attach(x)
     }
-    for (const spec of I2C_SPECS) {
-      const x = new I2c(spec, chip.i2c)
+    for (const spec of I2C_SPECS.slice(0, chip.i2cCount)) {
+      const x = new I2c(spec, chip.i2c, !f40x)
       const pads = i2cPads(spec.name, chip.af)
       x.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
       x.sync = () => this.sync(x)
@@ -535,11 +545,14 @@ export class Stm32 {
     this.ltdc.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
     this.ltdc.onActive = (on) => this.setActive(this.ltdc, on)
     this.ltdc.onUnsupported = (what) => this.unmodelled.feature(what)
-    bus.attach(this.ltdc)
     this.dma2d.bus = bus
     this.dma2d.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
     this.dma2d.onUnsupported = (what) => this.unmodelled.feature(what)
-    bus.attach(this.dma2d)
+    // LTDC and DMA2D are F429/F439 and F7 only (RM0090 §16 p480, §11; Table 62 has no 88–90).
+    if (!f40x) {
+      bus.attach(this.ltdc)
+      bus.attach(this.dma2d)
+    }
     this.dwt = new Dwt(() => this.cpu.cycles)
     bus.attach(this.dwt)
     bus.attach(this.dbgmcu)
@@ -834,7 +847,7 @@ export class Stm32 {
   private leaveDeepSleep() {
     if (!this.lowPower) return
     const kind = this.lowPower === "standby" ? "standby" : this.pwr.stopKind()
-    this.cpu.cycles += Math.round(this.chip.electrical.wakeup[kind] * this.sliceHz)
+    this.cpu.cycles += Math.round((this.chip.electrical.wakeup[kind] ?? this.chip.electrical.wakeup.stopLp) * this.sliceHz)
     for (const c of this.frozen) this.synced.set(c, this.cpu.cycles)
     this.frozen.clear()
     this.lowPower = null
@@ -901,7 +914,7 @@ export class Stm32 {
   private supplyOf(asleep: number): number {
     const e = this.chip.electrical
     if (this.lowPower === "standby") return e.idd.standby
-    if (this.lowPower === "stop") return e.idd[this.pwr.stopKind()]
+    if (this.lowPower === "stop") return e.idd[this.pwr.stopKind()] ?? e.idd.stopLp
     const mhz = this.clocks.hclk / 1e6
     const run = e.idd.run[0] + e.idd.run[1] * mhz
     const sleep = e.idd.sleep[0] + e.idd.sleep[1] * mhz
@@ -977,6 +990,7 @@ export class Stm32 {
     this.padQueue.length = 0
     this.digitalOut.length = 0
     this.digitalLevel.clear()
+    this.digitalPull.clear()
     this.dacOut.clear()
     this.afHigh.clear()
     this.cpu.nextEventCycle = Infinity
@@ -1233,8 +1247,16 @@ export class Stm32 {
    */
   private emit(pad: PadRef, level: boolean | null, time = this.eventTime ?? this.now) {
     if (level && this.gpio[pad.port].openDrain(pad.pin)) level = null
-    this.digitalOut.push({ pad, level, time })
+    const pull = level === null ? this.weakPull(pad.port, pad.pin) : undefined
+    if (level === null) this.digitalPull.set(pad.port * 16 + pad.pin, pull)
+    this.digitalOut.push(pull === undefined ? { pad, level, time } : { pad, level, time, pull })
     if (this.yieldOnOutput) this.cpu.stop = true
+  }
+
+  /** A released pad's own pull: up (true), down (false), or none. */
+  private weakPull(port: number, pin: number): boolean | undefined {
+    const pull = this.gpio[port].pull(pin)
+    return pull === 1 ? true : pull === 2 ? false : undefined
   }
 
   /** A GPIO register changed: watched pads that now drive a different level go out as edges. */
@@ -1247,7 +1269,9 @@ export class Stm32 {
       if (!this.digitalWatch.has(key)) continue
       const d = g.driveOf(pin)
       const level = d === "high" ? true : d === "low" ? false : null
-      if (this.digitalLevel.get(key) === level) continue
+      // A released pad whose pull changed is an edge too: the pull alone sets the net (an SPI's SCK
+      // held at its idle level by PUPDR before SPE, RM0090 §28.3.1).
+      if (this.digitalLevel.get(key) === level && (level !== null || this.digitalPull.get(key) === this.weakPull(port, pin))) continue
       this.digitalLevel.set(key, level)
       this.emit({ port, pin }, level)
     }
@@ -1319,6 +1343,11 @@ export class Stm32 {
       if (level === null) {
         this.gpio[p.port].setAfOutput(p.pin, false, false)
         this.trackAf(p.port, p.pin, null)
+        const key = p.port * 16 + p.pin
+        if (this.digitalWatch.has(key) && this.digitalLevel.get(key) !== null) {
+          this.digitalLevel.set(key, null)
+          this.emit({ port: p.port, pin: p.pin }, null)
+        }
       } else if (this.padHasAf(p.port, p.pin, p.af)) {
         this.gpio[p.port].setAfOutput(p.pin, level, true)
         this.trackAf(p.port, p.pin, level)
@@ -1327,17 +1356,36 @@ export class Stm32 {
     }
   }
 
-  /** An SPI line changed: drive every pad configured for it, and log the edge. */
-  private driveSpi(pads: SpiPad[], line: SpiLine, level: boolean | null) {
+  private i2sClockVersion = -1
+  private i2sClockHz = 0
+  /** I2S2/I2S3 kernel clock: PLLI2S R, re-read when the RCC changes (I2S_CKIN, I2SSRC = 1, is not modelled: no clock). */
+  private i2sClock(): number {
+    if (this.i2sClockVersion !== this.rcc.version) {
+      this.i2sClockVersion = this.rcc.version
+      this.i2sClockHz = this.rcc.i2sHz() ?? 0
+    }
+    return this.i2sClockHz
+  }
+
+  /** An SPI line changed (`lag` seconds ago): drive every pad configured for it, and log the edge. */
+  private driveSpi(pads: SpiPad[], line: SpiLine, level: boolean | null, lag = 0) {
     for (const p of pads) {
       if (p.line !== line) continue
+      const key = p.port * 16 + p.pin
+      const time = (this.eventTime ?? this.now) - lag
       if (level === null) {
         this.gpio[p.port].setAfOutput(p.pin, false, false)
         this.trackAf(p.port, p.pin, null)
+        // Released (SPE or I2SE cleared): the pad falls back to its pull, and the net learns it now.
+        if (this.digitalWatch.has(key) && this.digitalLevel.get(key) !== null) {
+          this.digitalLevel.set(key, null)
+          this.emit({ port: p.port, pin: p.pin }, null, time)
+        }
       } else if (this.padHasAf(p.port, p.pin, p.af)) {
         this.gpio[p.port].setAfOutput(p.pin, level, true)
         this.trackAf(p.port, p.pin, level)
-        this.emit({ port: p.port, pin: p.pin }, level)
+        this.digitalLevel.set(key, level)
+        this.emit({ port: p.port, pin: p.pin }, level, time)
       }
     }
   }

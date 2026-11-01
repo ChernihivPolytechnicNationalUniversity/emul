@@ -16,6 +16,7 @@ import { nucleoServo } from "./examples/servo"
 import { nucleoLcdI2c } from "./examples/lcd-i2c"
 import { nucleoOled } from "./examples/oled"
 import { nanoDimmer } from "./examples/nano-dimmer"
+import { discoveryAudio, discoveryRunningLight, discoveryTilt, h405Blink, netduinoBlink } from "./examples/discovery"
 import { lab1Project, lab1RunningLightProject, lcdProject, nucleoApp, type ProjectLoader } from "./projects"
 
 export type Example = {
@@ -687,7 +688,7 @@ export const nucleoAdc: Example = {
   },
 }
 
-export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoShiftRegister, nucleoWs2812, nucleoAdc, nucleoSevenSeg, nucleoKeypad, nucleoEncoder, nucleoServo, nucleoLcdI2c, nucleoOled, nanoDimmer, lab1Board, lab1RunningLight, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, chargeBoost, chargeBoostChips, ne555Flasher, metronome, ...buzzerExamples, systemExam, transistorLogic, lissajous, bridge]
+export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoShiftRegister, nucleoWs2812, nucleoAdc, nucleoSevenSeg, nucleoKeypad, nucleoEncoder, nucleoServo, nucleoLcdI2c, nucleoOled, discoveryRunningLight, discoveryTilt, discoveryAudio, h405Blink, netduinoBlink, nanoDimmer, lab1Board, lab1RunningLight, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, chargeBoost, chargeBoostChips, ne555Flasher, metronome, ...buzzerExamples, systemExam, transistorLogic, lissajous, bridge]
 
 /** The example a first visit opens, programmed and running: the README's hero circuit. */
 export const showcase = nucleoShiftRegister

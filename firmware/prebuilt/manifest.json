@@ -1,4 +1,68 @@
 {
+  "discovery-audio": {
+    "U1": {
+      "target": "stm32f407vg",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "7db5a109"
+      },
+      "sources": "d369ac77ad5d80b474043a4d7ca47de1526c7738243715dabdc85f2001ea979d",
+      "toolchain": "5abb6bceeff782bff23c5f7108b50c91927b5d8761b0c0c38d2f51999fab4528",
+      "elf": "discovery-audio.U1.elf",
+      "bytes": 1369352
+    }
+  },
+  "discovery-running-light": {
+    "U1": {
+      "target": "stm32f407vg",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "269cce8f"
+      },
+      "sources": "ae89ffe7d58bc4bca04ceb05c8965e313e670b9641cfcf982f8545b796d8ee49",
+      "toolchain": "5abb6bceeff782bff23c5f7108b50c91927b5d8761b0c0c38d2f51999fab4528",
+      "elf": "discovery-running-light.U1.elf",
+      "bytes": 1233048
+    }
+  },
+  "discovery-tilt": {
+    "U1": {
+      "target": "stm32f407vg",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "4ce89dc8"
+      },
+      "sources": "2443de22f6e3720f931b05953d4d1fb1117f0331b8a4fdeb97b6a9214ac55cc6",
+      "toolchain": "5abb6bceeff782bff23c5f7108b50c91927b5d8761b0c0c38d2f51999fab4528",
+      "elf": "discovery-tilt.U1.elf",
+      "bytes": 1282680
+    }
+  },
+  "h405-blink": {
+    "U1": {
+      "target": "stm32f405rg",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "8259927a"
+      },
+      "sources": "087342b91149b90b6b145d13d6f951420b97f519b9ad6b6ba1907f746fd0ff58",
+      "toolchain": "1bbbc1e7262be1dd5f02d7b5597d37d33eebe4e698f86fc82b9f54c946daa319",
+      "elf": "h405-blink.U1.elf",
+      "bytes": 1154488
+    }
+  },
   "lab1-f746": {
     "DD1": {
       "target": "stm32f746ig",
@@ -80,6 +144,23 @@
       "toolchain": "8ec58b663536421285626edba171cbea48bfbfd5382e51bc89fec528e8fce3b5",
       "elf": "nano-dimmer.U1.elf",
       "bytes": 71324
+    }
+  },
+  "netduino-blink": {
+    "U1": {
+      "target": "stm32f405rg",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Inc/stm32f4xx_hal_conf.h": "b90ee4e7",
+        "Core/Src/main.c": "8ea57f82"
+      },
+      "sources": "930b6af71cc379cfb30dd38b85d9eaa13f0146d58e89d9f16c9b922dcb644025",
+      "toolchain": "1bbbc1e7262be1dd5f02d7b5597d37d33eebe4e698f86fc82b9f54c946daa319",
+      "elf": "netduino-blink.U1.elf",
+      "bytes": 1191764
     }
   },
   "nucleo-74hc595": {

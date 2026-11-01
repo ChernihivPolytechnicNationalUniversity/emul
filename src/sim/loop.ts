@@ -752,9 +752,11 @@ export class SimLoop {
       if (!engine) continue
       const obj = this.doc.objects.find((o) => o.id === inst.object)
       const def = obj && getDef(obj.def)
-      inst.powerNet = def?.mcuPower ? engine.net.pinNet.get(pinKey(inst.object, def.mcuPower)) : undefined
-      inst.resetNet = def?.mcuReset ? engine.net.pinNet.get(pinKey(inst.object, def.mcuReset)) : undefined
-      inst.boot0Net = def?.mcuBoot0 ? engine.net.pinNet.get(pinKey(inst.object, def.mcuBoot0)) : undefined
+      // A pin of the board, or a node of its model that reaches no pin ("$SWITCH1": a button on BOOT0).
+      const netOf = (ref: string) => engine.net.pinNet.get(pinKey(inst.object, ref)) ?? engine.net.nodeNet.get(pinKey(inst.object, ref))
+      inst.powerNet = def?.mcuPower ? netOf(def.mcuPower) : undefined
+      inst.resetNet = def?.mcuReset ? netOf(def.mcuReset) : undefined
+      inst.boot0Net = def?.mcuBoot0 ? netOf(def.mcuBoot0) : undefined
       inst.vbatNet = def?.mcuVbat ? engine.net.pinNet.get(pinKey(inst.object, def.mcuVbat)) : undefined
       const vrefPin = def?.mcuVref ? pinKey(inst.object, def.mcuVref) : undefined
       inst.vrefNet = vrefPin ? engine.net.pinNet.get(vrefPin) : undefined
@@ -846,7 +848,7 @@ export class SimLoop {
     if (engine)
       for (const part of this.digitalParts.values())
         for (const pin of part.pins) {
-          const node = engine.net.pinNet.get(pinKey(part.object, pin))
+          const node = (engine.net.pinNet.get(pinKey(part.object, pin)) ?? engine.net.nodeNet.get(pinKey(part.object, pin)))
           if (node !== undefined) partPinNets.add(root(node))
         }
     const pulseSources = engine
@@ -902,9 +904,9 @@ export class SimLoop {
     const partNets = new Set<number>()
     this.senseNodes.clear()
     for (const part of this.digitalParts.values()) {
-      const outputs = part.outputsWhenGrounded?.((pin) => engine?.net.pinNet.get(pinKey(part.object, pin)) === GROUND) ?? part.outputs
+      const outputs = part.outputsWhenGrounded?.((pin) => (engine?.net.pinNet.get(pinKey(part.object, pin)) ?? engine?.net.nodeNet.get(pinKey(part.object, pin))) === GROUND) ?? part.outputs
       for (const pin of part.pins) {
-        const node = engine?.net.pinNet.get(pinKey(part.object, pin))
+        const node = (engine?.net.pinNet.get(pinKey(part.object, pin)) ?? engine?.net.nodeNet.get(pinKey(part.object, pin)))
         if (node === undefined) continue
         netFor(root(node)).parts.push({ part, pin })
         if (!outputs || outputs.includes(pin)) partNets.add(root(node))
@@ -1107,7 +1109,7 @@ export class SimLoop {
       const gnd = at(part.supply.gnd)
       const pins = new Map<string, number | null>()
       for (const pin of part.pins) {
-        const net = pinNet.get(pinKey(part.object, pin))
+        const net = pinNet.get(pinKey(part.object, pin)) ?? nodeNet.get(pinKey(part.object, pin))
         const wired = net === GROUND || (net !== undefined && [...(owners.get(net) ?? [])].some((o) => o !== part.object))
         pins.set(pin, wired ? net! : null)
       }
@@ -1196,7 +1198,7 @@ export class SimLoop {
     for (const inst of this.mcus.values()) for (const i of inst.inputs) pins.add(i.node)
     for (const part of this.digitalParts.values())
       for (const pin of part.pins) {
-        const node = engine.net.pinNet.get(pinKey(part.object, pin))
+        const node = (engine.net.pinNet.get(pinKey(part.object, pin)) ?? engine.net.nodeNet.get(pinKey(part.object, pin)))
         if (node !== undefined) pins.add(node)
       }
     for (const t of this.terminals.values())
@@ -1300,7 +1302,7 @@ export class SimLoop {
     if (!engine) return
     this.padsDirty = true
     for (const edge of part.out.splice(0, part.out.length)) {
-      const node = engine.net.pinNet.get(pinKey(part.object, edge.pin))
+      const node = (engine.net.pinNet.get(pinKey(part.object, edge.pin)) ?? engine.net.nodeNet.get(pinKey(part.object, edge.pin)))
       const net = this.digitalNet(node)
       if (net) this.queueEdge(edge.time, () => this.setDriver(net, `${part.object}/${edge.pin}`, edge.level, edge.time, false, node!))
     }
@@ -1329,7 +1331,13 @@ export class SimLoop {
       const node = inst.padNode.get(key)
       const net = this.digitalNet(node)
       const time = e.time + inst.offset
-      if (net) this.queueEdge(time, () => this.setDriver(net, `${inst.object}/${key}`, e.level, time, true, node!))
+      if (!net) continue
+      const pull = e.pull
+      this.queueEdge(time, () => {
+        // A released pad with a pull of its own sets the net now, not at the next analog step.
+        if (e.level === null && pull !== undefined && net.released !== pull) net.released = pull ? true : (net.released ?? false)
+        this.setDriver(net, `${inst.object}/${key}`, e.level, time, true, node!)
+      })
     }
     this.dispatching--
     if (!this.dispatching) this.flushPartEdges()
@@ -1442,7 +1450,8 @@ export class SimLoop {
       }
     }
     const inst = this.mcus.get(object)
-    if (inst?.mcu.loaded) {
+    // A board's own chips (not its MCU's pads) answer below, as any digital part does.
+    if (inst?.mcu.loaded && (node === "$idd" || inst.pads.has(node) || !this.digitalParts.has(object))) {
       // The supply load follows the power mode: the resistance that draws the mode's current.
       if (node === "$idd") return () => (inst.mcu.loaded ? inst.mcu.chip.electrical.vdd / inst.idd : null)
       const pad = inst.pads.get(node)

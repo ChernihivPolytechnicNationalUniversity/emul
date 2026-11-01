@@ -12,6 +12,8 @@ export type ExampleGroup = { title: string; items: ExampleItem[] }
 const SECTIONS: { title: string; targets: readonly (Target | null)[] }[] = [
   { title: "STM32 · Nucleo-F429ZI", targets: ["stm32f429zi"] },
   { title: "STM32 · F746 stand", targets: ["stm32f746ig"] },
+  { title: "STM32 · F4-Discovery", targets: ["stm32f407vg"] },
+  { title: "STM32 · F405 boards", targets: ["stm32f405rg"] },
   { title: "Arduino · Nano", targets: ["atmega328p"] },
   { title: "Circuits", targets: [null] },
 ]

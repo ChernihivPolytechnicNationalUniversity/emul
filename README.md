@@ -50,7 +50,7 @@ Proteus that runs in a browser tab.
 - Open a bench together with **live collaboration**: share a `/r/…` link and cursors, part moves and wiring sync in real time.
 - **Open source**, Apache-2.0.
 
-<sub>Boards: STM32 F429 (Nucleo-144) · F746 (Open746I-C) · Arduino Nano (ATmega328P) · PIC16F627A/628A/648A · ESP32 in development.</sub>
+<sub>Boards: STM32 F429 (Nucleo-144) · F746 (Open746I-C) · F407 (STM32F4-Discovery) · F405 (Olimex STM32-H405, Netduino Plus 2) · Arduino Nano (ATmega328P) · PIC16F627A/628A/648A · ESP32 in development.</sub>
 
 ## Quick start
 

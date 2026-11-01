@@ -7,6 +7,9 @@ import { open746ic } from "./components/open746i-c"
 import { arduinoNano } from "./components/arduino-nano"
 import { lcd7f } from "./components/lcd7-f"
 import { stm32f429zi, stm32f746ig } from "./components/stm32-chip"
+import { stm32f4Discovery } from "./components/stm32f4-discovery"
+import { olimexStm32H405 } from "./components/olimex-stm32-h405"
+import { netduinoPlus2 } from "./components/netduino-plus-2"
 import { atmega328p, atmega328pAu } from "./components/avr-chip"
 import { picChips } from "./components/pic-chip"
 import { eeprom24c } from "./components/eeprom"
@@ -27,7 +30,7 @@ import { lcdModules } from "./components/lcd1602"
 import { oledModules } from "./components/oled"
 
 /** Every component the palette can place. Add a definition file and list it here. */
-export const registry: ComponentDef[] = [open746ic, nucleoF429zi, arduinoNano, stm32f746ig, stm32f429zi, atmega328p, atmega328pAu, ...picChips, crystal, oscillator, eeprom24c, hc595, hct595, ne555, lcd7f, ...buzzers, ...addressableComponents, chargeBoostModule, ...powerIcs, ...meterComponents, ...basicComponents, ...rgbLeds, ...sevenSegmentComponents, keypad4x4, ...encoderComponents, servoSg90, ...lcdModules, ...oledModules].map(withPadClasses)
+export const registry: ComponentDef[] = [open746ic, nucleoF429zi, stm32f4Discovery, olimexStm32H405, netduinoPlus2, arduinoNano, stm32f746ig, stm32f429zi, atmega328p, atmega328pAu, ...picChips, crystal, oscillator, eeprom24c, hc595, hct595, ne555, lcd7f, ...buzzers, ...addressableComponents, chargeBoostModule, ...powerIcs, ...meterComponents, ...basicComponents, ...rgbLeds, ...sevenSegmentComponents, keypad4x4, ...encoderComponents, servoSg90, ...lcdModules, ...oledModules].map(withPadClasses)
 
 const byId = new Map(registry.map((d) => [d.id, d]))
 
