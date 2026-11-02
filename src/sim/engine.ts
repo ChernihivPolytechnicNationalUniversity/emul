@@ -2039,7 +2039,13 @@ export class Engine {
             this.addTerm(el.e, el.b, el.c, -(g2 + g4))
             if (el.e !== GROUND) z[el.e] += ic0 + ib0
           } else if (el.kind === "REG") {
-            if (this.regulator(i, el.in, el.out, el.gnd, n + el.index, el.value, el.dropout, el.imax, true)) clamped = true
+            const on = this.regEnabled(el, i, g(el.en ?? GROUND) - g(el.gnd))
+            if (this.regulator(i, el.in, el.out, el.gnd, n + el.index, el.value, el.dropout, el.imax, on, el.rdrop)) clamped = true
+            const gq = on ? el.gq : el.gqOff
+            if (gq > 0) {
+              this.addTerm(el.in, el.in, el.gnd, gq)
+              this.addTerm(el.gnd, el.in, el.gnd, -gq)
+            }
           } else if (el.kind === "CHG") {
             const st = this.ctl[i]
             const set = Math.max(0, -x[n + el.prog]) * CHG_GAIN
@@ -2380,14 +2386,20 @@ export class Engine {
     else if (st === OA_TIP_DOWN && region === OA_LOW) this.ctl[i] = OA_HELD_LOW
   }
 
-  private regulator(i: number, inN: number, outN: number, gndN: number, r: number, value: number, dropout: number, imax: number, enabled: boolean): boolean {
+  /** A regulator's enable input with its hysteresis: on above `enOn`, held on down to `enOff`; always on without one. */
+  private regEnabled(el: Extract<Resolved, { kind: "REG" }>, i: number, ven: number): boolean {
+    if (el.en === undefined) return true
+    return ven > (this.ctl[i] ? el.enOff : el.enOn)
+  }
+
+  private regulator(i: number, inN: number, outN: number, gndN: number, r: number, value: number, dropout: number, imax: number, enabled: boolean, rdrop = 0): boolean {
     const { A, z, x } = this
     const g = (k: number) => (k === GROUND ? 0 : this.guess[k])
     let clamped = false
     const vin = g(inN) - g(gndN)
     const vout = g(outN) - g(gndN)
     const iPrev = x[r]
-    const avail = vin - dropout
+    const avail = vin - dropout - rdrop * Math.max(0, Math.min(iPrev, imax))
     const target = Math.min(value, avail)
     const prev = this.rRegion[i]
     const regOrDrop = avail >= value - 1e-9 ? REG_REGULATE : REG_DROPOUT
@@ -2422,7 +2434,7 @@ export class Engine {
       case REG_DROPOUT:
         if (outN !== GROUND) A[this.cell(r, outN)] += 1
         if (inN !== GROUND) A[this.cell(r, inN)] -= 1
-        A[this.cell(r, r)] += R_REG
+        A[this.cell(r, r)] += R_REG + rdrop
         z[r] = -dropout
         break
       case REG_LIMIT: {
@@ -2884,9 +2896,13 @@ export class Engine {
           const cur = x[n + el.index]
           const vin = this.vol(el.in, this.v) - this.vol(el.gnd, this.v)
           const vout = this.vol(el.out, this.v) - this.vol(el.gnd, this.v)
-          tc[this.termOf[base]] += cur
+          const own = (this.regEnabled(el, i, el.en === undefined ? 0 : this.vol(el.en, this.v) - this.vol(el.gnd, this.v)) ? el.gq : el.gqOff) * vin
+          tc[this.termOf[base]] += cur + own
           tc[this.termOf[base + 1]] -= cur
-          this.record(el, i, dt, cur, vout, Math.max(0, (vin - vout) * cur))
+          tc[this.termOf[base + 2]] -= own
+          if (this.converged && el.en !== undefined) this.ctl[i] = this.regEnabled(el, i, this.vol(el.en, this.v) - this.vol(el.gnd, this.v)) ? 1 : 0
+          // A regulator's voltage rating is its input's: the output is what it makes.
+          this.record(el, i, dt, cur, vout, Math.max(0, (vin - vout) * cur), vin)
           break
         }
         case "CHG": {
@@ -3547,7 +3563,7 @@ function nodesOf(el: Resolved): (number | undefined)[] {
     case "GPIO":
       return [el.node, el.vddNet, el.gndNet]
     case "REG":
-      return [el.in, el.out, el.gnd]
+      return [el.in, el.out, el.gnd, el.en]
     case "CHG":
       return [el.in, el.bat, el.gnd, el.progNet, el.chrg, el.stdby, el.ce, el.temp]
     case "PROT":

@@ -367,7 +367,12 @@ export type Element =
    * higher, follows `in − dropout` below that, folds back to `imax` into an overload, and
    * blocks when something else holds `out` higher. Draws no quiescent current.
    */
-  | { kind: "REG"; in: NodeRef; out: NodeRef; gnd: NodeRef; value: Value; dropout?: Value; imax?: Value; limits?: Limits }
+  /**
+   * With `en`, the output is on once EN − GND rises past `enOn` and stays on until it falls below `enOff`.
+   * `rdrop` adds to the dropout with the load: dropout + rdrop · I.
+   * `gq` / `gqOff` are the regulator's own draw from IN to GND, in siemens, while on and while shut down.
+   */
+  | { kind: "REG"; in: NodeRef; out: NodeRef; gnd: NodeRef; value: Value; dropout?: Value; rdrop?: Value; imax?: Value; en?: NodeRef; enOn?: Value; enOff?: Value; gq?: Value; gqOff?: Value; limits?: Limits }
   | { kind: "CHG"; in: NodeRef; bat: NodeRef; gnd: NodeRef; prog: NodeRef; chrg?: NodeRef; stdby?: NodeRef; ce?: NodeRef; temp?: NodeRef; value?: Value; limits?: Limits }
   | { kind: "PROT"; vdd: NodeRef; vss: NodeRef; cs: NodeRef; od: NodeRef; oc: NodeRef; chip: ProtChip; limits?: Limits }
   | { kind: "BOOST"; in: NodeRef; out?: NodeRef; gnd: NodeRef; fb: NodeRef; vcc?: NodeRef; en?: NodeRef; vref?: Value; eff?: Value; ilim?: Value; uvlo?: Value; iq?: Value; limits?: Limits }
