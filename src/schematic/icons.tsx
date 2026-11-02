@@ -11,6 +11,8 @@ const dot = (cx: number, cy: number, r = 1.6) => <circle cx={cx} cy={cy} r={r} f
 
 export const ResistorIcon = make("ResistorIcon", <path d="M2 12h4M18 12h4M6 8.5h12v7H6z" />)
 
+export const PolyfuseIcon = make("PolyfuseIcon", <path d="M2 12h4M18 12h4M6 8.5h12v7H6zM5 18l3-3h8l3-6" />)
+
 export const PotentiometerIcon = make(
   "PotentiometerIcon",
   <>

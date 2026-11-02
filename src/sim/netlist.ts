@@ -13,13 +13,28 @@ export type ResolvedLimits = { power?: number; current?: number; voltage?: numbe
 
 export const DEFAULT_TAU = 0.035
 
+export type Ptc = { trip: number; tau: number; pd: number; reset: number }
+
+/**
+ * A resettable fuse's heat model from its data sheet row: it trips where its heat, the running
+ * average of (I / trip)², reaches 1, `trip` midway between Ihold (never trips) and Itrip (always
+ * does); the time constant makes it trip in exactly `within` seconds at `at` amps; it resets at
+ * Ihold's heat, (Ihold / trip)².
+ */
+export function ptcModel(hold: number, trip: number, at: number, within: number, pd: number): Ptc | undefined {
+  if (![hold, trip, at, within, pd].every((n) => Number.isFinite(n) && n > 0) || trip <= hold || at <= trip) return undefined
+  const it = (hold + trip) / 2
+  return { trip: it, tau: within / -Math.log1p(-((it * it) / (at * at))), pd, reset: (hold * hold) / (it * it) }
+}
+
 /** Common to every solved element: owner object, model element index, display ref, ratings. `hidden` keeps it out of the inspector. */
 type Base = { id: string; object: string; element: number; ref: string; limits?: ResolvedLimits; hidden?: boolean }
 
 /** `keys` are the node keys ("objectId:pinId") of the terminals, in the order listed per kind. */
 export type Resolved =
   /** An R with `live` takes its value from the pin reader on every step (see `Element`). */
-  | (Base & { kind: "R" | "C" | "L"; a: number; b: number; value: number; live?: string; euler?: boolean; keys: [string, string] })
+  /** `ptc`: a resettable fuse's trip current, thermal time constant (s), tripped dissipation (W) and reset heat (of the trip's). */
+  | (Base & { kind: "R" | "C" | "L"; a: number; b: number; value: number; live?: string; euler?: boolean; ptc?: Ptc; keys: [string, string] })
   /** `amplitude` is 0 for a DC source. */
   | (Base & { kind: "V"; plus: number; minus: number; value: number; amplitude: number; frequency: number; phase: number; shape: "sine" | "pulse"; duty: number; delay: number; index: number; keys: [string, string] })
   /**
@@ -403,7 +418,18 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
       case "L": {
         const value = resolveValue(el.value, props)
         if (Number.isFinite(value) && value > 0)
-          elements.push({ ...base, kind: el.kind, a: netOf(obj, el.a), b: netOf(obj, el.b), value, live: el.kind === "R" ? el.live : undefined, euler: el.kind === "C" ? el.euler : undefined, hidden: el.hidden, keys: [node(obj, el.a), node(obj, el.b)] })
+          elements.push({
+            ...base,
+            kind: el.kind,
+            a: netOf(obj, el.a),
+            b: netOf(obj, el.b),
+            value,
+            live: el.kind === "R" ? el.live : undefined,
+            euler: el.kind === "C" ? el.euler : undefined,
+            ptc: el.kind === "R" && el.ptc ? ptcModel(...([el.ptc.hold, el.ptc.trip, el.ptc.at, el.ptc.within, el.ptc.pd].map((v) => resolveValue(v, props)) as [number, number, number, number, number])) : undefined,
+            hidden: el.hidden,
+            keys: [node(obj, el.a), node(obj, el.b)],
+          })
         break
       }
       case "V": {

@@ -273,7 +273,12 @@ export type Limits = { power?: Value; current?: Value; voltage?: Value; reverse?
 
 export type Element =
   /** `live` names a pin-reader key the simulation loop answers with the resistance to use right now (an MCU's supply load by power mode). */
-  | { kind: "R"; a: NodeRef; b: NodeRef; value: Value; live?: string; limits?: Limits; hidden?: boolean; supply?: boolean }
+  /**
+   * With `ptc`, a resettable fuse: it heats with I² toward `trip` (between Ihold and Itrip) with the
+   * time constant that trips it in `within` seconds at `at` amps; tripped, its resistance keeps `pd`
+   * watts in it; unpowered, it cools the same way and resets back at Ihold's heat.
+   */
+  | { kind: "R"; a: NodeRef; b: NodeRef; value: Value; live?: string; limits?: Limits; hidden?: boolean; supply?: boolean; ptc?: { hold: Value; trip: Value; at: Value; within: Value; pd: Value } }
   | { kind: "C"; a: NodeRef; b: NodeRef; value: Value; limits?: Limits; hidden?: boolean; euler?: boolean }
   | { kind: "L"; a: NodeRef; b: NodeRef; value: Value; limits?: Limits; hidden?: boolean }
   /**

@@ -12,7 +12,7 @@ import {
   thermalMass,
   thermalResistance,
 } from "./battery"
-import { GROUND, type GpioState, type Netlist, type Resolved } from "./netlist"
+import { GROUND, type GpioState, type Netlist, type Ptc, type Resolved } from "./netlist"
 import { bias, dischargeSink, nextLatch, NE555, outputSink, outputSource, quiescent, supplyShare } from "./ne555"
 import { curveAt, fromPositive, supplyDrive } from "./opamp"
 import { SparseLU } from "./sparse-lu"
@@ -176,7 +176,7 @@ type Pad = Extract<Resolved, { kind: "GPIO" }>
 const NONLINEAR_KINDS = new Set<Resolved["kind"]>(["D", "Q", "REG", "CHG", "BOOST", "TMR", "M", "OPAMP"])
 const isPulse = (el: Resolved) => el.kind === "V" && el.amplitude > 0 && el.shape === "pulse"
 const switchesMask = (el: Resolved) =>
-  isPulse(el) || el.kind === "SW" || el.kind === "GPIO" || (el.kind === "R" && el.live) || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR"
+  isPulse(el) || el.kind === "SW" || el.kind === "GPIO" || (el.kind === "R" && (el.live || el.ptc)) || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR"
 const SURGE = 20
 /** Averaging window for RMS readings in AC circuits: at least this long, and a few periods of the slowest source. */
 const RMS_MIN_TAU = 0.05
@@ -424,6 +424,10 @@ export class Engine {
   private readonly ohms: Float64Array
   private readonly gpioVolts: Float64Array
   private readonly ctl: Uint8Array
+  /** Resettable fuses: their heat (1 trips them) and whether they are tripped. */
+  private readonly ptcElements: Int32Array
+  private readonly ptcHeat: Float64Array
+  private readonly ptcTripped: Uint8Array
   private readonly ctlT: Float64Array
   private readonly subV: Float64Array
   private readonly timers: Int32Array
@@ -627,6 +631,9 @@ export class Engine {
     this.strikeV = new Float64Array(n)
     this.gpioVolts = new Float64Array(m)
     this.ctl = new Uint8Array(m)
+    this.ptcElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "R" && el.ptc ? [i] : [])))
+    this.ptcHeat = new Float64Array(m)
+    this.ptcTripped = new Uint8Array(m)
     this.ctlT = new Float64Array(m * 3)
     this.subV = new Float64Array(n)
     this.timers = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "TMR" ? [i] : [])))
@@ -1100,6 +1107,12 @@ export class Engine {
       if (heat > 1) return false
       this.stress[i] = heat
     }
+    const ptcs = this.ptcElements
+    for (let j = 0; j < ptcs.length; j++) {
+      const i = ptcs[j]
+      const ptc = (elements[i] as Extract<Resolved, { kind: "R" | "C" | "L" }>).ptc!
+      if (!this.ptcWarm(i, ptc, dt, this.rCurrent[i], this.rVoltage[i], false)) return false
+    }
     const diodes = this.diodeElements
     for (let j = 0; j < diodes.length; j++) this.see(diodes[j], this.rCurrent[diodes[j]], dt)
     if (this.ac)
@@ -1160,7 +1173,59 @@ export class Engine {
       const t = lim.tau * Math.log((load - this.stress[i]) / (load - 1))
       steps = Math.min(steps, Math.floor(t / dt) - 1)
     }
+    const ptcs = this.ptcElements
+    for (let j = 0; j < ptcs.length; j++) {
+      const i = ptcs[j]
+      const ptc = (elements[i] as Extract<Resolved, { kind: "R" | "C" | "L" }>).ptc!
+      const target = this.ptcTarget(i, ptc, this.rCurrent[i], this.rVoltage[i])
+      const h = this.ptcHeat[i]
+      const edge = this.ptcTripped[i] ? ptc.reset : 1
+      if ((this.ptcTripped[i] ? target < edge : target > edge) && h !== target) steps = Math.min(steps, Math.floor((ptc.tau * Math.log((target - h) / (target - edge))) / dt) - 1)
+    }
     return Math.max(0, steps)
+  }
+
+  /** The heat a resettable fuse is heading for: (I / trip)² conducting, its dissipation over `pd` tripped. */
+  private ptcTarget(i: number, ptc: Ptc, cur: number, vd: number) {
+    return this.ptcTripped[i] ? Math.abs(cur * vd) / ptc.pd : (cur * cur) / (ptc.trip * ptc.trip)
+  }
+
+  /**
+   * A resettable fuse's heat over a step: it trips at 1 and resets at `ptc.reset`. With `flip`
+   * false (the settled path) it changes nothing and answers false where the step would flip it.
+   */
+  private ptcWarm(i: number, ptc: Ptc, dt: number, cur: number, vd: number, flip: boolean): boolean {
+    const h = this.ptcHeat[i] + (this.ptcTarget(i, ptc, cur, vd) - this.ptcHeat[i]) * -Math.expm1(-dt / ptc.tau)
+    const flips = this.ptcTripped[i] ? h < ptc.reset : h >= 1
+    if (flips && !flip) return false
+    this.ptcHeat[i] = h
+    if (flips) this.ptcTripped[i] ^= 1
+    return true
+  }
+
+  /**
+   * Each resettable fuse's resistance for this step: its cold value conducting; tripped, what
+   * keeps its dissipation at `pd` with the voltage it last had across it, approached
+   * geometrically so a fuse feeding a load settles instead of ringing. True when one changed.
+   */
+  private ptcResistances(): boolean {
+    let changed = false
+    const elements = this.net.elements
+    for (let j = 0; j < this.ptcElements.length; j++) {
+      const i = this.ptcElements[j]
+      const el = elements[i] as Extract<Resolved, { kind: "R" | "C" | "L" }>
+      const was = this.ohms[i]
+      let ohms = el.value
+      if (this.ptcTripped[i]) {
+        const v = this.rVoltage[i]
+        ohms = Math.sqrt(was * Math.max(el.value, (v * v) / el.ptc!.pd))
+      }
+      if (Math.abs(ohms - was) > was * 1e-3) {
+        this.ohms[i] = ohms
+        changed = true
+      }
+    }
+    return changed
   }
 
   /**
@@ -1273,6 +1338,7 @@ export class Engine {
         if (this.leafOf[i] < 0) rest = (rest * 31 + this.gpioState[i] + 7 * this.padSteps[i]) | 0
         continue
       } else if (el.kind === "R" && el.live) t = this.ohms[i] | 0
+      else if (el.kind === "R" && el.ptc) t = this.ptcTripped[i] ? (Math.round(this.ohms[i] * 1e3) | 0) + 1 : 0
       else if (el.kind === "BAT") t = this.batStep[i]
       else if (el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR") t = this.ctl[i]
       else if (el.kind === "V") t = pulseHigh(this.stepEnd, el) ? 1 : 0
@@ -1533,6 +1599,7 @@ export class Engine {
       }
     }
     if (this.scaledPads.length && this.scalePads()) disturbed = true
+    if (this.ptcElements.length && this.ptcResistances()) disturbed = true
     const mask = this.switchMask(parts)
     if (mask !== this.stepMask && (this.restMask !== this.stepRest || !this.leafDirty.length)) disturbed = true
     this.stepMask = mask
@@ -2752,6 +2819,7 @@ export class Engine {
           tc[this.termOf[base]] += cur
           tc[this.termOf[base + 1]] -= cur
           this.record(el, i, dt, cur, vd, vd * cur)
+          if (el.ptc && this.converged) this.ptcWarm(i, el.ptc, dt, cur, vd, true)
           break
         }
         case "C": {
@@ -3364,6 +3432,8 @@ export class Engine {
         }
       } else if (el.kind === "M") {
         reading.extra = { Vgs: formatSI(this.rVbe[i], "V"), region: MOS_REGIONS[this.rRegion[i]] }
+      } else if (el.kind === "R" && el.ptc) {
+        reading.extra = { state: this.ptcTripped[i] ? "tripped" : "conducting", heat: `${Math.round(this.ptcHeat[i] * 100)} %` }
       } else if (el.kind === "SW") {
         reading.extra = { state: this.rRegion[i] === 1 ? "closed" : this.rRegion[i] === 2 ? "arcing" : "open" }
       } else if (el.kind === "REG") {
