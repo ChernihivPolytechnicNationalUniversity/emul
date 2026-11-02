@@ -124,7 +124,7 @@ describe.each([STM32F407VG, STM32F405RG])("$name to RM0090 (F40x)", (chip) => {
     expect(mcu.i2c[0].def(0x24)).toBeUndefined()
   })
 
-  it("has the FSMC: no SDRAM registers (§36.6.9, Table 253)", () => {
+  it("keeps the die's FSMC registers, without SDRAM ones (§36.6.9, Table 253); DS8626 Table 2 gives the 64-pin F405RG no FSMC at all", () => {
     const { mcu } = bare(chip)
     expect(mcu.fmc.def(0x00)).toBeDefined()
     expect(mcu.fmc.def(0x140)).toBeUndefined()

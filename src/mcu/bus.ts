@@ -13,13 +13,15 @@ export class BusFault extends Error {
   readonly address: number
   readonly write: boolean
   readonly size: number
-  constructor(address: number, write: boolean, size: number) {
-    super(`${write ? "write" : "read"}${size * 8} at 0x${(address >>> 0).toString(16).padStart(8, "0")}: unmapped`)
+  constructor(address: number, write: boolean, size: number, reason = "unmapped") {
+    super(`${write ? "write" : "read"}${size * 8} at 0x${(address >>> 0).toString(16).padStart(8, "0")}: ${reason}`)
     this.address = address
     this.write = write
     this.size = size
   }
 }
+
+const onTheCpuDataBusOnly = (mem: Memory) => `${mem.name} is on the CPU's data bus only`
 
 export interface MemoryPort {
   slow: boolean
@@ -105,6 +107,7 @@ export class Memory {
   readonly isFlash: boolean
   readonly kind: MemoryRegion["kind"]
   readonly external: MemoryRegion["external"]
+  readonly cpuDataOnly: boolean
   /**
    * An external memory answers only once its controller has set it up (FMC SDRAM init
    * sequence): before that reads are whatever floats on the bus and writes are lost.
@@ -155,6 +158,7 @@ export class Memory {
     this.isFlash = r.kind === "flash"
     this.kind = r.kind
     this.external = r.external
+    this.cpuDataOnly = r.cpuDataOnly === true
     this.enabled = !r.external
   }
   /** Byte offset of `addr` in this block through any of its aliases, or -1. */
@@ -421,6 +425,25 @@ export class Bus {
     return null
   }
 
+  onTheCpuDataBusOnly(addr: number): string | null {
+    const mem = this.memoryAt(addr)
+    return mem?.cpuDataOnly ? onTheCpuDataBusOnly(mem) : null
+  }
+
+  cpuDataOnlyWithin(from: number, to: number): boolean {
+    if (to - from >= 0xffffffff) return this.memories.some((m) => m.cpuDataOnly)
+    const start = from >>> 0
+    const end = to >>> 0
+    for (const mem of this.memories) {
+      if (!mem.cpuDataOnly) continue
+      for (const base of mem.bases) {
+        const last = base + mem.bytes.length - 1
+        if (start <= end ? start <= last && end >= base : end >= base || start <= last) return true
+      }
+    }
+    return false
+  }
+
   /**
    * Direct bytes of an enabled memory holding [addr, addr + length), for a display controller
    * to scan a framebuffer line without a bus access per pixel; null when unmapped, gated off
@@ -428,7 +451,7 @@ export class Bus {
    */
   frameBytes(addr: number, length: number): { bytes: Uint8Array; offset: number } | null {
     const mem = this.memoryAt(addr)
-    if (!mem || !mem.enabled) return null
+    if (!mem || !mem.enabled || mem.cpuDataOnly) return null
     const off = mem.offsetOf(addr)
     if (off + length > mem.bytes.length) return null
     mem.shown = true
@@ -443,7 +466,7 @@ export class Bus {
    */
   span(addr: number, length: number, write: boolean): { bytes: Uint8Array; offset: number } | null {
     const mem = this.locate(addr >>> 0)
-    if (!mem || !mem.plain) return null
+    if (!mem || !mem.plain || mem.cpuDataOnly) return null
     const off = locOff
     if (off + length > mem.bytes.length) return null
     if (write && mem.watch) {
@@ -579,9 +602,25 @@ export class Bus {
   fetch16(addr: number): number {
     const mem = this.locate(addr >>> 0)
     if (!mem) throw new BusFault(addr, false, 2)
+    if (mem.cpuDataOnly) throw new BusFault(addr, false, 2, onTheCpuDataBusOnly(mem))
     const off = locOff
     if (off + 2 > mem.bytes.length) throw new BusFault(addr, false, 2)
     return mem.view.getUint16(off, true)
+  }
+
+  masterRead(addr: number, size: 1 | 2 | 4): number {
+    this.refuseMaster(addr, false, size)
+    return this.read(addr, size)
+  }
+
+  masterWrite(addr: number, value: number, size: 1 | 2 | 4) {
+    this.refuseMaster(addr, true, size)
+    this.write(addr, value, size)
+  }
+
+  private refuseMaster(addr: number, write: boolean, size: 1 | 2 | 4) {
+    const mem = this.locate(addr >>> 0)
+    if (mem?.cpuDataOnly) throw new BusFault(addr, write, size, onTheCpuDataBusOnly(mem))
   }
 
   /** Copy a blob into memory (used by the loader); silently clips to the region. */

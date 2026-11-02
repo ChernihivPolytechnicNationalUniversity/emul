@@ -19,6 +19,7 @@ export type MemoryRegion = {
    * and answer only once the controller has initialised them.
    */
   external?: "sdram1" | "sdram2"
+  cpuDataOnly?: true
 }
 
 export type CoreProfile = {
@@ -114,7 +115,7 @@ export type FactoryBytes = {
   tsCal1: { at: number; value: number; celsius: number }
   tsCal2: { at: number; value: number; celsius: number }
   calibrationVdda: number
-  packageData: { at: number; value: number }
+  packageData?: { at: number; value: number }
 }
 
 export type NoiseMixture = { weights: number[]; sigmasLsb: number[] }
@@ -232,6 +233,31 @@ const PIN_LAB_2026_10_12 = { vddaMv: 3290.4, risingMv: 1734.9, fallingMv: 1340.3
 
 const SUSPECTS_ON_THE_BENCH_2026_10_12 = { PA13: 3, PB3: 3, PA14: 2 }
 
+const CCM_ON_THE_CPU_DATA_BUS: MemoryRegion = { name: "CCM", base: 0x10000000, size: 64 * 1024, kind: "ram", cpuDataOnly: true }
+
+const RM0090_FACTORY: MemoryRegion = { name: "FACTORY", base: 0x1fff7800, size: 0x230, kind: "rom" }
+
+const SYNTHETIC_UID_F40X: [number, number, number] = [0x00410032, 0x5732510d, 0x34313533]
+const SYNTHETIC_UID_F429: [number, number, number] = [0x00360027, 0x3235510f, 0x31343938]
+
+const TWELVE_BIT_CODES = 4095
+
+function rm0090FactoryBytes(flashSizeKb: number, uid: [number, number, number]): FactoryBytes {
+  const typical = DATASHEET_ADC_INTERNAL
+  const calibrationVdda = 3.3
+  const code = (volts: number) => Math.round((volts / calibrationVdda) * TWELVE_BIT_CODES)
+  const sensorAt = (celsius: number) => code(typical.v25 + (celsius - 25) * typical.avgSlope)
+  return {
+    otp: { base: 0x1fff7800, size: 0x210 },
+    uid: { at: 0x1fff7a10, words: uid },
+    flashSizeKb: { at: 0x1fff7a22, value: flashSizeKb },
+    vrefintCal: { at: 0x1fff7a2a, value: code(typical.vrefint) },
+    tsCal1: { at: 0x1fff7a2c, value: sensorAt(30), celsius: 30 },
+    tsCal2: { at: 0x1fff7a2e, value: sensorAt(110), celsius: 110 },
+    calibrationVdda,
+  }
+}
+
 const RM0090_ADC_TRIGGERS = {
   regularTriggers: ["TIM1_CH1", "TIM1_CH2", "TIM1_CH3", "TIM2_CH2", "TIM2_CH3", "TIM2_CH4", "TIM2_TRGO", "TIM3_CH1", "TIM3_TRGO", "TIM4_CH4", "TIM5_CH1", "TIM5_CH2", "TIM5_CH3", "TIM8_CH1", "TIM8_TRGO", "EXTI11"],
   injectedTriggers: ["TIM1_CH4", "TIM1_TRGO", "TIM2_CH1", "TIM2_TRGO", "TIM3_CH2", "TIM3_CH4", "TIM4_CH1", "TIM4_CH2", "TIM4_CH3", "TIM4_TRGO", "TIM5_CH4", "TIM5_TRGO", "TIM8_CH2", "TIM8_CH3", "TIM8_CH4", "EXTI15"],
@@ -261,8 +287,9 @@ export const STM32F429ZI: ChipProfile = {
   memory: [
     { name: "FLASH", base: 0x08000000, size: 2 * 1024 * 1024, kind: "flash", aliases: [0x00000000] },
     { name: "SRAM", base: 0x20000000, size: 192 * 1024, kind: "ram" },
-    { name: "CCM", base: 0x10000000, size: 64 * 1024, kind: "ram" },
+    CCM_ON_THE_CPU_DATA_BUS,
     { name: "SYSTEM", base: 0x1fff0000, size: 30 * 1024, kind: "rom" },
+    RM0090_FACTORY,
     { name: "OPT", base: 0x1fffc000, size: 16, kind: "rom" },
   ],
   idcode: 0x20016419, // STM32F42x/43x, rev 3
@@ -280,6 +307,7 @@ export const STM32F429ZI: ChipProfile = {
   af: "f42x",
   rtcBackupRegisters: 20,
   backupSram: BACKUP_SRAM_4KB,
+  factory: rm0090FactoryBytes(2048, SYNTHETIC_UID_F429),
   adc: RM0090_ADC_TRIGGERS,
   dac: {},
   // DS9405 §6.2 (Tables 11, 12, 14), §6.3.6 (Tables 26–33: 180 MHz, all peripherals on), §6.3.15.
@@ -332,8 +360,9 @@ const F40X_DIE = {
   memory: [
     { name: "FLASH", base: 0x08000000, size: 1024 * 1024, kind: "flash", aliases: [0x00000000] },
     { name: "SRAM", base: 0x20000000, size: 128 * 1024, kind: "ram" },
-    { name: "CCM", base: 0x10000000, size: 64 * 1024, kind: "ram" },
+    CCM_ON_THE_CPU_DATA_BUS,
     { name: "SYSTEM", base: 0x1fff0000, size: 30 * 1024, kind: "rom" },
+    RM0090_FACTORY,
     { name: "OPT", base: 0x1fffc000, size: 16, kind: "rom" },
   ],
   idcode: 0x101f0413,
@@ -351,6 +380,7 @@ const F40X_DIE = {
   af: "f40x",
   rtcBackupRegisters: 20,
   backupSram: BACKUP_SRAM_4KB,
+  factory: rm0090FactoryBytes(1024, SYNTHETIC_UID_F40X),
   adc: { ...RM0090_ADC_TRIGGERS, tempOnIn16: true },
   dac: {},
   electrical: DS8626_ELECTRICAL,

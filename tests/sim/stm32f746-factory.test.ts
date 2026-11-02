@@ -176,9 +176,12 @@ describe("firmware calibrating the ADC with them on the F746", () => {
 })
 
 describe("STM32F429ZI factory-programmed bytes", () => {
-  it("are not modelled: DS9405/RM0090 are not in the repository to take the addresses from, so a read faults", () => {
+  it("sit where RM0090 Rev 22 §39 and DS9405 Rev 14 put them: UID 0x1FFF7A10, F_SIZE 0x1FFF7A22, VREFIN_CAL 0x1FFF7A2A, TS_CAL1/2 0x1FFF7A2C/2E", () => {
     const mcu = new Stm32(STM32F429ZI)
-    expect(STM32F429ZI.factory).toBeUndefined()
-    expect(() => mcu.bus.read(0x1fff7a10, 4)).toThrow(BusFault)
+    const factory = STM32F429ZI.factory!
+    expect.soft(factory.uid.at).toBe(0x1fff7a10)
+    expect.soft(factory.flashSizeKb).toEqual({ at: 0x1fff7a22, value: 2048 })
+    expect.soft([factory.vrefintCal.at, factory.tsCal1.at, factory.tsCal2.at]).toEqual([0x1fff7a2a, 0x1fff7a2c, 0x1fff7a2e])
+    expect.soft(mcu.bus.read(0x1fff7a22, 2)).toBe(2048)
   })
 })

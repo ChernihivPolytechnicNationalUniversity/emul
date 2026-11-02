@@ -367,8 +367,8 @@ export class Stm32 {
       d.reschedule = () => this.schedule()
       d.onActive = (on) => this.setActive(d, on)
       d.onUnsupported = (what) => this.unmodelled.feature(what)
-      d.readBus = (addr, size) => this.bus.read(addr, size)
-      d.writeBus = (addr, value, size) => this.bus.write(addr, value, size)
+      d.readBus = (addr, size) => this.bus.masterRead(addr, size)
+      d.writeBus = (addr, value, size) => this.bus.masterWrite(addr, value, size)
       d.levelOf = (source) => this.dmaLevel(source)
       this.dma.push(d)
       bus.attach(d)
@@ -808,7 +808,7 @@ export class Stm32 {
     const otp = this.bus.bytesAt(factory.otp.base)!
     otp.bytes.fill(0xff, otp.offset, otp.offset + factory.otp.size)
     factory.uid.words.forEach((word, i) => viewAt(factory.uid.at + 4 * i).setUint32(0, word, true))
-    for (const half of [factory.flashSizeKb, factory.vrefintCal, factory.tsCal1, factory.tsCal2, factory.packageData]) viewAt(half.at).setUint16(0, half.value, true)
+    for (const half of [factory.flashSizeKb, factory.vrefintCal, factory.tsCal1, factory.tsCal2, factory.packageData]) if (half) viewAt(half.at).setUint16(0, half.value, true)
   }
 
   /** A watchdog or SYSRESETREQ: the core restarts at the next slice boundary with the cause flagged. */
