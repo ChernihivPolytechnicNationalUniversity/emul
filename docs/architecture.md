@@ -321,6 +321,15 @@ reused pivot falls under the threshold against its column, a stricter test than 
 reuses the order until a pivot is exactly zero; KLU's guide recommends a check of this kind after `klu_refactor`.
 On the examples the order is redone one to seven times in two simulated seconds.
 
+A linear circuit keeps its factorization from step to step while nothing that is stamped into the
+matrix changes. What can change is keyed in one number: every switch, arc, live resistance, tripped
+polyfuse, battery step, controller and regulator state, pulse level and every pad's state and drive
+step, folded into two 32-bit lanes (FNV-1a and a multiply-xorshift) and joined into 53 bits. A live
+resistance goes in as its float's 64 bits, not rounded to whole ohms. The pads' share is rehashed only
+when a pad's state or drive step was written. A base-31 sum, which this replaced, took
+`(pad low, 1 Ω)` and `(pad high, 32 Ω)` for one circuit and solved the second on the first's factors
+(`tests/sim/engine-lu-key.test.ts`).
+
 The dense factorization this replaced cost O(n³) every step. On the metronome (53 unknowns, 115 elements) a 20 µs
 step took 113 µs in Node, 46 of them in the factorization; it now takes about 45. Measured in headless
 Chromium on the same machine, the metronome ran at 0.12× real time and now runs at 0.62×, the NE555 flasher at

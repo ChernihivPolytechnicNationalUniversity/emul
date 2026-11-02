@@ -207,6 +207,17 @@ const BAT_AVG_BUCKET = BAT_AVG_WINDOW / BAT_AVG_BUCKETS
 const BAT_LEAK = 1e-8
 /** A battery's resistance is stepped in 1 % increments as it drains, so a linear circuit keeps its factorization between steps. */
 const BAT_R_STEP = Math.log(1.01)
+const LANE_A_SEED = 0x811c9dc5 | 0
+const LANE_B_SEED = 0x2545f491
+const mixA = (h: number, t: number) => Math.imul(h ^ t, 0x01000193)
+const mixB = (h: number, t: number) => {
+  const m = Math.imul(h ^ t, 0x85ebca6b)
+  return m ^ (m >>> 13)
+}
+const keyOf = (a: number, b: number) => (a >>> 0) * 0x200000 + (b >>> 11)
+const floatScratch = new Float64Array(1)
+const floatWords = new Int32Array(floatScratch.buffer)
+
 /** Charge forced into a primary cell before it vents, as a fraction of its capacity. */
 const PRIMARY_CHARGE_LIMIT = 0.03
 /** Cells a pack can have in series (the inspector's slider range); per-cell state is laid out in blocks of this. */
@@ -509,8 +520,10 @@ export class Engine {
   private readonly nonlinearElements: Int32Array
   private readonly maskElements: Int32Array
   private readonly maskPads: Int32Array
-  private padMask = 0
-  private padRest = 0
+  private padMaskA = 0
+  private padMaskB = 0
+  private padRestA = 0
+  private padRestB = 0
   private padMaskStale = true
   /** RMS averaging time constant, seconds. */
   private readonly tau: number
@@ -1394,25 +1407,34 @@ export class Engine {
 
   private padHash() {
     if (!this.padMaskStale) return
-    let mask = 0
-    let rest = 0
+    let maskA = LANE_A_SEED
+    let maskB = LANE_B_SEED
+    let restA = LANE_A_SEED
+    let restB = LANE_B_SEED
     const pads = this.maskPads
     for (let k = 0; k < pads.length; k++) {
       const i = pads[k]
       const t = this.gpioState[i] + 7 * this.padSteps[i]
-      mask = (mask * 31 + t) | 0
-      if (this.leafOf[i] < 0) rest = (rest * 31 + t) | 0
+      maskA = mixA(maskA, t)
+      maskB = mixB(maskB, t)
+      if (this.leafOf[i] >= 0) continue
+      restA = mixA(restA, t)
+      restB = mixB(restB, t)
     }
-    this.padMask = mask
-    this.padRest = rest
+    this.padMaskA = maskA
+    this.padMaskB = maskB
+    this.padRestA = restA
+    this.padRestB = restB
     this.padMaskStale = false
   }
 
   /** Hash of every switch and pad state, so a toggle invalidates the cached factorization; the hash without the pads on leaves goes to `restMask`. */
   private switchMask(parts: PartReader) {
     this.padHash()
-    let mask = this.padMask
-    let rest = this.padRest
+    let maskA = this.padMaskA
+    let maskB = this.padMaskB
+    let restA = this.padRestA
+    let restB = this.padRestB
     const elements = this.net.elements
     const masked = this.maskElements
     for (let k = 0; k < masked.length; k++) {
@@ -1420,17 +1442,25 @@ export class Engine {
       const el = elements[i]
       let t = 0
       if (el.kind === "SW") t = switchClosed(el.closed, parts(this.partKeys[i])) ? 1 : this.arc[i] ? 2 : 0
-      else if (el.kind === "R" && el.live) t = this.ohms[i] | 0
-      else if (el.kind === "R" && el.ptc) t = this.ptcTripped[i] ? (Math.round(this.ohms[i] * 1e3) | 0) + 1 : 0
+      else if (el.kind === "R" && el.live) {
+        floatScratch[0] = this.ohms[i]
+        maskA = mixA(maskA, floatWords[0])
+        maskB = mixB(maskB, floatWords[0])
+        restA = mixA(restA, floatWords[0])
+        restB = mixB(restB, floatWords[0])
+        t = floatWords[1]
+      } else if (el.kind === "R" && el.ptc) t = this.ptcTripped[i] ? (Math.round(this.ohms[i] * 1e3) | 0) + 1 : 0
       else if (el.kind === "BAT") t = this.batStep[i]
       else if (el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR") t = this.ctl[i]
       else if (el.kind === "REG") t = this.regHot[i]
       else if (el.kind === "V") t = pulseHigh(this.stepEnd, el) ? 1 : 0
-      mask = (mask * 31 + t) | 0
-      rest = (rest * 31 + t) | 0
+      maskA = mixA(maskA, t)
+      maskB = mixB(maskB, t)
+      restA = mixA(restA, t)
+      restB = mixB(restB, t)
     }
-    this.restMask = rest
-    return mask
+    this.restMask = keyOf(restA, restB)
+    return keyOf(maskA, maskB)
   }
 
   /** A pad on a leaf changed: note the leaf, and the pad's state before (once a step). */
