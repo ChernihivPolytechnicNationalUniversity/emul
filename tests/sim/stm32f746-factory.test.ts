@@ -40,7 +40,7 @@ describe("STM32F746IG factory-programmed bytes", () => {
     expect(factory.otp).toEqual({ base: RM0385.otp.base, size: RM0385.otp.end + 1 - RM0385.otp.base })
     expect(factory.uid.at).toBe(RM0385.uid)
     expect(factory.flashSizeKb.at).toBe(RM0385.flashSize)
-    expect(factory.packageData.at).toBe(RM0385.packageData)
+    expect(factory.packageData?.at).toBe(RM0385.packageData)
     expect(factory.vrefintCal.at).toBe(DS10916.vrefintCal)
     expect(factory.tsCal1.at).toBe(DS10916.tsCal1)
     expect(factory.tsCal2.at).toBe(DS10916.tsCal2)
@@ -53,7 +53,7 @@ describe("STM32F746IG factory-programmed bytes", () => {
       vrefintCal: factory.vrefintCal.value,
       tsCal1: factory.tsCal1.value,
       tsCal2: factory.tsCal2.value,
-      packageData: factory.packageData.value,
+      packageData: factory.packageData?.value,
     }).toEqual(BENCH_CHIP_2026_10_12)
     expect(factory.tsCal1.celsius).toBe(30)
     expect(factory.tsCal2.celsius).toBe(110)
