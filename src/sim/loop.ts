@@ -2170,19 +2170,13 @@ export class SimLoop {
             had.also = [...(had.also ?? []), { element: f.damage.element, fail: f.damage.fail, reason: f.damage.reason }]
             if (f.damage.fatal) {
               had.fatal = true
-              this.digitalParts.get(f.object)?.burn?.()
+              this.burnOut(f.object, f.damage.reason)
             }
             this.onFailure?.(f)
             continue
           }
           this.damage[f.object] = f.damage
-          if (f.damage.fatal) this.digitalParts.get(f.object)?.burn?.()
-          // A burnt MCU is dead silicon: the core stops and its pads leave the circuit.
-          const inst = this.mcus.get(f.object)
-          if (inst?.mcu.loaded) {
-            inst.burnt = true
-            inst.mcu.halt(`burnt out: ${f.damage.reason}`)
-          }
+          if (f.damage.fatal) this.burnOut(f.object, f.damage.reason)
           this.onFailure?.(f)
         }
         this.rebuild(true)
@@ -2194,6 +2188,14 @@ export class SimLoop {
       if (this.debugStops(mcus)) return i + 1
     }
     return steps
+  }
+
+  private burnOut(object: string, reason: string) {
+    this.digitalParts.get(object)?.burn?.()
+    const inst = this.mcus.get(object)
+    if (!inst?.mcu.loaded) return
+    inst.burnt = true
+    inst.mcu.halt(`burnt out: ${reason}`)
   }
 
   /**

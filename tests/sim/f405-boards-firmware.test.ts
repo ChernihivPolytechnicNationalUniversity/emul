@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { STM32F405RG } from "@/mcu/chip"
+import { builder } from "@/schematic/builder"
 import { h405Blink, netduinoBlink } from "@/schematic/examples/discovery"
 import type { Example } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
@@ -105,6 +106,84 @@ describe("STM32-H405 boot bridges, sampled at RESET (the first start after progr
     const got = afterReset({ B1: { on: true } }, 2.2)
     expect.soft(got.atZero, "aliased at 0").toBe("FLASH")
     expect.soft(got.blinks.length, "STAT blinks").toBeGreaterThanOrEqual(2)
+  })
+})
+
+describe("STM32-H405 losing its LM1117 on VIN (TI LM1117 §7.1: 20 V absolute maximum)", () => {
+  const { doc, place, wire } = builder(GRID)
+  const u = place("olimex-stm32-h405", 0, 0)
+  doc.parts[partKey(u.id, "USB")] = { on: false }
+  u.props = { ...u.props, firmwareData: readFileSync(join(FIRMWARE, "prebuilt", `${h405Blink.id}.U1.elf`)).toString("base64") }
+  const vin = place("dc-source", 80, 0, { value: "5 V" })
+  const gnd = place("ground", 80, 10)
+  wire(vin, "+", u, "EXT2-26")
+  wire(vin, "-", gnd, "GND")
+  wire(gnd, "GND", u, "EXT2-25")
+  const loop = new SimLoop()
+  const failures: { fatal: boolean; reason: string }[] = []
+  loop.onFailure = (f) => failures.push({ fatal: f.damage.fatal, reason: f.damage.reason })
+  let clock = 0
+  const restart = () => {
+    loop.setDoc(doc)
+    loop.setParts(doc.parts)
+    loop.setRunning(true)
+  }
+  const core = () => (loop as unknown as { mcus: Map<string, { burnt: boolean; mcu: { mcu: { cpu: { halted: { reason?: string } | null } } } }> }).mcus.get(u.id)!
+  function onsets(seconds: number) {
+    const out: number[] = []
+    let was = false
+    for (let t = 0; t < seconds * 200; t++) {
+      clock += 5
+      loop.advance(clock)
+      const on = !!loop.snapshot()!.parts[partKey(u.id, "STAT")]?.on
+      if (on && !was) out.push(clock / 1000)
+      was = on
+    }
+    return out
+  }
+  const rail = () => loop.snapshot()!.pinVoltage[pinKey(u.id, "EXT1-5")]!
+
+  it("blinks from 5 V on VIN", () => {
+    restart()
+    expect(onsets(2.2).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it("at 24 V the regulator fails open and the rail goes dead, but the F405 is unpowered, not burnt", () => {
+    vin.props = { ...vin.props, value: "24 V" }
+    restart()
+    onsets(0.1)
+    const blinks = onsets(1)
+    expect.soft(failures, "one non-fatal failure, the regulator's").toEqual([{ fatal: false, reason: expect.stringMatching(/^voltage 2[34]\.\d+ V exceeds the 20\.00 V rating$/) }])
+    expect.soft(rail(), "the rail").toBeLessThan(0.5)
+    expect.soft(blinks, "STAT dark").toEqual([])
+    expect.soft(core().burnt, "the die is not dead").toBe(false)
+    expect.soft(core().mcu.mcu.cpu.halted, "not halted").toBeNull()
+  })
+
+  it("runs the firmware again once a bench supply feeds the 3.3V rail past the dead regulator", () => {
+    const bench = place("dc-source", 80, 30, { value: "3.3 V", rint: "0.01 Ω" })
+    const benchGnd = place("ground", 80, 40)
+    wire(bench, "+", u, "EXT1-5")
+    wire(bench, "-", benchGnd, "GND")
+    wire(benchGnd, "GND", u, "EXT1-6")
+    restart()
+    const blinks = onsets(2.2)
+    expect.soft(rail(), "the rail").toBeNear(3.3, 0.01)
+    expect.soft(blinks.length, "STAT blinks again").toBeGreaterThanOrEqual(2)
+    expect.soft(core().mcu.mcu.cpu.halted, "not halted").toBeNull()
+    expect.soft(loop.snapshot()!.damage[u.id]?.fatal, "the board's damage stays the regulator's").toBe(false)
+  })
+
+  it("burns the F405 out once that supply goes to 6 V, past VDD's 4.0 V absolute maximum (DS8626 Table 11), on top of the regulator", () => {
+    const bench = doc.objects.filter((o) => o.def === "dc-source").at(-1)!
+    bench.props = { ...bench.props, value: "6 V" }
+    restart()
+    onsets(0.2)
+    const damage = loop.snapshot()!.damage[u.id]
+    expect.soft(damage?.fatal, "fatal now").toBe(true)
+    expect.soft(failures[1], "the F405's own failure, after the regulator's").toEqual({ fatal: true, reason: "voltage 6.00 V exceeds the 4.00 V rating" })
+    expect.soft(core().burnt, "the die is dead").toBe(true)
+    expect.soft(String(core().mcu.mcu.cpu.halted), "halted as burnt out").toMatch(/burnt out: voltage 6\.00 V exceeds the 4\.00 V rating/)
   })
 })
 
