@@ -14,9 +14,9 @@ const LINES = [62, 48, 0, 34, 40, 0, 70, 56, 58, 0, 44, 66, 30, 52, 0, 38, 60, 2
  */
 export function PanelLoading({ className, explorer = true, label = "Loading the editor…" }: { className?: string; explorer?: boolean; label?: string }) {
   return (
-    <div className={cn("relative flex min-h-0 shrink-0 border-l bg-background", className)} role="status" aria-live="polite">
+    <div className={cn("relative flex min-h-0 shrink-0 border-l bg-background md:max-xl:absolute md:max-xl:inset-y-0 md:max-xl:right-0 md:max-xl:z-30 md:max-xl:max-w-full max-md:fixed max-md:inset-x-0 max-md:top-10 max-md:bottom-0 max-md:z-40 max-md:w-auto max-md:border-l-0", className)} role="status" aria-live="polite">
       {explorer && (
-        <div className="flex w-50 shrink-0 flex-col gap-2 border-r p-3">
+        <div className="flex w-50 max-md:hidden shrink-0 flex-col gap-2 border-r p-3">
           <Skeleton className="h-3 w-20" />
           <Skeleton className="h-5 w-full" />
           <Skeleton className="h-5 w-3/4" />

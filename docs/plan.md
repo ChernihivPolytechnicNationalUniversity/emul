@@ -7,7 +7,7 @@ a firmware or circuit test, and its row in `docs/coverage.md` flipped; then it l
 - [ ] **Logic ICs** — 74HC00/04/08/32/86 gates, 74HC74 flip-flop, 74HC138 decoder, 4017 counter, with input
   thresholds and output drivers on the 74HC595's pattern (`src/sim/hc595.ts`: a digital part with VCC-referenced
   thresholds, timing checks and the pins as GPIO elements with a scaled CMOS drive).
-- [ ] **Op-amp, comparator** — ideal op-amp with rails, LM393-style comparator; a CMOS 555 (TLC555) beside the NE555.
+- [ ] **Comparator, CMOS 555** — an LM393-style comparator with its open-collector output (the op amps are done: `src/sim/opamp.ts`); a CMOS 555 (TLC555) beside the NE555.
 - [ ] **Relay, DC motor** — relay coil + contacts, motor as R+L+back-EMF with an RPM readout.
 - [ ] **Character LCD, the rest** — a 20×4 module (needs its own module sheet for the glass), the A00 font's
   5×10 descenders (E0–FF), the HD44780's bias divider loading V0.

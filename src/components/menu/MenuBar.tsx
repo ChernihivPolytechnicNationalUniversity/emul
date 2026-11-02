@@ -35,8 +35,9 @@ import { TEXT_SCALES } from "@/components/field/text-scale"
 // menu components are sized for touch and to the trigger's width, so each is restyled here.
 const DEVELOPERS = ["true_normis", "cerobreath", "andrys1"]
 
-const ITEM = "gap-6 rounded-sm py-1 pr-2 pl-6 text-xs whitespace-nowrap"
-const CONTENT = "w-auto min-w-52 rounded-md p-1"
+// Below md the same menus are worked with a finger: taller rows, larger type.
+const ITEM = "gap-6 rounded-sm py-1 pr-2 pl-6 text-xs whitespace-nowrap max-md:py-2 max-md:text-sm"
+const CONTENT = "w-auto min-w-52 max-w-[calc(100vw-1rem)] rounded-md p-1 max-md:max-h-[calc(100dvh-4rem)] max-md:overflow-y-auto"
 
 const MenubarItem = ({ className, ...props }: React.ComponentProps<typeof UiItem>) => (
   <UiItem className={cn(ITEM, className)} {...props} />
@@ -60,7 +61,7 @@ const MenubarShortcut = ({ className, ...props }: React.ComponentProps<typeof Ui
   <UiShortcut className={cn("pl-2 text-[0.6875rem] tracking-normal tabular-nums", className)} {...props} />
 )
 const MenubarTrigger = ({ className, ...props }: React.ComponentProps<typeof UiTrigger>) => (
-  <UiTrigger className={cn("h-5 px-2 text-xs font-normal", className)} {...props} />
+  <UiTrigger className={cn("h-5 px-2 text-xs font-normal max-md:h-8 max-md:px-2 max-md:text-sm max-[359px]:px-1.5", className)} {...props} />
 )
 
 type MenuBarProps = React.ComponentProps<"div"> & {
@@ -126,14 +127,21 @@ export function MenuBar({
   return (
     <div
       data-slot="menu-bar"
-      className={cn("relative flex h-7 shrink-0 items-center gap-2 border-b bg-background/80 px-2 backdrop-blur-sm", className)}
+      className={cn("relative flex h-7 shrink-0 items-center gap-2 border-b max-md:gap-0 bg-background/80 px-2 backdrop-blur-sm", className)}
       {...props}
     >
-      <Logo className="px-1 text-xs" />
+      <Logo className="px-1 text-xs max-[359px]:hidden" />
       <Menubar className="h-auto gap-0 rounded-none border-0 bg-transparent p-0">
         <MenubarMenu>
           <MenubarTrigger>File</MenubarTrigger>
           <MenubarContent>
+            {/* The bar has no room for the project's name on a phone: it heads File instead. */}
+            {project && (
+              <MenubarGroup className="md:hidden">
+                <MenubarLabel className="max-w-64 truncate pl-6 text-xs">{project}</MenubarLabel>
+                <MenubarSeparator />
+              </MenubarGroup>
+            )}
             <MenubarItem onClick={onNew}>New project</MenubarItem>
             <MenubarItem onClick={onProjects}>
               Projects…
@@ -370,7 +378,7 @@ export function MenuBar({
           type="button"
           onClick={onProjects}
           title="Projects"
-          className="absolute top-1/2 max-w-80 -translate-x-1/2 -translate-y-1/2 truncate rounded-sm px-2 text-xs text-muted-foreground transition-[left] duration-200 ease-linear hover:bg-accent hover:text-foreground"
+          className="absolute top-1/2 max-w-80 -translate-x-1/2 max-md:hidden max-lg:max-w-40 -translate-y-1/2 truncate rounded-sm px-2 text-xs text-muted-foreground transition-[left] duration-200 ease-linear hover:bg-accent hover:text-foreground"
           style={{ left: `calc(50% + ${fieldInset} / 2)` }}
         >
           {project}
@@ -390,7 +398,7 @@ export function MenuBar({
           size="xs"
           variant="ghost"
           nativeButton={false}
-          className="h-5 gap-1 text-muted-foreground hover:text-foreground"
+          className="h-5 gap-1 text-muted-foreground hover:text-foreground max-md:hidden"
           render={
             <a
               href="https://github.com/ChernihivPolytechnicNationalUniversity/emul"
@@ -401,9 +409,9 @@ export function MenuBar({
           }
         >
           <Star className="size-3 fill-amber-400 text-amber-400" />
-          <span className="hidden sm:inline">Star on GitHub</span>
+          <span className="hidden lg:inline">Star on GitHub</span>
         </Button>
-        <Button size="xs" className="h-5" onClick={onShareDialog}>
+        <Button size="xs" className="h-5 max-md:h-7" onClick={onShareDialog}>
           Share
         </Button>
       </div>

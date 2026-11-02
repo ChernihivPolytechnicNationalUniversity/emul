@@ -188,6 +188,10 @@
     }
   body {
     @apply bg-background text-foreground;
+    /* A double tap on a button is two taps, not a page zoom (and no 300 ms wait for one). */
+    touch-action: manipulation;
+    /* No grey flash over every tapped control on mobile WebKit. */
+    -webkit-tap-highlight-color: transparent;
     }
   html {
     @apply font-sans;

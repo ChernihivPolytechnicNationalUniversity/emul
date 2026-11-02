@@ -594,6 +594,25 @@ describe("bench physics", () => {
     expect.soft(snap.damage[bat.id], "the battery then feeds the short through the dead die and burns").toBeTruthy()
   })
 
+  it("an LM358 on a 9 V battery the wrong way round: the substrate diode burns and the dead die shorts the battery", () => {
+    const { doc, place, wire } = builder(GRID)
+    const u = place("opamp-lm358", 10, 0)
+    const bat = place("battery", 0, 0, { chem: "alkaline", cells: "6", capacity: "0.6 Ah" })
+    const gnd = place("ground", 0, 8)
+    wire(bat, "+", u, "V-")
+    wire(bat, "-", u, "V+")
+    wire(bat, "-", gnd, "GND")
+    wire(u, "OUT", u, "IN-")
+    wire(u, "IN+", gnd, "GND")
+    const t = start(doc)
+    const snap = t.run(0.05)
+    const dead = snap.damage[u.id]
+    expect.soft(dead?.fatal, "the op amp is gone").toBe(true)
+    expect.soft(dead?.reason ?? "", "through the diode, not the die's supply rating").toMatch(/^current .* exceeds the 50\.00 mA rating$/)
+    expect.soft(dead?.fail, "and it failed short").toBe("short")
+    expect.soft(Math.abs(reading(snap, bat.id).current), "the battery now feeds a short").toBeGreaterThan(1)
+  })
+
   it("a capacitor on a Nucleo's PWM pin through USB unplugs and replugs: the pad the reset lets go of is not kicked", () => {
     const { doc, place, wire } = builder(GRID)
     const u = place("nucleo-f429zi", 0, 0, { firmware: "nucleo-pwm.elf", firmwareData: exampleBase64("nucleo-pwm.elf") })
