@@ -264,12 +264,40 @@ function spanBox(points: readonly Point[], pad: number): Box {
 
 const OPEN_LEVER_DEGREES = -28
 
-const USB_DRAWING = {
+export type UsbDrawing = {
+  receptacle: { w: number; h: number } | null
+  boot: { across: number; alongX: number; alongY: number }
+  cable: { length: number; width: number }
+  label: { below: number; size: number; widest: string }
+}
+
+const GENERIC_USB: UsbDrawing = {
   receptacle: { w: 2.4, h: 1.2 },
   boot: { across: 1.8, alongX: 1.9, alongY: 1.4 },
   cable: { length: 6, width: 0.3 },
   label: { below: 0.45, size: 0.3, widest: "USB (unplugged)" },
-} as const
+}
+
+const MM = 1 / 2.54
+
+export const TYPE_B_PLUG_MM = {
+  shell: { width: 8.0, exposed: 11.75 - 8.88 },
+  overmold: { width: 11.5, length: 16, corner: 1.2 },
+  cable: 4.57,
+}
+
+const TYPE_B_REACH_MM = TYPE_B_PLUG_MM.shell.exposed + TYPE_B_PLUG_MM.overmold.length
+
+const USB_B_PLUG: UsbDrawing = {
+  receptacle: null,
+  boot: { across: TYPE_B_PLUG_MM.overmold.width * MM, alongX: TYPE_B_REACH_MM * MM, alongY: TYPE_B_REACH_MM * MM },
+  cable: { length: 6, width: TYPE_B_PLUG_MM.cable * MM },
+  label: { below: 0.45, size: 0.3, widest: "USB (unplugged)" },
+}
+
+export const usbDrawing = (part: Extract<PartDef, { type: "usb" }>): UsbDrawing => (part.plug === "usb-b" ? USB_B_PLUG : GENERIC_USB)
+
+export const usbLabelBelow = (drawing: UsbDrawing) => (drawing.receptacle ? drawing.receptacle.h : drawing.boot.across) / 2 + drawing.label.below
 
 const SIDE_DIRECTION: Record<Side, Point> = { left: { x: -1, y: 0 }, right: { x: 1, y: 0 }, top: { x: 0, y: -1 }, bottom: { x: 0, y: 1 } }
 
@@ -280,15 +308,16 @@ function unionOf(boxes: readonly Box[]): Box {
 }
 
 function usbDrawingBox(part: Extract<PartDef, { type: "usb" }>): Box {
-  const { receptacle, boot, cable, label } = USB_DRAWING
+  const drawing = usbDrawing(part)
+  const { receptacle, boot, cable, label } = drawing
   const dir = SIDE_DIRECTION[part.side]
   const bootEnd = { x: part.x + dir.x * boot.alongX, y: part.y + dir.y * boot.alongY }
   const cableEnd = { x: bootEnd.x + dir.x * cable.length, y: bootEnd.y + dir.y * cable.length }
   const bootBox = spanBox([{ x: part.x, y: part.y }, bootEnd], 0)
   const labelSize = { w: textEms(label.widest, true) * label.size, h: PRINTED_HALF_HEIGHT_EM * label.size * 2 }
-  const labelY = part.y + receptacle.h / 2 + label.below
+  const labelY = part.y + usbLabelBelow(drawing)
   return unionOf([
-    { x: part.x - receptacle.w / 2, y: part.y - receptacle.h / 2, w: receptacle.w, h: receptacle.h },
+    ...(receptacle ? [{ x: part.x - receptacle.w / 2, y: part.y - receptacle.h / 2, w: receptacle.w, h: receptacle.h }] : []),
     dir.x ? { x: bootBox.x, y: part.y - boot.across / 2, w: bootBox.w, h: boot.across } : { x: part.x - boot.across / 2, y: bootBox.y, w: boot.across, h: bootBox.h },
     spanBox([bootEnd, cableEnd], cable.width / 2),
     { x: part.x - labelSize.w / 2, y: labelY - labelSize.h / 2, w: labelSize.w, h: labelSize.h },

@@ -181,6 +181,7 @@ export type PartDef =
       y: number
       /** Cable comes from this side of the connector. */
       side: Side
+      plug?: "usb-b"
       /** State before the user touches it (a board ships plugged in). */
       initial?: PartState
     }
