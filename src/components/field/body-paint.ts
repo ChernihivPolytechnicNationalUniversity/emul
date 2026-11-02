@@ -128,8 +128,23 @@ export function soonImage(shape: Soon, palette: FieldPalette): SoonImage | null 
     if (child.type === "text") paintPlainText(sharpContext, child, SOON_PX_PER_CELL, palette)
     else paintShape(sharpContext, child, SOON_PX_PER_CELL, 1, palette)
   }
-  context.filter = `blur(${SOON_BLUR_CELLS * SOON_PX_PER_CELL}px)`
+  const blurPx = SOON_BLUR_CELLS * SOON_PX_PER_CELL
+  context.filter = `blur(${blurPx}px)`
   context.drawImage(sharp, 0, 0)
+  // Feather the edges: a blurred inset rectangle as the alpha mask, so what reaches the box's edge
+  // fades out there instead of stopping on a line where the blur was cut off.
+  const mask = makeCanvas(width, height)
+  const maskContext = mask.getContext("2d") as CanvasRenderingContext2D | null
+  if (maskContext) {
+    const inset = Math.min(blurPx * 1.5, width / 4, height / 4)
+    maskContext.filter = `blur(${blurPx}px)`
+    maskContext.fillStyle = "#fff"
+    maskContext.fillRect(inset, inset, width - 2 * inset, height - 2 * inset)
+    context.filter = "none"
+    context.globalCompositeOperation = "destination-in"
+    context.drawImage(mask, 0, 0)
+    context.globalCompositeOperation = "source-over"
+  }
   const url = "toDataURL" in blurred ? blurred.toDataURL() : null
   const image = { canvas: blurred, url }
   byTheme.set(palette.theme, image)
