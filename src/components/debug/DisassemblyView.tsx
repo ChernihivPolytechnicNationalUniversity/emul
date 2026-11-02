@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import type { BoardView, DebugController } from "@/debug/session"
 import { disassemble, rangeAround, type DisasmLine } from "@/debug/disasm"
 import { MemorySnapshot } from "@/debug/memory"
+import { EM_AVR } from "@/mcu/elf"
 import { cn } from "@/lib/utils"
 
 type Props = {
@@ -28,7 +29,7 @@ const hex = (v: number) => (v >>> 0).toString(16).padStart(8, "0")
 export function DisassemblyView({ debug, boardId, view, breakpoints, onToggleBreakpoint, sourceLine, onOpenSource }: Props) {
   const fw = debug.image(boardId)
   const info = debug.info(boardId)
-  const pc = view.regs?.r[15] ?? null
+  const pc = view.regs?.pc ?? null
   const framePc = view.frames[view.frame]?.pc ?? pc
   const [anchor, setAnchor] = React.useState<number | null>(null)
   const [text, setText] = React.useState("")
@@ -41,7 +42,7 @@ export function DisassemblyView({ debug, boardId, view, breakpoints, onToggleBre
   const at = anchor ?? framePc ?? fw?.entry ?? symbols.find((s) => s.name === "main")?.value ?? 0x08000000
   const range = rangeAround(symbols, at & ~1)
   // A function's worth of instructions decodes in a millisecond or two: every render reads the memory as it now is.
-  const lines: DisasmLine[] = disassemble({ read: (a, n) => mem.bytes(a, n), symbols, mapping: fw?.mapping ?? [], lines: info?.lines ?? null, sourceLine }, range.start, range.end)
+  const lines: DisasmLine[] = disassemble({ read: (a, n) => mem.bytes(a, n), symbols, mapping: fw?.mapping ?? [], lines: info?.lines ?? null, sourceLine, arch: fw?.machine === EM_AVR ? "avr" : "arm" }, range.start, range.end)
   React.useEffect(() => debug.requestMissing(boardId))
   // Follow the PC to its row.
   React.useEffect(() => {

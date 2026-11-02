@@ -10,7 +10,8 @@ import { symbolAt } from "@/mcu/elf"
 import { excName } from "@/mcu/faults"
 import type { DebugInfo, FunctionInfo, InlineLevel } from "./info"
 import type { MemorySnapshot } from "./memory"
-import type { CoreRegisters } from "./protocol"
+import { AVR_DW_RA, AVR_DW_SP } from "./arch"
+import type { ArmRegisters, AvrRegisters, CoreRegisters } from "./protocol"
 import { evaluateValue, type ExprContext } from "./dwarf/expr"
 
 /**
@@ -59,10 +60,15 @@ export type StackFrame = {
 }
 
 const MAX_FRAMES = 64
-const isExcReturn = (v: number) => (v & 0xffffffe0) >>> 0 === 0xffffffe0 && v >>> 0 >= 0xffffffe0
+/** An EXC_RETURN (B1.5.8): 0xFFFFFFE1/E9/ED/F1/F9/FD. Not LR's reset value 0xFFFFFFFF, which ends the stack. */
+const isExcReturn = (v: number) => (v & 0xffffffe0) >>> 0 === 0xffffffe0 && [0x1, 0x9, 0xd].includes(v & 0xf)
 
 /** The frames at a stop, innermost first. */
 export function unwind(info: DebugInfo, regs: CoreRegisters, mem: MemorySnapshot): StackFrame[] {
+  return regs.arch === "avr" ? unwindAvr(info, regs, mem) : unwindArm(info, regs, mem)
+}
+
+function unwindArm(info: DebugInfo, regs: ArmRegisters, mem: MemorySnapshot): StackFrame[] {
   const frames: StackFrame[] = []
   let r: (number | null)[] = regs.r.slice(0, 16)
   let s: number[] | null = regs.s
@@ -205,6 +211,111 @@ export function unwind(info: DebugInfo, regs: CoreRegisters, mem: MemorySnapshot
     sHome = null
   }
   return frames
+}
+
+/** Registers a callee must keep for its caller (avr-gcc's ABI): r1 (zero), r2–r17, r28–r29 (Y). */
+const AVR_KEPT = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 28, 29]
+
+/**
+ * The AVR's frames, by avr-gcc's call frame information: the CFA is SP (DWARF 32) plus an
+ * offset, a saved register is one byte at CFA + n, and the return address (column 36) is the
+ * two bytes a call pushed, high byte first, a word address. Registers and SP hold data
+ * addresses; the debugger reads the data space at 0x800000 up.
+ */
+function unwindAvr(info: DebugInfo, regs: AvrRegisters, mem: MemorySnapshot): StackFrame[] {
+  const data = info.arch.dataAddress
+  const frames: StackFrame[] = []
+  let r: (number | null)[] = regs.r.slice(0, AVR_DW_SP + 1)
+  let rHome: (RegHome | null)[] = r.map((_, n) => inRegister(n))
+  let pc = regs.pc
+  for (let depth = 0; depth < MAX_FRAMES; depth++) {
+    const lookup = depth === 0 ? pc : pc - 1
+    const row = info.frames.rowAt(lookup)
+    // SP, or a register pair as the CFA's base (r28 is Y, r28:r29).
+    const regOf = (n: number) => {
+      if (n === AVR_DW_SP) return r[n]
+      const lo = r[n]
+      const hi = r[n + 1]
+      return n < 31 && lo !== null && hi !== null ? lo | (hi << 8) : null
+    }
+    const sp = r[AVR_DW_SP]
+    let cfa: number | null = null
+    if (row) {
+      if (row.cfa.expr) cfa = evaluateValue(row.cfa.expr, ctx(regOf, mem))
+      else {
+        const base = regOf(row.cfa.reg)
+        cfa = base === null ? null : (base + row.cfa.offset) & 0xffff
+      }
+      if (cfa !== null && sregPushedUndescribed(info, mem, lookup)) cfa = (cfa + 1) & 0xffff
+    } else if (depth === 0 && sp !== null) {
+      // No rules (assembly, a library routine): as at a function's entry, the return address is on top.
+      cfa = (sp + 2) & 0xffff
+    }
+    pushFrames(frames, info, { pc, lookup, cfa, regs: { r, s: null, rHome, sHome: null }, interruptedBy: null })
+    if (cfa === null) break
+
+    const next: (number | null)[] = new Array(AVR_DW_SP + 1).fill(null)
+    const nextHome: (RegHome | null)[] = new Array(AVR_DW_SP + 1).fill(null)
+    for (const n of AVR_KEPT) {
+      next[n] = r[n]
+      nextHome[n] = rHome[n]
+    }
+    next[AVR_DW_SP] = cfa
+    let raAt: number | null = (cfa - 1) & 0xffff
+    if (row) {
+      for (const [n, rule] of row.regs) {
+        if (n === AVR_DW_RA) {
+          raAt = rule.kind === "offset" ? (cfa + rule.n) & 0xffff : null
+          continue
+        }
+        if (n >= AVR_DW_SP) continue
+        if (rule.kind === "offset") {
+          const at = data((cfa + rule.n) & 0xffff)
+          next[n] = mem.u8(at)
+          nextHome[n] = next[n] === null ? null : slot(at)
+        } else if (rule.kind === "register") {
+          next[n] = rule.reg <= AVR_DW_SP ? r[rule.reg] : null
+          nextHome[n] = rule.reg <= AVR_DW_SP ? rHome[rule.reg] : null
+        } else if (rule.kind === "same") {
+          next[n] = r[n]
+          nextHome[n] = rHome[n]
+        } else {
+          next[n] = null
+          nextHome[n] = null
+        }
+      }
+    }
+    if (raAt === null) break
+    const hi = mem.u8(data(raAt))
+    const lo = mem.u8(data((raAt + 1) & 0xffff))
+    if (hi === null || lo === null) break
+    const ra = ((hi << 8) | lo) * 2
+    // The stack only grows down: a caller is above its callee; past the top there is nothing to return to.
+    if (sp !== null && cfa <= sp) break
+    pc = ra
+    r = next
+    rHome = nextHome
+  }
+  return frames
+}
+
+/**
+ * avr-gcc 5.4 leaves one push of an interrupt handler's prologue out of its call frame
+ * information: SREG saved through r0 (`in r0, 0x3f` or `lds r0, 0x5f`, then `push r0`). Past
+ * that push the CFA the rules give is a byte short, and the return address read there is
+ * wrong. Whether the code at `pc` is past such a push in its function's prologue.
+ */
+function sregPushedUndescribed(info: DebugInfo, mem: MemorySnapshot, pc: number): boolean {
+  const fn = symbolAt(info.symbols.filter((x) => x.type === "func"), pc)
+  if (!fn || !/^__vector_\d+$/.test(fn.symbol.name)) return false
+  const start = fn.symbol.value
+  for (let a = start; a < pc && a < start + 16; a += 2) {
+    const w = mem.u16(a)
+    const next = mem.u16(a + 2)
+    if (w === 0xb60f && next === 0x920f) return a + 2 < pc
+    if (w === 0x9000 && next === 0x005f && mem.u16(a + 4) === 0x920f) return a + 4 < pc
+  }
+  return false
 }
 
 function ctx(reg: (n: number) => number | null, mem: MemorySnapshot): ExprContext {

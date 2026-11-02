@@ -462,6 +462,12 @@ export class Adc extends RegBlock implements Clocked {
     const tsvrefe = (this.common.ccr & CCR_TSVREFE) !== 0
     const vbate = (this.common.ccr & CCR_VBATE) !== 0
     const inside = (volts: number): AdcSource => ({ volts, ohms: 0, farads: 0, throughDacBuffer: false })
+    // F40x: temperature on IN16, VBAT/2 on IN18; F42x/F7: both on IN18, VBAT/4 winning (RM0090 §13.3.3, §13.10, §13.11).
+    if (this.profile.tempOnIn16) {
+      if (channel === 16) return inside(internal && tsvrefe ? this.internal.temperature : 0)
+      if (channel === 17) return inside(internal && tsvrefe ? this.internal.vrefint : 0)
+      if (channel === 18) return inside(internal && vbate ? this.vbat / 2 : 0)
+    }
     if (channel === 16) return inside(0)
     if (channel === 17) return inside(internal && tsvrefe ? this.internal.vrefint : 0)
     if (channel === 18) return inside(!internal ? 0 : vbate ? this.vbat / 4 : tsvrefe ? this.internal.temperature : 0)

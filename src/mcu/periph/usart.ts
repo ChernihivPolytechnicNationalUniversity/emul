@@ -526,7 +526,7 @@ export const USART_SPECS: UsartSpec[] = [
 
 export type UsartPad = { port: number; pin: number; af: number; dir: "tx" | "rx" }
 
-/** TX/RX pads (DS9405 Table 12 / DS10916 Rev 5 Table 12; the Nucleo-144 header map agrees). */
+/** TX/RX pads (DS9405 Table 12 / DS10916 Rev 5 Table 12 / DS8626 Rev 12 Table 9, the same on all three; the Nucleo-144 header map agrees). */
 const PADS: Record<string, string> = {
   USART1: "TX PA9 PB6; RX PA10 PB7 @7",
   USART2: "TX PA2 PD5; RX PA3 PD6 @7",

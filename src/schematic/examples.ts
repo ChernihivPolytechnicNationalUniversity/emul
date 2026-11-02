@@ -17,6 +17,7 @@ import { nucleoLcdI2c } from "./examples/lcd-i2c"
 import { nucleoOled } from "./examples/oled"
 import { nanoDimmer } from "./examples/nano-dimmer"
 import { opampExamples } from "./examples/opamp"
+import { discoveryAudio, discoveryRunningLight, discoveryTilt, h405Blink, netduinoBlink } from "./examples/discovery"
 import { lab1Project, lab1RunningLightProject, lcdProject, nucleoApp, type ProjectLoader } from "./projects"
 
 export type Example = {
@@ -688,4 +689,12 @@ export const nucleoAdc: Example = {
   },
 }
 
-export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoShiftRegister, nucleoWs2812, nucleoAdc, nucleoSevenSeg, nucleoKeypad, nucleoEncoder, nucleoServo, nucleoLcdI2c, nucleoOled, nanoDimmer, lab1Board, lab1RunningLight, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, chargeBoost, chargeBoostChips, ne555Flasher, ...opampExamples, metronome, ...buzzerExamples, systemExam, transistorLogic, lissajous, bridge]
+export const examples: Example[] = [nucleoBlink, nucleoSquare, nucleoPwm, nucleoSerial, nucleoSpi, nucleoI2c, nucleoShiftRegister, nucleoWs2812, nucleoAdc, nucleoSevenSeg, nucleoKeypad, nucleoEncoder, nucleoServo, nucleoLcdI2c, nucleoOled, discoveryRunningLight, discoveryTilt, discoveryAudio, h405Blink, netduinoBlink, nanoDimmer, lab1Board, lab1RunningLight, lcdDemo, touchDemo, cubeDemo, lab1Stand, powerSupply, batteryLife, chargeBoost, chargeBoostChips, ne555Flasher, ...opampExamples, metronome, ...buzzerExamples, systemExam, transistorLogic, lissajous, bridge]
+
+/** The example a first visit opens, programmed and running: the README's hero circuit. */
+export const showcase = nucleoShiftRegister
+
+/** Short names for links (`/?example=running-light`); every example's own id works as well. */
+const SLUGS: Record<string, Example> = { "running-light": nucleoShiftRegister, blink: nucleoBlink }
+
+export const exampleBySlug = (slug: string): Example | undefined => SLUGS[slug] ?? examples.find((e) => e.id === slug)

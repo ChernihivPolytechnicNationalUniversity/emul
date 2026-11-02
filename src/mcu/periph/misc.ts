@@ -37,14 +37,18 @@ export class Pwr extends RegBlock {
   onPvdOutput: (vddBelow: boolean) => void = () => {}
   onUnsupported: (what: string) => void = () => {}
 
-  constructor(map: "v1" | "v2" = "v1", pvdLevels: PvdLevels | null = null, vdd = 3.3) {
+  /** Over-/under-drive (ODEN, ODSWEN, UDEN, MRUDS, LPUDS, ADCDC1): F42x and F7 only (RM0090 §5.1.4 vs §5.1.3). */
+  readonly overdrive: boolean
+
+  constructor(map: "v1" | "v2" = "v1", pvdLevels: PvdLevels | null = null, vdd = 3.3, overdrive = true) {
     super(
       "PWR",
       0x40007000,
       0x400,
       map === "v1"
         ? [
-            { name: "CR", offset: 0x00, reset: 0x0000c000 },
+            // F40x: reset 0x0000 4000, one VOS bit, bits 31:15 and 13:10 reserved (RM0090 §5.4.1, Table 32).
+            overdrive ? { name: "CR", offset: 0x00, reset: 0x0000c000 } : { name: "CR", offset: 0x00, reset: 0x00004000, rw: 0x000043ff },
             { name: "CSR", offset: 0x04, reset: 0, rw: 0x00000300 },
           ]
         : [
@@ -55,6 +59,7 @@ export class Pwr extends RegBlock {
           ],
     )
     this.map = map
+    this.overdrive = overdrive
     this.pvdLevels = pvdLevels
     this.vdd = vdd
   }
@@ -109,8 +114,8 @@ export class Pwr extends RegBlock {
         // The regulator flags in CSR follow CR at once: VOSRDY, ODRDY (from ODEN), ODSWRDY (from ODSWEN).
         let csr = this.regs[1] & ~((1 << 14) | (1 << 16) | (1 << 17))
         csr |= 1 << 14
-        if (next & (1 << 16)) csr |= 1 << 16
-        if (next & (1 << 17)) csr |= 1 << 17
+        if (this.overdrive && next & (1 << 16)) csr |= 1 << 16
+        if (this.overdrive && next & (1 << 17)) csr |= 1 << 17
         // CWUF and CSBF clear their flags and read back as zero.
         if (this.map === "v1" && written & (1 << 2)) csr &= ~1
         if (written & (1 << 3)) csr &= ~2
@@ -142,7 +147,7 @@ export class Pwr extends RegBlock {
   stopKind(): "stop" | "stopLp" | "stopUd" {
     const cr = this.regs[0]
     const lp = (cr & 1) !== 0
-    const underDrive = ((cr >>> 18) & 3) === 3 && (cr & (lp ? 1 << 10 : 1 << 11)) !== 0
+    const underDrive = this.overdrive && ((cr >>> 18) & 3) === 3 && (cr & (lp ? 1 << 10 : 1 << 11)) !== 0
     return underDrive ? "stopUd" : lp ? "stopLp" : "stop"
   }
 
@@ -167,10 +172,12 @@ export class Pwr extends RegBlock {
 // --- SYSCFG (RM0090 §9) -------------------------------------------------------------------
 
 export class Syscfg extends RegBlock {
-  constructor() {
+  constructor(line: "f40x" | "f42x" | "f7" = "f42x") {
+    const f40x = line === "f40x"
     super("SYSCFG", 0x40013800, 0x400, [
-      { name: "MEMRMP", offset: 0x00 },
-      { name: "PMC", offset: 0x04 },
+      // F40x: MEM_MODE[1:0] only, PMC MII_RMII_SEL only (RM0090 §9.2.1, §9.2.2).
+      f40x ? { name: "MEMRMP", offset: 0x00, rw: 0x3 } : { name: "MEMRMP", offset: 0x00 },
+      f40x ? { name: "PMC", offset: 0x04, rw: 0x00800000 } : { name: "PMC", offset: 0x04 },
       { name: "EXTICR1", offset: 0x08, rw: 0xffff },
       { name: "EXTICR2", offset: 0x0c, rw: 0xffff },
       { name: "EXTICR3", offset: 0x10, rw: 0xffff },

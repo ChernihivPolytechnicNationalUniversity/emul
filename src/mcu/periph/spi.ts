@@ -9,8 +9,25 @@
  * SCK/MOSI and samples MISO on its pins; the slave samples SCK/MOSI/NSS and drives MISO while
  * selected, releasing it otherwise.
  *
- * Not modelled (reported through `unsupported`): bidirectional single-wire mode, CRC, TI
- * frame format, I²S. DMA requests (TXDMAEN/RXDMAEN) are level lines the DMA polls.
+ * I²S (RM0090 §28.4, F4 SPI2/SPI3 = I2S2/I2S3 only, §28.2.2): I2SMOD switches the block over,
+ * I2SE enables it. Master transmit and master receive; Philips, MSB-justified, LSB-justified and
+ * PCM short/long frame (§28.4.3); DATLEN 16/24/32 with CHLEN 16/32 and the two-halfword DR
+ * sequence for 24/32-bit data (Figures 265–278); CKPOL. The bit clock comes from I2SxCLK (the
+ * PLLI2S R output, read through the SoC's `i2sClock` hook) through I2SDIV/ODD and, with MCKOE, the
+ * fixed /8 or /4 stage (§28.4.4, Figure 282). CK (SCK pad), WS (NSS pad) and SD (MOSI pad) are
+ * driven edge by edge, each edge one `Clocked` event stamped with its exact time; the receiver
+ * samples SD on the CK edge opposite the shifting one. TXE, RXNE, CHSIDE, BSY, OVR with
+ * TXEIE/RXNEIE/ERRIE and the TXDMAEN/RXDMAEN request lines (§28.4.7–§28.4.10).
+ * The one deliberate deviation: MCK (256 × Fs, §28.4.1) is not toggled — that would be ~12 M
+ * events per second — the MCK pad is held high while MCKOE and I2SE are set in master mode, and
+ * `mckHz()` gives the frequency it stands for, so a codec model can read its master clock.
+ *
+ * Not modelled (reported through `onUnsupported`): bidirectional single-wire mode, CRC, TI frame
+ * format; in I²S: slave transmit/receive (and with it UDR and FRE, which only a slave sets,
+ * §28.4.8), full duplex through I2S2ext/I2S3ext (§28.4.2; the ext blocks are not mapped), the
+ * external I2S_CKIN clock (RCC_CFGR.I2SSRC = 1, reported by the RCC), I2SDIV 0/1 (forbidden,
+ * §28.5.9: no clock), DATLEN = 11 (not allowed), I²S on the F7 (v2) blocks. DMA requests
+ * (TXDMAEN/RXDMAEN) are level lines the DMA polls.
  *
  * Lazy like the timers and USARTs: the master's clock edges are events (see `Clocked`); the
  * slave only moves when a pin it listens to changes.
@@ -28,7 +45,8 @@ export type SpiSpec = {
   irq: number
 }
 
-export type SpiLine = "SCK" | "MOSI" | "MISO" | "NSS"
+/** SPI lines; in I²S mode CK is SCK, WS is NSS, SD is MOSI (§28.4.1), and MCK is its own pad. */
+export type SpiLine = "SCK" | "MOSI" | "MISO" | "NSS" | "MCK"
 
 const regs = (flavour: SpiFlavour): RegDef[] => [
   { name: "CR1", offset: 0x00, rw: 0xffff },
@@ -67,6 +85,43 @@ const SR_TXE = 1 << 1
 const SR_MODF = 1 << 5
 const SR_OVR = 1 << 6
 const SR_BSY = 1 << 7
+const SR_CHSIDE = 1 << 2
+// SPI_I2SCFGR / SPI_I2SPR (§28.5.8, §28.5.9)
+const I2SCFGR_I2SMOD = 1 << 11
+const I2SCFGR_I2SE = 1 << 10
+const I2SCFGR_PCMSYNC = 1 << 7
+const I2SCFGR_CKPOL = 1 << 3
+const I2SPR_ODD = 1 << 8
+const I2SPR_MCKOE = 1 << 9
+const STD_PHILIPS = 0
+const STD_LSB = 2
+const STD_PCM = 3
+
+/**
+ * One halfword of a channel: its first bit slot within the channel and the bits of the 16 that go
+ * on the wire (the rest forced to 0, §28.4.3).
+ */
+type I2sSegment = { at: number; mask: number }
+
+/** A running I²S master: the configuration it started with and where it is in the frame. */
+type I2sRun = {
+  tx: boolean
+  std: number
+  pcmLong: boolean
+  ckpol: boolean
+  /** Bits per channel (per word in PCM). */
+  ch: number
+  /** Slots per frame: two channels, or one word in PCM. */
+  frame: number
+  /** 1 when SD runs one CK behind WS (Philips, PCM short frame), else 0. */
+  delay: number
+  segs: I2sSegment[]
+  /** Pin slot since the start; the edge within it (0: before the sampling edge, 1: after). */
+  slot: number
+  half: number
+  shift: number
+  rx: number
+}
 
 /** FIFO occupancy in bytes → FRLVL/FTLVL code (v2). */
 const fifoLevel = (n: number) => (n === 0 ? 0 : n === 1 ? 1 : n === 2 ? 2 : 3)
@@ -96,12 +151,23 @@ export class Spi extends RegBlock implements Clocked {
   private misoIn = false
   private nssIn = true
   /** Levels this block drives (null: released). */
-  private readonly out: Record<SpiLine, boolean | null> = { SCK: null, MOSI: null, MISO: null, NSS: null }
+  private readonly out: Record<SpiLine, boolean | null> = { SCK: null, MOSI: null, MISO: null, NSS: null, MCK: null }
 
   private pclkHz = 16e6
   private hclkHz = 16e6
 
-  onOut: (line: SpiLine, level: boolean | null) => void = () => {}
+  // I²S state (§28.4): the 16-bit Tx/Rx buffers, the frame engine, CHSIDE.
+  private i2s: I2sRun | null = null
+  private i2sTx = 0
+  private i2sTxFull = false
+  private i2sRx = 0
+  private i2sRxFull = false
+  private chside = false
+  /** Lag of the edge being driven behind "now", in seconds (edges caught up late by `tick`). */
+  private lag = 0
+
+  /** A line changed; `lag`: how long ago, in seconds (0 = now). */
+  onOut: (line: SpiLine, level: boolean | null, lag: number) => void = () => {}
   raiseIrq: (irq: number) => void = () => {}
   sync: () => void = () => {}
   reschedule: () => void = () => {}
@@ -122,6 +188,8 @@ export class Spi extends RegBlock implements Clocked {
     this.pclkHz = pclkHz
     this.hclkHz = hclkHz
   }
+  /** I2SxCLK in Hz (RM0090 §28.4.4, Figure 282): the PLLI2S R output, or 0. Set by the SoC. */
+  i2sClock: () => number = () => 0
 
   reset() {
     super.reset()
@@ -133,6 +201,9 @@ export class Spi extends RegBlock implements Clocked {
     this.ovr = this.modf = this.ovrArmed = this.modfArmed = false
     this.due = Infinity
     this.nssIn = true
+    this.i2s = null
+    this.i2sTxFull = this.i2sRxFull = this.chside = false
+    this.i2sTx = this.i2sRx = 0
     this.setActive(false)
     this.refreshOutputs()
   }
@@ -191,9 +262,12 @@ export class Spi extends RegBlock implements Clocked {
     return this.rxFifo.length * this.bytesPerWord()
   }
   private txe() {
+    // I²S: TXE is reset while I2SE is off (§28.4.7). UDR (bit 3) is never set: slave-only, not modelled.
+    if (this.i2sMode()) return this.i2sOn() && !this.i2sTxFull
     return this.flavour === "v1" ? this.txFifo.length === 0 : this.txBytes() <= 2
   }
   private rxne() {
+    if (this.i2sMode()) return this.i2sRxFull
     if (this.flavour === "v1") return this.rxFifo.length > 0
     return this.rxBytes() >= (this.cr2() & CR2_FRXTH ? 1 : 2)
   }
@@ -201,6 +275,10 @@ export class Spi extends RegBlock implements Clocked {
     return this.frame !== null || (this.master() && this.enabled() && this.txFifo.length > 0)
   }
   private status() {
+    if (this.i2sMode())
+      // BSY: set through master transmission, kept low in master receive (§28.4.7). UDR and FRE
+      // are slave-only (§28.4.8) and the slave modes are not modelled, so they stay 0.
+      return (this.rxne() ? SR_RXNE : 0) | (this.txe() ? SR_TXE : 0) | (this.chside ? SR_CHSIDE : 0) | (this.ovr ? SR_OVR : 0) | (this.i2s?.tx ? SR_BSY : 0)
     return (
       (this.rxne() ? SR_RXNE : 0) |
       (this.txe() ? SR_TXE : 0) |
@@ -213,6 +291,7 @@ export class Spi extends RegBlock implements Clocked {
 
   private checkIrq() {
     const cr2 = this.cr2()
+    // ERRIE covers OVR and MODF in SPI mode, OVR (and the unmodelled UDR/FRE) in I²S mode (§28.5.2).
     if ((cr2 & CR2_TXEIE && this.txe()) || (cr2 & CR2_RXNEIE && this.rxne()) || (cr2 & CR2_ERRIE && (this.ovr || this.modf))) this.raiseIrq(this.spec.irq)
     if (cr2 & CR2_TXDMAEN && this.txe()) this.onDmaRequest("tx")
     if (cr2 & CR2_RXDMAEN && this.rxne()) this.onDmaRequest("rx")
@@ -221,7 +300,9 @@ export class Spi extends RegBlock implements Clocked {
   /** Level of a DMA request line, for the DMA controller. */
   dmaLevel(line: "tx" | "rx"): boolean {
     const cr2 = this.cr2()
-    return line === "tx" ? (cr2 & CR2_TXDMAEN) !== 0 && this.enabled() && this.txe() : (cr2 & CR2_RXDMAEN) !== 0 && this.rxne()
+    // I²S DMA works exactly as in SPI mode (§28.4.10): the requests follow TXE and RXNE.
+    const on = this.i2sMode() ? this.i2sOn() : this.enabled()
+    return line === "tx" ? (cr2 & CR2_TXDMAEN) !== 0 && on && this.txe() : (cr2 & CR2_RXDMAEN) !== 0 && this.rxne()
   }
 
   // --- register file ------------------------------------------------------------------------
@@ -234,7 +315,7 @@ export class Spi extends RegBlock implements Clocked {
   /** DR shows the word at the head of the receive FIFO without popping it; SR without arming or clearing OVR/MODF. */
   peek(offset: number, size: 1 | 2 | 4): number {
     this.sync()
-    if ((offset & ~3) === 0x0c) return this.rxFifo[0] ?? 0
+    if ((offset & ~3) === 0x0c) return this.i2sMode() ? this.i2sRx : (this.rxFifo[0] ?? 0)
     return super.peek(offset, size)
   }
   protected peekValue(d: RegDef, current: number): number {
@@ -250,6 +331,7 @@ export class Spi extends RegBlock implements Clocked {
   protected onRead(d: RegDef, current: number): number {
     if (d.name === "SR") {
       const v = this.status()
+      // OVR: a DR read then an SR read (§28.4.8, same as SPI mode).
       if (this.ovrArmed) this.ovr = this.ovrArmed = false
       this.modfArmed = this.modf
       return v
@@ -261,6 +343,7 @@ export class Spi extends RegBlock implements Clocked {
     switch (d.name) {
       case "CR1": {
         this.regs[0] = next
+        if (this.i2sMode()) return next // SPI_CR1 is not used in I²S mode (§28.4.1)
         if (this.modfArmed) this.modf = this.modfArmed = false
         if (next & CR1_BIDIMODE && !(old & CR1_BIDIMODE)) this.onUnsupported(`${this.name} bidirectional mode`)
         if (next & CR1_CRCEN && !(old & CR1_CRCEN)) this.onUnsupported(`${this.name} CRC`)
@@ -280,14 +363,21 @@ export class Spi extends RegBlock implements Clocked {
         this.checkIrq()
         return
       case "I2SCFGR":
-        if (next & (1 << 11) && !(old & (1 << 11))) this.onUnsupported(`${this.name} I²S`)
-        return
+        this.regs[7] = next
+        this.i2sConfig(next, old)
+        return this.regs[7]
     }
   }
 
   /** Read DR: pop one word, or two packed 8-bit words on a 16-bit access (v2 data packing). */
   private popRx(size: 1 | 2 | 4): number {
     this.ovrArmed = true
+    if (this.i2sMode()) {
+      // On overrun the buffer keeps the older, correctly received halfword (§28.4.8).
+      this.i2sRxFull = false
+      this.checkIrq()
+      return this.i2sRx
+    }
     let v = this.rxFifo.length ? this.rxFifo.shift()! : 0
     if (this.flavour === "v2" && this.bits() <= 8 && size > 1 && this.rxFifo.length) v |= this.rxFifo.shift()! << 8
     this.checkIrq()
@@ -296,6 +386,14 @@ export class Spi extends RegBlock implements Clocked {
 
   /** Write DR: queue one word, or two 8-bit words from a 16-bit access on v2. */
   private pushTx(value: number, size: 1 | 2 | 4) {
+    if (this.i2sMode()) {
+      // One 16-bit buffer (§28.5.4); a write over a full buffer replaces it, as in SPI mode on v1.
+      this.i2sTx = value & 0xffff
+      this.i2sTxFull = true
+      this.i2sStart()
+      this.checkIrq()
+      return
+    }
     const words = this.flavour === "v2" && this.bits() <= 8 && size > 1 ? [value & 0xff, (value >>> 8) & 0xff] : [value & 0xffff]
     for (const w of words) {
       if (this.txBytes() + this.bytesPerWord() > this.fifoBytes()) {
@@ -426,11 +524,16 @@ export class Spi extends RegBlock implements Clocked {
   private drive(line: SpiLine, level: boolean | null) {
     if (this.out[line] === level) return
     this.out[line] = level
-    this.onOut(line, level)
+    this.onOut(line, level, this.lag)
   }
 
   /** Idle levels for the current mode; called on configuration changes. */
   private refreshOutputs() {
+    if (this.i2sMode()) {
+      this.i2sOutputs()
+      return
+    }
+    this.drive("MCK", null)
     if (!this.enabled()) {
       for (const line of ["SCK", "MOSI", "MISO", "NSS"] as const) this.drive(line, null)
       return
@@ -466,6 +569,11 @@ export class Spi extends RegBlock implements Clocked {
 
   /** A pin this block listens to changed (the SoC syncs the block first). */
   pinEdge(line: SpiLine, level: boolean) {
+    if (this.i2sMode()) {
+      // Master only: SD is the one input (the receiver); CK and WS are this block's outputs.
+      if (line === "MOSI") this.mosiIn = level
+      return
+    }
     switch (line) {
       case "SCK":
         if (this.sckIn === level) return
@@ -501,6 +609,231 @@ export class Spi extends RegBlock implements Clocked {
     }
   }
 
+
+  // --- I²S (RM0090 §28.4) ---------------------------------------------------------------------
+
+  /** I²S exists on the F4's SPI2 and SPI3 (I2S2, I2S3, §28.2.2). */
+  private i2sCapable() {
+    return this.flavour === "v1" && (this.spec.name === "SPI2" || this.spec.name === "SPI3")
+  }
+  /** I2SMOD set on a block that has I²S. */
+  i2sMode() {
+    return this.i2sCapable() && (this.regs[7] & I2SCFGR_I2SMOD) !== 0
+  }
+  private i2sOn() {
+    return (this.regs[7] & I2SCFGR_I2SE) !== 0
+  }
+  /** I2SCFG: 2 master transmit, 3 master receive (0/1 slave, not modelled). */
+  private i2sCfg() {
+    return (this.regs[7] >>> 8) & 3
+  }
+  private i2sMaster() {
+    return this.i2sCfg() >= 2
+  }
+  /** Bits per channel: CHLEN only counts with DATLEN = 16-bit, otherwise 32 (§28.5.8). */
+  private i2sChannelBits() {
+    const cfg = this.regs[7]
+    return ((cfg >>> 1) & 3) === 0 && !(cfg & 1) ? 16 : 32
+  }
+
+  /** Bit clock CK in Hz (§28.4.4): I2SxCLK / (2·I2SDIV + ODD), and / 8 (16-bit) or / 4 (32-bit channel) more with MCKOE. 0 with no clock. */
+  ckHz(): number {
+    if (!this.i2sMode() || !this.i2sMaster()) return 0
+    const pr = this.regs[8]
+    const div = pr & 0xff
+    const clk = this.i2sClock()
+    if (div < 2 || clk <= 0) return 0
+    const d = 2 * div + (pr & I2SPR_ODD ? 1 : 0)
+    return pr & I2SPR_MCKOE ? clk / (d * (this.i2sChannelBits() === 16 ? 8 : 4)) : clk / d
+  }
+  /** Audio sampling frequency Fs = CK / (2 × channel bits), the RM's formulas (§28.4.4). */
+  fsHz(): number {
+    return this.ckHz() / (2 * this.i2sChannelBits())
+  }
+  /**
+   * Master clock in Hz: 256 × Fs (§28.4.1) while it is output (I²S master, MCKOE, I2SE), else 0.
+   * The MCK pad itself is only held high (see the header): a board model reads this instead.
+   */
+  mckHz(): number {
+    return this.i2sOn() && this.regs[8] & I2SPR_MCKOE ? 256 * this.fsHz() : 0
+  }
+  /** Core cycles per half CK period. Decision: ODD dividers get two equal halves (the RM's "reshaping stage" is not specified). */
+  private i2sHalfCycles() {
+    const ck = this.ckHz()
+    return ck > 0 ? this.hclkHz / (2 * ck) : Infinity
+  }
+
+  /** I2SCFGR written: report what is not modelled, start or stop. */
+  private i2sConfig(next: number, old: number) {
+    if (!(next & I2SCFGR_I2SMOD)) {
+      if (old & I2SCFGR_I2SMOD) this.i2sStop()
+      this.refreshOutputs()
+      return
+    }
+    if (!this.i2sCapable()) {
+      if (!(old & I2SCFGR_I2SMOD)) this.onUnsupported(`${this.name} I²S`)
+      return
+    }
+    const wasOn = (old & I2SCFGR_I2SMOD) !== 0 && (old & I2SCFGR_I2SE) !== 0
+    if (next & I2SCFGR_I2SE && !wasOn) {
+      if (!this.i2sMaster()) this.onUnsupported(`${this.name} I²S slave mode`)
+      if (((next >>> 1) & 3) === 3) this.onUnsupported(`${this.name} I²S DATLEN = 11 (not allowed)`)
+      if ((this.regs[8] & 0xff) < 2) this.onUnsupported(`${this.name} I²S I2SDIV < 2 (forbidden)`)
+    }
+    // Off: TXE reads 0 (§28.4.7); a halfword already written stays in the buffer for the next start.
+    if (!(next & I2SCFGR_I2SE)) this.i2sStop()
+    this.refreshOutputs() // the steady levels first, so a frame starting now begins with an edge
+    if (next & I2SCFGR_I2SE && !this.i2s) this.i2sStart()
+    this.checkIrq()
+  }
+
+  /** Start the master if it can: receive at once, transmit on the first halfword (§28.4.5). */
+  private i2sStart() {
+    if (this.i2s || !this.i2sMode() || !this.i2sOn() || !this.i2sMaster()) return
+    const tx = this.i2sCfg() === 2
+    if (tx && !this.i2sTxFull) return
+    const cfg = this.regs[7]
+    const std = (cfg >>> 4) & 3
+    const datlen = (cfg >>> 1) & 3
+    const ch = this.i2sChannelBits()
+    const pcmLong = std === STD_PCM && (cfg & I2SCFGR_PCMSYNC) !== 0
+    // Halfwords per channel and the bits each puts on the wire (§28.4.3, Figures 265–278).
+    const lsb = std === STD_LSB
+    let segs: I2sSegment[]
+    if (datlen === 0) segs = [{ at: ch === 32 && lsb ? 16 : 0, mask: 0xffff }]
+    else if (datlen === 1) segs = lsb ? [{ at: 0, mask: 0x00ff }, { at: 16, mask: 0xffff }] : [{ at: 0, mask: 0xffff }, { at: 16, mask: 0xff00 }]
+    else segs = [{ at: 0, mask: 0xffff }, { at: 16, mask: 0xffff }]
+    this.i2s = {
+      tx,
+      std,
+      pcmLong,
+      ckpol: (cfg & I2SCFGR_CKPOL) !== 0,
+      ch,
+      frame: std === STD_PCM ? ch : 2 * ch,
+      delay: std === STD_PHILIPS || (std === STD_PCM && !pcmLong) ? 1 : 0,
+      segs,
+      slot: 0,
+      half: 0,
+      shift: 0,
+      rx: 0,
+    }
+    this.chside = false
+    this.drive("SCK", this.i2s.ckpol)
+    this.i2sEnterSlot()
+    this.due = this.i2sHalfCycles()
+    this.setActive(true)
+  }
+
+  /**
+   * I2SE cleared. Decision: the frame stops at once and the pads are released; the RM asks
+   * software to wait for TXE = 1 / BSY = 0 or the right RXNE first (§28.4.5), so a cut-off
+   * frame is the firmware's doing.
+   */
+  private i2sStop() {
+    this.i2s = null
+    this.due = Infinity
+    this.setActive(false)
+  }
+
+  /** Pad levels outside a running frame. */
+  private i2sOutputs() {
+    const on = this.i2sOn() && this.i2sMaster()
+    this.drive("MISO", null) // I2Sx_ext_SD: full duplex not modelled
+    // MCK: held high in place of the 256·Fs clock (the documented deviation).
+    this.drive("MCK", on && this.regs[8] & I2SPR_MCKOE ? true : null)
+    if (!on) {
+      for (const line of ["SCK", "MOSI", "NSS"] as const) this.drive(line, null)
+      return
+    }
+    const cfg = this.regs[7]
+    if (this.i2s) return
+    this.drive("SCK", (cfg & I2SCFGR_CKPOL) !== 0)
+    // Decision (undocumented): before the first frame WS rests at the level that ends a frame, so
+    // the first channel starts with an edge — high for Philips, low for the others (the levels
+    // §28.4.8 has a slave resynchronise on).
+    this.drive("NSS", ((cfg >>> 4) & 3) === STD_PHILIPS)
+    this.drive("MOSI", this.i2sCfg() === 2 ? (this.out.MOSI ?? false) : null)
+  }
+
+  /** WS in a pin slot (§28.4.3): Philips low = left; MSB/LSB justified high = left; PCM a 1-CK or 13-CK pulse. */
+  private wsLevel(r: I2sRun, slot: number) {
+    const p = slot % r.frame
+    if (r.std === STD_PHILIPS) return p >= r.ch
+    if (r.std === STD_PCM) return r.pcmLong ? p < 13 : p === 0
+    return p < r.ch
+  }
+
+  /** Where a pin slot falls in the data: channel, bit within the channel, or null in the lead-in slot. */
+  private dataPos(r: I2sRun, slot: number) {
+    const d = slot - r.delay
+    if (d < 0) return null
+    const p = d % r.frame
+    return { channel: r.std === STD_PCM ? 0 : Math.floor(p / r.ch), bit: p % r.ch }
+  }
+
+  /** A new slot begins (on the shifting CK edge): WS, and for a transmitter the next SD bit. */
+  private i2sEnterSlot() {
+    const r = this.i2s!
+    this.drive("NSS", this.wsLevel(r, r.slot))
+    if (!r.tx) return
+    const pos = this.dataPos(r, r.slot)
+    let bit = false
+    if (pos) {
+      const k = r.segs.findIndex((g) => pos.bit >= g.at && pos.bit < g.at + 16)
+      if (k >= 0) {
+        const g = r.segs[k]
+        if (pos.bit === g.at) {
+          // The halfword moves from the buffer to the shift register as its first bit goes out;
+          // TXE is set and CHSIDE names the channel the next write is for (§28.4.5).
+          // Decision (undocumented): an empty buffer in master mode reloads its stale content (no UDR, §28.4.8).
+          r.shift = this.i2sTx & g.mask
+          this.i2sTxFull = false
+          const nextChannel = k + 1 < r.segs.length ? pos.channel : r.std === STD_PCM ? 0 : pos.channel ^ 1
+          this.chside = nextChannel === 1
+          this.checkIrq()
+        }
+        bit = ((r.shift >>> (15 - (pos.bit - g.at))) & 1) === 1
+      }
+    }
+    this.drive("MOSI", bit)
+  }
+
+  /** The sampling CK edge: a receiver shifts in SD; a full halfword goes to the buffer (§28.4.5). */
+  private i2sSample() {
+    const r = this.i2s!
+    if (r.tx) return
+    const pos = this.dataPos(r, r.slot)
+    if (!pos) return
+    const g = r.segs.find((x) => pos.bit >= x.at && pos.bit < x.at + 16)
+    if (!g) return
+    r.rx = ((r.rx << 1) | (this.mosiIn ? 1 : 0)) & 0xffff
+    if (pos.bit !== g.at + 15) return
+    if (this.i2sRxFull) this.ovr = true // the new halfword is lost (§28.4.8)
+    else {
+      this.i2sRx = r.rx & g.mask
+      this.i2sRxFull = true
+      this.chside = r.std !== STD_PCM && pos.channel === 1 // CHSIDE: meaningless in PCM (§28.5.3)
+    }
+    this.checkIrq()
+  }
+
+  /** One CK edge: the leading one (away from the steady state) samples, the trailing one shifts (Figure 264, CKPOL inverts both). */
+  private i2sEdge() {
+    const r = this.i2s!
+    if (r.half === 0) {
+      r.half = 1
+      this.drive("SCK", !r.ckpol)
+      this.i2sSample()
+    } else {
+      r.half = 0
+      this.drive("SCK", r.ckpol)
+      r.slot++
+      // Keep the counter bounded: only the slot within the frame and the lead-in matter.
+      if (r.slot >= 2 * r.frame) r.slot -= r.frame
+      this.i2sEnterSlot()
+    }
+  }
+
   // --- clocking -------------------------------------------------------------------------------
 
   private setActive(on: boolean) {
@@ -510,6 +843,16 @@ export class Spi extends RegBlock implements Clocked {
   }
 
   tick(cycles: number) {
+    if (this.i2s) {
+      this.due -= cycles
+      while (this.i2s && this.due <= 0) {
+        this.lag = -this.due / this.hclkHz
+        this.i2sEdge()
+        this.due += this.i2sHalfCycles()
+      }
+      this.lag = 0
+      return
+    }
     if (!this.frame || !this.master()) return
     this.due -= cycles
     while (this.frame && this.due <= 0) {
@@ -519,6 +862,7 @@ export class Spi extends RegBlock implements Clocked {
   }
 
   cyclesUntilEvent(): number {
+    if (this.i2s) return Math.max(1, Math.ceil(this.due))
     return this.frame && this.master() ? Math.max(1, Math.ceil(this.due)) : Infinity
   }
 }
@@ -555,7 +899,14 @@ const DS10916_REV5_PADS: Record<string, string> = {
   SPI6: "NSS PG8; SCK PG13; MISO PG12; MOSI PG14 @5",
 }
 
-const PADS: Record<AfMap, Record<string, string>> = { f42x: F42X_PADS, f74x: DS10916_REV5_PADS }
+/** F405/F407 (DS8626 Rev 12 Table 9): SPI1–3 only, no SPI1 on port G, no SPI2 on PC1/PD3/PA9/PB4, no SPI3 on PD6. */
+const DS8626_REV12_PADS: Record<string, string> = {
+  SPI1: "NSS PA4 PA15; SCK PA5 PB3; MISO PA6 PB4; MOSI PA7 PB5 @5",
+  SPI2: "NSS PB9 PB12 PI0; SCK PB10 PB13 PI1; MISO PB14 PC2 PI2; MOSI PB15 PC3 PI3 @5",
+  SPI3: "NSS PA4 PA15; SCK PB3 PC10; MISO PB4 PC11; MOSI PB5 PC12 @6",
+}
+
+const PADS: Record<AfMap, Record<string, string>> = { f40x: DS8626_REV12_PADS, f42x: F42X_PADS, f74x: DS10916_REV5_PADS }
 
 export function spiPads(name: string, map: AfMap): SpiPad[] {
   const spec = PADS[map][name]
@@ -572,4 +923,33 @@ export function spiPads(name: string, map: AfMap): SpiPad[] {
     }
   }
   return out
+}
+
+export type I2sLine = "CK" | "WS" | "SD" | "MCK"
+export type I2sPad = { port: number; pin: number; af: number; line: I2sLine }
+
+/**
+ * MCK pads: I2S2_MCK PC6 AF5, I2S3_MCK PC7 AF6 (DS8626 Rev 12 Table 9; the same pads and AFs in
+ * DS9405 for the F42x). None on the F7 map: I²S is not modelled on the v2 blocks.
+ */
+const I2S_MCK: Record<AfMap, Record<string, SpiPad[]>> = {
+  f40x: { SPI2: [{ port: 2, pin: 6, af: 5, line: "MCK" }], SPI3: [{ port: 2, pin: 7, af: 6, line: "MCK" }] },
+  f42x: { SPI2: [{ port: 2, pin: 6, af: 5, line: "MCK" }], SPI3: [{ port: 2, pin: 7, af: 6, line: "MCK" }] },
+  f74x: {},
+}
+
+/** Pads the SoC wires to an SPI beyond `spiPads`: the I²S master clock. */
+export function i2sMckPads(name: string, map: AfMap): SpiPad[] {
+  return I2S_MCK[map][name] ?? []
+}
+
+/**
+ * The I²S signals of an SPI block: CK, WS and SD are its SCK, NSS and MOSI pads (RM0090 §28.4.1;
+ * DS8626 Table 9 lists them as "SPI2_SCK/I2S2_CK" and so on), plus MCK. Empty where the block has
+ * no I²S (SPI1/4/5/6, the F7 map).
+ */
+export function i2sPads(name: string, map: AfMap): I2sPad[] {
+  if (map === "f74x" || (name !== "SPI2" && name !== "SPI3")) return []
+  const as: Partial<Record<SpiLine, I2sLine>> = { SCK: "CK", NSS: "WS", MOSI: "SD", MCK: "MCK" }
+  return [...spiPads(name, map), ...i2sMckPads(name, map)].filter((p) => as[p.line]).map((p) => ({ port: p.port, pin: p.pin, af: p.af, line: as[p.line]! }))
 }

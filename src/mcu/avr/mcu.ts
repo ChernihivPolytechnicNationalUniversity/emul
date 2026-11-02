@@ -9,7 +9,11 @@ import { CpuHalt, emulatorError } from "../faults"
 import { EM_AVR, parseFirmware, type Firmware } from "../elf"
 import type { PadDrive } from "../periph/gpio"
 import type { PadRef } from "../pads"
+import { CoreDebugger } from "../debugger"
+import { AVR_DATA } from "@/debug/arch"
+import type { AvrRegisters, CoreDebugCommand, DebugStop, DebugWrite, InspectReply, InspectRequest, MemoryChunk } from "@/debug/protocol"
 import { AvrCpu, type AvrSystem } from "./cpu"
+import { AvrDebugTarget } from "./debug"
 import type { AvrProfile } from "./chip"
 import { Interrupts, type AvrBus, type Peripheral, type RegisterHooks } from "./io"
 import { Port } from "./port"
@@ -290,7 +294,7 @@ export class AvrMcu implements AvrBus, AvrSystem {
     return fromBoot ? !(this.fuses.lock & 0x08) : !(this.fuses.lock & 0x20)
   }
   /** Interrupts whose vectors sit in a read-protected section are held off while the other section runs. */
-  private interruptsHeld(): boolean {
+  interruptsHeld(): boolean {
     const vectorsInBoot = (this.mcucr & 0x02) !== 0
     const inBoot = this.cpu.pc >= this.bootStart
     if (vectorsInBoot === inBoot) return false
@@ -584,6 +588,7 @@ export class AvrMcu implements AvrBus, AvrSystem {
     this.division = 1 << this.clkpr
     const pc = this.fuses.high & 1 ? 0 : this.bootStart
     this.cpu.reset(pc)
+    this.cpu.dbg?.onReset()
     this.sliceCycle = 0
     this.sliceTime = t
     this.time = t
@@ -625,6 +630,138 @@ export class AvrMcu implements AvrBus, AvrSystem {
     this.firmwareName = name
     this.time = 0
     this.reset("power-on")
+    // Breakpoints go onto the new image before its first instruction runs.
+    this.cpu.dbg?.onLoad(this.firmware)
+  }
+
+  // --- debugging ---------------------------------------------------------------------------------
+
+  /** The debug unit, made the first time anything debugs this core (plain `cpu.breakpoints` halt it instead). */
+  get debugger(): CoreDebugger {
+    let d = this.cpu.dbg
+    if (!d) {
+      d = new CoreDebugger(new AvrDebugTarget(this.cpu))
+      this.cpu.dbg = d
+      d.onLoad(this.firmware)
+    }
+    return d
+  }
+
+  debug(cmd: CoreDebugCommand) {
+    const d = this.debugger
+    switch (cmd.op) {
+      case "breakpoints":
+        d.setBreakpoints(cmd.list)
+        break
+      case "catch":
+        break
+      case "resume":
+        d.resume()
+        break
+      case "step":
+        d.step(cmd.step)
+        break
+    }
+  }
+
+  /** Where the core is stopped for the debugger, when it is. */
+  get debugStop(): DebugStop | null {
+    return this.cpu.dbg?.stop ?? null
+  }
+
+  /**
+   * Registers and memory as they are, without side effects, in avr-gdb's addresses: flash
+   * from 0, data space at 0x800000, EEPROM at 0x810000. The request's writes come first.
+   */
+  inspect(req: InspectRequest): InspectReply {
+    const cpu = this.cpu
+    const writeErrors = req.write?.length ? req.write.map((w) => this.applyWrite(w)).filter((e): e is string => e !== null) : undefined
+    let regs: AvrRegisters | null = null
+    if (req.regs)
+      regs = { arch: "avr", r: [...cpu.data.subarray(0, 32), cpu.sp], pc: cpu.pc * 2, sp: cpu.sp, sreg: cpu.sreg, s: null, cycles: cpu.cycles, instructions: cpu.instructions, sleeping: cpu.sleeping }
+    return { regs, memory: (req.ranges ?? []).map((q) => this.peekRange(q.addr >>> 0, Math.max(0, Math.min(q.size, 1 << 20)))), stop: this.debugStop, time: this.time, halted: cpu.halted?.message ?? null, writeErrors }
+  }
+
+  /**
+   * I/O registers a read acts on (DS40002061B): reading UDR0 takes a byte from the receive
+   * buffer (§20.11.1), SPSR then SPDR clears SPIF (§19.5.2), ADCL locks the result until ADCH
+   * is read (§24.9.3), and the 16-bit timer's low bytes latch the high byte into TEMP (§15.3).
+   * The debugger leaves them unread.
+   */
+  private static readonly READ_ACTS = new Set(["UDR0", "SPSR", "SPDR", "ADCL", "ADCH", "TCNT1L", "TCNT1H", "ICR1L", "ICR1H"])
+
+  /** A data-space byte as the debugger may read it: null where a read would act or nothing is. */
+  peekData(a: number): number | null {
+    const cpu = this.cpu
+    if (a < 0x20 || a === SREG || a === 0x5d || a === 0x5e) return cpu.data[a]
+    if (a < 0x100) {
+      const name = this.names.get(a)
+      if (!name || AvrMcu.READ_ACTS.has(name)) return null
+      const at = cpu.at
+      cpu.at = cpu.cycles
+      try {
+        return cpu.ioRead[a](a) & 0xff
+      } finally {
+        cpu.at = at
+      }
+    }
+    return a <= cpu.ramEnd ? cpu.data[a] : null
+  }
+
+  private peekRange(addr: number, size: number): MemoryChunk {
+    const bytes = new Uint8Array(size)
+    const invalid: [number, number][] = []
+    const cpu = this.cpu
+    for (let i = 0; i < size; i++) {
+      const a = addr + i
+      let v: number | null = null
+      if (a < this.chip.flashBytes) v = (cpu.flash[a >> 1] >> ((a & 1) * 8)) & 0xff
+      else if (a >= AVR_DATA && a < AVR_DATA + 0x10000) v = this.peekData(a - AVR_DATA)
+      else if (a >= 0x810000 && a < 0x810000 + this.eeprom.length) v = this.eeprom[a - 0x810000]
+      if (v === null) {
+        const last = invalid[invalid.length - 1]
+        if (last && last[1] === a) last[1] = a + 1
+        else invalid.push([a, a + 1])
+      } else bytes[i] = v
+    }
+    return invalid.length ? { addr, bytes, invalid } : { addr, bytes }
+  }
+
+  /** One debugger change: a data-space store as the core would make it, EEPROM, or a register. */
+  private applyWrite(w: DebugWrite): string | null {
+    const cpu = this.cpu
+    const at = (a: number) => `0x${a.toString(16)}`
+    if (w.kind === "register") {
+      const v = w.value >>> 0
+      const r = /^r(\d{1,2})$/.exec(w.reg)
+      if (r && Number(r[1]) < 32) cpu.data[Number(r[1])] = v & 0xff
+      else if (w.reg === "sp") cpu.sp = v & 0xffff
+      else if (w.reg === "sreg") cpu.data[SREG] = v & 0xff
+      else if (w.reg === "pc") {
+        cpu.pc = (v >>> 1) & cpu.pcMask
+        // The stop is where the core now goes on from.
+        const d = cpu.dbg
+        if (d?.stop) d.stop = { ...d.stop, pc: cpu.pc * 2 }
+      } else return `${w.reg} is not a register of the AVR core`
+      return null
+    }
+    for (let i = 0; i < w.bytes.length; i++) {
+      const a = w.addr + i
+      const b = w.bytes[i]
+      if (a < AVR_DATA) return `${at(a)} is in flash, which only a new build changes`
+      if (a >= 0x810000 && a < 0x810000 + this.eeprom.length) {
+        this.eeprom[a - 0x810000] = b
+        continue
+      }
+      const d = a - AVR_DATA
+      if (d > cpu.ramEnd) return `nothing answers at ${at(a)}`
+      if (d >= 0x20 && d < 0x100 && !this.names.has(d) && d !== SREG && d !== 0x5d && d !== 0x5e) return `nothing answers at ${at(a)}`
+      const was = cpu.at
+      cpu.at = cpu.cycles
+      cpu.write(d, b)
+      cpu.at = was
+    }
+    return null
   }
 
   /** RESET pin level (unless RSTDISBL makes it PC6): low holds the core in reset, the rising edge starts the time-out. */
@@ -649,8 +786,9 @@ export class AvrMcu implements AvrBus, AvrSystem {
 
   // --- running -------------------------------------------------------------------------------
 
+  /** Firmware loaded, not halted, and not stopped by the debugger. */
   get running() {
-    return this.firmware !== null && this.cpu.halted === null
+    return this.firmware !== null && this.cpu.halted === null && !this.cpu.dbg?.stop
   }
   get inReset() {
     return this.resetPinLow || this.porHeld || this.bodHeld || this.time < this.resetUntil
@@ -691,6 +829,8 @@ export class AvrMcu implements AvrBus, AvrSystem {
         this.cpu.run(target)
         this.time = this.cycleTime(this.cpu.cycles)
         if (this.cpu.halted) return false
+        // Stopped for the debugger (a breakpoint, a finished step): the slice ends here.
+        if (this.cpu.dbg?.stop) return false
         if (this.resetRequest) {
           const cause = this.resetRequest
           this.reset(cause)
@@ -860,12 +1000,12 @@ export class AvrMcu implements AvrBus, AvrSystem {
   /**
    * Typical supply current, A (Table 29-8): active and idle scale with the clock (given at 5 V,
    * taken proportional to VCC as CMOS switching current is); the deep sleep modes use the
-   * Power-down and Power-save figures (3 V), with the watchdog's share when it runs.
+   * Power-down and Power-save figures (3 V), with the watchdog's share when it runs. At `vcc`, the part's own by default.
    */
-  supplyCurrent(asleep: number): number {
+  supplyCurrent(asleep: number, vcc = this.vcc): number {
     const e = this.chip.electrical.idd
     const mhz = this.hz / 1e6
-    const scale = this.vcc / 5
+    const scale = vcc / 5
     const active = e.activePerMHz * mhz * scale
     const m = this.sleepMode
     let sleeping = e.idlePerMHz * mhz * scale

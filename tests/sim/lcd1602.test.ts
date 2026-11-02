@@ -158,6 +158,14 @@ describe("HD44780 controller", () => {
   })
 })
 
+describe("the parallel module's bus direction", () => {
+  it("drives D0–D7 only to answer a read: with R/W on ground it never drives, so a core feeding it need not stop at each edge", () => {
+    const lcd = new LcdParallel("DS1", {})
+    expect(lcd.outputsWhenGrounded((pin) => pin === "RW")).toEqual([])
+    expect(lcd.outputsWhenGrounded((pin) => pin === "VSS")).toEqual(["D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7"])
+  })
+})
+
 describe("the glass (Vishay LCD-016M002B)", () => {
   it("threshold and saturation come from the recommended window at each temperature", () => {
     const two = dotRms(16, 5)

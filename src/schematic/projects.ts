@@ -26,6 +26,8 @@ const lab1RunningLightFiles = glob(() => import.meta.glob("../../firmware/lab1-r
 const lcd = glob(() => import.meta.glob("../../firmware/lcd/{display,touch,cube}/{Src,Inc,BSP,Fonts}/*.{c,cpp,h}", { query: "?raw", import: "default" }) as Raw)
 const cubeTexture = glob(() => import.meta.glob("../../firmware/lcd/cube/texture.c", { query: "?raw", import: "default" }) as Raw)
 const sketches = glob(() => import.meta.glob("../../firmware/arduino/examples/*/*.{ino,h,cpp}", { query: "?raw", import: "default" }) as Raw)
+const netduino = glob(() => import.meta.glob("../../firmware/netduino/Core/{Inc,Src}/*.{c,h}", { query: "?raw", import: "default" }) as Raw)
+const discovery = glob(() => import.meta.glob("../../firmware/discovery/*/Core/{Inc,Src}/*.{c,h}", { query: "?raw", import: "default" }) as Raw)
 const retarget = glob(() => import.meta.glob("../../firmware/lcd/retarget.c", { query: "?raw", import: "default" }) as Raw)
 
 const MAIN_H = '#ifndef MAIN_H\n#define MAIN_H\n\n#include "stm32f4xx_hal.h"\n\n#endif /* MAIN_H */\n'
@@ -51,6 +53,15 @@ async function under(files: Raw, prefix: string): Promise<SourceFile[]> {
   }
   return out
 }
+
+/** The Netduino Plus 2 example (`firmware/netduino`): Core/ with its own hal_conf for the 25 MHz HSE. */
+export const netduinoProject: ProjectLoader = () => under(netduino, "../../firmware/netduino/")
+
+/** One of the STM32F4-Discovery examples (`firmware/discovery/<name>`), Core/ only. */
+export const discoveryProject =
+  (name: string): ProjectLoader =>
+  () =>
+    under(discovery, `../../firmware/discovery/${name}/`)
 
 /** The lab's CubeIDE project (`firmware/lab1`), Core/ only. */
 export const lab1Project: ProjectLoader = () => under(lab1, "../../firmware/lab1/")

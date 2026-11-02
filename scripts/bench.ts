@@ -8,8 +8,10 @@
  *   pnpm bench "" 3 --workers  every core in a worker thread (the browser's arrangement)
  */
 import { readFileSync } from "node:fs"
-import { join } from "node:path"
+import { basename, join } from "node:path"
+import { builder } from "@/schematic/builder"
 import { GRID } from "@/schematic/geometry"
+import type { Schematic } from "@/schematic/types"
 import { examples } from "@/schematic/examples"
 import { SimLoop } from "@/sim/loop"
 import { spawnNodeCore } from "./lib/core-threads"
@@ -33,17 +35,47 @@ const FIRMWARE: Record<string, Record<string, string>> = {
   "nucleo-i2c": { U1: "nucleo-i2c.elf" },
   "nucleo-adc": { U1: "nucleo-adc.elf" },
   "nucleo-melody": { U1: "nucleo-melody.elf" },
+  "nano-dimmer": { U1: "../arduino/build/dimmer.elf" },
 }
 
+/** Circuits that are not palette examples: a Nano with a parallel 1602 and its contrast pot, as people wire it. */
+function nanoLcd(): Schematic {
+  const b = builder(GRID)
+  const elf = readFileSync(join(process.cwd(), "firmware", "arduino", "build", "lcd-hello.elf"))
+  const nano = b.place("arduino-nano", 0, 0, { firmware: "lcd-hello.elf", firmwareData: elf.toString("base64") })
+  const lcd = b.place("lcd-1602", 16, 4)
+  const pin: Record<string, string> = { D12: "J1-15", D11: "J1-14", D5: "J1-8", D4: "J1-7", D3: "J1-6", D2: "J1-5", "5V": "J2-4", GND: "J2-2" }
+  for (const [p, lp] of [["D12", "RS"], ["D11", "E"], ["D5", "D4"], ["D4", "D5"], ["D3", "D6"], ["D2", "D7"], ["5V", "VDD"], ["5V", "A"], ["GND", "VSS"], ["GND", "RW"], ["GND", "K"]]) b.wire(nano, pin[p], lcd, lp)
+  const pot = b.place("potentiometer", 16, 20, { pos: "0.8" })
+  const g = b.place("ground", 22, 26)
+  b.wire(nano, pin["5V"], pot, "1")
+  b.wire(pot, "2", g, "GND")
+  b.wire(pot, "W", lcd, "V0")
+  return b.doc
+}
+
+const scenarios: { id: string; build: () => Schematic }[] = []
 for (const ex of examples) {
   const firmware = FIRMWARE[ex.id]
-  if (!firmware || !ex.id.includes(filter)) continue
-  const doc = ex.build(GRID)
-  for (const [ref, name] of Object.entries(firmware)) {
-    const obj = doc.objects.find((o) => o.props?.ref === ref)!
-    const elf = readFileSync(join(process.cwd(), "firmware", "examples", name))
-    obj.props = { ...obj.props, firmware: name, firmwareData: elf.toString("base64") }
-  }
+  if (!firmware) continue
+  scenarios.push({
+    id: ex.id,
+    build() {
+      const doc = ex.build(GRID)
+      for (const [ref, name] of Object.entries(firmware)) {
+        const obj = doc.objects.find((o) => o.props?.ref === ref)!
+        const elf = readFileSync(join(process.cwd(), "firmware", "examples", name))
+        obj.props = { ...obj.props, firmware: basename(name), firmwareData: elf.toString("base64") }
+      }
+      return doc
+    },
+  })
+}
+scenarios.push({ id: "nano-lcd1602", build: nanoLcd })
+
+for (const sc of scenarios) {
+  if (!sc.id.includes(filter)) continue
+  const doc = sc.build()
   const loop = new SimLoop()
   if (workers) loop.spawnCore = spawnNodeCore
   loop.setDoc(doc)
@@ -67,7 +99,7 @@ for (const ex of examples) {
   const mhz = mcus.map((m) => ((m.sysclk ?? 0) / 1e6).toFixed(0)).join("+")
   const hosts = [...new Set(mcus.map((m) => m.host))].join(", ")
   console.log(
-    `${ex.id.padEnd(22)} ${(snap.time / wall).toFixed(3).padStart(6)}×  sim ${snap.time.toFixed(2)} s in ${wall.toFixed(1)} s wall` +
+    `${sc.id.padEnd(22)} ${(snap.time / wall).toFixed(3).padStart(6)}×  sim ${snap.time.toFixed(2)} s in ${wall.toFixed(1)} s wall` +
       `  ${(instr / wall / 1e6).toFixed(1).padStart(5)} MIPS @ ${mhz} MHz  ${(ticks / wall).toFixed(0)} ticks/s  ${hosts}`,
   )
   loop.setRunning(false)

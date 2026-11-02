@@ -12,7 +12,7 @@ import { DebugInfo } from "@/debug/info"
 import { assignment, registerAssignment } from "@/debug/assign"
 import { evaluateExpression, Pending } from "@/debug/eval"
 import { MemorySnapshot } from "@/debug/memory"
-import type { BreakpointSpec, DebugStop, DebugWrite, StepRequest } from "@/debug/protocol"
+import type { ArmRegisters, BreakpointSpec, DebugStop, DebugWrite, StepRequest } from "@/debug/protocol"
 import { normalizeDebug } from "@/debug/saved"
 import { unwind } from "@/debug/unwind"
 import { leBytes, show } from "@/debug/values"
@@ -172,8 +172,9 @@ describe("writes at a stop on a bare F429", () => {
     expect(r.writeErrors ?? []).toEqual([])
     expect(r.memory[0].bytes[0]).toBe(42)
     expect(r.regs!.r[0]).toBe(0x1234)
-    expect(r.regs!.xpsr >>> 28, "NZCV").toBe(0xf)
-    expect(r.regs!.xpsr & 0x1ff, "IPSR is the core's").toBe(0)
+    const regs = r.regs as ArmRegisters
+    expect(regs.xpsr >>> 28, "NZCV").toBe(0xf)
+    expect(regs.xpsr & 0x1ff, "IPSR is the core's").toBe(0)
   })
 
   it("sets GPIOB->ODR: LD1's pad follows at once", () => {
@@ -230,7 +231,14 @@ function stopView(m: Stm32, di: DebugInfo) {
   const ram = m.chip.memory.filter((r) => r.kind === "ram" && !r.external).map((r) => ({ addr: r.base, size: r.size }))
   const reply = m.inspect({ regs: true, ranges: ram })
   const mem = new MemorySnapshot(di.firmware.segments, reply.memory)
-  const frames = unwind(di, reply.regs!, mem)
+  // As the session does: what the unwinding reached for and did not have is fetched, and the stack walked again.
+  let frames = unwind(di, reply.regs!, mem)
+  for (let round = 0; round < 4; round++) {
+    const misses = mem.takeMisses()
+    if (!misses.length) break
+    for (const c of m.inspect({ ranges: misses }).memory) mem.add(c)
+    frames = unwind(di, reply.regs!, mem)
+  }
   /** An expression in a frame, as the watch list shows it; memory the snapshot lacks is fetched as the session would. */
   const value = (expr: string, frame = 0) => {
     for (let round = 0; ; round++) {
@@ -446,6 +454,8 @@ describe.each(["O0", "O2"])("the debugger's test program at -%s", (opt) => {
         expect(view.frames[4]?.name).toBe("main")
         expect(facts.map((_, i) => view.value("n", i)).join(" "), "each with its own n").toBe("2 3 4 5")
         expect(view.frames[view.frames.length - 1]?.name).toBe("Reset_Handler")
+        // LR's reset value (0xFFFFFFFF) ends the stack: it is no EXC_RETURN with a context under it.
+        expect(view.frames.filter((f) => f.name === "Reset_Handler"), names(view.frames)).toHaveLength(1)
       })
 
       it("steps out of two activations: back in factorial(3), then factorial(4)", () => {

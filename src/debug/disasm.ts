@@ -5,6 +5,7 @@
  * where they are), and the source line each group of instructions came from.
  */
 import { blockName } from "@/mcu/blocks"
+import { avrDisasm, avrTwoWord } from "@/mcu/avr/disasm"
 import { decode } from "@/mcu/decode"
 import { symbolAt, type MappingSymbol, type Symbol } from "@/mcu/elf"
 import type { LineTable } from "./lines"
@@ -23,6 +24,8 @@ export type DisasmContext = {
   lines: LineTable | null
   /** The text of a source line, when the file is at hand. */
   sourceLine?: (path: string, line: number) => string | null
+  /** The core's instruction set; Thumb when absent. */
+  arch?: "arm" | "avr"
 }
 
 const hex = (v: number, width = 8) => `0x${(v >>> 0).toString(16).padStart(width, "0")}`
@@ -107,6 +110,23 @@ export function disassemble(ctx: DisasmContext, start: number, end: number): Dis
     if (hw1 === null) {
       out.push({ kind: "unreadable", addr })
       addr += 2
+      continue
+    }
+    if (ctx.arch === "avr") {
+      const two = avrTwoWord(hw1)
+      const w2 = two ? u16(addr + 2) : 0
+      if (w2 === null) {
+        out.push({ kind: "unreadable", addr })
+        addr += 2
+        continue
+      }
+      const insn = avrDisasm(hw1, w2, addr)
+      // objdump's comment, with the symbol a jump goes to or a data address is in.
+      const named = insn.target !== null ? symbolize(ctx.symbols, insn.target) : /^(lds|sts)$/.test(insn.mnemonic) ? symbolize(ctx.symbols, parseInt(insn.comment, 16)) : ""
+      const comment = insn.comment ? `; ${insn.comment}${named ? ` ${named}` : ""}` : ""
+      const bytes = two ? `${hw1.toString(16).padStart(4, "0")} ${w2.toString(16).padStart(4, "0")}` : hw1.toString(16).padStart(4, "0")
+      out.push({ kind: "insn", addr, size: insn.size, bytes, mnemonic: insn.mnemonic, operands: insn.operands, comment, target: insn.target })
+      addr += insn.size
       continue
     }
     const wide = (hw1 & 0xf800) >= 0xe800

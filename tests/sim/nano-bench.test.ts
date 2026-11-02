@@ -276,7 +276,8 @@ describe("Arduino Nano: two of its pins tied together keep it running as it was"
     // The same core, its time and instruction count carried on: not reloaded with the image's (factory) fuses.
     expect(after.instructions).toBeGreaterThan(before.instructions)
     expect(after.labels?.fuses).toBe("L:FF H:DA E:FD lock:0F")
-    expect(after.host).toBe("in-process")
+    // It stays where it ran (in this thread, or its worker, then in step): a move would reload it.
+    expect(after.host.split(" ")[0]).toBe(before.host.split(" ")[0])
     const t = loop.snapshot()!.terminals[b.term!.id]
     expect(t.text).toMatch(/^tick 0\r\ntick 1\r\ntick 2\r\n/)
     expect(t.framingErrors).toBe(0)

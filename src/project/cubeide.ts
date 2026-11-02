@@ -14,6 +14,9 @@ type TargetSpec = { family: string; defines: string[] }
 const CUBEIDE: Record<Stm32Target, { fpu: string; clockMHz: number }> = {
   stm32f429zi: { fpu: "fpv4-sp-d16", clockMHz: 180 },
   stm32f746ig: { fpu: "fpv5-sp-d16", clockMHz: 216 },
+  // DS8626 Table 14: 168 MHz.
+  stm32f407vg: { fpu: "fpv4-sp-d16", clockMHz: 168 },
+  stm32f405rg: { fpu: "fpv4-sp-d16", clockMHz: 168 },
 }
 
 const OPTIMIZATION: Record<OptLevel, string | null> = { "-O0": null, "-Og": "og", "-O1": "o1", "-O2": "o2", "-O3": "o3", "-Os": "os" }

@@ -10,6 +10,11 @@
  */
 import type { SourceFile } from "emul-shared/source"
 import { chipById, type ChipProfile } from "@/mcu/chip"
+import { EM_ARM, EM_AVR } from "@/mcu/elf"
+import { AVR_DATA } from "./arch"
+
+/** The data space read at a stop: registers, I/O and SRAM of the parts modelled (the 328P ends at 0x8FF). */
+const AVR_DATA_WINDOW = 0x900
 import type { Firmware } from "@/mcu/elf"
 import { base64ToBytes } from "@/lib/bytes"
 import type { BlockInfo, BreakpointSpec, CoreDebugCommand, CoreRegisters, DebugStop, DebugWrite, InspectReply, InspectRequest, StepRequest } from "./protocol"
@@ -171,7 +176,7 @@ export class DebugController {
     let fw: Firmware | null = null
     try {
       const bytes = base64ToBytes(b.image)
-      fw = analysis.parseFirmware(bytes.buffer as ArrayBuffer, b.imageName)
+      fw = analysis.parseFirmware(bytes.buffer as ArrayBuffer, b.imageName, [EM_ARM, EM_AVR])
     } catch {
       fw = null
     }
@@ -292,7 +297,9 @@ export class DebugController {
    */
   private async refresh(b: Board, stop: DebugStop | null, write?: DebugWrite[]): Promise<string[]> {
     const gen = b.gen
-    const ram = (b.chipProfile?.memory ?? []).filter((r) => r.kind === "ram" && !r.external).map((r) => ({ addr: r.base, size: r.size }))
+    // An AVR's registers, I/O and SRAM are its data space, at 0x800000 in the debugger's addresses.
+    const avr = this.info(b.id)?.arch.id === "avr" || b.chip.startsWith("ATMEGA")
+    const ram = avr ? [{ addr: AVR_DATA, size: AVR_DATA_WINDOW }] : (b.chipProfile?.memory ?? []).filter((r) => r.kind === "ram" && !r.external).map((r) => ({ addr: r.base, size: r.size }))
     const [reply, a] = await Promise.all([this.bridge.inspect(b.id, { regs: true, ranges: ram, write }), analysisReady])
     const refused = reply?.writeErrors ?? []
     if (gen !== b.gen) return refused
@@ -305,11 +312,11 @@ export class DebugController {
     const mem = new a.MemorySnapshot(info?.firmware.segments ?? [], reply.memory)
     const real = reply.stop ?? stop
     const frames = info ? a.unwind(info, reply.regs, mem) : []
-    const stay = write !== undefined && reply.regs.r[15] === b.view.regs?.r[15]
+    const stay = write !== undefined && reply.regs.pc === b.view.regs?.pc
     b.view = {
       ...b.view,
       status: real ? "stopped" : "paused",
-      stop: real ?? { reason: "pause", pc: reply.regs.r[15] },
+      stop: real ?? { reason: "pause", pc: reply.regs.pc },
       regs: reply.regs,
       mem,
       time: reply.time,
@@ -397,7 +404,7 @@ export class DebugController {
       const stopped = this.nextStop(b)
       this.step(b.id, { kind: "over" })
       await stopped
-      const pc = b.view.regs?.r[15]
+      const pc = b.view.regs?.pc
       if (pc === undefined || b.view.stop?.reason !== "step") return
       if (!info.inlineLevels(pc).some((l) => l.scope === scope)) return
     }

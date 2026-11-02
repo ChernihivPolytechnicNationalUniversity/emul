@@ -56,14 +56,22 @@ const u32 = (v: number) => v >>> 0
 export function frameContext(env: Env, frame: StackFrame | null = env.frame): ExprContext {
   const r = frame?.regs.r ?? []
   const s = frame?.regs.s ?? null
+  const avr = env.info.arch.id === "avr"
   const reg = (n: number): number | null => {
+    // The AVR's SP (32), and a register as a base address (DW_OP_breg28 is Y): the pair from it up, r28:r29.
+    if (avr) {
+      if (n === 32) return r[32] ?? null
+      const lo = r[n]
+      const hi = r[n + 1]
+      return n < 31 && lo !== null && lo !== undefined && hi !== null && hi !== undefined ? lo | (hi << 8) : null
+    }
     if (n < 16) return r[n] ?? null
     if (n >= 64 && n < 96) return s ? s[n - 64] : null
     if (n >= 256 && n < 272) return s ? s[(n - 256) * 2] : null
     return null
   }
   const cfa = () => frame?.cfa ?? null
-  const base: ExprContext = { reg, read: (a, size) => env.mem.read(a, size), cfa }
+  const base: ExprContext = { reg, read: (a, size) => env.mem.read(a, size), cfa, dataAddress: avr ? env.info.arch.dataAddress : undefined }
   return {
     ...base,
     frameBase: () => {
@@ -132,6 +140,17 @@ export function valueBytes(env: Env, v: Value, size = byteSize(v)): Uint8Array {
 }
 
 function registerBytes(env: Env, reg: number, size: number): Uint8Array {
+  if (env.info.arch.id === "avr") {
+    // Eight-bit registers: a wider value goes on in the ones above (r24:r25 for an int).
+    const r = env.frame?.regs.r ?? []
+    const out = new Uint8Array(size)
+    for (let i = 0; i < size; i++) {
+      const v = reg + i < 32 ? (r[reg + i] ?? null) : null
+      if (v === null) throw new Unreadable(`not saved in this frame`)
+      out[i] = v & 0xff
+    }
+    return out
+  }
   const ctx = frameContext(env)
   const out = new Uint8Array(Math.max(size, 4))
   const put = (at: number, v: number | null) => {
@@ -202,8 +221,12 @@ export function scalarOf(env: Env, v: Value): Scalar {
       return { kind: "int", value: t.signed ? BigInt.asIntN(t.size * 8, raw) : raw, signed: t.signed, size: t.size }
     }
     case "pointer":
-    case "reference":
-      return { kind: "pointer", value: Number(leValue(valueBytes(env, v, 4)) & 0xffffffffn), target: t.target }
+    case "reference": {
+      // The target's own pointers may be narrower than the debugger's addresses (the AVR's 16 bits); ones the debugger made are not.
+      const size = t.size || 4
+      const raw = Number(leValue(valueBytes(env, v, size)) & 0xffffffffn)
+      return { kind: "pointer", value: size < 4 ? env.info.arch.pointerToAddress(raw, strip(t.target).kind === "function") : raw, target: t.target }
+    }
     case "array":
       // An array decays to the address of its first element.
       if (v.loc.kind === "memory") return { kind: "pointer", value: u32(v.loc.addr), target: t.element }

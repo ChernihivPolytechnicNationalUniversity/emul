@@ -12,6 +12,8 @@
  * The core is interpreted from a predecoded table (decode.ts): each flash word decodes once
  * into a closure carrying its operands; self-programming (SPM) drops what it rewrote.
  */
+import { BreakpointSet } from "../breakpoints"
+import { DBG_STEP_QUIET, DBG_STOP, type CoreDebugger } from "../debugger"
 import { CpuHalt } from "../faults"
 
 import { SPH, SPL, SREG, SREG_I } from "./sreg"
@@ -40,6 +42,8 @@ export interface AvrSystem {
   lpm(byteAddr: number): number
   /** A peripheral event came due (`nextEventCycle`). */
   service(): void
+  /** Pending interrupts are held off whatever SREG.I says (boot lock bits, Tables 27-2/27-3). */
+  interruptsHeld?(): boolean
 }
 
 export const DATA_SIZE = 0x900
@@ -81,6 +85,15 @@ export class AvrCpu {
   onBreak: (pc: number) => void = (pc) => {
     throw new CpuHalt("bkpt", "break", pc * 2)
   }
+  /**
+   * Byte addresses the run loop stops at before executing. Without a debugger (`dbg`) a hit
+   * halts the core; with one, the debugger decides (see debugger.ts, avr/debug.ts).
+   */
+  readonly breakpoints = new BreakpointSet()
+  /** The debug unit, once something debugs this core. */
+  dbg: CoreDebugger | null = null
+  /** The debugger asks to see every boundary: a step in progress, a stop to take. */
+  dbgActive = false
   /** Data-space accesses outside the implemented memory, counted for the inspector. */
   stray = 0
   /**
@@ -213,6 +226,8 @@ export class AvrCpu {
             this.sleepCycles += until - this.cycles
             this.cycles = until
           }
+        } else if (this.dbg !== null || this.breakpoints.size !== 0) {
+          if (this.runWatched(limit)) break
         } else {
           // The deadline is read on every instruction: a register write can bring an event closer.
           while (this.cycles < limit && this.cycles < this.nextEventCycle) {
@@ -236,6 +251,54 @@ export class AvrCpu {
     }
   }
 
+  /**
+   * The run loop with breakpoints or a debugger: each boundary is looked at before the
+   * instruction there runs. An interrupt taken ends the boundary, so the debugger sees the
+   * vector before it runs. Returns true when the core stopped.
+   */
+  private runWatched(limit: number): boolean {
+    const data = this.data
+    const bps = this.breakpoints
+    const dbg = this.dbg
+    while (this.cycles < limit && this.cycles < this.nextEventCycle) {
+      const pc = this.pc
+      let quiet = false
+      if (dbg !== null) {
+        if (this.dbgActive || bps.has(pc << 1)) {
+          const act = dbg.check()
+          if (act === DBG_STOP) return true
+          quiet = act === DBG_STEP_QUIET
+        }
+      } else if (bps.has(pc << 1)) {
+        this.halted = new CpuHalt("bkpt", "breakpoint", pc << 1)
+        return true
+      }
+      if (!quiet && this.irqPending && data[SREG] & SREG_I && this.cycles >= this.irqHold) {
+        this.interrupt()
+        if (this.pc !== pc) continue
+      }
+      this.opPc = pc
+      const op = this.ops[pc] ?? this.decodeAt(pc)
+      try {
+        op(this)
+      } catch (e) {
+        // BREAK with a debugger attached is a stop on the instruction, not a halt.
+        if (!(e instanceof CpuHalt && e.reason === "bkpt" && dbg !== null)) throw e
+        this.pc = pc
+        dbg.onBkpt(e.detail)
+        continue
+      }
+      this.instructions++
+      if (this.stop || this.sleeping) break
+    }
+    return false
+  }
+
+  /** An interrupt would be taken before the next instruction. */
+  interruptDue(): boolean {
+    return this.irqPending && (this.data[SREG] & SREG_I) !== 0 && this.cycles >= this.irqHold && !this.system.interruptsHeld?.()
+  }
+
   private wake() {
     this.sleeping = false
     const extra = this.system.wakeCycles()
@@ -250,6 +313,8 @@ export class AvrCpu {
   private interrupt() {
     const vector = this.system.takeInterrupt()
     if (vector === 0) return
+    const sp = this.sp
+    this.dbg?.onException(vector, this.pc << 1, sp, 0)
     this.pushPc(this.pc)
     this.data[SREG] &= ~SREG_I
     this.pc = (this.vectorBase + (vector - 1) * this.vectorWords) & this.pcMask

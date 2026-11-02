@@ -196,6 +196,8 @@ async function buildAvr(spec: AvrSpec, files: SourceFile[], options: BuildOption
       `-mmcu=${spec.mcu}`,
       `-DF_CPU=${fcpu}UL`,
       opt,
+      // Debian's avr-gcc 5.4 writes stabs for a bare -g: DWARF has to be asked for.
+      "-gdwarf-4",
       "-g3",
       "-Wall",
       "-ffunction-sections",
@@ -322,7 +324,7 @@ async function buildSketch(spec: AvrSpec, files: SourceFile[], options: BuildOpt
   const libs = await librariesFor(files.map((f) => f.content))
   const projectIncludes = [...new Set(files.filter((f) => HEADER.test(f.path)).map((f) => path.dirname(f.path)))]
   const includes = [...projectIncludes, ...core.includes, ...libs.flatMap((l) => l.includes)].map((i) => `-I${i}`)
-  const base = [`-mmcu=${spec.mcu}`, `-DF_CPU=${fcpu}L`, ...ARDUINO_DEFINES, "-g", "-ffunction-sections", "-fdata-sections", "-fdiagnostics-color=never", "-fmax-errors=50", ...includes]
+  const base = [`-mmcu=${spec.mcu}`, `-DF_CPU=${fcpu}L`, ...ARDUINO_DEFINES, "-gdwarf-4", "-ffunction-sections", "-fdata-sections", "-fdiagnostics-color=never", "-fmax-errors=50", ...includes]
   const flags = (file: string, quiet: boolean) => {
     const level = quiet ? ["-Os", "-w"] : [opt, "-Wall"]
     if (ASM.test(file)) return [...base, "-x", "assembler-with-cpp"]
@@ -358,7 +360,7 @@ async function buildSketch(spec: AvrSpec, files: SourceFile[], options: BuildOpt
   if (failed) return { ok: false, log: lines.join("\n"), error: failed }
   const archive = await exec(`${AVR_GCC}ar`, ["rcs", "core.a", ...coreJobs.map((j) => j.out)], src, env)
   if (archive.error) return { ok: false, log: lines.join("\n") + archive.output, error: archive.error }
-  const link = await exec(driver, [`-mmcu=${spec.mcu}`, "-w", "-Os", "-g", "-Wl,--gc-sections", ...jobs.map((j) => j.out), "core.a", "-o", "firmware.elf", "-Wl,-Map=firmware.map", "-lm"], src, env)
+  const link = await exec(driver, [`-mmcu=${spec.mcu}`, "-w", "-Os", "-gdwarf-4", "-Wl,--gc-sections", ...jobs.map((j) => j.out), "core.a", "-o", "firmware.elf", "-Wl,-Map=firmware.map", "-lm"], src, env)
   if (link.output.trim()) lines.push(link.output)
   if (link.error) return { ok: false, log: lines.join("\n"), error: link.error }
   const size = await exec(`${AVR_GCC}size`, ["firmware.elf"], src, env)

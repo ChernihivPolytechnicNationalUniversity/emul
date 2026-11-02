@@ -17,6 +17,8 @@ export type Firmware = {
   mapping?: MappingSymbol[]
   /** The ELF image as loaded: the debugger reads its sections (DWARF) from it. */
   image?: Uint8Array
+  /** e_machine of an ELF image (EM_ARM, EM_AVR). */
+  machine?: number
 }
 
 const PT_LOAD = 1
@@ -96,7 +98,7 @@ export function parseElf(buf: ArrayBuffer, machines: readonly number[] = [EM_ARM
   }
   symbols.sort((a, b) => a.value - b.value)
   mapping.sort((a, b) => a.addr - b.addr)
-  return { format: "elf", segments, entry, symbols, mapping, image: bytes }
+  return { format: "elf", segments, entry, symbols, mapping, image: bytes, machine }
 }
 
 /**
@@ -221,9 +223,10 @@ export function symbolAt(symbols: Symbol[], addr: number): { symbol: Symbol; off
     } else hi = mid - 1
   }
   if (best < 0) return null
-  // Prefer a function symbol among equal addresses.
+  // Prefer a function symbol among equal addresses, then an object (`first` over the linker's `__data_start`).
   let i = best
   while (i > 0 && symbols[i - 1].value === symbols[best].value) i--
   for (let j = i; j <= best; j++) if (symbols[j].type === "func") return { symbol: symbols[j], offset: addr - symbols[j].value }
+  for (let j = i; j <= best; j++) if (symbols[j].type === "object") return { symbol: symbols[j], offset: addr - symbols[j].value }
   return { symbol: symbols[best], offset: addr - symbols[best].value }
 }

@@ -107,6 +107,13 @@ const BUILTIN: Record<string, DType> = {
   bool: base("bool", 1, DW_ATE.boolean),
   void: VOID,
 }
+/** Where avr-gcc's sizes differ from the 32-bit ones (int, unsigned, double: avr-gcc 5.4's double is a float). */
+const AVR_BUILTIN: Record<string, DType> = {
+  int: base("int", 2, DW_ATE.signed),
+  "unsigned int": base("unsigned int", 2, DW_ATE.unsigned),
+  double: base("double", 4, DW_ATE.float),
+  "long double": base("long double", 4, DW_ATE.float),
+}
 const pointerTo = (t: DType): DType => ({ kind: "pointer", size: 4, target: t })
 
 /** A computed value with no home in the target. */
@@ -427,7 +434,11 @@ class Parser {
     let type: DType | null = null
     const spelled = words.join(" ")
     // Keywords only (`unsigned`, `long long int`): a built-in type, however it is spelled.
-    if (!tag && words.every((w) => keywords.has(w))) type = BUILTIN[spelled] ?? BUILTIN[normalizeBuiltin(words)] ?? null
+    if (!tag && words.every((w) => keywords.has(w))) {
+      // The AVR's int is 16 bits and its double 32 (avr-gcc 5.4): the program's own base types say so, where it has them.
+      if (this.env.info.arch.id === "avr") type = this.env.info.typeNamed(spelled) ?? this.env.info.typeNamed(normalizeBuiltin(words)) ?? AVR_BUILTIN[normalizeBuiltin(words)] ?? null
+      type ??= BUILTIN[spelled] ?? BUILTIN[normalizeBuiltin(words)] ?? null
+    }
     if (!type) type = this.env.info.typeNamed(tag ? `${tag} ${spelled}` : spelled)
     if (!type) return null
     for (;;) {
@@ -488,6 +499,16 @@ const REGS = ["r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10",
 
 function register(env: Env, name: string): Value {
   const r = env.frame?.regs.r ?? []
+  if (env.info.arch.id === "avr") {
+    // r0–r31 a byte each, SP and the PC as addresses.
+    const m = /^r(\d{1,2})$/.exec(name)
+    const n = m && Number(m[1]) < 32 ? Number(m[1]) : name === "sp" ? 32 : -1
+    if (name === "pc" && env.frame) return intValue(env.frame.pc, pointerTo(VOID))
+    if (n < 0) throw new Unreadable(`no register $${name}`)
+    const v = r[n]
+    if (v === null || v === undefined) throw new Unreadable(`$${name} is not saved in this frame`)
+    return n === 32 ? intValue(env.info.arch.dataAddress(v), pointerTo(VOID)) : intValue(v, BUILTIN["unsigned char"])
+  }
   const n = REGS.indexOf(name === "r13" ? "sp" : name === "r14" ? "lr" : name === "r15" ? "pc" : name)
   if (n >= 0) {
     const v = r[n]

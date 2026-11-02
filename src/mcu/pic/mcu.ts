@@ -1207,11 +1207,11 @@ export class PicMcu implements PicBus, PicSystem {
    * Typical supply current, A (decision D45): awake, D012A (INTOSC 4 MHz) by VDD, scaled with FOSC as
    * CMOS switching current is; asleep, IPD (D020) plus the WDT (D021) and BOR (D022) when they run.
    */
-  supplyCurrent(asleep: number): number {
+  supplyCurrent(asleep: number, vdd = this.vdd): number {
     const e = this.chip.electrical
-    const active = byVdd(e.iddIntosc, this.vdd) * (this.fosc / 4e6)
-    let sleeping = byVdd(e.ipd, this.vdd)
-    if (this.config & 0x04) sleeping += byVdd(e.iwdt, this.vdd)
+    const active = byVdd(e.iddIntosc, vdd) * (this.fosc / 4e6)
+    let sleeping = byVdd(e.ipd, vdd)
+    if (this.config & 0x04) sleeping += byVdd(e.iwdt, vdd)
     if (this.config & 0x40) sleeping += e.ibor
     if (this.inReset || !this.running) return active
     return active * (1 - asleep) + sleeping * asleep

@@ -234,7 +234,7 @@ function WatchView({ debug, boardId, view, watches, onWatches }: { debug: DebugC
 function CallStackView({ debug, boardId, view }: { debug: DebugController; boardId: string; view: BoardView }) {
   const why = notStopped(view)
   if (why) return <Empty>{why}</Empty>
-  if (!view.frames.length) return <Empty>No call frame information: the stack cannot be walked. The PC is 0x{view.regs!.r[15].toString(16)}.</Empty>
+  if (!view.frames.length) return <Empty>No call frame information: the stack cannot be walked. The PC is 0x{view.regs!.pc.toString(16)}.</Empty>
   return (
     <div className="py-0.5 font-mono text-[11px]">
       {view.frames.map((f, i) => (
@@ -328,6 +328,11 @@ function BreakpointsView({ info, breakpoints, onBreakpoints, catchFaults, onCatc
 const hex8 = (v: number) => `0x${(v >>> 0).toString(16).padStart(8, "0")}`
 const CORE = ["r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "r12", "sp", "lr", "pc"]
 
+/** The AVR's status flags, I T H S V N Z C from bit 7 down, capitals for the ones set. */
+function sregText(v: number) {
+  return [..."ITHSVNZC"].map((c, i) => (v & (0x80 >> i) ? c : c.toLowerCase())).join("")
+}
+
 function xpsrText(v: number) {
   const f = (bit: number, c: string) => (v & (1 << bit) ? c : c.toLowerCase())
   const ipsr = v & 0x1ff
@@ -343,25 +348,25 @@ function RegistersView({ debug, boardId, view }: { debug: DebugController; board
   const [editing, setEditing] = React.useState<{ name: string; text: string; busy?: boolean } | null>(null)
   const why = notStopped(view)
   if (why) return <Empty>{why}</Empty>
-  const regs = view.regs!
-  const prev = view.prevRegs
+  const all = view.regs!
   const frame = view.frames[view.frame]
   // A caller's frame knows the registers the calls kept (r4–r11, SP, PC); the rest are the callee's business.
   const outer = view.frame > 0 && frame
-  const r = outer ? frame.regs.r : regs.r
+  const r = outer ? frame.regs.r : all.r
   const commit = async (name: string, text: string) => {
     if (!text.trim()) return setEditing(null)
     setEditing({ name, text, busy: true })
-    const error = await debug.setRegister(boardId, name, text, CORE.includes(name) ? view.frame : 0)
+    const error = await debug.setRegister(boardId, name, text, (all.arch === "avr" ? /^(r\d+|sp)$/i.test(name) : CORE.includes(name)) ? view.frame : 0)
     if (error) {
       toast.error(`Cannot set ${name}`, { description: error })
       setEditing({ name, text })
     } else setEditing(null)
   }
-  const cell = (name: string, value: number | null, before: number | null | undefined, extra?: string, opts: { settable?: boolean; editText?: string } = {}) => {
+  const cell = (name: string, value: number | null, before: number | null | undefined, extra?: string, opts: { settable?: boolean; editText?: string; width?: number } = {}) => {
     const edit = editing?.name === name ? editing : null
     const canSet = opts.settable !== false && value !== null
-    const start = () => setEditing({ name, text: opts.editText ?? hex8(value ?? 0) })
+    const hex = (v: number) => (opts.width ? `0x${v.toString(16).padStart(opts.width, "0")}` : hex8(v))
+    const start = () => setEditing({ name, text: opts.editText ?? hex(value ?? 0) })
     return (
       <div key={name} className="group flex h-5 min-w-0 items-center gap-2 px-2" title={extra}>
         <span className="w-14 shrink-0 text-violet-700 dark:text-violet-300">{name}</span>
@@ -387,7 +392,7 @@ function RegistersView({ debug, boardId, view }: { debug: DebugController; board
             className={cn("tabular-nums", value !== null && before !== undefined && before !== null && before !== value && "rounded-sm bg-amber-200/60 px-0.5 dark:bg-amber-500/30", value === null && "text-muted-foreground", canSet && "cursor-text")}
             onDoubleClick={canSet ? start : undefined}
           >
-            {value === null ? "—" : hex8(value)}
+            {value === null ? "—" : hex(value)}
           </span>
         )}
         {extra && !edit && <span className="min-w-0 truncate text-muted-foreground">{extra}</span>}
@@ -399,6 +404,26 @@ function RegistersView({ debug, boardId, view }: { debug: DebugController; board
       </div>
     )
   }
+  if (all.arch === "avr") {
+    const prev = view.prevRegs?.arch === "avr" ? view.prevRegs : null
+    const now = view.frame === 0
+    const pair = (lo: number) => (r[lo] === null || r[lo] === undefined || r[lo + 1] === null || r[lo + 1] === undefined ? null : r[lo]! | (r[lo + 1]! << 8))
+    const prevPair = (lo: number) => (prev && now ? prev.r[lo] | (prev.r[lo + 1] << 8) : undefined)
+    return (
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] py-0.5 font-mono text-[11px]">
+        {cell("PC", outer ? frame.pc : all.pc, now ? prev?.pc : undefined, undefined, { settable: !outer, width: 4 })}
+        {cell("SP", r[32] ?? null, now ? prev?.sp : undefined, undefined, { settable: !outer || frame.regs.rHome[32] !== null, width: 4 })}
+        {cell("SREG", outer ? null : all.sreg, now ? prev?.sreg : undefined, outer ? undefined : sregText(all.sreg), { settable: !outer, width: 2 })}
+        {cell("X", pair(26), prevPair(26), "r27:r26", { settable: false, width: 4 })}
+        {cell("Y", pair(28), prevPair(28), "r29:r28", { settable: false, width: 4 })}
+        {cell("Z", pair(30), prevPair(30), "r31:r30", { settable: false, width: 4 })}
+        {r.slice(0, 32).map((v, i) => cell(`r${i}`, v ?? null, now ? prev?.r[i] : undefined, v === null || v === undefined ? undefined : String(v), { settable: !outer || frame.regs.rHome[i] !== null, width: 2 }))}
+        {cell("cycles", all.cycles, undefined, `${all.instructions.toLocaleString()} instructions${all.sleeping ? ", asleep" : ""}`, { settable: false })}
+      </div>
+    )
+  }
+  const regs = all
+  const prev = view.prevRegs?.arch === "arm" ? view.prevRegs : null
   const u = (x: number) => new DataView(new Uint32Array([x]).buffer).getFloat32(0, true)
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] py-0.5 font-mono text-[11px]">

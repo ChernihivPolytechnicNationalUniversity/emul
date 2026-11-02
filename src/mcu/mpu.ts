@@ -169,7 +169,7 @@ export class MemoryGuard implements MemoryPort {
       const mem = this.pageMem[p]!
       const off = addr - this.pageBase[p]
       if (mem.plain && off < mem.bytes.length) {
-        if (mem.watch) mem.dirty = true
+        if (mem.watch) mem.stored(off, v, 1)
         mem.bytes[off] = v & 0xff
         return
       }
@@ -182,7 +182,7 @@ export class MemoryGuard implements MemoryPort {
       const mem = this.pageMem[p]!
       const off = addr - this.pageBase[p]
       if (mem.plain && off + 2 <= mem.bytes.length) {
-        if (mem.watch) mem.dirty = true
+        if (mem.watch) mem.stored(off, v, 2)
         mem.view.setUint16(off, v & 0xffff, true)
         return
       }
@@ -195,7 +195,7 @@ export class MemoryGuard implements MemoryPort {
       const mem = this.pageMem[p]!
       const off = addr - this.pageBase[p]
       if (mem.plain && off + 4 <= mem.bytes.length) {
-        if (mem.watch) mem.dirty = true
+        if (mem.watch) mem.stored(off, v, 4)
         mem.view.setUint32(off, v >>> 0, true)
         return
       }

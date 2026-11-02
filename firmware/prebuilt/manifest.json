@@ -1,0 +1,555 @@
+{
+  "discovery-audio": {
+    "U1": {
+      "target": "stm32f407vg",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "7db5a109"
+      },
+      "sources": "d369ac77ad5d80b474043a4d7ca47de1526c7738243715dabdc85f2001ea979d",
+      "toolchain": "5abb6bceeff782bff23c5f7108b50c91927b5d8761b0c0c38d2f51999fab4528",
+      "elf": "discovery-audio.U1.elf",
+      "bytes": 1369352
+    }
+  },
+  "discovery-running-light": {
+    "U1": {
+      "target": "stm32f407vg",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "269cce8f"
+      },
+      "sources": "ae89ffe7d58bc4bca04ceb05c8965e313e670b9641cfcf982f8545b796d8ee49",
+      "toolchain": "5abb6bceeff782bff23c5f7108b50c91927b5d8761b0c0c38d2f51999fab4528",
+      "elf": "discovery-running-light.U1.elf",
+      "bytes": 1233048
+    }
+  },
+  "discovery-tilt": {
+    "U1": {
+      "target": "stm32f407vg",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "4ce89dc8"
+      },
+      "sources": "2443de22f6e3720f931b05953d4d1fb1117f0331b8a4fdeb97b6a9214ac55cc6",
+      "toolchain": "5abb6bceeff782bff23c5f7108b50c91927b5d8761b0c0c38d2f51999fab4528",
+      "elf": "discovery-tilt.U1.elf",
+      "bytes": 1282680
+    }
+  },
+  "h405-blink": {
+    "U1": {
+      "target": "stm32f405rg",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "8259927a"
+      },
+      "sources": "087342b91149b90b6b145d13d6f951420b97f519b9ad6b6ba1907f746fd0ff58",
+      "toolchain": "1bbbc1e7262be1dd5f02d7b5597d37d33eebe4e698f86fc82b9f54c946daa319",
+      "elf": "h405-blink.U1.elf",
+      "bytes": 1154488
+    }
+  },
+  "lab1-f746": {
+    "DD1": {
+      "target": "stm32f746ig",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/gpio.h": "b0aa6a1c",
+        "Core/Inc/main.h": "e32e6134",
+        "Core/Inc/stm32f7xx_it.h": "6acc6266",
+        "Core/Src/gpio.c": "72aaba99",
+        "Core/Src/main.c": "1932edb9",
+        "Core/Src/stm32f7xx_hal_msp.c": "c55663e6",
+        "Core/Src/stm32f7xx_it.c": "81903933"
+      },
+      "sources": "f7f15ef9936a0e62da350eecb35444d0e3d88135217362fa10b96f76e638bac8",
+      "toolchain": "78b83cde03275b8f1cf0c82378b53570116dd081e8ebc9eb29b40dd296912ff7",
+      "elf": "lab1-f746.DD1.elf",
+      "bytes": 1447388
+    }
+  },
+  "lab1-open746i-c": {
+    "U1": {
+      "target": "stm32f746ig",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/gpio.h": "b0aa6a1c",
+        "Core/Inc/main.h": "e32e6134",
+        "Core/Inc/stm32f7xx_it.h": "6acc6266",
+        "Core/Src/gpio.c": "72aaba99",
+        "Core/Src/main.c": "1932edb9",
+        "Core/Src/stm32f7xx_hal_msp.c": "c55663e6",
+        "Core/Src/stm32f7xx_it.c": "81903933"
+      },
+      "sources": "f7f15ef9936a0e62da350eecb35444d0e3d88135217362fa10b96f76e638bac8",
+      "toolchain": "78b83cde03275b8f1cf0c82378b53570116dd081e8ebc9eb29b40dd296912ff7",
+      "elf": "lab1-open746i-c.U1.elf",
+      "bytes": 1447388
+    }
+  },
+  "lab1-running-light": {
+    "U1": {
+      "target": "stm32f746ig",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "App/Inc/lab1.h": "c89695c2",
+        "App/Src/lab1.cpp": "be0421e9",
+        "Core/Inc/gpio.h": "d61d509a",
+        "Core/Inc/main.h": "de950386",
+        "Core/Inc/stm32f7xx_it.h": "f342b7c7",
+        "Core/Inc/tim.h": "a2c5d06b",
+        "Core/Src/gpio.c": "44b6768f",
+        "Core/Src/main.c": "63016cb8",
+        "Core/Src/stm32f7xx_hal_msp.c": "4c1a952e",
+        "Core/Src/stm32f7xx_it.c": "175f0004",
+        "Core/Src/tim.c": "abbbafe3"
+      },
+      "sources": "0ec8e41399f14b86fa874f2f674a0c00cef94e5a953cf32737383b1a6872227c",
+      "toolchain": "78b83cde03275b8f1cf0c82378b53570116dd081e8ebc9eb29b40dd296912ff7",
+      "elf": "lab1-running-light.U1.elf",
+      "bytes": 1571528
+    }
+  },
+  "nano-dimmer": {
+    "U1": {
+      "target": "atmega328p",
+      "options": {
+        "opt": "-Os",
+        "fcpu": 16000000
+      },
+      "files": {
+        "Dimmer.ino": "d4b17f89"
+      },
+      "sources": "988a1284b491120357b2d274946935c197f82c1733bdddd322f2c1ace89b6f12",
+      "toolchain": "8ec58b663536421285626edba171cbea48bfbfd5382e51bc89fec528e8fce3b5",
+      "elf": "nano-dimmer.U1.elf",
+      "bytes": 71324
+    }
+  },
+  "netduino-blink": {
+    "U1": {
+      "target": "stm32f405rg",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Inc/stm32f4xx_hal_conf.h": "b90ee4e7",
+        "Core/Src/main.c": "8ea57f82"
+      },
+      "sources": "930b6af71cc379cfb30dd38b85d9eaa13f0146d58e89d9f16c9b922dcb644025",
+      "toolchain": "1bbbc1e7262be1dd5f02d7b5597d37d33eebe4e698f86fc82b9f54c946daa319",
+      "elf": "netduino-blink.U1.elf",
+      "bytes": 1191764
+    }
+  },
+  "nucleo-74hc595": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "db67a46a"
+      },
+      "sources": "e49ec4b66c7c3f5007335ec39fc881a60823e7df7b13d1cb04c89c1a0082bcd9",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-74hc595.U1.elf",
+      "bytes": 1368016
+    }
+  },
+  "nucleo-7seg": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "9c2333d6"
+      },
+      "sources": "c5de8e2fce030a95785feb0871ac420c1f64e76c08f449347212acfa34294d85",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-7seg.U1.elf",
+      "bytes": 1424528
+    }
+  },
+  "nucleo-adc": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "93e140a8"
+      },
+      "sources": "9e8a3dc44f66228a21969546e02c9a0ea17db73cdfbecdaabaf4a0b8aa0b9a92",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-adc.U1.elf",
+      "bytes": 1495272
+    }
+  },
+  "nucleo-blink": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "184926ed"
+      },
+      "sources": "9c8a5535619839aae9912d32c3359c9ab286029e4113e3852039f8066327846b",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-blink.U1.elf",
+      "bytes": 1334864
+    }
+  },
+  "nucleo-encoder": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "c701943b"
+      },
+      "sources": "03f738351b30a9dc69bb18ae86d2b17f091a8efe119ca5ce6046f6ecfea75364",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-encoder.U1.elf",
+      "bytes": 1488736
+    }
+  },
+  "nucleo-i2c": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "b41b1186"
+      },
+      "sources": "275f3bb44bad63038b7af8c12217e8f9aa90a0836f03f8f2e861e150db30a044",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-i2c.U1.elf",
+      "bytes": 1413656
+    }
+  },
+  "nucleo-keypad": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "61588d61"
+      },
+      "sources": "9e1e1e664057e192a38734570a22fe151aa0c39133d7215ddfcdeddb0d92cf49",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-keypad.U1.elf",
+      "bytes": 1386704
+    }
+  },
+  "nucleo-lcd-i2c": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "abac8938"
+      },
+      "sources": "c34c2f36b3c45b340e8f3dc0417dc21b4ca6f77cd55cf1b1a5abb9f612af649b",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-lcd-i2c.U1.elf",
+      "bytes": 1394552
+    }
+  },
+  "nucleo-melody": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "6afdec88"
+      },
+      "sources": "32894d12e919919fee200e8bb1be32a2ef814948c07ba46636a50eca0925b995",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-melody.U1.elf",
+      "bytes": 1401512
+    }
+  },
+  "nucleo-oled": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "55c3c474"
+      },
+      "sources": "6b89d3f0881403857594e3861e9b106b81668c17007e593488d064312ffcfa76",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-oled.U1.elf",
+      "bytes": 1410716
+    }
+  },
+  "nucleo-pwm": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "ddec8596"
+      },
+      "sources": "b38ffacc00c3fd307b19948a119ba5100791f49095d5dbebd494a2f6fb4afd97",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-pwm.U1.elf",
+      "bytes": 1430560
+    }
+  },
+  "nucleo-serial": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "4ef4b309"
+      },
+      "sources": "b7a45b7115206b989734478542339e44fc790aec4c0e907a3eb4297a5359439d",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-serial.U1.elf",
+      "bytes": 1434460
+    }
+  },
+  "nucleo-servo": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "c0643d18"
+      },
+      "sources": "33391ce8ec0775e85845b1cb10540e9e46f20b91f0bf857dcdf2e4f3b398593e",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-servo.U1.elf",
+      "bytes": 1401428
+    }
+  },
+  "nucleo-spi": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "2fcb1b46"
+      },
+      "sources": "30928afee5433bdbbbce845444bffb27515bf16738091ae822c8d100309d1e9d",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-spi.U1.elf",
+      "bytes": 1367936
+    },
+    "U2": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "a6cb772c"
+      },
+      "sources": "73bc95940458714545cdc3ab659c729d2f41047831726c904d8ca27b619f0e6e",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-spi.U2.elf",
+      "bytes": 1367808
+    }
+  },
+  "nucleo-square": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "8f6a3a4a"
+      },
+      "sources": "8ebbf3677b3613e377b86a396b261a5b164837d5b64cf085a0dc2334262e367a",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-square.U1.elf",
+      "bytes": 1334084
+    }
+  },
+  "nucleo-ws2812": {
+    "U1": {
+      "target": "stm32f429zi",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "223a80aa"
+      },
+      "sources": "b673a59a47150c5dfb5a873b6d9220a26b88bd53c861c90515a6d3fb0d281a37",
+      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "elf": "nucleo-ws2812.U1.elf",
+      "bytes": 1418276
+    }
+  },
+  "open746-cube": {
+    "U1": {
+      "target": "stm32f746ig",
+      "options": {
+        "opt": "-O2"
+      },
+      "files": {
+        "BSP/stm32746g_sdram.c": "0d8d22f0",
+        "BSP/stm32746g_sdram.h": "83f32089",
+        "Inc/dma.h": "318f3709",
+        "Inc/dma2d.h": "eef733eb",
+        "Inc/fmc.h": "f7fdbdcf",
+        "Inc/gpio.h": "bf61b1ad",
+        "Inc/ltdc.h": "26258e97",
+        "Inc/mxconstants.h": "4d576cbb",
+        "Inc/stm32f7xx_it.h": "8f83d761",
+        "Inc/usart.h": "7bc09e7a",
+        "Src/clock.c": "534d02be",
+        "Src/dma.c": "83db3fff",
+        "Src/dma2d.c": "f50167e1",
+        "Src/fmc.c": "775a8f73",
+        "Src/gpio.c": "9fd91bcc",
+        "Src/ltdc.c": "e6b6c68a",
+        "Src/main.cpp": "f7a26eef",
+        "Src/stm32f7xx_hal_msp.c": "1b922d5c",
+        "Src/stm32f7xx_it.c": "8fb96dd5",
+        "Src/usart.c": "8d165b49",
+        "Src/retarget.c": "c7431070",
+        "texture.c": "1062d62c"
+      },
+      "sources": "85bffba0decd6d5a38f44503c1300d9c8bbdb6a8f84a78be724f566bd4a61b75",
+      "toolchain": "78b83cde03275b8f1cf0c82378b53570116dd081e8ebc9eb29b40dd296912ff7",
+      "elf": "open746-cube.U1.elf",
+      "bytes": 1905284
+    }
+  },
+  "open746-lcd": {
+    "U1": {
+      "target": "stm32f746ig",
+      "options": {
+        "opt": "-O2"
+      },
+      "files": {
+        "BSP/stm32746g_lcd.c": "d22eade1",
+        "BSP/stm32746g_lcd.h": "fc38efa7",
+        "BSP/stm32746g_sdram.c": "0d8d22f0",
+        "BSP/stm32746g_sdram.h": "83f32089",
+        "Fonts/font12.c": "04cc39e4",
+        "Fonts/font16.c": "8e0dd16c",
+        "Fonts/font20.c": "08a93181",
+        "Fonts/font24.c": "566c3ca9",
+        "Fonts/font8.c": "1013214f",
+        "Fonts/fonts.h": "ce9f89b2",
+        "Inc/dma.h": "318f3709",
+        "Inc/dma2d.h": "eef733eb",
+        "Inc/fmc.h": "f7fdbdcf",
+        "Inc/gpio.h": "bf61b1ad",
+        "Inc/ltdc.h": "26258e97",
+        "Inc/mxconstants.h": "4d576cbb",
+        "Inc/stm32f7xx_it.h": "8f83d761",
+        "Inc/usart.h": "7bc09e7a",
+        "Src/dma.c": "83db3fff",
+        "Src/dma2d.c": "f50167e1",
+        "Src/fmc.c": "775a8f73",
+        "Src/gpio.c": "9fd91bcc",
+        "Src/ltdc.c": "e6b6c68a",
+        "Src/main.c": "767cc9ff",
+        "Src/stm32f7xx_hal_msp.c": "1b922d5c",
+        "Src/stm32f7xx_it.c": "8fb96dd5",
+        "Src/usart.c": "8d165b49",
+        "Src/retarget.c": "c7431070"
+      },
+      "sources": "3f9cc08ce390740326bd41492cd2a98cef588f66d84a0990b363ebd5b8b5d342",
+      "toolchain": "78b83cde03275b8f1cf0c82378b53570116dd081e8ebc9eb29b40dd296912ff7",
+      "elf": "open746-lcd.U1.elf",
+      "bytes": 1717808
+    }
+  },
+  "open746-touch": {
+    "U1": {
+      "target": "stm32f746ig",
+      "options": {
+        "opt": "-O2"
+      },
+      "files": {
+        "BSP/CT_I2C.c": "c8aebb87",
+        "BSP/CT_I2C.h": "cdb68a92",
+        "BSP/GT911.c": "8d40128a",
+        "BSP/GT911.h": "fb044755",
+        "BSP/stm32746g_lcd.c": "bc97b934",
+        "BSP/stm32746g_lcd.h": "fc38efa7",
+        "BSP/stm32746g_sdram.c": "5b78121c",
+        "BSP/stm32746g_sdram.h": "9fc62e69",
+        "Fonts/font12.c": "04cc39e4",
+        "Fonts/font16.c": "8e0dd16c",
+        "Fonts/font20.c": "08a93181",
+        "Fonts/font24.c": "566c3ca9",
+        "Fonts/font8.c": "1013214f",
+        "Fonts/fonts.h": "ce9f89b2",
+        "Inc/dma.h": "318f3709",
+        "Inc/dma2d.h": "eef733eb",
+        "Inc/fmc.h": "f7fdbdcf",
+        "Inc/gpio.h": "bf61b1ad",
+        "Inc/i2c.h": "8e9e6625",
+        "Inc/ltdc.h": "26258e97",
+        "Inc/mxconstants.h": "4d576cbb",
+        "Inc/stm32f7xx_it.h": "2adf9ef9",
+        "Inc/usart.h": "7bc09e7a",
+        "Src/main.c": "422ed059",
+        "Src/stm32f7xx_hal_msp.c": "32937b71",
+        "Src/stm32f7xx_it.c": "4e15a913",
+        "Src/retarget.c": "c7431070"
+      },
+      "sources": "4060ad5b0d6981c9d54a905f6c09070af9c1ea0d43d8f5b705276efcada72ad8",
+      "toolchain": "78b83cde03275b8f1cf0c82378b53570116dd081e8ebc9eb29b40dd296912ff7",
+      "elf": "open746-touch.U1.elf",
+      "bytes": 1741392
+    }
+  }
+}

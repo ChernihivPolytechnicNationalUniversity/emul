@@ -1,12 +1,14 @@
 import { Logo } from "./Logo"
 import { useConfig } from "@/hooks/use-config"
-import { CheckIcon } from "lucide-react"
+import { CheckIcon, PlayIcon, Star } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   Menubar,
   MenubarCheckboxItem as UiCheckboxItem,
   MenubarContent as UiContent,
+  MenubarGroup,
   MenubarItem as UiItem,
+  MenubarLabel,
   MenubarMenu,
   MenubarRadioGroup,
   MenubarRadioItem as UiRadioItem,
@@ -18,7 +20,8 @@ import {
   MenubarTrigger as UiTrigger,
 } from "@/components/ui/menubar"
 import type { DotFieldHandle, FieldState } from "@/components/field/DotField"
-import { examples, type Example } from "@/schematic/examples"
+import type { Example } from "@/schematic/examples"
+import { exampleGroups } from "./example-groups"
 import type { ProjectMeta } from "@/project/project-store"
 import type { Identity } from "@/collab/identity"
 import type { LiveStatus } from "@/collab/use-live"
@@ -172,12 +175,24 @@ export function MenuBar({
             <MenubarSeparator />
             <MenubarSub>
               <MenubarSubTrigger>Examples</MenubarSubTrigger>
-              <MenubarSubContent className="min-w-44">
-                {examples.map((example) => (
-                  <MenubarItem key={example.id} onClick={() => onExample(example)}>
-                    <example.icon />
-                    {example.name}
-                  </MenubarItem>
+              {/* Grouped by the board the firmware runs on; ▶ marks the ones that open programmed and running. */}
+              <MenubarSubContent className="max-h-[min(36rem,80svh)] min-w-44 overflow-y-auto">
+                {exampleGroups().map((group, k) => (
+                  <MenubarGroup key={group.title}>
+                    {k > 0 && <MenubarSeparator />}
+                    <MenubarLabel className="pl-6 text-[0.6875rem]">{group.title}</MenubarLabel>
+                    {group.items.map(({ example, ready }) => (
+                      <MenubarItem key={example.id} onClick={() => onExample(example)}>
+                        <example.icon />
+                        {example.name}
+                        {ready && (
+                          <MenubarShortcut title="Ready to run: opens with its firmware on the board and starts">
+                            <PlayIcon className="size-2.5! fill-current" aria-label="ready to run" />
+                          </MenubarShortcut>
+                        )}
+                      </MenubarItem>
+                    ))}
+                  </MenubarGroup>
                 ))}
               </MenubarSubContent>
             </MenubarSub>
@@ -371,6 +386,23 @@ export function MenuBar({
             {people.length > 5 && <span className="pl-2.5 text-xs text-muted-foreground">+{people.length - 5}</span>}
           </button>
         )}
+        <Button
+          size="xs"
+          variant="ghost"
+          nativeButton={false}
+          className="h-5 gap-1 text-muted-foreground hover:text-foreground"
+          render={
+            <a
+              href="https://github.com/ChernihivPolytechnicNationalUniversity/emul"
+              target="_blank"
+              rel="noreferrer"
+              title="Star εmul on GitHub"
+            />
+          }
+        >
+          <Star className="size-3 fill-amber-400 text-amber-400" />
+          <span className="hidden sm:inline">Star on GitHub</span>
+        </Button>
         <Button size="xs" className="h-5" onClick={onShareDialog}>
           Share
         </Button>

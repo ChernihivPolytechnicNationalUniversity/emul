@@ -4,7 +4,7 @@
  */
 
 /** Chips the emulator has a profile for (`src/mcu/chip.ts`, `src/mcu/avr/chip.ts`, `src/mcu/pic/chip.ts`); a job targets one of them. */
-export const STM32_TARGETS = ["stm32f429zi", "stm32f746ig"] as const
+export const STM32_TARGETS = ["stm32f429zi", "stm32f746ig", "stm32f407vg", "stm32f405rg"] as const
 /** PIC16F62x parts, by their profile ids lower-cased: C builds with SDCC, assembly with gpasm. */
 export const PIC_TARGETS = [
   "pic16f627",

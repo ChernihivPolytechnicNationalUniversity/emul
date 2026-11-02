@@ -10,6 +10,8 @@ firmware/**/*.elf
 firmware/**/*.bin
 firmware/**/*.o
 firmware/**/*.7z
+# …except the examples' prebuilt images, which the site ships (src/project/prebuilt.ts)
+!firmware/prebuilt/*.elf
 
 # Deploy-time settings are mounted at /etc/config/config.json at run time
 public/config.json

@@ -166,8 +166,9 @@ export class I2c extends RegBlock implements Clocked {
   onUnsupported: (what: string) => void = () => {}
   private active = false
 
-  constructor(spec: I2cSpec, flavour: I2cFlavour) {
-    super(spec.name, spec.base, 0x400, flavour === "v1" ? V1_REGS : V2_REGS)
+  /** `noiseFilter` false: no I2C_FLTR, as on F405/F407 (RM0090 §27.6.10: "F42xxx and F43xxx only"). */
+  constructor(spec: I2cSpec, flavour: I2cFlavour, noiseFilter = true) {
+    super(spec.name, spec.base, 0x400, flavour === "v2" ? V2_REGS : noiseFilter ? V1_REGS : V1_REGS.filter((d) => d.name !== "FLTR"))
     this.spec = spec
     this.flavour = flavour
   }
@@ -875,7 +876,14 @@ const DS10916_REV5_PADS: Record<string, string> = {
   I2C4: "SCL PD12 PF14 PH11; SDA PD13 PF15 PH12 @4",
 }
 
-const PADS: Record<AfMap, Record<string, string>> = { f42x: F42X_PADS, f74x: DS10916_REV5_PADS }
+/** F405/F407 (DS8626 Rev 12 Table 9): I2C1–3, no AF9 SDA pads. */
+const DS8626_REV12_PADS: Record<string, string> = {
+  I2C1: "SCL PB6 PB8; SDA PB7 PB9 @4",
+  I2C2: "SCL PB10 PF1 PH4; SDA PB11 PF0 PH5 @4",
+  I2C3: "SCL PA8 PH7; SDA PC9 PH8 @4",
+}
+
+const PADS: Record<AfMap, Record<string, string>> = { f40x: DS8626_REV12_PADS, f42x: F42X_PADS, f74x: DS10916_REV5_PADS }
 
 export function i2cPads(name: string, map: AfMap): I2cPad[] {
   const spec = PADS[map][name]

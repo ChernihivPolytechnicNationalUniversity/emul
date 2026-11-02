@@ -30,6 +30,8 @@ export interface DigitalPart {
   tick?(time: number): boolean | void
   /** Pins the part can drive; absent, any of `pins`. A core that only feeds listen-only pins need not hand its edges over one by one. */
   readonly outputs?: readonly string[]
+  /** `outputs` for the wiring: which pins can drive, given which pins are tied to ground (a module whose R/W is grounded never reads back). */
+  outputsWhenGrounded?(grounded: (pin: string) => boolean): readonly string[]
   /** Pins whose voltage the part reads after every solver step (its supply, an input's high level). */
   readonly senses?: readonly string[]
   sense?(volts: (pin: string) => number, time: number): void

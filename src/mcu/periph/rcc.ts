@@ -40,6 +40,8 @@ const CR_PLLI2SON = 1 << 26
 const CR_PLLI2SRDY = 1 << 27
 const CR_PLLSAION = 1 << 28
 const CR_PLLSAIRDY = 1 << 29
+/** CFGR.I2SSRC: the I²S clock from the external I2S_CKIN pad instead of PLLI2S (RM0090 §6.3.3, §7.3.3). */
+const CFGR_I2SSRC = 1 << 23
 
 const REGS: RegDef[] = [
   { name: "CR", offset: 0x00, reset: 0x00000083, rw: 0x150dff01 },
@@ -90,10 +92,19 @@ export class Rcc extends RegBlock {
   onLptimReset: () => void = () => {}
   readonly apbGated: Record<1 | 2, number> = { 1: 0, 2: 0 }
   onApbChange: (apb: 1 | 2, changed: number, asserted: number) => void = () => {}
+  /** Clock options the firmware turned on that the model lacks, by name. */
+  onUnsupported: (what: string) => void = () => {}
 
-  constructor(lptim?: LptimProfile) {
-    super("RCC", RCC_BASE, 0x400, lptim ? [...REGS, { name: "DCKCFGR2", offset: lptim.clockSelectOffset, rw: 0x1fffffff }] : REGS)
+  /** PLLSAI and DCKCFGR (TIMPRE, PLLSAIDIVR): F42x/F43x and F7 only (RM0090 Table 34 vs Table 35). */
+  readonly pllsai: boolean
+
+  constructor(lptim?: LptimProfile, resets: Partial<Record<string, number>> = {}, pllsai = true) {
+    const regs = REGS.filter((d) => pllsai || (d.name !== "PLLSAICFGR" && d.name !== "DCKCFGR"))
+      .map((d) => (d.name === "CR" && !pllsai ? { ...d, rw: d.rw! & ~CR_PLLSAION } : d))
+      .map((d) => (resets[d.name] === undefined ? d : { ...d, reset: resets[d.name] }))
+    super("RCC", RCC_BASE, 0x400, lptim ? [...regs, { name: "DCKCFGR2", offset: lptim.clockSelectOffset, rw: 0x1fffffff }] : regs)
     this.lptim = lptim
+    this.pllsai = pllsai
   }
 
   apbClockOn(apb: 1 | 2, bit: number): boolean {
@@ -278,6 +289,7 @@ export class Rcc extends RegBlock {
         const ready = sw === 0 ? (cr & CR_HSIRDY) !== 0 : sw === 1 ? (cr & CR_HSERDY) !== 0 : sw === 2 ? (cr & CR_PLLRDY) !== 0 : false
         const sws = ready ? sw : (old >>> 2) & 3
         const v = ((next & ~0xc) | (sws << 2)) >>> 0
+        if (v & CFGR_I2SSRC && !(old & CFGR_I2SSRC)) this.onUnsupported("I2S clock from I2S_CKIN (RCC_CFGR.I2SSRC = 1)")
         if (v !== old) this.bump()
         return v
       }
@@ -338,7 +350,7 @@ export class Rcc extends RegBlock {
    * RM0385 §5.3.25). Zero while PLLSAI is off or the LTDC has no clock (APB2ENR.LTDCEN).
    */
   ltdcHz(): number {
-    if (!(this.regs[0] & CR_PLLSAION)) return 0
+    if (!this.pllsai || !(this.regs[0] & CR_PLLSAION)) return 0
     if (!(this.get("APB2ENR") & (1 << 26))) return 0
     const cfg = this.get("PLLCFGR")
     const m = cfg & 0x3f
@@ -349,6 +361,25 @@ export class Rcc extends RegBlock {
     const divr = 2 ** (((this.get("DCKCFGR") >>> 16) & 3) + 1)
     if (m === 0 || r === 0) return 0
     return ((src / m) * n) / r / divr
+  }
+
+  /**
+   * I2SxCLK, the I2S2/I2S3 kernel clock (RM0090 §7.3.23 / §6.3.23): f(VCO) = f(PLL input) ×
+   * PLLI2SN / PLLM, I2SxCLK = f(VCO) / PLLI2SR, the input being PLLCFGR.PLLSRC's HSE or HSI.
+   * 0 while PLLI2S is off or PLLI2SR is 0/1 ("wrong configuration"); null when CFGR.I2SSRC picks
+   * the external I2S_CKIN pad, which is not modelled.
+   */
+  i2sHz(): number | null {
+    if (this.regs[2] & CFGR_I2SSRC) return null
+    if (!(this.regs[0] & CR_PLLI2SRDY)) return 0
+    const cfg = this.get("PLLCFGR")
+    const m = cfg & 0x3f
+    const src = cfg & (1 << 22) ? this.hseHz() : HSI_HZ
+    const i2s = this.get("PLLI2SCFGR")
+    const n = (i2s >>> 6) & 0x1ff
+    const r = (i2s >>> 28) & 7
+    if (m === 0 || r < 2) return 0
+    return ((src / m) * n) / r
   }
 
   clocks(): ClockTree {
@@ -372,7 +403,7 @@ export class Rcc extends RegBlock {
     const apbDiv = (v: number) => (v < 4 ? 1 : 2 ** (v - 3))
     const ppre1 = apbDiv((cfgr >>> 10) & 7)
     const ppre2 = apbDiv((cfgr >>> 13) & 7)
-    const timpre = (this.get("DCKCFGR") & (1 << 24)) !== 0
+    const timpre = this.pllsai && (this.get("DCKCFGR") & (1 << 24)) !== 0
     const timclk = (pclk: number, div: number) => (timpre ? (div <= 4 ? hclk : pclk * 4) : div === 1 ? pclk : pclk * 2)
     return {
       sysclk,

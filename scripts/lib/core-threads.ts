@@ -29,6 +29,7 @@ export function spawnNodeCore(): CoreTransport {
     // synchronous receive gets nothing. The proxy polls where it needs the replies.
     onMessage: (cb) => (handler = cb),
     poll,
+    blocking: true,
     terminate: () => {
       replies.port1.close()
       void w.terminate()
