@@ -3,21 +3,22 @@ import { BoardIcon } from "../icons"
 import { mcuModel } from "../mcu-model"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind } from "../types"
 import { LED_COLORS } from "./basic"
+import { BOARD_MM, boardArt, FRAME, HEADER } from "./netduino-plus-2-art"
 
 /**
  * Netduino Plus 2, Rev A (Secret Labs CW0034, STM32F405RGT6). Sources (docs/netduino-plus-2/
  * board-checklist.md): the Rev A schematic, the archived spec page, the Arduino Uno R3 board file
- * for the outline and header pads (Netduino publishes no drawing of its own), photos for the rest.
+ * for the outline, header pads and holes (Netduino publishes no drawing of its own), and a top
+ * view of the board for everything else; the board drawn to scale in netduino-plus-2-art.ts.
  *
  * Scale: 1 cell = 2.54 mm. The board is 68.58 × 53.34 mm, headers along the top (digital) and
- * bottom (power, analog) as on an Uno; it sits at (1, 0) cells. The Uno's D8–SCL header is 0.06"
- * off the 0.1" grid of the others (J4 x = 41.656 mm), so it is rounded to the nearest cell.
+ * bottom (power, analog) as on an Uno; its left edge sits 2 cells in, for the RJ45 that stands
+ * past it. The Uno's D8–SCL header is 0.06" off the 0.1" grid of the others (x = 41.656 mm for
+ * D8), so its pins are rounded to the nearest cell and the header is drawn there.
  */
 
-const ORIGIN = { x: 1, y: 0 }
-const BOARD_MM = { w: 68.58, h: 53.34 }
-/** The checklist's coordinates have their origin at the bottom-left; the field's at the top-left. */
-const at = (xMm: number, yFromBottomMm: number) => ({ x: ORIGIN.x + xMm / 2.54, y: ORIGIN.y + (BOARD_MM.h - yFromBottomMm) / 2.54 })
+/** Board millimetres (y down from the top edge) to cells. */
+const cell = (mm: { x: number; y: number }) => ({ x: Math.round((mm.x + FRAME.originX) * FRAME.cellsPerMm * 100) / 100, y: Math.round((mm.y + FRAME.originY) * FRAME.cellsPerMm * 100) / 100 })
 
 /** [pin id, label, MCU pin, x of the pad in mm (Uno R3), note] */
 type Row = [string, string, string | undefined, number, string?]
@@ -26,7 +27,7 @@ const TOP: Row[] = [
   ["D0", "0", "PC7", 63.5, "USART6_RX"], ["D1", "1", "PC6", 60.96, "USART6_TX"], ["D2", "2", "PA3", 58.42, "USART2_RX"], ["D3", "3", "PA2", 55.88, "USART2_TX"],
   ["D4", "4", "PB12", 53.34], ["D5", "5", "PB8", 50.8, "TIM4_CH3"], ["D6", "6", "PB9", 48.26, "TIM4_CH4"], ["D7", "7", "PA1", 45.72, "UART4_RX"],
   ["D8", "8", "PA0", 41.656, "UART4_TX"], ["D9", "9", "PA6", 39.116], ["D10", "10", "PB10", 36.576], ["D11", "11", "PB15", 34.036, "SPI2_MOSI"],
-  ["D12", "12", "PB14", 31.496, "SPI2_MISO"], ["D13", "13", "PB13", 28.956, "SPI2_SCK"], ["GND1", "GND", undefined, 26.416], ["AREF", "AREF", undefined, 23.876, "Not connected"],
+  ["D12", "12", "PB14", 31.496, "SPI2_MISO"], ["D13", "13", "PB13", 28.956, "SPI2_SCK"], ["GND1", "GND", undefined, 26.416], ["AREF", "AREF", undefined, 23.876, "Not connected (its box on the board is empty)"],
   ["SDA", "SD", "PB7", 21.336, "I2C1_SDA, no pull-up on the board"], ["SCL", "SC", "PB6", 18.796, "I2C1_SCL, no pull-up on the board"],
 ]
 const BOTTOM: Row[] = [
@@ -42,59 +43,29 @@ function kindOf(id: string, mcu?: string): PinKind {
   return mcu || id === "RESET" ? "digital" : "nc"
 }
 
-const WIDTH = 29
+const WIDTH = Math.ceil(cell({ x: BOARD_MM.w, y: 0 }).x)
 const HEIGHT = 22
 
+/** Every header name is printed on the board, in its box (A0–A5 as 0–5 under "Analog In"). */
 function header(rows: Row[], top: boolean): PinDef[] {
   return rows.map(([id, label, mcu, xMm, note]) => {
-    const p = at(xMm, top ? 50.8 : 2.54)
+    const p = cell({ x: xMm, y: top ? HEADER.top : HEADER.bottom })
     const y = Math.round(p.y)
-    return { id, label, x: Math.round(p.x), y, side: top ? "top" : "bottom", labelAt: top ? "bottom" : "top", kind: kindOf(id, mcu), stub: top ? y : HEIGHT - y, mcu, note } satisfies PinDef
+    return { id, label, x: Math.round(p.x), y, side: top ? "top" : "bottom", labelAt: top ? "bottom" : "top", kind: kindOf(id, mcu), stub: top ? y : HEIGHT - y, mcu, note, printed: true } satisfies PinDef
   })
 }
 
 const pins: PinDef[] = [...header(TOP, true), ...header(BOTTOM, false)]
 
-const corner = at(0, BOARD_MM.h)
-const place = (xMm: number, yMm: number) => at(xMm, yMm)
-const rj45 = place(7.7, 39.4)
-const enc = place(38.0, 39.3)
-const mcu = place(42.0, 22.3)
-const usb = place(2.1, 22.6)
-const jack = place(4.3, 8.5)
-const sd = place(19.0, 10.4)
-const y1 = place(38.9, 12.6)
-const jtag = place(64.8, 27.3)
+const body: BodyShape[] = boardArt()
 
-const body: BodyShape[] = [
-  { type: "rect", x: corner.x, y: corner.y, w: BOARD_MM.w / 2.54, h: BOARD_MM.h / 2.54, rx: 0.3, fill: "board" },
-  { type: "rect", x: rj45.x - 4, y: rj45.y - 2.7, w: 6.6, h: 6.2, rx: 0.2, fill: "connector" },
-  { type: "text", x: rj45.x - 0.7, y: rj45.y + 0.1, text: "RJ45", size: 0.4, muted: true },
-  { type: "rect", x: enc.x - 2, y: enc.y - 1.1, w: 4, h: 2.2, rx: 0.1, fill: "chip" },
-  { type: "text", x: enc.x, y: enc.y + 0.1, text: "ENC28J60", size: 0.32, inverse: true },
-  { type: "rect", x: mcu.x - 1.97, y: mcu.y - 1.97, w: 3.94, h: 3.94, rx: 0.1, fill: "chip" },
-  { type: "text", x: mcu.x, y: mcu.y - 0.2, text: "STM32F405", size: 0.36, inverse: true },
-  { type: "text", x: mcu.x, y: mcu.y + 0.5, text: "RGT6", size: 0.3, inverse: true },
-  { type: "rect", x: usb.x - 1.3, y: usb.y - 1.2, w: 2.4, h: 2.4, rx: 0.2, fill: "connector" },
-  { type: "rect", x: jack.x - 2.4, y: jack.y - 1.8, w: 5, h: 3.6, rx: 0.2, fill: "connector" },
-  { type: "text", x: jack.x + 0.1, y: jack.y + 2.6, text: "7.5–9.0V", size: 0.3, printed: true },
-  { type: "rect", x: sd.x - 2.3, y: sd.y - 2.2, w: 4.6, h: 4.4, rx: 0.15, fill: "connector" },
-  { type: "text", x: sd.x, y: sd.y + 2.9, text: "MicroSD", size: 0.3, printed: true },
-  { type: "rect", x: y1.x - 0.9, y: y1.y - 0.6, w: 1.8, h: 1.2, rx: 0.3, fill: "connector" },
-  { type: "text", x: y1.x, y: y1.y + 0.12, text: "25.000", size: 0.24, muted: true },
-  { type: "rect", x: jtag.x - 1.4, y: jtag.y - 1.1, w: 2.8, h: 2.2, rx: 0.1, fill: "connector" },
-  { type: "text", x: at(48, 0).x, y: at(0, 12.5).y, text: "netduino plus 2", size: 0.55, printed: true },
-  { type: "text", x: at(66, 0).x, y: at(0, 8.5).y, text: "REV.A", size: 0.3, printed: true, anchor: "end" },
-  { type: "text", x: at(48, 0).x, y: at(0, 47.4).y, text: "Digital I/O", size: 0.32, printed: true },
-  { type: "text", x: at(57, 0).x, y: at(0, 6).y, text: "Analog In", size: 0.32, printed: true },
-]
-
+/** Positions measured on the board (mm from its top-left corner); see netduino-plus-2-art.ts. */
 const parts: PartDef[] = [
-  { type: "led", id: "LED", label: "LED", ...place(59.4, 42.1), color: LED_COLORS.blue.css, mcu: "PA10" },
-  { type: "led", id: "PWR", label: "PWR", ...place(10.2, 20.0), color: LED_COLORS.white.css, mcu: "PC13" },
-  { type: "led", id: "ACT", label: "ACT", ...place(3.4, 48.6), color: LED_COLORS.green.css },
-  { type: "button", id: "BTN", label: "BTN", ...place(55.3, 27.1), mcu: "PB11" },
-  { type: "usb", id: "USB", label: "USB", x: usb.x - 1.3, y: usb.y, side: "left", initial: { on: true } },
+  { type: "led", id: "LED", label: "LED", ...cell({ x: 60.2, y: 10.45 }), color: LED_COLORS.blue.css, mcu: "PA10", printed: true },
+  { type: "led", id: "PWR", label: "PWR", ...cell({ x: 9.55, y: 33.0 }), color: LED_COLORS.white.css, mcu: "PC13", printed: true },
+  { type: "led", id: "ACT", label: "ACT", ...cell({ x: 2.7, y: 3.85 }), color: LED_COLORS.green.css, printed: true },
+  { type: "button", id: "BTN", label: "BTN", ...cell({ x: 55.45, y: 26.3 }), size: 1.3, mcu: "PB11", printed: true },
+  { type: "usb", id: "USB", label: "USB", ...cell({ x: 1.5, y: 30.7 }), side: "left", initial: { on: true } },
 ]
 
 // --- electrical model ---------------------------------------------------------
@@ -226,7 +197,7 @@ export const netduinoPlus2: ComponentDef = {
     Power: "PB2 high switches the header 3V3/5V on; PC15 low powers the ENC28J60; PB1 low powers the microSD",
     Ethernet: "ENC28J60 on SPI1: SCK PA5, MOSI PA7, MISO PB4, CS PC8, INT PA4, RESET PD2; clock from MCO1 on PA8",
     microSD: "SPI3: SCK PC10, MISO PC11, MOSI PC12, CS PB0; card detect PB5 (low = inserted)",
-    "Not modelled": "microSD card, the ENC28J60's network side (no cable to another host: what it sends goes nowhere, nothing arrives), the MCO1 clock as a signal (the ENC28J60 is clocked whenever it is powered), the VIN/USB comparator (both sources feed +5V)",
+    "Not modelled": "microSD card, the ENC28J60's network side (no cable to another host: what it sends goes nowhere, nothing arrives), the MCO1 clock as a signal (the ENC28J60 is clocked whenever it is powered), the VIN/USB comparator (both sources feed +5V), the MiniJTAG header",
     Source: "Secret Labs CW0034 Rev A schematic; Arduino Uno R3 board file for the outline",
   },
 }
