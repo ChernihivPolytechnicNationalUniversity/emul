@@ -62,8 +62,12 @@ export const PARTS = {
   resetEn: { x: 27.94, y: 26.035 },
 } as const
 
-/** The 16U2's corner, clear of AREF's name and the LEDs' (its parts move with IOH, as the header does). */
-const SOON_16U2 = { from: { x: 12.4, y: 4.7 }, to: { x: 21.0, y: 22.7 }, label: "ATmega16U2 · ICSP1 · JP2" }
+/**
+ * The 16U2's corner in two boxes, each holding its parts whole (they move with IOH, as the header
+ * does): ICSP1 left of AREF's name, the chip and JP2 under it, clear of the LEDs' names.
+ */
+const SOON_ICSP1 = { from: { x: 12.4, y: 4.3 }, to: { x: 21.2, y: 10.0 }, label: "ICSP1" }
+const SOON_16U2 = { from: { x: 12.4, y: 10.0 }, to: { x: 23.0, y: 22.7 }, label: "ATmega16U2 · JP2" }
 
 const NAME: TextStyle = { size: 0.5, mono: true }
 const SMALL: TextStyle = { size: 0.36, mono: true }
@@ -206,12 +210,12 @@ export function boardArt(names: UnoNames): BodyShape[] {
   art.text("ON", 60.0, PARTS.leds.ON.y, named(SMALL, { anchor: "start" }))
 
   // --- The 16U2's corner, under its soon badge, moved with IOH as the header is.
+  const icsp1 = soon(SOON_ICSP1, (s) => maleBlock(s.moved({ x: IOH_SHIFT, y: 0 }), [15.748, 18.288, 20.828], [5.842, 8.382]))
   const u2 = soon(SOON_16U2, (s) => {
     const a = s.moved({ x: IOH_SHIFT, y: 0 })
     const c = { x: 19.939, y: 18.669 }
     a.rect("chip", c.x - 2.5, c.y - 2.5, c.x + 2.5, c.y + 2.5, 0.2)
     a.text("16U2", c.x, c.y, { size: 0.36, inverse: true })
-    maleBlock(a, [15.748, 18.288, 20.828], [5.842, 8.382])
     for (const x of [18.288, 20.828]) for (const y of [10.922, 13.462]) a.circle("zone", x, y, 0.66)
     a.text("JP2", 15.6, 12.2, SMALL)
     for (const y of [13.97, 19.69]) smd(a, 13.7, y, SMD.c0603)
@@ -219,7 +223,7 @@ export function boardArt(names: UnoNames): BodyShape[] {
   })
 
   const plate: BodyShape = { type: "art", d: boardPath(art), fill: "board" }
-  return [plate, ...art.shapes(), u2]
+  return [plate, ...art.shapes(), icsp1, u2]
 }
 
 /** The plate itself: the outline, in cells. */
