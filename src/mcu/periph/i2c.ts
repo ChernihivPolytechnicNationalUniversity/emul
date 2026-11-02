@@ -883,7 +883,21 @@ const DS8626_REV12_PADS: Record<string, string> = {
   I2C3: "SCL PA8 PH7; SDA PC9 PH8 @4",
 }
 
-const PADS: Record<AfMap, Record<string, string>> = { f40x: DS8626_REV12_PADS, f42x: F42X_PADS, f74x: DS10916_REV5_PADS }
+/** F411 (DS10314 Rev 8 Table 9, UFQFPN48 pads): AF4, plus the AF9 SDA pads PB3/PB9 (I2C2) and PB4/PB8 (I2C3). */
+const DS10314_REV8_PADS: Record<string, string> = {
+  I2C1: "SCL PB6 PB8; SDA PB7 PB9 @4",
+  I2C2: "SCL PB10; SDA PB3@9 PB9@9 @4",
+  I2C3: "SCL PA8; SDA PB4@9 PB8@9 @4",
+}
+
+/** F401 (DS9716 Rev 11 / DS10086 Rev 5 Table 9, UFQFPN48 pads): AF4, plus AF9 SDA on PB3 (I2C2) and PB4 (I2C3) only. */
+const DS10086_REV5_PADS: Record<string, string> = {
+  I2C1: "SCL PB6 PB8; SDA PB7 PB9 @4",
+  I2C2: "SCL PB10; SDA PB3@9 @4",
+  I2C3: "SCL PA8; SDA PB4@9 @4",
+}
+
+const PADS: Record<AfMap, Record<string, string>> = { f40x: DS8626_REV12_PADS, f401: DS10086_REV5_PADS, f411: DS10314_REV8_PADS, f42x: F42X_PADS, f74x: DS10916_REV5_PADS }
 
 export function i2cPads(name: string, map: AfMap): I2cPad[] {
   const spec = PADS[map][name]

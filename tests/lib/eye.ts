@@ -22,7 +22,11 @@ export function sustainedReaches(fraction: number) {
   return hi
 }
 
-export const EYE_SETTLED = sustainedReaches(0.99)
+/**
+ * Long enough for any change to settle below what the eye sees: an LED turned off from a few mA has to fall
+ * under the ~45 µA it is still seen at (src/sim/led-light.ts), so 99.99 % of the cascade's step.
+ */
+export const EYE_SETTLED = sustainedReaches(0.9999)
 
 export function sustainedPwm(hz: number, duty: number, harmonics = 2000) {
   const phases = 1000

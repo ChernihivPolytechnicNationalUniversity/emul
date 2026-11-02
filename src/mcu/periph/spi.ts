@@ -906,7 +906,26 @@ const DS8626_REV12_PADS: Record<string, string> = {
   SPI3: "NSS PA4 PA15; SCK PB3 PC10; MISO PB4 PC11; MOSI PB5 PC12 @6",
 }
 
-const PADS: Record<AfMap, Record<string, string>> = { f40x: DS8626_REV12_PADS, f42x: F42X_PADS, f74x: DS10916_REV5_PADS }
+/**
+ * F411 (DS10314 Rev 8 Table 9, UFQFPN48 pads): SPI1/2 on AF5, SPI3/4/5 on AF6 with SPI3_SCK PB12 on AF7 and
+ * SPI4_MOSI PA1 on AF5.
+ */
+const DS10314_REV8_PADS: Record<string, string> = {
+  SPI1: "NSS PA4 PA15; SCK PA5 PB3; MISO PA6 PB4; MOSI PA7 PB5 @5",
+  SPI2: "NSS PB9 PB12; SCK PB10 PB13; MISO PB14; MOSI PB15 @5",
+  SPI3: "NSS PA4 PA15; SCK PB3 PB12@7; MISO PB4; MOSI PB5 @6",
+  SPI4: "NSS PB12; SCK PB13; MISO PA11; MOSI PA1@5 @6",
+  SPI5: "NSS PB1; SCK PB0; MISO PA12; MOSI PA10 PB8 @6",
+}
+
+/** F401 (DS9716 Rev 11 / DS10086 Rev 5 Table 9, UFQFPN48 pads): SPI1/2 on AF5, SPI3 on AF6; SPI4 has no pad on this package. */
+const DS10086_REV5_PADS: Record<string, string> = {
+  SPI1: "NSS PA4 PA15; SCK PA5 PB3; MISO PA6 PB4; MOSI PA7 PB5 @5",
+  SPI2: "NSS PB9 PB12; SCK PB10 PB13; MISO PB14; MOSI PB15 @5",
+  SPI3: "NSS PA4 PA15; SCK PB3; MISO PB4; MOSI PB5 @6",
+}
+
+const PADS: Record<AfMap, Record<string, string>> = { f40x: DS8626_REV12_PADS, f401: DS10086_REV5_PADS, f411: DS10314_REV8_PADS, f42x: F42X_PADS, f74x: DS10916_REV5_PADS }
 
 export function spiPads(name: string, map: AfMap): SpiPad[] {
   const spec = PADS[map][name]
@@ -935,6 +954,16 @@ export type I2sPad = { port: number; pin: number; af: number; line: I2sLine }
 const I2S_MCK: Record<AfMap, Record<string, SpiPad[]>> = {
   f40x: { SPI2: [{ port: 2, pin: 6, af: 5, line: "MCK" }], SPI3: [{ port: 2, pin: 7, af: 6, line: "MCK" }] },
   f42x: { SPI2: [{ port: 2, pin: 6, af: 5, line: "MCK" }], SPI3: [{ port: 2, pin: 7, af: 6, line: "MCK" }] },
+  // DS10086 Rev 5 Table 9: I2S2_MCK and I2S3_MCK only on PC6/PC7, not bonded on the UFQFPN48.
+  f401: {},
+  // DS10314 Rev 8 Table 9: I2S2_MCK PA3 AF5, PA6 AF6; I2S3_MCK PB10 AF6 (PC6/PC7 are not bonded on the UFQFPN48).
+  f411: {
+    SPI2: [
+      { port: 0, pin: 3, af: 5, line: "MCK" },
+      { port: 0, pin: 6, af: 6, line: "MCK" },
+    ],
+    SPI3: [{ port: 1, pin: 10, af: 6, line: "MCK" }],
+  },
   f74x: {},
 }
 

@@ -18,6 +18,7 @@
  * Lazy like the timers: the SoC catches the shifter up on register access, on RX pin edges
  * and at its next bit boundary; see `Clocked`.
  */
+import type { AfMap } from "../chip"
 import type { Clocked } from "./clocked"
 import { RegBlock, type RegDef } from "./regblock"
 
@@ -538,8 +539,25 @@ const PADS: Record<string, string> = {
   UART8: "TX PE1; RX PE0 @8",
 }
 
-export function usartPads(name: string): UsartPad[] {
-  const spec = PADS[name]
+/**
+ * F411 (DS10314 Rev 8 Table 9, the UFQFPN48 pads): USART1 also on PA15/PB3, USART6 on PA11/PA12 (PC6/PC7 are
+ * not bonded on the 48-pin package).
+ */
+const DS10314_REV8_PADS: Record<string, string> = {
+  USART1: "TX PA9 PB6 PA15; RX PA10 PB7 PB3 @7",
+  USART2: "TX PA2; RX PA3 @7",
+  USART6: "TX PA11; RX PA12 @8",
+}
+
+/** F401 (DS9716 Rev 11 / DS10086 Rev 5 Table 9, UFQFPN48 pads): USART6 on PA11/PA12, no USART1 on PA15/PB3. */
+const DS10086_REV5_PADS: Record<string, string> = {
+  USART1: "TX PA9 PB6; RX PA10 PB7 @7",
+  USART2: "TX PA2; RX PA3 @7",
+  USART6: "TX PA11; RX PA12 @8",
+}
+
+export function usartPads(name: string, map?: AfMap): UsartPad[] {
+  const spec = map === "f411" ? DS10314_REV8_PADS[name] : map === "f401" ? DS10086_REV5_PADS[name] : PADS[name]
   if (!spec) return []
   const [body, afText] = spec.split("@")
   const af = Number(afText)

@@ -28,6 +28,11 @@ export const template = (target: Target): SourceFile[] =>
         { path: "Core/Inc/main.h", content: MAIN_H },
         { path: "Core/Src/main.c", content: H405_MAIN_C },
       ]
+    : target === "stm32f411ce" || target === "stm32f401cc" || target === "stm32f401ce"
+    ? [
+        { path: "Core/Inc/main.h", content: MAIN_H },
+        { path: "Core/Src/main.c", content: target === "stm32f411ce" ? BLACKPILL_MAIN_C : BLACKPILL_F401_MAIN_C },
+      ]
     : [
         { path: "Core/Inc/main.h", content: MAIN_H },
         { path: "Core/Src/main.c", content: MAIN_C },
@@ -381,6 +386,170 @@ static void GPIO_Init(void)
 }
 
 ${F40X_CLOCK}`
+
+const BLACKPILL_MAIN_C = `/*
+ * WeAct Black Pill (STM32F411CEU6) on the ST HAL: 100 MHz from the 25 MHz crystal through the PLL,
+ * SysTick at 1 kHz.
+ *
+ *   C13 LED (PC13, blue, lit when low): blinks every 500 ms, every 100 ms while KEY is held
+ *   KEY (PA0, to GND when pressed): read with the internal pull-up
+ */
+#include "main.h"
+
+void Error_Handler(void);
+static void SystemClock_Config(void);
+static void GPIO_Init(void);
+
+int main(void)
+{
+  HAL_Init();
+  SystemClock_Config();
+  GPIO_Init();
+
+  while (1)
+  {
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+    HAL_Delay(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET ? 100 : 500);
+  }
+}
+
+static void GPIO_Init(void)
+{
+  GPIO_InitTypeDef gpio = {0};
+
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+  gpio.Pin = GPIO_PIN_13;
+  gpio.Mode = GPIO_MODE_OUTPUT_PP;
+  gpio.Pull = GPIO_NOPULL;
+  gpio.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &gpio);
+
+  gpio.Pin = GPIO_PIN_0;
+  gpio.Mode = GPIO_MODE_INPUT;
+  gpio.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOA, &gpio);
+}
+
+static void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef osc = {0};
+  RCC_ClkInitTypeDef clk = {0};
+
+  __HAL_RCC_PWR_CLK_ENABLE();
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+
+  osc.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  osc.HSEState = RCC_HSE_ON;
+  osc.PLL.PLLState = RCC_PLL_ON;
+  osc.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  osc.PLL.PLLM = 25;
+  osc.PLL.PLLN = 200;
+  osc.PLL.PLLP = RCC_PLLP_DIV2;
+  osc.PLL.PLLQ = 4;
+  if (HAL_RCC_OscConfig(&osc) != HAL_OK) Error_Handler();
+
+  clk.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+  clk.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  clk.APB1CLKDivider = RCC_HCLK_DIV2;
+  clk.APB2CLKDivider = RCC_HCLK_DIV1;
+  if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_3) != HAL_OK) Error_Handler();
+}
+
+void Error_Handler(void)
+{
+  __disable_irq();
+  while (1)
+  {
+    __asm volatile("bkpt 0xEE");
+  }
+}
+`
+
+const BLACKPILL_F401_MAIN_C = `/*
+ * WeAct Black Pill (STM32F401CCU6 / STM32F401CEU6) on the ST HAL: 84 MHz from the 25 MHz crystal through the PLL
+ * (WeAct's own F401 examples: M 25, N 336, P 4, Q 7 for 48 MHz USB), voltage scale 2, SysTick at 1 kHz.
+ *
+ *   C13 LED (PC13, blue, lit when low): blinks every 500 ms, every 100 ms while KEY is held
+ *   KEY (PA0, to GND when pressed): read with the internal pull-up
+ */
+#include "main.h"
+
+void Error_Handler(void);
+static void SystemClock_Config(void);
+static void GPIO_Init(void);
+
+int main(void)
+{
+  HAL_Init();
+  SystemClock_Config();
+  GPIO_Init();
+
+  while (1)
+  {
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+    HAL_Delay(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET ? 100 : 500);
+  }
+}
+
+static void GPIO_Init(void)
+{
+  GPIO_InitTypeDef gpio = {0};
+
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+  gpio.Pin = GPIO_PIN_13;
+  gpio.Mode = GPIO_MODE_OUTPUT_PP;
+  gpio.Pull = GPIO_NOPULL;
+  gpio.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &gpio);
+
+  gpio.Pin = GPIO_PIN_0;
+  gpio.Mode = GPIO_MODE_INPUT;
+  gpio.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOA, &gpio);
+}
+
+static void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef osc = {0};
+  RCC_ClkInitTypeDef clk = {0};
+
+  __HAL_RCC_PWR_CLK_ENABLE();
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE2);
+
+  osc.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  osc.HSEState = RCC_HSE_ON;
+  osc.PLL.PLLState = RCC_PLL_ON;
+  osc.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  osc.PLL.PLLM = 25;
+  osc.PLL.PLLN = 336;
+  osc.PLL.PLLP = RCC_PLLP_DIV4;
+  osc.PLL.PLLQ = 7;
+  if (HAL_RCC_OscConfig(&osc) != HAL_OK) Error_Handler();
+
+  clk.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+  clk.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  clk.APB1CLKDivider = RCC_HCLK_DIV2;
+  clk.APB2CLKDivider = RCC_HCLK_DIV1;
+  if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK) Error_Handler();
+}
+
+void Error_Handler(void)
+{
+  __disable_irq();
+  while (1)
+  {
+    __asm volatile("bkpt 0xEE");
+  }
+}
+`
 
 const NANO_SKETCH = `// Arduino Nano: L blinks, the USB serial counts the seconds and echoes what you type.
 //

@@ -71,23 +71,31 @@ export class FlashIf extends RegBlock {
   private readonly optcr1Reset: number
 
   /**
-   * `f40x`: the F405/F407 controller (RM0090 §3.9.x vs §3.9.(x+1)): no FLASH_OPTCR1, no RDERR, OPTCR without
-   * SPRMOD/DB1M/BFB2 (bit 4 reads 0), SNB[3:0] and no MER1.
+   * Single-bank v1 controllers, no FLASH_OPTCR1, SNB[3:0] and no MER1:
+   * `f40x`, F405/F407 (RM0090 §3.9.x vs §3.9.(x+1)): no RDERR, OPTCR without SPRMOD/DB1M/BFB2 (bit 4 reads 0);
+   * `f411` (RM0383 Rev 4 §3.8.4, §3.8.6): RDERR (bit 8) for PCROP, OPTCR SPRMOD (bit 31), nWRP[7:0], bit 4 reads 0.
    */
   readonly f40x: boolean
+  readonly variant: "full" | "f40x" | "f411"
 
-  constructor(map: "v1" | "v2", geometry: ChipProfile["flash"], flashBase: number, f40x = false) {
+  constructor(map: "v1" | "v2", geometry: ChipProfile["flash"], flashBase: number, variant: "full" | "f40x" | "f411" = "full") {
+    const f40x = variant !== "full"
     const regs: RegDef[] = [
       { name: "ACR", offset: 0x00, reset: 0, rw: 0x00001f00 | ((1 << geometry.latencyBits) - 1) },
       { name: "KEYR", offset: 0x04 },
       { name: "OPTKEYR", offset: 0x08 },
-      { name: "SR", offset: 0x0c, reset: 0, w1c: SR_ERRORS | SR_EOP | (f40x ? 0 : 1 << 8) },
+      { name: "SR", offset: 0x0c, reset: 0, w1c: SR_ERRORS | SR_EOP | (variant === "f40x" ? 0 : 1 << 8) },
       { name: "CR", offset: 0x10, reset: CR_LOCK },
-      f40x ? { name: "OPTCR", offset: 0x14, reset: 0x0fffaaed, rw: 0x0fffffef } : { name: "OPTCR", offset: 0x14, reset: map === "v1" ? 0x0fffaaed : 0xc0ffaafd },
+      variant === "f411"
+        ? { name: "OPTCR", offset: 0x14, reset: 0x0fffaaed, rw: 0x80ffffef }
+        : f40x
+        ? { name: "OPTCR", offset: 0x14, reset: 0x0fffaaed, rw: 0x0fffffef }
+        : { name: "OPTCR", offset: 0x14, reset: map === "v1" ? 0x0fffaaed : 0xc0ffaafd },
     ]
     if (!f40x) regs.push({ name: "OPTCR1", offset: 0x18, reset: map === "v1" ? 0x0fff0000 : 0x00400080 })
     super("FLASH", 0x40023c00, 0x400, regs)
     this.f40x = f40x
+    this.variant = variant
     this.map = map
     this.geometry = geometry
     this.flashBase = flashBase

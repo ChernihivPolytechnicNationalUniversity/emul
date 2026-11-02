@@ -81,13 +81,13 @@ describe("Open746I-C running lab 1", () => {
     beforeAll(() => {
       snap = run(11.5, (s) => {
         for (const l of LEDS) if (onAt[l] === undefined && ledOn(s, l)) onAt[l] = s.time
-        if (alone === undefined && s.time >= ALONE_AT) alone = s.parts[partKey(u.id, "LED1")]?.level
+        if (alone === undefined && s.time >= ALONE_AT) alone = s.parts[partKey(u.id, "LED1")]?.amps
       })
     })
 
     it("lights LED1 dimly while it is the only one on", () => {
-      // 1.4 mA through 1 kΩ: a dim LED, as on the real board (8 mA counts as full).
-      expect(alone ?? 0).toBeNear(0.18, 0.05)
+      // 1.4 mA through 1 kΩ: a dim LED, as on the real board.
+      expect(alone ?? 0).toBeNear(1.4e-3, 0.4e-3)
     })
 
     it.each([

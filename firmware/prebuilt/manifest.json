@@ -1,4 +1,52 @@
 {
+  "blackpill-blink": {
+    "U1": {
+      "target": "stm32f411ce",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "a9648cc4"
+      },
+      "sources": "d90dc40a6f0e926b095823c24d2bdec4352bec0772d0646e6e96020702c02d97",
+      "toolchain": "12e897f1fa3fbf9259e32280a307bdffa54d8c41a4fe03d91daf25bb6c594482",
+      "elf": "blackpill-blink.U1.elf",
+      "bytes": 873164
+    }
+  },
+  "blackpill-f401cc-blink": {
+    "U1": {
+      "target": "stm32f401cc",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "9941881a"
+      },
+      "sources": "18ec588e09f1595dde9e47292bd096695d177a5822515010a0e3fd34fc9b65be",
+      "toolchain": "fb1e9c7923e73e8665d0db32d6e1acab3a1575633b1e5118c8c91411319019f7",
+      "elf": "blackpill-f401cc-blink.U1.elf",
+      "bytes": 869436
+    }
+  },
+  "blackpill-f401ce-blink": {
+    "U1": {
+      "target": "stm32f401ce",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "9941881a"
+      },
+      "sources": "18ec588e09f1595dde9e47292bd096695d177a5822515010a0e3fd34fc9b65be",
+      "toolchain": "5bc1c8edbaf9952445f8a34e2c6883244e40b3e2baafa8ba50f2d3fb3368bf6a",
+      "elf": "blackpill-f401ce-blink.U1.elf",
+      "bytes": 869696
+    }
+  },
   "discovery-audio": {
     "U1": {
       "target": "stm32f407vg",

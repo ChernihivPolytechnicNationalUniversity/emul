@@ -221,7 +221,7 @@ describe("the backup-domain pads PC13–PC15 and PI8 behind the power switch", (
     const drop = (pad: string) => rail - bench.volts(snap, pad)
     const current = (pad: string) => -bench.padCurrent(snap, pad)
     expect(drop("PB6") / current("PB6"), "PB6 source resistance, Ω").toBeNear(R_GPIO, 0.5)
-    expect((drop("PI8") - pads.backupDomain.switchDrop) / current("PI8"), "PI8 source resistance past the switch's own drop, Ω").toBeNear(R_GPIO + pads.backupDomain.switchOhms, 0.5)
+    expect((drop("PI8") - pads.backupDomain.switchDrop!) / current("PI8"), "PI8 source resistance past the switch's own drop, Ω").toBeNear(R_GPIO + pads.backupDomain.switchOhms!, 0.5)
     expect(current("PI8") * 1e3, "LED4 current, mA").toBeNear(PIN_LAB_2026_10_12.ledMa, 0.1)
     const extra = (drop("PI8") - drop("PB6") * (current("PI8") / current("PB6"))) * 1e3
     const benchExtra = PIN_LAB_2026_10_12.ph4HighMv - PIN_LAB_2026_10_12.pi8HighMv

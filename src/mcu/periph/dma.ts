@@ -326,3 +326,36 @@ export const DMA2_REQUESTS: DmaRequestTable = [
   ["TIM1_CH1/TIM1_CH2/TIM1_CH3", "SPI6_RX", "CRYP_IN", "", "SDIO", "USART6_TX", "TIM1_CH3", "SPI5_TX"],
   ["", "DCMI", "HASH_IN", "", "USART1_TX", "USART6_TX", "", "TIM8_CH4/TIM8_TRIG/TIM8_COM"],
 ]
+
+/** STM32F411xC/E, RM0383 Rev 3 Table 27 (DMA1) and Table 28 (DMA2): [stream][channel]. */
+export const F411_DMA1_REQUESTS: DmaRequestTable = [
+  ["SPI3_RX", "I2C1_RX", "TIM4_CH1", "I2S3_EXT_RX", "", "", "TIM5_CH3/TIM5_UP", ""],
+  ["I2C1_TX", "I2C3_RX", "", "TIM2_UP/TIM2_CH3", "", "", "TIM5_CH4/TIM5_TRIG", ""],
+  ["SPI3_RX", "", "I2S3_EXT_RX", "I2C3_RX", "", "TIM3_CH4/TIM3_UP", "TIM5_CH1", "I2C2_RX"],
+  ["SPI2_RX", "", "TIM4_CH2", "I2S2_EXT_RX", "", "", "TIM5_CH4/TIM5_TRIG", "I2C2_RX"],
+  ["SPI2_TX", "", "I2S2_EXT_TX", "I2C3_TX", "", "TIM3_CH1/TIM3_TRIG", "TIM5_CH2", ""],
+  ["SPI3_TX", "I2C1_RX", "I2S3_EXT_TX", "TIM2_CH1", "USART2_RX", "TIM3_CH2", "I2C3_TX", ""],
+  ["", "I2C1_TX", "TIM4_UP", "TIM2_CH2/TIM2_CH4", "USART2_TX", "", "TIM5_UP", ""],
+  ["SPI3_TX", "I2C1_TX", "TIM4_CH3", "TIM2_UP/TIM2_CH4", "", "TIM3_CH3", "USART2_RX", "I2C2_TX"],
+]
+export const F411_DMA2_REQUESTS: DmaRequestTable = [
+  ["ADC1", "", "", "SPI1_RX", "SPI4_RX", "", "TIM1_TRIG", ""],
+  ["", "", "", "", "SPI4_TX", "USART6_RX", "TIM1_CH1", ""],
+  ["", "", "SPI1_TX", "SPI1_RX", "USART1_RX", "USART6_RX", "TIM1_CH2", ""],
+  ["", "", "SPI5_RX", "SPI1_TX", "SDIO", "SPI4_RX", "TIM1_CH1", ""],
+  ["ADC1", "", "SPI5_TX", "", "SPI4_RX", "SPI4_TX", "TIM1_CH4/TIM1_TRIG/TIM1_COM", ""],
+  ["", "", "", "SPI1_TX", "USART1_RX", "SPI5_TX", "TIM1_UP", "SPI5_RX"],
+  ["TIM1_CH1/TIM1_CH2/TIM1_CH3", "", "", "", "SDIO", "USART6_TX", "TIM1_CH3", "SPI5_TX"],
+  ["", "", "", "", "USART1_TX", "USART6_TX", "", ""],
+]
+
+/**
+ * STM32F401xB/C/D/E, RM0368 Rev 6 Tables 28/29: the F411's map without SPI5 and with nine cells empty
+ * (DMA1 S1 ch0 I2C1_TX, S7 ch6 USART2_RX; DMA2 S2 ch2 SPI1_TX, S4 ch4 SPI4_RX and every SPI5 request).
+ */
+const F401_EMPTY: [table: 1 | 2, stream: number, channel: number][] = [
+  [1, 1, 0], [1, 7, 6], [2, 2, 2], [2, 3, 2], [2, 4, 2], [2, 4, 4], [2, 5, 5], [2, 5, 7], [2, 6, 7],
+]
+const without = (table: DmaRequestTable, n: 1 | 2): DmaRequestTable => table.map((stream, s) => stream.map((source, c) => (F401_EMPTY.some(([t, ss, cc]) => t === n && ss === s && cc === c) ? "" : source)))
+export const F401_DMA1_REQUESTS: DmaRequestTable = without(F411_DMA1_REQUESTS, 1)
+export const F401_DMA2_REQUESTS: DmaRequestTable = without(F411_DMA2_REQUESTS, 2)

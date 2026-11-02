@@ -17,6 +17,7 @@ import { PanelInstance } from "./display"
 import { isAdcPad } from "@/mcu/periph/adc"
 import { makeCore, PAD_KEYS, RemoteCore, type CoreHost, type CoreStatus, type CoreTransport, type PanelWiring } from "./core-host"
 import { NO_READBACK, PadRelease, releaseKind, Surroundings } from "./readback"
+import { ledLight } from "./led-light"
 import type { BreakpointSpec, CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 
 /**
@@ -348,9 +349,6 @@ const SERIES_OHMS = 1000
 const QUIET_STEPS = 500
 /** Time constant of the achieved-speed average, wall-clock seconds. */
 const RATE_TAU = 0.5
-/** Diode current that counts as fully lit. */
-export const LED_FULL = 8e-3
-export const LED_ON_LEVEL = 0.05
 
 /** A voltage measurement between two pins; a null `b` measures against ground. */
 export type Probe = { id: string; a: string; b: string | null }
@@ -757,7 +755,7 @@ export class SimLoop {
       inst.powerNet = def?.mcuPower ? netOf(def.mcuPower) : undefined
       inst.resetNet = def?.mcuReset ? netOf(def.mcuReset) : undefined
       inst.boot0Net = def?.mcuBoot0 ? netOf(def.mcuBoot0) : undefined
-      inst.vbatNet = def?.mcuVbat ? engine.net.pinNet.get(pinKey(inst.object, def.mcuVbat)) : undefined
+      inst.vbatNet = def?.mcuVbat ? netOf(def.mcuVbat) : undefined
       const vrefPin = def?.mcuVref ? pinKey(inst.object, def.mcuVref) : undefined
       inst.vrefNet = vrefPin ? engine.net.pinNet.get(vrefPin) : undefined
       inst.vrefWired = inst.vrefNet !== undefined && [...engine.net.pinNet].some(([key, net]) => net === inst.vrefNet && key !== vrefPin)
@@ -2298,8 +2296,8 @@ export class SimLoop {
       // A bench frozen by the debugger shows the current as it stands: the pins stay where the
       // stopped code left them for as long as the eye cares to look.
       const i = paused && !this.running ? engine.diodeI[index] : engine.diodeAvg[index]
-      const level = Math.min(1, Math.max(0, i) / LED_FULL)
-      parts[partKey(el.object, el.part)] = { on: level > LED_ON_LEVEL, level, amps: i }
+      const light = ledLight(i, el.vf ?? 0.7)
+      parts[partKey(el.object, el.part)] = { on: light.on, level: light.level, amps: i }
     })
     for (const part of this.digitalParts.values()) {
       const lit = part.parts?.()

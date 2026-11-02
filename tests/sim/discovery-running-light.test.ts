@@ -14,11 +14,6 @@ import { FIRMWARE } from "../lib/firmware"
 
 const ELF = readFileSync(join(FIRMWARE, "prebuilt", "discovery-running-light.U1.elf")).toString("base64")
 const ORDER = ["LD4", "LD3", "LD5", "LD6"]
-/**
- * LD6 (blue, VF 2.5–3.1 V at 5 mA) runs at a few hundred µA from the 2.9 V VDD through 680 Ω,
- * below the field's "lit" threshold; it counts here by its current.
- */
-const GLOWING = 0.1e-3
 
 describe("Discovery running light", () => {
   const doc = discoveryRunningLight.build(GRID)
@@ -32,7 +27,8 @@ describe("Discovery running light", () => {
   /** The one carrying the most current: as one LED goes out and the next lights, both glow for a moment. */
   const lit = () => {
     const parts = loop.snapshot()!.parts
-    const levels = ORDER.map((id) => ({ id, level: (parts[partKey(u.id, id)]?.amps ?? 0) > GLOWING ? (parts[partKey(u.id, id)]?.amps ?? 0) : 0 }))
+    // LD6 (blue) runs at a few hundred µA from the 2.9 V VDD through 680 Ω: dim, but seen on (src/sim/led-light.ts).
+    const levels = ORDER.map((id) => ({ id, level: parts[partKey(u.id, id)]?.on ? (parts[partKey(u.id, id)]?.amps ?? 0) : 0 }))
     const top = levels.reduce((a, b) => (b.level > a.level ? b : a))
     return top.level > 0 ? [top.id] : []
   }
