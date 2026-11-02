@@ -1,6 +1,7 @@
 import { STM32F407VG } from "@/mcu/chip"
 import { BoardIcon } from "../icons"
 import { mcuModel } from "../mcu-model"
+import { boardArt } from "./stm32f4-discovery-art"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind } from "../types"
 import { LED_COLORS } from "./basic"
 
@@ -16,7 +17,6 @@ import { LED_COLORS } from "./basic"
 
 const ORIGIN = { x: 0.508, y: 0.685 }
 const at = (xMm: number, yMm: number) => ({ x: ORIGIN.x + xMm / 2.54, y: ORIGIN.y + yMm / 2.54 })
-const BOARD_MM = { w: 66, h: 97 }
 
 /** [header pin, label, MCU pin, note] */
 type Row = [number, string, string?, string?]
@@ -92,56 +92,19 @@ function header(connector: "P1" | "P2", rows: Row[]): PinDef[] {
       connector,
       connectorPin: pin,
       note,
+      printed: true,
     } satisfies PinDef
   })
 }
 
 const pins: PinDef[] = [...header("P1", P1), ...header("P2", P2)]
 
-const corner = at(0, 0)
-const mcu = at(32.66, 48.54)
-const x2 = at(30.6, 33.3)
-const stlink = at(28.4, 24.3)
-const codec = at(27.0, 76.71)
-const accel = at(33.51, 65.89)
-const jack = at(17.76, 91.44)
-const otg = at(36.81, 92.05)
 const jp1 = at(17.61, 42.54)
-const cn2 = at(6.33, 11.3)
-const cn3 = at(47.3, 16.88)
 
-const body: BodyShape[] = [
-  { type: "rect", x: corner.x, y: corner.y, w: BOARD_MM.w / 2.54, h: BOARD_MM.h / 2.54, rx: 0.3, fill: "board" },
-  // ST-LINK/V2 (STM32F103, X1) across the top third, cut off by CN3's jumpers.
-  { type: "rect", x: corner.x + 0.3, y: corner.y + 0.3, w: BOARD_MM.w / 2.54 - 0.6, h: 10.4, rx: 0.3, fill: "zone" },
-  { type: "rect", x: stlink.x - 1.4, y: stlink.y - 1.4, w: 2.8, h: 2.8, rx: 0.15, fill: "chip" },
-  { type: "text", x: stlink.x, y: stlink.y + 0.1, text: "STM32F103", size: 0.28, inverse: true },
-  { type: "text", x: at(42, 0).x, y: at(0, 25.5).y, text: "ST-LINK", size: 0.36, muted: true },
-  { type: "rect", x: cn2.x - 0.4, y: cn2.y - 0.4, w: 0.8, h: 5 * 1 + 0.8, rx: 0.1, fill: "connector" },
-  { type: "text", x: cn2.x + 1.1, y: cn2.y + 2.6, text: "SWD", size: 0.35, rotate: -90, muted: true },
-  { type: "rect", x: cn3.x - 0.4, y: cn3.y - 0.4, w: 0.8, h: 3 + 0.8, rx: 0.1, fill: "connector" },
-  { type: "text", x: cn3.x + 1.6, y: cn3.y + 1.5, text: "CN3", size: 0.3, muted: true },
-  // HSE X2 (8 MHz HC-49) and the MCU (LQFP100, 14 × 14 mm, rotated 180°).
-  { type: "rect", x: x2.x - 2, y: x2.y - 0.75, w: 4, h: 1.5, rx: 0.7, fill: "connector" },
-  { type: "text", x: x2.x, y: x2.y + 0.12, text: "8.000", size: 0.32, muted: true },
-  { type: "rect", x: mcu.x - 2.76, y: mcu.y - 2.76, w: 5.51, h: 5.51, rx: 0.15, fill: "chip" },
-  { type: "text", x: mcu.x, y: mcu.y - 0.3, text: "STM32F407VG", size: 0.42, inverse: true },
-  { type: "text", x: mcu.x, y: mcu.y + 0.6, text: "LQFP100 · 168 MHz", size: 0.28, inverse: true },
-  // JP1 Idd, the accelerometer, the codec, the audio jack and the OTG connector.
-  { type: "text", x: jp1.x - 1, y: jp1.y + 0.1, text: "Idd", size: 0.3, muted: true, anchor: "end" },
-  { type: "rect", x: accel.x - 0.4, y: accel.y - 0.4, w: 0.8, h: 0.8, rx: 0.05, fill: "chip" },
-  { type: "rect", x: codec.x - 1.1, y: codec.y - 1.1, w: 2.2, h: 2.2, rx: 0.1, fill: "chip" },
-  { type: "text", x: codec.x, y: codec.y + 0.1, text: "CS43L22", size: 0.26, inverse: true },
-  { type: "rect", x: jack.x - 1.2, y: jack.y - 1.6, w: 2.4, h: 3.6, rx: 0.2, fill: "connector" },
-  { type: "text", x: jack.x, y: jack.y + 0.1, text: "CN4", size: 0.3, muted: true },
-  { type: "rect", x: otg.x - 1.2, y: otg.y - 0.9, w: 2.4, h: 1.8, rx: 0.2, fill: "connector" },
-  { type: "text", x: otg.x, y: otg.y - 1.2, text: "CN5 OTG", size: 0.28, muted: true },
-  // Header names and the silkscreen.
-  { type: "text", x: (COL.p1Odd + COL.p1Even) / 2, y: TOP - 1, text: "P1", size: 0.4, muted: true },
-  { type: "text", x: (COL.p2Odd + COL.p2Even) / 2, y: TOP - 1, text: "P2", size: 0.4, muted: true },
-  { type: "text", x: corner.x + BOARD_MM.w / 2.54 / 2, y: at(0, 29.6).y, text: "www.st.com/stm32f4-discovery", size: 0.34, printed: true },
-  { type: "text", x: at(52, 0).x, y: at(0, 18).y, text: "MB997A", size: 0.3, printed: true },
-]
+const body: BodyShape[] = boardArt({
+  p1: Array.from({ length: 25 }, (_, row) => [P1[row * 2][1], P1[row * 2 + 1][1]]),
+  p2: Array.from({ length: 25 }, (_, row) => [P2[row * 2][1], P2[row * 2 + 1][1]]),
+})
 
 /**
  * The MB997's Everlight 0603 LEDs (part numbers from the B02/G01 BOMs; datasheets in
@@ -155,19 +118,17 @@ const body: BodyShape[] = [
  */
 const VF = { red: 2.05, orange: 1.95, green: 2.0, blue: 2.8 }
 const orange = { css: "#f97316" }
-const ld = (id: string, xMm: number, yMm: number, color: string, mcuPin?: string, pin?: string): PartDef => ({ type: "led", id, label: id, ...at(xMm, yMm), color, mcu: mcuPin, pin })
+const ld = (id: string, xMm: number, yMm: number, color: string, mcuPin?: string, pin?: string): PartDef => ({ type: "led", id, label: id, ...at(xMm, yMm), color, mcu: mcuPin, pin, printed: true })
 
 const parts: PartDef[] = [
-  ld("LD1", 16.4, 7.38, LED_COLORS.red.css),
   ld("LD2", 41.56, 12.34, LED_COLORS.red.css),
   ld("LD3", 33.51, 61.72, orange.css, "PD13", "P1-45"),
   ld("LD4", 29.34, 65.91, LED_COLORS.green.css, "PD12", "P1-44"),
   ld("LD5", 37.65, 65.91, LED_COLORS.red.css, "PD14", "P1-46"),
   ld("LD6", 33.51, 70.1, LED_COLORS.blue.css, "PD15", "P1-47"),
-  ld("LD7", 29.19, 94.7, LED_COLORS.green.css),
   ld("LD8", 44.4, 94.7, LED_COLORS.red.css, "PD5", "P2-29"),
-  { type: "button", id: "B1", label: "User", ...at(20.96, 65.23), mcu: "PA0", pin: "P1-12" },
-  { type: "button", id: "B2", label: "Reset", ...at(45.04, 65.23), mcu: "NRST", pin: "P1-6" },
+  { type: "button", id: "B1", label: "User", ...at(20.96, 65.23), size: 1.4, mcu: "PA0", pin: "P1-12", printed: true },
+  { type: "button", id: "B2", label: "Reset", ...at(45.04, 65.23), size: 1.4, mcu: "NRST", pin: "P1-6", printed: true },
   { type: "switch", id: "JP1", label: "JP1 Idd: the MCU's VDD from the 3V rail; take it off to put an ammeter across", x: jp1.x, y: jp1.y - 0.5, span: 1, vertical: true, initial: { on: true } },
   { type: "usb", id: "USB", label: "CN1 USB (ST-LINK)", ...at(33.36, 0.5), side: "top", initial: { on: true } },
 ]
