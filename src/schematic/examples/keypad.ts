@@ -16,11 +16,13 @@ export const nucleoKeypad = {
   build(grid: number) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
-    // VCP pins sit on the ST-LINK zone's left edge at y 4 (TX) and 6 (RX), stubs 2 cells out.
-    const term = place("serial-terminal", -12, 3, { baud: "115200" })
-    wire(u, "VCP-TX", term, "RX")
-    wire(u, "VCP-RX", term, "TX")
-    // CN10's outer row, D7..D0 (CN10-2..16), ends at x 28, y 24..31. The keypad's header
+    // The VCP pins stand above the board either side of CN1, ending at (18,-1) and (22,-1); the
+    // terminal sits up and to the right, clear of the USB cable (x 20, up to y -7), RX at row -8
+    // and TX at row -6, so the two wires nest.
+    const term = place("serial-terminal", 26, -9, { baud: "115200" })
+    wire(u, "VCP-TX", term, "RX", [[18, -8]])
+    wire(u, "VCP-RX", term, "TX", [[22, -6]])
+    // CN10's outer row, D7..D0 (CN10-2..16), ends at x 29, y 24..31. The keypad's header
     // R1..R4 C1..C4 points down at x 33..40, y 19: nested L-shaped wires, none crossing.
     const kp = place("keypad-4x4", 32, 8)
     const header = ["R1", "R2", "R3", "R4", "C1", "C2", "C3", "C4"]

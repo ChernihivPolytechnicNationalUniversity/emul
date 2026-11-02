@@ -3,10 +3,11 @@ import { BoardIcon } from "../icons"
 import { mcuModel } from "../mcu-model"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind, Side } from "../types"
 import { LED_COLORS } from "./basic"
+import { BOARD_MM, boardArt, CN7_SHIFT, FRAME, PITCH, ZIO } from "./nucleo-f429zi-art"
 
 /**
- * NUCLEO-F429ZI (Nucleo-144, MB1137). Pin data from ST UM1974, Table 16.
- * Scale: 1 cell = 2.54 mm; the board is 133.34 × 70 mm ≈ 52 × 28 cells.
+ * NUCLEO-F429ZI (Nucleo-144, MB1137). Pin data from ST UM1974, Table 16; the board drawn to
+ * scale (70 × 133.32 mm) from the MB1137 rev B Gerbers, see nucleo-f429zi-art.ts.
  */
 
 /** [connector pin, label, MCU pin, signal, function, note] */
@@ -137,80 +138,70 @@ function kindOf(label: string, mcu?: string): PinKind {
   return "digital"
 }
 
-const WIDTH = 28
-const HEIGHT = 52
-const X = { leftOuter: 2, leftInner: 3, rightInner: WIDTH - 3, rightOuter: WIDTH - 2 }
+/** 1 cell = 2.54 mm; the frame puts the header pins on whole cells (nucleo-f429zi-art.ts). */
+const cell = (mm: { x: number; y: number }) => ({ x: Math.round((mm.x + FRAME.originX) * FRAME.cellsPerMm * 100) / 100, y: Math.round((mm.y + FRAME.originY) * FRAME.cellsPerMm * 100) / 100 })
+const WIDTH = Math.ceil(cell({ x: BOARD_MM.w, y: 0 }).x)
+const HEIGHT = Math.ceil(cell({ x: 0, y: BOARD_MM.h + 3 }).y)
 
-function header(
-  connector: string,
-  side: Side,
-  top: number,
-  outer: Row[],
-  inner: Row[],
-): PinDef[] {
+function header(connector: string, side: Side, firstRow: number, outer: Row[], inner: Row[]): PinDef[] {
   const left = side === "left"
-  const col = (rows: Row[], x: number, labelAt: Side, stub: number): PinDef[] =>
-    rows.map(([pin, label, mcu, signal, fn, note], i) => ({
-      id: `${connector}-${pin}`,
-      label,
-      x,
-      y: top + i,
-      side,
-      labelAt,
-      kind: kindOf(label, mcu),
-      stub,
-      mcu,
-      signal,
-      fn,
-      connector,
-      connectorPin: pin,
-      note,
-    }))
+  const columns = left ? ZIO.left : ZIO.right
+  const col = (rows: Row[], xMm: number, labelAt: Side): PinDef[] =>
+    rows.map(([pin, label, mcu, signal, fn, note], i) => {
+      const at = cell({ x: xMm, y: firstRow + i * PITCH })
+      return {
+        id: `${connector}-${pin}`,
+        label,
+        x: Math.round(at.x),
+        y: Math.round(at.y),
+        side,
+        labelAt,
+        kind: kindOf(label, mcu),
+        stub: left ? Math.round(at.x) : WIDTH - Math.round(at.x),
+        mcu,
+        signal,
+        fn,
+        connector,
+        connectorPin: pin,
+        note,
+        printed: true,
+      }
+    })
   return left
-    ? [...col(outer, X.leftOuter, "left", 2), ...col(inner, X.leftInner, "right", 3)]
-    : [...col(outer, X.rightOuter, "right", 2), ...col(inner, X.rightInner, "left", 3)]
+    ? [...col(outer, columns.outer, "left"), ...col(inner, columns.inner, "right")]
+    : [...col(outer, columns.outer, "right"), ...col(inner, columns.inner, "left")]
 }
+
+/** The VCP's two pins stand just past the top edge either side of CN1, where the ST-LINK's USB is. */
+const VCP = { y: -1.3, tx: 43.87, rx: 54.03 }
 
 const pins: PinDef[] = [
   // The ST-LINK's virtual COM port: USART3 of the target on PD8/PD9, reachable over the USB
-  // cable on a real board; here as two pins on the ST-LINK zone for a serial terminal.
-  { id: "VCP-TX", label: "VCP TX", x: 0, y: 4, side: "left", labelAt: "right", kind: "digital", stub: 2, mcu: "PD8", signal: "STLK_RX", fn: "USART3_TX", note: "Target → host; connect to a terminal's RX" },
-  { id: "VCP-RX", label: "VCP RX", x: 0, y: 6, side: "left", labelAt: "right", kind: "digital", stub: 2, mcu: "PD9", signal: "STLK_TX", fn: "USART3_RX", note: "Host → target; connect to a terminal's TX" },
-  ...header("CN8", "left", 13, CN8_OUTER, CN8_INNER),
-  ...header("CN9", "left", 22, CN9_OUTER, CN9_INNER),
-  ...header("CN7", "right", 13, CN7_OUTER, CN7_INNER),
-  ...header("CN10", "right", 24, CN10_OUTER, CN10_INNER),
+  // cable on a real board; here as two pins beside CN1 for a serial terminal.
+  { id: "VCP-TX", label: "VCP TX", ...cell({ x: VCP.tx, y: VCP.y }), side: "top", labelAt: "left", kind: "digital", stub: 1, mcu: "PD8", signal: "STLK_RX", fn: "USART3_TX", note: "Target → host; connect to a terminal's RX", printed: true },
+  { id: "VCP-RX", label: "VCP RX", ...cell({ x: VCP.rx, y: VCP.y }), side: "top", labelAt: "right", kind: "digital", stub: 1, mcu: "PD9", signal: "STLK_TX", fn: "USART3_RX", note: "Host → target; connect to a terminal's TX", printed: true },
+  ...header("CN8", "left", ZIO.cn8, CN8_OUTER, CN8_INNER),
+  ...header("CN9", "left", ZIO.cn9, CN9_OUTER, CN9_INNER),
+  ...header("CN7", "right", ZIO.cn7 + CN7_SHIFT, CN7_OUTER, CN7_INNER),
+  ...header("CN10", "right", ZIO.cn10, CN10_OUTER, CN10_INNER),
 ]
 
-const body: BodyShape[] = [
-  { type: "rect", x: 0, y: 0, w: WIDTH, h: HEIGHT, rx: 0.6, fill: "board" },
-  // ST-LINK section
-  { type: "rect", x: 0.5, y: 0.5, w: WIDTH - 1, h: 9.5, rx: 0.4, fill: "zone" },
-  { type: "text", x: 14, y: 5, text: "ST-LINK/V2-1", size: 0.5 },
-  { type: "text", x: 14, y: 6.2, text: "STM32F103CBT6", size: 0.32, muted: true },
-  // MCU
-  { type: "rect", x: 9, y: 21, w: 10, h: 10, rx: 0.3, fill: "chip" },
-  { type: "text", x: 14, y: 25.6, text: "STM32F429ZI", size: 0.55, inverse: true },
-  { type: "text", x: 14, y: 26.9, text: "LQFP144 · 180 MHz", size: 0.35, inverse: true },
-  // Ethernet and USB OTG
-  { type: "rect", x: 1, y: 45, w: 8, h: 6.5, rx: 0.3, fill: "connector" },
-  { type: "text", x: 5, y: 48.3, text: "CN14 ETH", size: 0.38 },
-  { type: "rect", x: 19, y: 46.5, w: 8, h: 5, rx: 0.3, fill: "connector" },
-  { type: "text", x: 23, y: 49, text: "CN13 USB OTG", size: 0.34 },
-  // connector names
-  { type: "text", x: 2.5, y: 12.2, text: "CN8", size: 0.35, muted: true },
-  { type: "text", x: 2.5, y: 21.2, text: "CN9", size: 0.35, muted: true },
-  { type: "text", x: WIDTH - 2.5, y: 12.2, text: "CN7", size: 0.35, muted: true },
-  { type: "text", x: WIDTH - 2.5, y: 23.2, text: "CN10", size: 0.35, muted: true },
-]
+const names = (outer: Row[], inner: Row[]) => ({ outer: outer.map((r) => r[1]), inner: inner.map((r) => r[1]) })
+const body: BodyShape[] = boardArt({
+  cn8: names(CN8_OUTER, CN8_INNER),
+  cn9: names(CN9_OUTER, CN9_INNER),
+  cn7: names(CN7_OUTER, CN7_INNER),
+  cn10: names(CN10_OUTER, CN10_INNER),
+})
 
+/** Positions from the MB1137 pick-and-place file (mm from the board's top-left corner). */
 const parts: PartDef[] = [
-  { type: "led", id: "LD1", label: "LD1", x: 11, y: 41, color: "#22c55e", pin: "CN10-31", mcu: "PB0" },
-  { type: "led", id: "LD2", label: "LD2", x: 13, y: 41, color: "#3b82f6", mcu: "PB7" },
-  { type: "led", id: "LD3", label: "LD3", x: 15, y: 41, color: "#ef4444", mcu: "PB14" },
-  { type: "button", id: "B1", label: "USER", x: 22, y: 42, mcu: "PC13" },
-  { type: "button", id: "RESET", label: "RESET", x: 4, y: 8, mcu: "NRST" },
-  { type: "usb", id: "USB", label: "CN1 USB", x: 14, y: 0.6, side: "top", initial: { on: true } },
+  { type: "led", id: "LD1", label: "LD1", ...cell({ x: 36.35, y: 27.66 }), color: "#22c55e", pin: "CN10-31", mcu: "PB0", printed: true },
+  { type: "led", id: "LD2", label: "LD2", ...cell({ x: 33.17, y: 27.66 }), color: "#3b82f6", mcu: "PB7", printed: true },
+  { type: "led", id: "LD3", label: "LD3", ...cell({ x: 29.92, y: 27.66 }), color: "#ef4444", mcu: "PB14", printed: true },
+  { type: "button", id: "B1", label: "USER", ...cell({ x: 7.75, y: 127.05 }), size: 1.4, mcu: "PC13", printed: true },
+  { type: "button", id: "RESET", label: "RESET", ...cell({ x: 62.38, y: 127.05 }), size: 1.4, mcu: "NRST", printed: true },
+  { type: "usb", id: "USB", label: "CN1 USB", ...cell({ x: 48.95, y: 0.5 }), side: "top", initial: { on: true } },
 ]
 
 // --- electrical model ---------------------------------------------------------

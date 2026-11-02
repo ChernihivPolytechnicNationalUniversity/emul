@@ -20,15 +20,15 @@ export const nucleoLcdI2c = {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
     // The backpack's pins face the board: GND (36,12), VCC (36,13), SDA (36,14), SCL (36,15),
-    // stubs ending at x 35. CN7-2 (D15, SCL) leaves at (28,13), CN7-4 (D14, SDA) at (28,14):
+    // stubs ending at x 35. CN7-2 (D15, SCL) leaves at (29,13), CN7-4 (D14, SDA) at (29,14):
     // SCL has to cross SDA, the two pin orders are opposite.
     const lcd = place("lcd-1602-i2c", 36, 9)
     wire(u, "CN7-4", lcd, "SDA")
     wire(u, "CN7-2", lcd, "SCL", [[31, 13], [31, 15]])
-    // +5V (CN8-9) and GND (CN8-11) leave at (0,17) and (0,18) from the far side, over the top of the
-    // board, nested so they do not cross.
-    wire(u, "CN8-9", lcd, "VCC", [[-2, 17], [-2, -3], [33, -3], [33, 13]])
-    wire(u, "CN8-11", lcd, "GND", [[-3, 18], [-3, -4], [34, -4], [34, 12]])
+    // +5V (CN8-9) and GND (CN8-11) leave at (0,21) and (0,22) from the far side, over the top of the
+    // board above the USB cable, nested so they do not cross.
+    wire(u, "CN8-9", lcd, "VCC", [[-2, 21], [-2, -8], [33, -8], [33, 13]])
+    wire(u, "CN8-11", lcd, "GND", [[-3, 22], [-3, -9], [34, -9], [34, 12]])
     return doc
   },
 }

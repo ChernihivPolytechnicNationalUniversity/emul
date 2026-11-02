@@ -26,7 +26,7 @@ export const nucleoSevenSeg: { id: string; name: string; description: string; ic
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
 
-    // Segments: CN10 outer rows 25..32 (pin ends at x 28). Each runs right to its own column,
+    // Segments: CN10 outer rows 25..32 (pin ends at x 29). Each runs right to its own column,
     // down through a vertical 220 Ω and on to the display's pin on rows 40..47; the top row
     // takes the rightmost column so no two wires cross.
     const ds = place("seven-segment-4-cc", 47, 39, { value: "CC56-12EWA" })

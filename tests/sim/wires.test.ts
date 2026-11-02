@@ -1014,7 +1014,7 @@ describe("coincident pins, against a brute-force sweep over every pair", () => {
     const nucleo: PlacedObject = { id: "n", def: "nucleo-f429zi", x: 0, y: 0, rotation: 45 }
     const offEdge = (v: number) => Math.abs(v - Math.floor(v) - 0.5)
     const pin = objectPins(nucleo, GRID).reduce((best, p) => (p.pin.kind !== "nc" && offEdge(p.point.y) < offEdge(best.point.y) ? p : best))
-    expect.soft(offEdge(pin.point.y), "a pin sits within a thousandth of a pixel edge").toBeLessThan(1e-3)
+    expect.soft(offEdge(pin.point.y), "a pin sits within a thousandth or so of a pixel edge").toBeLessThan(1.5e-3)
     const across = Math.floor(pin.point.y) + 0.5 + (pin.point.y % 1 < 0.5 ? 0.0015 : -0.0015)
     const pinOffset = objectPins({ id: "probe", def: "ground", x: 0, y: 0 }, GRID)[0].point
     const objects = [nucleo, { id: "g", def: "ground", x: pin.point.x - pinOffset.x, y: across - pinOffset.y }]

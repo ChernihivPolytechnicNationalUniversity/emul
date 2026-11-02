@@ -18,21 +18,23 @@ export const nucleoEncoder = {
   build(grid: number) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
-    // VCP pins end at (-2,4) and (-2,6); the terminal is mirrored so its pins face them.
-    const term = Object.assign(place("serial-terminal", -12, 3, { baud: "115200" }), { mirror: true })
-    wire(u, "VCP-TX", term, "RX")
-    wire(u, "VCP-RX", term, "TX")
+    // The VCP pins stand above the board either side of CN1, ending at (18,-1) and (22,-1); the
+    // terminal sits up and to the right, clear of the USB cable (x 20, up to y -7), RX at row -8
+    // and TX at row -6, so the two wires nest.
+    const term = place("serial-terminal", 26, -9, { baud: "115200" })
+    wire(u, "VCP-TX", term, "RX", [[18, -8]])
+    wire(u, "VCP-RX", term, "TX", [[22, -6]])
     // The module, mirrored so its pins face CN10: GND (34,30), + (34,31), SW (34,32),
     // DT (34,33), CLK (34,34). CN10-18 (D42, PE8), CN10-19 (D28, PD13) and CN10-21
-    // (D29, PD12) end at x 28 on rows 32, 33 and 34: three straight wires.
+    // (D29, PD12) end at x 29 on rows 32, 33 and 34: three straight wires.
     const ky = Object.assign(place("ky-040", 34, 29), { mirror: true })
     wire(u, "CN10-18", ky, "SW")
     wire(u, "CN10-19", ky, "DT")
     wire(u, "CN10-21", ky, "CLK")
-    // +3V3 (CN8-7, (0,16)) and GND (CN8-11, (0,18)) from the far side, round the terminal
-    // and over the top of the board.
-    wire(u, "CN8-7", ky, "VCC", [[-14, 16], [-14, -3], [32, -3], [32, 31]])
-    wire(u, "CN8-11", ky, "GND", [[-15, 18], [-15, -4], [33, -4], [33, 30]])
+    // +3V3 (CN8-7, (0,20)) and GND (CN8-11, (0,22)) from the far side, over the top of the
+    // board above the terminal and the USB cable, nested so they do not cross.
+    wire(u, "CN8-7", ky, "VCC", [[-2, 20], [-2, -10], [32, -10], [32, 31]])
+    wire(u, "CN8-11", ky, "GND", [[-3, 22], [-3, -11], [33, -11], [33, 30]])
     return doc
   },
 }

@@ -83,7 +83,7 @@ describe("parts do not pile onto each other", () => {
 
   it("a socket part docks only by whole connectors: a Nucleo with two stray pins on the board's pins is refused", () => {
     const board = part("board", "open746i-c", 0, 0)
-    const nucleo = part("nucleo", "nucleo-f429zi", 13, -38)
+    const nucleo = part("nucleo", "nucleo-f429zi", 49, -38)
     const s = scene([board, nucleo])
     const over = objectPins(nucleo, GRID).filter(({ point }) => point.y > c(1) && point.y < c(55) && point.x > c(1) && point.x < c(72))
     const boardPins = new Set(objectPins(board, GRID).map(({ point }) => `${point.x},${point.y}`))

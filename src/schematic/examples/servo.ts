@@ -17,13 +17,13 @@ export const nucleoServo = {
   build(grid: number) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
-    // D6 (CN10-4) ends at (28,25), straight into the servo's SIG at (32,25); its + sits at
-    // (32,24) and GND at (32,23). +5V (CN8-9) on the far side ends at (0,17) and comes over
-    // the top of the board down x = 30; GND (CN10-22, (28,34)) goes round the servo's right
+    // D6 (CN10-4) ends at (29,25), straight into the servo's SIG at (32,25); its + sits at
+    // (32,24) and GND at (32,23). +5V (CN8-9) on the far side ends at (0,21) and comes over
+    // the top of the board, above the USB cable, down x = 30; GND (CN10-22, (29,34)) goes round the servo's right
     // and over its top so neither wire crosses the other.
     const m = place("servo-sg90", 32, 21)
     wire(u, "CN10-4", m, "SIG")
-    wire(u, "CN8-9", m, "VCC", [[-2, 17], [-2, -3], [30, -3], [30, 24]])
+    wire(u, "CN8-9", m, "VCC", [[-2, 21], [-2, -8], [30, -8], [30, 24]])
     wire(u, "CN10-22", m, "GND", [[44, 34], [44, 19], [31, 19], [31, 23]])
     return doc
   },
