@@ -45,6 +45,9 @@ export const crystal: ComponentDef = {
  */
 export const RESONATOR_TOLERANCE = { initial: 0.5, temperature: 0.3, ageing: 0.2 }
 
+/** Assumed until checked: a ceramic resonator is up in 0.5 ms, a quarter of a MHz crystal's 2 ms (Murata gives no figure). */
+export const RESONATOR_STARTUP = 0.5e-3
+
 export const resonator: ComponentDef = {
   id: "resonator",
   name: "Ceramic resonator",
@@ -77,7 +80,8 @@ export const resonator: ComponentDef = {
   info: {
     Tolerance: `±${RESONATOR_TOLERANCE.initial} % initial, ±${RESONATOR_TOLERANCE.temperature} % over −20…80 °C, ±${RESONATOR_TOLERANCE.ageing} % ageing`,
     Source: "Murata CSTCE16M0V53-R0 product data (murata.com)",
-    "Not modelled": "the start-up time (taken as a crystal's 2 ms; Murata gives none), the frequency's own drift with temperature and age (set the deviation), the built-in capacitors and ESR",
+    "Start-up": "0.5 ms: assumed, to be checked (Murata gives no figure)",
+    "Not modelled": "the frequency's own drift with temperature and age (set the deviation), the built-in capacitors and ESR",
   },
 }
 

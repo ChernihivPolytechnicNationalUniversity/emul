@@ -376,8 +376,9 @@ export type Element =
    * With `en`, the output is on once EN − GND rises past `enOn` and stays on until it falls below `enOff`.
    * `rdrop` adds to the dropout with the load: dropout + rdrop · I.
    * `gq` / `gqOff` are the regulator's own draw from IN to GND, in siemens, while on and while shut down.
+   * `thermal`: its junction heads for 25 °C + P · `rja` with time constant `tau`; off at `tsd` °C, back on at `tsdOff`.
    */
-  | { kind: "REG"; in: NodeRef; out: NodeRef; gnd: NodeRef; value: Value; dropout?: Value; rdrop?: Value; imax?: Value; en?: NodeRef; enOn?: Value; enOff?: Value; gq?: Value; gqOff?: Value; limits?: Limits }
+  | { kind: "REG"; in: NodeRef; out: NodeRef; gnd: NodeRef; value: Value; dropout?: Value; rdrop?: Value; imax?: Value; en?: NodeRef; enOn?: Value; enOff?: Value; gq?: Value; gqOff?: Value; thermal?: { rja: Value; tsd: Value; tsdOff: Value; tau: Value }; limits?: Limits }
   | { kind: "CHG"; in: NodeRef; bat: NodeRef; gnd: NodeRef; prog: NodeRef; chrg?: NodeRef; stdby?: NodeRef; ce?: NodeRef; temp?: NodeRef; value?: Value; limits?: Limits }
   | { kind: "PROT"; vdd: NodeRef; vss: NodeRef; cs: NodeRef; od: NodeRef; oc: NodeRef; chip: ProtChip; limits?: Limits }
   | { kind: "BOOST"; in: NodeRef; out?: NodeRef; gnd: NodeRef; fb: NodeRef; vcc?: NodeRef; en?: NodeRef; vref?: Value; eff?: Value; ilim?: Value; uvlo?: Value; iq?: Value; limits?: Limits }

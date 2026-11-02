@@ -65,7 +65,8 @@ export const polyfuse: ComponentDef = {
     Source: "Bourns MF-MSMF series data sheet, electrical characteristics at 23 °C",
     Model:
       "heat is the running average of (I / Itrip′)², Itrip′ midway between Ihold and Itrip; it trips at 1, timed so the listed current trips it in exactly the listed maximum time; tripped, its resistance keeps the tripped dissipation in it; unpowered, it cools with the same time constant and resets at Ihold's heat",
+    Reset: "cools with the heating's time constant (≈17 s for the MF-MSMF050) and resets at Ihold's heat: assumed, to be checked (the data sheet gives no reset time)",
     "Not modelled":
-      "the spread between Rmin and R1max (it starts at Rmin and returns to it after a trip), the resistance's rise as it warms below a trip, the ambient temperature (23 °C), the reset time (the data sheet gives none: the cooling is the heating's time constant)",
+      "the spread between Rmin and R1max (it starts at Rmin and returns to it after a trip), the resistance's rise as it warms below a trip, the ambient temperature's effect on Ihold",
   },
 }

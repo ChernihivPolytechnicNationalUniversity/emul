@@ -13,6 +13,9 @@ export type ResolvedLimits = { power?: number; current?: number; voltage?: numbe
 
 export const DEFAULT_TAU = 0.035
 
+/** A regulator's thermal shutdown: junction-to-ambient °C/W, off and back-on temperatures (°C), the junction's time constant (s). */
+export type RegThermal = { rja: number; tsd: number; tsdOff: number; tau: number }
+
 export type Ptc = { trip: number; tau: number; pd: number; reset: number }
 
 /**
@@ -70,7 +73,7 @@ export type Resolved =
   /** MCU pad; what it drives is read live from the pin reader on every step. `vddNet` is the rail it switches to, when it has one. */
   | (Base & { kind: "GPIO"; node: number; nodeKey: string; vdd: number; vddNet: number | undefined; gndNet: number | undefined; ohms: number; ohmsAt: number; pull: number; keys: string[] })
   /** `index` is the extra unknown (through current, in → out) like a source's. */
-  | (Base & { kind: "REG"; in: number; out: number; gnd: number; value: number; dropout: number; rdrop: number; imax: number; en?: number; enOn: number; enOff: number; gq: number; gqOff: number; index: number; keys: [string, string, string] })
+  | (Base & { kind: "REG"; in: number; out: number; gnd: number; value: number; dropout: number; rdrop: number; imax: number; en?: number; enOn: number; enOff: number; gq: number; gqOff: number; thermal?: RegThermal; index: number; keys: [string, string, string] })
   | (Base & { kind: "CHG"; in: number; bat: number; gnd: number; progNet: number; chrg: number | undefined; stdby: number | undefined; ce: number | undefined; temp: number | undefined; value: number; index: number; prog: number; keys: string[] })
   | (Base & { kind: "PROT"; vdd: number; vss: number; cs: number; od: number; oc: number; spec: ProtSpec; keys: string[] })
   | (Base & { kind: "BOOST"; in: number; out: number; gnd: number; fb: number; vcc: number | undefined; en: number | undefined; vref: number; eff: number; ilim: number; uvlo: number; iq: number; index: number; keys: string[] })
@@ -587,8 +590,10 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         const gq = positive(el.gq)
         const rdrop = positive(el.rdrop)
         const gqOff = el.gqOff === undefined ? gq : positive(el.gqOff)
+        const t = el.thermal && { rja: positive(el.thermal.rja), tsd: positive(el.thermal.tsd), tsdOff: positive(el.thermal.tsdOff), tau: positive(el.thermal.tau) }
+        const thermal = t && t.rja > 0 && t.tau > 0 && t.tsd > t.tsdOff ? t : undefined
         if (Number.isFinite(value) && value > 0)
-          elements.push({ ...base, kind: "REG", in: netOf(obj, el.in), out: netOf(obj, el.out), gnd: netOf(obj, el.gnd), value, dropout: Number.isFinite(dropout) ? Math.max(0, dropout) : 0, rdrop, imax: imax > 0 ? imax : Infinity, en: el.en ? netOf(obj, el.en) : undefined, enOn, enOff: Math.min(enOn, enOff), gq, gqOff, index: sources++, keys: [node(obj, el.in), node(obj, el.out), node(obj, el.gnd)] })
+          elements.push({ ...base, kind: "REG", in: netOf(obj, el.in), out: netOf(obj, el.out), gnd: netOf(obj, el.gnd), value, dropout: Number.isFinite(dropout) ? Math.max(0, dropout) : 0, rdrop, imax: imax > 0 ? imax : Infinity, en: el.en ? netOf(obj, el.en) : undefined, enOn, enOff: Math.min(enOn, enOff), gq, gqOff, thermal, index: sources++, keys: [node(obj, el.in), node(obj, el.out), node(obj, el.gnd)] })
         break
       }
       case "CHG": {

@@ -92,3 +92,15 @@ missing document.
 |---|---|
 | Q1 | NCP1117 and CSTCE16M0V53 data sheets: onsemi and Murata refuse scripted downloads; the user downloads them, or rows P5 and M4 wait |
 | Q2 | DS BOM names U5 "LMV358LIST-A.9" while the schematic says LMV358IDGKR: same die, different package; the schematic's MSOP-8 is drawn |
+
+## Assumptions to check
+
+Figures the documents do not give, set by judgement so the parts behave; each is marked in the
+part's inspector and is to be replaced when a source is found.
+
+| # | Assumption | Where |
+|---|---|---|
+| A1 | NCP1117 junction-to-ambient time constant 2 s, thermal shutdown hysteresis 15 °C (back on at 160 °C) | `power-ics.ts` NCP1117_THERMAL |
+| A2 | LP2985 junction-to-ambient time constant 1 s | `power-ics.ts` LP2985_THERMAL |
+| A3 | Ceramic resonator start-up 0.5 ms | `clock.ts` RESONATOR_STARTUP |
+| A4 | MF-MSMF trip point midway between Ihold and Itrip; reset by cooling with the heating's time constant (≈17 s for the MF-MSMF050) down to Ihold's heat | `netlist.ts` ptcModel |

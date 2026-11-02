@@ -81,6 +81,11 @@ export const mt3608Chip: ComponentDef = {
  * NCP1117 (onsemi NCP1117/D), the fixed-output parts. The dropout is fitted to the table's
  * 0.95 V at 100 mA and 1.07 V at 800 mA as 0.933 V plus 0.171 Ω times the load.
  */
+/**
+ * Thermal shutdown: RθJA 160 °C/W (SOT-223, minimum pad), "approximately 175 °C" (Note 2).
+ * Assumed until checked: 15 °C of hysteresis and a 2 s junction-to-ambient time constant (the sheet gives neither).
+ */
+const NCP1117_THERMAL = { rja: 160, tsd: 175, tsdOff: 160, tau: 2 }
 const NCP1117 = { volts: ["1.5", "1.8", "2.0", "2.5", "3.3", "5.0", "12"], dropout: 0.933, rDrop: 0.171, limit: 1.5, iq: 6e-3, iqAt: 15, vinMax: 20 }
 
 export const ncp1117Chip: ComponentDef = {
@@ -103,13 +108,14 @@ export const ncp1117Chip: ComponentDef = {
   body: chipBody(8, 4, "NCP1117", "{vout} V LDO", 1.6),
   parts: [],
   model: [
-    { kind: "REG", in: "IN", out: "OUT", gnd: "GND", value: "{vout}", dropout: NCP1117.dropout, rdrop: NCP1117.rDrop, imax: NCP1117.limit, gq: NCP1117.iq / NCP1117.iqAt, limits: { voltage: NCP1117.vinMax, fail: "open" } },
+    { kind: "REG", in: "IN", out: "OUT", gnd: "GND", value: "{vout}", dropout: NCP1117.dropout, rdrop: NCP1117.rDrop, imax: NCP1117.limit, gq: NCP1117.iq / NCP1117.iqAt, thermal: NCP1117_THERMAL, limits: { voltage: NCP1117.vinMax, fail: "open" } },
   ],
   info: {
     Package: "SOT-223: 1 GND/ADJ, 2 OUT (and the tab), 3 IN",
     Accuracy: "±1 % at 25 °C, ±2 % over line, load and temperature",
     Source: "onsemi NCP1117/D: electrical characteristics, absolute maximum ratings, ordering information",
-    "Not modelled": "thermal shutdown (175 °C) and the safe-operating-area limit, the ground current's rise with load, line and load regulation, ripple rejection, the adjustable part, reverse current from OUT to IN",
+    Thermal: "shuts down at 175 °C, junction at 25 °C + P · 160 °C/W; assumed, to be checked: back on at 160 °C, a 2 s time constant",
+    "Not modelled": "the safe-operating-area limit, the ambient temperature (25 °C), the ground current's rise with load, line and load regulation, ripple rejection, the adjustable part, reverse current from OUT to IN",
   },
 }
 
@@ -119,6 +125,8 @@ export const ncp1117Chip: ComponentDef = {
  * off below 0.72 V (typical). Ground current 69 µA with no load at VOUT + 1 V, 1.12 µA shut down
  * at 16 V.
  */
+/** Thermal shutdown: RθJA 178.6 °C/W (new chip, DBV), off at 170 °C, back at 150 °C (§5.4, 5.5). Assumed: a 1 s time constant. */
+const LP2985_THERMAL = { rja: 178.6, tsd: 170, tsdOff: 150, tau: 1 }
 const LP2985 = { volts: ["1.8", "2.5", "2.8", "2.9", "3.0", "3.3", "5.0"], dropout: 0.092, rDrop: 0.586, limit: 0.375, enOn: 0.85, enOff: 0.72, iq: 69e-6, iqOff: 1.12e-6, iqOffAt: 16, vinMax: 18 }
 
 export const lp2985Chip: ComponentDef = {
@@ -157,6 +165,7 @@ export const lp2985Chip: ComponentDef = {
       enOff: LP2985.enOff,
       gq: (p) => LP2985.iq / (Number(p.vout ?? "3.3") + 1),
       gqOff: LP2985.iqOff / LP2985.iqOffAt,
+      thermal: LP2985_THERMAL,
       limits: { voltage: LP2985.vinMax, fail: "open" },
     },
   ],
@@ -164,7 +173,8 @@ export const lp2985Chip: ComponentDef = {
     Package: "SOT-23-5 (DBV): 1 IN, 2 GND, 3 ON/OFF, 4 BYPASS, 5 OUT",
     Accuracy: "±0.5 % (new chip)",
     Source: "TI SLVS522S (May 2025), §5.1, 5.3, 5.5, the new chip's figures",
-    "Not modelled": "thermal shutdown (170 °C, back at 150 °C), the input's UVLO (2.2 V rising), the ground current's rise with load (765 µA at 150 mA), the bypass pin's noise, the legacy chip's figures",
+    Thermal: "off at 170 °C, back at 150 °C, junction at 25 °C + P · 178.6 °C/W; assumed, to be checked: a 1 s time constant",
+    "Not modelled": "the ambient temperature (25 °C), the input's UVLO (2.2 V rising), the ground current's rise with load (765 µA at 150 mA), the bypass pin's noise, the legacy chip's figures",
   },
 }
 

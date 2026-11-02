@@ -3,7 +3,7 @@ import { partKey, pinKey, type ComponentDef, type Damage, type PartState, type S
 import { parsePad, type PadRef } from "@/mcu/stm32f429"
 import { rcFrequency } from "@/mcu/pic/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
-import { crystalStartup } from "@/schematic/components/clock"
+import { crystalStartup, RESONATOR_STARTUP } from "@/schematic/components/clock"
 import { parseValue } from "./units"
 import { DT } from "./speeds"
 import { Engine, R_PULL, switchClosed, type Failure, type PartReader, type PinReader, type ProbeReading, type Reading, type TraceChunk } from "./engine"
@@ -705,7 +705,7 @@ export class SimLoop {
         const a = pinNet.get(pinKey(obj.id, "1"))
         const b = pinNet.get(pinKey(obj.id, obj.def === "resonator" ? "3" : "2"))
         if (oscOut !== undefined && oscOut !== GROUND && ((a === oscIn && b === oscOut) || (a === oscOut && b === oscIn)))
-          return { source: { hz, kind: "crystal", startup: crystalStartup(hz) } }
+          return { source: { hz, kind: "crystal", startup: obj.def === "resonator" ? RESONATOR_STARTUP : crystalStartup(hz) } }
       } else if (pinNet.get(pinKey(obj.id, "OUT")) === oscIn) {
         return { source: { hz, kind: "clock", startup: 0 }, vccNet: pinNet.get(pinKey(obj.id, "VCC")) ?? GROUND }
       }

@@ -108,6 +108,67 @@ describe("NCP1117 against onsemi NCP1117/D (typical, 25 °C)", () => {
   })
 })
 
+/**
+ * Thermal shutdown: the junction heads for 25 °C + P · RθJA with an assumed time constant (the data
+ * sheets give none): NCP1117 160 °C/W (SOT-223, minimum pad), off at 175 °C, back at an assumed
+ * 160 °C; LP2985 178.6 °C/W, off at 170 °C, back at 150 °C.
+ */
+describe("thermal shutdown (RθJA and thresholds from the data sheets, time constants assumed)", () => {
+  /** Output volts, sampled every 10 ms for `seconds`. */
+  const trace = (def: string, vin: number, load: string, seconds: number, en?: number) => {
+    const { doc, u } = bench(def, vin, load, {}, en)
+    const e = new Engine(buildNetlist(doc))
+    const parts = (key: string) => doc.parts[key] ?? {}
+    const out: number[] = []
+    const every = Math.round(0.01 / DT)
+    for (let k = 1; k <= Math.round(seconds / DT); k++) {
+      e.step(DT, parts)
+      if (k % every === 0) out.push(volts(e, u, "OUT"))
+    }
+    return { out, e, u }
+  }
+
+  it("an NCP1117-5.0 dropping 7 V at 300 mA (2.1 W, 361 °C if it could) shuts down after about 1.2 s", () => {
+    const { out } = trace("ncp1117", 12, `${5 / 0.3} Ω`, 2)
+    const first = out.findIndex((v) => v < 1)
+    expect.soft(out[10], "at 0.1 s").toBeNear(5, 0.05)
+    expect.soft(first * 0.01, "shut down at (s)").toBeGreaterThan(0.9)
+    expect.soft(first * 0.01, "shut down at (s)").toBeLessThan(1.5)
+  })
+
+  it("and comes back once its junction has cooled 15 °C, cycling", () => {
+    const { out } = trace("ncp1117", 12, `${5 / 0.3} Ω`, 4)
+    const after = out.slice(out.findIndex((v) => v < 1))
+    expect.soft(after.some((v) => v > 4.9), "on again").toBe(true)
+    expect.soft(after.at(-1)! < 1 || after.at(-1)! > 4.9, "on or off, never between").toBe(true)
+  })
+
+  it("says so in its reading, with the junction temperature", () => {
+    const { e, u } = trace("ncp1117", 12, `${5 / 0.3} Ω`, 1.3)
+    const r = regulator(e, u)
+    expect.soft(r.extra?.mode).toBe("thermal shutdown")
+    expect.soft(Number.parseFloat(String(r.extra?.Tj)), "Tj (°C)").toBeGreaterThan(160)
+  })
+
+  it("an NCP1117 at 7 V and 100 mA (0.2 W, 57 °C) never shuts down", () => {
+    const { out, e, u } = trace("ncp1117", 7, "50 Ω", 10)
+    expect.soft(Math.min(...out), "lowest output").toBeGreaterThan(4.9)
+    expect.soft(Number.parseFloat(String(regulator(e, u).extra?.Tj)), "Tj (°C)").toBeNear(25 + (0.2 + (7 * 7 * 6e-3) / 15) * 160, 1)
+  })
+
+  it("an LP2985-3.3 from 16 V at 100 mA (1.27 W) shuts down at 170 °C and is back at 150 °C", () => {
+    const { out } = trace("lp2985", 16, "33 Ω", 3)
+    const off = out.findIndex((v) => v < 1)
+    expect.soft(off, "shuts down").toBeGreaterThan(0)
+    expect.soft(out.slice(off).some((v) => v > 3.2), "back on").toBe(true)
+  })
+
+  it("an LP2985-3.3 from 5 V at 150 mA (0.26 W, 70 °C) runs on", () => {
+    const { out } = trace("lp2985", 5, "22 Ω", 5)
+    expect(Math.min(...out)).toBeGreaterThan(3.1)
+  })
+})
+
 describe("LP2985 against TI SLVS522S (new chip, typical, 25 °C)", () => {
   it("holds 3.3 V at 4.3 V in and 1 mA out (±0.5 %)", () => {
     expect(out("lp2985", 4.3, "3.3 kΩ")).toBeNear(3.3, 3.3 * 0.005)
