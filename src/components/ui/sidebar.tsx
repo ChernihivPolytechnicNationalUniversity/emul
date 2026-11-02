@@ -55,6 +55,8 @@ function SidebarProvider({
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
+  openMobile: openMobileProp,
+  onOpenMobileChange,
   className,
   style,
   children,
@@ -63,9 +65,21 @@ function SidebarProvider({
   defaultOpen?: boolean
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  /** The phone's sheet, controlled from outside like `open` (the menu bar toggles it too). */
+  openMobile?: boolean
+  onOpenMobileChange?: (open: boolean) => void
 }) {
   const isMobile = useIsMobile()
-  const [openMobile, setOpenMobile] = React.useState(false)
+  const [_openMobile, _setOpenMobile] = React.useState(false)
+  const openMobile = openMobileProp ?? _openMobile
+  const setOpenMobile = React.useCallback(
+    (value: boolean | ((value: boolean) => boolean)) => {
+      const next = typeof value === "function" ? value(openMobile) : value
+      if (onOpenMobileChange) onOpenMobileChange(next)
+      else _setOpenMobile(next)
+    },
+    [onOpenMobileChange, openMobile]
+  )
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
@@ -185,6 +199,8 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
+          // Opened by a finger, focusing the search would throw the keyboard over the list.
+          initialFocus={(type) => type !== "touch"}
           className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
           style={
             {

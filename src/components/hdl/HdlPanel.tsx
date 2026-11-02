@@ -9,6 +9,7 @@ import { isModified, sourceKey } from "@/schematic/hdl"
 import type { HdlModule } from "@/schematic/types"
 import { cn } from "@/lib/utils"
 import { useEvent } from "@/hooks/use-event"
+import { MOBILE_PANEL, NARROW_PANEL, useIsMobile } from "@/hooks/use-mobile"
 import { HDL_ACCEPT, mergeFiles, readHdlFiles } from "./files"
 import { languageId, registerHdlLanguages } from "./languages"
 
@@ -50,6 +51,7 @@ type HdlPanelProps = Omit<React.ComponentProps<"div">, "onChange"> & {
 
 export function HdlPanel({ module, placed, onChange, onDelete, onClose, className, style, ...props }: HdlPanelProps) {
   const [width, setWidth] = React.useState(DEFAULT_WIDTH)
+  const mobile = useIsMobile()
   const [activeByModule, setActiveByModule] = React.useState<Record<string, string>>({})
   const [builds, setBuilds] = React.useState<Record<string, Build>>({})
   const [adding, setAdding] = React.useState<string | null>(null)
@@ -138,8 +140,8 @@ export function HdlPanel({ module, placed, onChange, onDelete, onClose, classNam
   return (
     <div
       data-slot="hdl-panel"
-      className={cn("relative flex min-h-0 shrink-0 flex-col border-l bg-background", className)}
-      style={{ ...style, width }}
+      className={cn("relative flex min-h-0 shrink-0 flex-col border-l bg-background", mobile ? MOBILE_PANEL : NARROW_PANEL, className)}
+      style={{ ...style, width: mobile ? undefined : width }}
       onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       onCopy={(e) => e.stopPropagation()}
@@ -147,7 +149,7 @@ export function HdlPanel({ module, placed, onChange, onDelete, onClose, classNam
       onPaste={(e) => e.stopPropagation()}
       {...props}
     >
-      <div className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-primary/40" onPointerDown={onResizeStart} aria-label="Resize HDL panel" />
+      {!mobile && <div className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-primary/40" onPointerDown={onResizeStart} aria-label="Resize HDL panel" />}
       <div className="flex h-8 shrink-0 items-center gap-1.5 border-b bg-sidebar pr-1 pl-3 text-xs">
         <input
           className="h-6 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 font-medium hover:border-border focus:border-border focus:bg-background focus:outline-none"
@@ -233,7 +235,7 @@ export function HdlPanel({ module, placed, onChange, onDelete, onClose, classNam
                 {f.path}
               </button>
               {files.length > 1 && (
-                <button type="button" className="rounded-sm p-0.5 opacity-0 group-hover:opacity-100 hover:bg-muted" onClick={() => removeFile(f.path)} aria-label={`Remove ${f.path}`}>
+                <button type="button" className="rounded-sm p-0.5 opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 hover:bg-muted" onClick={() => removeFile(f.path)} aria-label={`Remove ${f.path}`}>
                   <XIcon className="size-3" />
                 </button>
               )}

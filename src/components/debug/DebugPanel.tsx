@@ -73,7 +73,7 @@ export function DebugPanel(p: Props) {
   }
   return (
     <div data-slot="debug-panel" className="relative flex shrink-0 flex-col border-t" style={{ height: p.height }}>
-      <div className="absolute inset-x-0 top-0 z-10 h-1 cursor-row-resize hover:bg-primary/40" onPointerDown={onResizeStart} aria-label="Resize panel" />
+      <div className="absolute inset-x-0 top-0 z-10 h-1 cursor-row-resize touch-none hover:bg-primary/40 max-md:h-3" onPointerDown={onResizeStart} aria-label="Resize panel" />
       <div className="flex h-7 shrink-0 items-center bg-sidebar pr-1 text-xs">
         <div className="flex min-w-0 flex-1 items-stretch self-stretch overflow-x-auto [scrollbar-width:none]" role="tablist">
           {TABS.map((t) => (
@@ -291,7 +291,7 @@ function BreakpointsView({ info, breakpoints, onBreakpoints, catchFaults, onCatc
             </button>
             {b.kind === "line" && place.line !== undefined && place.line !== b.line && <span className="shrink-0 text-muted-foreground">→ line {place.line}</span>}
             {!place.ok && info && <span className="shrink-0 text-muted-foreground">not in the program</span>}
-            <Button variant="ghost" size="icon-xs" className="ml-auto opacity-0 group-hover:opacity-100" aria-label="Remove breakpoint" onClick={() => onBreakpoints(breakpoints.filter((x) => x.id !== b.id))}>
+            <Button variant="ghost" size="icon-xs" className="ml-auto opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100" aria-label="Remove breakpoint" onClick={() => onBreakpoints(breakpoints.filter((x) => x.id !== b.id))}>
               <XIcon />
             </Button>
           </div>
@@ -397,7 +397,7 @@ function RegistersView({ debug, boardId, view }: { debug: DebugController; board
         )}
         {extra && !edit && <span className="min-w-0 truncate text-muted-foreground">{extra}</span>}
         {canSet && !edit && (
-          <Button variant="ghost" size="icon-xs" className="ml-auto shrink-0 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100" aria-label={`Set ${name}`} title="Set the value (or double-click it)" onClick={start}>
+          <Button variant="ghost" size="icon-xs" className="ml-auto shrink-0 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100" aria-label={`Set ${name}`} title="Set the value (or double-click it)" onClick={start}>
             <PencilIcon />
           </Button>
         )}

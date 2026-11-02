@@ -112,7 +112,7 @@ function Row({
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger
-          render={<Button variant="ghost" size="icon-sm" className="opacity-0 group-hover:opacity-100 aria-expanded:opacity-100" />}
+          render={<Button variant="ghost" size="icon-sm" className="opacity-0 group-hover:opacity-100 aria-expanded:opacity-100 pointer-coarse:opacity-100" />}
           onClick={(e) => e.stopPropagation()}
           aria-label="Project actions"
         >
