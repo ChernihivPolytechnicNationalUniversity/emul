@@ -746,10 +746,11 @@ export function Scope({
 
   return (
     <div data-slot="scope" className={cn("relative flex flex-col bg-card text-card-foreground", className)} style={{ ...style, height }} {...props}>
-      <div className="absolute inset-x-0 top-0 z-10 h-1.5 cursor-row-resize hover:bg-primary/40" onPointerDown={onResizeStart} aria-label="Resize oscilloscope" />
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b px-2">
+      <div className="absolute inset-x-0 top-0 z-10 h-1.5 cursor-row-resize touch-none hover:bg-primary/40 max-md:h-3" onPointerDown={onResizeStart} aria-label="Resize oscilloscope" />
+      {/* A phone cannot fit the controls in one row: they wrap, and the channels take a row of their own below. */}
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b px-2 max-md:h-auto max-md:flex-wrap max-md:gap-1.5 max-md:py-1">
         <span className="text-xs font-medium">Oscilloscope</span>
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto max-md:order-last max-md:basis-full">
           {channels.map((c) => (
             <span
               key={c.id}

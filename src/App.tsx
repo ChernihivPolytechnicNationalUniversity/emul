@@ -13,7 +13,7 @@ import { exampleBench, programExample } from "@/project/prebuilt"
 import type { Schematic } from "@/schematic/types"
 import { HDL_ACCEPT, readHdlFiles } from "@/components/hdl/files"
 import { useEvent } from "@/hooks/use-event"
-import { useIsMobile } from "@/hooks/use-mobile"
+import { MENU_H_TOUCH, useIsMobile } from "@/hooks/use-mobile"
 import { announceUpgrade, useProjects } from "@/hooks/use-projects"
 import { fileName, nameFromFile, projectFile, readProjectFile, shareLink } from "@/project/project-store"
 import { cubeBench, importNotes, readCubeProject, unsupportedChip, type ProjectEntry } from "@/project/cubemx"
@@ -50,6 +50,8 @@ export default function App() {
   const field = React.useRef<DotFieldHandle>(null)
   const [state, setState] = React.useState<FieldState>(emptyState)
   const [sidebarOpen, setSidebarOpen] = React.useState(true)
+  /** On a phone the palette is a sheet over the field, closed until asked for and closed again after a pick. */
+  const [paletteSheet, setPaletteSheet] = React.useState(false)
   const isMobile = useIsMobile()
   const fileInput = React.useRef<HTMLInputElement>(null)
   /** Set while an example that came programmed is on its way to the field: it starts once loaded. */
@@ -324,8 +326,8 @@ export default function App() {
         <MenuBar
           field={field}
           state={state}
-          sidebarOpen={sidebarOpen}
-          onSidebarToggle={() => setSidebarOpen((v) => !v)}
+          sidebarOpen={isMobile ? paletteSheet : sidebarOpen}
+          onSidebarToggle={() => (isMobile ? setPaletteSheet((v) => !v) : setSidebarOpen((v) => !v))}
           fieldInset={sidebarOpen && !isMobile ? SIDEBAR_WIDTH : "0px"}
           project={projects.current?.name ?? null}
           recent={projects.list.filter((p) => p.id !== projects.current?.id).slice(0, 8)}
@@ -343,14 +345,26 @@ export default function App() {
           onExportPng={() => void exportImage()}
           onImportHdl={importHdl}
           onExample={(example) => void loadExample(example)}
-          style={{ height: MENU_H }}
+          style={{ height: isMobile ? MENU_H_TOUCH : MENU_H }}
         />
-        <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} style={{ minHeight: 0, flex: 1, "--sidebar-width": SIDEBAR_WIDTH } as React.CSSProperties}>
+        <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} openMobile={paletteSheet} onOpenMobileChange={setPaletteSheet} style={{ minHeight: 0, flex: 1, "--sidebar-width": SIDEBAR_WIDTH } as React.CSSProperties}>
           <ComponentsSidebar
-            onPick={(item) => field.current?.addAtCenter(item.id)}
-            onHdlNew={(language) => field.current?.newHdl(language)}
-            onHdlImport={importHdl}
-            onHdlOpen={(id) => field.current?.openHdl(id)}
+            onPick={(item) => {
+              setPaletteSheet(false)
+              field.current?.addAtCenter(item.id)
+            }}
+            onHdlNew={(language) => {
+              setPaletteSheet(false)
+              field.current?.newHdl(language)
+            }}
+            onHdlImport={() => {
+              setPaletteSheet(false)
+              importHdl()
+            }}
+            onHdlOpen={(id) => {
+              setPaletteSheet(false)
+              field.current?.openHdl(id)
+            }}
             style={{ top: MENU_H, height: `calc(100svh - ${MENU_H}px)` }}
           />
           <SidebarInset className="relative min-h-0 flex-1 overflow-hidden">
@@ -388,7 +402,8 @@ export default function App() {
       <ProjectsSheet open={projectsOpen} onOpenChange={setProjectsOpen} projects={projects} onNew={newProject} onDownload={(id) => void downloadProject(id)} />
       <input ref={fileInput} type="file" accept=".emul,.zip" className="hidden" onChange={onFile} />
       <input ref={hdlInput} type="file" multiple accept={HDL_ACCEPT} className="hidden" onChange={onHdlFiles} />
-      <Toaster position="bottom-center" richColors />
+      {/* On a phone toasts stand above the run and zoom controls rather than over them. */}
+      <Toaster position="bottom-center" richColors mobileOffset={{ bottom: 64 }} />
     </TooltipProvider>
   )
 }

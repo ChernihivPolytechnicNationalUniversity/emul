@@ -138,7 +138,7 @@ export function Tabs({ open, active, onActivate, onChange, className, ...props }
                 aria-label={`Close ${name}`}
                 className={cn(
                   "ml-0.5 flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-accent",
-                  current ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-70",
+                  current ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-70 pointer-coarse:opacity-70",
                 )}
                 onClick={(e) => {
                   e.stopPropagation()

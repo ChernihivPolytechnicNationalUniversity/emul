@@ -305,9 +305,10 @@ export function LogicAnalyser({ className, store, version, channels, span, onSpa
 
   return (
     <div data-slot="logic-analyser" className={cn("flex flex-col bg-card text-card-foreground", className)} {...props}>
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b px-2">
+      {/* A phone cannot fit the controls in one row: they wrap, and the channels take a row of their own below. */}
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b px-2 max-md:h-auto max-md:flex-wrap max-md:gap-1.5 max-md:py-1">
         <span className="text-xs font-medium">Logic analyser</span>
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto max-md:order-last max-md:basis-full">
           {channels.map((c) => (
             <span key={c.id} className="flex h-6 shrink-0 items-center gap-1.5 rounded-md border px-1.5 text-[0.6875rem] tabular-nums" style={{ borderColor: c.color }}>
               <span className="size-2 rounded-full" style={{ background: c.color }} />

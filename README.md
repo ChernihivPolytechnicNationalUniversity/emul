@@ -45,6 +45,7 @@ Proteus that runs in a browser tab.
 - **Unmodified firmware** runs on an emulated Cortex-M4/M7, ATmega328P or PIC16: drop a CubeIDE `.elf`, an AVR `.elf` or Arduino sketch, or a PIC `.hex`, with no porting.
 - A **live circuit** surrounds the chip, solved as a nonlinear nodal model: timers, UART, SPI, I²C, DMA, ADC/DAC, flash, an SDRAM-backed LTDC panel, real parts with real ratings.
 - Everything runs **client-side in a browser tab**. Nothing to install, no sign-up, free.
+- **Works on a phone**: drag a finger to pan, pinch to zoom, long-press for the field menu; the code and HDL editors take the whole screen, the oscilloscope and logic analyser fit its width. Box selection, dropping files onto the bench and keyboard shortcuts stay desktop-only (Edit → Select all works everywhere).
 - You can **short an output, reverse polarity, or put 12 V on a GPIO** safely; it does what it does on the desk, minus the magic smoke.
 - A built-in **Monaco editor and build service** compile a project the way CubeIDE and the Arduino IDE do.
 - Open a bench together with **live collaboration**: share a `/r/…` link and cursors, part moves and wiring sync in real time.

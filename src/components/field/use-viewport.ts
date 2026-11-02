@@ -42,6 +42,8 @@ export function followTarget(view: { current: Viewport }, target: { current: Vie
  * - wheel: pan; ctrl/meta + wheel (and trackpad pinch): zoom to cursor
  * - middle button or space + left button: drag to pan
  * - ctrl/meta + / - / 0: zoom in / out / reset
+ * - touch: two fingers pinch-zoom and pan together; whatever the first finger had started is
+ *   cancelled through `onPinchStart`, and the fingers' events go no further while they pinch
  */
 export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scale: 0.5 }) {
   const containerRef = React.useRef<HTMLDivElement>(null)
@@ -299,6 +301,11 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     [panBy],
   )
 
+  const cancelPan = React.useCallback(() => {
+    last.current = null
+    setPanning(false)
+  }, [])
+
   const endPan = React.useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!last.current) return false
     if (e.button === 1) e.preventDefault()
@@ -309,6 +316,93 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     }
     return true
   }, [])
+
+  /**
+   * Pinch: the world point under the fingers' starting midpoint stays under their midpoint,
+   * scaled by how far apart they are now against how far they started. Listened to in the
+   * capture phase so the fingers never reach the bodies, pins and wires below while pinching;
+   * the gesture lasts until the last finger is up, so a finger left behind cannot start a drag.
+   */
+  const onPinchStart = React.useRef<() => void>(() => {})
+  /** What a pinch cancels: the caller's own gestures (a drag, a wire, a marquee) begun by its first finger. */
+  const setOnPinchStart = React.useCallback((cancel: () => void) => {
+    onPinchStart.current = cancel
+  }, [])
+  React.useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const touches = new Map<number, Point>()
+    let pinch: { v: Viewport; mid: Point; dist: number } | null = null
+    const local = (p: Point) => {
+      const r = el.getBoundingClientRect()
+      return { x: p.x - r.left, y: p.y - r.top }
+    }
+    const pair = () => {
+      const [a, b] = [...touches.values()]
+      return { mid: local({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }), dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)) }
+    }
+    const begin = () => {
+      cancelAnimationFrame(raf.current)
+      raf.current = 0
+      target.current = current.current
+      onPinchStart.current()
+      cancelPan()
+      pinch = { v: current.current, ...pair() }
+    }
+    const down = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") return
+      // The first finger of a gesture starts it afresh: a finger whose lift never reached us
+      // (a menu opened under it) must not turn the next single touch into a pinch.
+      if (e.isPrimary) {
+        touches.clear()
+        pinch = null
+      }
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (pinch) {
+        if (touches.size === 2) pinch = { v: current.current, ...pair() }
+        e.stopPropagation()
+      } else if (touches.size === 2) {
+        begin()
+        e.stopPropagation()
+      }
+    }
+    const move = (e: PointerEvent) => {
+      if (e.pointerType !== "touch" || !touches.has(e.pointerId)) return
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (!pinch) return
+      e.stopPropagation()
+      if (touches.size < 2) return
+      const { mid, dist } = pair()
+      const { v, mid: m0, dist: d0 } = pinch
+      const scale = clamp((v.scale * dist) / d0, MIN_SCALE, MAX_SCALE)
+      const wx = (m0.x - v.x) / v.scale
+      const wy = (m0.y - v.y) / v.scale
+      const next = { scale, x: mid.x - wx * scale, y: mid.y - wy * scale }
+      current.current = next
+      target.current = next
+      paint(next, true)
+    }
+    const up = (e: PointerEvent) => {
+      if (e.pointerType !== "touch" || !touches.delete(e.pointerId)) return
+      if (!pinch) return
+      e.stopPropagation()
+      if (touches.size) return
+      pinch = null
+      paint(current.current)
+      publish(current.current.scale)
+    }
+    el.addEventListener("pointerdown", down, true)
+    el.addEventListener("pointermove", move, true)
+    // Lifts are heard window-wide: a finger may come up over a menu or panel outside the field.
+    window.addEventListener("pointerup", up, true)
+    window.addEventListener("pointercancel", up, true)
+    return () => {
+      el.removeEventListener("pointerdown", down, true)
+      el.removeEventListener("pointermove", move, true)
+      window.removeEventListener("pointerup", up, true)
+      window.removeEventListener("pointercancel", up, true)
+    }
+  }, [paint, publish, cancelPan])
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -347,5 +441,6 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     startPan,
     movePan,
     endPan,
+    setOnPinchStart,
   }
 }

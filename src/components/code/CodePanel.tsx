@@ -1,6 +1,6 @@
 import * as React from "react"
 import { toast } from "sonner"
-import { CpuIcon, HammerIcon, LoaderCircleIcon, TriangleAlertIcon, XIcon } from "lucide-react"
+import { CpuIcon, FolderTreeIcon, HammerIcon, LoaderCircleIcon, TriangleAlertIcon, XIcon } from "lucide-react"
 import { OPT_LEVELS, SOURCE_LIMITS, isPicTarget, type OptLevel, type SourceFile, type Stm32Target } from "emul-shared/source"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -21,6 +21,7 @@ import type { BoardDebug, PlacedObject } from "@/schematic/types"
 import { formatSI } from "@/sim/units"
 import { cn } from "@/lib/utils"
 import { useEvent } from "@/hooks/use-event"
+import { MOBILE_PANEL, NARROW_PANEL, useIsMobile } from "@/hooks/use-mobile"
 import type { BreakpointSpec } from "@/debug/protocol"
 import { provideAnalysis, type DebugController } from "@/debug/session"
 import { parseFirmware } from "@/mcu/elf"
@@ -111,6 +112,9 @@ const keyOfTab = (tab: string | null) => (!tab || tab === DISASM ? null : tab.st
  */
 export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onBuild, onDebug, debug, onClose, projectName, className, style, ...props }: CodePanelProps) {
   const [width, setWidth] = React.useState(DEFAULT_WIDTH)
+  // A phone has no room beside the field: the panel covers it, and the explorer slides over the editor on demand.
+  const mobile = useIsMobile()
+  const [filesShown, setFilesShown] = React.useState(false)
   const editor = React.useRef<EditorHandle | null>(null)
   // The field's Undo/Redo reach the editor through this panel; the editor may not be mounted (no board).
   React.useImperativeHandle(ref, () => ({
@@ -183,7 +187,10 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
   const setTab = (next: Partial<TabState>) => {
     if (id) setTabs((t) => ({ ...t, [id]: { open, active, ...next } }))
   }
-  const openFile = (path: string) => setTab({ open: open.includes(path) ? open : [...open, path], active: path })
+  const openFile = (path: string) => {
+    setFilesShown(false)
+    setTab({ open: open.includes(path) ? open : [...open, path], active: path })
+  }
   /** Open a file the image names, wherever its text is (or say it is nowhere). */
   const openSource = (image: string, line?: number) => {
     const r = resolve(image)
@@ -561,8 +568,8 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
   return (
     <div
       data-slot="code-panel"
-      className={cn("relative flex min-h-0 shrink-0 border-l bg-background", className)}
-      style={{ ...style, width }}
+      className={cn("relative flex min-h-0 shrink-0 border-l bg-background", mobile ? MOBILE_PANEL : NARROW_PANEL, className)}
+      style={{ ...style, width: mobile ? undefined : width }}
       onKeyDown={onPanelKey}
       onPointerDown={(e) => e.stopPropagation()}
       onCopy={(e) => e.stopPropagation()}
@@ -570,10 +577,14 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
       onPaste={(e) => e.stopPropagation()}
       {...props}
     >
-      <div className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-primary/40" onPointerDown={onResizeStart} aria-label="Resize code panel" />
+      {!mobile && <div className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-primary/40" onPointerDown={onResizeStart} aria-label="Resize code panel" />}
       {board && id ? (
         <>
-          <div className="flex min-h-0 shrink-0 flex-col border-r" style={{ width: EXPLORER_WIDTH }}>
+          {mobile && filesShown && <div className="absolute inset-0 z-20 bg-black/20" onClick={() => setFilesShown(false)} />}
+          <div
+            className={cn("flex min-h-0 shrink-0 flex-col border-r", mobile && "absolute inset-y-0 left-0 z-30 bg-background shadow-lg", mobile && !filesShown && "hidden")}
+            style={{ width: EXPLORER_WIDTH }}
+          >
             <Explorer
               className="min-h-0 flex-1"
               files={project}
@@ -592,10 +603,15 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="flex h-8 shrink-0 items-stretch border-b">
+              {mobile && (
+                <Button variant="ghost" size="icon-sm" className="shrink-0 self-center" onClick={() => setFilesShown((v) => !v)} aria-label="Files">
+                  <FolderTreeIcon />
+                </Button>
+              )}
               <Tabs className="min-w-0 flex-1" open={open} active={active} onActivate={openFile} onChange={(o, a) => setTab({ open: o, active: a })} />
               <div className="flex shrink-0 items-center gap-1.5 bg-sidebar pr-1 pl-2 text-xs">
-                <CpuIcon className="size-3.5 text-muted-foreground" />
-                <span className="font-medium">{boardName(board)}</span>
+                <CpuIcon className="size-3.5 text-muted-foreground max-md:hidden" />
+                <span className="font-medium max-md:hidden">{boardName(board)}</span>
                 {!pic && (
                 <Select value={opt} items={OPT_LEVELS.map((o) => ({ value: o, label: o }))} onValueChange={(v) => v && onBuild(id, { ...board.build, opt: v })}>
                   <SelectTrigger size="sm" className="h-6 gap-1 rounded-md bg-background px-1.5 font-mono text-xs" title={optHelp(avr, sketch)} aria-label="Optimization level">
