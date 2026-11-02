@@ -33,12 +33,14 @@ panel says which blocks the program touched that are missing**, so it is never a
 |---|---|---|
 | STM32F429ZIT6 (Cortex-M4F, 2 MB / 256 KB) | `STM32F429ZI` LQFP144 | Nucleo-144 (NUCLEO-F429ZI) |
 | STM32F746IGT6 (Cortex-M7, 1 MB / 320 KB) | `STM32F746IG` LQFP176 | Open746I-C (Waveshare, with the Core746I module) |
-| STM32F407VGT6 (Cortex-M4F, 1 MB / 128 KB + 64 KB CCM) | — | STM32F4-Discovery (MB997, `stm32f4-discovery`) |
-| STM32F405RGT6 (Cortex-M4F, 1 MB / 128 KB + 64 KB CCM) | — | Olimex STM32-H405 Rev. C, Netduino Plus 2 Rev A |
-| STM32F411CEU6 (Cortex-M4F, 512 KB / 128 KB) | — | WeAct Black Pill V3.1 (MiniF4x1Cx) |
-| STM32F401CCU6 / STM32F401CEU6 (Cortex-M4F, 256 KB / 64 KB, 512 KB / 96 KB) | — | WeAct Black Pill V3.1, the same PCB |
+| STM32F407VGT6 (Cortex-M4F, 1 MB / 128 KB + 64 KB CCM) | `STM32F407VG` LQFP100 (DS8626 Table 7) | STM32F4-Discovery (MB997, `stm32f4-discovery`) |
+| STM32F405RGT6 (Cortex-M4F, 1 MB / 128 KB + 64 KB CCM) | `STM32F405RG` LQFP64 (DS8626 Table 7) | Olimex STM32-H405 Rev. C, Netduino Plus 2 Rev A |
+| STM32F411CEU6 (Cortex-M4F, 512 KB / 128 KB) | `STM32F411CE` UFQFPN48 (DS10314 Table 8) | WeAct Black Pill V3.1 (MiniF4x1Cx) |
+| STM32F401CCU6 / STM32F401CEU6 (Cortex-M4F, 256 KB / 64 KB, 512 KB / 96 KB) | `STM32F401CC`, `STM32F401CE` UFQFPN48 (DS9716 / DS10086 Table 8) | WeAct Black Pill V3.1, the same PCB |
 | ATmega328P (AVRe+, 32 KB / 2 KB / 1 KB EEPROM) | `ATmega328P` PDIP-28, `ATmega328P TQFP-32` with the analog-only ADC6/ADC7 (`src/mcu/avr/chip.ts`) | Arduino Nano 3.x (A000005) |
 | PIC16F627A/628A/648A, PIC16LF627A/628A/648A; the original PIC16F627/628 (-20 and -04 grades) and PIC16LF627/628 (mid-range PIC14, 1–4K words / 224–256 B / 128–256 B EEPROM) | PDIP-18 for each (`src/mcu/pic/chip.ts`, `src/schematic/components/pic-chip.ts`) | — |
+
+The five bare F4 chips take their pin numbers from the datasheets' pin tables, which agree with KiCad's MCU_ST_STM32F4 symbols to the pin, and run their board's starting project with only a crystal and an LED around them (`tests/sim/stm32-bare-chips.test.ts`). **Not drawn:** the UFQFPN48's exposed die pad (the datasheets give it no pin number, only that it should go to ground), and on every package VCAP_1/VCAP_2 and VREF+ (as on the F429 and F746).
 
 ## On-board chips of the F4 boards
 

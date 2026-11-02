@@ -1,4 +1,4 @@
-import { STM32F429ZI, STM32F746IG, type ChipElectrical, type ChipProfile } from "@/mcu/chip"
+import { STM32F401CC, STM32F401CE, STM32F405RG, STM32F407VG, STM32F411CE, STM32F429ZI, STM32F746IG, type ChipElectrical, type ChipProfile } from "@/mcu/chip"
 import { ChipIcon } from "../icons"
 import { mcuModel } from "../mcu-model"
 import type { BodyShape, ComponentDef, Element, PinDef, PinKind } from "../types"
@@ -15,8 +15,12 @@ import type { BodyShape, ComponentDef, Element, PinDef, PinKind } from "../types
  * single VDD and a single VSS; VDDA/VSSA, VBAT and VDDUSB keep their own pins.
  */
 
-/** [package pin, name] for every pin of a package, in pin order. */
-type Package = { name: string; pins: [number, string][]; source: string }
+/**
+ * [package pin, name] for every pin of a package, in pin order. `leftPorts`: how many ports
+ * (from A) the left column takes, for a package whose ports are not alike in size; without it
+ * the left column gets the smaller half of the ports.
+ */
+type Package = { name: string; pins: [number, string][]; source: string; leftPorts?: number }
 
 /** Body width in cells: room for two pin-name columns and the title block. */
 const WIDTH = 12
@@ -63,7 +67,7 @@ export function stm32Chip(chip: ChipProfile, pkg: Package, description: string):
   })
   const ports = "ABCDEFGHIJK".split("").map(port).filter((g) => g.names.length)
   // The left column also carries supply, ground and reset, so it gets the smaller half of the ports.
-  const half = Math.floor(ports.length / 2)
+  const half = pkg.leftPorts ?? Math.floor(ports.length / 2)
   const left: Group[] = [
     { names: ["VDD", "VDDA", "VDDUSB", "VBAT"].filter(has), kind: "power" },
     { names: ["VSS", "VSSA"].filter(has), kind: "gnd" },
@@ -132,7 +136,7 @@ export function stm32Chip(chip: ChipProfile, pkg: Package, description: string):
   const kb = (bytes: number) => (bytes >= 1 << 20 ? `${bytes >> 20} MB` : `${bytes >> 10} KB`)
   return {
     id: chip.id,
-    name: chip.name.replace(/T6$/, ""),
+    name: chip.name.replace(/[TU]6$/, ""),
     description,
     category: "Chips",
     icon: ChipIcon,
@@ -160,7 +164,8 @@ export function stm32Chip(chip: ChipProfile, pkg: Package, description: string):
 // --- packages ------------------------------------------------------------------------------
 // Pin tables from the KiCad MCU_ST_STM32F4/F7 libraries, cross-checked against the ST
 // datasheets' "pin and ball definitions" (Nucleo header map for the F429, the teaching
-// stand's schematic for the F746).
+// stand's schematic for the F746; for the F405/F407 and the F411/F401 the datasheets' tables,
+// read cell by cell, agree with KiCad's to the pin).
 
 const LQFP176_F746: Package = {
   name: "LQFP176",
@@ -216,5 +221,63 @@ const LQFP144_F429: Package = {
   ],
 }
 
+const LQFP100_F40X: Package = {
+  name: "LQFP100",
+  source: "ST DS8626 Table 7, RM0090",
+  // PA, PB left; PC, PD, PE, PH right (PA–PC left made the left column 55 rows to the right's 34).
+  leftPorts: 2,
+  pins: [
+  [1, "PE2"], [2, "PE3"], [3, "PE4"], [4, "PE5"], [5, "PE6"], [6, "VBAT"], [7, "PC13"], [8, "PC14"],
+  [9, "PC15"], [10, "VSS"], [11, "VDD"], [12, "PH0"], [13, "PH1"], [14, "NRST"], [15, "PC0"], [16, "PC1"],
+  [17, "PC2"], [18, "PC3"], [19, "VDD"], [20, "VSSA"], [21, "VREF+"], [22, "VDDA"], [23, "PA0"], [24, "PA1"],
+  [25, "PA2"], [26, "PA3"], [27, "VSS"], [28, "VDD"], [29, "PA4"], [30, "PA5"], [31, "PA6"], [32, "PA7"],
+  [33, "PC4"], [34, "PC5"], [35, "PB0"], [36, "PB1"], [37, "PB2"], [38, "PE7"], [39, "PE8"], [40, "PE9"],
+  [41, "PE10"], [42, "PE11"], [43, "PE12"], [44, "PE13"], [45, "PE14"], [46, "PE15"], [47, "PB10"], [48, "PB11"],
+  [49, "VCAP_1"], [50, "VDD"], [51, "PB12"], [52, "PB13"], [53, "PB14"], [54, "PB15"], [55, "PD8"], [56, "PD9"],
+  [57, "PD10"], [58, "PD11"], [59, "PD12"], [60, "PD13"], [61, "PD14"], [62, "PD15"], [63, "PC6"], [64, "PC7"],
+  [65, "PC8"], [66, "PC9"], [67, "PA8"], [68, "PA9"], [69, "PA10"], [70, "PA11"], [71, "PA12"], [72, "PA13"],
+  [73, "VCAP_2"], [74, "VSS"], [75, "VDD"], [76, "PA14"], [77, "PA15"], [78, "PC10"], [79, "PC11"], [80, "PC12"],
+  [81, "PD0"], [82, "PD1"], [83, "PD2"], [84, "PD3"], [85, "PD4"], [86, "PD5"], [87, "PD6"], [88, "PD7"],
+  [89, "PB3"], [90, "PB4"], [91, "PB5"], [92, "PB6"], [93, "PB7"], [94, "BOOT0"], [95, "PB8"], [96, "PB9"],
+  [97, "PE0"], [98, "PE1"], [99, "VSS"], [100, "VDD"],
+  ],
+}
+
+const LQFP64_F40X: Package = {
+  name: "LQFP64",
+  source: "ST DS8626 Table 7, RM0090",
+  // PA left; PB, PC, PD2, PH right: PD and PH are one or two pins each.
+  leftPorts: 1,
+  pins: [
+  [1, "VBAT"], [2, "PC13"], [3, "PC14"], [4, "PC15"], [5, "PH0"], [6, "PH1"], [7, "NRST"], [8, "PC0"],
+  [9, "PC1"], [10, "PC2"], [11, "PC3"], [12, "VSSA"], [13, "VDDA"], [14, "PA0"], [15, "PA1"], [16, "PA2"],
+  [17, "PA3"], [18, "VSS"], [19, "VDD"], [20, "PA4"], [21, "PA5"], [22, "PA6"], [23, "PA7"], [24, "PC4"],
+  [25, "PC5"], [26, "PB0"], [27, "PB1"], [28, "PB2"], [29, "PB10"], [30, "PB11"], [31, "VCAP_1"], [32, "VDD"],
+  [33, "PB12"], [34, "PB13"], [35, "PB14"], [36, "PB15"], [37, "PC6"], [38, "PC7"], [39, "PC8"], [40, "PC9"],
+  [41, "PA8"], [42, "PA9"], [43, "PA10"], [44, "PA11"], [45, "PA12"], [46, "PA13"], [47, "VCAP_2"], [48, "VDD"],
+  [49, "PA14"], [50, "PA15"], [51, "PC10"], [52, "PC11"], [53, "PC12"], [54, "PD2"], [55, "PB3"], [56, "PB4"],
+  [57, "PB5"], [58, "PB6"], [59, "PB7"], [60, "BOOT0"], [61, "PB8"], [62, "PB9"], [63, "VSS"], [64, "VDD"],
+  ],
+}
+
+const UFQFPN48_F4X1: Package = {
+  name: "UFQFPN48",
+  // PA left; PB, PC13–15, PH0/1 right.
+  leftPorts: 1,
+  source: "ST DS10314 / DS9716 / DS10086 Table 8, RM0383 / RM0368",
+  pins: [
+  [1, "VBAT"], [2, "PC13"], [3, "PC14"], [4, "PC15"], [5, "PH0"], [6, "PH1"], [7, "NRST"], [8, "VSSA"],
+  [9, "VDDA"], [10, "PA0"], [11, "PA1"], [12, "PA2"], [13, "PA3"], [14, "PA4"], [15, "PA5"], [16, "PA6"],
+  [17, "PA7"], [18, "PB0"], [19, "PB1"], [20, "PB2"], [21, "PB10"], [22, "VCAP_1"], [23, "VSS"], [24, "VDD"],
+  [25, "PB12"], [26, "PB13"], [27, "PB14"], [28, "PB15"], [29, "PA8"], [30, "PA9"], [31, "PA10"], [32, "PA11"],
+  [33, "PA12"], [34, "PA13"], [35, "VSS"], [36, "VDD"], [37, "PA14"], [38, "PA15"], [39, "PB3"], [40, "PB4"],
+  [41, "PB5"], [42, "PB6"], [43, "PB7"], [44, "BOOT0"], [45, "PB8"], [46, "PB9"], [47, "VSS"], [48, "VDD"],
+  ],
+}
 export const stm32f746ig = stm32Chip(STM32F746IG, LQFP176_F746, "Cortex-M7 MCU, LQFP176")
 export const stm32f429zi = stm32Chip(STM32F429ZI, LQFP144_F429, "Cortex-M4F MCU, LQFP144")
+export const stm32f407vg = stm32Chip(STM32F407VG, LQFP100_F40X, "Cortex-M4F MCU, LQFP100")
+export const stm32f405rg = stm32Chip(STM32F405RG, LQFP64_F40X, "Cortex-M4F MCU, LQFP64")
+export const stm32f411ce = stm32Chip(STM32F411CE, UFQFPN48_F4X1, "Cortex-M4F MCU, UFQFPN48")
+export const stm32f401cc = stm32Chip(STM32F401CC, UFQFPN48_F4X1, "Cortex-M4F MCU, UFQFPN48")
+export const stm32f401ce = stm32Chip(STM32F401CE, UFQFPN48_F4X1, "Cortex-M4F MCU, UFQFPN48")
