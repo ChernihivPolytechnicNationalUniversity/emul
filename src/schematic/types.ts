@@ -372,6 +372,13 @@ export type Element =
   | { kind: "PROT"; vdd: NodeRef; vss: NodeRef; cs: NodeRef; od: NodeRef; oc: NodeRef; chip: ProtChip; limits?: Limits }
   | { kind: "BOOST"; in: NodeRef; out?: NodeRef; gnd: NodeRef; fb: NodeRef; vcc?: NodeRef; en?: NodeRef; vref?: Value; eff?: Value; ilim?: Value; uvlo?: Value; iq?: Value; limits?: Limits }
   | { kind: "TMR"; vcc: NodeRef; gnd: NodeRef; trig: NodeRef; thres: NodeRef; ctrl: NodeRef; lo: NodeRef; reset: NodeRef; out: NodeRef; dis: NodeRef; limits?: Limits }
+  /**
+   * Operational amplifier, one amplifier of a package with its own supply pins: `part` is a
+   * preset id from `OPAMP_PRESETS` (`src/sim/opamp.ts`), whose datasheet figures the values given
+   * override — open-loop `gain` (V/V), `gbw` (Hz), `slew` (V/s), `vos` (V), the output's swing
+   * short of each `rail` (V) and its current limit `isc` (A). `limits.voltage` rates V+ − V−.
+   */
+  | { kind: "OPAMP"; inp: NodeRef; inn: NodeRef; out: NodeRef; vcc: NodeRef; vee: NodeRef; part: string; gain?: Value; gbw?: Value; slew?: Value; vos?: Value; rail?: Value; isc?: Value; limits?: Limits }
   /** Nodes that are the same conductor inside the component (a ground rail). */
   | { kind: "SHORT"; nodes: NodeRef[] }
 
