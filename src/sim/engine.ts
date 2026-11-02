@@ -508,6 +508,10 @@ export class Engine {
   private readonly junctionElements: Int32Array
   private readonly nonlinearElements: Int32Array
   private readonly maskElements: Int32Array
+  private readonly maskPads: Int32Array
+  private padMask = 0
+  private padRest = 0
+  private padMaskStale = true
   /** RMS averaging time constant, seconds. */
   private readonly tau: number
   /** Switch/pad hash of the current step, and how many steps in a row ended at a fixed point. */
@@ -596,7 +600,8 @@ export class Engine {
     this.nonlinearElements = Int32Array.from(net.elements.flatMap((el, i) => (NONLINEAR_KINDS.has(el.kind) ? [i] : [])))
     this.strikeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "SW" && el.strike !== Infinity ? [i] : [])))
     this.pulseElements = Int32Array.from(net.elements.flatMap((el, i) => (isPulse(el) ? [i] : [])))
-    this.maskElements = Int32Array.from(net.elements.flatMap((el, i) => (switchesMask(el) ? [i] : [])))
+    this.maskElements = Int32Array.from(net.elements.flatMap((el, i) => (switchesMask(el) && el.kind !== "GPIO" ? [i] : [])))
+    this.maskPads = Int32Array.from(net.elements.flatMap((el, i) => (switchesMask(el) && el.kind === "GPIO" ? [i] : [])))
     this.liveElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) || (el.kind === "V" && el.amplitude > 0) ? [i] : [])))
     this.stateless = !net.elements.some((el) => el.kind === "C" || el.kind === "L" || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR" || el.kind === "OPAMP")
     this.drifting = net.elements.some((el) => el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT")
@@ -1387,10 +1392,27 @@ export class Engine {
     }
   }
 
-  /** Hash of every switch and pad state, so a toggle invalidates the cached factorization; the hash without the pads on leaves goes to `restMask`. */
-  private switchMask(parts: PartReader) {
+  private padHash() {
+    if (!this.padMaskStale) return
     let mask = 0
     let rest = 0
+    const pads = this.maskPads
+    for (let k = 0; k < pads.length; k++) {
+      const i = pads[k]
+      const t = this.gpioState[i] + 7 * this.padSteps[i]
+      mask = (mask * 31 + t) | 0
+      if (this.leafOf[i] < 0) rest = (rest * 31 + t) | 0
+    }
+    this.padMask = mask
+    this.padRest = rest
+    this.padMaskStale = false
+  }
+
+  /** Hash of every switch and pad state, so a toggle invalidates the cached factorization; the hash without the pads on leaves goes to `restMask`. */
+  private switchMask(parts: PartReader) {
+    this.padHash()
+    let mask = this.padMask
+    let rest = this.padRest
     const elements = this.net.elements
     const masked = this.maskElements
     for (let k = 0; k < masked.length; k++) {
@@ -1398,11 +1420,7 @@ export class Engine {
       const el = elements[i]
       let t = 0
       if (el.kind === "SW") t = switchClosed(el.closed, parts(this.partKeys[i])) ? 1 : this.arc[i] ? 2 : 0
-      else if (el.kind === "GPIO") {
-        mask = (mask * 31 + this.gpioState[i] + 7 * this.padSteps[i]) | 0
-        if (this.leafOf[i] < 0) rest = (rest * 31 + this.gpioState[i] + 7 * this.padSteps[i]) | 0
-        continue
-      } else if (el.kind === "R" && el.live) t = this.ohms[i] | 0
+      else if (el.kind === "R" && el.live) t = this.ohms[i] | 0
       else if (el.kind === "R" && el.ptc) t = this.ptcTripped[i] ? (Math.round(this.ohms[i] * 1e3) | 0) + 1 : 0
       else if (el.kind === "BAT") t = this.batStep[i]
       else if (el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR") t = this.ctl[i]
@@ -1647,6 +1665,7 @@ export class Engine {
             if (this.leafOf[i] < 0) disturbed = true
             else this.markLeaf(i)
           }
+          if (this.gpioState[i] !== GPIO_VOLTS) this.padMaskStale = true
           this.gpioState[i] = GPIO_VOLTS
           this.gpioVolts[i] = st
         } else {
@@ -1654,6 +1673,7 @@ export class Engine {
           if (this.gpioState[i] !== code) {
             if (this.leafOf[i] < 0) disturbed = true
             else this.markLeaf(i)
+            this.padMaskStale = true
           }
           this.gpioState[i] = code
         }
@@ -1853,6 +1873,7 @@ export class Engine {
       const steps = Math.round(Math.log(scale) / CMOS_STEP)
       if (steps === this.padSteps[i]) continue
       this.padSteps[i] = steps
+      this.padMaskStale = true
       this.ohms[i] = el.ohms * Math.exp(steps * CMOS_STEP)
       changed = true
     }
