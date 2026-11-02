@@ -179,7 +179,8 @@ export function boardArt(names: UnoNames): BodyShape[] {
   art.rect("connector", 13.6, 25.5, 24.2, 29.0, 1.75)
   art.text("16.000", 18.9, 27.25, SMALL)
   art.rect("chip", 39.7, 27.8, 42.9, 29.1, 0.2)
-  art.text("RST EN", 26.3, 26.04, named(SMALL, { size: 0.32, anchor: "end" }))
+  // Clear of the jumper part's left contact, at 26.67 mm.
+  art.text("RST EN", 25.3, 26.04, named(SMALL, { size: 0.32, anchor: "end" }))
 
   // --- ATmega328P-PU in its socket, pin 1 by the notch on the right as Arduino fits it.
   const dip = { x0: 28.6, x1: 64.1, y0: 34.0, y1: 39.9 }
