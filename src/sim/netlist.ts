@@ -254,6 +254,7 @@ function damaged(el: Element, index: number, dmg: Damage | undefined): Element |
   }
   if (!dmg.fatal) return el
   if (el.kind === "R" && el.supply) return { kind: "R", a: el.a, b: el.b, value: 0.01 }
+  if (el.kind === "GPIO" && el.clamp) return el
   return null
 }
 
@@ -552,7 +553,8 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         const ohms = el.drive ? resolveValue(el.drive.ohms, props) : NaN
         const at = el.drive?.at !== undefined ? resolveValue(el.drive.at, props) : NaN
         const pull = el.pull === undefined ? NaN : resolveValue(el.pull, props)
-        elements.push({
+        const dieDead = damage[obj.id]?.fatal === true
+        if (!dieDead) elements.push({
           ...base,
           kind: "GPIO",
           node: netOf(obj, el.node),
@@ -571,7 +573,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
           elements.push({ ...base, id: `${base.id}$cio`, kind: "C", a: netOf(obj, el.node), b: ground, value: el.capacitance, euler: true, hidden: true, limits: undefined, keys: [pin, groundKey] })
         const injection = el.clamp ? resolveValue(el.clamp.injection, props) : NaN
         if (el.clamp && Number.isFinite(injection) && injection > 0) {
-          const clampDiode = { ...base, kind: "D" as const, is: saturationCurrent(ESD_DIODE_VF, ESD_DIODE_N), n: ESD_DIODE_N, hidden: true, limits: { current: injection, tau: DEFAULT_TAU, fail: "short" as const, fatal: true } }
+          const clampDiode = { ...base, kind: "D" as const, is: saturationCurrent(ESD_DIODE_VF, ESD_DIODE_N), n: ESD_DIODE_N, hidden: true, limits: dieDead ? undefined : { current: injection, tau: DEFAULT_TAU, fail: "short" as const, fatal: true } }
           elements.push({ ...clampDiode, id: `${base.id}$clamp-vss`, anode: ground, cathode: netOf(obj, el.node), keys: [groundKey, pin] })
           if (el.clamp.rail) elements.push({ ...clampDiode, id: `${base.id}$clamp-vdd`, anode: netOf(obj, el.node), cathode: netOf(obj, el.clamp.rail), keys: [pin, node(obj, el.clamp.rail)] })
         }

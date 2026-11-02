@@ -233,6 +233,17 @@ const PIN_LAB_2026_10_12 = { vddaMv: 3290.4, risingMv: 1734.9, fallingMv: 1340.3
 
 const SUSPECTS_ON_THE_BENCH_2026_10_12 = { PA13: 3, PB3: 3, PA14: 2 }
 
+const BACKUP_SWITCH_AS_MEASURED_ON_THE_F746 = { switchOhms: 22, switchDrop: PIN_LAB_2026_10_12.backupDomainDropMv / 1000 }
+
+const DS8626_DS9405_PADS: PadClasses = {
+  ft: { aboveVdd: 4.0 },
+  tta: { pads: ["PA4", "PA5"], voltageMax: 4.0 },
+  injectedCurrentMax: 5e-3,
+  backupDomain: { pads: ["PC13", "PC14", "PC15", "PI8"], currentMax: 3e-3, ...BACKUP_SWITCH_AS_MEASURED_ON_THE_F746 },
+  otgId: { pads: [], pullOhms: 0 },
+  releaseFromHighDrainsAtSpeed: {},
+}
+
 const CCM_ON_THE_CPU_DATA_BUS: MemoryRegion = { name: "CCM", base: 0x10000000, size: 64 * 1024, kind: "ram", cpuDataOnly: true }
 
 const RM0090_FACTORY: MemoryRegion = { name: "FACTORY", base: 0x1fff7800, size: 0x230, kind: "rom" }
@@ -322,6 +333,7 @@ export const STM32F429ZI: ChipProfile = {
     nrstPullUp: 40e3,
     inputThresholdsOfVdd: { rising: 0.7, falling: 0.3 },
     adcInternal: DATASHEET_ADC_INTERNAL,
+    pads: DS8626_DS9405_PADS,
   },
 }
 
@@ -347,6 +359,7 @@ const DS8626_ELECTRICAL: ChipElectrical = {
     rising: [2.14, 2.3, 2.45, 2.6, 2.76, 2.93, 3.03, 3.14],
     falling: [2.04, 2.19, 2.35, 2.51, 2.66, 2.84, 2.93, 3.03],
   },
+  pads: DS8626_DS9405_PADS,
 }
 
 /**
@@ -643,7 +656,7 @@ export const STM32F746IG: ChipProfile = {
       ft: { aboveVdd: 4.0 },
       tta: { pads: ["PA4", "PA5"], voltageMax: 4.0 },
       injectedCurrentMax: 5e-3,
-      backupDomain: { pads: ["PC13", "PC14", "PC15", "PI8"], currentMax: 3e-3, switchOhms: 22, switchDrop: PIN_LAB_2026_10_12.backupDomainDropMv / 1000 },
+      backupDomain: { pads: ["PC13", "PC14", "PC15", "PI8"], currentMax: 3e-3, ...BACKUP_SWITCH_AS_MEASURED_ON_THE_F746 },
       otgId: { pads: ["PA10", "PB12"], pullOhms: 10e3 },
       releaseFromHighDrainsAtSpeed: SUSPECTS_ON_THE_BENCH_2026_10_12,
     },
