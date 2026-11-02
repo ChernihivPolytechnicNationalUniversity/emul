@@ -3,7 +3,7 @@ import { partKey, pinKey, type ComponentDef, type Damage, type PartState, type S
 import { parsePad, type PadRef } from "@/mcu/stm32f429"
 import { rcFrequency } from "@/mcu/pic/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
-import { crystalStartup } from "@/schematic/components/clock"
+import { crystalStartup, RESONATOR_STARTUP } from "@/schematic/components/clock"
 import { parseValue } from "./units"
 import { DT } from "./speeds"
 import { Engine, R_PULL, switchClosed, type Failure, type PartReader, type PinReader, type ProbeReading, type Reading, type TraceChunk } from "./engine"
@@ -695,15 +695,17 @@ export class SimLoop {
     const oscOut = pinNet.get(pinKey(object, outPin.id))
     if (oscIn === undefined || oscIn === GROUND) return { source: null }
     for (const obj of this.doc.objects) {
-      if (obj.def !== "crystal" && obj.def !== "oscillator") continue
+      if (obj.def !== "crystal" && obj.def !== "resonator" && obj.def !== "oscillator") continue
       const props = { ...getDef(obj.def)?.defaults, ...obj.props }
-      const hz = parseValue(props.value ?? "")
+      const deviation = obj.def === "resonator" ? Number.parseFloat(props.deviation ?? "0") : 0
+      const hz = parseValue(props.value ?? "") * (1 + (Number.isFinite(deviation) ? deviation : 0) / 100)
       if (!(hz > 0)) continue
-      if (obj.def === "crystal") {
+      if (obj.def === "crystal" || obj.def === "resonator") {
+        // A resonator's outer pins are 1 and 3; its middle pin is the built-in capacitors' ground.
         const a = pinNet.get(pinKey(obj.id, "1"))
-        const b = pinNet.get(pinKey(obj.id, "2"))
+        const b = pinNet.get(pinKey(obj.id, obj.def === "resonator" ? "3" : "2"))
         if (oscOut !== undefined && oscOut !== GROUND && ((a === oscIn && b === oscOut) || (a === oscOut && b === oscIn)))
-          return { source: { hz, kind: "crystal", startup: crystalStartup(hz) } }
+          return { source: { hz, kind: "crystal", startup: obj.def === "resonator" ? RESONATOR_STARTUP : crystalStartup(hz) } }
       } else if (pinNet.get(pinKey(obj.id, "OUT")) === oscIn) {
         return { source: { hz, kind: "clock", startup: 0 }, vccNet: pinNet.get(pinKey(obj.id, "VCC")) ?? GROUND }
       }

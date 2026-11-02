@@ -265,7 +265,7 @@ one step: the step's share of it is what the solver sees.
 Every preset in `OPAMP_PRESETS` (`src/sim/opamp.ts`) is one datasheet's typical figures at 25 °C
 and a palette entry of its own, `opamp-<preset id>` (`src/schematic/components/opamp.ts`): the
 generic "Op amp", an ideal amplifier with rails whose figures the inspector sets, and the LM358,
-LM741, TL072 and MCP6002, which have no settings. A symbol is one amplifier with its supply pins
+LM741, TL072, MCP6002 and LMV358, which have no settings. A symbol is one amplifier with its supply pins
 drawn on it, the way a schematic draws a dual's two halves; the inspector names the package pins.
 
 The `OPAMP` element is a single-pole macro-model with an unknown of its own beside the node

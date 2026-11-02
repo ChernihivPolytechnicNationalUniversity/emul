@@ -12,9 +12,9 @@ import {
   thermalMass,
   thermalResistance,
 } from "./battery"
-import { GROUND, type GpioState, type Netlist, type Resolved } from "./netlist"
+import { GROUND, type GpioState, type Netlist, type Ptc, type RegThermal, type Resolved } from "./netlist"
 import { bias, dischargeSink, nextLatch, NE555, outputSink, outputSource, quiescent, supplyShare } from "./ne555"
-import { curveAt, fromPositive, supplyDrive } from "./opamp"
+import { curveAt, fromPositive, RAIL_CLAMP_OHMS, supplyDrive } from "./opamp"
 import { SparseLU } from "./sparse-lu"
 import { formatSI } from "./units"
 import { nextPulseEdge, pulseHigh, pulseTiming } from "./pulse"
@@ -50,6 +50,12 @@ export const R_PULL = 40e3
 /** Output resistance of an ideal regulator: keeps two in parallel solvable and sharing. */
 const R_REG = 0.01
 const REG_MODES = ["regulating", "dropout", "current limit", "off"] as const
+/** How far a resettable fuse's resistance jumps the step it trips. */
+const PTC_TRIP_JUMP = 1000
+/** The least room an op amp's input stage is taken to need from its rail, V (rail-to-rail inputs). */
+const BIAS_EDGE = 0.05
+/** The air round a regulator, °C: the data sheets' 25 °C. */
+const AMBIENT = 25
 const REG_REGULATE = 0
 const REG_DROPOUT = 1
 const REG_LIMIT = 2
@@ -176,7 +182,7 @@ type Pad = Extract<Resolved, { kind: "GPIO" }>
 const NONLINEAR_KINDS = new Set<Resolved["kind"]>(["D", "Q", "REG", "CHG", "BOOST", "TMR", "M", "OPAMP"])
 const isPulse = (el: Resolved) => el.kind === "V" && el.amplitude > 0 && el.shape === "pulse"
 const switchesMask = (el: Resolved) =>
-  isPulse(el) || el.kind === "SW" || el.kind === "GPIO" || (el.kind === "R" && el.live) || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR"
+  isPulse(el) || el.kind === "SW" || el.kind === "GPIO" || (el.kind === "R" && (el.live || el.ptc)) || (el.kind === "REG" && el.thermal !== undefined) || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR"
 const SURGE = 20
 /** Averaging window for RMS readings in AC circuits: at least this long, and a few periods of the slowest source. */
 const RMS_MIN_TAU = 0.05
@@ -424,6 +430,16 @@ export class Engine {
   private readonly ohms: Float64Array
   private readonly gpioVolts: Float64Array
   private readonly ctl: Uint8Array
+  /** Resettable fuses: their heat (1 trips them) and whether they are tripped. */
+  private readonly ptcElements: Int32Array
+  private readonly ptcHeat: Float64Array
+  private readonly ptcTripped: Uint8Array
+  /** Set on the step a fuse trips: its jump in resistance stands for one step before the power balance takes over. */
+  private readonly ptcFresh: Uint8Array
+  /** Regulators with thermal shutdown: junction temperature (°C) and whether it has shut them down. */
+  private readonly hotRegulators: Int32Array
+  private readonly regTj: Float64Array
+  private readonly regHot: Uint8Array
   private readonly ctlT: Float64Array
   private readonly subV: Float64Array
   private readonly timers: Int32Array
@@ -627,6 +643,13 @@ export class Engine {
     this.strikeV = new Float64Array(n)
     this.gpioVolts = new Float64Array(m)
     this.ctl = new Uint8Array(m)
+    this.ptcElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "R" && el.ptc ? [i] : [])))
+    this.ptcHeat = new Float64Array(m)
+    this.ptcTripped = new Uint8Array(m)
+    this.ptcFresh = new Uint8Array(m)
+    this.hotRegulators = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "REG" && el.thermal ? [i] : [])))
+    this.regTj = new Float64Array(m).fill(AMBIENT)
+    this.regHot = new Uint8Array(m)
     this.ctlT = new Float64Array(m * 3)
     this.subV = new Float64Array(n)
     this.timers = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "TMR" ? [i] : [])))
@@ -1100,6 +1123,18 @@ export class Engine {
       if (heat > 1) return false
       this.stress[i] = heat
     }
+    const ptcs = this.ptcElements
+    for (let j = 0; j < ptcs.length; j++) {
+      const i = ptcs[j]
+      const ptc = (elements[i] as Extract<Resolved, { kind: "R" | "C" | "L" }>).ptc!
+      if (!this.ptcWarm(i, ptc, dt, this.rCurrent[i], this.rVoltage[i], false)) return false
+    }
+    const hot = this.hotRegulators
+    for (let j = 0; j < hot.length; j++) {
+      const i = hot[j]
+      const el = elements[i] as Extract<Resolved, { kind: "REG" }>
+      if (!this.regWarm(i, el.thermal!, dt, this.regPower(el, i), false)) return false
+    }
     const diodes = this.diodeElements
     for (let j = 0; j < diodes.length; j++) this.see(diodes[j], this.rCurrent[diodes[j]], dt)
     if (this.ac)
@@ -1160,7 +1195,102 @@ export class Engine {
       const t = lim.tau * Math.log((load - this.stress[i]) / (load - 1))
       steps = Math.min(steps, Math.floor(t / dt) - 1)
     }
+    const ptcs = this.ptcElements
+    for (let j = 0; j < ptcs.length; j++) {
+      const i = ptcs[j]
+      const ptc = (elements[i] as Extract<Resolved, { kind: "R" | "C" | "L" }>).ptc!
+      const target = this.ptcTarget(i, ptc, this.rCurrent[i], this.rVoltage[i])
+      const h = this.ptcHeat[i]
+      const edge = this.ptcTripped[i] ? ptc.reset : 1
+      if ((this.ptcTripped[i] ? target < edge : target > edge) && h !== target) steps = Math.min(steps, Math.floor((ptc.tau * Math.log((target - h) / (target - edge))) / dt) - 1)
+    }
+    const hot = this.hotRegulators
+    for (let j = 0; j < hot.length; j++) {
+      const i = hot[j]
+      const el = elements[i] as Extract<Resolved, { kind: "REG" }>
+      const th = el.thermal!
+      const target = AMBIENT + this.regPower(el, i) * th.rja
+      const tj = this.regTj[i]
+      const edge = this.regHot[i] ? th.tsdOff : th.tsd
+      if ((this.regHot[i] ? target < edge : target > edge) && tj !== target) steps = Math.min(steps, Math.floor((th.tau * Math.log((target - tj) / (target - edge))) / dt) - 1)
+    }
     return Math.max(0, steps)
+  }
+
+  /** What a regulator dissipates: its pass element's (VIN − VOUT) · I and its own draw from VIN. */
+  private regPower(el: Extract<Resolved, { kind: "REG" }>, i: number) {
+    const vin = this.vol(el.in, this.v) - this.vol(el.gnd, this.v)
+    const on = this.regEnabled(el, i, el.en === undefined ? 0 : this.vol(el.en, this.v) - this.vol(el.gnd, this.v))
+    return this.rPower[i] + (on ? el.gq : el.gqOff) * vin * vin
+  }
+
+  /**
+   * A regulator's junction over a step: it shuts down at `tsd` and comes back at `tsdOff`. With
+   * `flip` false (the settled path) it changes nothing and answers false where the step would flip it.
+   */
+  private regWarm(i: number, th: RegThermal, dt: number, watts: number, flip: boolean): boolean {
+    const tj = this.regTj[i] + (AMBIENT + watts * th.rja - this.regTj[i]) * -Math.expm1(-dt / th.tau)
+    const flips = this.regHot[i] ? tj <= th.tsdOff : tj >= th.tsd
+    if (flips && !flip) return false
+    this.regTj[i] = tj
+    if (flips) this.regHot[i] ^= 1
+    return true
+  }
+
+  /** The heat a resettable fuse is heading for: (I / trip)² conducting, its dissipation over `pd` tripped. */
+  private ptcTarget(i: number, ptc: Ptc, cur: number, vd: number) {
+    return this.ptcTripped[i] ? Math.abs(cur * vd) / ptc.pd : (cur * cur) / (ptc.trip * ptc.trip)
+  }
+
+  /**
+   * A resettable fuse's heat over a step: it trips at 1 and resets at `ptc.reset`. With `flip`
+   * false (the settled path) it changes nothing and answers false where the step would flip it.
+   */
+  private ptcWarm(i: number, ptc: Ptc, dt: number, cur: number, vd: number, flip: boolean): boolean {
+    const h = this.ptcHeat[i] + (this.ptcTarget(i, ptc, cur, vd) - this.ptcHeat[i]) * -Math.expm1(-dt / ptc.tau)
+    const flips = this.ptcTripped[i] ? h < ptc.reset : h >= 1
+    if (flips && !flip) return false
+    this.ptcHeat[i] = h
+    if (flips) {
+      this.ptcTripped[i] ^= 1
+      // A trip takes the fuse up its steep resistance curve at once: from far up it, the power
+      // balance below settles on the hot branch, where it holds `pd`, not on the cold one.
+      if (this.ptcTripped[i]) {
+        this.ohms[i] *= PTC_TRIP_JUMP
+        this.ptcFresh[i] = 1
+      }
+    }
+    return true
+  }
+
+  /**
+   * Each resettable fuse's resistance for this step: its cold value conducting; tripped, what
+   * keeps its dissipation at `pd` with the voltage it last had across it, approached
+   * geometrically so a fuse feeding a load settles instead of ringing. True when one changed.
+   */
+  private ptcResistances(): boolean {
+    let changed = false
+    const elements = this.net.elements
+    for (let j = 0; j < this.ptcElements.length; j++) {
+      const i = this.ptcElements[j]
+      const el = elements[i] as Extract<Resolved, { kind: "R" | "C" | "L" }>
+      if (this.ptcFresh[i]) {
+        this.ptcFresh[i] = 0
+        changed = true
+        continue
+      }
+      const was = this.ohms[i]
+      let ohms = el.value
+      if (this.ptcTripped[i]) {
+        const v = this.rVoltage[i]
+        ohms = Math.sqrt(was * Math.max(el.value, (v * v) / el.ptc!.pd))
+      }
+      if (Math.abs(ohms - was) > was * 1e-3) {
+        this.ohms[i] = ohms
+        changed = true
+      }
+    }
+    return changed
   }
 
   /**
@@ -1273,8 +1403,10 @@ export class Engine {
         if (this.leafOf[i] < 0) rest = (rest * 31 + this.gpioState[i] + 7 * this.padSteps[i]) | 0
         continue
       } else if (el.kind === "R" && el.live) t = this.ohms[i] | 0
+      else if (el.kind === "R" && el.ptc) t = this.ptcTripped[i] ? (Math.round(this.ohms[i] * 1e3) | 0) + 1 : 0
       else if (el.kind === "BAT") t = this.batStep[i]
       else if (el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR") t = this.ctl[i]
+      else if (el.kind === "REG") t = this.regHot[i]
       else if (el.kind === "V") t = pulseHigh(this.stepEnd, el) ? 1 : 0
       mask = (mask * 31 + t) | 0
       rest = (rest * 31 + t) | 0
@@ -1533,6 +1665,7 @@ export class Engine {
       }
     }
     if (this.scaledPads.length && this.scalePads()) disturbed = true
+    if (this.ptcElements.length && this.ptcResistances()) disturbed = true
     const mask = this.switchMask(parts)
     if (mask !== this.stepMask && (this.restMask !== this.stepRest || !this.leafDirty.length)) disturbed = true
     this.stepMask = mask
@@ -2039,7 +2172,13 @@ export class Engine {
             this.addTerm(el.e, el.b, el.c, -(g2 + g4))
             if (el.e !== GROUND) z[el.e] += ic0 + ib0
           } else if (el.kind === "REG") {
-            if (this.regulator(i, el.in, el.out, el.gnd, n + el.index, el.value, el.dropout, el.imax, true)) clamped = true
+            const on = this.regEnabled(el, i, g(el.en ?? GROUND) - g(el.gnd)) && !this.regHot[i]
+            if (this.regulator(i, el.in, el.out, el.gnd, n + el.index, el.value, el.dropout, el.imax, on, el.rdrop)) clamped = true
+            const gq = on ? el.gq : el.gqOff
+            if (gq > 0) {
+              this.addTerm(el.in, el.in, el.gnd, gq)
+              this.addTerm(el.gnd, el.in, el.gnd, -gq)
+            }
           } else if (el.kind === "CHG") {
             const st = this.ctl[i]
             const set = Math.max(0, -x[n + el.prog]) * CHG_GAIN
@@ -2255,6 +2394,32 @@ export class Engine {
    * what it sources taken from V+, what it sinks handed to V−. True when the guess put the target
    * or the output stage in another region.
    */
+  /**
+   * An input's bias current, `mag` while the input stage has room — PNP inputs (negative `ib`,
+   * out of the pins) need the input `cm[1]` below V+, NPN ones `cm[0]` above V− — falling linearly
+   * to none at the rail, where the stage has turned off; so a floating input drifts to the edge
+   * of its range, not past the supply. The current and its slope against the room.
+   */
+  private biasAt(el: Opamp, input: number, mag: number, v: Float64Array): [number, number, number] {
+    const pnp = el.spec.ib < 0
+    const room = pnp ? this.vol(el.vcc, v) - this.vol(input, v) : this.vol(input, v) - this.vol(el.vee, v)
+    const h = Math.max(pnp ? el.spec.cm[1] : el.spec.cm[0], BIAS_EDGE)
+    if (room >= h) return [mag, 0, room]
+    // Past the rail by more than its rating allows, a rail-clamped input conducts into that rail.
+    const margin = pnp ? el.spec.inputs[1] : el.spec.inputs[0]
+    if (el.spec.railClamp && room < -margin) return [(room + margin) / RAIL_CLAMP_OHMS, 1 / RAIL_CLAMP_OHMS, room]
+    if (room <= 0) return [0, 0, room]
+    return [(mag * room) / h, mag / h, room]
+  }
+
+  /** The bias current of one input linearized at the guess: from V+ into a PNP input, out of an NPN one into V−. */
+  private biasStamp(el: Opamp, input: number, mag: number, guess: Float64Array) {
+    const [cur, g, room] = this.biasAt(el, input, mag, guess)
+    const [from, to] = el.spec.ib < 0 ? [el.vcc, input] : [input, el.vee]
+    this.addI(from, to, cur - g * room)
+    if (g) this.addG(from, to, g)
+  }
+
   private opamp(el: Opamp, i: number): boolean {
     const s = el.spec
     const out = this.branchOut
@@ -2268,13 +2433,7 @@ export class Engine {
     out[0] *= drive
     this.addBranch(el.vcc, el.vee, vs, out)
     const ib = s.ib * drive
-    if (ib > 0) {
-      this.addI(el.inp, el.vee, ib)
-      this.addI(el.inn, el.vee, ib)
-    } else if (ib < 0) {
-      this.addI(el.vcc, el.inp, -ib)
-      this.addI(el.vcc, el.inn, -ib)
-    }
+    if (ib !== 0 || s.railClamp) for (const input of [el.inp, el.inn]) this.biasStamp(el, input, Math.abs(ib), guess)
     const prev = this.rRegion[i]
     const region = this.frozen ? prev : this.opampRegion(el, i, guess, dt)
     this.rRegion[i] = region
@@ -2380,14 +2539,20 @@ export class Engine {
     else if (st === OA_TIP_DOWN && region === OA_LOW) this.ctl[i] = OA_HELD_LOW
   }
 
-  private regulator(i: number, inN: number, outN: number, gndN: number, r: number, value: number, dropout: number, imax: number, enabled: boolean): boolean {
+  /** A regulator's enable input with its hysteresis: on above `enOn`, held on down to `enOff`; always on without one. */
+  private regEnabled(el: Extract<Resolved, { kind: "REG" }>, i: number, ven: number): boolean {
+    if (el.en === undefined) return true
+    return ven > (this.ctl[i] ? el.enOff : el.enOn)
+  }
+
+  private regulator(i: number, inN: number, outN: number, gndN: number, r: number, value: number, dropout: number, imax: number, enabled: boolean, rdrop = 0): boolean {
     const { A, z, x } = this
     const g = (k: number) => (k === GROUND ? 0 : this.guess[k])
     let clamped = false
     const vin = g(inN) - g(gndN)
     const vout = g(outN) - g(gndN)
     const iPrev = x[r]
-    const avail = vin - dropout
+    const avail = vin - dropout - rdrop * Math.max(0, Math.min(iPrev, imax))
     const target = Math.min(value, avail)
     const prev = this.rRegion[i]
     const regOrDrop = avail >= value - 1e-9 ? REG_REGULATE : REG_DROPOUT
@@ -2422,7 +2587,7 @@ export class Engine {
       case REG_DROPOUT:
         if (outN !== GROUND) A[this.cell(r, outN)] += 1
         if (inN !== GROUND) A[this.cell(r, inN)] -= 1
-        A[this.cell(r, r)] += R_REG
+        A[this.cell(r, r)] += R_REG + rdrop
         z[r] = -dropout
         break
       case REG_LIMIT: {
@@ -2740,6 +2905,7 @@ export class Engine {
           tc[this.termOf[base]] += cur
           tc[this.termOf[base + 1]] -= cur
           this.record(el, i, dt, cur, vd, vd * cur)
+          if (el.ptc && this.converged) this.ptcWarm(i, el.ptc, dt, cur, vd, true)
           break
         }
         case "C": {
@@ -2884,9 +3050,14 @@ export class Engine {
           const cur = x[n + el.index]
           const vin = this.vol(el.in, this.v) - this.vol(el.gnd, this.v)
           const vout = this.vol(el.out, this.v) - this.vol(el.gnd, this.v)
-          tc[this.termOf[base]] += cur
+          const own = (this.regEnabled(el, i, el.en === undefined ? 0 : this.vol(el.en, this.v) - this.vol(el.gnd, this.v)) ? el.gq : el.gqOff) * vin
+          tc[this.termOf[base]] += cur + own
           tc[this.termOf[base + 1]] -= cur
-          this.record(el, i, dt, cur, vout, Math.max(0, (vin - vout) * cur))
+          tc[this.termOf[base + 2]] -= own
+          if (this.converged && el.en !== undefined) this.ctl[i] = this.regEnabled(el, i, this.vol(el.en, this.v) - this.vol(el.gnd, this.v)) ? 1 : 0
+          // A regulator's voltage rating is its input's: the output is what it makes.
+          this.record(el, i, dt, cur, vout, Math.max(0, (vin - vout) * cur), vin)
+          if (el.thermal && this.converged) this.regWarm(i, el.thermal, dt, this.rPower[i] + own * vin, true)
           break
         }
         case "CHG": {
@@ -3075,7 +3246,11 @@ export class Engine {
     const drive = supplyDrive(s, vs)
     curveAt(s.iq, vs, out)
     const iq = out[0] * drive
-    const ib = s.ib * drive
+    const mag = Math.abs(s.ib * drive)
+    // Signed as `ib` is: into the pins positive.
+    const sign = s.ib < 0 ? -1 : 1
+    const ibp = s.ib === 0 && !s.railClamp ? 0 : sign * this.biasAt(el, el.inp, mag, v)[0]
+    const ibn = s.ib === 0 && !s.railClamp ? 0 : sign * this.biasAt(el, el.inn, mag, v)[0]
     const target = this.x[this.net.nodes + el.index]
     const stage = this.oaOut[i]
     curveAt(stage === OA_SINKING ? s.sink : s.source, vs, out)
@@ -3083,11 +3258,11 @@ export class Engine {
     fromPositive(io, out)
     const sp = out[0]
     const sn = sp - io
-    tc[this.termOf[base]] += ib
-    tc[this.termOf[base + 1]] += ib
+    tc[this.termOf[base]] += ibp
+    tc[this.termOf[base + 1]] += ibn
     tc[this.termOf[base + 2]] -= io
-    tc[this.termOf[base + 3]] += sp + iq - Math.min(0, 2 * ib)
-    tc[this.termOf[base + 4]] -= sn + iq + Math.max(0, 2 * ib)
+    tc[this.termOf[base + 3]] += sp + iq - Math.min(0, ibp + ibn)
+    tc[this.termOf[base + 4]] -= sn + iq + Math.max(0, ibp + ibn)
     this.record(el, i, dt, io, vs, sp * (vcc - vo) + sn * (vo - vee) + iq * vs)
     this.oaV[i] = target
     if (this.converged) this.opampLatch(el, i, this.rRegion[i], vs)
@@ -3348,10 +3523,13 @@ export class Engine {
         }
       } else if (el.kind === "M") {
         reading.extra = { Vgs: formatSI(this.rVbe[i], "V"), region: MOS_REGIONS[this.rRegion[i]] }
+      } else if (el.kind === "R" && el.ptc) {
+        reading.extra = { state: this.ptcTripped[i] ? "tripped" : "conducting", heat: `${Math.round(this.ptcHeat[i] * 100)} %` }
       } else if (el.kind === "SW") {
         reading.extra = { state: this.rRegion[i] === 1 ? "closed" : this.rRegion[i] === 2 ? "arcing" : "open" }
       } else if (el.kind === "REG") {
-        reading.extra = { mode: REG_MODES[this.rRegion[i]] ?? "off" }
+        reading.extra = { mode: this.regHot[i] ? "thermal shutdown" : (REG_MODES[this.rRegion[i]] ?? "off") }
+        if (el.thermal) reading.extra.Tj = `${this.regTj[i].toFixed(1)} °C`
       } else if (el.kind === "CHG") {
         const st = this.ctl[i]
         const vin = this.vol(el.in, this.v) - this.vol(el.gnd, this.v)
@@ -3547,7 +3725,7 @@ function nodesOf(el: Resolved): (number | undefined)[] {
     case "GPIO":
       return [el.node, el.vddNet, el.gndNet]
     case "REG":
-      return [el.in, el.out, el.gnd]
+      return [el.in, el.out, el.gnd, el.en]
     case "CHG":
       return [el.in, el.bat, el.gnd, el.progNet, el.chrg, el.stdby, el.ce, el.temp]
     case "PROT":
