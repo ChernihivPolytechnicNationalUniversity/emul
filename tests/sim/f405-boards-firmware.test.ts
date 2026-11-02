@@ -6,23 +6,32 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { STM32F405RG } from "@/mcu/chip"
 import { h405Blink, netduinoBlink } from "@/schematic/examples/discovery"
 import type { Example } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { partKey, pinKey } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
 import { FIRMWARE } from "../lib/firmware"
+import { EYE_SETTLED } from "../lib/eye"
 
-function bench(example: Example, def: string) {
+function bench(example: Example, def: string, bridges: Record<string, { on: boolean }> = {}) {
   const doc = example.build(GRID)
   const u = doc.objects.find((o) => o.def === def)!
+  for (const [id, state] of Object.entries(bridges)) doc.parts[partKey(u.id, id)] = state
   u.props = { ...u.props, firmwareData: readFileSync(join(FIRMWARE, "prebuilt", `${example.id}.U1.elf`)).toString("base64") }
   const loop = new SimLoop()
   loop.setDoc(doc)
   loop.setParts(doc.parts)
   loop.setRunning(true)
   let clock = 0
-  type Core = { clocks: { hclk: number }; cpu: { halted: unknown }; bus: { read: (a: number, n: number) => number }; firmware: { symbols: { name: string; value: number }[] } }
+  type Core = {
+    clocks: { hclk: number }
+    cpu: { halted: { reason?: string } | null; pc: number; sleeping: boolean }
+    bus: { read: (a: number, n: number) => number; memoryAt: (a: number) => { name: string } | null }
+    firmware: { symbols: { name: string; value: number }[] }
+    unmodelled: { features: Map<string, number> }
+  }
   const core = () => (loop as unknown as { mcus: Map<string, { mcu: { mcu: Core } }> }).mcus.get(u.id)!.mcu.mcu
   const byte = (name: string) => core().bus.read(core().firmware.symbols.find((s) => s.name === name)!.value, 1)
   /** Times (s) the LED part went from dark to lit over `seconds`, sampled every 5 ms. */
@@ -62,6 +71,40 @@ describe("STM32-H405 blink", () => {
     expect(on.length).toBeGreaterThanOrEqual(5)
     b.press("BUT", false)
     for (const p of periods(on.slice(1))) expect(p).toBeCloseTo(0.2, 1)
+  })
+})
+
+describe("STM32-H405 boot bridges, sampled at RESET (the first start after programming is the programmer's own)", () => {
+  function afterReset(bridges: Record<string, { on: boolean }>, seconds: number) {
+    const b = bench(h405Blink, "olimex-stm32-h405", bridges)
+    b.onsets("STAT", 0.1)
+    b.press("RESET", true)
+    b.onsets("STAT", EYE_SETTLED)
+    b.press("RESET", false)
+    const blinks = b.onsets("STAT", seconds)
+    const core = b.core()
+    return { blinks, atZero: core.bus.memoryAt(0)?.name, pc: core.cpu.pc, sleeping: core.cpu.sleeping, halted: core.cpu.halted, features: [...core.unmodelled.features.keys()], system: STM32F405RG.flash.system }
+  }
+  it("boots system memory with B0 on B0_H: system memory aliased at 0, the core asleep in the stub that stands in for ST's bootloader (not modelled, and said so), STAT dark", () => {
+    const got = afterReset({ B0: { on: true } }, 1.5)
+    expect.soft(got.atZero, "aliased at 0").toBe("SYSTEM")
+    expect.soft(got.pc >= got.system.base && got.pc < got.system.base + got.system.size, `PC 0x${got.pc.toString(16)} in system memory`).toBe(true)
+    expect.soft(got.halted, "not halted").toBeNull()
+    expect.soft(got.sleeping, "asleep on the stub's WFI").toBe(true)
+    expect.soft(got.features, "reported").toContain("system bootloader (BOOT0 high)")
+    expect.soft(got.blinks, "STAT dark").toEqual([])
+  })
+  it("boots SRAM with both bridges high: SRAM aliased at 0, its empty vector table stops the core, STAT dark", () => {
+    const got = afterReset({ B0: { on: true }, B1: { on: true } }, 1.5)
+    expect.soft(got.atZero, "aliased at 0").toBe("SRAM")
+    expect.soft(got.halted, "stopped on SRAM's empty vectors").not.toBeNull()
+    expect.soft(got.features, "not the bootloader").not.toContain("system bootloader (BOOT0 high)")
+    expect.soft(got.blinks, "STAT dark").toEqual([])
+  })
+  it("ignores B1 while B0 is low: flash aliased at 0, and STAT blinks", () => {
+    const got = afterReset({ B1: { on: true } }, 2.2)
+    expect.soft(got.atZero, "aliased at 0").toBe("FLASH")
+    expect.soft(got.blinks.length, "STAT blinks").toBeGreaterThanOrEqual(2)
   })
 })
 
