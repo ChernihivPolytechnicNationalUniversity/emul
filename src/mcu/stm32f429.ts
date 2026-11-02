@@ -6,7 +6,7 @@
 import { blockName } from "./blocks"
 import { Bus, type Peripheral } from "./bus"
 import type { Clocked } from "./periph/clocked"
-import { internalChannelVolts, STM32F429ZI, type ChipProfile, type MemoryRegion } from "./chip"
+import { blocksOf, internalChannelVolts, STM32F429ZI, type ChipProfile, type MemoryRegion } from "./chip"
 import { Cpu } from "./cpu"
 import { CoreDebugger } from "./debugger"
 import { parseFirmware, type Firmware } from "./elf"
@@ -23,7 +23,7 @@ import { Rtc } from "./periph/rtc"
 import { Iwdg, Wwdg } from "./periph/wdg"
 import { AdcBlock, adcPad, Dac, DAC_PADS, type Adc, type AdcSource } from "./periph/adc"
 import { BackupSram } from "./periph/bkpsram"
-import { Dma, DMA_SPECS, DMA1_REQUESTS, DMA2_REQUESTS } from "./periph/dma"
+import { Dma, DMA_SPECS, DMA1_REQUESTS, DMA2_REQUESTS, F401_DMA1_REQUESTS, F401_DMA2_REQUESTS, F411_DMA1_REQUESTS, F411_DMA2_REQUESTS } from "./periph/dma"
 import { Dma2d } from "./periph/dma2d"
 import { Fmc } from "./periph/fmc"
 import { Ltdc } from "./periph/ltdc"
@@ -132,7 +132,8 @@ export class Stm32 {
   readonly adc: Adc[]
   readonly dac: Dac
   readonly rtc: Rtc
-  readonly bkpsram: BackupSram
+  /** Null on parts without backup SRAM (F411). */
+  readonly bkpsram: BackupSram | null
   readonly fmc: Fmc
   readonly ltdc = new Ltdc()
   readonly dma2d = new Dma2d()
@@ -222,20 +223,22 @@ export class Stm32 {
   /** `external`: memory the board hangs on the FMC (an SDRAM), on top of the chip's own map. */
   constructor(chip: ChipProfile = STM32F429ZI, external: MemoryRegion[] = []) {
     this.chip = chip
-    const f40x = chip.line === "f40x"
+    // F40x and F411 share the RM0090-F40x shape where they differ from F42x: no over-drive, no PLLSAI, single-bank flash.
+    const f40x = chip.line === "f40x" || chip.line === "f411" || chip.line === "f401"
+    const blocks = blocksOf(chip)
     this.syscfg = new Syscfg(chip.line)
-    this.fmc = new Fmc(!f40x)
-    this.rcc = new Rcc(chip.lptim, chip.rccResets, !f40x)
+    this.fmc = new Fmc(blocks.fmc === "sdram")
+    this.rcc = new Rcc(chip.lptim, chip.rccResets, !f40x, chip.line === "f411" || chip.line === "f401", chip.line === "f411")
     this.rtc = new Rtc(chip.rtcBackupRegisters)
     this.lptim = chip.lptim ? new Lptim(chip.lptim) : null
     this.vdda = chip.electrical.vdd
     this.bus = new Bus([...chip.memory, ...external], chip.core.bitBand)
     this.cpu = new Cpu(this.bus, chip.core)
     this.dbgmcu = new Dbgmcu(chip.idcode)
-    this.pwr = new Pwr(chip.pwr, chip.electrical.pvd ?? null, chip.electrical.vdd, !f40x)
+    this.pwr = new Pwr(chip.pwr, chip.electrical.pvd ?? null, chip.electrical.vdd, !f40x, chip.line === "f411" ? "f411" : chip.line === "f401" ? "f401" : null)
     const bus = this.bus
     const flashRegion = chip.memory.find((m) => m.kind === "flash")!
-    this.flash = new FlashIf(chip.flash.map, chip.flash, flashRegion.base, f40x)
+    this.flash = new FlashIf(chip.flash.map, chip.flash, flashRegion.base, chip.line === "f40x" ? "f40x" : chip.line === "f411" || chip.line === "f401" ? "f411" : "full")
     this.flash.bus = bus
     bus.flashWriter = (addr, value, size) => this.flash.programWrite(addr, value, size)
     this.flash.onBusy = (seconds) => {
@@ -271,10 +274,12 @@ export class Stm32 {
     this.pwr.onUnsupported = (what) => this.unmodelled.feature(what)
     this.rcc.onUnsupported = (what) => this.unmodelled.feature(what)
     this.pwr.onPvdOutput = (vddBelow) => this.exti.edge(PVD_EXTI_LINE, vddBelow)
-    this.bkpsram = new BackupSram(chip.backupSram.base, chip.backupSram.size)
-    this.bkpsram.interfaceClocked = () => this.rcc.enabled("AHB1ENR", AHB1ENR_BKPSRAMEN)
-    this.bkpsram.backupDomainWritable = () => this.pwr.backupDomainWritable()
-    bus.attach(this.bkpsram)
+    this.bkpsram = chip.backupSram ? new BackupSram(chip.backupSram.base, chip.backupSram.size) : null
+    if (this.bkpsram) {
+      this.bkpsram.interfaceClocked = () => this.rcc.enabled("AHB1ENR", AHB1ENR_BKPSRAMEN)
+      this.bkpsram.backupDomainWritable = () => this.pwr.backupDomainWritable()
+      bus.attach(this.bkpsram)
+    }
     bus.attach(this.flash)
     this.syscfg.onRemap = (mode) => {
       if (mode === 2) this.unmodelled.feature("SYSCFG remap of the FMC at address 0")
@@ -296,8 +301,10 @@ export class Stm32 {
     this.cpu.onDeepWake = () => this.leaveDeepSleep()
     this.cpu.onUnsupported = (what) => this.unmodelled.feature(what)
     const drainSpeeds = Object.entries(chip.electrical.pads?.releaseFromHighDrainsAtSpeed ?? {}).map(([pad, speed]) => ({ ref: parsePad(pad)!, speed }))
-    // GPIOA–GPIOI on F40x, A–K on F42x/F7 (RM0090 Table 35 has no GPIOJ/K enable bits).
-    for (let i = 0; i < (f40x ? 9 : GPIO_PORTS); i++) {
+    // GPIOA–GPIOI on F40x, A–K on F42x/F7 (RM0090 Table 35 has no GPIOJ/K enable bits), A–E + H on F411
+    // (RM0383 Table 1). Ports a die lacks still get an object so `gpio[port]` indexes by letter; only present ones go on the bus.
+    const lastPort = Math.max(...[...blocks.gpio].map((l) => l.charCodeAt(0) - 65))
+    for (let i = 0; i <= Math.min(lastPort, GPIO_PORTS - 1); i++) {
       const drainSpeed: number[] = []
       for (const { ref, speed } of drainSpeeds) if (ref.port === i) drainSpeed[ref.pin] = speed
       const g = new Gpio(i, drainSpeed)
@@ -350,10 +357,11 @@ export class Stm32 {
       }
       g.onOutput = (port) => this.watchGpio(port)
       this.gpio.push(g)
-      bus.attach(g)
+      if (blocks.gpio.includes(String.fromCharCode(65 + i))) bus.attach(g)
     }
     for (const [i, spec] of DMA_SPECS.entries()) {
-      const d = new Dma(spec, i === 0 ? DMA1_REQUESTS : DMA2_REQUESTS)
+      const tables = chip.line === "f411" ? [F411_DMA1_REQUESTS, F411_DMA2_REQUESTS] : chip.line === "f401" ? [F401_DMA1_REQUESTS, F401_DMA2_REQUESTS] : [DMA1_REQUESTS, DMA2_REQUESTS]
+      const d = new Dma(spec, tables[i])
       d.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
       d.sync = () => this.sync(d)
       d.reschedule = () => this.schedule()
@@ -365,7 +373,7 @@ export class Stm32 {
       this.dma.push(d)
       bus.attach(d)
     }
-    for (const spec of TIM_SPECS) {
+    for (const spec of TIM_SPECS.filter((t) => blocks.tim.includes(t.name))) {
       const t = new Tim(spec, chip.tim)
       const pads = timPads(spec.name)
       const lines = [...pads.filter((p) => !p.complementary).map((p) => ({ ...p, line: p.channel })), ...timAuxPads(spec.name, chip.af).map((p) => ({ ...p, line: TIM_LINE[p.line] }))]
@@ -401,10 +409,9 @@ export class Stm32 {
       }
       this.schedule()
     }
-    // UART7/UART8 and SPI4–6 are F42x/F7 only (RM0090 Table 35, Table 62).
-    for (const spec of USART_SPECS.filter((u) => !f40x || (u.name !== "UART7" && u.name !== "UART8"))) {
+    for (const spec of USART_SPECS.filter((u) => blocks.usart.includes(u.name))) {
       const u = new Usart(spec, chip.usart)
-      const pads = usartPads(spec.name)
+      const pads = usartPads(spec.name, chip.af)
       u.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
       u.onDmaRequest = (line) => this.dmaRequest(`${spec.name}_${line.toUpperCase()}`)
       u.sync = () => this.sync(u)
@@ -420,7 +427,7 @@ export class Stm32 {
       this.usart.push(u)
       bus.attach(u)
     }
-    for (const spec of SPI_SPECS.slice(0, f40x ? 3 : SPI_SPECS.length)) {
+    for (const spec of SPI_SPECS.filter((x) => blocks.spi.includes(x.name))) {
       const x = new Spi(spec, chip.spi)
       const pads = [...spiPads(spec.name, chip.af), ...i2sMckPads(spec.name, chip.af)]
       x.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
@@ -441,7 +448,7 @@ export class Stm32 {
       bus.attach(x)
     }
     for (const spec of I2C_SPECS.slice(0, chip.i2cCount)) {
-      const x = new I2c(spec, chip.i2c, !f40x)
+      const x = new I2c(spec, chip.i2c, chip.line !== "f40x")
       const pads = i2cPads(spec.name, chip.af)
       x.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
       x.sync = () => this.sync(x)
@@ -456,7 +463,7 @@ export class Stm32 {
       this.i2c.push(x)
       bus.attach(x)
     }
-    this.adcBlock = new AdcBlock(0x40012000, 3, chip.adc)
+    this.adcBlock = new AdcBlock(0x40012000, blocks.adcs, chip.adc)
     this.adc = this.adcBlock.adcs
     this.dac = new Dac(chip.dac)
     this.adcBlock.common.onUnsupported = (what) => this.unmodelled.feature(what)
@@ -485,7 +492,7 @@ export class Stm32 {
       else this.dacOut.set(key, volts)
       this.gpio[pad.port].version++
     }
-    bus.attach(this.dac)
+    if (blocks.dac) bus.attach(this.dac)
     for (const w of [this.iwdg, this.wwdg]) {
       w.sync = () => this.sync(w)
       w.reschedule = () => this.schedule()
@@ -538,7 +545,7 @@ export class Stm32 {
     // External memory controller, display controller and the 2D accelerator.
     this.fmc.bus = bus
     this.fmc.onUnsupported = (what) => this.unmodelled.feature(what)
-    bus.attach(this.fmc)
+    if (blocks.fmc) bus.attach(this.fmc)
     bus.onUnreadyAccess = (mem, _addr, write) => this.unmodelled.feature(`${mem} ${write ? "written" : "read"} before the FMC initialised it`)
     this.ltdc.bus = bus
     this.ltdc.pixelClock = () => this.rcc.ltdcHz()
@@ -549,7 +556,7 @@ export class Stm32 {
     this.dma2d.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
     this.dma2d.onUnsupported = (what) => this.unmodelled.feature(what)
     // LTDC and DMA2D are F429/F439 and F7 only (RM0090 §16 p480, §11; Table 62 has no 88–90).
-    if (!f40x) {
+    if (blocks.lcd) {
       bus.attach(this.ltdc)
       bus.attach(this.dma2d)
     }
@@ -974,7 +981,7 @@ export class Stm32 {
     this.bus.clearRam()
     if (this.firmware) for (const seg of this.firmware.segments) if (this.bus.memoryAt(seg.addr)?.kind === "ram") this.bus.load(seg.addr, seg.data)
     this.bus.resetPeripherals()
-    if (!backupSramKept) this.bkpsram.loseContents()
+    if (!backupSramKept) this.bkpsram?.loseContents()
     // CSR reset flags: PIN for every reset; POR/BOR only for power-on; the watchdogs and SFTRST by cause.
     if (cause === "standby") this.pwr.flagStandbyExit(this.standbyWakePin)
     else {

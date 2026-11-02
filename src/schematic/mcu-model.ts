@@ -39,9 +39,10 @@ function classify(el: Pad, pad: string, classes: PadClasses): Pad {
   if (classes.tta.pads.includes(pad))
     return { ...el, clamp: { injection: classes.injectedCurrentMax, rail: el.vddNode }, limits: { current: el.limits?.current, voltage: classes.tta.voltageMax, fail } }
   const backup = classes.backupDomain.pads.includes(pad)
+  const switched = backup && classes.backupDomain.switchOhms !== undefined
   return {
     ...el,
-    vddNode: backup ? BACKUP_DOMAIN_SUPPLY : el.vddNode,
+    vddNode: switched ? BACKUP_DOMAIN_SUPPLY : el.vddNode,
     pull: classes.otgId.pads.includes(pad) ? classes.otgId.pullOhms : undefined,
     clamp: { injection: classes.injectedCurrentMax },
     limits: { current: backup ? classes.backupDomain.currentMax : el.limits?.current, aboveSupply: classes.ft.aboveVdd, fail },
@@ -57,13 +58,13 @@ export function withPadClasses(def: ComponentDef): ComponentDef {
     if (el.kind !== "GPIO") return el
     const pad = padOf(el.node)
     if (!pad || !parsePad(pad)) return el
-    if (classes.backupDomain.pads.includes(pad)) backupFeed ??= el.vddNode
+    if (classes.backupDomain.pads.includes(pad) && classes.backupDomain.switchOhms !== undefined) backupFeed ??= el.vddNode
     return classify(el, pad, classes)
   })
   if (backupFeed)
     model.push(
-      { kind: "V", plus: backupFeed, minus: BACKUP_DOMAIN_SWITCH, value: classes.backupDomain.switchDrop },
-      { kind: "R", a: BACKUP_DOMAIN_SWITCH, b: BACKUP_DOMAIN_SUPPLY, value: classes.backupDomain.switchOhms, label: "Backup-domain power switch", limits: { current: classes.backupDomain.currentMax, fail: "short" } },
+      { kind: "V", plus: backupFeed, minus: BACKUP_DOMAIN_SWITCH, value: classes.backupDomain.switchDrop ?? 0 },
+      { kind: "R", a: BACKUP_DOMAIN_SWITCH, b: BACKUP_DOMAIN_SUPPLY, value: classes.backupDomain.switchOhms!, label: "Backup-domain power switch", limits: { current: classes.backupDomain.currentMax, fail: "short" } },
     )
   return { ...def, model }
 }

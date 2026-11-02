@@ -46,7 +46,7 @@ export type Resolved =
     })
   /** `index` is the extra unknown (secondary current) like a source's. */
   | (Base & { kind: "XFMR"; p1: number; p2: number; s1: number; s2: number; ratio: number; index: number; keys: [string, string, string, string] })
-  | (Base & { kind: "D"; anode: number; anodePin?: number; cathode: number; is: number; n: number; zener?: number; part?: string; keys: [string, string] })
+  | (Base & { kind: "D"; anode: number; anodePin?: number; cathode: number; is: number; n: number; zener?: number; part?: string; keys: [string, string]; vf?: number })
   /** With `rc`, `c` is an internal node behind the collector resistance and `cPin` the pin's net; readings report pin to pin. */
   | (Base & { kind: "Q"; polarity: 1 | -1; b: number; c: number; e: number; beta: number; cPin: number; keys: [string, string, string] })
   | (Base & { kind: "M"; polarity: 1 | -1; g: number; d: number; s: number; vth: number; k: number; lambda: number; keys: [string, string, string] })
@@ -478,7 +478,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
           anodeKey = `${node(obj, el.anode)}$rs`
           nodeNet.set(anodeKey, anode)
         }
-        elements.push({ ...base, kind: "D", anode, anodePin, cathode: netOf(obj, el.cathode), is, n, zener: zener && Number.isFinite(zener) ? zenerOffset(zener, is, n) : undefined, part: el.part, hidden: el.hidden, keys: [anodeKey, node(obj, el.cathode)] })
+        elements.push({ ...base, kind: "D", anode, anodePin, cathode: netOf(obj, el.cathode), is, n, zener: zener && Number.isFinite(zener) ? zenerOffset(zener, is, n) : undefined, part: el.part, vf: Number.isFinite(vf) && vf > 0 ? vf : 0.7, hidden: el.hidden, keys: [anodeKey, node(obj, el.cathode)] })
         if (withRs) elements.push({ ...base, id: `${base.id}$rs`, kind: "R", a: anodePin, b: anode, value: rs, hidden: true, limits: undefined, keys: [node(obj, el.anode), anodeKey] })
         break
       }

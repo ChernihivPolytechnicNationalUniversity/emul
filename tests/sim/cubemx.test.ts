@@ -105,7 +105,7 @@ describe("a CubeMX project opened in the editor", () => {
     expect(project.target).toBeNull()
     expect(unsupportedChip(project)).toEqual({
       title: "STM32F767ZITx not supported",
-      description: "Supported: STM32F429ZIT6 (Nucleo-144), STM32F746IGT6 (Open746I-C), STM32F407VGT6 (STM32F4-Discovery), STM32F405RGT6 (Olimex STM32-H405).",
+      description: "Supported: STM32F429ZIT6 (Nucleo-144), STM32F746IGT6 (Open746I-C), STM32F407VGT6 (STM32F4-Discovery), STM32F405RGT6 (Olimex STM32-H405), STM32F411CEU6 (WeAct Black Pill F411), STM32F401CCU6 (WeAct Black Pill F401CC), STM32F401CEU6 (WeAct Black Pill F401CE).",
     })
   })
 

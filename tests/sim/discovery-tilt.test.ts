@@ -34,7 +34,7 @@ describe.each([
   const core = () => (loop as unknown as { mcus: Map<string, { mcu: { mcu: Core } }> }).mcus.get(u.id)!.mcu.mcu
   const sym = (name: string) => core().firmware.symbols.find((s) => s.name === name)!.value
   const mg = () => [0, 1, 2].map((i) => core().bus.read32(sym("accel_mg") + 4 * i) | 0)
-  const lit = () => ["LD3", "LD4", "LD5", "LD6"].filter((ld) => loop.snapshot()!.parts[partKey(u.id, ld)]?.on || (loop.snapshot()!.parts[partKey(u.id, ld)]?.amps ?? 0) > 0.1e-3)
+  const lit = () => ["LD3", "LD4", "LD5", "LD6"].filter((ld) => loop.snapshot()!.parts[partKey(u.id, ld)]?.on)
   const tilt = (roll: number, pitch: number) => {
     u.props = { ...u.props, roll: String(roll), pitch: String(pitch) }
     loop.setDoc(doc)

@@ -49,9 +49,10 @@ describe("Nucleo ADC and DAC", () => {
     expect.soft(word("errors"), "no HAL errors").toBe(0)
     expect.soft(snap.pinVoltage[pinKey(u.id, "CN9-1")], "0.99 V on A0").toBeNear(0.99, 0.02)
     expect.soft(word("adcValue"), "ADC counts").toBeNear(1229, 15)
-    ld1 = snap.parts[partKey(u.id, "LD1")]?.level ?? 0
-    expect.soft(ld1, "LD1 dimmed (30 % duty)").toBeGreaterThan(0.03)
-    expect.soft(ld1, "LD1 dimmed (30 % duty)").toBeLessThan(0.15)
+    // The averaged current (linear in light for the AlGaInP die), not the drawn Stevens brightness.
+    ld1 = snap.parts[partKey(u.id, "LD1")]?.amps ?? 0
+    expect.soft(ld1, "LD1 dimmed (30 % duty)").toBeGreaterThan(0.24e-3)
+    expect.soft(ld1, "LD1 dimmed (30 % duty)").toBeLessThan(1.2e-3)
   })
 
   it("follows the pot turned up", () => {
@@ -61,7 +62,7 @@ describe("Nucleo ADC and DAC", () => {
     snap = loop.snapshot()!
     expect.soft(snap.pinVoltage[pinKey(u.id, "CN9-1")], "A0 now near 2.97 V").toBeNear(2.97, 0.03)
     expect.soft(word("adcValue"), "ADC follows").toBeNear(3686, 20)
-    expect.soft(snap.parts[partKey(u.id, "LD1")]?.level ?? 0, "LD1 brighter").toBeGreaterThan(ld1)
+    expect.soft(snap.parts[partKey(u.id, "LD1")]?.amps ?? 0, "LD1 brighter").toBeGreaterThan(ld1)
   })
 
   it("drives the LED with the DAC's sine", () => {

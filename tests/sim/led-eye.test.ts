@@ -3,7 +3,9 @@ import { builder } from "@/schematic/builder"
 import { GRID } from "@/schematic/geometry"
 import { GLOW_OPACITY, glowOf } from "@/components/field/led-glow"
 import { partKey, type Schematic } from "@/schematic/types"
-import { LED_FULL, SimLoop, type Snapshot } from "@/sim/loop"
+import { SimLoop, type Snapshot } from "@/sim/loop"
+import { ledLight } from "@/sim/led-light"
+import { LED_COLORS } from "@/schematic/components/basic"
 import { sustainedPwm, sustainedReaches } from "../lib/eye"
 import { example } from "../lib/firmware"
 import { Lab2Bench, patchWord, type Joy } from "../lib/lab2-bench"
@@ -134,7 +136,7 @@ describe("an LED as the eye sees it: Watson's sustained cascade (1986, Fig. 6.4)
     expect(crossing(true), "the same half-light time with a 10 Hz sine on another net").toBeNear(crossing(false), SAMPLED_PHASE + 1e-4)
   })
 
-  it("has no dark cut-off: 0.1 mA glows at its share of full", () => {
+  it("has no dark cut-off: 0.1 mA glows, and a red LED there is seen on (OSRAM LS Q976 0.52 % of 20 mA × 80 mcd ≈ 0.4 mcd, over the 0.18 mcd of MIL-STD-1472F §5.2.2.1.8)", () => {
     const b = builder(GRID)
     const source = b.place("dc-source", 0, 0, { value: "3.3 V", rint: "1 Ω" })
     const resistor = b.place("resistor", 5, 0, { value: "15 kΩ" })
@@ -148,8 +150,9 @@ describe("an LED as the eye sees it: Watson's sustained cascade (1986, Fig. 6.4)
     const part = bench.run(WARM).parts[partKey(led.id, "LED")]!
     bench.dispose()
     expect.soft(part.amps, "about 0.1 mA through 15 kΩ").toBeNearRel(1e-4, 0.15)
-    expect.soft(part.level, "lit, at its current over full").toBeNearRel(part.amps! / LED_FULL, 1e-9)
-    expect.soft(part.on, "but below the on-state threshold the tests read").toBe(false)
+    expect.soft(part.level, "lit, at its brightness for that current").toBeNearRel(ledLight(part.amps!, LED_COLORS.red.vf).level, 1e-9)
+    expect.soft(part.level, "dim: √(0.52 %) ≈ 7 % of full").toBeLessThan(0.1)
+    expect.soft(part.on, "and seen on in a lit room").toBe(true)
   })
 })
 
@@ -206,7 +209,9 @@ describe("lab 2 variant 7 at 25 Hz: the flicker a real one shows", () => {
 
   it("flickers at 5 % of 25 Hz by what the cascade passes, without going dark", () => {
     const levels: number[] = []
-    for (let k = 0; k < 160; k++) levels.push(b.run(SAMPLE_MS / 1000).parts[partKey(b.led!, "R")]?.level ?? 0)
+    // The eye's cascade averages light, which for this AlGaInP die is linear in current (OSRAM LS Q976 p.7):
+    // the swing is read off the averaged current, not the drawn brightness (that is its Stevens power).
+    for (let k = 0; k < 160; k++) levels.push(b.run(SAMPLE_MS / 1000).parts[partKey(b.led!, "R")]?.amps ?? 0)
     const s = swing(levels)
     const want = sustainedPwm(25, 0.05)
     expect.soft(s.relative, "peak-to-peak over the mean").toBeNear((want.max - want.min) / want.mean, 0.03)
