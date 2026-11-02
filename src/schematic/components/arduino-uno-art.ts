@@ -39,6 +39,7 @@ export const HOLES: Mm[] = [
   { x: 13.97, y: 50.8 },
 ]
 const HOLE_R = 1.6
+const CORNER_R = 1.0
 
 /** Header rows: pin 1's centre and the direction the pins run. IOH sits 160 mil from IOL, off the 0.1" grid. */
 export const ROWS = {
@@ -56,7 +57,8 @@ export const ICSP_SHIFT = -0.05 * PITCH
 export const JACK = { mouth: -PITCH, y: 18 * PITCH, depth: 14.2, h: 9.0 }
 
 export const PARTS = {
-  usb: { x: -3.2, y: 14.73 },
+  /** The plug goes into the USB-B's mouth, on its centre line. */
+  usb: { x: -5.9, y: 6 * PITCH },
   reset: { x: 6.5, y: 2.75 },
   leds: { L: { x: 27.94, y: 11.176 }, TX: { x: 27.94, y: 16.764 }, RX: { x: 27.94, y: 19.05 }, ON: { x: 58.42, y: 16.764 } },
   resetEn: { x: 27.94, y: 26.035 },
@@ -107,6 +109,9 @@ export type UnoNames = { ioh: string[]; iol: string[]; power: string[]; ad: stri
 export function boardArt(names: UnoNames): BodyShape[] {
   const art = new Artwork(FRAME)
 
+  // --- The plate: the outline with its corners rounded 1 mm, as the .brd draws them.
+  art.polygon("board", OUTLINE, CORNER_R)
+
   // --- Holes.
   for (const h of HOLES) art.circle("zone", h.x, h.y, HOLE_R)
 
@@ -139,8 +144,10 @@ export function boardArt(names: UnoNames): BodyShape[] {
   icsp.text("ICSP", (ICSP.x[0] + ICSP.x[1]) / 2, 20.35, SMALL)
 
   // --- USB-B over the left edge, the jack under it, its mouth where its pin is.
-  art.rect("connector", -6.35, 8.5, 9.53, 20.96, 0.4)
-  art.outline(-6.35, 10.6, -4.4, 18.9, 0.3)
+  // Centred on the grid row between TX and RX (0.5 mm under the .brd's 14.73), so the two sit evenly in it.
+  art.rect("connector", -6.35, 6 * PITCH - 6.23, 9.53, 6 * PITCH + 6.23, 0.4)
+  // The serial port's two pins sit on the receptacle, above and below the plug: their names beside them.
+  art.text("TX", 1.2, 4 * PITCH, named(SMALL, { anchor: "start" })).text("RX", 1.2, 8 * PITCH, named(SMALL, { anchor: "start" }))
   art.rect("connector", JACK.mouth, JACK.y - JACK.h / 2, JACK.mouth + JACK.depth, JACK.y + JACK.h / 2, 0.6)
   art.outline(JACK.mouth, JACK.y - 3.2, JACK.mouth + 1.6, JACK.y + 3.2, 0.3)
 
@@ -222,12 +229,5 @@ export function boardArt(names: UnoNames): BodyShape[] {
     smd(a, 13.83, 16.51, SMD.array, true)
   })
 
-  const plate: BodyShape = { type: "art", d: boardPath(art), fill: "board" }
-  return [plate, ...art.shapes(), icsp1, u2]
-}
-
-/** The plate itself: the outline, in cells. */
-function boardPath(a: Artwork) {
-  const round = (v: number) => Math.round(v * 100) / 100
-  return OUTLINE.map((p, i) => `${i ? "L" : "M"}${round(a.cellX(p.x))} ${round(a.cellY(p.y))}`).join("") + "Z"
+  return [...art.shapes(), icsp1, u2]
 }
