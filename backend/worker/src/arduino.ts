@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises"
 import path from "node:path"
-import type { SourceFile } from "emul-shared/source"
+import type { ArduinoBoard, SourceFile } from "emul-shared/source"
 
 /**
  * Arduino sketches, built the way the Arduino IDE builds them (arduino-builder with
@@ -13,10 +13,15 @@ import type { SourceFile } from "emul-shared/source"
 export const ARDUINO_ROOT = process.env.ARDUINO_ROOT ?? "/opt/arduino"
 export const INO = /\.(ino|pde)$/i
 
-/** What ArduinoCore-avr 1.8.6 defines for the Nano (boards.txt: nano.build.*), IDE 1.8.19. */
-export const ARDUINO_DEFINES = ["-DARDUINO=10819", "-DARDUINO_AVR_NANO", "-DARDUINO_ARCH_AVR"]
-/** The Nano's variant: the standard pins plus A6/A7. */
-export const VARIANT = "eightanaloginputs"
+/** ArduinoCore-avr 1.8.6 boards.txt, <board>.build.board and .variant: the Nano's variant is the standard pins plus A6/A7. */
+export const BOARDS: Record<ArduinoBoard, { name: string; board: string; variant: string }> = {
+  nano: { name: "Arduino Nano", board: "AVR_NANO", variant: "eightanaloginputs" },
+  uno: { name: "Arduino Uno", board: "AVR_UNO", variant: "standard" },
+}
+
+/** What the core is built with for a board, as IDE 1.8.19 builds it. */
+export const arduinoDefines = (board: ArduinoBoard) => ["-DARDUINO=10819", `-DARDUINO_${BOARDS[board].board}`, "-DARDUINO_ARCH_AVR"]
+export const variantDir = (root: string, board: ArduinoBoard) => path.join(root, "core", "variants", BOARDS[board].variant)
 
 const KEYWORDS = new Set(["if", "for", "while", "switch", "catch", "return", "sizeof", "do", "else", "defined"])
 
@@ -199,8 +204,8 @@ export async function librariesFor(texts: string[], root = ARDUINO_ROOT): Promis
   )
 }
 
-/** The core's sources and include folders for the Nano's variant. */
-export async function coreFor(root = ARDUINO_ROOT): Promise<{ includes: string[]; sources: string[] }> {
+/** The core's sources and include folders for a board's variant. */
+export async function coreFor(board: ArduinoBoard, root = ARDUINO_ROOT): Promise<{ includes: string[]; sources: string[] }> {
   const cores = path.join(root, "core", "cores", "arduino")
-  return { includes: [cores, path.join(root, "core", "variants", VARIANT)], sources: (await readdir(cores)).filter((f) => SOURCE.test(f)).map((f) => path.join(cores, f)) }
+  return { includes: [cores, variantDir(root, board)], sources: (await readdir(cores)).filter((f) => SOURCE.test(f)).map((f) => path.join(cores, f)) }
 }

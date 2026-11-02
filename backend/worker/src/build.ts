@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
 import { DEFAULT_OPT, type BuildOptions, type SourceFile, type Target } from "emul-shared/source"
-import { ARDUINO_DEFINES, coreFor, INO, librariesFor, sketchToCpp } from "./arduino.ts"
+import { arduinoDefines, BOARDS, coreFor, INO, librariesFor, sketchToCpp } from "./arduino.ts"
 
 /**
  * Compile a project for its chip with GCC, the way STM32CubeIDE would: the program's own
@@ -314,24 +314,25 @@ const PARALLEL = 4
 async function buildSketch(spec: AvrSpec, files: SourceFile[], options: BuildOptions, src: string): Promise<BuildOutput> {
   const fcpu = options.fcpu ?? DEFAULT_FCPU
   const opt = options.opt ?? "-Os"
+  const board = options.arduino ?? "nano"
   const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: path.dirname(src), LANG: "C" }
   const driver = `${AVR_GCC}gcc`
   const sketch = path.join("sketch", "sketch.ino.cpp")
   await mkdir(path.join(src, "sketch"), { recursive: true })
   await writeFile(path.join(src, sketch), sketchToCpp(files))
   const own = files.filter((f) => !INO.test(f.path) && (C.test(f.path) || CXX.test(f.path) || ASM.test(f.path))).map((f) => f.path)
-  const core = await coreFor()
+  const core = await coreFor(board)
   const libs = await librariesFor(files.map((f) => f.content))
   const projectIncludes = [...new Set(files.filter((f) => HEADER.test(f.path)).map((f) => path.dirname(f.path)))]
   const includes = [...projectIncludes, ...core.includes, ...libs.flatMap((l) => l.includes)].map((i) => `-I${i}`)
-  const base = [`-mmcu=${spec.mcu}`, `-DF_CPU=${fcpu}L`, ...ARDUINO_DEFINES, "-gdwarf-4", "-ffunction-sections", "-fdata-sections", "-fdiagnostics-color=never", "-fmax-errors=50", ...includes]
+  const base = [`-mmcu=${spec.mcu}`, `-DF_CPU=${fcpu}L`, ...arduinoDefines(board), "-gdwarf-4", "-ffunction-sections", "-fdata-sections", "-fdiagnostics-color=never", "-fmax-errors=50", ...includes]
   const flags = (file: string, quiet: boolean) => {
     const level = quiet ? ["-Os", "-w"] : [opt, "-Wall"]
     if (ASM.test(file)) return [...base, "-x", "assembler-with-cpp"]
     if (C.test(file)) return [...base, ...level, "-std=gnu11"]
     return [...base, ...level, "-x", "c++", "-std=gnu++11", "-fpermissive", "-fno-exceptions", "-fno-threadsafe-statics", "-Wno-error=narrowing"]
   }
-  const lines = [`# ${spec.name} (Arduino Nano), ${opt}, F_CPU ${fcpu} Hz`, `# sketch: ${files.filter((f) => INO.test(f.path)).map((f) => f.path).join(" ")}${own.length ? ` + ${own.join(" ")}` : ""}`, `# libraries: ${libs.map((l) => l.name).join(", ") || "none"}; core: ArduinoCore-avr 1.8.6`, ""]
+  const lines = [`# ${spec.name} (${BOARDS[board].name}), ${opt}, F_CPU ${fcpu} Hz`, `# sketch: ${files.filter((f) => INO.test(f.path)).map((f) => f.path).join(" ")}${own.length ? ` + ${own.join(" ")}` : ""}`, `# libraries: ${libs.map((l) => l.name).join(", ") || "none"}; core: ArduinoCore-avr 1.8.6`, ""]
   await mkdir(path.join(src, "obj"), { recursive: true })
   const object = (file: string, i: number) => path.join("obj", `${i}-${path.basename(file)}.o`)
   type Job = { file: string; quiet: boolean; out: string }

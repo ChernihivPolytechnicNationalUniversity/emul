@@ -1,4 +1,4 @@
-import { TARGETS, type BuildOptions, type OptLevel, type Target } from "emul-shared/source"
+import { TARGETS, type ArduinoBoard, type BuildOptions, type OptLevel, type Target } from "emul-shared/source"
 import { avrFcpu } from "@/project/avr-clock"
 import type { ComponentDef, PlacedObject } from "@/schematic/types"
 
@@ -13,11 +13,16 @@ export const buildTarget = (def: ComponentDef | undefined): Target | undefined =
 export const buildOpt = (board: PlacedObject | null | undefined, target: Target | undefined): OptLevel =>
   board?.build?.opt ?? (target === "atmega328p" ? AVR_BUILD_OPT : DEFAULT_BUILD_OPT)
 
+/** The Arduino boards by their def ids: a sketch is built with the board's define and pin variant. */
+const ARDUINO: Record<string, ArduinoBoard> = { "arduino-nano": "nano", "arduino-uno": "uno" }
+
 /**
  * The options the Compile button sends for a board. The examples' prebuilt images are made
  * with the same (scripts/example-firmware.ts), so one stands for what Compile would give.
  */
 export function buildOptions(board: PlacedObject, def: ComponentDef, target: Target): BuildOptions {
   const opt = buildOpt(board, target)
-  return target === "atmega328p" ? { opt, fcpu: avrFcpu(def, board.props) } : { opt }
+  if (target !== "atmega328p") return { opt }
+  const arduino = ARDUINO[def.id]
+  return { opt, fcpu: avrFcpu(def, board.props), ...(arduino ? { arduino } : {}) }
 }
