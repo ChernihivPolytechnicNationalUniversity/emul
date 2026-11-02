@@ -104,3 +104,4 @@ part's inspector and is to be replaced when a source is found.
 | A2 | LP2985 junction-to-ambient time constant 1 s | `power-ics.ts` LP2985_THERMAL |
 | A3 | Ceramic resonator start-up 0.5 ms | `clock.ts` RESONATOR_STARTUP |
 | A4 | MF-MSMF trip point midway between Ihold and Itrip; reset by cooling with the heating's time constant (≈17 s for the MF-MSMF050) down to Ihold's heat | `netlist.ts` ptcModel |
+| A5 | The LMV358's inputs are held within 0.2 V of its supply by a 1 kΩ path to the rail (its −0.2…5.7 V input rating at 5.5 V); the sheet gives no clamp current | `opamp.ts` railClamp |

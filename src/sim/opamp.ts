@@ -43,7 +43,16 @@ export type OpampSpec = {
   /** Total supply (V+ − V−) the amplifier is specified for; below `vsMin` its output has less drive, down to none at 0 V. */
   vsMin: number
   vsMax: number
+  /**
+   * The inputs are held to their `inputs` margin past either rail through a path to that rail
+   * (`RAIL_CLAMP_OHMS`): a part whose input rating follows its supply. Off for parts whose inputs
+   * may go past V+ (the LM358's to 32 V whatever V+ is).
+   */
+  railClamp?: boolean
 }
+
+/** The path that holds a rail-clamped input near its rail, Ω. Assumed: the sheets give no clamp current. */
+export const RAIL_CLAMP_OHMS = 1e3
 
 export type OpampPreset = {
   id: string
@@ -267,6 +276,8 @@ export const OPAMP_PRESETS: OpampPreset[] = [
       ],
       vsMin: 2.7,
       vsMax: 5.5,
+      // §6.1: inputs −0.2 V to 5.7 V on at most 5.5 V of supply: 0.2 V past either rail.
+      railClamp: true,
     },
     vsAbs: 5.5,
     // VSSOP (DGK): RθJA 201.2 °C/W, TJ 150 °C.

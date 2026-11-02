@@ -14,7 +14,7 @@ import {
 } from "./battery"
 import { GROUND, type GpioState, type Netlist, type Ptc, type RegThermal, type Resolved } from "./netlist"
 import { bias, dischargeSink, nextLatch, NE555, outputSink, outputSource, quiescent, supplyShare } from "./ne555"
-import { curveAt, fromPositive, supplyDrive } from "./opamp"
+import { curveAt, fromPositive, RAIL_CLAMP_OHMS, supplyDrive } from "./opamp"
 import { SparseLU } from "./sparse-lu"
 import { formatSI } from "./units"
 import { nextPulseEdge, pulseHigh, pulseTiming } from "./pulse"
@@ -50,6 +50,10 @@ export const R_PULL = 40e3
 /** Output resistance of an ideal regulator: keeps two in parallel solvable and sharing. */
 const R_REG = 0.01
 const REG_MODES = ["regulating", "dropout", "current limit", "off"] as const
+/** How far a resettable fuse's resistance jumps the step it trips. */
+const PTC_TRIP_JUMP = 1000
+/** The least room an op amp's input stage is taken to need from its rail, V (rail-to-rail inputs). */
+const BIAS_EDGE = 0.05
 /** The air round a regulator, °C: the data sheets' 25 °C. */
 const AMBIENT = 25
 const REG_REGULATE = 0
@@ -430,6 +434,8 @@ export class Engine {
   private readonly ptcElements: Int32Array
   private readonly ptcHeat: Float64Array
   private readonly ptcTripped: Uint8Array
+  /** Set on the step a fuse trips: its jump in resistance stands for one step before the power balance takes over. */
+  private readonly ptcFresh: Uint8Array
   /** Regulators with thermal shutdown: junction temperature (°C) and whether it has shut them down. */
   private readonly hotRegulators: Int32Array
   private readonly regTj: Float64Array
@@ -640,6 +646,7 @@ export class Engine {
     this.ptcElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "R" && el.ptc ? [i] : [])))
     this.ptcHeat = new Float64Array(m)
     this.ptcTripped = new Uint8Array(m)
+    this.ptcFresh = new Uint8Array(m)
     this.hotRegulators = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "REG" && el.thermal ? [i] : [])))
     this.regTj = new Float64Array(m).fill(AMBIENT)
     this.regHot = new Uint8Array(m)
@@ -1244,7 +1251,15 @@ export class Engine {
     const flips = this.ptcTripped[i] ? h < ptc.reset : h >= 1
     if (flips && !flip) return false
     this.ptcHeat[i] = h
-    if (flips) this.ptcTripped[i] ^= 1
+    if (flips) {
+      this.ptcTripped[i] ^= 1
+      // A trip takes the fuse up its steep resistance curve at once: from far up it, the power
+      // balance below settles on the hot branch, where it holds `pd`, not on the cold one.
+      if (this.ptcTripped[i]) {
+        this.ohms[i] *= PTC_TRIP_JUMP
+        this.ptcFresh[i] = 1
+      }
+    }
     return true
   }
 
@@ -1259,6 +1274,11 @@ export class Engine {
     for (let j = 0; j < this.ptcElements.length; j++) {
       const i = this.ptcElements[j]
       const el = elements[i] as Extract<Resolved, { kind: "R" | "C" | "L" }>
+      if (this.ptcFresh[i]) {
+        this.ptcFresh[i] = 0
+        changed = true
+        continue
+      }
       const was = this.ohms[i]
       let ohms = el.value
       if (this.ptcTripped[i]) {
@@ -2374,6 +2394,32 @@ export class Engine {
    * what it sources taken from V+, what it sinks handed to V−. True when the guess put the target
    * or the output stage in another region.
    */
+  /**
+   * An input's bias current, `mag` while the input stage has room — PNP inputs (negative `ib`,
+   * out of the pins) need the input `cm[1]` below V+, NPN ones `cm[0]` above V− — falling linearly
+   * to none at the rail, where the stage has turned off; so a floating input drifts to the edge
+   * of its range, not past the supply. The current and its slope against the room.
+   */
+  private biasAt(el: Opamp, input: number, mag: number, v: Float64Array): [number, number, number] {
+    const pnp = el.spec.ib < 0
+    const room = pnp ? this.vol(el.vcc, v) - this.vol(input, v) : this.vol(input, v) - this.vol(el.vee, v)
+    const h = Math.max(pnp ? el.spec.cm[1] : el.spec.cm[0], BIAS_EDGE)
+    if (room >= h) return [mag, 0, room]
+    // Past the rail by more than its rating allows, a rail-clamped input conducts into that rail.
+    const margin = pnp ? el.spec.inputs[1] : el.spec.inputs[0]
+    if (el.spec.railClamp && room < -margin) return [(room + margin) / RAIL_CLAMP_OHMS, 1 / RAIL_CLAMP_OHMS, room]
+    if (room <= 0) return [0, 0, room]
+    return [(mag * room) / h, mag / h, room]
+  }
+
+  /** The bias current of one input linearized at the guess: from V+ into a PNP input, out of an NPN one into V−. */
+  private biasStamp(el: Opamp, input: number, mag: number, guess: Float64Array) {
+    const [cur, g, room] = this.biasAt(el, input, mag, guess)
+    const [from, to] = el.spec.ib < 0 ? [el.vcc, input] : [input, el.vee]
+    this.addI(from, to, cur - g * room)
+    if (g) this.addG(from, to, g)
+  }
+
   private opamp(el: Opamp, i: number): boolean {
     const s = el.spec
     const out = this.branchOut
@@ -2387,13 +2433,7 @@ export class Engine {
     out[0] *= drive
     this.addBranch(el.vcc, el.vee, vs, out)
     const ib = s.ib * drive
-    if (ib > 0) {
-      this.addI(el.inp, el.vee, ib)
-      this.addI(el.inn, el.vee, ib)
-    } else if (ib < 0) {
-      this.addI(el.vcc, el.inp, -ib)
-      this.addI(el.vcc, el.inn, -ib)
-    }
+    if (ib !== 0 || s.railClamp) for (const input of [el.inp, el.inn]) this.biasStamp(el, input, Math.abs(ib), guess)
     const prev = this.rRegion[i]
     const region = this.frozen ? prev : this.opampRegion(el, i, guess, dt)
     this.rRegion[i] = region
@@ -3206,7 +3246,11 @@ export class Engine {
     const drive = supplyDrive(s, vs)
     curveAt(s.iq, vs, out)
     const iq = out[0] * drive
-    const ib = s.ib * drive
+    const mag = Math.abs(s.ib * drive)
+    // Signed as `ib` is: into the pins positive.
+    const sign = s.ib < 0 ? -1 : 1
+    const ibp = s.ib === 0 && !s.railClamp ? 0 : sign * this.biasAt(el, el.inp, mag, v)[0]
+    const ibn = s.ib === 0 && !s.railClamp ? 0 : sign * this.biasAt(el, el.inn, mag, v)[0]
     const target = this.x[this.net.nodes + el.index]
     const stage = this.oaOut[i]
     curveAt(stage === OA_SINKING ? s.sink : s.source, vs, out)
@@ -3214,11 +3258,11 @@ export class Engine {
     fromPositive(io, out)
     const sp = out[0]
     const sn = sp - io
-    tc[this.termOf[base]] += ib
-    tc[this.termOf[base + 1]] += ib
+    tc[this.termOf[base]] += ibp
+    tc[this.termOf[base + 1]] += ibn
     tc[this.termOf[base + 2]] -= io
-    tc[this.termOf[base + 3]] += sp + iq - Math.min(0, 2 * ib)
-    tc[this.termOf[base + 4]] -= sn + iq + Math.max(0, 2 * ib)
+    tc[this.termOf[base + 3]] += sp + iq - Math.min(0, ibp + ibn)
+    tc[this.termOf[base + 4]] -= sn + iq + Math.max(0, ibp + ibn)
     this.record(el, i, dt, io, vs, sp * (vcc - vo) + sn * (vo - vee) + iq * vs)
     this.oaV[i] = target
     if (this.converged) this.opampLatch(el, i, this.rRegion[i], vs)

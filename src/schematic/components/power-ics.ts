@@ -1,6 +1,6 @@
 import { ChipIcon } from "../icons"
 import { dw03, mt3608, tp4056 } from "../power-model"
-import type { BodyShape, ComponentDef } from "../types"
+import type { BodyShape, ComponentDef, ModelElement, Value } from "../types"
 
 const chipBody = (w: number, h: number, part: string, what: string, y: number): BodyShape[] => [
   { type: "rect", x: 1, y: 0.5, w: w - 2, h: h - 1, rx: 0.2, fill: "board" },
@@ -88,6 +88,20 @@ export const mt3608Chip: ComponentDef = {
 const NCP1117_THERMAL = { rja: 160, tsd: 175, tsdOff: 160, tau: 2 }
 const NCP1117 = { volts: ["1.5", "1.8", "2.0", "2.5", "3.3", "5.0", "12"], dropout: 0.933, rDrop: 0.171, limit: 1.5, iq: 6e-3, iqAt: 15, vinMax: 20 }
 
+/** The NCP1117's regulator element between `nodes`, at `vout` volts (a number or "{vout}"). */
+export const ncp1117Element = (nodes: { in: string; out: string; gnd: string }, vout: number | string, label?: string): ModelElement => ({
+  kind: "REG",
+  ...nodes,
+  value: vout,
+  dropout: NCP1117.dropout,
+  rdrop: NCP1117.rDrop,
+  imax: NCP1117.limit,
+  gq: NCP1117.iq / NCP1117.iqAt,
+  thermal: NCP1117_THERMAL,
+  limits: { voltage: NCP1117.vinMax, fail: "open" },
+  label,
+})
+
 export const ncp1117Chip: ComponentDef = {
   id: "ncp1117",
   name: "NCP1117",
@@ -108,7 +122,7 @@ export const ncp1117Chip: ComponentDef = {
   body: chipBody(8, 4, "NCP1117", "{vout} V LDO", 1.6),
   parts: [],
   model: [
-    { kind: "REG", in: "IN", out: "OUT", gnd: "GND", value: "{vout}", dropout: NCP1117.dropout, rdrop: NCP1117.rDrop, imax: NCP1117.limit, gq: NCP1117.iq / NCP1117.iqAt, thermal: NCP1117_THERMAL, limits: { voltage: NCP1117.vinMax, fail: "open" } },
+    ncp1117Element({ in: "IN", out: "OUT", gnd: "GND" }, "{vout}"),
   ],
   info: {
     Package: "SOT-223: 1 GND/ADJ, 2 OUT (and the tab), 3 IN",
@@ -128,6 +142,26 @@ export const ncp1117Chip: ComponentDef = {
 /** Thermal shutdown: RθJA 178.6 °C/W (new chip, DBV), off at 170 °C, back at 150 °C (§5.4, 5.5). Assumed: a 1 s time constant. */
 const LP2985_THERMAL = { rja: 178.6, tsd: 170, tsdOff: 150, tau: 1 }
 const LP2985 = { volts: ["1.8", "2.5", "2.8", "2.9", "3.0", "3.3", "5.0"], dropout: 0.092, rDrop: 0.586, limit: 0.375, enOn: 0.85, enOff: 0.72, iq: 69e-6, iqOff: 1.12e-6, iqOffAt: 16, vinMax: 18 }
+
+/** The LP2985's regulator element; `gq` its own draw while on (69 µA at VOUT + 1 V). */
+export const lp2985Element = (nodes: { in: string; out: string; gnd: string; en: string }, vout: number | string, gq: Value, label?: string): ModelElement => ({
+  kind: "REG",
+  ...nodes,
+  value: vout,
+  dropout: LP2985.dropout,
+  rdrop: LP2985.rDrop,
+  imax: LP2985.limit,
+  enOn: LP2985.enOn,
+  enOff: LP2985.enOff,
+  gq,
+  gqOff: LP2985.iqOff / LP2985.iqOffAt,
+  thermal: LP2985_THERMAL,
+  limits: { voltage: LP2985.vinMax, fail: "open" },
+  label,
+})
+
+/** The LP2985-33's own draw while on: 69 µA at 4.3 V. */
+export const LP2985_33_GQ = LP2985.iq / 4.3
 
 export const lp2985Chip: ComponentDef = {
   id: "lp2985",
@@ -151,23 +185,7 @@ export const lp2985Chip: ComponentDef = {
   body: chipBody(9, 6, "LP2985", "{vout} V LDO", 2.2),
   parts: [],
   model: [
-    {
-      kind: "REG",
-      in: "IN",
-      out: "OUT",
-      gnd: "GND",
-      value: "{vout}",
-      dropout: LP2985.dropout,
-      rdrop: LP2985.rDrop,
-      imax: LP2985.limit,
-      en: "EN",
-      enOn: LP2985.enOn,
-      enOff: LP2985.enOff,
-      gq: (p) => LP2985.iq / (Number(p.vout ?? "3.3") + 1),
-      gqOff: LP2985.iqOff / LP2985.iqOffAt,
-      thermal: LP2985_THERMAL,
-      limits: { voltage: LP2985.vinMax, fail: "open" },
-    },
+    lp2985Element({ in: "IN", out: "OUT", gnd: "GND", en: "EN" }, "{vout}", (p) => LP2985.iq / (Number(p.vout ?? "3.3") + 1)),
   ],
   info: {
     Package: "SOT-23-5 (DBV): 1 IN, 2 GND, 3 ON/OFF, 4 BYPASS, 5 OUT",
