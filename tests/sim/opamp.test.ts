@@ -13,6 +13,7 @@ import { GRID } from "@/schematic/geometry"
 import { pinKey, type PlacedObject, type Schematic } from "@/schematic/types"
 import { Engine, type Reading } from "@/sim/engine"
 import { buildNetlist, GROUND } from "@/sim/netlist"
+import { opampSpec } from "@/sim/opamp"
 import { DT } from "@/sim/speeds"
 
 type Pin = [PlacedObject, string]
@@ -329,6 +330,50 @@ describe("MCP6002 against Microchip DS20001733L", () => {
     expect.soft(at(5.25).inputs, "0.25 V above VDD").toBeUndefined()
     expect.soft(at(5.25).out, "the output at the rail").toBeNear(5, 1e-3)
     expect.soft(at(6.5).inputs, "1.5 V above VDD").toBe("IN+ past the absolute maximum")
+  })
+})
+
+describe("LMV358 against TI SLOS263Y (LMV358I, typical, 25 °C)", () => {
+  it("has 100 V/mV of open-loop gain and 1.7 mV of offset at 5 V", () => {
+    const { gain, vos } = gainAndOffset("lmv358", 5, 0, [1, 4])
+    expect.soft(gain, "gain").toBeNearRel(100e3, 0.01)
+    expect.soft(vos * 1e3, "offset").toBeNear(1.7, 0.01)
+  })
+
+  it("swings within the table of the rails at 5 V: 10 / 65 mV into 10 kΩ, 40 / 120 mV into 2 kΩ, all inside the maxima", () => {
+    const high = (load: string) => 5 - railed("lmv358", 5, 0, true, load, 2.5).out
+    const low = (load: string) => railed("lmv358", 5, 0, false, load, 2.5).out
+    expect.soft(high("10 kΩ") * 1e3, "high, 10 kΩ").toBeNear(10, 15)
+    expect.soft(low("10 kΩ") * 1e3, "low, 10 kΩ").toBeNear(65, 15)
+    expect.soft(high("2 kΩ") * 1e3, "high, 2 kΩ").toBeNear(40, 15)
+    expect.soft(low("2 kΩ") * 1e3, "low, 2 kΩ").toBeNear(120, 15)
+    expect.soft(high("2 kΩ"), "high, 2 kΩ max").toBeLessThan(0.3)
+    expect.soft(low("2 kΩ"), "low, 2 kΩ max").toBeLessThan(0.3)
+  })
+
+  it("sources and sinks 40 mA into a short at 5 V", () => {
+    expect.soft(shorted("lmv358", 5, 0, true, 0).amps * 1e3, "source").toBeNear(40, 0.01)
+    expect.soft(shorted("lmv358", 5, 0, false, 5).amps * 1e3, "sink").toBeNear(-40, 0.01)
+  })
+
+  it.each([
+    [2.7, 70],
+    [5, 105],
+  ] as const)("at %d V draws %d µA per amplifier (half the pair's figure)", (vcc, ua) => {
+    expect(quiescent("lmv358", vcc) * 1e6).toBeNearRel(ua, 0.01)
+  })
+
+  it("pulls 15 nA out of its PNP inputs", () => {
+    expect(opampSpec("lmv358").ib * 1e9).toBeNear(-15, 1e-6)
+  })
+
+  it("slews at 1 V/µs with 1 MHz of gain-bandwidth", () => {
+    expect.soft(opampSpec("lmv358").slew, "slew").toBe(1e6)
+    expect.soft(opampSpec("lmv358").gbw, "GBW").toBe(1e6)
+  })
+
+  it("takes inputs from 0.2 V below ground to 0.8 V below VCC", () => {
+    expect(opampSpec("lmv358").cm).toEqual([-0.2, 0.8])
   })
 })
 

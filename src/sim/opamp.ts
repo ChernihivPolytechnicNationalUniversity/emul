@@ -234,6 +234,46 @@ export const OPAMP_PRESETS: OpampPreset[] = [
     dip: { package: "PDIP-8", out: 1, inn: 2, inp: 3, vee: 4, vcc: 8, others: "5 VINB+, 6 VINB−, 7 VOUTB" },
     source: "Microchip MCP6001/1R/1U/2/4 datasheet DS20001733L (2020), §1.0 and 4.1",
   },
+  {
+    id: "lmv358",
+    part: "LMV358",
+    description:
+      "TI's LMV358, a low-voltage dual op amp for 2.7–5.5 V with the output from rail to rail and inputs down to 0.2 V below ground: 1 MHz, 1 V/µs, 40 mA into a short, about 100 µA an amplifier. Arduino Uno's comparator and LED buffer. One symbol is one of its two amplifiers.",
+    keywords: ["LMV358", "LMV358I", "LMV321", "LMV324", "rail-to-rail", "low voltage", "op amp", "operational amplifier", "comparator"],
+    spec: {
+      // Table 6.8 at VCC = 5 V: AVD 100 V/mV into 2 kΩ, VIO 1.7 mV, IIB 15 nA.
+      gain: 100e3,
+      gbw: 1e6,
+      slew: 1e6,
+      vos: 1.7e-3,
+      // PNP inputs (VICR reaches below ground): the bias current flows out of the pins.
+      ib: -15e-9,
+      // VICR −0.2 V to 4.2 V at 5 V.
+      cm: [-0.2, 0.8],
+      // §6.1: either input −0.2 V to 5.7 V.
+      inputs: [0.2, 0.2],
+      inputMax: 5.7,
+      // Output swing to 2.5 V: high VCC − 10 mV (10 kΩ), VCC − 40 mV (2 kΩ); low 65 mV (10 kΩ), 120 mV (2 kΩ).
+      // One output resistance cannot fit both sides; 42 Ω splits it, each figure within 15 mV of the table.
+      swing: [0, 0.06],
+      rout: 42,
+      // IOS 40 mA sourcing (VO = 0 V) and sinking (VO = 5 V).
+      source: 0.04,
+      sink: 0.04,
+      // ICC for both amplifiers: 140 µA at 2.7 V, 210 µA at 5 V.
+      iq: [
+        [2.7, 70e-6],
+        [5, 105e-6],
+      ],
+      vsMin: 2.7,
+      vsMax: 5.5,
+    },
+    vsAbs: 5.5,
+    // VSSOP (DGK): RθJA 201.2 °C/W, TJ 150 °C.
+    pmax: 0.62,
+    dip: { package: "VSSOP-8", out: 1, inn: 2, inp: 3, vee: 4, vcc: 8, others: "5 2IN+, 6 2IN−, 7 2OUT" },
+    source: "TI LMV3xx datasheet SLOS263Y (August 2023), §6.1, 6.3, 6.4, 6.7, 6.8",
+  },
 ]
 
 const byId = new Map(OPAMP_PRESETS.map((p) => [p.id, p]))
