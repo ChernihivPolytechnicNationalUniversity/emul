@@ -15,8 +15,12 @@ import type { BodyShape, ComponentDef, Element, PinDef, PinKind } from "../types
  * single VDD and a single VSS; VDDA/VSSA, VBAT and VDDUSB keep their own pins.
  */
 
-/** [package pin, name] for every pin of a package, in pin order. */
-type Package = { name: string; pins: [number, string][]; source: string }
+/**
+ * [package pin, name] for every pin of a package, in pin order. `leftPorts`: how many ports
+ * (from A) the left column takes, for a package whose ports are not alike in size; without it
+ * the left column gets the smaller half of the ports.
+ */
+type Package = { name: string; pins: [number, string][]; source: string; leftPorts?: number }
 
 /** Body width in cells: room for two pin-name columns and the title block. */
 const WIDTH = 12
@@ -63,7 +67,7 @@ export function stm32Chip(chip: ChipProfile, pkg: Package, description: string):
   })
   const ports = "ABCDEFGHIJK".split("").map(port).filter((g) => g.names.length)
   // The left column also carries supply, ground and reset, so it gets the smaller half of the ports.
-  const half = Math.floor(ports.length / 2)
+  const half = pkg.leftPorts ?? Math.floor(ports.length / 2)
   const left: Group[] = [
     { names: ["VDD", "VDDA", "VDDUSB", "VBAT"].filter(has), kind: "power" },
     { names: ["VSS", "VSSA"].filter(has), kind: "gnd" },
@@ -220,6 +224,8 @@ const LQFP144_F429: Package = {
 const LQFP100_F40X: Package = {
   name: "LQFP100",
   source: "ST DS8626 Table 7, RM0090",
+  // PA, PB left; PC, PD, PE, PH right (PA–PC left made the left column 55 rows to the right's 34).
+  leftPorts: 2,
   pins: [
   [1, "PE2"], [2, "PE3"], [3, "PE4"], [4, "PE5"], [5, "PE6"], [6, "VBAT"], [7, "PC13"], [8, "PC14"],
   [9, "PC15"], [10, "VSS"], [11, "VDD"], [12, "PH0"], [13, "PH1"], [14, "NRST"], [15, "PC0"], [16, "PC1"],
@@ -240,6 +246,8 @@ const LQFP100_F40X: Package = {
 const LQFP64_F40X: Package = {
   name: "LQFP64",
   source: "ST DS8626 Table 7, RM0090",
+  // PA left; PB, PC, PD2, PH right: PD and PH are one or two pins each.
+  leftPorts: 1,
   pins: [
   [1, "VBAT"], [2, "PC13"], [3, "PC14"], [4, "PC15"], [5, "PH0"], [6, "PH1"], [7, "NRST"], [8, "PC0"],
   [9, "PC1"], [10, "PC2"], [11, "PC3"], [12, "VSSA"], [13, "VDDA"], [14, "PA0"], [15, "PA1"], [16, "PA2"],
@@ -254,6 +262,8 @@ const LQFP64_F40X: Package = {
 
 const UFQFPN48_F4X1: Package = {
   name: "UFQFPN48",
+  // PA left; PB, PC13–15, PH0/1 right.
+  leftPorts: 1,
   source: "ST DS10314 / DS9716 / DS10086 Table 8, RM0383 / RM0368",
   pins: [
   [1, "VBAT"], [2, "PC13"], [3, "PC14"], [4, "PC15"], [5, "PH0"], [6, "PH1"], [7, "NRST"], [8, "VSSA"],
