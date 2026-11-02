@@ -26,8 +26,8 @@ export const nucleoOled = {
     const oled = place("oled-ssd1306-i2c", 33, 2)
     wire(u, "CN7-2", oled, "SCL", [[47, 13], [47, -1], [40, -1]])
     wire(u, "CN7-4", oled, "SDA", [[48, 14], [48, -2], [42, -2]])
-    // +3V3 (CN8-7, row 16) from the far side, over the top of the board.
-    wire(u, "CN8-7", oled, "VCC", [[-2, 16], [-2, -3], [38, -3]])
+    // +3V3 (CN8-7, row 20) from the far side, over the top of the board above the USB cable.
+    wire(u, "CN8-7", oled, "VCC", [[-2, 20], [-2, -9], [38, -9]])
     const gnd = place("ground", 30, 1)
     wire(oled, "GND", gnd, "GND", [[36, 0], [31, 0]])
     return doc
