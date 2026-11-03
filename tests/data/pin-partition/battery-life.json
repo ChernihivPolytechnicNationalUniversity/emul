@@ -2,13 +2,13 @@
   "source": "example battery-life",
   "objects": [
     "BT1 (battery)",
-    "ground (ground)",
+    "ground@23,11 (ground)",
     "LED1 (led)",
     "R1 (resistor)",
     "SW1 (switch)"
   ],
   "nets": [
-    ["BT1.-","ground.GND","LED1.2"],
+    ["BT1.-","ground@23,11.GND","LED1.2"],
     ["BT1.+","SW1.1"],
     ["LED1.1","R1.2"],
     ["R1.1","SW1.2"]

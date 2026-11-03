@@ -2,24 +2,24 @@
   "source": "example opamp-amplifier",
   "objects": [
     "G1 (ac-source)",
-    "ground (ground)",
-    "ground (ground)",
-    "ground (ground)",
+    "ground@0,14 (ground)",
+    "ground@15,11 (ground)",
+    "ground@24,15 (ground)",
     "R1 (resistor)",
     "R2 (resistor)",
     "R3 (resistor)",
-    "supply{imax=1 A,rint=15 mΩ,value=+12V,voltage=12 V} (supply)",
-    "supply{imax=1 A,rint=15 mΩ,value=−12V,voltage=-12 V} (supply)",
+    "supply@20,2 (supply)",
+    "supply@20,14 (supply)",
     "U1 (opamp-tl072)"
   ],
   "nets": [
-    ["G1.-","ground.GND"],
+    ["G1.-","ground@0,14.GND"],
     ["G1.+","R1.1"],
-    ["ground.GND","R3.2"],
-    ["ground.GND","U1.IN+"],
+    ["ground@15,11.GND","U1.IN+"],
+    ["ground@24,15.GND","R3.2"],
     ["R1.2","R2.1","U1.IN-"],
     ["R2.2","R3.1","U1.OUT"],
-    ["supply{imax=1 A,rint=15 mΩ,value=+12V,voltage=12 V}.V","U1.V+"],
-    ["supply{imax=1 A,rint=15 mΩ,value=−12V,voltage=-12 V}.V","U1.V-"]
+    ["supply@20,2.V","U1.V+"],
+    ["supply@20,14.V","U1.V-"]
   ]
 }

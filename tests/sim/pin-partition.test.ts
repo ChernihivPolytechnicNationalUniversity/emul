@@ -1,10 +1,10 @@
 import { existsSync, readdirSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { GRID, objectPins } from "@/schematic/geometry"
-import { fieldRouter } from "@/schematic/placement"
+import { GRID, objectPins, Router } from "@/schematic/geometry"
+import { designatorRects, fieldRouter } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
-import type { Point, Schematic } from "@/schematic/types"
-import { canonical, duplicateRefs, geometricGroups, inventory, partitionDiff, pinPartition, polylineSegments, renamed, type Partition, type RefPin, type RefSegment } from "../lib/pin-partition"
+import type { PlacedObject, Point, Schematic, Wire } from "@/schematic/types"
+import { canonical, duplicateRefs, geometricGroups, inventory, partitionDiff, pinPartition, polylineSegments, renamed, stableNames, type Partition, type RefPin, type RefSegment } from "../lib/pin-partition"
 import { fixturePath, PARTITIONS, partitionDocuments, readFixture } from "../lib/partition-documents"
 import { SCHEMATIC_CASES } from "../lib/schematic-cases"
 
@@ -29,6 +29,33 @@ describe("the pin partition every later phase must keep: the groups of pins on o
       expect.soft(inventory(reversed.objects), `${name}: parts`).toEqual(inventory(doc.objects))
       expect.soft(pinPartition(reversed, GRID), `${name}: partition`).toEqual(pinPartition(doc, GRID))
     }
+  })
+
+  it("every part has a name of its own: a part without a designator is named by its definition and where it stands", () => {
+    for (const { name, doc } of documents) {
+      const names = [...stableNames(doc.objects).values()]
+      expect.soft(names.length - new Set(names).size, `${name}: names used twice`).toBe(0)
+    }
+    const unnamed = (id: string, x: number, y: number): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: y * GRID, props: { value: "1 kΩ" } })
+    const objects: PlacedObject[] = [
+      unnamed("a", 0, 0),
+      unnamed("b", 0, 4),
+      { id: "r1", def: "resistor", x: 8 * GRID, y: 0, props: { ref: "R1" } },
+      { id: "r2", def: "resistor", x: 8 * GRID, y: 4 * GRID, props: { ref: "R2" } },
+      { id: "g", def: "ground", x: -6 * GRID, y: 8 * GRID },
+      { id: "v", def: "supply", x: -6 * GRID, y: -6 * GRID },
+    ]
+    const wire = (id: string, from: [string, string], to: [string, string]): Wire => ({ id, from: { object: from[0], pin: from[1] }, to: { object: to[0], pin: to[1] } })
+    const common = [wire("1", ["a", "2"], ["r1", "1"]), wire("2", ["b", "2"], ["r2", "1"])]
+    const before: Schematic = { objects, wires: [...common, wire("3", ["a", "1"], ["g", "GND"]), wire("4", ["b", "1"], ["v", "V"])], parts: {} }
+    const swapped: Schematic = { objects, wires: [...common, wire("3", ["a", "1"], ["v", "V"]), wire("4", ["b", "1"], ["g", "GND"])], parts: {} }
+    expect.soft(pinPartition(swapped, GRID), "ground and supply swapped between two unnamed resistors").not.toEqual(pinPartition(before, GRID))
+  })
+
+  it("a partition is compared group for group, so a repeated group lost or gained is a difference", () => {
+    const twoPairs: Partition = [["ground@0,0.GND", "ground@0,4.GND"], ["ground@0,0.GND", "ground@0,4.GND"]]
+    expect.soft(partitionDiff(twoPairs, [twoPairs[0]]), "one of two equal groups gone").toEqual({ missing: [twoPairs[0]], extra: [] })
+    expect.soft(partitionDiff([twoPairs[0]], twoPairs), "one more").toEqual({ missing: [], extra: [twoPairs[0]] })
   })
 
   it("the order of keys and groups is total: two designators that compare equal numerically still sort one way", () => {
@@ -130,7 +157,10 @@ const refPins = (doc: Schematic): RefPin[] =>
 
 function frozenPartition(doc: Schematic, corners = polylineSegments) {
   const routes = fieldRouter().routeAll(doc.objects, doc.wires, GRID)
-  return renamed(doc.objects, geometricGroups(refPins(doc), routes.flatMap((r) => corners(r.pts))))
+  const byId = new Map(doc.wires.map((w) => [w.id, w]))
+  const pinned = (w: Wire) => [`${w.from.object}:${w.from.pin}`, `${w.to.object}:${w.to.pin}`] as const
+  const collapsed = routes.filter((r) => corners(r.pts).length === 0).map((r) => pinned(byId.get(r.id)!))
+  return renamed(doc.objects, geometricGroups(refPins(doc), routes.flatMap((r) => corners(r.pts)), collapsed))
 }
 
 const everyVertex = (pts: readonly Point[]): RefSegment[] => pts.slice(1).flatMap((p, i) => (p.x === pts[i].x && p.y === pts[i].y ? [] : [{ a: pts[i], b: p }]))
@@ -162,6 +192,25 @@ describe("the reference against today's buildNets, every wire routed by today's 
       if (!document) continue
       expect.soft(frozenPartition(document.doc), `${name}: the whole frozen partition, the recorded merges applied and nothing else`).toEqual(withMerges(pinPartition(document.doc, GRID), merged))
     }
+  })
+
+  it("a wire whose two pins coincide keeps its connection when frozen, even to a pad the board leaves unconnected", () => {
+    const board: PlacedObject = { id: "u1", def: "nucleo-f429zi", x: 0, y: 0, props: { ref: "U1" } }
+    const pad = objectPins(board, GRID).find((p) => p.pin.id === "CN8-1")!.point
+    const resistor: PlacedObject = { id: "r1", def: "resistor", x: pad.x, y: pad.y - GRID, props: { ref: "R1" } }
+    const butted: Schematic = { objects: [board, resistor], wires: [], parts: {} }
+    const wired: Schematic = { ...butted, wires: [{ id: "w", from: { object: "r1", pin: "1" }, to: { object: "u1", pin: "CN8-1" } }] }
+    expect.soft(pinPartition(butted, GRID), "butted on the NC pad, today: nothing").toEqual([])
+    expect.soft(frozenPartition(butted), "frozen: nothing").toEqual([])
+    expect.soft(pinPartition(wired, GRID), "wired to it, today: joined").toEqual([["R1.1", "U1.CN8-1"]])
+    expect.soft(frozenPartition(wired), "frozen: still joined").toEqual([["R1.1", "U1.CN8-1"]])
+  })
+
+  it("the freeze routes as the field does, designators and values in the way included", () => {
+    const doc = documents.find((d) => d.name === "charge-boost-chips")!.doc
+    const shape = (router: Router) => router.routeAll(doc.objects, doc.wires, GRID).map((r) => r.pts)
+    expect.soft(shape(fieldRouter()), "the field's router").toEqual(shape(new Router(designatorRects)))
+    expect.soft(shape(new Router()), "a router blind to text routes this document differently, so the check above can fail").not.toEqual(shape(new Router(designatorRects)))
   })
 
   it("a frozen route has to be written as its corners: kept, the stub ends lying on another net's wire at a crossing join the two nets", () => {

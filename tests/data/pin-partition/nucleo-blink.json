@@ -1,13 +1,13 @@
 {
   "source": "example nucleo-blink",
   "objects": [
-    "ground (ground)",
+    "ground@45,18 (ground)",
     "LED1 (led)",
     "R1 (resistor)",
     "U1 (nucleo-f429zi)"
   ],
   "nets": [
-    ["ground.GND","LED1.2","U1.CN7-8"],
+    ["ground@45,18.GND","LED1.2","U1.CN7-8"],
     ["LED1.1","R1.2"],
     ["R1.1","U1.CN7-10"]
   ]

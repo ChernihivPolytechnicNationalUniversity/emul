@@ -100,6 +100,12 @@ async function landingSettled(page: Page) {
     if (!(await pageTitle(page)).startsWith("εmul")) return
     await page.waitForTimeout(100)
   }
+  throw new Error(`the landing example never arrived in ${LANDING_TIMEOUT_MS / 1000} s: the upload could still be replaced by it`)
+}
+
+async function stillShows(page: Page, name: string) {
+  const title = await pageTitle(page)
+  if (!title.startsWith(`${name} `)) throw new Error(`the field left ${name} for “${title}” mid-measurement`)
 }
 
 async function holdsTitle(page: Page, name: string) {
@@ -508,7 +514,9 @@ async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChe
   console.log(`\n${doc.objects.length} objects / ${doc.wires.length} wires / ${pins} pins`)
   const { page, mountMs } = await openField(browser, doc)
   try {
+    const shown = `stress-${doc.objects.length}`
     const zoom = await normaliseZoom(page)
+    await stillShows(page, shown)
     const nodes = await fieldNodes(page)
     console.log(`  loaded in ${mountMs} ms, zoom ${Math.round(zoom * 100)}%, ${nodes.total} nodes in the field (path ${nodes.path}, circle ${nodes.circle}, text ${nodes.text})`)
 
@@ -543,6 +551,7 @@ async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChe
     const idle = await measure(page, () => page.waitForTimeout(IDLE_MS))
     console.log(phaseLine("idle", idle))
 
+    await stillShows(page, shown)
     return { objects: doc.objects.length, wires: doc.wires.length, pins, zoom, nodes, mountMs, moved, drag, pan, wheelZoom, idle }
   } finally {
     await page.close()

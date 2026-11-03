@@ -1,16 +1,16 @@
 {
   "source": "example nucleo-adc",
   "objects": [
-    "ground (ground)",
-    "ground (ground)",
+    "ground@-8,28 (ground)",
+    "ground@45,22 (ground)",
     "LED1 (led)",
     "R1 (resistor)",
     "RV1 (potentiometer)",
     "U1 (nucleo-f429zi)"
   ],
   "nets": [
-    ["ground.GND","LED1.2"],
-    ["ground.GND","RV1.2"],
+    ["ground@-8,28.GND","RV1.2"],
+    ["ground@45,22.GND","LED1.2"],
     ["LED1.1","R1.2"],
     ["R1.1","U1.CN7-17"],
     ["RV1.1","U1.CN8-7"],

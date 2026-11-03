@@ -5,23 +5,23 @@
     "G2 (ac-source)",
     "G3 (ac-source)",
     "G4 (ac-source)",
-    "ground (ground)",
-    "ground (ground)",
-    "ground (ground)",
-    "ground (ground)",
+    "ground@2,9 (ground)",
+    "ground@10,9 (ground)",
+    "ground@22,9 (ground)",
+    "ground@30,9 (ground)",
     "R1 (resistor)",
     "R2 (resistor)",
     "R3 (resistor)",
     "R4 (resistor)"
   ],
   "nets": [
-    ["G1.-","ground.GND","R1.2"],
+    ["G1.-","ground@2,9.GND","R1.2"],
     ["G1.+","R1.1"],
-    ["G2.-","ground.GND","R2.2"],
+    ["G2.-","ground@10,9.GND","R2.2"],
     ["G2.+","R2.1"],
-    ["G3.-","ground.GND","R3.2"],
+    ["G3.-","ground@22,9.GND","R3.2"],
     ["G3.+","R3.1"],
-    ["G4.-","ground.GND","R4.2"],
+    ["G4.-","ground@30,9.GND","R4.2"],
     ["G4.+","R4.1"]
   ]
 }

@@ -1,16 +1,16 @@
 {
   "source": "example nucleo-i2c",
   "objects": [
-    "ground (ground)",
+    "ground@42,20 (ground)",
     "R1 (resistor)",
     "R2 (resistor)",
-    "supply{imax=1 A,rint=15 mΩ,value=+3V3,voltage=3.3 V} (supply)",
+    "supply@37,-1 (supply)",
     "U1 (nucleo-f429zi)",
     "U2 (eeprom-24c)"
   ],
   "nets": [
-    ["ground.GND","U2.A0","U2.A1","U2.A2","U2.GND","U2.WP"],
-    ["R1.1","R2.1","supply{imax=1 A,rint=15 mΩ,value=+3V3,voltage=3.3 V}.V","U2.VCC"],
+    ["ground@42,20.GND","U2.A0","U2.A1","U2.A2","U2.GND","U2.WP"],
+    ["R1.1","R2.1","supply@37,-1.V","U2.VCC"],
     ["R1.2","U1.CN7-2","U2.SCL"],
     ["R2.2","U1.CN7-4","U2.SDA"]
   ]

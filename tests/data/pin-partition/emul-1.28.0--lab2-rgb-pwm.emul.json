@@ -1,9 +1,9 @@
 {
   "source": "tests/data/emul-1.28.0/lab2-rgb-pwm.emul",
   "objects": [
-    "ground (ground)",
-    "ground (ground)",
-    "ground (ground)",
+    "ground@-23,26 (ground)",
+    "ground@-23,33 (ground)",
+    "ground@32,60 (ground)",
     "R2 (resistor)",
     "R3 (resistor)",
     "R4 (resistor)",
@@ -13,9 +13,9 @@
     "VD1R (led)"
   ],
   "nets": [
-    ["ground.GND","VD1B.2"],
-    ["ground.GND","VD1G.2"],
-    ["ground.GND","VD1R.2"],
+    ["ground@-23,26.GND","VD1G.2"],
+    ["ground@-23,33.GND","VD1R.2"],
+    ["ground@32,60.GND","VD1B.2"],
     ["R2.1","VD1R.1"],
     ["R2.2","U1.P4-7"],
     ["R3.1","VD1G.1"],

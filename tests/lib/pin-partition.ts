@@ -1,3 +1,4 @@
+import { GRID } from "@/schematic/geometry"
 import { buildNets } from "@/schematic/nets"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject, Point, Schematic } from "@/schematic/types"
@@ -8,15 +9,9 @@ const JUNCTION = "junction"
 
 export const isJunctionObject = (o: PlacedObject) => o.def === JUNCTION
 
-function anonymousName(o: PlacedObject): string {
-  const def = getDef(o.def)
-  const keys = (def?.fields ?? []).map((f) => f.key).filter((k) => k !== "ref").sort()
-  const values = keys.flatMap((k) => {
-    const v = o.props?.[k] ?? def?.defaults?.[k]
-    return v ? [`${k}=${v}`] : []
-  })
-  return values.length ? `${o.def}{${values.join(",")}}` : o.def
-}
+const cells = (v: number) => String(Math.round((v / GRID) * 100) / 100)
+
+const anonymousName = (o: PlacedObject) => `${o.def}@${cells(o.x)},${cells(o.y)}`
 
 export function stableNames(objects: readonly PlacedObject[]): ReadonlyMap<string, string> {
   const names = new Map<string, string>()
@@ -114,7 +109,7 @@ export function pinOnSegmentConnects(pin: RefPin, s: RefSegment): boolean {
 
 export const segmentsConnect = (s: RefSegment, t: RefSegment) => onSegment(s.a, t) || onSegment(s.b, t) || onSegment(t.a, s) || onSegment(t.b, s)
 
-export function geometricGroups(pins: readonly RefPin[], segments: readonly RefSegment[]): string[][] {
+export function geometricGroups(pins: readonly RefPin[], segments: readonly RefSegment[], joins: readonly (readonly [string, string])[] = []): string[][] {
   const n = pins.length + segments.length
   const parent = Array.from({ length: n }, (_, i) => i)
   const find = (i: number): number => {
@@ -134,6 +129,12 @@ export function geometricGroups(pins: readonly RefPin[], segments: readonly RefS
   for (let i = 0; i < P; i++) for (let j = i + 1; j < P; j++) if (!pins[i].nc && !pins[j].nc && same(pins[i].at, pins[j].at)) union(i, j)
   for (let i = 0; i < P; i++) for (let s = 0; s < segments.length; s++) if (isConductor(segments[s]) && pinOnSegmentConnects(pins[i], segments[s])) union(i, P + s)
   for (let s = 0; s < segments.length; s++) for (let t = s + 1; t < segments.length; t++) if (isConductor(segments[s]) && isConductor(segments[t]) && segmentsConnect(segments[s], segments[t])) union(P + s, P + t)
+  const indexOf = new Map(pins.map((p, i) => [p.key, i]))
+  for (const [a, b] of joins) {
+    const i = indexOf.get(a)
+    const j = indexOf.get(b)
+    if (i !== undefined && j !== undefined) union(i, j)
+  }
   const groups = new Map<number, string[]>()
   for (let i = 0; i < P; i++) {
     const root = find(i)
@@ -158,9 +159,15 @@ export function polylineSegments(pts: readonly Point[]): RefSegment[] {
   return out
 }
 
-export function partitionDiff(want: Partition, got: Partition): { missing: string[][]; extra: string[][] } {
-  const key = (g: string[]) => g.join(" ")
-  const wanted = new Set(want.map(key))
-  const gotten = new Set(got.map(key))
-  return { missing: want.filter((g) => !gotten.has(key(g))), extra: got.filter((g) => !wanted.has(key(g))) }
+function beyond(groups: Partition, against: Partition): string[][] {
+  const left = new Map<string, number>()
+  for (const g of against) left.set(JSON.stringify(g), (left.get(JSON.stringify(g)) ?? 0) + 1)
+  return groups.filter((g) => {
+    const k = JSON.stringify(g)
+    const n = left.get(k) ?? 0
+    if (n > 0) left.set(k, n - 1)
+    return n === 0
+  })
 }
+
+export const partitionDiff = (want: Partition, got: Partition) => ({ missing: beyond(want, got), extra: beyond(got, want) })

@@ -7,7 +7,7 @@
     "D3 (diode)",
     "D4 (diode)",
     "G1 (ac-source)",
-    "ground (ground)",
+    "ground@16,13 (ground)",
     "LED1 (led)",
     "R1 (resistor)",
     "R2 (resistor)",
@@ -15,7 +15,7 @@
   ],
   "nets": [
     ["C1.1","D1.2","D2.2","R1.1","R2.1"],
-    ["C1.2","D3.1","D4.1","ground.GND","LED1.2","R1.2"],
+    ["C1.2","D3.1","D4.1","ground@16,13.GND","LED1.2","R1.2"],
     ["D1.1","D3.2","T1.S1"],
     ["D2.1","D4.2","T1.S2"],
     ["G1.-","T1.P2"],

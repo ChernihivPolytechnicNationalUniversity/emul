@@ -1,7 +1,7 @@
 {
   "source": "example bridge",
   "objects": [
-    "ground (ground)",
+    "ground@4,14 (ground)",
     "R1 (resistor)",
     "R2 (resistor)",
     "R3 (resistor)",
@@ -9,12 +9,12 @@
     "R5 (resistor)",
     "R6 (resistor)",
     "R7 (resistor)",
-    "supply{imax=1 A,rint=15 mΩ,value=+12V,voltage=12 V} (supply)"
+    "supply@4,-4 (supply)"
   ],
   "nets": [
-    ["ground.GND","R5.1"],
+    ["ground@4,14.GND","R5.1"],
     ["R1.1","R3.1","R4.2","R6.2"],
-    ["R1.2","R2.2","R4.1","supply{imax=1 A,rint=15 mΩ,value=+12V,voltage=12 V}.V"],
+    ["R1.2","R2.2","R4.1","supply@4,-4.V"],
     ["R2.1","R3.2","R7.2"],
     ["R5.2","R6.1","R7.1"]
   ]
