@@ -56,7 +56,7 @@ export class FlashIf extends RegBlock {
   readonly sectors: FlashSector[] = []
   bus: Bus | null = null
   /** The core stalls for this long: a program or erase in progress. */
-  onBusy: (seconds: number) => void = () => {}
+  onBusy: (seconds: number, psize: number) => void = () => {}
   raiseIrq: (irq: number) => void = () => {}
   /** The option bytes changed (BOR level, watchdog mode): the SoC re-reads what it cares about. */
   onOptions: () => void = () => {}
@@ -280,7 +280,7 @@ export class FlashIf extends RegBlock {
     // Programming can only clear bits.
     for (let i = 0; i < size; i++) at.bytes[at.offset + i] &= (value >>> (8 * i)) & 0xff
     this.bus!.flashDirty = true
-    this.onBusy(T_PROGRAM)
+    this.onBusy(T_PROGRAM, (cr >>> 8) & 3)
     this.finish(SR_EOP)
   }
 
@@ -312,7 +312,7 @@ export class FlashIf extends RegBlock {
       if (at) at.bytes.fill(0xff, at.offset, at.offset + s.size)
     }
     this.bus!.flashDirty = true
-    this.onBusy(targets.length === 1 ? eraseTime(targets[0].size) : T_MASS_ERASE)
+    this.onBusy(targets.length === 1 ? eraseTime(targets[0].size) : T_MASS_ERASE, (cr >>> 8) & 3)
     this.finish(SR_EOP)
   }
 }

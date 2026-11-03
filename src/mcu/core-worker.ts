@@ -157,6 +157,7 @@ function publish(parity: number, running: boolean, idd: number) {
   out[OUT.STOP_REASON] = stop ? STOP_REASONS.indexOf(stop.reason) : 0
   out[OUT.IDD] = lastIdd = idd
   out[OUT.POR] = c.porThreshold
+  out[OUT.BACKUP] = c.backupDomainState?.() ?? 0
   const supply = Number.isFinite(vdd) ? vdd : c.chip.electrical.vdd
   for (let i = 0; i < padList.length; i++) {
     const key = padList[i]

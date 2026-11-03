@@ -7,6 +7,8 @@
  * the pin-outs, ARM DDI0439 (Cortex-M4) and DDI0489 (Cortex-M7) for the ID registers.
  */
 
+import { DS8626_SUPPLY, type SupplyTables } from "./supply"
+
 export type MemoryRegion = {
   name: string
   base: number
@@ -19,6 +21,7 @@ export type MemoryRegion = {
    * and answer only once the controller has initialised them.
    */
   external?: "sdram1" | "sdram2"
+  cpuDataOnly?: true
 }
 
 export type CoreProfile = {
@@ -55,6 +58,8 @@ export type ChipElectrical = {
    * the low-power regulator, and under-drive; Standby with the RTC running.
    */
   idd: { run: [number, number]; sleep: [number, number]; stop: number; stopLp: number; stopUd?: number; standby: number }
+  supply?: SupplyTables
+  coreRegulator?: { volts: number; inrushAmps: number }
   /** Wake-up latency, s: leaving Stop on the main regulator, the low-power regulator, under-drive; leaving Standby. */
   wakeup: { stop: number; stopLp: number; stopUd?: number; standby: number }
   /** Internal pull-up on NRST, Ω. */
@@ -114,7 +119,7 @@ export type FactoryBytes = {
   tsCal1: { at: number; value: number; celsius: number }
   tsCal2: { at: number; value: number; celsius: number }
   calibrationVdda: number
-  packageData: { at: number; value: number }
+  packageData?: { at: number; value: number }
 }
 
 export type NoiseMixture = { weights: number[]; sigmasLsb: number[] }
@@ -134,6 +139,7 @@ export type DacProfile = {
 
 export type ChipProfile = {
   family?: "stm32"
+  notBonded?: readonly string[]
   /**
    * Which reference-manual variant the part follows where one manual covers several lines:
    * F405/F407 vs F42x/F43x in RM0090 (blocks present, PWR/RCC/FLASH/SYSCFG/ADC/I²C/FSMC details), F7.
@@ -232,6 +238,42 @@ const PIN_LAB_2026_10_12 = { vddaMv: 3290.4, risingMv: 1734.9, fallingMv: 1340.3
 
 const SUSPECTS_ON_THE_BENCH_2026_10_12 = { PA13: 3, PB3: 3, PA14: 2 }
 
+const BACKUP_SWITCH_AS_MEASURED_ON_THE_F746 = { switchOhms: 22, switchDrop: PIN_LAB_2026_10_12.backupDomainDropMv / 1000 }
+
+const DS8626_DS9405_PADS: PadClasses = {
+  ft: { aboveVdd: 4.0 },
+  tta: { pads: ["PA4", "PA5"], voltageMax: 4.0 },
+  injectedCurrentMax: 5e-3,
+  backupDomain: { pads: ["PC13", "PC14", "PC15", "PI8"], currentMax: 3e-3, ...BACKUP_SWITCH_AS_MEASURED_ON_THE_F746 },
+  otgId: { pads: [], pullOhms: 0 },
+  releaseFromHighDrainsAtSpeed: {},
+}
+
+const CCM_ON_THE_CPU_DATA_BUS: MemoryRegion = { name: "CCM", base: 0x10000000, size: 64 * 1024, kind: "ram", cpuDataOnly: true }
+
+const RM0090_FACTORY: MemoryRegion = { name: "FACTORY", base: 0x1fff7800, size: 0x230, kind: "rom" }
+
+const SYNTHETIC_UID_F40X: [number, number, number] = [0x00410032, 0x5732510d, 0x34313533]
+const SYNTHETIC_UID_F429: [number, number, number] = [0x00360027, 0x3235510f, 0x31343938]
+
+const TWELVE_BIT_CODES = 4095
+
+function rm0090FactoryBytes(flashSizeKb: number, uid: [number, number, number]): FactoryBytes {
+  const typical = DATASHEET_ADC_INTERNAL
+  const calibrationVdda = 3.3
+  const code = (volts: number) => Math.round((volts / calibrationVdda) * TWELVE_BIT_CODES)
+  const sensorAt = (celsius: number) => code(typical.v25 + (celsius - 25) * typical.avgSlope)
+  return {
+    otp: { base: 0x1fff7800, size: 0x210 },
+    uid: { at: 0x1fff7a10, words: uid },
+    flashSizeKb: { at: 0x1fff7a22, value: flashSizeKb },
+    vrefintCal: { at: 0x1fff7a2a, value: code(typical.vrefint) },
+    tsCal1: { at: 0x1fff7a2c, value: sensorAt(30), celsius: 30 },
+    tsCal2: { at: 0x1fff7a2e, value: sensorAt(110), celsius: 110 },
+    calibrationVdda,
+  }
+}
+
 const RM0090_ADC_TRIGGERS = {
   regularTriggers: ["TIM1_CH1", "TIM1_CH2", "TIM1_CH3", "TIM2_CH2", "TIM2_CH3", "TIM2_CH4", "TIM2_TRGO", "TIM3_CH1", "TIM3_TRGO", "TIM4_CH4", "TIM5_CH1", "TIM5_CH2", "TIM5_CH3", "TIM8_CH1", "TIM8_TRGO", "EXTI11"],
   injectedTriggers: ["TIM1_CH4", "TIM1_TRGO", "TIM2_CH1", "TIM2_TRGO", "TIM3_CH2", "TIM3_CH4", "TIM4_CH1", "TIM4_CH2", "TIM4_CH3", "TIM4_TRGO", "TIM5_CH4", "TIM5_TRGO", "TIM8_CH2", "TIM8_CH3", "TIM8_CH4", "EXTI15"],
@@ -261,8 +303,9 @@ export const STM32F429ZI: ChipProfile = {
   memory: [
     { name: "FLASH", base: 0x08000000, size: 2 * 1024 * 1024, kind: "flash", aliases: [0x00000000] },
     { name: "SRAM", base: 0x20000000, size: 192 * 1024, kind: "ram" },
-    { name: "CCM", base: 0x10000000, size: 64 * 1024, kind: "ram" },
+    CCM_ON_THE_CPU_DATA_BUS,
     { name: "SYSTEM", base: 0x1fff0000, size: 30 * 1024, kind: "rom" },
+    RM0090_FACTORY,
     { name: "OPT", base: 0x1fffc000, size: 16, kind: "rom" },
   ],
   idcode: 0x20016419, // STM32F42x/43x, rev 3
@@ -280,6 +323,7 @@ export const STM32F429ZI: ChipProfile = {
   af: "f42x",
   rtcBackupRegisters: 20,
   backupSram: BACKUP_SRAM_4KB,
+  factory: rm0090FactoryBytes(2048, SYNTHETIC_UID_F429),
   adc: RM0090_ADC_TRIGGERS,
   dac: {},
   // DS9405 §6.2 (Tables 11, 12, 14), §6.3.6 (Tables 26–33: 180 MHz, all peripherals on), §6.3.15.
@@ -294,6 +338,7 @@ export const STM32F429ZI: ChipProfile = {
     nrstPullUp: 40e3,
     inputThresholdsOfVdd: { rising: 0.7, falling: 0.3 },
     adcInternal: DATASHEET_ADC_INTERNAL,
+    pads: DS8626_DS9405_PADS,
   },
 }
 
@@ -319,6 +364,9 @@ const DS8626_ELECTRICAL: ChipElectrical = {
     rising: [2.14, 2.3, 2.45, 2.6, 2.76, 2.93, 3.03, 3.14],
     falling: [2.04, 2.19, 2.35, 2.51, 2.66, 2.84, 2.93, 3.03],
   },
+  pads: DS8626_DS9405_PADS,
+  supply: DS8626_SUPPLY,
+  coreRegulator: { volts: 1.26, inrushAmps: 0.16 },
 }
 
 /**
@@ -332,8 +380,9 @@ const F40X_DIE = {
   memory: [
     { name: "FLASH", base: 0x08000000, size: 1024 * 1024, kind: "flash", aliases: [0x00000000] },
     { name: "SRAM", base: 0x20000000, size: 128 * 1024, kind: "ram" },
-    { name: "CCM", base: 0x10000000, size: 64 * 1024, kind: "ram" },
+    CCM_ON_THE_CPU_DATA_BUS,
     { name: "SYSTEM", base: 0x1fff0000, size: 30 * 1024, kind: "rom" },
+    RM0090_FACTORY,
     { name: "OPT", base: 0x1fffc000, size: 16, kind: "rom" },
   ],
   idcode: 0x101f0413,
@@ -351,6 +400,7 @@ const F40X_DIE = {
   af: "f40x",
   rtcBackupRegisters: 20,
   backupSram: BACKUP_SRAM_4KB,
+  factory: rm0090FactoryBytes(1024, SYNTHETIC_UID_F40X),
   adc: { ...RM0090_ADC_TRIGGERS, tempOnIn16: true },
   dac: {},
   electrical: DS8626_ELECTRICAL,
@@ -360,7 +410,7 @@ const F40X_DIE = {
 export const STM32F407VG: ChipProfile = { ...F40X_DIE, id: "stm32f407vg", name: "STM32F407VGT6" }
 
 /** STM32F405RGT6 (Olimex STM32-H405, Netduino Plus 2): LQFP64, PA–PC + PD2 + PH0/PH1 bonded, no ETH/DCMI. */
-export const STM32F405RG: ChipProfile = { ...F40X_DIE, id: "stm32f405rg", name: "STM32F405RGT6" }
+export const STM32F405RG: ChipProfile = { ...F40X_DIE, id: "stm32f405rg", name: "STM32F405RGT6", notBonded: ["ETH_MAC", "DCMI"] }
 
 const DS10314_ELECTRICAL: ChipElectrical = {
   vdd: 3.3,
@@ -613,7 +663,7 @@ export const STM32F746IG: ChipProfile = {
       ft: { aboveVdd: 4.0 },
       tta: { pads: ["PA4", "PA5"], voltageMax: 4.0 },
       injectedCurrentMax: 5e-3,
-      backupDomain: { pads: ["PC13", "PC14", "PC15", "PI8"], currentMax: 3e-3, switchOhms: 22, switchDrop: PIN_LAB_2026_10_12.backupDomainDropMv / 1000 },
+      backupDomain: { pads: ["PC13", "PC14", "PC15", "PI8"], currentMax: 3e-3, ...BACKUP_SWITCH_AS_MEASURED_ON_THE_F746 },
       otgId: { pads: ["PA10", "PB12"], pullOhms: 10e3 },
       releaseFromHighDrainsAtSpeed: SUSPECTS_ON_THE_BENCH_2026_10_12,
     },

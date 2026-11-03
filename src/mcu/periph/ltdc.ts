@@ -418,6 +418,12 @@ export class Ltdc extends RegBlock implements Clocked {
 
   // --- composition ---------------------------------------------------------------------------
 
+  private refuseCpuOnlyFramebuffer(layer: number, framebuffer: number, line: number) {
+    const why = this.bus?.onTheCpuDataBusOnly(line)
+    if (why) this.onUnsupported?.(`LTDC layer ${layer + 1} framebuffer at 0x${(framebuffer >>> 0).toString(16)}: ${why}, out of the LTDC's reach (RM0090 §2.3.1); drawn as the layer's default colour, the transfer error (TERRIF) not modelled`)
+    return why !== null
+  }
+
   /**
    * Compose the frame the controller is outputting: the background colour, then each enabled
    * layer's window read from memory and blended with its blending factors. `out` is RGBA, row
@@ -446,6 +452,7 @@ export class Ltdc extends RegBlock implements Clocked {
       const db = l.defaultColor & 0xff
       const da = l.defaultColor >>> 24
       const pixelsPerLine = Math.floor(l.lineBytes / bpp)
+      let refused = false
       const winW = l.x1 - l.x0
       // An opaque layer without alpha of its own covers what is under it: its pixels go straight in.
       const opaque = l.alpha === 255 && (l.format === 1 || l.format === 2)
@@ -453,6 +460,7 @@ export class Ltdc extends RegBlock implements Clocked {
         const line = y - l.y0
         const lineAddr = (l.address + line * l.pitch) >>> 0
         const mem = line < l.lines ? this.bus.frameBytes(lineAddr, pixelsPerLine * bpp) : null
+        if (!mem && line < l.lines && !refused) refused = this.refuseCpuOnlyFramebuffer(li, l.address, lineAddr)
         let x = x0
         if (opaque && mem) {
           const bytes = mem.bytes

@@ -25,6 +25,7 @@ import { AvrCore } from "./avr-core"
 import { picChipById } from "@/mcu/pic/chip"
 import { PicCore } from "./pic-core"
 import { CpuHalt } from "@/mcu/faults"
+import { backupDomainAmps } from "@/mcu/supply"
 import type { PadDrive } from "@/mcu/periph/gpio"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import { Stm32, type ClockStatus, type PadRef, type PowerStatus } from "@/mcu/stm32f429"
@@ -152,6 +153,8 @@ export interface CoreHost {
   /** Edges made since the last drain (own time). */
   drainEdges(): OutEdge[]
   supplyCurrent(): number
+  backupDomainState?(): number
+  backupDomainCurrent?(vbat: number): number
   status(): CoreStatus
   /** What a panel wired to this core shows: a fresh frame when the picture changed, and the panel's verdict. */
   capturePanel(panel: PanelWiring, wall: number, powered: boolean): { frame: ArrayBuffer | null; status: string }
@@ -350,6 +353,12 @@ export class LocalCore implements CoreHost {
     this.stepIdd = null
     return idd
   }
+  backupDomainState() {
+    return this.mcu.backupDomainState()
+  }
+  backupDomainCurrent(vbat: number) {
+    return this.mcu.backupDomainCurrent(vbat)
+  }
   status(): CoreStatus {
     return statusOf(this.mcu, "in-process")
   }
@@ -456,7 +465,7 @@ export const STOP_REASONS: StopReason[] = ["breakpoint", "step", "pause", "bkpt"
 /** Command bank layout (Float64 offsets within the bank). */
 export const CMD = { TARGET: 0, FLAGS: 1, HSE_HZ: 2, HSE_KIND: 3, HSE_START: 4, LSE_HZ: 5, LSE_KIND: 6, LSE_START: 7, LEVELS: 8, ANALOG: 8 + PAD_KEYS, BATTERY: 8 + 2 * PAD_KEYS, BASE: 9 + 2 * PAD_KEYS, STEP: 10 + 2 * PAD_KEYS, STEPS: 11 + 2 * PAD_KEYS, IN_UPTO: 12 + 2 * PAD_KEYS, VDD: 13 + 2 * PAD_KEYS, VBAT: 14 + 2 * PAD_KEYS, READBACK: 15 + 2 * PAD_KEYS, SOURCE_OHMS: 15 + 3 * PAD_KEYS, SOURCE_FARADS: 15 + 4 * PAD_KEYS, VREF: 15 + 5 * PAD_KEYS, VRESET: 16 + 5 * PAD_KEYS, SIZE: 17 + 5 * PAD_KEYS } as const
 /** Output bank layout. */
-export const OUT = { TIME: 0, FLAGS: 1, IDD: 2, POR: 3, STEPS: 4, STOP_PC: 5, STOP_REASON: 6, DRIVE: 7, DUTY: 7 + PAD_KEYS, DUTY_BASE: 7 + 2 * PAD_KEYS, VIH: 7 + 3 * PAD_KEYS, VIL: 7 + 4 * PAD_KEYS, SIZE: 7 + 5 * PAD_KEYS } as const
+export const OUT = { TIME: 0, FLAGS: 1, IDD: 2, POR: 3, STEPS: 4, STOP_PC: 5, STOP_REASON: 6, BACKUP: 7, DRIVE: 8, DUTY: 8 + PAD_KEYS, DUTY_BASE: 8 + 2 * PAD_KEYS, VIH: 8 + 3 * PAD_KEYS, VIL: 8 + 4 * PAD_KEYS, SIZE: 8 + 5 * PAD_KEYS } as const
 /** Edge rings: [time, code] pairs; code = key·4 + level (0 low, 1 high, 2 released). */
 export const OUT_RING = 8192
 export const IN_RING = 2048
@@ -738,6 +747,7 @@ export class RemoteCore implements CoreHost {
     this.finish()
     this.resetPending = true
     this.resetBackup = !!opts.backup
+    if (!opts.backup) this.backupLost = true
     this.resetSupplyKept = !!opts.supplyKept
     this.haltedFlag = false
     this.haltReason = null
@@ -816,6 +826,7 @@ export class RemoteCore implements CoreHost {
     if (!awaitChange(this.ctl, CTL.ACK, this.seq - 1, undefined, this.answersWithinMs)) return this.giveUp()
     const prev = this.outBank
     this.outBank = this.outBanks[this.seq & 1]
+    this.backupLost = false
     // Anything the pads drive differently than after the run before bumps the version.
     for (let k = 0; k < PAD_KEYS; k++)
       if (this.outBank[OUT.DRIVE + k] !== prev[OUT.DRIVE + k]) {
@@ -949,6 +960,14 @@ export class RemoteCore implements CoreHost {
   }
   supplyCurrent() {
     return this.outBank[OUT.IDD]
+  }
+  private backupLost = false
+  backupDomainState() {
+    return this.backupLost ? 0 : this.outBank[OUT.BACKUP]
+  }
+  backupDomainCurrent(vbat: number) {
+    const tables = "pads" in this.chip.electrical ? this.chip.electrical.supply : undefined
+    return tables ? backupDomainAmps(tables, this.backupDomainState(), vbat) : 0
   }
   private statusAsked = 0
   private statusGot = 0

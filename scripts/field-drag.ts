@@ -292,6 +292,36 @@ async function cursorsOverARunningBench(page: Page) {
     expect(`over ${where}, a cursor picture of our own, not the system one Windows draws by inverting`, cursor?.startsWith("url(") ? "ours" : cursor, "ours")
 }
 
+async function typeBPlugTakesTheClick(page: Page) {
+  for (const rotation of [0, 90] as const) {
+    console.log(`\nthe STM32-H405's USB-B plug, board turned ${rotation}°: a click on the overmold or the cable unplugs it, one on the receptacle plugs it back`)
+    const base = examples.find((e) => e.id === "h405-blink")!.build(GRID)
+    await openDoc(page, `h405-usb-${rotation}`, { ...base, objects: base.objects.map((o) => (o.def === "olimex-stm32-h405" ? { ...o, rotation } : o)) })
+    for (let k = 0; k < 3; k++) {
+      await page.keyboard.press("Control+Minus")
+      await page.waitForTimeout(300)
+    }
+    const usb = page.locator("[data-slot=component] g.cursor-pointer").filter({ has: page.locator("title", { hasText: /^USB: click to/ }) }).first()
+    const state = async () => ((await usb.locator("title").textContent()) ?? "").replace(/^USB: click to /, "")
+    const centre = async (selector: string, along = 0.5) => {
+      const b = (await usb.locator(selector).first().boundingBox())!
+      return { x: b.x + b.width * (rotation ? 0.5 : along), y: b.y + b.height * (rotation ? along : 0.5) }
+    }
+    const onThePlug = (p: Point) => page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest("g.cursor-pointer title, g.cursor-pointer")?.querySelector("title")?.textContent?.startsWith("USB"), p)
+    expect("plugged in at first", await state(), "unplug")
+    const overmold = await centre("rect.fill-foreground")
+    const cable = await centre("line.stroke-foreground", 0.2)
+    const face = await centre("rect.fill-secondary")
+    expect("the overmold and the cable are in the field, not under a panel", [await onThePlug(overmold), await onThePlug(cable)], [true, true])
+    await page.mouse.click(overmold.x, overmold.y)
+    expect("a click on the overmold unplugs it", await state(), "plug in")
+    await page.mouse.click(face.x, face.y)
+    expect("a click on the receptacle's face plugs it back", await state(), "unplug")
+    await page.mouse.click(cable.x, cable.y)
+    expect("a click on the cable, well away from the board, unplugs it", await state(), "plug in")
+  }
+}
+
 try {
   await fetch(DEV_SERVER, { signal: AbortSignal.timeout(3000) })
 } catch {
@@ -307,6 +337,7 @@ try {
   await noPluggingIntoHeaders(page)
   await freedSlotTakesTheDrop(page)
   await addingLandsInView(page)
+  await typeBPlugTakesTheClick(page)
   await cursorsOverARunningBench(page)
 } finally {
   await browser.close()

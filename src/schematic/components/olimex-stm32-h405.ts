@@ -1,65 +1,60 @@
 import { STM32F405RG } from "@/mcu/chip"
 import { BoardIcon } from "../icons"
 import { mcuModel } from "../mcu-model"
-import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind } from "../types"
+import type { ComponentDef, Element, ModelElement, PartDef, PinDef, PinKind } from "../types"
 import { LED_COLORS } from "./basic"
+import { schottky1n5819 } from "./schottky-1n5819"
+import { AT, BOARD_MM, BOOT_BRIDGES, BRIDGE_PITCH, boardArt, extPad, FRAME, jtagPad, PLATE, USBP_E } from "./olimex-stm32-h405-art"
 
-/**
- * Olimex STM32-H405, Rev. C (STM32F405RGT6). Sources (docs/olimex-h405/board-checklist.md): the
- * user manual (rev B, 2016), the Rev. C schematic and the Rev. C dimension drawing (mil).
- *
- * Scale: 1 cell = 2.54 mm. The board is 60.96 × 34.29 mm with the USB-B sticking out 6.86 mm on
- * the left; it sits at (3.25, 0.75) cells so that the 0.1" headers EXT1 (bottom edge) and EXT2
- * (top edge) fall on whole cells. The headers are male pins under the board; seen from the top.
- */
+const at = (mm: { x: number; y: number }) => ({ x: Math.round((mm.x + FRAME.originX) * FRAME.cellsPerMm * 100) / 100, y: Math.round((mm.y + FRAME.originY) * FRAME.cellsPerMm * 100) / 100 })
 
-const ORIGIN = { x: 3.25, y: 0.75 }
-const at = (xMm: number, yMm: number) => ({ x: ORIGIN.x + xMm / 2.54, y: ORIGIN.y + yMm / 2.54 })
-const BOARD_MM = { w: 60.96, h: 34.29 }
-
-/** [pin, label, MCU pin, note] — UM §6.3.1/§6.3.2, checked against the schematic. */
 type Row = [number, string, string?, string?]
 
 const EXT1: Row[] = [
-  [1, "PA11", "PA11", "USB D− (22 Ω)"], [2, "PA8", "PA8"], [3, "PA12", "PA12", "USB D+ (22 Ω)"], [4, "PA9", "PA9", "Not VBUS on this board"],
+  [1, "PA11", "PA11", "USB D− through R22 22 Ω"], [2, "PA8", "PA8"], [3, "PA12", "PA12", "USB D+ through R21 22 Ω; the DISC circuit's 1.5 kΩ (R20) pulls it up"], [4, "PA9", "PA9", "Not VBUS on this board: a free pin"],
   [5, "3.3V"], [6, "GND"], [7, "PA10", "PA10"], [8, "PC10", "PC10"],
-  [9, "PC11", "PC11", "DISC: low with VBUS present switches 1.5 kΩ onto D+"], [10, "PC12", "PC12", "STAT LED (lit when low)"],
+  [9, "PC11", "PC11", "DISC: through R27 1 kΩ to Q3's base, 47 kΩ (R26) to 3.3 V. Q3 clamps it near 0.65 V, so as an input it reads low even with the pull-up; low with VBUS present switches 1.5 kΩ onto D+"],
+  [10, "PC12", "PC12", "STAT LED through R4 2 kΩ and LED_E (lit when low)"],
   [11, "PD2", "PD2"], [12, "PB5", "PB5"], [13, "PB6", "PB6"], [14, "PA6", "PA6"],
   [15, "PB7", "PB7"], [16, "PB8", "PB8"], [17, "PB9", "PB9"], [18, "PA5", "PA5"],
   [19, "PC0", "PC0"], [20, "PC1", "PC1"], [21, "PB0", "PB0"], [22, "PA7", "PA7"],
-  [23, "VBAT", undefined, "Jumpered to 3.3V (VBAT solder jumper closed)"], [24, "PC13", "PC13"], [25, "RST", "NRST"], [26, "PB1", "PB1"],
+  [23, "VBAT", undefined, "VBAT; the VBAT bridge (closed as shipped) ties it to 3.3 V"], [24, "PC13", "PC13"], [25, "RST", "NRST"], [26, "PB1", "PB1"],
 ]
 const EXT2: Row[] = [
-  [1, "VDDA", undefined, "3.3V through the ferrite L1"], [2, "PC2", "PC2"], [3, "AGND"], [4, "PA0", "PA0", "BUT (560 Ω, 10 kΩ pull-up; low when pressed)"],
+  [1, "VDDA", undefined, "3.3 V through the ferrite L1"], [2, "PC2", "PC2"], [3, "AGND", undefined, "VSSA, joined to GND by R16 0 Ω"], [4, "PA0", "PA0", "BUT through R19 560 Ω; R18 10 kΩ pull-up and C18 100 nF at the switch (low when pressed)"],
   [5, "3.3V"], [6, "GND"], [7, "PA2", "PA2"], [8, "PA1", "PA1"],
-  [9, "PC3", "PC3"], [10, "PA3", "PA3"], [11, "PA4", "PA4"], [12, "PC4", "PC4", "USB_P: VBUS through 15k/22k (USBP_E closed)"],
+  [9, "PC3", "PC3"], [10, "PA3", "PA3"], [11, "PA4", "PA4"], [12, "PC4", "PC4", "USB_P: VBUS through R1 15 kΩ / R29 22 kΩ and the USBP_E bridge (closed as shipped)"],
   [13, "PC5", "PC5"], [14, "PB10", "PB10"], [15, "PB11", "PB11"], [16, "PB13", "PB13"],
   [17, "PB12", "PB12"], [18, "PB14", "PB14"], [19, "PB15", "PB15"], [20, "PC6", "PC6"],
   [21, "PC7", "PC7"], [22, "PC8", "PC8"], [23, "+5V_USB", undefined, "Raw USB VBUS, before D1"], [24, "PC9", "PC9"],
-  [25, "GND"], [26, "VIN", undefined, "Regulator input, no reverse-polarity diode"],
+  [25, "GND"], [26, "VIN", undefined, "The regulator's input, after D1 and D2; no reverse-polarity protection of its own"],
+]
+const JTAG_ROWS: Row[] = [
+  [1, "3.3V"], [2, "3.3V"],
+  [3, "TRST", "PB4", "R23 10 kΩ to 3.3 V; the R-T bridge (open as shipped) joins it to RST"], [4, "GND"],
+  [5, "TDI", "PA15", "R13 10 kΩ to 3.3 V"], [6, "GND"],
+  [7, "TMS", "PA13", "SWDIO; R6 10 kΩ to 3.3 V"], [8, "GND"],
+  [9, "TCK", "PA14", "SWCLK; R5 10 kΩ to 3.3 V"], [10, "GND"],
+  [11, "RTCK", undefined, "R24 10 kΩ to GND (the UM's table calls it GND)"], [12, "GND"],
+  [13, "TDO", "PB3", "SWO; R25 10 kΩ to 3.3 V"], [14, "GND"],
+  [15, "RST", "NRST"], [16, "GND"],
+  [17, "NC", undefined, "ARM's DBGRQ, which debuggers leave unconnected; R2 10 kΩ to GND on this board (the UM's table calls it GND)"], [18, "GND"],
+  [19, "5V", undefined, "A debugger's 5 V supply: through D2 (1N5819S) to VIN, R3 47 kΩ to GND (the UM's table calls it GND)"], [20, "GND"],
 ]
 
 function kindOf(label: string, mcu?: string): PinKind {
   if (label === "GND" || label === "AGND") return "gnd"
-  if (/^(3\.3V|VDDA|VBAT|\+5V_USB|VIN)$/.test(label)) return "power"
+  if (/^(3\.3V|VDDA|VBAT|\+5V_USB|VIN|5V)$/.test(label)) return "power"
   return mcu ? "digital" : "nc"
 }
 
-const WIDTH = 28
-const HEIGHT = 15
+const WIDTH = Math.ceil(at({ x: PLATE.x1, y: 0 }).x + 0.75)
+const HEIGHT = Math.ceil(at({ x: 0, y: PLATE.y1 }).y + 0.75)
 
-/**
- * Pad centres in mil (DIM): EXT2 odd x = 1875 − 50(n−1) at y 225, even x = 1875 − 50(n−2) at y 125;
- * EXT1 odd x = 675 + 50(n−1) at y 1125, even x = 675 + 50(n−2) at y 1225.
- */
-function header(connector: "EXT1" | "EXT2", rows: Row[]): PinDef[] {
+function ext(connector: "EXT1" | "EXT2", rows: Row[]): PinDef[] {
   return rows.map(([pin, label, mcu, note]) => {
     const odd = pin % 2 === 1
-    const k = odd ? pin - 1 : pin - 2
-    const mil = connector === "EXT2" ? { x: 1875 - 50 * k, y: odd ? 225 : 125 } : { x: 675 + 50 * k, y: odd ? 1125 : 1225 }
-    const p = at(mil.x * 0.0254, mil.y * 0.0254)
-    const x = Math.round(p.x)
-    const y = Math.round(p.y)
+    const { x, y } = at(extPad(connector, pin))
     const top = connector === "EXT2"
     return {
       id: `${connector}-${pin}`,
@@ -74,101 +69,162 @@ function header(connector: "EXT1" | "EXT2", rows: Row[]): PinDef[] {
       connector,
       connectorPin: pin,
       note,
+      printed: true,
     } satisfies PinDef
   })
 }
 
-const pins: PinDef[] = [...header("EXT2", EXT2), ...header("EXT1", EXT1)]
+const JTAG_PULLED_DOWN = [11, 17]
 
-const corner = at(0, 0)
-const u1 = at(30.48, 17.145)
-const q1 = at(45.8, 18.4)
-const vr = at(4.85, 4.45)
-const usb = at(-6.86, 11.1)
-const jtag = at(52.1, 0.7)
+function jtag(rows: Row[]): PinDef[] {
+  return rows.map(([pin, label, mcu, note]) => {
+    const odd = pin % 2 === 1
+    const { x, y } = at(jtagPad(pin))
+    return {
+      id: `JTAG-${pin}`,
+      label,
+      x,
+      y,
+      side: "right",
+      labelAt: odd ? "left" : "right",
+      kind: JTAG_PULLED_DOWN.includes(pin) ? "node" : kindOf(label, mcu),
+      stub: WIDTH - x,
+      mcu,
+      connector: "JTAG",
+      connectorPin: pin,
+      note,
+      printed: true,
+    } satisfies PinDef
+  })
+}
 
-const body: BodyShape[] = [
-  { type: "rect", x: corner.x, y: corner.y, w: BOARD_MM.w / 2.54, h: BOARD_MM.h / 2.54, rx: 0.15, fill: "board" },
-  // USB-B (AMP 787616-1), 6.86 mm past the left edge.
-  { type: "rect", x: usb.x, y: usb.y, w: 16.5 / 2.54, h: 12.2 / 2.54, rx: 0.15, fill: "connector" },
-  // VR LM1117 (SOT-223), U1 STM32F405RGT6 (LQFP64, 10 × 10 mm, pin 1 bottom-right), Q1 8 MHz HC-49 upright.
-  { type: "rect", x: vr.x - 1.2, y: vr.y - 1.2, w: 2.4, h: 2.4, rx: 0.1, fill: "chip" },
-  { type: "text", x: vr.x, y: vr.y + 2, text: "VR", size: 0.35, printed: true },
-  { type: "rect", x: u1.x - 1.97, y: u1.y - 1.97, w: 3.94, h: 3.94, rx: 0.1, fill: "chip" },
-  { type: "text", x: u1.x, y: u1.y - 0.2, text: "STM32F405", size: 0.36, inverse: true },
-  { type: "text", x: u1.x, y: u1.y + 0.5, text: "RGT6", size: 0.3, inverse: true },
-  { type: "rect", x: q1.x - 1, y: q1.y - 2.3, w: 2, h: 4.6, rx: 0.9, fill: "connector" },
-  { type: "text", x: q1.x, y: q1.y + 0.1, text: "8.000", size: 0.3, muted: true, rotate: -90 },
-  // 20-pin JTAG box header on the right edge.
-  { type: "rect", x: jtag.x, y: jtag.y, w: 8.8 / 2.54, h: 33 / 2.54, rx: 0.15, fill: "connector" },
-  { type: "text", x: jtag.x + 1.7, y: jtag.y + 6.5, text: "JTAG", size: 0.4, muted: true, rotate: -90 },
-  // Silkscreen.
-  // Silkscreen, moved off the header rows the field labels: the address up the gap between Q1 and JTAG.
-  { type: "text", x: at(50.4, 0).x, y: at(0, 18).y, text: "WWW.OLIMEX.COM (C) 2013", size: 0.28, printed: true, rotate: -90 },
-  { type: "text", x: at(30.5, 0).x, y: at(0, 23.2).y, text: "STM32-H405 Rev. C", size: 0.28, printed: true },
-  { type: "text", x: at(15.4, 0).x, y: at(0, 4.6).y, text: "EXT2", size: 0.3, muted: true, anchor: "end" },
-  { type: "text", x: at(15.4, 0).x, y: at(0, 30.1).y, text: "EXT1", size: 0.3, muted: true, anchor: "end" },
-]
+const pins: PinDef[] = [...ext("EXT2", EXT2), ...ext("EXT1", EXT1), ...jtag(JTAG_ROWS)]
+
+const changeover = (id: string, label: string, centre: { x: number; y: number }): PartDef => ({
+  type: "switch",
+  id,
+  label,
+  ...at(centre),
+  span: Math.round(BRIDGE_PITCH * FRAME.cellsPerMm * 100) / 100,
+  throws: { on: at({ x: centre.x - BRIDGE_PITCH, y: centre.y }), off: at({ x: centre.x + BRIDGE_PITCH, y: centre.y }) },
+})
+
+const usbpE = at({ x: USBP_E.x0, y: USBP_E.y })
 
 const parts: PartDef[] = [
-  { type: "led", id: "PWR", label: "PWR", ...at(3.56, 28.1), color: LED_COLORS.red.css },
-  { type: "led", id: "STAT", label: "STAT", ...at(3.56, 31.75), color: LED_COLORS.green.css, mcu: "PC12", pin: "EXT1-10" },
-  { type: "button", id: "BUT", label: "BUT", ...at(15.24, 21.21), mcu: "PA0", pin: "EXT2-4" },
-  { type: "button", id: "RESET", label: "RESET", ...at(15.24, 12.45), size: 1.1, mcu: "NRST", pin: "EXT1-25" },
-  { type: "usb", id: "USB", label: "USB", ...at(-6.86, 17.145), side: "left", initial: { on: true } },
+  { type: "led", id: "PWR", label: "PWR", ...at(AT.pwr), color: LED_COLORS.red.css, printed: true },
+  { type: "led", id: "STAT", label: "STAT", ...at(AT.stat), color: LED_COLORS.green.css, mcu: "PC12", pin: "EXT1-10", printed: true },
+  { type: "button", id: "BUT", label: "BUT", ...at(AT.but), size: 1.4, mcu: "PA0", pin: "EXT2-4", printed: true },
+  { type: "button", id: "RESET", label: "RESET", ...at(AT.reset), size: 1.1, mcu: "NRST", pin: "EXT1-25", printed: true },
+  { type: "usb", id: "USB", label: "USB", ...at(AT.usb), side: "left", plug: "usb-b", initial: { on: true } },
+  changeover("B1", "B1_H/B1_L: BOOT1 (PB2) through R28 33 kΩ to 3.3 V (on, B1_H) or GND (off, B1_L as shipped)", BOOT_BRIDGES.b1),
+  changeover("B0", "B0_H/B0_L: BOOT0 through R15 33 kΩ to 3.3 V (on, B0_H) or GND (off, B0_L as shipped: flash). B0_H boots system memory with B1_L (ST's bootloader is not modelled: the core sleeps there) and SRAM with B1_H; sampled at RESET", BOOT_BRIDGES.b0),
+  { type: "switch", id: "USBP_E", label: "USBP_E: PC4 ↔ the VBUS divider (closed as shipped)", ...usbpE, span: Math.round((USBP_E.x1 - USBP_E.x0) * FRAME.cellsPerMm * 100) / 100, initial: { on: true } },
 ]
-
-// --- electrical model ---------------------------------------------------------
 
 const GND = "EXT1-6"
 const V33 = "EXT1-5"
+const VDDA = "EXT2-1"
+const VCAP = "$vcap"
 const VIN = "EXT2-26"
 const V5USB = "EXT2-23"
 const NRST = "EXT1-25"
+const BOOT0 = "$boot0"
 
-/**
- * D1 1N5819S: about 0.18 V at 10 mA, read off Vishay doc 88525 Fig. 3 (the tables start at 0.1 A; no
- * datasheet covers the "S" variant). VR LM1117-ADJ (TI SNOS412Q Table 7.5): VREF 1.25 V, adjust-pin
- * current 60 µA through R9, so VOUT = 1.25 × (1 + 390/240) + 60 µA × 390 Ω ≈ 3.30 V; dropout 1.1 V at
- * 100 mA; current limit 1.2 A typical.
- */
-const D1_VF = 0.18
-const LM1117 = { vout: 1.25 * (1 + 390 / 240) + 60e-6 * 390, dropout: 1.1, imax: 1.2 }
+const USB_HOST = { volts: 5, limitAmps: 0.5, bulkFarads: 120e-6, vbusCableOhms: 0.25, groundCableOhms: 0.25 }
+const X5R_22U_6V3_AT_3V3 = 11.5e-6
+const X5R_10U_10V_AT_3V3 = 6.6e-6
+const X5R_2U2_6V3 = 2.2e-6
+const CERAMIC_100N = 100e-9
+const TANTALUM_C2 = { farads: 10e-6, esrOhms: 2.0, ratedVolts: 16, surgeVolts: 1.32 * 16, sustainedReverseVolts: 0.01, transientReverseVolts: 0.15 * 16, overstressSeconds: 30 }
+const FERRITE_L1_OHMS = 0.2
+const NOT_FATAL = { fail: "short", fatal: false } as const
+const capacitor = (name: string, a: string, value: number, volts?: number): ModelElement => ({ kind: "C", a, b: GND, value, hidden: true, limits: volts ? { voltage: volts, ...NOT_FATAL } : undefined, label: name })
+const LM1117 = { vout: 1.25 * (1 + 390 / 240) + 60e-6 * 390, dropout: 1.1 - 0.1 * (0.1 / 0.7), rdrop: 0.1 / 0.7, imax: 1.2, vinMax: 20, thermal: { rja: 61.6, tsd: 150, tsdOff: 135, tau: 2 } }
+const BC817_BETA = 250
+const BRIDGE_CLOSED_OHMS = 1e-3
+const BRIDGE_OPEN_OHMS = 1e12
+const bridge = (key: string) => (props: Record<string, string>) => (props[key] === "open" ? BRIDGE_OPEN_OHMS : BRIDGE_CLOSED_OHMS)
 
-const model: Element[] = [
-  { kind: "SHORT", nodes: [GND, "EXT2-6", "EXT2-25", "EXT2-3"] },
+const jtagPin = (n: number) => `JTAG-${n}`
+const mcuPads = pins.filter((p) => p.mcu && p.mcu !== "NRST").map((p) => p.id)
+
+const model: ModelElement[] = [
+  { kind: "SHORT", nodes: [GND, "EXT2-6", "EXT2-25", "EXT2-3", ...[4, 6, 8, 10, 12, 14, 16, 18, 20].map(jtagPin)] },
   { kind: "GND", node: GND },
-  { kind: "SHORT", nodes: [V33, "EXT2-5", "EXT2-1", "EXT1-23"] },
-  // USB VBUS (a USB 2.0 host port, 500 mA) → +5V_USB → D1 → VIN → LM1117 → 3.3V. EXT2-26 feeds VIN directly.
-  { kind: "V", plus: "$usb", minus: GND, value: 5 },
-  { kind: "SW", a: "$usb", b: "$usbsw", part: "USB", closed: "on" },
-  { kind: "REG", in: "$usbsw", out: V5USB, gnd: GND, value: 5, dropout: 0, imax: 0.5 },
-  { kind: "D", anode: V5USB, cathode: VIN, vf: D1_VF },
-  { kind: "REG", in: VIN, out: V33, gnd: GND, value: LM1117.vout, dropout: LM1117.dropout, imax: LM1117.imax },
-  // PWR: 3.3V → LED → R7 2 kΩ → GND. STAT: 3.3V → LED → R4 2 kΩ → LED_E (closed) → PC12. Colours:
-  // STAT green (schematic "led0603/green"), PWR red (UM §5.3); no part numbers, so the palette's forward voltages.
+  { kind: "SHORT", nodes: [V33, "EXT2-5", jtagPin(1), jtagPin(2)] },
+  { kind: "SHORT", nodes: [NRST, jtagPin(15)] },
+  { kind: "R", a: V33, b: "EXT1-23", value: bridge("vbat") },
+  { kind: "V", plus: "$usb", minus: GND, value: USB_HOST.volts },
+  { kind: "REG", in: "$usb", out: "$host", gnd: GND, value: USB_HOST.volts, dropout: 0, imax: USB_HOST.limitAmps, label: "USB host port switch" },
+  { kind: "C", a: "$host", b: GND, value: USB_HOST.bulkFarads, hidden: true, label: "USB host bulk capacitance" },
+  { kind: "SW", a: "$host", b: "$usbsw", part: "USB", closed: "on" },
+  { kind: "R", a: "$usbsw", b: V5USB, value: USB_HOST.vbusCableOhms + USB_HOST.groundCableOhms, hidden: true, label: "USB cable, VBUS and GND" },
+  ...schottky1n5819(V5USB, VIN),
+  ...schottky1n5819(jtagPin(19), VIN),
+  capacitor("C1", VIN, CERAMIC_100N),
+  { kind: "C", a: "$c2", b: GND, value: TANTALUM_C2.farads, hidden: true, limits: { voltage: TANTALUM_C2.ratedVolts, reverse: TANTALUM_C2.sustainedReverseVolts, overstress: { seconds: TANTALUM_C2.overstressSeconds, surgeVoltage: TANTALUM_C2.surgeVolts, reverseSurge: TANTALUM_C2.transientReverseVolts }, ...NOT_FATAL }, label: "C2" },
+  { kind: "R", a: VIN, b: "$c2", value: TANTALUM_C2.esrOhms, hidden: true, label: "C2 ESR" },
+  capacitor("C21", VIN, CERAMIC_100N),
+  capacitor("C3", V33, X5R_22U_6V3_AT_3V3, 6.3),
+  capacitor("C24", V33, X5R_22U_6V3_AT_3V3, 6.3),
+  capacitor("C4", V33, CERAMIC_100N),
+  capacitor("C5", V33, CERAMIC_100N),
+  capacitor("C6", V33, CERAMIC_100N),
+  capacitor("C7", V33, CERAMIC_100N),
+  capacitor("C8", V33, X5R_10U_10V_AT_3V3, 10),
+  capacitor("C10", V33, CERAMIC_100N),
+  { kind: "R", a: V33, b: VDDA, value: FERRITE_L1_OHMS, hidden: true, label: "L1 ferrite bead" },
+  capacitor("C11", VDDA, X5R_10U_10V_AT_3V3, 10),
+  capacitor("C9", VDDA, CERAMIC_100N),
+  capacitor("C22", VDDA, CERAMIC_100N),
+  capacitor("C20", VCAP, X5R_2U2_6V3, 6.3),
+  capacitor("C23", VCAP, X5R_2U2_6V3, 6.3),
+  { kind: "R", a: jtagPin(19), b: GND, value: 47e3 },
+  { kind: "REG", in: VIN, out: V33, gnd: GND, value: LM1117.vout, dropout: LM1117.dropout, rdrop: LM1117.rdrop, imax: LM1117.imax, thermal: LM1117.thermal, limits: { voltage: LM1117.vinMax, fail: "open", fatal: false }, label: "VR LM1117-ADJ" },
+  { kind: "R", a: V33, b: "$adj", value: 240 },
+  { kind: "R", a: "$adj", b: GND, value: 390 },
   { kind: "D", anode: V33, cathode: "$pwrk", vf: LED_COLORS.red.vf, part: "PWR" },
   { kind: "R", a: "$pwrk", b: GND, value: 2e3 },
   { kind: "D", anode: V33, cathode: "$statk", vf: LED_COLORS.green.vf, part: "STAT" },
-  { kind: "R", a: "$statk", b: "EXT1-10", value: 2e3 },
-  // BUT: R18 10 kΩ from 3.3V to the node, switch and C18 100 nF to GND, R19 560 Ω to PA0.
+  { kind: "R", a: "$statk", b: "$lede", value: 2e3 },
+  { kind: "R", a: "$lede", b: "EXT1-10", value: bridge("lede") },
   { kind: "R", a: V33, b: "$but", value: 10e3 },
   { kind: "SW", a: "$but", b: GND, part: "BUT", closed: "pressed" },
   { kind: "C", a: "$but", b: GND, value: 100e-9 },
   { kind: "R", a: "$but", b: "EXT2-4", value: 560 },
-  // RESET: R8 10 kΩ pull-up, C19 100 nF, switch to GND.
   { kind: "R", a: NRST, b: V33, value: 10e3 },
   { kind: "C", a: NRST, b: GND, value: 100e-9 },
   { kind: "SW", a: NRST, b: GND, part: "RESET", closed: "pressed" },
-  // USB_P: +5V_USB → R1 15 kΩ → node → R29 22 kΩ → GND; USBP_E closed → PC4.
-  { kind: "R", a: V5USB, b: "EXT2-12", value: 15e3 },
-  { kind: "R", a: "EXT2-12", b: GND, value: 22e3 },
-  // JTAG pull-ups, 10 kΩ to 3.3V on TMS PA13, TCK PA14, TDI PA15, TDO PB3, TRST PB4 (none reaches a header).
-  ...["$PA13", "$PA14", "$PA15", "$PB3", "$PB4"].map((pad): Element => ({ kind: "R", a: pad, b: V33, value: 10e3 })),
-  // BOOT1 (PB2) through R28 33 kΩ to GND (B1_L). PB2 reaches no header.
-  { kind: "R", a: "$PB2", b: GND, value: 33e3 },
-  ...mcuModel(STM32F405RG, { vdd: V33, gnd: GND, nrst: NRST, pads: ["$PA13", "$PA14", "$PA15", "$PB3", "$PB4", "$PB2", ...pins.filter((p) => p.mcu && p.mcu !== "NRST").map((p) => p.id)] }),
+  { kind: "R", a: V5USB, b: "$usbp", value: 15e3 },
+  { kind: "R", a: "$usbp", b: GND, value: 22e3 },
+  { kind: "SW", a: "$usbp", b: "EXT2-12", part: "USBP_E", closed: "on" },
+  { kind: "R", a: "EXT1-1", b: "$dm", value: 22 },
+  { kind: "R", a: "EXT1-3", b: "$dp", value: 22 },
+  { kind: "SW", a: "$dm", b: "$hostdm", part: "USB", closed: "on" },
+  { kind: "SW", a: "$dp", b: "$hostdp", part: "USB", closed: "on" },
+  { kind: "R", a: "$hostdm", b: GND, value: 15e3 },
+  { kind: "R", a: "$hostdp", b: GND, value: 15e3 },
+  { kind: "R", a: V33, b: "$q3b", value: 47e3 },
+  { kind: "R", a: "EXT1-9", b: "$q3b", value: 1e3 },
+  { kind: "Q", polarity: "npn", b: "$q3b", c: "$q4b", e: GND, beta: BC817_BETA },
+  { kind: "R", a: V5USB, b: "$q4b", value: 10e3 },
+  { kind: "R", a: "$q4b", b: GND, value: 33e3 },
+  { kind: "Q", polarity: "npn", b: "$q4b", c: V33, e: "$q4e", beta: BC817_BETA },
+  { kind: "R", a: "$q4e", b: "EXT1-3", value: 1.5e3 },
+  ...[3, 5, 7, 9, 13].map((n): Element => ({ kind: "R", a: jtagPin(n), b: V33, value: 10e3 })),
+  ...JTAG_PULLED_DOWN.map((n): Element => ({ kind: "R", a: jtagPin(n), b: GND, value: 10e3 })),
+  { kind: "R", a: jtagPin(15), b: jtagPin(3), value: bridge("rt") },
+  { kind: "R", a: BOOT0, b: "$b0", value: 33e3 },
+  { kind: "SW", a: "$b0", b: V33, part: "B0", closed: "on" },
+  { kind: "SW", a: "$b0", b: GND, part: "B0", closed: "off" },
+  { kind: "R", a: "$PB2", b: "$b1", value: 33e3 },
+  { kind: "SW", a: "$b1", b: V33, part: "B1", closed: "on" },
+  { kind: "SW", a: "$b1", b: GND, part: "B1", closed: "off" },
+  ...mcuModel(STM32F405RG, { vdd: V33, gnd: GND, nrst: NRST, boot0: BOOT0, vbat: "EXT1-23", vcap: VCAP, pads: ["$PB2", ...mcuPads] }),
 ]
+
+const solderBridge = (key: string, label: string) => ({ key, label, type: "select" as const, options: [{ value: "closed", label: "Closed" }, { value: "open", label: "Open (cut)" }] })
 
 export const olimexStm32H405: ComponentDef = {
   id: "olimex-stm32-h405",
@@ -179,7 +235,13 @@ export const olimexStm32H405: ComponentDef = {
   prefix: "U",
   width: WIDTH,
   height: HEIGHT,
-  body,
+  defaults: { vbat: "closed", lede: "closed", rt: "open" },
+  fields: [
+    solderBridge("vbat", "VBAT bridge (bottom): VBAT to 3.3 V"),
+    solderBridge("lede", "LED_E bridge (bottom): STAT LED to PC12"),
+    solderBridge("rt", "R-T bridge (bottom): JTAG RST to TRST"),
+  ],
+  body: boardArt({ EXT1: EXT1.map((row) => row[1]), EXT2: EXT2.map((row) => row[1]), JTAG: JTAG_ROWS.map((row) => row[1]) }),
   pins,
   parts,
   model,
@@ -188,16 +250,23 @@ export const olimexStm32H405: ComponentDef = {
   chip: STM32F405RG.id,
   mcuPower: V33,
   mcuReset: NRST,
+  mcuBoot0: BOOT0,
   mcuVbat: "EXT1-23",
-  // Q1 8 MHz crystal (C12/C13 27 pF) and Q2 32.768 kHz crystal under the board; startup DS8626 Tables 32/33.
+  mcuVref: VDDA,
+  mcuVdda: VDDA,
   mcuClocks: { hse: { hz: 8e6, kind: "crystal", startup: 2e-3 }, lse: { hz: 32768, kind: "crystal", startup: 2 } },
   info: {
-    MCU: "STM32F405RGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM (128 KB + 64 KB CCM)",
-    LEDs: "STAT green on PC12 (lit when low, 2 kΩ), PWR red",
-    Buttons: "BUT on PA0 (10 kΩ pull-up, 100 nF, low when pressed), RESET",
-    USB: "D− PA11, D+ PA12 (22 Ω); VBUS sensed on PC4 through 15k/22k, not on PA9; no ID; PC11 low switches a 1.5 kΩ D+ pull-up in",
-    Boot: "BOOT0 and BOOT1 (PB2) each through 33 kΩ to the B0_L/B1_L solder jumpers' GND side",
-    "Not modelled": "USB (the device stack and the PC11 D+ pull-up transistors), the boot solder jumpers as switches, JTAG",
+    MCU: "STM32F405RGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM (128 KB + 64 KB CCM); the schematic's RET6 label is wrong",
+    Board: `Rev. C, ${BOARD_MM.w} × ${BOARD_MM.h} mm, drawn to scale from Olimex's dimension drawing and UM photos. The board prints no pin names; εmul prints them in tables on the inner side of each header, as the Open746I-C does, which stretches the board: everything below EXT2 sits 3 cells lower, EXT1 with the LEDs, bridges and URL 7 cells lower, JTAG 2 cells right and its shroud widened for the names; inside each part, everything where Olimex put it. So the EXT headers stand 1.7 in apart here, not the board's 1 in (UM §6.3)`,
+    "Supply current": "The F405 draws DS8626's own tables, not one all-peripherals line: Table 20/21's base by HCLK (ART or code in RAM, or neither) with every peripheral clock off, plus Table 28's µA/MHz for each clock RCC enables on its bus (in Sleep only those LPENR keeps; Ethernet and the camera interface, which the F405 does not have, never), an estimated 10 % between Scale 1 and 2 (Table 14 note 1: the rows up to 144 MHz read as Scale 2 measurements), the ADCs' and DAC channels' analog parts, the compensation cell, HSI, LSI, LSE, the PLLs where the tables leave them out (their min–max midpoint), an estimated 532 µA for the HSE oscillator (DS8626 Rev 4 Table 31's figure at 25 MHz and CL 10 pF; Rev 5 dropped the row), flash program/erase (Table 39) for the share of time the flash is busy; Stop (Table 23), Standby (Table 24) and, with VDD gone, the cell on VBAT (Table 25) by the backup regulator and the LSE. Drawn as a current that holds at the VDD the board gives it. The blink at 168 MHz: 41.6 mA, the board 48.8 mA from 5 V, where the UM says about 40 mA without naming its firmware",
+    Decoupling: "C1 100 nF, C2 10 µF/16 V tantalum (2 Ω ESR, KEMET T491B's maximum; shorts at once past 1.32 × rated or 15 % reversed, and, on an assumed 30 s damage model, held over 16 V or reversed at all), C21 100 nF on VIN; C3, C24 22 µF and C8 10 µF X5R on 3.3 V at what DC bias leaves of them at 3.3 V (11.5 and 6.6 µF, the median of Murata's and TDK's curves), C4–C7, C10 100 nF; L1 to VDDA, the ADC's reference, as its DC resistance (0.2 Ω; no part number, so no rating and no failure), C11, C9, C22 there; C20/C23 2.2 µF on VCAP behind the core regulator's 160 mA inrush limit at Scale 1's 1.26 V (DS8626 Tables 14 and 19). The USB host is a modelled one: 5 V behind an assumed 0.5 A switch, USB 2.0's 120 µF of bulk, 0.25 Ω each in VBUS and GND (the 125 mV per conductor at 500 mA of §7.2.2). D1/D2: onsemi's typical 1N5819 at 25 °C, Fig. 7 forward (Is 3.28 µA, n 1.019, Rs 83 mΩ, 1 mV rms) and Fig. 9 reverse (4 % rms to 21 V)",
+    LEDs: "STAT green on PC12 (lit when low, 2 kΩ, through LED_E), PWR red (2 kΩ)",
+    Buttons: "BUT on PA0 (10 kΩ pull-up, 100 nF, 560 Ω, low when pressed), RESET",
+    Power: "USB VBUS through D1, or a JTAG debugger's 5 V (pin 19) through D2, or VIN directly, into the LM1117-ADJ (240 Ω / 390 Ω: 3.30 V, 5.2 mA through the divider, over the 5 mA minimum load; dropout 1.1 V at 100 mA to 1.2 V at 800 mA, current limit 1.2 A typical, 0.8 A guaranteed — the UM’s “up to 800 mA” —, destroyed open past 20 V in without taking the board with it; it heats at 61.6 °C/W (TI's SOT-223 figure, not this board's copper) and shuts down at 150 °C, the absolute maximum, back on at 135 °C with a 2 s time constant — TI gives no shutdown point, hysteresis or time constant, so those three are assumptions; TI LM1117 §7.1, §7.4, §7.5); or 3.3 V straight onto the rail",
+    USB: "D− PA11, D+ PA12 (22 Ω each); a plugged host's 15 kΩ pull-downs; VBUS sensed on PC4 through 15k/22k and USBP_E, not on PA9; no ID; PC11 low with VBUS present switches 1.5 kΩ onto D+ (Q3, Q4 BC817)",
+    JTAG: "20-pin ARM header: TRST PB4, TDI PA15, TMS/SWDIO PA13, TCK/SWCLK PA14, TDO/SWO PB3 (10 kΩ pull-ups each), RST, 3.3 V on 1–2, RTCK (11) and 17 10 kΩ to GND, 5 V in on 19",
+    Bridges: "On top, clickable: B0_H/B0_L and B1_H/B1_L (boot from flash, system memory or SRAM), USBP_E. On the bottom, in the inspector: VBAT, LED_E, R-T",
+    "Not modelled": "The USB device stack (no OTG FS core), ST's bootloader in system memory (the core idles there), the JTAG/SWD protocol (the debugger reaches the core directly), the crystals' load network (C12/C13 27 pF and R12 1 MΩ on Q1, C14/C15 10 pF on Q2: the oscillators are ideal 8 MHz and 32 768 Hz after their start-up times), the LM1117's loop (its load-transient response: the regulator is static, so the capacitors act when it cannot regulate — power-up, power-down, dropout, current limit), the capacitors' ESL and the ceramics' DC bias as a curve (each is taken at its rail's voltage), the bead's impedance above DC, the F405's VDDA share (its analog current is drawn from VDD; ≤ 6.4 mA, ≤ 1.3 mV across L1), the core regulator following VOS (1.14 V in Scale 2) and Standby (off, then its wake-up inrush), the I/O switching current into the pads' own capacitance (Table 27), U2/U3 and C16/C17 (not fitted on the board)",
     Source: "Olimex STM32-H405 user manual rev B, Rev. C schematic and dimension drawing",
   },
 }

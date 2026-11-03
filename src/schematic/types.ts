@@ -181,6 +181,7 @@ export type PartDef =
       y: number
       /** Cable comes from this side of the connector. */
       side: Side
+      plug?: "usb-b"
       /** State before the user touches it (a board ships plugged in). */
       initial?: PartState
     }
@@ -269,7 +270,7 @@ export type Value = number | string | ((props: Record<string, string>) => number
  * the rest of the part keeps working on its own (the other half of a potentiometer).
  */
 /** `slow`: fails only by heating, never at once past 20 × its rating (a supply whose protection rides out a µs inrush). */
-export type Limits = { power?: Value; current?: Value; voltage?: Value; reverse?: Value; surge?: Value; tau?: Value; fail?: "open" | "short"; fatal?: boolean; aboveSupply?: Value; slow?: boolean }
+export type Limits = { power?: Value; current?: Value; voltage?: Value; reverse?: Value; surge?: Value; tau?: Value; fail?: "open" | "short"; fatal?: boolean; aboveSupply?: Value; slow?: boolean; overstress?: { seconds: Value; surgeVoltage?: Value; reverseSurge?: Value } }
 
 export type Element =
   /** `live` names a pin-reader key the simulation loop answers with the resistance to use right now (an MCU's supply load by power mode). */
@@ -454,6 +455,7 @@ export type ComponentDef = {
    */
   mcuVbat?: string
   mcuVref?: string
+  mcuVdda?: string
   /**
    * Clock sources a board carries for its MCU (null: the pins are free). A bare chip omits this
    * and gets its HSE/LSE from crystals or oscillators wired to its OSC pins on the field.

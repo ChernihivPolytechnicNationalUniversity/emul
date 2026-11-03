@@ -207,6 +207,17 @@ const BAT_AVG_BUCKET = BAT_AVG_WINDOW / BAT_AVG_BUCKETS
 const BAT_LEAK = 1e-8
 /** A battery's resistance is stepped in 1 % increments as it drains, so a linear circuit keeps its factorization between steps. */
 const BAT_R_STEP = Math.log(1.01)
+const LANE_A_SEED = 0x811c9dc5 | 0
+const LANE_B_SEED = 0x2545f491
+const mixA = (h: number, t: number) => Math.imul(h ^ t, 0x01000193)
+const mixB = (h: number, t: number) => {
+  const m = Math.imul(h ^ t, 0x85ebca6b)
+  return m ^ (m >>> 13)
+}
+const keyOf = (a: number, b: number) => (a >>> 0) * 0x200000 + (b >>> 11)
+const floatScratch = new Float64Array(1)
+const floatWords = new Int32Array(floatScratch.buffer)
+
 /** Charge forced into a primary cell before it vents, as a fraction of its capacity. */
 const PRIMARY_CHARGE_LIMIT = 0.03
 /** Cells a pack can have in series (the inspector's slider range); per-cell state is laid out in blocks of this. */
@@ -352,6 +363,9 @@ export class Engine {
   private readonly indV: Float64Array
   /** Accumulated overload (seconds × excess ratio). */
   private readonly stress: Float64Array
+  private readonly overstressed: Float64Array
+  private readonly overstressElements: Int32Array
+  private readonly rRated: Float64Array
   /** Load against the heating rating each element last ran at, for the settled steps. */
   private readonly rRatio: Float64Array
   /** Last junction voltages used for limiting: [vd | vbe] and [vbc]. */
@@ -508,6 +522,12 @@ export class Engine {
   private readonly junctionElements: Int32Array
   private readonly nonlinearElements: Int32Array
   private readonly maskElements: Int32Array
+  private readonly maskPads: Int32Array
+  private padMaskA = 0
+  private padMaskB = 0
+  private padRestA = 0
+  private padRestB = 0
+  private padMaskStale = true
   /** RMS averaging time constant, seconds. */
   private readonly tau: number
   /** Switch/pad hash of the current step, and how many steps in a row ended at a fixed point. */
@@ -588,6 +608,7 @@ export class Engine {
     this.partKeys = net.elements.map((el) => (el.kind === "SW" ? partKey(el.object, el.part) : ""))
     this.padElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) ? [i] : [])))
     this.diodeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "D" && el.part ? [i] : [])))
+    this.overstressElements = Int32Array.from(net.elements.flatMap((el, i) => (el.limits?.overstress ? [i] : [])))
     this.limitsOf = net.elements.map((el) => el.limits)
     this.isDiode = Uint8Array.from(net.elements, (el) => (el.kind === "D" ? 1 : 0))
     this.heatDt = new Float64Array(net.elements.length)
@@ -596,7 +617,8 @@ export class Engine {
     this.nonlinearElements = Int32Array.from(net.elements.flatMap((el, i) => (NONLINEAR_KINDS.has(el.kind) ? [i] : [])))
     this.strikeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "SW" && el.strike !== Infinity ? [i] : [])))
     this.pulseElements = Int32Array.from(net.elements.flatMap((el, i) => (isPulse(el) ? [i] : [])))
-    this.maskElements = Int32Array.from(net.elements.flatMap((el, i) => (switchesMask(el) ? [i] : [])))
+    this.maskElements = Int32Array.from(net.elements.flatMap((el, i) => (switchesMask(el) && el.kind !== "GPIO" ? [i] : [])))
+    this.maskPads = Int32Array.from(net.elements.flatMap((el, i) => (switchesMask(el) && el.kind === "GPIO" ? [i] : [])))
     this.liveElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) || (el.kind === "V" && el.amplitude > 0) ? [i] : [])))
     this.stateless = !net.elements.some((el) => el.kind === "C" || el.kind === "L" || el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR" || el.kind === "OPAMP")
     this.drifting = net.elements.some((el) => el.kind === "BAT" || el.kind === "CHG" || el.kind === "PROT")
@@ -618,6 +640,8 @@ export class Engine {
     this.indI = new Float64Array(m)
     this.indV = new Float64Array(m)
     this.stress = new Float64Array(m)
+    this.overstressed = new Float64Array(m)
+    this.rRated = new Float64Array(m)
     this.rRatio = new Float64Array(m)
     this.jA = new Float64Array(m)
     this.jB = new Float64Array(m)
@@ -721,6 +745,7 @@ export class Engine {
       this.indI[to] = prev.indI[from]
       this.indV[to] = prev.indV[from]
       this.stress[to] = prev.stress[from]
+      this.overstressed[to] = prev.overstressed[from]
       this.rRatio[to] = prev.rRatio[from]
       this.msI[to] = prev.msI[from]
       this.msV[to] = prev.msV[from]
@@ -1123,6 +1148,8 @@ export class Engine {
       if (heat > 1) return false
       this.stress[i] = heat
     }
+    const overstressed = this.overstressElements
+    for (let j = 0; j < overstressed.length; j++) if (this.overstressTime(overstressed[j], dt) > this.limitsOf[overstressed[j]]!.overstress!.seconds) return false
     const ptcs = this.ptcElements
     for (let j = 0; j < ptcs.length; j++) {
       const i = ptcs[j]
@@ -1145,7 +1172,15 @@ export class Engine {
         this.msV[i] = this.ema(this.msV[i], v * v, dt)
         this.msP[i] = this.ema(this.msP[i], this.rPower[i], dt)
       }
+    for (let j = 0; j < overstressed.length; j++) this.overstressed[overstressed[j]] = this.overstressTime(overstressed[j], dt)
     return true
+  }
+
+  private overstressTime(i: number, dt: number): number {
+    const lim = this.limitsOf[i]!
+    const v = this.rRated[i]
+    const over = (lim.voltage !== undefined && v > lim.voltage) || (lim.reverse !== undefined && -v > lim.reverse)
+    return Math.max(0, this.overstressed[i] + (over ? dt : -dt))
   }
 
   private see(i: number, amps: number, dt: number) {
@@ -1387,10 +1422,36 @@ export class Engine {
     }
   }
 
+  private padHash() {
+    if (!this.padMaskStale) return
+    let maskA = LANE_A_SEED
+    let maskB = LANE_B_SEED
+    let restA = LANE_A_SEED
+    let restB = LANE_B_SEED
+    const pads = this.maskPads
+    for (let k = 0; k < pads.length; k++) {
+      const i = pads[k]
+      const t = this.gpioState[i] + 7 * this.padSteps[i]
+      maskA = mixA(maskA, t)
+      maskB = mixB(maskB, t)
+      if (this.leafOf[i] >= 0) continue
+      restA = mixA(restA, t)
+      restB = mixB(restB, t)
+    }
+    this.padMaskA = maskA
+    this.padMaskB = maskB
+    this.padRestA = restA
+    this.padRestB = restB
+    this.padMaskStale = false
+  }
+
   /** Hash of every switch and pad state, so a toggle invalidates the cached factorization; the hash without the pads on leaves goes to `restMask`. */
   private switchMask(parts: PartReader) {
-    let mask = 0
-    let rest = 0
+    this.padHash()
+    let maskA = this.padMaskA
+    let maskB = this.padMaskB
+    let restA = this.padRestA
+    let restB = this.padRestB
     const elements = this.net.elements
     const masked = this.maskElements
     for (let k = 0; k < masked.length; k++) {
@@ -1398,21 +1459,25 @@ export class Engine {
       const el = elements[i]
       let t = 0
       if (el.kind === "SW") t = switchClosed(el.closed, parts(this.partKeys[i])) ? 1 : this.arc[i] ? 2 : 0
-      else if (el.kind === "GPIO") {
-        mask = (mask * 31 + this.gpioState[i] + 7 * this.padSteps[i]) | 0
-        if (this.leafOf[i] < 0) rest = (rest * 31 + this.gpioState[i] + 7 * this.padSteps[i]) | 0
-        continue
-      } else if (el.kind === "R" && el.live) t = this.ohms[i] | 0
-      else if (el.kind === "R" && el.ptc) t = this.ptcTripped[i] ? (Math.round(this.ohms[i] * 1e3) | 0) + 1 : 0
+      else if (el.kind === "R" && el.live) {
+        floatScratch[0] = this.ohms[i]
+        maskA = mixA(maskA, floatWords[0])
+        maskB = mixB(maskB, floatWords[0])
+        restA = mixA(restA, floatWords[0])
+        restB = mixB(restB, floatWords[0])
+        t = floatWords[1]
+      } else if (el.kind === "R" && el.ptc) t = this.ptcTripped[i] ? (Math.round(this.ohms[i] * 1e3) | 0) + 1 : 0
       else if (el.kind === "BAT") t = this.batStep[i]
       else if (el.kind === "CHG" || el.kind === "PROT" || el.kind === "TMR") t = this.ctl[i]
       else if (el.kind === "REG") t = this.regHot[i]
       else if (el.kind === "V") t = pulseHigh(this.stepEnd, el) ? 1 : 0
-      mask = (mask * 31 + t) | 0
-      rest = (rest * 31 + t) | 0
+      maskA = mixA(maskA, t)
+      maskB = mixB(maskB, t)
+      restA = mixA(restA, t)
+      restB = mixB(restB, t)
     }
-    this.restMask = rest
-    return mask
+    this.restMask = keyOf(restA, restB)
+    return keyOf(maskA, maskB)
   }
 
   /** A pad on a leaf changed: note the leaf, and the pad's state before (once a step). */
@@ -1647,6 +1712,7 @@ export class Engine {
             if (this.leafOf[i] < 0) disturbed = true
             else this.markLeaf(i)
           }
+          if (this.gpioState[i] !== GPIO_VOLTS) this.padMaskStale = true
           this.gpioState[i] = GPIO_VOLTS
           this.gpioVolts[i] = st
         } else {
@@ -1654,6 +1720,7 @@ export class Engine {
           if (this.gpioState[i] !== code) {
             if (this.leafOf[i] < 0) disturbed = true
             else this.markLeaf(i)
+            this.padMaskStale = true
           }
           this.gpioState[i] = code
         }
@@ -1853,6 +1920,7 @@ export class Engine {
       const steps = Math.round(Math.log(scale) / CMOS_STEP)
       if (steps === this.padSteps[i]) continue
       this.padSteps[i] = steps
+      this.padMaskStale = true
       this.ohms[i] = el.ohms * Math.exp(steps * CMOS_STEP)
       changed = true
     }
@@ -3359,6 +3427,7 @@ export class Engine {
     this.rCurrent[i] = cur
     this.rVoltage[i] = v
     this.rPower[i] = p
+    this.rRated[i] = ratedV
     // A step the solver could not settle is not evidence of anything: an exponential evaluated
     // at a stray iterate reads megawatts. Such a step still shows its (flagged) numbers, but it
     // must not heat a part, break one, or poison the running averages.
@@ -3390,11 +3459,23 @@ export class Engine {
     if (lim.reverse !== undefined && -ratedV / lim.reverse > load) load = -ratedV / lim.reverse
     this.rLoad[i] = load
 
-    if (voltageMax !== undefined && Math.abs(ratedV) > voltageMax)
-      return this.fail(el, lim.fail, "voltage", Math.abs(ratedV), voltageMax, "V")
-    // Polarity: an electrolytic the wrong way round breaks down long before its rating.
-    if (lim.reverse !== undefined && -ratedV > lim.reverse)
-      return this.fail(el, lim.fail, "reverse voltage", -ratedV, lim.reverse, "V")
+    const os = lim.overstress
+    if (os) {
+      if (os.surgeVoltage !== undefined && ratedV > os.surgeVoltage) return this.fail(el, lim.fail, "surge voltage", ratedV, os.surgeVoltage, "V")
+      if (os.reverseSurge !== undefined && -ratedV > os.reverseSurge) return this.fail(el, lim.fail, "reverse voltage", -ratedV, os.reverseSurge, "V")
+      const over = voltageMax !== undefined && ratedV > voltageMax
+      this.overstressed[i] = this.overstressTime(i, dt)
+      if (this.overstressed[i] > os.seconds) {
+        const [what, actual, rated] = over ? ["voltage", ratedV, voltageMax!] : ["reverse voltage", -ratedV, lim.reverse!]
+        return this.failWith(el, lim.fail, `${what} ${formatSI(actual, "V")} past the ${formatSI(rated, "V")} rating for over ${formatSI(os.seconds, "s")}`)
+      }
+    } else {
+      if (voltageMax !== undefined && Math.abs(ratedV) > voltageMax)
+        return this.fail(el, lim.fail, "voltage", Math.abs(ratedV), voltageMax, "V")
+      // Polarity: an electrolytic the wrong way round breaks down long before its rating.
+      if (lim.reverse !== undefined && -ratedV > lim.reverse)
+        return this.fail(el, lim.fail, "reverse voltage", -ratedV, lim.reverse, "V")
+    }
     if (el.kind === "SW") {
       const weldCurrent = lim.surge ?? Infinity
       const melt = Math.abs(cur) / weldCurrent

@@ -63,7 +63,7 @@ export const discoveryAudio: Example = {
 export const h405Blink: Example = {
   id: "h405-blink",
   name: "STM32-H405 blink",
-  description: "Olimex STM32-H405: the STAT LED blinks every 500 ms, every 100 ms while BUT is held.",
+  description: "Olimex STM32-H405: the STAT LED toggles every 500 ms, every 100 ms while BUT is held.",
   icon: CpuIcon,
   projects: [{ ref: "U1", load: async () => template("stm32f405rg") }],
   build(grid) {

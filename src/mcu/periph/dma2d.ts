@@ -5,16 +5,21 @@
  * written (the bus is not shared, so nothing observes it in flight), then TCIF is set and
  * the interrupt raised if enabled. CLUT loads work the same way.
  */
-import type { Bus } from "../bus"
+import { BusFault, type Bus, type MemoryPort } from "../bus"
 import { RegBlock, type RegDef } from "./regblock"
 import { pixelToArgb, PIXEL_BYTES, type PixelFormat } from "./ltdc"
+
+type Port = Pick<MemoryPort, "read8" | "write8" | "write16" | "write32">
+type Span = { start: number; rows: number; rowBytes: number; stride: number }
 
 const DMA2D_BASE = 0x4002b000
 export const DMA2D_IRQ = 90
 
 const CR_START = 1
+const CR_TEIE = 1 << 8
 const CR_TCIE = 1 << 9
 const CR_CTCIE = 1 << 12
+const ISR_TEIF = 1
 const ISR_TCIF = 2
 const ISR_CTCIF = 1 << 4
 const ISR_CEIF = 1 << 5
@@ -84,14 +89,23 @@ export class Dma2d extends RegBlock {
           const addr = this.get(fg ? "FGCMAR" : "BGCMAR")
           const entries = ((next >>> 8) & 0xff) + 1
           const rgb888 = (next & (1 << 4)) !== 0
+          const size = rgb888 ? 3 : 4
+          if (!this.bus) return next & ~(1 << 5)
+          const port = this.portFor([{ start: addr >>> 0, rows: 1, rowBytes: entries * size, stride: 0 }])
           const clut = this.cluts[fg ? 0 : 1]
-          for (let i = 0; i < entries; i++) {
-            const a = addr + i * (rgb888 ? 3 : 4)
-            const b = this.bus?.read(a, 1) ?? 0
-            const g = this.bus?.read(a + 1, 1) ?? 0
-            const r = this.bus?.read(a + 2, 1) ?? 0
-            const al = rgb888 ? 0xff : (this.bus?.read(a + 3, 1) ?? 0)
-            clut[i] = ((al << 24) | (r << 16) | (g << 8) | b) >>> 0
+          try {
+            for (let i = 0; i < entries; i++) {
+              const a = addr + i * size
+              const b = port.read8(a)
+              const g = port.read8(a + 1)
+              const r = port.read8(a + 2)
+              const al = rgb888 ? 0xff : port.read8(a + 3)
+              clut[i] = ((al << 24) | (r << 16) | (g << 8) | b) >>> 0
+            }
+          } catch (e) {
+            if (!(e instanceof BusFault)) throw e
+            this.transferError()
+            return next & ~(1 << 5)
           }
           this.regs[0x04 >>> 2] |= ISR_CTCIF
           if (this.get("CR") & CR_CTCIE) this.raiseIrq?.(DMA2D_IRQ)
@@ -102,8 +116,7 @@ export class Dma2d extends RegBlock {
   }
 
   /** Read one input pixel as ARGB with the layer's alpha mode and colour applied. */
-  private inputPixel(addr: number, cm: number, pfccr: number, colr: number, clut: Uint32Array, sub: number): number {
-    const bus = this.bus!
+  private inputPixel(bus: Port, addr: number, cm: number, pfccr: number, colr: number, clut: Uint32Array, sub: number): number {
     let argb: number
     if (cm === CM_L4) {
       const byte = bus.read8(addr)
@@ -130,8 +143,7 @@ export class Dma2d extends RegBlock {
   }
 
   /** Write one output pixel in OPFCCR's colour mode. */
-  private outputPixel(addr: number, cm: number, argb: number) {
-    const bus = this.bus!
+  private outputPixel(bus: Port, addr: number, cm: number, argb: number) {
     const a = argb >>> 24
     const r = (argb >>> 16) & 0xff
     const g = (argb >>> 8) & 0xff
@@ -155,6 +167,24 @@ export class Dma2d extends RegBlock {
         bus.write16(addr, ((a >>> 4) << 12) | ((r >>> 4) << 8) | ((g >>> 4) << 4) | (b >>> 4))
         return
     }
+  }
+
+  private portFor(spans: readonly Span[]): Port {
+    const bus = this.bus!
+    const reachesCpuOnly = spans.some(({ start, rows, rowBytes, stride }) => rows > 0 && rowBytes > 0 && bus.cpuDataOnlyWithin(start, start + (rows - 1) * stride + rowBytes - 1))
+    return reachesCpuOnly ? this.asMaster : bus
+  }
+
+  private readonly asMaster: Port = {
+    read8: (addr) => this.bus!.masterRead(addr, 1),
+    write8: (addr, v) => this.bus!.masterWrite(addr, v, 1),
+    write16: (addr, v) => this.bus!.masterWrite(addr, v, 2),
+    write32: (addr, v) => this.bus!.masterWrite(addr, v, 4),
+  }
+
+  private transferError() {
+    this.regs[0x04 >>> 2] |= ISR_TEIF
+    if (this.get("CR") & CR_TEIE) this.raiseIrq?.(DMA2D_IRQ)
   }
 
   /** Bytes per pixel of an input colour mode; L4/A4 are half a byte and handled by the caller. */
@@ -189,78 +219,90 @@ export class Dma2d extends RegBlock {
     const fcolr = this.get("FGCOLR")
     const bcolr = this.get("BGCOLR")
     const ocolr = this.get("OCOLR") >>> 0
+    const rows = (start: number, offset: number, bpp: number): Span => ({ start, rows: lines, rowBytes: Math.ceil(pixels * bpp), stride: Math.ceil((pixels + offset) * bpp) })
+    const spans = [rows(oaddr, oor, obpp)]
+    if (mode !== 3) spans.push(rows(faddr, fgor, fbpp))
+    if (mode === 2) spans.push(rows(baddr, bgor, bbpp))
+    const port = this.portFor(spans)
+    const bus = this.bus
     // Register-to-memory: the colour is already in the output format.
     const fill = mode === 3 ? (ocm === 0 ? ocolr : ocm === 1 ? (0xff000000 | (ocolr & 0xffffff)) >>> 0 : ocolr & 0xffff) : 0
     // The two bulk cases straight through memory: a fill in a 32/24-bit format, and a copy
     // between identical formats with the alpha untouched. Anything else goes pixel by pixel.
     const bulkFill = mode === 3
     const bulkCopy = mode === 0 && fcm === ocm && ((fgpfccr >>> 16) & 3) === 0 && obpp === fbpp
-    for (let y = 0; y < lines; y++) {
-      const rowBytes = pixels * obpp
-      if (bulkFill) {
-        const out = this.bus.span(oaddr, rowBytes, true)
-        if (out) {
-          const { bytes, offset } = out
-          if (obpp === 4) {
-            const view = new DataView(bytes.buffer, bytes.byteOffset)
-            for (let x = 0; x < pixels; x++) view.setUint32(offset + x * 4, fill, true)
-          } else if (obpp === 2) {
-            const view = new DataView(bytes.buffer, bytes.byteOffset)
-            for (let x = 0; x < pixels; x++) view.setUint16(offset + x * 2, fill, true)
-          } else {
-            const b = fill & 0xff
-            const g = (fill >>> 8) & 0xff
-            const r = (fill >>> 16) & 0xff
-            for (let x = 0, o = offset; x < pixels; x++, o += 3) {
-              bytes[o] = b
-              bytes[o + 1] = g
-              bytes[o + 2] = r
+    try {
+      for (let y = 0; y < lines; y++) {
+        const rowBytes = pixels * obpp
+        if (bulkFill) {
+          const out = bus.span(oaddr, rowBytes, true)
+          if (out) {
+            const { bytes, offset } = out
+            if (obpp === 4) {
+              const view = new DataView(bytes.buffer, bytes.byteOffset)
+              for (let x = 0; x < pixels; x++) view.setUint32(offset + x * 4, fill, true)
+            } else if (obpp === 2) {
+              const view = new DataView(bytes.buffer, bytes.byteOffset)
+              for (let x = 0; x < pixels; x++) view.setUint16(offset + x * 2, fill, true)
+            } else {
+              const b = fill & 0xff
+              const g = (fill >>> 8) & 0xff
+              const r = (fill >>> 16) & 0xff
+              for (let x = 0, o = offset; x < pixels; x++, o += 3) {
+                bytes[o] = b
+                bytes[o + 1] = g
+                bytes[o + 2] = r
+              }
             }
-          }
-          oaddr += (pixels + oor) * obpp
-          faddr += Math.ceil((pixels + fgor) * fbpp)
-          baddr += Math.ceil((pixels + bgor) * bbpp)
-          continue
-        }
-      } else if (bulkCopy) {
-        const out = this.bus.span(oaddr, rowBytes, true)
-        const src = this.bus.span(faddr, rowBytes, false)
-        if (out && src) {
-          out.bytes.set(src.bytes.subarray(src.offset, src.offset + rowBytes), out.offset)
-          oaddr += (pixels + oor) * obpp
-          faddr += Math.ceil((pixels + fgor) * fbpp)
-          baddr += Math.ceil((pixels + bgor) * bbpp)
-          continue
-        }
-      }
-      for (let x = 0; x < pixels; x++) {
-        let argb: number
-        if (mode === 3) {
-          if (ocm <= 1) argb = fill
-          else {
-            // 16-bit formats take the colour as packed bits: write it straight.
-            this.bus.write16(oaddr + x * obpp, ocolr & 0xffff)
+            oaddr += (pixels + oor) * obpp
+            faddr += Math.ceil((pixels + fgor) * fbpp)
+            baddr += Math.ceil((pixels + bgor) * bbpp)
             continue
           }
-        } else {
-          const fa = faddr + Math.floor(x * fbpp)
-          argb = this.inputPixel(fa, fcm, fgpfccr, fcolr, this.cluts[0], x & 1)
-          if (mode === 2) {
-            const ba = baddr + Math.floor(x * bbpp)
-            const bg = this.inputPixel(ba, bcm, bgpfccr, bcolr, this.cluts[1], x & 1)
-            // Alpha blending as RM0385 §9.3.6: out = fg·αf + bg·αb·(1 − αf), normalised by the result alpha.
-            const af = (argb >>> 24) / 255
-            const ab = (bg >>> 24) / 255
-            const ao = af + ab * (1 - af)
-            const mix = (f: number, b: number) => (ao > 0 ? Math.round((f * af + b * ab * (1 - af)) / ao) : 0)
-            argb = ((Math.round(ao * 255) << 24) | (mix((argb >>> 16) & 0xff, (bg >>> 16) & 0xff) << 16) | (mix((argb >>> 8) & 0xff, (bg >>> 8) & 0xff) << 8) | mix(argb & 0xff, bg & 0xff)) >>> 0
+        } else if (bulkCopy) {
+          const out = bus.span(oaddr, rowBytes, true)
+          const src = bus.span(faddr, rowBytes, false)
+          if (out && src) {
+            out.bytes.set(src.bytes.subarray(src.offset, src.offset + rowBytes), out.offset)
+            oaddr += (pixels + oor) * obpp
+            faddr += Math.ceil((pixels + fgor) * fbpp)
+            baddr += Math.ceil((pixels + bgor) * bbpp)
+            continue
           }
         }
-        this.outputPixel(oaddr + x * obpp, ocm, argb)
+        for (let x = 0; x < pixels; x++) {
+          let argb: number
+          if (mode === 3) {
+            if (ocm <= 1) argb = fill
+            else {
+              // 16-bit formats take the colour as packed bits: write it straight.
+              port.write16(oaddr + x * obpp, ocolr & 0xffff)
+              continue
+            }
+          } else {
+            const fa = faddr + Math.floor(x * fbpp)
+            argb = this.inputPixel(port, fa, fcm, fgpfccr, fcolr, this.cluts[0], x & 1)
+            if (mode === 2) {
+              const ba = baddr + Math.floor(x * bbpp)
+              const bg = this.inputPixel(port, ba, bcm, bgpfccr, bcolr, this.cluts[1], x & 1)
+              // Alpha blending as RM0385 §9.3.6: out = fg·αf + bg·αb·(1 − αf), normalised by the result alpha.
+              const af = (argb >>> 24) / 255
+              const ab = (bg >>> 24) / 255
+              const ao = af + ab * (1 - af)
+              const mix = (f: number, b: number) => (ao > 0 ? Math.round((f * af + b * ab * (1 - af)) / ao) : 0)
+              argb = ((Math.round(ao * 255) << 24) | (mix((argb >>> 16) & 0xff, (bg >>> 16) & 0xff) << 16) | (mix((argb >>> 8) & 0xff, (bg >>> 8) & 0xff) << 8) | mix(argb & 0xff, bg & 0xff)) >>> 0
+            }
+          }
+          this.outputPixel(port, oaddr + x * obpp, ocm, argb)
+        }
+        oaddr += (pixels + oor) * obpp
+        faddr += Math.ceil((pixels + fgor) * fbpp)
+        baddr += Math.ceil((pixels + bgor) * bbpp)
       }
-      oaddr += (pixels + oor) * obpp
-      faddr += Math.ceil((pixels + fgor) * fbpp)
-      baddr += Math.ceil((pixels + bgor) * bbpp)
+    } catch (e) {
+      if (!(e instanceof BusFault)) throw e
+      this.transferError()
+      return
     }
     this.transfers++
     this.regs[0x04 >>> 2] |= ISR_TCIF

@@ -2,7 +2,7 @@
 
 ## Layout
 
-- `src/mcu/` — the emulator: `cpu.ts`, `decode.ts`, `jit.ts` (blocks compiled to JavaScript), `scs.ts` (NVIC/SysTick/SCB), `mpu.ts` (the MPU and the unprivileged PPB rule, checked in front of the bus only while they can refuse something), `bus.ts`, `periph/*`, `chip.ts` (profiles), `stm32f429.ts` (the SoC class `Stm32`), `debugger.ts` (breakpoints and stepping, beside the core), `core-worker.ts` (one core in a worker of its own)
+- `src/mcu/` — the emulator: `cpu.ts`, `decode.ts`, `jit.ts` (blocks compiled to JavaScript), `scs.ts` (NVIC/SysTick/SCB), `mpu.ts` (the MPU and the unprivileged PPB rule, checked in front of the bus only while they can refuse something), `bus.ts`, `periph/*`, `chip.ts` (profiles), `supply.ts` (the supply-current tables a profile may carry: base by HCLK, per-peripheral µA/MHz, low-power and VBAT rows), `stm32f429.ts` (the SoC class `Stm32`), `debugger.ts` (breakpoints and stepping, beside the core), `core-worker.ts` (one core in a worker of its own)
 - `src/sim/` — analog engine (`engine.ts`), netlist, the co-simulation loop (`loop.ts`) and its worker, `core-host.ts` (a core in this thread or in a worker, over a SharedArrayBuffer), digital parts (`digital.ts`)
 - `src/schematic/` — component definitions (`components/*`), examples, geometry, `mcu-model.ts`; wiring in `nets.ts` (the net map), `wiring.ts` (connect, tap), `wire-colors.ts` (palette, shortcuts, the automatic rule)
 - `src/debug/` — the debugger's reading of an image: `dwarf/*` (DWARF 2–5: units, line programs, range and location lists, call frame information, expressions, macros), `lines.ts` (the line table, shared by the core and the editor), `info.ts`, `unwind.ts`, `values.ts` and `eval.ts` (values and C expressions over a stop's memory), `disasm.ts`, `sources.ts` (where a file the image names comes from); `session.ts` is the UI's controller for the whole bench
@@ -320,6 +320,15 @@ walks only that pattern in that order. The order is redone when a stamp lands ou
 reused pivot falls under the threshold against its column, a stricter test than ngspice's `spFactor`, which
 reuses the order until a pivot is exactly zero; KLU's guide recommends a check of this kind after `klu_refactor`.
 On the examples the order is redone one to seven times in two simulated seconds.
+
+A linear circuit keeps its factorization from step to step while nothing that is stamped into the
+matrix changes. What can change is keyed in one number: every switch, arc, live resistance, tripped
+polyfuse, battery step, controller and regulator state, pulse level and every pad's state and drive
+step, folded into two 32-bit lanes (FNV-1a and a multiply-xorshift) and joined into 53 bits. A live
+resistance goes in as its float's 64 bits, not rounded to whole ohms. The pads' share is rehashed only
+when a pad's state or drive step was written. A base-31 sum, which this replaced, took
+`(pad low, 1 Ω)` and `(pad high, 32 Ω)` for one circuit and solved the second on the first's factors
+(`tests/sim/engine-lu-key.test.ts`).
 
 The dense factorization this replaced cost O(n³) every step. On the metronome (53 unknowns, 115 elements) a 20 µs
 step took 113 µs in Node, 46 of them in the factorization; it now takes about 45. Measured in headless

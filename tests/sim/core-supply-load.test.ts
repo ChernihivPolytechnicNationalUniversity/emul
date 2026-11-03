@@ -11,10 +11,12 @@ import { PIC16F628A } from "@/mcu/pic/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import { AvrCore } from "@/sim/avr-core"
 import { PicCore } from "@/sim/pic-core"
+import { STM32F405RG } from "@/mcu/chip"
+import { LocalCore } from "@/sim/core-host"
 import { DT } from "@/sim/speeds"
 import { buffer, example } from "../lib/firmware"
 
-type Core = AvrCore | PicCore
+type Core = AvrCore | PicCore | LocalCore
 
 /** `steps` steps at `volts(step)`, the loop's way: supply, run, read the load. */
 function run(core: Core, steps: number, volts: (step: number) => number) {
@@ -36,6 +38,15 @@ function avr() {
   return core
 }
 
+function f405() {
+  const image = buffer(example("adc-idle.elf")).slice(0)
+  new DataView(image).setUint32(0x1000, 0x20020000, true)
+  new DataView(image).setUint16(0x11ac, 0xbf00, true)
+  const core = new LocalCore(STM32F405RG)
+  core.load(image, "busy.elf")
+  return core
+}
+
 function pic() {
   const core = new PicCore(PIC16F628A)
   core.load(buffer(example("pic-blink.hex")), "pic-blink.hex")
@@ -46,12 +57,13 @@ describe("the supply current a core puts on the circuit", () => {
   for (const [name, make] of [
     ["ATmega328P", avr],
     ["PIC16F628A", pic],
+    ["STM32F405RG", f405],
   ] as const) {
     it(`${name}: 50 mV of ripple every other step does not move the resistor`, () => {
       const core = make()
-      // 200 ms: past the start-up delay and the sleep share's 10 ms average.
-      run(core, 10000, () => 5)
-      const loads = run(core, 2500, (k) => (k % 2 ? 4.95 : 5))
+      const volts = name === "STM32F405RG" ? 3.3 : 5
+      run(core, 10000, () => volts)
+      const loads = run(core, 2500, (k) => (k % 2 ? volts - 0.05 : volts))
       expect(changes(loads), "changes of the load over 50 ms of ripple").toBeLessThanOrEqual(2)
       expect(loads.at(-1)! > 0).toBe(true)
     })

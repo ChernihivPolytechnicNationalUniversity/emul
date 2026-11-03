@@ -7,6 +7,7 @@ import { blockName } from "./blocks"
 import { Bus, type Peripheral } from "./bus"
 import type { Clocked } from "./periph/clocked"
 import { blocksOf, internalChannelVolts, STM32F429ZI, type ChipProfile, type MemoryRegion } from "./chip"
+import { BACKUP_LSE, BACKUP_REGULATOR, backupDomainAmps, bondedEnables, flashProgramEraseAmps, PSIZE_X64, runAmps, sleepAmps, standbyAmps, stopAmps, type EnableRegisters, type SupplyState, type SupplyTables } from "./supply"
 import { Cpu } from "./cpu"
 import { CoreDebugger } from "./debugger"
 import { parseFirmware, type Firmware } from "./elf"
@@ -33,6 +34,12 @@ import { connectTimers, Tim, TIM_LINE, TIM_SPECS, timAuxPads, timPads, type TimP
 import { Usart, USART_SPECS, usartPads, type UsartPad } from "./periph/usart"
 
 const LOAD_AVERAGED_OVER_SECONDS = 0.01
+const FLASH_BASE = 0x08000000
+const FLASH_END = 0x08200000
+const MAX_SLICE_CYCLES = 20000
+const LOAD_VDD_STEP = 0.01
+const SUPPLY_TABLES_VDD_MIN = 1.7
+const SUPPLY_TABLES_VDD_MAX = 3.6
 const LOAD_SLEEP_SHARE_STEP = 1 / 32
 const LOAD_SHARE_HYSTERESIS = 0.75
 
@@ -157,11 +164,23 @@ export class Stm32 {
   /** WKUP pin index that ended the Standby (−1: the RTC did), for PWR's flags. */
   private standbyWakePin = -1
   /** Cycle counters behind the run/sleep duty for the supply current and the status line. */
-  private readonly supplyMeter = { cycles: 0, sleep: 0 }
-  private readonly statusMeter = { cycles: 0, sleep: 0 }
-  private readonly loadMeter = { cycles: 0, sleep: 0 }
+  private readonly supplyMeter = { cycles: 0, sleep: 0, flashCharge: 0, flashAmps: 0 }
+  private readonly statusMeter = { cycles: 0, sleep: 0, flashCharge: 0, flashAmps: 0 }
+  private readonly loadMeter = { cycles: 0, sleep: 0, flashCharge: 0, flashAmps: 0 }
+  private readonly share = { asleep: 0, flashAmps: 0 }
   private loadAsleep = 0
   private loadSleepShare = 0
+  private loadVdd = NaN
+  private loadVddShare = NaN
+  private readonly supplyKey = new Float64Array(16).fill(NaN)
+  private supplyNow: SupplyState | null = null
+  private supplyRunAmps = 0
+  private supplySleepAmps = 0
+  private readonly bonded: EnableRegisters | null
+  private flashCharge = 0
+  private runEnd = 0
+  private stallPending = 0
+  private stallPendingCharge = 0
   /** Volts on a pad as the circuit has them (set by the board model); null: unknown, reads as 0 V. */
   analogRead: (pad: PadRef) => number | null = () => null
   analogSource: (pad: PadRef) => { ohms: number; farads: number } | null = () => null
@@ -241,8 +260,18 @@ export class Stm32 {
     this.flash = new FlashIf(chip.flash.map, chip.flash, flashRegion.base, chip.line === "f40x" ? "f40x" : chip.line === "f411" || chip.line === "f401" ? "f411" : "full")
     this.flash.bus = bus
     bus.flashWriter = (addr, value, size) => this.flash.programWrite(addr, value, size)
-    this.flash.onBusy = (seconds) => {
-      this.cpu.cycles += Math.round(seconds * this.sliceHz)
+    this.bonded = chip.electrical.supply ? bondedEnables(chip.electrical.supply, chip.notBonded ?? []) : null
+    this.flash.onBusy = (seconds, psize) => {
+      const t = chip.electrical.supply
+      if (t && psize === PSIZE_X64) this.unmodelled.feature("flash program/erase current at x64 parallelism (DS8626 Table 39 gives none: x64 needs VPP); taken as x32's")
+      const amps = t ? flashProgramEraseAmps(t, psize) : 0
+      const now = this.time + (this.cpu.cycles - this.sliceStart) / this.sliceHz
+      const within = Math.max(0, Math.min(seconds, this.runEnd - now))
+      const stall = Math.round(within * this.sliceHz)
+      this.cpu.cycles += stall
+      this.flashCharge += stall * amps
+      this.stallPending += seconds - within
+      this.stallPendingCharge += (seconds - within) * amps
     }
     this.flash.raiseIrq = (irq) => this.cpu.scs.raiseIrq(irq)
     // Wait states: the core pays ACR.LATENCY per new flash line unless the prefetch buffer
@@ -367,8 +396,8 @@ export class Stm32 {
       d.reschedule = () => this.schedule()
       d.onActive = (on) => this.setActive(d, on)
       d.onUnsupported = (what) => this.unmodelled.feature(what)
-      d.readBus = (addr, size) => this.bus.read(addr, size)
-      d.writeBus = (addr, value, size) => this.bus.write(addr, value, size)
+      d.readBus = (addr, size) => this.bus.masterRead(addr, size)
+      d.writeBus = (addr, value, size) => this.bus.masterWrite(addr, value, size)
       d.levelOf = (source) => this.dmaLevel(source)
       this.dma.push(d)
       bus.attach(d)
@@ -808,7 +837,7 @@ export class Stm32 {
     const otp = this.bus.bytesAt(factory.otp.base)!
     otp.bytes.fill(0xff, otp.offset, otp.offset + factory.otp.size)
     factory.uid.words.forEach((word, i) => viewAt(factory.uid.at + 4 * i).setUint32(0, word, true))
-    for (const half of [factory.flashSizeKb, factory.vrefintCal, factory.tsCal1, factory.tsCal2, factory.packageData]) viewAt(half.at).setUint16(0, half.value, true)
+    for (const half of [factory.flashSizeKb, factory.vrefintCal, factory.tsCal1, factory.tsCal2, factory.packageData]) if (half) viewAt(half.at).setUint16(0, half.value, true)
   }
 
   /** A watchdog or SYSRESETREQ: the core restarts at the next slice boundary with the cause flagged. */
@@ -904,13 +933,17 @@ export class Stm32 {
     return this.cpu.sleeping ? "sleep" : "run"
   }
 
-  /** Fraction of the cycles since this meter was last read that the core spent asleep. */
-  private sleepFraction(meter: { cycles: number; sleep: number }) {
+  private meterShares(meter: { cycles: number; sleep: number; flashCharge: number; flashAmps: number }) {
     const dc = this.cpu.cycles - meter.cycles
     const ds = this.cpu.sleepCycles - meter.sleep
+    const dq = this.flashCharge - meter.flashCharge
     meter.cycles = this.cpu.cycles
     meter.sleep = this.cpu.sleepCycles
-    return dc > 0 ? ds / dc : this.cpu.sleeping ? 1 : 0
+    meter.flashCharge = this.flashCharge
+    if (dc > 0) meter.flashAmps = dq / dc
+    this.share.asleep = dc > 0 ? ds / dc : this.cpu.sleeping ? 1 : 0
+    this.share.flashAmps = meter.flashAmps
+    return this.share
   }
 
   /**
@@ -918,8 +951,9 @@ export class Stm32 {
    * blended by how much of the time the core slept (`asleep`, 0–1). Not an activity model —
    * the same value for a busy loop and for a NOP loop.
    */
-  private supplyOf(asleep: number): number {
+  private supplyOf(asleep: number, flashAmps = 0): number {
     const e = this.chip.electrical
+    if (e.supply) return this.supplyFromTables(e.supply, asleep, flashAmps)
     if (this.lowPower === "standby") return e.idd.standby
     if (this.lowPower === "stop") return e.idd[this.pwr.stopKind()] ?? e.idd.stopLp
     const mhz = this.clocks.hclk / 1e6
@@ -927,22 +961,137 @@ export class Stm32 {
     const sleep = e.idd.sleep[0] + e.idd.sleep[1] * mhz
     return run * (1 - asleep) + sleep * asleep
   }
+  private supplyFromTables(t: SupplyTables, asleep: number, flashAmps: number): number {
+    const state = this.supplyState(t)
+    if (this.lowPower === "standby") return standbyAmps(t, state, this.vdda)
+    const pwrCr = this.pwr.regs[0]
+    if (this.lowPower === "stop") return stopAmps(t, state, (pwrCr & 1) !== 0, (pwrCr & (1 << 9)) !== 0, this.vdda)
+    return this.supplyRunAmps * (1 - asleep) + this.supplySleepAmps * asleep + flashAmps
+  }
+
+  private supplyState(t: SupplyTables): SupplyState {
+    let adcOn = 0
+    let converting = 0
+    for (let i = 0; i < this.adc.length; i++) {
+      if (this.adc[i].regs[0x08 >>> 2] & 1) adcOn |= 1 << i
+      if (this.adc[i].converting) converting |= 1 << i
+    }
+    let i2s = 0
+    for (let i = 0; i < this.spi.length; i++) if (this.spi[i].regs[0x1c >>> 2] & (1 << 11)) i2s |= 1 << i
+    const pc = this.cpu.pc
+    const fromRam = pc >= FLASH_BASE && pc < FLASH_END ? 0 : this.bus.memoryAt(pc)?.kind === "ram" ? 1 : 0
+    const hclk = this.clocks.hclk
+    const k = this.supplyKey
+    const fresh =
+      this.supplyNow !== null &&
+      k[0] === this.rcc.changes &&
+      k[1] === this.rcc.version &&
+      k[2] === this.pwr.regs[0] &&
+      k[3] === this.pwr.regs[1] &&
+      k[4] === this.flash.regs[0] &&
+      k[5] === this.syscfg.regs[0x20 >>> 2] &&
+      k[6] === this.dac.regs[0] &&
+      k[7] === adcOn &&
+      k[8] === converting &&
+      k[9] === i2s &&
+      k[10] === fromRam &&
+      k[11] === hclk &&
+      k[12] === this.vdda &&
+      k[13] === (this.rcc.hse?.hz ?? 0)
+    if (fresh) return this.supplyNow!
+    k[0] = this.rcc.changes
+    k[1] = this.rcc.version
+    k[2] = this.pwr.regs[0]
+    k[3] = this.pwr.regs[1]
+    k[4] = this.flash.regs[0]
+    k[5] = this.syscfg.regs[0x20 >>> 2]
+    k[6] = this.dac.regs[0]
+    k[7] = adcOn
+    k[8] = converting
+    k[9] = i2s
+    k[10] = fromRam
+    k[11] = hclk
+    k[12] = this.vdda
+    k[13] = this.rcc.hse?.hz ?? 0
+    const state = this.readSupplyState(adcOn, converting, fromRam === 1)
+    this.supplyNow = state
+    this.supplyRunAmps = runAmps(t, state, this.vdda)
+    this.supplySleepAmps = sleepAmps(t, state, this.vdda)
+    return state
+  }
+
+  private readSupplyState(adcOn: number, converting: number, fromRam: boolean): SupplyState {
+    const r = this.rcc.regs
+    const cr = r[0]
+    const bdcr = r[0x70 >>> 2]
+    const c = this.clocks
+    const bonded = this.bonded!
+    const reg = (offset: number) => r[offset >>> 2]
+    const i2sMode = (name: string) => ((this.spi.find((x) => x.spec.name === name)?.regs[0x1c >>> 2] ?? 0) & (1 << 11)) !== 0
+    const dacCr = this.dac.regs[0]
+    const count = (mask: number) => {
+      let n = 0
+      for (let m = mask; m; m &= m - 1) n++
+      return n
+    }
+    return {
+      hclk: c.hclk,
+      pclk1: c.pclk1,
+      pclk2: c.pclk2,
+      enabled: { AHB1ENR: reg(0x30) & bonded.AHB1ENR, AHB2ENR: reg(0x34) & bonded.AHB2ENR, AHB3ENR: reg(0x38) & bonded.AHB3ENR, APB1ENR: reg(0x40) & bonded.APB1ENR, APB2ENR: reg(0x44) & bonded.APB2ENR },
+      enabledInSleep: { AHB1ENR: reg(0x50), AHB2ENR: reg(0x54), AHB3ENR: reg(0x58), APB1ENR: reg(0x60), APB2ENR: reg(0x64) },
+      scale1: (this.pwr.regs[0] & (1 << 14)) !== 0,
+      instructionCacheOrRam: fromRam || (this.flash.regs[0] & (1 << 9)) !== 0,
+      hsi: (cr & 1) !== 0,
+      hseCrystal: (cr & (1 << 16)) !== 0 && (cr & (1 << 18)) === 0,
+      lsi: (reg(0x74) & 1) !== 0,
+      lse: (bdcr & 1) !== 0 && (bdcr & (1 << 2)) === 0,
+      backupRegulator: this.pwr.backupRegulatorOn(),
+      pllVco: cr & (1 << 24) ? this.rcc.pllVcoHz() : null,
+      pllDrivesHclk: c.source === "PLL",
+      plli2sVco: cr & (1 << 26) ? this.rcc.plli2sVcoHz() : null,
+      i2sMode: { 2: i2sMode("SPI2"), 3: i2sMode("SPI3") },
+      adcsOn: count(adcOn),
+      adcsConverting: count(converting),
+      dacChannels: (dacCr & 1) + ((dacCr >>> 16) & 1),
+      compensationCell: (this.syscfg.regs[0x20 >>> 2] & 1) !== 0,
+    }
+  }
+
+  backupDomainState(): number {
+    const bdcr = this.rcc.regs[0x70 >>> 2]
+    return (this.pwr.backupRegulatorOn() ? BACKUP_REGULATOR : 0) | ((bdcr & 1) !== 0 && (bdcr & (1 << 2)) === 0 ? BACKUP_LSE : 0)
+  }
+
+  backupDomainCurrent(vbat: number): number {
+    const t = this.chip.electrical.supply
+    return t ? backupDomainAmps(t, this.backupDomainState(), vbat) : 0
+  }
+
   /** Supply current, A, averaged over the cycles since the previous call (the board's load). */
   supplyCurrent(): number {
-    return this.supplyOf(this.sleepFraction(this.supplyMeter))
+    const { asleep, flashAmps } = this.meterShares(this.supplyMeter)
+    return this.supplyOf(asleep, flashAmps)
   }
   supplyLoad(): number {
     const cycles = this.cpu.cycles - this.loadMeter.cycles
-    const asleep = this.sleepFraction(this.loadMeter)
-    this.loadAsleep += (asleep - this.loadAsleep) * -Math.expm1(-cycles / this.clocks.hclk / LOAD_AVERAGED_OVER_SECONDS)
+    const { asleep, flashAmps } = this.meterShares(this.loadMeter)
+    const k = -Math.expm1(-cycles / this.clocks.hclk / LOAD_AVERAGED_OVER_SECONDS)
+    this.loadAsleep += (asleep - this.loadAsleep) * k
     if (Math.abs(this.loadAsleep - this.loadSleepShare) > LOAD_SHARE_HYSTERESIS * LOAD_SLEEP_SHARE_STEP) this.loadSleepShare = Math.round(this.loadAsleep / LOAD_SLEEP_SHARE_STEP) * LOAD_SLEEP_SHARE_STEP
-    return this.supplyOf(this.loadSleepShare)
+    const amps = this.supplyOf(this.loadSleepShare, flashAmps)
+    if (!this.chip.electrical.supply) return amps
+    const vdd = Math.min(SUPPLY_TABLES_VDD_MAX, Math.max(SUPPLY_TABLES_VDD_MIN, this.vdda))
+    this.loadVdd = Number.isNaN(this.loadVdd) ? vdd : this.loadVdd + (vdd - this.loadVdd) * k
+    if (Number.isNaN(this.loadVddShare) || Math.abs(this.loadVdd - this.loadVddShare) > LOAD_SHARE_HYSTERESIS * LOAD_VDD_STEP) this.loadVddShare = Math.round(this.loadVdd / LOAD_VDD_STEP) * LOAD_VDD_STEP
+    return (amps * this.chip.electrical.vdd) / this.loadVddShare
   }
   /** The power line for the inspector: mode, sleep duty since the last call, and the current estimate. */
   powerStatus(): PowerStatus {
-    const asleep = this.lowPower ? 1 : this.sleepFraction(this.statusMeter)
+    const { asleep: measured, flashAmps } = this.meterShares(this.statusMeter)
+    const asleep = this.lowPower ? 1 : measured
     const kind = this.pwr.stopKind()
-    return { mode: this.powerMode, asleep, current: this.supplyOf(asleep), regulator: kind === "stop" ? "main" : kind === "stopLp" ? "low-power" : "under-drive" }
+    return { mode: this.powerMode, asleep, current: this.supplyOf(asleep, flashAmps), regulator: kind === "stop" ? "main" : kind === "stopLp" ? "low-power" : "under-drive" }
   }
 
   /**
@@ -992,8 +1141,9 @@ export class Stm32 {
     this.frozen.clear()
     this.lowPower = null
     this.lptimInterruptHeldInStop = false
-    this.supplyMeter.cycles = this.supplyMeter.sleep = this.statusMeter.cycles = this.statusMeter.sleep = 0
-    this.loadMeter.cycles = this.loadMeter.sleep = this.loadAsleep = this.loadSleepShare = 0
+    for (const meter of [this.supplyMeter, this.statusMeter, this.loadMeter]) meter.cycles = meter.sleep = meter.flashCharge = meter.flashAmps = 0
+    this.loadAsleep = this.loadSleepShare = this.flashCharge = this.stallPending = this.stallPendingCharge = 0
+    this.supplyNow = null
     this.padQueue.length = 0
     this.digitalOut.length = 0
     this.digitalLevel.clear()
@@ -1077,14 +1227,19 @@ export class Stm32 {
    */
   runUntil(end: number): boolean {
     if (!this.running) return false
+    this.runEnd = end
     for (const g of this.gpio) g.settleDrains()
     try {
       while (this.time < end) {
+        if (this.stallPending > 0) {
+          this.waitOnFlash(end)
+          continue
+        }
         const hz = this.clocks.hclk
         const version = this.rcc.version
         // Run in slices small enough that a clock switch mid-way costs little accuracy.
         const cycles = Math.max(1, Math.round((end - this.time) * hz))
-        const slice = Math.min(cycles, 20000)
+        const slice = Math.min(cycles, MAX_SLICE_CYCLES)
         // Cycles added between slices (a Standby wake-up from a pad edge) count in this one.
         const before = this.sliceStart
         this.sliceHz = hz
@@ -1122,6 +1277,20 @@ export class Stm32 {
       return false
     }
     return true
+  }
+
+  private waitOnFlash(end: number) {
+    const hz = this.clocks.hclk
+    const seconds = Math.min(this.stallPending, end - this.time)
+    const cycles = Math.max(1, Math.round(seconds * hz))
+    const amps = this.stallPendingCharge / this.stallPending
+    this.cpu.cycles += cycles
+    this.flashCharge += cycles * amps
+    this.stallPendingCharge = Math.max(0, this.stallPendingCharge - seconds * amps)
+    this.stallPending = Math.max(0, this.stallPending - seconds)
+    if (this.stallPending < 0.5 / hz) this.stallPending = this.stallPendingCharge = 0
+    this.time += cycles / hz
+    this.sliceStart = this.cpu.cycles
   }
 
   /**

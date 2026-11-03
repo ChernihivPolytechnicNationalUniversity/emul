@@ -40,7 +40,7 @@ describe("STM32F746IG factory-programmed bytes", () => {
     expect(factory.otp).toEqual({ base: RM0385.otp.base, size: RM0385.otp.end + 1 - RM0385.otp.base })
     expect(factory.uid.at).toBe(RM0385.uid)
     expect(factory.flashSizeKb.at).toBe(RM0385.flashSize)
-    expect(factory.packageData.at).toBe(RM0385.packageData)
+    expect(factory.packageData?.at).toBe(RM0385.packageData)
     expect(factory.vrefintCal.at).toBe(DS10916.vrefintCal)
     expect(factory.tsCal1.at).toBe(DS10916.tsCal1)
     expect(factory.tsCal2.at).toBe(DS10916.tsCal2)
@@ -53,7 +53,7 @@ describe("STM32F746IG factory-programmed bytes", () => {
       vrefintCal: factory.vrefintCal.value,
       tsCal1: factory.tsCal1.value,
       tsCal2: factory.tsCal2.value,
-      packageData: factory.packageData.value,
+      packageData: factory.packageData?.value,
     }).toEqual(BENCH_CHIP_2026_10_12)
     expect(factory.tsCal1.celsius).toBe(30)
     expect(factory.tsCal2.celsius).toBe(110)
@@ -176,9 +176,12 @@ describe("firmware calibrating the ADC with them on the F746", () => {
 })
 
 describe("STM32F429ZI factory-programmed bytes", () => {
-  it("are not modelled: DS9405/RM0090 are not in the repository to take the addresses from, so a read faults", () => {
+  it("sit where RM0090 Rev 22 §39 and DS9405 Rev 14 put them: UID 0x1FFF7A10, F_SIZE 0x1FFF7A22, VREFIN_CAL 0x1FFF7A2A, TS_CAL1/2 0x1FFF7A2C/2E", () => {
     const mcu = new Stm32(STM32F429ZI)
-    expect(STM32F429ZI.factory).toBeUndefined()
-    expect(() => mcu.bus.read(0x1fff7a10, 4)).toThrow(BusFault)
+    const factory = STM32F429ZI.factory!
+    expect.soft(factory.uid.at).toBe(0x1fff7a10)
+    expect.soft(factory.flashSizeKb).toEqual({ at: 0x1fff7a22, value: 2048 })
+    expect.soft([factory.vrefintCal.at, factory.tsCal1.at, factory.tsCal2.at]).toEqual([0x1fff7a2a, 0x1fff7a2c, 0x1fff7a2e])
+    expect.soft(mcu.bus.read(0x1fff7a22, 2)).toBe(2048)
   })
 })

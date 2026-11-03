@@ -3,13 +3,14 @@ import { pinContacts } from "@/schematic/contacts"
 import { getDef } from "@/schematic/registry"
 import { pinKey, type Damage, type Element, type Limits, type NodeRef, type PlacedObject, type ProtChip, type Schematic, type Value } from "@/schematic/types"
 import { chemistryById, defaultResistance, type Chemistry } from "./battery"
+import { JUNCTION_VT as VT, saturationCurrent } from "./junction"
 import { opampSpec, type OpampSpec } from "./opamp"
 import { parseValue } from "./units"
 
 /** Net index; GROUND is the reference node and has no matrix row. */
 export const GROUND = -1
 
-export type ResolvedLimits = { power?: number; current?: number; voltage?: number; reverse?: number; surge?: number; tau: number; fail: "open" | "short"; fatal: boolean; aboveSupply?: number; slow?: boolean }
+export type ResolvedLimits = { power?: number; current?: number; voltage?: number; reverse?: number; surge?: number; tau: number; fail: "open" | "short"; fatal: boolean; aboveSupply?: number; slow?: boolean; overstress?: { seconds: number; surgeVoltage?: number; reverseSurge?: number } }
 
 export const DEFAULT_TAU = 0.035
 
@@ -123,7 +124,6 @@ export type Netlist = {
   contacts: ReadonlyMap<string, string>
 }
 
-const VT = 0.025852
 /** Contact resistance of a switch that does not state its own. */
 const SW_RON = 0.05
 /**
@@ -138,10 +138,7 @@ const ZENER_IZT = 5e-3
 const ESD_DIODE_VF = 0.7
 const ESD_DIODE_N = 1
 
-/** Shockley saturation current so that the diode drops `vf` at 10 mA with emission coefficient n. */
-export function saturationCurrent(vf: number, n: number) {
-  return 0.01 / (Math.exp(vf / (n * VT)) - 1)
-}
+export { saturationCurrent }
 
 /**
  * Breakdown is modelled as a mirrored junction, so it conducts ~0.7 V past its offset. The
@@ -193,7 +190,9 @@ function resolveLimits(l: Limits | undefined, props: Record<string, string>): Re
     const n = resolveValue(v, props)
     return Number.isFinite(n) && n > 0 ? n : undefined
   }
-  const out = { power: num(l.power), current: num(l.current), voltage: num(l.voltage), reverse: num(l.reverse), surge: num(l.surge), tau: num(l.tau) ?? DEFAULT_TAU, fail: l.fail ?? "open", fatal: l.fatal ?? true, aboveSupply: num(l.aboveSupply), slow: l.slow }
+  const seconds = l.overstress ? num(l.overstress.seconds) : undefined
+  const overstress = l.overstress && seconds !== undefined ? { seconds, surgeVoltage: num(l.overstress.surgeVoltage), reverseSurge: num(l.overstress.reverseSurge) } : undefined
+  const out = { power: num(l.power), current: num(l.current), voltage: num(l.voltage), reverse: num(l.reverse), surge: num(l.surge), tau: num(l.tau) ?? DEFAULT_TAU, fail: l.fail ?? "open", fatal: l.fatal ?? true, aboveSupply: num(l.aboveSupply), slow: l.slow, overstress }
   // Every rating left blank (a battery without a stated max current): the element is unrated.
   if (out.power === undefined && out.current === undefined && out.voltage === undefined && out.reverse === undefined && out.aboveSupply === undefined) return undefined
   return out
@@ -254,6 +253,7 @@ function damaged(el: Element, index: number, dmg: Damage | undefined): Element |
   }
   if (!dmg.fatal) return el
   if (el.kind === "R" && el.supply) return { kind: "R", a: el.a, b: el.b, value: 0.01 }
+  if (el.kind === "GPIO" && el.clamp) return el
   return null
 }
 
@@ -552,7 +552,8 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         const ohms = el.drive ? resolveValue(el.drive.ohms, props) : NaN
         const at = el.drive?.at !== undefined ? resolveValue(el.drive.at, props) : NaN
         const pull = el.pull === undefined ? NaN : resolveValue(el.pull, props)
-        elements.push({
+        const dieDead = damage[obj.id]?.fatal === true
+        if (!dieDead) elements.push({
           ...base,
           kind: "GPIO",
           node: netOf(obj, el.node),
@@ -571,7 +572,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
           elements.push({ ...base, id: `${base.id}$cio`, kind: "C", a: netOf(obj, el.node), b: ground, value: el.capacitance, euler: true, hidden: true, limits: undefined, keys: [pin, groundKey] })
         const injection = el.clamp ? resolveValue(el.clamp.injection, props) : NaN
         if (el.clamp && Number.isFinite(injection) && injection > 0) {
-          const clampDiode = { ...base, kind: "D" as const, is: saturationCurrent(ESD_DIODE_VF, ESD_DIODE_N), n: ESD_DIODE_N, hidden: true, limits: { current: injection, tau: DEFAULT_TAU, fail: "short" as const, fatal: true } }
+          const clampDiode = { ...base, kind: "D" as const, is: saturationCurrent(ESD_DIODE_VF, ESD_DIODE_N), n: ESD_DIODE_N, hidden: true, limits: dieDead ? undefined : { current: injection, tau: DEFAULT_TAU, fail: "short" as const, fatal: true } }
           elements.push({ ...clampDiode, id: `${base.id}$clamp-vss`, anode: ground, cathode: netOf(obj, el.node), keys: [groundKey, pin] })
           if (el.clamp.rail) elements.push({ ...clampDiode, id: `${base.id}$clamp-vdd`, anode: netOf(obj, el.node), cathode: netOf(obj, el.clamp.rail), keys: [pin, node(obj, el.clamp.rail)] })
         }
