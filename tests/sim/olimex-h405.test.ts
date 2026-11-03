@@ -7,7 +7,7 @@ import { builder } from "@/schematic/builder"
 import { pinContacts } from "@/schematic/contacts"
 import { getDef } from "@/schematic/registry"
 import { GRID } from "@/schematic/geometry"
-import { partKey, pinKey, type PlacedObject } from "@/schematic/types"
+import { partKey, pinKey, type ModelElement, type PlacedObject } from "@/schematic/types"
 import { Engine } from "@/sim/engine"
 import { SimLoop, type Snapshot } from "@/sim/loop"
 import { buildNetlist } from "@/sim/netlist"
@@ -61,11 +61,11 @@ const loop = new SimLoop()
 const failures: string[] = []
 loop.onFailure = (f) => failures.push(`${f.ref}: ${f.damage.reason}`)
 let clock = 0
-function settle(): Snapshot {
+function settle(seconds = EYE_SETTLED): Snapshot {
   loop.setDoc(doc)
   loop.setParts(doc.parts)
   loop.setRunning(true)
-  const end = clock + EYE_SETTLED * 1000
+  const end = clock + seconds * 1000
   while (clock < end) {
     clock = Math.min(end, clock + 30)
     loop.advance(clock)
@@ -114,7 +114,7 @@ describe("Olimex STM32-H405 without firmware", () => {
     expect.soft(v(snap, u, "EXT2-12"), "PC4 = 5 V × 22/37").toBeNearRel((5 * 22) / 37, 0.02)
     doc.parts[partKey(u.id, "USB")] = { on: false }
     const off = settle()
-    expect.soft(v(off, u, "EXT2-12"), "PC4 without USB").toBeNear(0, 0.01)
+    expect.soft(v(off, u, "EXT2-12"), "PC4 without USB: what C2 still holds on VIN leaks back through D1 into the divider, far below VIL").toBeLessThan(0.5)
     expect.soft(v(off, u, "EXT1-5"), "3.3V without USB").toBeLessThan(0.1)
     doc.parts[partKey(u.id, "USB")] = { on: true }
   })
@@ -143,7 +143,7 @@ describe("Olimex STM32-H405 circuits beyond the headers' own pins", () => {
     const snap = settle()
     for (const n of [1, 2]) expect.soft(v(snap, u, `JTAG-${n}`), `JTAG-${n}`).toBeNearRel(v(snap, u, "EXT1-5"), 0.001)
     for (const n of [4, 6, 8, 10, 12, 14, 16, 18, 20, 11, 17]) expect.soft(v(snap, u, `JTAG-${n}`), `JTAG-${n}`).toBeNear(0, 0.01)
-    expect.soft(v(snap, u, "JTAG-19"), "JTAG-19: R3 47 kΩ against D2's reverse leakage, about 10 µA at 5 V").toBeLessThan(0.6)
+    expect.soft(v(snap, u, "JTAG-19"), "JTAG-19: R3 47 kΩ against D2's reverse leakage, onsemi's typical 1N5819 (Fig. 9) about 36 µA at 3 V reverse: 1.72 V").toBeNear(1.72, 0.15)
     for (const n of [3, 5, 7, 9, 13]) expect.soft(v(snap, u, `JTAG-${n}`), `JTAG-${n} pulled up`).toBeGreaterThan(3)
     expect.soft(v(snap, u, "JTAG-15"), "RST").toBeNearRel(v(snap, u, "EXT1-25"), 0.001)
   })
@@ -167,11 +167,11 @@ describe("Olimex STM32-H405 circuits beyond the headers' own pins", () => {
     const supply = place("dc-source", 80, 0, { value: "3.3 V" })
     const gnd = place("ground", 80, 10)
     const wires = [wire(supply, "+", u, "JTAG-1"), wire(supply, "-", gnd, "GND"), wire(gnd, "GND", u, "JTAG-4")]
-    const snap = settle()
+    const snap = settle(1.5)
     expect.soft(v(snap, u, "EXT1-5"), "3.3V rail from the debugger").toBeNearRel(3.3, 0.005)
     expect.soft(v(snap, u, "JTAG-2"), "JTAG-2 on the same rail").toBeNearRel(3.3, 0.005)
     expect.soft(lit(snap, "PWR"), "PWR lit").toBe(true)
-    expect.soft(v(snap, u, "EXT2-26"), "VIN stays low: the LM1117 does not conduct backwards far").toBeLessThan(3.3)
+    expect.soft(v(snap, u, "EXT2-26"), "VIN, left at 4.7 V on C2 by the USB just unplugged, leaks away and is not held up from the rail: the LM1117 does not conduct backwards").toBeLessThan(3.3)
     expect.soft(failures, "nothing damaged").toEqual([])
     for (const o of [supply, gnd]) doc.objects.splice(doc.objects.indexOf(o), 1)
     for (const w of wires) doc.wires.splice(doc.wires.indexOf(w), 1)
@@ -194,7 +194,8 @@ describe("Olimex STM32-H405 circuits beyond the headers' own pins", () => {
     let t = 0
     while (t < EYE_SETTLED * 1000) sim.advance((t += 20))
     const snap = sim.snapshot()!
-    return { rail: snap.pinVoltage[pinKey(board.id, "EXT1-5")]!, pwr: !!snap.parts[partKey(board.id, "PWR")]?.on, damage: snap.damage[board.id]?.reason }
+    const damage = snap.damage[board.id]
+    return { rail: snap.pinVoltage[pinKey(board.id, "EXT1-5")]!, pwr: !!snap.parts[partKey(board.id, "PWR")]?.on, damage: damage?.reason, also: damage?.also?.map((d) => d.reason) ?? [], fatal: damage?.fatal }
   }
 
   it("runs from +5 V on EXT2 #26 and GND on #25 with USB out (UM §3.3): 3.3 V, PWR lit", () => {
@@ -209,12 +210,14 @@ describe("Olimex STM32-H405 circuits beyond the headers' own pins", () => {
     expect.soft(got.rail, "4.2 V − about 1.09 V").toBeNear(4.2 - 1.09, 0.03)
   })
 
-  it("takes 15 V on VIN, and loses the LM1117 past its 20 V absolute maximum (TI LM1117 §7.1)", () => {
+  it("takes 15 V on VIN, and at 24 V loses the LM1117 past its 20 V absolute maximum (TI LM1117 §7.1) and C2, the 16 V tantalum, past the 1.32 × rated surge it is tested to (KEMET T491)", () => {
     const fine = fromVin(15)
     expect.soft(fine.damage, "15 V: the recommended maximum").toBeUndefined()
     expect.soft(fine.rail, "still 3.3 V").toBeNearRel(3.305, 0.01)
     const burnt = fromVin(24)
-    expect.soft(burnt.damage, "24 V: the regulator fails").toMatch(/^voltage 2[34]\.\d+ V exceeds the 20\.00 V rating$/)
+    expect.soft(burnt.damage, "24 V: the regulator fails").toMatch(/^voltage 2\d\.\d+ V exceeds the 20\.00 V rating$/)
+    expect.soft(burnt.also, "and C2 shorts past the 1.32 × 16 V its surge test allows").toEqual([expect.stringMatching(/^surge voltage 2\d\.\d+ V exceeds the 21\.12 V rating$/)])
+    expect.soft(burnt.fatal, "neither takes the board's other parts with it").toBe(false)
     expect.soft(burnt.rail, "the rail goes dead").toBeLessThan(0.5)
   })
 
@@ -236,10 +239,10 @@ describe("Olimex STM32-H405 circuits beyond the headers' own pins", () => {
     return { vbat: snap.pinVoltage[pinKey(board.id, "EXT1-23")]!, amps: Math.abs(snap.wireCurrent[lead.id] ?? 0), damage: snap.damage[board.id]?.reason }
   }
 
-  it("a CR2032 on EXT1 #23 with VBAT open sits on VBAT alone, at its own rest voltage (UM §6.4.3; the backup domain's microamps are not modelled as a load)", () => {
+  it("a CR2032 on EXT1 #23 with VBAT open sits on VBAT alone, at its own rest voltage, and gives nothing while VDD is up: the backup domain then runs from VDD (UM §6.4.3, RM0090 §5.1.2)", () => {
     const got = coinCellOnVbat("open")
     expect.soft(got.vbat, "VBAT at the fresh cell's rest voltage, a little over its 3 V nominal").toBeNear(3.25, 0.1)
-    expect.soft(got.amps, "no current: the backup domain draws nothing in the model").toBeLessThan(1e-9)
+    expect.soft(got.amps, "no current while VDD is up").toBeLessThan(1e-9)
   })
 
   it("a CR2032 on EXT1 #23 with VBAT closed meets the 3.3 V rail (UM §6.4.3): the rail forces current into a cell that cannot take a charge", () => {
@@ -271,10 +274,11 @@ describe("Olimex STM32-H405 circuits beyond the headers' own pins", () => {
       const b = builder(GRID)
       const board = b.place("olimex-stm32-h405", 0, 0, { vbat: "open" })
       board.props = { ...board.props, firmwareData: readFileSync(join(FIRMWARE, "prebuilt", "h405-blink.U1.elf")).toString("base64") }
+      let lead: { id: string } | undefined
       if (cell) {
         const bat = b.place("battery", 80, 0, { chem: "li-mno2", capacity: "0.22 Ah" })
         const gnd = b.place("ground", 80, 10)
-        b.wire(bat, "+", board, "EXT1-23")
+        lead = b.wire(bat, "+", board, "EXT1-23")
         b.wire(bat, "-", gnd, "GND")
         b.wire(gnd, "GND", board, "EXT1-6")
       }
@@ -318,7 +322,15 @@ describe("Olimex STM32-H405 circuits beyond the headers' own pins", () => {
       const before = secondsOf(r(RTC.TR))
 
       usb(false)
-      run(OUTAGE_S * 1000)
+      run(OUTAGE_S * 1000 - 500)
+      sim.snapshot()
+      run(500)
+      if (lead) {
+        const out = sim.snapshot()!
+        const vbat = out.pinVoltage[pinKey(board.id, "EXT1-23")]!
+        const table25 = 0.73e-6 + ((vbat - 2.4) / 0.9) * (0.96e-6 - 0.73e-6)
+        expect.soft(Math.abs(out.wireCurrent[lead.id] ?? 0), `the cell's current at ${vbat.toFixed(2)} V: DS8626 Table 25, LSE and RTC on, backup SRAM off`).toBeNearRel(table25, 0.01)
+      }
       usb(true)
       run(200)
       const snap = sim.snapshot()!
@@ -506,5 +518,427 @@ describe("VR, the LM1117-ADJ, against TI SNOS412Q (§7.4 thermal, §7.5 electric
     expect.soft(drawn, "and by something: the LEDs, pull-ups, the MCU").toBeGreaterThan(1e-4)
     expect.soft(VR_ELEMENT, "VR found in the model").toBeGreaterThanOrEqual(0)
     expect.soft(after.readings().some((r) => r.object === t.board.id && r.element === VR_ELEMENT), "VR gone").toBe(false)
+  })
+})
+
+describe("the power path against its parts: onsemi's 1N5819 curves, the Rev. C capacitors and bead, USB 2.0 §7.2.4.1 and DS8626's VCAP inrush", () => {
+  const ONSEMI_FIG7_25C: readonly [number, number][] = [[0.0207, 0.231], [0.0507, 0.2591], [0.101, 0.2805], [0.2129, 0.3086], [0.5099, 0.3591], [1.0157, 0.4148]]
+  const ONSEMI_FIG9_1N5819_25C: readonly [number, number][] = [[2.29, 34.7e-6], [3.79, 38.8e-6], [4.99, 45.1e-6], [7.78, 56.6e-6], [11.87, 77.2e-6], [16.17, 105.6e-6], [19.56, 125.4e-6]]
+  const along = (curve: readonly [number, number][], x: number, logX: boolean) => {
+    const f = (v: number) => (logX ? Math.log(v) : v)
+    let i = 1
+    while (i < curve.length - 1 && x > curve[i][0]) i++
+    const [x0, y0] = curve[i - 1]
+    const [x1, y1] = curve[i]
+    return y0 + ((f(x) - f(x0)) / (f(x1) - f(x0))) * (y1 - y0)
+  }
+  const index = (match: (el: ModelElement) => boolean) => olimexStm32H405.model!.findIndex(match)
+  const D1 = index((el) => el.kind === "D" && el.anode === "EXT2-23")
+  const CABLE = index((el) => "label" in el && el.label === "USB cable, VBUS and GND")
+  const HOST_SWITCH = index((el) => "label" in el && el.label === "USB host port switch")
+  const CORE_REGULATOR = index((el) => "label" in el && el.label === "Core regulator (VCAP)")
+  const L1 = index((el) => "label" in el && el.label === "L1 ferrite bead")
+
+  function bench(usb: boolean, wiring: (b: ReturnType<typeof builder>, board: PlacedObject, gnd: PlacedObject) => void = () => {}) {
+    const b = builder(GRID)
+    const board = b.place("olimex-stm32-h405", 0, 0)
+    b.doc.parts[partKey(board.id, "USB")] = { on: usb }
+    const gnd = b.place("ground", 80, 40)
+    b.wire(gnd, "GND", board, "EXT2-25")
+    wiring(b, board, gnd)
+    const engine = new Engine(buildNetlist(b.doc))
+    const parts = (key: string) => b.doc.parts[key] ?? {}
+    const step = () => engine.step(DT, parts)
+    const run = (seconds: number) => {
+      for (let k = 0; k < Math.round(seconds / DT); k++) step()
+    }
+    const volt = (pin: string) => engine.v[engine.net.pinNet.get(pinKey(board.id, pin))!]
+    const of = (element: number) => engine.readings().filter((r) => r.object === board.id && r.element === element)
+    const amps = (element: number) => of(element)[0]?.current ?? NaN
+    return { b, board, engine, parts, step, run, volt, of, amps }
+  }
+  const load = (ohms: number, pin = "EXT1-5") => (b: ReturnType<typeof builder>, board: PlacedObject, gnd: PlacedObject) => {
+    const r = b.place("resistor", 70, 20, { value: `${ohms} Ω`, power: "100" })
+    b.wire(r, "1", board, pin)
+    b.wire(r, "2", gnd, "GND")
+  }
+  const supply = (volts: number, pin: string, extra?: ReturnType<typeof load>) => (b: ReturnType<typeof builder>, board: PlacedObject, gnd: PlacedObject) => {
+    const src = b.place("dc-source", 90, 0, { value: `${volts} V`, rint: "1 mΩ", imax: "10 A" })
+    b.wire(src, "+", board, pin)
+    b.wire(src, "-", gnd, "GND")
+    extra?.(b, board, gnd)
+  }
+
+  it("D1 drops what onsemi's typical 1N5819 forward curve gives (1N5817-D Fig. 7, 25 °C), from 20 mA to 0.5 A", () => {
+    for (const ohms of [600, 90, 38, 17.5, 6.8]) {
+      const t = bench(false, supply(5, "EXT2-23", load(ohms)))
+      t.run(3e-3)
+      const d = t.of(D1).find((r) => r.kind === "D")!
+      const want = along(ONSEMI_FIG7_25C, d.current, true)
+      expect.soft(t.volt("EXT2-23") - t.volt("EXT2-26"), `VF at ${(d.current * 1e3).toFixed(0)} mA`).toBeNear(want, 0.008)
+    }
+  })
+
+  it("D1 leaks what the same datasheet's typical reverse curve gives for the 1N5819 (Fig. 9, 25 °C), within 10 % from 3 to 19 V reverse", () => {
+    for (const volts of [3, 5, 8, 12, 16, 19]) {
+      const t = bench(false, supply(volts, "EXT2-26"))
+      t.run(3e-3)
+      const reverse = t.volt("EXT2-26") - t.volt("EXT2-23")
+      const total = -(t.of(D1).find((r) => r.kind === "D")!.current + t.amps(D1 + 1) + t.amps(D1 + 2))
+      expect.soft(total, `reverse current at ${reverse.toFixed(2)} V`).toBeNearRel(along(ONSEMI_FIG9_1N5819_25C, reverse, false), 0.1)
+    }
+  })
+
+  it("asks a modelled USB host (5 V, an assumed 0.5 A switch, USB 2.0's 120 µF and 0.25 Ω per conductor) for the charge of the 51.5 µF behind D1, the LM1117 and the core regulator when plugged in: over 2.5 × the 50 µC a 10 µF ∥ 44 Ω load (USB 2.0 §7.2.4.1) takes, counted above 100 mA over 50 ms (not the USB-IF's region method), and the host's 120 µF sagging past 330 mV", () => {
+    const t = bench(false)
+    t.run(0.01)
+    t.b.doc.parts[partKey(t.board.id, "USB")] = { on: true }
+    const hostNode = t.engine.net.nodeNet.get(pinKey(t.board.id, "$host"))!
+    let charge = 0
+    let above100mA = 0
+    let hostMin = Infinity
+    let fed = Math.abs(t.amps(HOST_SWITCH))
+    const steps = Math.round(0.05 / DT)
+    for (let k = 0; k < steps; k++) {
+      t.step()
+      const i = Math.abs(t.amps(CABLE))
+      if (i > 0.1) above100mA += i * DT
+      const now = Math.abs(t.amps(HOST_SWITCH))
+      charge += ((fed + now) / 2) * DT
+      fed = now
+      hostMin = Math.min(hostMin, t.engine.v[hostNode])
+    }
+    const steady = Math.abs(t.amps(HOST_SWITCH))
+    const VIN_FARADS = (0.1 + 10 + 0.1) * 1e-6
+    const RAIL_FARADS = (2 * 11.5 + 5 * 0.1 + 6.6) * 1e-6
+    const VDDA_FARADS = (6.6 + 0.1 + 0.1) * 1e-6
+    const VCAP_FARADS = 2 * 2.2e-6
+    const stored = VIN_FARADS * t.volt("EXT2-26") + (RAIL_FARADS + VDDA_FARADS) * t.volt("EXT1-5") + VCAP_FARADS * 1.26
+    expect.soft(charge - steady * steps * DT, "the charge the host's port switch delivered beyond the steady load (its own 120 µF back at 5 V): Σ C·V of the schematic's").toBeNearRel(stored, 0.05)
+    expect.soft(above100mA, "inrush charge above 100 mA, against the USB-IF's 50 µC").toBeGreaterThan(2.5 * 50e-6)
+    expect.soft(5 - hostMin, "the host's sag").toBeGreaterThan(0.33)
+    expect.soft(5 - hostMin, "and not a collapse").toBeLessThan(2)
+  })
+
+  it("charges VCAP's 2 × 2.2 µF from VDD through the core regulator at DS8626 Table 19's 160 mA inrush: 0.73 V after the first 20 µs of a stiff 3.3 V, 1.26 V (C · V12 = 5.5 µC, against ERUSH's 5.4 µC) after the second", () => {
+    const stiff = (b: ReturnType<typeof builder>, board: PlacedObject, gnd: PlacedObject) => {
+      const src = b.place("dc-source", 90, 0, { value: "3.3 V", rint: "1 mΩ", imax: "100 A" })
+      const sw = b.place("switch", 85, 0)
+      b.wire(src, "+", sw, "1")
+      b.wire(sw, "2", board, "EXT1-5")
+      b.wire(src, "-", gnd, "GND")
+      b.doc.parts[partKey(sw.id, "SW")] = { on: false }
+      return sw
+    }
+    let sw: PlacedObject | undefined
+    const t = bench(false, (b, board, gnd) => (sw = stiff(b, board, gnd)))
+    t.run(1e-3)
+    t.b.doc.parts[partKey(sw!.id, "SW")] = { on: true }
+    const vcap = () => t.engine.v[t.engine.net.nodeNet.get(pinKey(t.board.id, "$vcap"))!]
+    t.step()
+    expect.soft(vcap(), "after 20 µs at 160 mA into 4.4 µF").toBeNearRel((0.16 * 20e-6) / 4.4e-6, 0.05)
+    t.step()
+    expect.soft(vcap(), "charged").toBeNear(1.26, 0.005)
+    t.run(1e-4)
+    expect.soft(Math.abs(t.amps(CORE_REGULATOR)), "and quiet").toBeLessThan(1e-3)
+  })
+
+  it("keeps the rail above the F405's 1.68 V power-down threshold (DS8626 Table 19) for milliseconds after the USB is pulled: 47 µF of rail, VDDA and VIN capacitance into the board's ~250 Ω", () => {
+    const t = bench(true)
+    t.run(0.02)
+    t.b.doc.parts[partKey(t.board.id, "USB")] = { on: false }
+    let held = 0
+    while (t.volt("EXT1-5") > 1.68 && held < 0.1) {
+      t.step()
+      held += DT
+    }
+    const tau = 47.1e-6 * (3.305 / 13.0e-3)
+    expect.soft(held, "hold-up").toBeNearRel(tau * Math.log(3.305 / 1.68) + (0.36 * 10.2e-6) / 13.0e-3, 0.12)
+  })
+
+  it("feeds VDDA, the ADC's reference (VREF+ is VDDA on the LQFP64), through L1 as its DC resistance: 20 mV under the rail at 100 mA on EXT2-1, 60 mV at 300 mA, and with no part number, no rating to burn it", () => {
+    expect.soft(olimexStm32H405.mcuVref, "the ADC references VDDA").toBe("EXT2-1")
+    for (const [ohms, amps] of [[33, 0.1], [11, 0.3]] as const) {
+      const t = bench(true, load(ohms, "EXT2-1"))
+      t.run(amps > 0.2 ? 10 : 5e-3)
+      expect.soft(t.volt("EXT1-5") - t.volt("EXT2-1"), `VDDA below the rail at ${amps} A`).toBeNearRel(Math.abs(t.amps(L1)) * 0.2, 0.01)
+      expect.soft(Math.abs(t.amps(L1)), "the bead's current").toBeNearRel(amps, 0.1)
+      expect.soft(t.engine.failures, "nothing burns").toEqual([])
+    }
+  })
+
+  it("keeps C2, the 16 V tantalum, at 18 V on VIN for the 30 s εmul assumes (an assumed damage model: KEMET qualifies 1.32 × rated surges, it gives no time to failure) and shorts it after; the LM1117, inside its 20 V, and the rest of the board go on", () => {
+    const t = bench(false, supply(18, "EXT2-26"))
+    const failedBy = (seconds: number) => {
+      for (let k = 0; k < Math.round(seconds / DT) && !t.engine.failures.length; k++) t.step()
+      return t.engine.failures[0]?.damage
+    }
+    expect.soft(failedBy(29), "29 s over its rating").toBeUndefined()
+    const damage = failedBy(2)
+    expect.soft(damage?.reason, "C2 shorts").toMatch(/^voltage 1[78]\.\d+ V past the 16\.00 V rating for over 30\.00 s$/)
+    expect.soft(damage?.fatal, "not fatal to the board").toBe(false)
+  })
+
+  it("lets C2 take a brief reverse voltage up to 15 % of its rating (KEMET T491, 25 °C), shorts it past that at once, and after the assumed 30 s any reverse voltage held, 0.1 V included (KEMET: never continuously reversed)", () => {
+    const instant = bench(false, supply(-3, "EXT2-26"))
+    instant.run(1e-3)
+    expect.soft(instant.engine.failures[0]?.damage.reason, "3 V the wrong way").toMatch(/^reverse voltage [23]\.\d+ V exceeds the 2\.40 V rating$/)
+    const held = bench(false, supply(-1, "EXT2-26"))
+    held.run(25)
+    expect.soft(held.engine.failures, "1 V reversed for 25 s").toEqual([])
+    held.run(6)
+    expect.soft(held.engine.failures[0]?.damage.reason, "and on past 30 s").toMatch(/^reverse voltage [01]\.\d+ V past the 10\.00 mV rating for over 30\.00 s$/)
+    const slight = bench(false, supply(-0.1, "EXT2-26"))
+    slight.run(31)
+    expect.soft(slight.engine.failures[0]?.damage.reason, "0.1 V reversed for 31 s").toMatch(/^reverse voltage \d+\.\d+ mV past the 10\.00 mV rating for over 30\.00 s$/)
+  })
+
+  it("lets D2 fail short, and only D2, when a debugger's 5 V on JTAG 19 feeds a short on VIN: past the 1N5819's 1 A, without taking the board with it", () => {
+    const short = (b: ReturnType<typeof builder>, board: PlacedObject, gnd: PlacedObject) => {
+      const src = b.place("dc-source", 90, 0, { value: "5 V", rint: "1 mΩ", imax: "100 A" })
+      b.wire(src, "+", board, "JTAG-19")
+      b.wire(src, "-", gnd, "GND")
+      const r = b.place("resistor", 70, 20, { value: "0.5 Ω", power: "1000" })
+      b.wire(r, "1", board, "EXT2-26")
+      b.wire(r, "2", gnd, "GND")
+    }
+    const t = bench(false, short)
+    let damage: { element: number; reason: string; fatal: boolean } | undefined
+    for (let k = 0; k < Math.round(10 / DT) && !damage; k++) {
+      t.step()
+      damage = t.engine.failures.find((f) => f.object === t.board.id)?.damage
+    }
+    expect.soft(damage?.element, "D2").toBe(index((el) => el.kind === "D" && el.anode === "JTAG-19"))
+    expect.soft(damage?.reason, "past its average-current rating").toMatch(/^current \d+\.\d+ A exceeds the 1\.00 A rating$/)
+    expect.soft(damage?.fatal, "not fatal to the board").toBe(false)
+  })
+
+  it("lets D1 fail short, and only D1, when USB's 5 V on +5V_USB feeds a short on VIN, without taking the board with it", () => {
+    const short = (b: ReturnType<typeof builder>, board: PlacedObject, gnd: PlacedObject) => {
+      const src = b.place("dc-source", 90, 0, { value: "5 V", rint: "1 mΩ", imax: "100 A" })
+      b.wire(src, "+", board, "EXT2-23")
+      b.wire(src, "-", gnd, "GND")
+      const r = b.place("resistor", 70, 20, { value: "0.5 Ω", power: "1000" })
+      b.wire(r, "1", board, "EXT2-26")
+      b.wire(r, "2", gnd, "GND")
+    }
+    const t = bench(false, short)
+    let damage: { element: number; reason: string; fatal: boolean } | undefined
+    for (let k = 0; k < Math.round(10 / DT) && !damage; k++) {
+      t.step()
+      damage = t.engine.failures.find((f) => f.object === t.board.id)?.damage
+    }
+    expect.soft(damage?.element, "D1").toBe(D1)
+    expect.soft(damage?.fatal, "not fatal to the board").toBe(false)
+  })
+
+  it("brings the rail up as slowly as its capacitors make it: 37 µF on the rail and VDDA, charged at no more than the LM1117's 1.2 A from a VIN the host's cable lets sag, take 0.06–0.2 ms to reach 3.0 V, not one step", () => {
+    const t = bench(false)
+    t.run(0.01)
+    t.b.doc.parts[partKey(t.board.id, "USB")] = { on: true }
+    let k = 0
+    while (t.volt("EXT1-5") < 3.0 && k < 1000) {
+      t.step()
+      k++
+    }
+    expect.soft(k * DT, "time to 3.0 V: at least Σ C · 3.0 V / 1.2 A").toBeGreaterThanOrEqual(((30.1 + 6.8) * 1e-6 * 3.0) / 1.2 - DT)
+    expect.soft(k * DT, "and not much more").toBeLessThanOrEqual(0.2e-3)
+  })
+
+  it("carries every capacitor of the Rev. C schematic on its node, at its value (the X5R ones at what DC bias leaves of them at 3.3 V)", () => {
+    const want: Record<string, [string, number]> = {
+      C1: ["EXT2-26", 100e-9], C2: ["$c2", 10e-6], C21: ["EXT2-26", 100e-9],
+      C3: ["EXT1-5", 11.5e-6], C24: ["EXT1-5", 11.5e-6], C4: ["EXT1-5", 100e-9], C5: ["EXT1-5", 100e-9], C6: ["EXT1-5", 100e-9], C7: ["EXT1-5", 100e-9], C8: ["EXT1-5", 6.6e-6], C10: ["EXT1-5", 100e-9],
+      C11: ["EXT2-1", 6.6e-6], C9: ["EXT2-1", 100e-9], C22: ["EXT2-1", 100e-9],
+      C20: ["$vcap", 2.2e-6], C23: ["$vcap", 2.2e-6],
+    }
+    const have = Object.fromEntries(olimexStm32H405.model!.flatMap((el) => (el.kind === "C" && "label" in el && el.label && /^C\d+$/.test(el.label) ? [[el.label, [el.a, el.value]]] : [])))
+    expect.soft(Object.keys(have).sort(), "the decouplers").toEqual(Object.keys(want).sort())
+    for (const [name, [node, farads]] of Object.entries(want)) expect.soft(have[name], name).toEqual([node, farads])
+  })
+})
+
+describe("the F405's own load on the board, with the starting project running", () => {
+  const BLINK = readFileSync(join(FIRMWARE, "prebuilt", "h405-blink.U1.elf")).toString("base64")
+  type Bus = { read: (a: number, n: 4) => number; write: (a: number, v: number, n: 4) => void }
+  function running(wiring: (b: ReturnType<typeof builder>, board: PlacedObject) => void, usb = true) {
+    const b = builder(GRID)
+    const board = b.place("olimex-stm32-h405", 0, 0, { vbat: "open" })
+    board.props = { ...board.props, firmwareData: BLINK }
+    b.doc.parts[partKey(board.id, "USB")] = { on: usb }
+    wiring(b, board)
+    const sim = new SimLoop()
+    sim.setDoc(b.doc)
+    sim.setParts(b.doc.parts)
+    sim.setRunning(true)
+    let t = 0
+    const run = (ms: number) => {
+      const end = t + ms
+      while (t < end) sim.advance((t += 5))
+    }
+    const parts = (key: string, state: Record<string, boolean>) => {
+      b.doc.parts[key] = state
+      sim.setParts(b.doc.parts)
+    }
+    const bus = () => (sim as unknown as { mcus: Map<string, { mcu: { mcu: { bus: Bus } } }> }).mcus.get(board.id)!.mcu.mcu.bus
+    const r = (a: number) => bus().read(a, 4) >>> 0
+    const w = (a: number, v: number) => bus().write(a, v >>> 0, 4)
+    const engine = () => (sim as unknown as { engine: Engine }).engine
+    return { b, board, sim, run, parts, r, w, engine }
+  }
+  const startLse = (r: (a: number) => number, w: (a: number, v: number) => void, run: (ms: number) => void) => {
+    w(0x40023840, r(0x40023840) | (1 << 28))
+    w(0x40007000, r(0x40007000) | (1 << 8))
+    w(0x40023870, 1)
+    run(2200)
+  }
+
+  it("draws its table current at a 2.4 V rail too: the supply resistance carries what the inspector reports", () => {
+    const t = running((b, board) => {
+      const src = b.place("dc-source", 90, 0, { value: "2.4 V", rint: "1 mΩ" })
+      const gnd = b.place("ground", 90, 20)
+      b.wire(src, "+", board, "EXT1-5")
+      b.wire(src, "-", gnd, "GND")
+      b.wire(gnd, "GND", board, "EXT1-6")
+    }, false)
+    t.run(600)
+    const snap = t.sim.snapshot()!
+    const engine = t.engine()
+    const supply = engine.net.elements.findIndex((el) => el.kind === "R" && el.live === "$idd" && el.object === t.board.id)
+    const drawn = Math.abs(engine.readings()[supply].current)
+    expect.soft(drawn, "through the F405's supply element at 2.4 V").toBeNearRel(snap.mcus[t.board.id]!.power.current, 0.01)
+  })
+
+  it("loads a cell on VBAT from the first instant VDD is absent, a cold board included: Table 25's reset-state 0.1 µA", () => {
+    let lead: { id: string } | undefined
+    const t = running((b, board) => {
+      const cell = b.place("battery", 80, 0, { chem: "li-mno2", capacity: "0.22 Ah" })
+      const gnd = b.place("ground", 80, 10)
+      lead = b.wire(cell, "+", board, "EXT1-23")
+      b.wire(cell, "-", gnd, "GND")
+      b.wire(gnd, "GND", board, "EXT1-6")
+    }, false)
+    t.run(200)
+    t.sim.snapshot()
+    t.run(300)
+    expect.soft(Math.abs(t.sim.snapshot()!.wireCurrent[lead!.id] ?? 0), "never powered").toBeNearRel(0.1e-6, 0.02)
+  })
+
+  it("takes nothing from a cell on VBAT while VDD is up, RESET held or not (RM0090 §5.1.2: the backup domain runs from VDD)", () => {
+    let lead: { id: string } | undefined
+    const t = running((b, board) => {
+      const cell = b.place("battery", 80, 0, { chem: "li-mno2", capacity: "0.22 Ah" })
+      const gnd = b.place("ground", 80, 10)
+      lead = b.wire(cell, "+", board, "EXT1-23")
+      b.wire(cell, "-", gnd, "GND")
+      b.wire(gnd, "GND", board, "EXT1-6")
+    })
+    t.run(300)
+    t.parts(partKey(t.board.id, "RESET"), { pressed: true })
+    t.run(200)
+    t.sim.snapshot()
+    t.run(300)
+    expect.soft(Math.abs(t.sim.snapshot()!.wireCurrent[lead!.id] ?? 0), "RESET held").toBeLessThan(1e-9)
+  })
+
+  it("follows the cell's voltage through one outage: Table 25 at 3.3 V, then at 1.9 V, without the circuit being rebuilt", () => {
+    let feed: { id: string } | undefined
+    let sw: PlacedObject | undefined
+    const t = running((b, board) => {
+      const high = b.place("dc-source", 90, 0, { value: "3.3 V", rint: "1 mΩ" })
+      const low = b.place("dc-source", 90, 20, { value: "1.9 V", rint: "1 mΩ" })
+      sw = b.place("switch", 84, 0)
+      const r = b.place("resistor", 84, 20, { value: "1 kΩ" })
+      const gnd = b.place("ground", 96, 30)
+      const node = b.place("resistor", 78, 10, { value: "1 mΩ" })
+      b.wire(high, "+", sw, "1")
+      b.wire(sw, "2", node, "1")
+      b.wire(low, "+", r, "1")
+      b.wire(r, "2", node, "1")
+      feed = b.wire(node, "2", board, "EXT1-23")
+      b.wire(high, "-", gnd, "GND")
+      b.wire(low, "-", gnd, "GND")
+      b.wire(gnd, "GND", board, "EXT1-6")
+      b.doc.parts[partKey(sw.id, "SW")] = { on: true }
+    })
+    t.run(200)
+    startLse(t.r, t.w, t.run)
+    t.parts(partKey(t.board.id, "USB"), { on: false })
+    t.run(500)
+    t.sim.snapshot()
+    t.run(300)
+    const atHigh = t.sim.snapshot()!
+    const vHigh = atHigh.pinVoltage[pinKey(t.board.id, "EXT1-23")]!
+    const table25 = (v: number) => (v <= 2.4 ? 0.62e-6 + ((v - 1.8) / 0.6) * 0.11e-6 : 0.73e-6 + ((v - 2.4) / 0.9) * 0.23e-6)
+    expect.soft(Math.abs(atHigh.wireCurrent[feed!.id] ?? 0), `at ${vHigh.toFixed(2)} V`).toBeNearRel(table25(vHigh), 0.02)
+    t.parts(partKey(sw!.id, "SW"), { on: false })
+    t.run(200)
+    t.sim.snapshot()
+    t.run(300)
+    const atLow = t.sim.snapshot()!
+    const vLow = atLow.pinVoltage[pinKey(t.board.id, "EXT1-23")]!
+    expect.soft(vLow, "the low source through 1 kΩ").toBeNear(1.9, 0.01)
+    expect.soft(Math.abs(atLow.wireCurrent[feed!.id] ?? 0), `at ${vLow.toFixed(2)} V`).toBeNearRel(table25(vLow), 0.02)
+  })
+
+  it("loads the cell again, at the reset state's 0.1 µA, when VBAT drops out and returns within one outage: the backup domain lost, the load not", () => {
+    let feed: { id: string } | undefined
+    let sw: PlacedObject | undefined
+    const t = running((b, board) => {
+      const cell = b.place("dc-source", 90, 0, { value: "3.3 V", rint: "1 mΩ" })
+      sw = b.place("switch", 84, 0)
+      const pull = b.place("resistor", 84, 20, { value: "1 MΩ" })
+      const node = b.place("resistor", 78, 10, { value: "1 mΩ" })
+      const gnd = b.place("ground", 96, 30)
+      b.wire(cell, "+", sw, "1")
+      b.wire(sw, "2", node, "1")
+      b.wire(pull, "1", node, "1")
+      b.wire(pull, "2", gnd, "GND")
+      feed = b.wire(node, "2", board, "EXT1-23")
+      b.wire(cell, "-", gnd, "GND")
+      b.wire(gnd, "GND", board, "EXT1-6")
+      b.doc.parts[partKey(sw.id, "SW")] = { on: true }
+    })
+    t.run(200)
+    startLse(t.r, t.w, t.run)
+    t.parts(partKey(t.board.id, "USB"), { on: false })
+    t.run(300)
+    t.parts(partKey(sw!.id, "SW"), { on: false })
+    t.run(300)
+    t.parts(partKey(sw!.id, "SW"), { on: true })
+    t.run(200)
+    t.sim.snapshot()
+    t.run(300)
+    expect.soft(Math.abs(t.sim.snapshot()!.wireCurrent[feed!.id] ?? 0), "back at 3.3 V, the domain reset").toBeNearRel(0.1e-6, 0.02)
+  })
+
+  it("adds Table 39's 12 mA (x32) for the second a sector erase keeps the flash busy, and nothing after it or after a RESET in the middle of one", () => {
+    const t = running(() => {})
+    t.run(400)
+    const current = () => t.sim.snapshot()!.mcus[t.board.id]!.power.current
+    t.sim.snapshot()
+    t.run(100)
+    const idle = current()
+    const erase = () => {
+      t.w(0x40023c04, 0x45670123)
+      t.w(0x40023c04, 0xcdef89ab)
+      t.w(0x40023c10, (2 << 8) | (1 << 1) | (11 << 3) | (1 << 16))
+    }
+    erase()
+    t.run(400)
+    expect.soft(current() - idle, "0.4 s into the erase").toBeNear(12e-3, 0.2e-3)
+    t.run(500)
+    expect.soft(current() - idle, "0.9 s in").toBeNear(12e-3, 0.2e-3)
+    t.run(300)
+    expect.soft(current() - idle, "0.9–1.2 s: the erase's last 0.1 s of the window's 0.3").toBeNear(12e-3 / 3, 0.3e-3)
+    t.run(200)
+    expect.soft(current() - idle, "done").toBeNear(0, 0.2e-3)
+    erase()
+    t.run(300)
+    t.parts(partKey(t.board.id, "RESET"), { pressed: true })
+    t.run(50)
+    t.parts(partKey(t.board.id, "RESET"), { pressed: false })
+    t.run(400)
+    expect.soft(current() - idle, "after a RESET in the middle of one").toBeNear(0, 0.2e-3)
   })
 })

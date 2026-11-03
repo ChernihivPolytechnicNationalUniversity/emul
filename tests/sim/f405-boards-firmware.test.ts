@@ -109,6 +109,58 @@ describe("STM32-H405 boot bridges, sampled at RESET (the first start after progr
   })
 })
 
+describe("STM32-H405 blink's supply current, from DS8626's tables and the board's own loads, against the UM's 'around 0.04 A' (§5.3)", () => {
+  const b = builder(GRID)
+  const u = b.place("olimex-stm32-h405", 0, 0)
+  b.doc.parts[partKey(u.id, "USB")] = { on: false }
+  u.props = { ...u.props, firmwareData: readFileSync(join(FIRMWARE, "prebuilt", `${h405Blink.id}.U1.elf`)).toString("base64") }
+  const usb5v = b.place("dc-source", 90, 0, { value: "5 V", rint: "1 mΩ" })
+  const gnd = b.place("ground", 90, 20)
+  const lead = b.wire(usb5v, "+", u, "EXT2-23")
+  b.wire(usb5v, "-", gnd, "GND")
+  b.wire(gnd, "GND", u, "EXT2-25")
+  const loop = new SimLoop()
+  loop.setDoc(b.doc)
+  loop.setParts(b.doc.parts)
+  loop.setRunning(true)
+  let clock = 0
+  const run = (ms: number) => {
+    const end = clock + ms
+    while (clock < end) loop.advance((clock += 5))
+  }
+  type Core = { bus: { read: (a: number, n: number) => number }; clocks: { hclk: number; pclk1: number; pclk2: number } }
+  const core = () => (loop as unknown as { mcus: Map<string, { mcu: { mcu: Core } }> }).mcus.get(u.id)!.mcu.mcu
+  const reg = (addr: number) => core().bus.read(addr, 4) >>> 0
+  run(500)
+  loop.snapshot()
+  run(2000)
+  const snap = loop.snapshot()!
+
+  it("runs 168 MHz from the crystal with the ART on in Scale 1, HSI left on, GPIOA, GPIOC, PWR and SYSCFG clocked: nothing else", () => {
+    expect.soft(core().clocks, "HCLK, PCLK1, PCLK2").toMatchObject({ hclk: 168e6, pclk1: 42e6, pclk2: 84e6 })
+    expect.soft(reg(0x40023830), "AHB1ENR: GPIOA, GPIOC and the CCM's reset bit").toBe((1 << 20) | 0b101)
+    expect.soft(reg(0x40023834), "AHB2ENR").toBe(0)
+    expect.soft(reg(0x40023840), "APB1ENR: PWR").toBe(1 << 28)
+    expect.soft(reg(0x40023844), "APB2ENR: SYSCFG").toBe(1 << 14)
+    expect.soft(reg(0x40023c00) & 0x700, "ACR: ICEN, DCEN, PRFTEN").toBe(0x700)
+    expect.soft(reg(0x40007000) & (1 << 14), "VOS: Scale 1").toBe(1 << 14)
+    expect.soft(reg(0x40023800) & ((1 << 0) | (1 << 16) | (1 << 18) | (1 << 24)), "HSION, HSEON (crystal), PLLON").toBe((1 << 0) | (1 << 16) | (1 << 24))
+  })
+
+  it("draws Table 20's 40 mA at 168 MHz, Table 28's GPIOA, GPIOC, PWR and SYSCFG on their buses, the HSE oscillator's 532 µA and the HSI's 60 µA: 41.58 mA", () => {
+    const want = 40e-3 + (2.7 + 2.54) * 168e-6 + 1.0 * 42e-6 + 0.74 * 84e-6 + 532e-6 + 60e-6
+    expect.soft(snap.mcus[u.id]!.power.current, "the F405's supply current").toBeNear(want, 1e-9)
+  })
+
+  it("asks 48.8 mA of a 5 V USB supply, which is the F405's, the LEDs', the LM1117 divider's and the VBUS dividers' currents added up (a conservation check, not a measurement); 22 % over the UM's 'around 0.04 A', whose firmware and clock it does not name", () => {
+    const board = Math.abs(snap.wireCurrent[lead.id] ?? 0)
+    const leds = (snap.parts[partKey(u.id, "PWR")]?.amps ?? 0) + (snap.parts[partKey(u.id, "STAT")]?.amps ?? 0)
+    const fromParts = snap.mcus[u.id]!.power.current + 3.305 / 630 + leds + 5 / 37e3 + 5 / 43e3
+    expect.soft(board, "the 5 V supply's current, itemised").toBeNearRel(fromParts, 0.02)
+    expect.soft(board, "against the UM's 0.04 A").toBeNearRel(0.04, 0.25)
+  })
+})
+
 describe("STM32-H405 losing its LM1117 on VIN (TI LM1117 §7.1: 20 V absolute maximum)", () => {
   const { doc, place, wire } = builder(GRID)
   const u = place("olimex-stm32-h405", 0, 0)
@@ -148,12 +200,12 @@ describe("STM32-H405 losing its LM1117 on VIN (TI LM1117 §7.1: 20 V absolute ma
     expect(onsets(2.2).length).toBeGreaterThanOrEqual(2)
   })
 
-  it("at 24 V the regulator fails open and the rail goes dead, but the F405 is unpowered, not burnt", () => {
-    vin.props = { ...vin.props, value: "24 V" }
+  it("at 21 V the regulator fails open past its 20 V and the rail goes dead, C2 (16 V tantalum) holds for the second it spends under its 21.12 V surge limit (30 s allowed), and the F405 is unpowered, not burnt", () => {
+    vin.props = { ...vin.props, value: "21 V" }
     restart()
     onsets(0.1)
     const blinks = onsets(1)
-    expect.soft(failures, "one non-fatal failure, the regulator's").toEqual([{ fatal: false, reason: expect.stringMatching(/^voltage 2[34]\.\d+ V exceeds the 20\.00 V rating$/) }])
+    expect.soft(failures, "one non-fatal failure, the regulator's").toEqual([{ fatal: false, reason: expect.stringMatching(/^voltage 2[01]\.\d+ V exceeds the 20\.00 V rating$/) }])
     expect.soft(rail(), "the rail").toBeLessThan(0.5)
     expect.soft(blinks, "STAT dark").toEqual([])
     expect.soft(core().burnt, "the die is not dead").toBe(false)
@@ -181,9 +233,9 @@ describe("STM32-H405 losing its LM1117 on VIN (TI LM1117 §7.1: 20 V absolute ma
     onsets(0.2)
     const damage = loop.snapshot()!.damage[u.id]
     expect.soft(damage?.fatal, "fatal now").toBe(true)
-    expect.soft(failures[1], "the F405's own failure, after the regulator's").toEqual({ fatal: true, reason: "voltage 6.00 V exceeds the 4.00 V rating" })
+    expect.soft(failures[1], "the F405's own failure, after the regulator's, while the rail's 30 µF of decoupling charges to 6 V").toEqual({ fatal: true, reason: expect.stringMatching(/^voltage [4-6]\.\d\d V exceeds the 4\.00 V rating$/) })
     expect.soft(core().burnt, "the die is dead").toBe(true)
-    expect.soft(String(core().mcu.mcu.cpu.halted), "halted as burnt out").toMatch(/burnt out: voltage 6\.00 V exceeds the 4\.00 V rating/)
+    expect.soft(String(core().mcu.mcu.cpu.halted), "halted as burnt out").toMatch(/burnt out: voltage [4-6]\.\d\d V exceeds the 4\.00 V rating/)
   })
 })
 

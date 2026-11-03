@@ -3,6 +3,7 @@ import { BoardIcon } from "../icons"
 import { mcuModel } from "../mcu-model"
 import type { ComponentDef, Element, ModelElement, PartDef, PinDef, PinKind } from "../types"
 import { LED_COLORS } from "./basic"
+import { schottky1n5819 } from "./schottky-1n5819"
 import { AT, BOARD_MM, BOOT_BRIDGES, BRIDGE_PITCH, boardArt, extPad, FRAME, jtagPad, PLATE, USBP_E } from "./olimex-stm32-h405-art"
 
 const at = (mm: { x: number; y: number }) => ({ x: Math.round((mm.x + FRAME.originX) * FRAME.cellsPerMm * 100) / 100, y: Math.round((mm.y + FRAME.originY) * FRAME.cellsPerMm * 100) / 100 })
@@ -123,12 +124,22 @@ const parts: PartDef[] = [
 
 const GND = "EXT1-6"
 const V33 = "EXT1-5"
+const VDDA = "EXT2-1"
+const VCAP = "$vcap"
 const VIN = "EXT2-26"
 const V5USB = "EXT2-23"
 const NRST = "EXT1-25"
 const BOOT0 = "$boot0"
 
-const SCHOTTKY = { vf: 0.18, emission: 1 }
+const USB_HOST = { volts: 5, limitAmps: 0.5, bulkFarads: 120e-6, vbusCableOhms: 0.25, groundCableOhms: 0.25 }
+const X5R_22U_6V3_AT_3V3 = 11.5e-6
+const X5R_10U_10V_AT_3V3 = 6.6e-6
+const X5R_2U2_6V3 = 2.2e-6
+const CERAMIC_100N = 100e-9
+const TANTALUM_C2 = { farads: 10e-6, esrOhms: 2.0, ratedVolts: 16, surgeVolts: 1.32 * 16, sustainedReverseVolts: 0.01, transientReverseVolts: 0.15 * 16, overstressSeconds: 30 }
+const FERRITE_L1_OHMS = 0.2
+const NOT_FATAL = { fail: "short", fatal: false } as const
+const capacitor = (name: string, a: string, value: number, volts?: number): ModelElement => ({ kind: "C", a, b: GND, value, hidden: true, limits: volts ? { voltage: volts, ...NOT_FATAL } : undefined, label: name })
 const LM1117 = { vout: 1.25 * (1 + 390 / 240) + 60e-6 * 390, dropout: 1.1 - 0.1 * (0.1 / 0.7), rdrop: 0.1 / 0.7, imax: 1.2, vinMax: 20, thermal: { rja: 61.6, tsd: 150, tsdOff: 135, tau: 2 } }
 const BC817_BETA = 250
 const BRIDGE_CLOSED_OHMS = 1e-3
@@ -141,14 +152,34 @@ const mcuPads = pins.filter((p) => p.mcu && p.mcu !== "NRST").map((p) => p.id)
 const model: ModelElement[] = [
   { kind: "SHORT", nodes: [GND, "EXT2-6", "EXT2-25", "EXT2-3", ...[4, 6, 8, 10, 12, 14, 16, 18, 20].map(jtagPin)] },
   { kind: "GND", node: GND },
-  { kind: "SHORT", nodes: [V33, "EXT2-5", "EXT2-1", jtagPin(1), jtagPin(2)] },
+  { kind: "SHORT", nodes: [V33, "EXT2-5", jtagPin(1), jtagPin(2)] },
   { kind: "SHORT", nodes: [NRST, jtagPin(15)] },
   { kind: "R", a: V33, b: "EXT1-23", value: bridge("vbat") },
-  { kind: "V", plus: "$usb", minus: GND, value: 5 },
-  { kind: "SW", a: "$usb", b: "$usbsw", part: "USB", closed: "on" },
-  { kind: "REG", in: "$usbsw", out: V5USB, gnd: GND, value: 5, dropout: 0, imax: 0.5 },
-  { kind: "D", anode: V5USB, cathode: VIN, ...SCHOTTKY },
-  { kind: "D", anode: jtagPin(19), cathode: VIN, ...SCHOTTKY },
+  { kind: "V", plus: "$usb", minus: GND, value: USB_HOST.volts },
+  { kind: "REG", in: "$usb", out: "$host", gnd: GND, value: USB_HOST.volts, dropout: 0, imax: USB_HOST.limitAmps, label: "USB host port switch" },
+  { kind: "C", a: "$host", b: GND, value: USB_HOST.bulkFarads, hidden: true, label: "USB host bulk capacitance" },
+  { kind: "SW", a: "$host", b: "$usbsw", part: "USB", closed: "on" },
+  { kind: "R", a: "$usbsw", b: V5USB, value: USB_HOST.vbusCableOhms + USB_HOST.groundCableOhms, hidden: true, label: "USB cable, VBUS and GND" },
+  ...schottky1n5819(V5USB, VIN),
+  ...schottky1n5819(jtagPin(19), VIN),
+  capacitor("C1", VIN, CERAMIC_100N),
+  { kind: "C", a: "$c2", b: GND, value: TANTALUM_C2.farads, hidden: true, limits: { voltage: TANTALUM_C2.ratedVolts, reverse: TANTALUM_C2.sustainedReverseVolts, overstress: { seconds: TANTALUM_C2.overstressSeconds, surgeVoltage: TANTALUM_C2.surgeVolts, reverseSurge: TANTALUM_C2.transientReverseVolts }, ...NOT_FATAL }, label: "C2" },
+  { kind: "R", a: VIN, b: "$c2", value: TANTALUM_C2.esrOhms, hidden: true, label: "C2 ESR" },
+  capacitor("C21", VIN, CERAMIC_100N),
+  capacitor("C3", V33, X5R_22U_6V3_AT_3V3, 6.3),
+  capacitor("C24", V33, X5R_22U_6V3_AT_3V3, 6.3),
+  capacitor("C4", V33, CERAMIC_100N),
+  capacitor("C5", V33, CERAMIC_100N),
+  capacitor("C6", V33, CERAMIC_100N),
+  capacitor("C7", V33, CERAMIC_100N),
+  capacitor("C8", V33, X5R_10U_10V_AT_3V3, 10),
+  capacitor("C10", V33, CERAMIC_100N),
+  { kind: "R", a: V33, b: VDDA, value: FERRITE_L1_OHMS, hidden: true, label: "L1 ferrite bead" },
+  capacitor("C11", VDDA, X5R_10U_10V_AT_3V3, 10),
+  capacitor("C9", VDDA, CERAMIC_100N),
+  capacitor("C22", VDDA, CERAMIC_100N),
+  capacitor("C20", VCAP, X5R_2U2_6V3, 6.3),
+  capacitor("C23", VCAP, X5R_2U2_6V3, 6.3),
   { kind: "R", a: jtagPin(19), b: GND, value: 47e3 },
   { kind: "REG", in: VIN, out: V33, gnd: GND, value: LM1117.vout, dropout: LM1117.dropout, rdrop: LM1117.rdrop, imax: LM1117.imax, thermal: LM1117.thermal, limits: { voltage: LM1117.vinMax, fail: "open", fatal: false }, label: "VR LM1117-ADJ" },
   { kind: "R", a: V33, b: "$adj", value: 240 },
@@ -190,7 +221,7 @@ const model: ModelElement[] = [
   { kind: "R", a: "$PB2", b: "$b1", value: 33e3 },
   { kind: "SW", a: "$b1", b: V33, part: "B1", closed: "on" },
   { kind: "SW", a: "$b1", b: GND, part: "B1", closed: "off" },
-  ...mcuModel(STM32F405RG, { vdd: V33, gnd: GND, nrst: NRST, boot0: BOOT0, pads: ["$PB2", ...mcuPads] }),
+  ...mcuModel(STM32F405RG, { vdd: V33, gnd: GND, nrst: NRST, boot0: BOOT0, vbat: "EXT1-23", vcap: VCAP, pads: ["$PB2", ...mcuPads] }),
 ]
 
 const solderBridge = (key: string, label: string) => ({ key, label, type: "select" as const, options: [{ value: "closed", label: "Closed" }, { value: "open", label: "Open (cut)" }] })
@@ -221,17 +252,21 @@ export const olimexStm32H405: ComponentDef = {
   mcuReset: NRST,
   mcuBoot0: BOOT0,
   mcuVbat: "EXT1-23",
+  mcuVref: VDDA,
+  mcuVdda: VDDA,
   mcuClocks: { hse: { hz: 8e6, kind: "crystal", startup: 2e-3 }, lse: { hz: 32768, kind: "crystal", startup: 2 } },
   info: {
     MCU: "STM32F405RGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM (128 KB + 64 KB CCM); the schematic's RET6 label is wrong",
     Board: `Rev. C, ${BOARD_MM.w} × ${BOARD_MM.h} mm, drawn to scale from Olimex's dimension drawing and UM photos. The board prints no pin names; εmul prints them in tables on the inner side of each header, as the Open746I-C does, which stretches the board: everything below EXT2 sits 3 cells lower, EXT1 with the LEDs, bridges and URL 7 cells lower, JTAG 2 cells right and its shroud widened for the names; inside each part, everything where Olimex put it. So the EXT headers stand 1.7 in apart here, not the board's 1 in (UM §6.3)`,
+    "Supply current": "The F405 draws DS8626's own tables, not one all-peripherals line: Table 20/21's base by HCLK (ART or code in RAM, or neither) with every peripheral clock off, plus Table 28's µA/MHz for each clock RCC enables on its bus (in Sleep only those LPENR keeps; Ethernet and the camera interface, which the F405 does not have, never), an estimated 10 % between Scale 1 and 2 (Table 14 note 1: the rows up to 144 MHz read as Scale 2 measurements), the ADCs' and DAC channels' analog parts, the compensation cell, HSI, LSI, LSE, the PLLs where the tables leave them out (their min–max midpoint), an estimated 532 µA for the HSE oscillator (DS8626 Rev 4 Table 31's figure at 25 MHz and CL 10 pF; Rev 5 dropped the row), flash program/erase (Table 39) for the share of time the flash is busy; Stop (Table 23), Standby (Table 24) and, with VDD gone, the cell on VBAT (Table 25) by the backup regulator and the LSE. Drawn as a current that holds at the VDD the board gives it. The blink at 168 MHz: 41.6 mA, the board 48.8 mA from 5 V, where the UM says about 40 mA without naming its firmware",
+    Decoupling: "C1 100 nF, C2 10 µF/16 V tantalum (2 Ω ESR, KEMET T491B's maximum; shorts at once past 1.32 × rated or 15 % reversed, and, on an assumed 30 s damage model, held over 16 V or reversed at all), C21 100 nF on VIN; C3, C24 22 µF and C8 10 µF X5R on 3.3 V at what DC bias leaves of them at 3.3 V (11.5 and 6.6 µF, the median of Murata's and TDK's curves), C4–C7, C10 100 nF; L1 to VDDA, the ADC's reference, as its DC resistance (0.2 Ω; no part number, so no rating and no failure), C11, C9, C22 there; C20/C23 2.2 µF on VCAP behind the core regulator's 160 mA inrush limit at Scale 1's 1.26 V (DS8626 Tables 14 and 19). The USB host is a modelled one: 5 V behind an assumed 0.5 A switch, USB 2.0's 120 µF of bulk, 0.25 Ω each in VBUS and GND (the 125 mV per conductor at 500 mA of §7.2.2). D1/D2: onsemi's typical 1N5819 at 25 °C, Fig. 7 forward (Is 3.28 µA, n 1.019, Rs 83 mΩ, 1 mV rms) and Fig. 9 reverse (4 % rms to 21 V)",
     LEDs: "STAT green on PC12 (lit when low, 2 kΩ, through LED_E), PWR red (2 kΩ)",
     Buttons: "BUT on PA0 (10 kΩ pull-up, 100 nF, 560 Ω, low when pressed), RESET",
     Power: "USB VBUS through D1, or a JTAG debugger's 5 V (pin 19) through D2, or VIN directly, into the LM1117-ADJ (240 Ω / 390 Ω: 3.30 V, 5.2 mA through the divider, over the 5 mA minimum load; dropout 1.1 V at 100 mA to 1.2 V at 800 mA, current limit 1.2 A typical, 0.8 A guaranteed — the UM’s “up to 800 mA” —, destroyed open past 20 V in without taking the board with it; it heats at 61.6 °C/W (TI's SOT-223 figure, not this board's copper) and shuts down at 150 °C, the absolute maximum, back on at 135 °C with a 2 s time constant — TI gives no shutdown point, hysteresis or time constant, so those three are assumptions; TI LM1117 §7.1, §7.4, §7.5); or 3.3 V straight onto the rail",
     USB: "D− PA11, D+ PA12 (22 Ω each); a plugged host's 15 kΩ pull-downs; VBUS sensed on PC4 through 15k/22k and USBP_E, not on PA9; no ID; PC11 low with VBUS present switches 1.5 kΩ onto D+ (Q3, Q4 BC817)",
     JTAG: "20-pin ARM header: TRST PB4, TDI PA15, TMS/SWDIO PA13, TCK/SWCLK PA14, TDO/SWO PB3 (10 kΩ pull-ups each), RST, 3.3 V on 1–2, RTCK (11) and 17 10 kΩ to GND, 5 V in on 19",
     Bridges: "On top, clickable: B0_H/B0_L and B1_H/B1_L (boot from flash, system memory or SRAM), USBP_E. On the bottom, in the inspector: VBAT, LED_E, R-T",
-    "Not modelled": "The USB device stack (no OTG FS core), ST's bootloader in system memory (the core idles there), the JTAG/SWD protocol (the debugger reaches the core directly), the decoupling capacitors, the crystals' load network (C12/C13 27 pF and R12 1 MΩ on Q1, C14/C15 10 pF on Q2: the oscillators are ideal 8 MHz and 32 768 Hz after their start-up times), the backup domain's own current from VBAT (DS8626 Table 25, 0.1–1.68 µA: a cell on EXT1 #23 keeps the backup domain through an outage but carries nothing), U2/U3 and C16/C17 (not fitted on the board)",
+    "Not modelled": "The USB device stack (no OTG FS core), ST's bootloader in system memory (the core idles there), the JTAG/SWD protocol (the debugger reaches the core directly), the crystals' load network (C12/C13 27 pF and R12 1 MΩ on Q1, C14/C15 10 pF on Q2: the oscillators are ideal 8 MHz and 32 768 Hz after their start-up times), the LM1117's loop (its load-transient response: the regulator is static, so the capacitors act when it cannot regulate — power-up, power-down, dropout, current limit), the capacitors' ESL and the ceramics' DC bias as a curve (each is taken at its rail's voltage), the bead's impedance above DC, the F405's VDDA share (its analog current is drawn from VDD; ≤ 6.4 mA, ≤ 1.3 mV across L1), the core regulator following VOS (1.14 V in Scale 2) and Standby (off, then its wake-up inrush), the I/O switching current into the pads' own capacitance (Table 27), U2/U3 and C16/C17 (not fitted on the board)",
     Source: "Olimex STM32-H405 user manual rev B, Rev. C schematic and dimension drawing",
   },
 }

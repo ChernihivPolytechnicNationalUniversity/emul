@@ -455,6 +455,7 @@ export type ComponentDef = {
    */
   mcuVbat?: string
   mcuVref?: string
+  mcuVdda?: string
   /**
    * Clock sources a board carries for its MCU (null: the pins are free). A bare chip omits this
    * and gets its HSE/LSE from crystals or oscillators wired to its OSC pins on the field.

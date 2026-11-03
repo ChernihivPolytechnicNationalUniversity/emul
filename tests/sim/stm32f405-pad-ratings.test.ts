@@ -12,24 +12,32 @@ const pads = STM32F405RG.electrical.pads!
 const FT_PB6 = "EXT1-13"
 const TTA_PA4 = "EXT2-11"
 
-function bench(volts: number, pin: string, ohms = 0, usb = true) {
+const BOARD_UP_MS = 20
+
+function bench(volts: number, pin: string, ohms = 0, usb = true, applied: "once the board is up" | "from the start" = "once the board is up") {
   const { place, wire, doc } = builder(GRID)
   const u = place("olimex-stm32-h405", 0, 0)
   const supply = place("dc-source", 40, 30, { value: `${volts} V` })
+  const sw = place("switch", 37, 30)
   const gnd = place("ground", 40, 40)
   wire(supply, "-", gnd, "GND")
   wire(gnd, "GND", u, "EXT1-6")
+  wire(supply, "+", sw, "1")
   if (ohms > 0) {
     const r = place("resistor", 34, 30, { value: `${ohms} Ω`, power: "1" })
-    wire(supply, "+", r, "1")
+    wire(sw, "2", r, "1")
     wire(r, "2", u, pin)
-  } else wire(supply, "+", u, pin)
+  } else wire(sw, "2", u, pin)
   doc.parts[partKey(u.id, "USB")] = { on: usb }
+  doc.parts[partKey(sw.id, "SW")] = { on: applied === "from the start" }
   const loop = new SimLoop()
   loop.setDoc(doc)
   loop.setParts(doc.parts)
   loop.setRunning(true)
   let clock = 0
+  while (clock < BOARD_UP_MS) loop.advance((clock += 5))
+  doc.parts[partKey(sw.id, "SW")] = { on: true }
+  loop.setParts(doc.parts)
   while (clock < EYE_SETTLED * 1000) loop.advance((clock += 20))
   const snap = loop.snapshot()!
   return { damage: snap.damage[u.id]?.reason, volts: snap.pinVoltage[pinKey(u.id, pin)]! }
@@ -56,6 +64,10 @@ describe("on the STM32-H405, without firmware", () => {
     const got = bench(5, FT_PB6)
     expect.soft(got.damage).toBeUndefined()
     expect.soft(got.volts).toBeNear(5, 0.05)
+  })
+
+  it("burns at 5 V on FT PB6 applied from the start: while the board's rail is still coming up, VDD + 4 V is under 5 V (DS8626 Table 11 note 2: VIN's maximum must always be respected)", () => {
+    expect(bench(5, FT_PB6, 0, true, "from the start").damage).toMatch(/^voltage 5(\.0+)? V exceeds the 4\.\d+ V rating$/)
   })
 
   it("burns at 7.5 V on FT PB6, past the regulator's 3.3 V + 4 V", () => {

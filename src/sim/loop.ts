@@ -170,20 +170,23 @@ export type McuStatus = CoreStatus & {
   reference: string | null
 }
 
-const VREF_MIN_VOLTS = 1.7
 const VREF_UNDER_VDDA_MAX_VOLTS = 1.2
 const VREF_OVER_VDDA_TOLERANCE_VOLTS = 0.01
 
 export type ReferenceWiring = { grounded: boolean; wired: boolean }
+export type ReferenceRules = { minVolts: number; minSource: string; vddaSource: string }
 
-export function referenceProblem(volts: number, vdda: number, { grounded, wired }: ReferenceWiring): string | null {
+export const DS10916_REFERENCE: ReferenceRules = { minVolts: 1.7, minSource: "DS10916 Tables 63 and 74", vddaSource: "DS10916 Table 63" }
+export const DS8626_REFERENCE: ReferenceRules = { minVolts: 1.8, minSource: "DS8626 Table 67", vddaSource: "DS8626 Table 67 and Table 14 note 4" }
+
+export function referenceProblem(volts: number, vdda: number, { grounded, wired }: ReferenceWiring, rules: ReferenceRules = DS10916_REFERENCE): string | null {
   const at = (v: number) => `${v.toFixed(2)} V`
   if (grounded) return "VREF+ grounded: no ADC/DAC reference"
-  if (!wired && volts < VREF_MIN_VOLTS) return "VREF+ floating: no ADC/DAC reference"
-  if (volts < VREF_MIN_VOLTS) return `VREF+ at ${at(volts)}: under the ${VREF_MIN_VOLTS} V the ADC and DAC need (DS10916 Tables 63 and 74)`
+  if (!wired && volts < rules.minVolts) return "VREF+ floating: no ADC/DAC reference"
+  if (volts < rules.minVolts) return `VREF+ at ${at(volts)}: under the ${rules.minVolts} V the ADC and DAC need (${rules.minSource})`
   if (!(vdda > 0)) return null
-  if (volts > vdda + VREF_OVER_VDDA_TOLERANCE_VOLTS) return `VREF+ at ${at(volts)}: above VDDA (${at(vdda)}), which DS10916 Table 63 does not allow`
-  if (vdda - volts >= VREF_UNDER_VDDA_MAX_VOLTS) return `VREF+ at ${at(volts)}: ${VREF_UNDER_VDDA_MAX_VOLTS} V or more under VDDA (${at(vdda)}), outside DS10916 Table 63`
+  if (volts > vdda + VREF_OVER_VDDA_TOLERANCE_VOLTS) return `VREF+ at ${at(volts)}: above VDDA (${at(vdda)}), which ${rules.vddaSource} does not allow`
+  if (vdda - volts >= VREF_UNDER_VDDA_MAX_VOLTS) return `VREF+ at ${at(volts)}: ${VREF_UNDER_VDDA_MAX_VOLTS} V or more under VDDA (${at(vdda)}), outside ${rules.vddaSource}`
   return null
 }
 
@@ -280,6 +283,7 @@ class McuInstance {
   boot0Net: number | undefined = undefined
   /** Net of VBAT (undefined: unsolved or absent, treated as VDD: nothing survives an outage). */
   vbatNet: number | undefined = undefined
+  vddaNet: number | undefined = undefined
   vbatOhms: number | null = null
   vddDown = true
   vrefNet: number | undefined = undefined
@@ -315,7 +319,8 @@ class McuInstance {
 
   status(): McuStatus {
     const wiring = { grounded: this.vrefNet === GROUND, wired: this.vrefWired }
-    const reference = this.vref === undefined || this.vrefNet === undefined ? null : this.mcu.referenceProblem ? this.mcu.referenceProblem(this.vref, wiring) : referenceProblem(this.vref, this.vdda, wiring)
+    const rules = "line" in this.mcu.chip && this.mcu.chip.line === "f40x" ? DS8626_REFERENCE : DS10916_REFERENCE
+    const reference = this.vref === undefined || this.vrefNet === undefined ? null : this.mcu.referenceProblem ? this.mcu.referenceProblem(this.vref, wiring) : referenceProblem(this.vref, this.vdda, wiring, rules)
     return { ...this.mcu.status(), firmware: this.name, powered: this.powered, reference }
   }
 
@@ -761,6 +766,7 @@ export class SimLoop {
       inst.resetNet = def?.mcuReset ? netOf(def.mcuReset) : undefined
       inst.boot0Net = def?.mcuBoot0 ? netOf(def.mcuBoot0) : undefined
       inst.vbatNet = def?.mcuVbat ? netOf(def.mcuVbat) : undefined
+      inst.vddaNet = def?.mcuVdda ? netOf(def.mcuVdda) : undefined
       const vrefPin = def?.mcuVref ? pinKey(inst.object, def.mcuVref) : undefined
       inst.vrefNet = vrefPin ? engine.net.pinNet.get(vrefPin) : undefined
       inst.vrefWired = inst.vrefNet !== undefined && [...engine.net.pinNet].some(([key, net]) => net === inst.vrefNet && key !== vrefPin)
@@ -2087,7 +2093,7 @@ export class SimLoop {
           inst.base = engine.time
         }
         if (Number.isFinite(vdd)) {
-          inst.vdda = vdd
+          inst.vdda = inst.vddaNet === undefined ? vdd : inst.vddaNet === GROUND ? 0 : engine.v[inst.vddaNet]
           inst.mcu.setSupply(vdd)
         }
         // A part that reads its reset pin itself (a PIC's MCLR/VPP) gets the voltage on it.
