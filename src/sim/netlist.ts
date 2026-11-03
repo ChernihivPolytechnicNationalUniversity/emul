@@ -3,6 +3,7 @@ import { pinContacts } from "@/schematic/contacts"
 import { getDef } from "@/schematic/registry"
 import { pinKey, type Damage, type Element, type Limits, type NodeRef, type PlacedObject, type ProtChip, type Schematic, type Value } from "@/schematic/types"
 import { chemistryById, defaultResistance, type Chemistry } from "./battery"
+import { JUNCTION_VT as VT, saturationCurrent } from "./junction"
 import { opampSpec, type OpampSpec } from "./opamp"
 import { parseValue } from "./units"
 
@@ -123,7 +124,6 @@ export type Netlist = {
   contacts: ReadonlyMap<string, string>
 }
 
-const VT = 0.025852
 /** Contact resistance of a switch that does not state its own. */
 const SW_RON = 0.05
 /**
@@ -138,10 +138,7 @@ const ZENER_IZT = 5e-3
 const ESD_DIODE_VF = 0.7
 const ESD_DIODE_N = 1
 
-/** Shockley saturation current so that the diode drops `vf` at 10 mA with emission coefficient n. */
-export function saturationCurrent(vf: number, n: number) {
-  return 0.01 / (Math.exp(vf / (n * VT)) - 1)
-}
+export { saturationCurrent }
 
 /**
  * Breakdown is modelled as a mirrored junction, so it conducts ~0.7 V past its offset. The
