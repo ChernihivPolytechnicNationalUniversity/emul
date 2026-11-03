@@ -1,0 +1,13 @@
+{
+  "source": "example opamp-amplifier",
+  "nets": [
+    ["G1.-","ground#3.GND"],
+    ["G1.+","R1.1"],
+    ["ground#1.GND","R3.2"],
+    ["ground#2.GND","U1.IN+"],
+    ["R1.2","R2.1","U1.IN-"],
+    ["R2.2","R3.1","U1.OUT"],
+    ["supply#1.V","U1.V+"],
+    ["supply#2.V","U1.V-"]
+  ]
+}

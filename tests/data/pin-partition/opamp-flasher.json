@@ -1,0 +1,15 @@
+{
+  "source": "example opamp-flasher",
+  "nets": [
+    ["C1.1","R1.1","U1.IN-"],
+    ["C1.2","ground#1.GND"],
+    ["ground#2.GND","LED1.2"],
+    ["ground#3.GND","LED2.1"],
+    ["ground#4.GND","R2.2"],
+    ["LED1.1","LED2.2","R4.2"],
+    ["R1.2","R3.2","R4.1","U1.OUT"],
+    ["R2.1","R3.1","U1.IN+"],
+    ["supply#1.V","U1.V+"],
+    ["supply#2.V","U1.V-"]
+  ]
+}

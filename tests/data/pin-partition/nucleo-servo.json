@@ -1,0 +1,8 @@
+{
+  "source": "example nucleo-servo",
+  "nets": [
+    ["M1.GND","U1.CN10-22"],
+    ["M1.SIG","U1.CN10-4"],
+    ["M1.VCC","U1.CN8-9"]
+  ]
+}

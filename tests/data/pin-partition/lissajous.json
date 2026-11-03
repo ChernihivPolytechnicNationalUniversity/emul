@@ -1,0 +1,13 @@
+{
+  "source": "example lissajous",
+  "nets": [
+    ["G1.-","ground#1.GND","R1.2"],
+    ["G1.+","R1.1"],
+    ["G2.-","ground#2.GND","R2.2"],
+    ["G2.+","R2.1"],
+    ["G3.-","ground#3.GND","R3.2"],
+    ["G3.+","R3.1"],
+    ["G4.-","ground#4.GND","R4.2"],
+    ["G4.+","R4.1"]
+  ]
+}

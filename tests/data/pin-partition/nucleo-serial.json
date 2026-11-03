@@ -1,0 +1,7 @@
+{
+  "source": "example nucleo-serial",
+  "nets": [
+    ["TERM1.RX","U1.VCP-TX"],
+    ["TERM1.TX","U1.VCP-RX"]
+  ]
+}

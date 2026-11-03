@@ -1,0 +1,9 @@
+{
+  "source": "example battery-life",
+  "nets": [
+    ["BT1.-","ground#1.GND","LED1.2"],
+    ["BT1.+","SW1.1"],
+    ["LED1.1","R1.2"],
+    ["R1.1","SW1.2"]
+  ]
+}

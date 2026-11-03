@@ -1,0 +1,8 @@
+{
+  "source": "example nucleo-ws2812",
+  "nets": [
+    ["LED1.DIN","U1.CN10-4"],
+    ["LED1.GND","U1.CN10-22"],
+    ["LED1.VDD","U1.CN8-9"]
+  ]
+}

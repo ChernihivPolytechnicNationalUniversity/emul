@@ -1,0 +1,7 @@
+{
+  "source": "example nucleo-melody",
+  "nets": [
+    ["BZ1.1","U1.CN7-10"],
+    ["BZ1.2","U1.CN7-8"]
+  ]
+}

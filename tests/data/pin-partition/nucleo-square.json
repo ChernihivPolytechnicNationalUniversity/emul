@@ -1,0 +1,8 @@
+{
+  "source": "example nucleo-square",
+  "nets": [
+    ["ground#1.GND","R1.2","R2.2"],
+    ["R1.1","U1.CN7-10"],
+    ["R2.1","U1.CN10-31"]
+  ]
+}

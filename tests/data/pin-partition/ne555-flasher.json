@@ -1,0 +1,17 @@
+{
+  "source": "example ne555-flasher",
+  "nets": [
+    ["BT1.-","ground#1.GND"],
+    ["BT1.+","R1.1","R4.1","U1.RESET","U1.VCC"],
+    ["C1.1","R2.2","U1.THRES","U1.TRIG"],
+    ["C1.2","ground#2.GND"],
+    ["C2.1","U1.CTRL"],
+    ["C2.2","ground#4.GND"],
+    ["ground#3.GND","U1.GND"],
+    ["ground#5.GND","LED1.2"],
+    ["LED1.1","R3.2"],
+    ["LED2.1","R4.2"],
+    ["LED2.2","R3.1","U1.OUT"],
+    ["R1.2","R2.1","U1.DIS"]
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "source": "example charge-boost",
+  "nets": [
+    ["A1.B-","BT1.-"],
+    ["A1.B+","BT1.+"],
+    ["A1.VO-","R1.2"],
+    ["A1.VO+","SW1.1"],
+    ["R1.1","SW1.2"]
+  ]
+}

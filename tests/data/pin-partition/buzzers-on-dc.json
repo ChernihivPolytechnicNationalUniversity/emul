@@ -1,0 +1,11 @@
+{
+  "source": "example buzzers-on-dc",
+  "nets": [
+    ["BT1.-","ground#3.GND"],
+    ["BT1.+","SW1.1"],
+    ["BZ1.1","R1.1","SW1.2"],
+    ["BZ1.2","ground#1.GND"],
+    ["BZ2.1","R1.2"],
+    ["BZ2.2","ground#2.GND"]
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "source": "example lab1-f746",
+  "nets": [
+    ["C1.1","DD1.PH0","ZQ1.1"],
+    ["C1.2","C2.2","ground#11.GND"],
+    ["C2.1","DD1.PH1","ZQ1.2"],
+    ["DD1.NRST","SA1.2"],
+    ["DD1.PB6","R2.2"],
+    ["DD1.PB7","R3.2"],
+    ["DD1.PD4","SA4.2"],
+    ["DD1.PD5","SA5.2"],
+    ["DD1.PG2","SA2.1"],
+    ["DD1.PG3","SA3.1"],
+    ["DD1.PH4","R4.1"],
+    ["DD1.PI8","R5.1"],
+    ["DD1.PI11","SA6.1"],
+    ["DD1.VDD","DD1.VDDA","supply#1.V"],
+    ["DD1.VSS","DD1.VSSA","ground#1.GND","SA1.1"],
+    ["ground#2.GND","VD1.2"],
+    ["ground#3.GND","VD2.2"],
+    ["ground#4.GND","VD3.2"],
+    ["ground#5.GND","VD4.2"],
+    ["ground#6.GND","SA2.2"],
+    ["ground#7.GND","SA3.2"],
+    ["ground#8.GND","SA4.1"],
+    ["ground#9.GND","SA5.1"],
+    ["ground#10.GND","SA6.2"],
+    ["R2.1","VD1.1"],
+    ["R3.1","VD2.1"],
+    ["R4.2","VD3.1"],
+    ["R5.2","VD4.1"]
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "source": "example nucleo-adc",
+  "nets": [
+    ["ground#1.GND","RV1.2"],
+    ["ground#2.GND","LED1.2"],
+    ["LED1.1","R1.2"],
+    ["R1.1","U1.CN7-17"],
+    ["RV1.1","U1.CN8-7"],
+    ["RV1.W","U1.CN9-1"]
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "source": "example charge-boost-chips",
+  "nets": [
+    ["BT1.-","U2.GND"],
+    ["BT1.+","L1.1","U1.BAT","U2.VDD","U3.EN","U3.IN"],
+    ["D1.1","L1.2","U3.SW"],
+    ["D1.2","R4.2","SW2.1"],
+    ["G1.-","ground#1.GND"],
+    ["G1.+","SW1.1"],
+    ["ground#2.GND","R1.1","U1.TEMP"],
+    ["ground#3.GND","U1.GND"],
+    ["ground#4.GND","U2.VM"],
+    ["ground#5.GND","R5.2"],
+    ["ground#6.GND","U3.GND"],
+    ["ground#7.GND","R6.2"],
+    ["LED1.1","R2.2"],
+    ["LED1.2","U1.CHRG"],
+    ["LED2.1","R3.2"],
+    ["LED2.2","U1.STDBY"],
+    ["R1.2","U1.PROG"],
+    ["R2.1","R3.1","SW1.2","U1.CE","U1.VCC"],
+    ["R4.1","R5.1","U3.FB"],
+    ["R6.1","SW2.2"]
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "source": "example nucleo-pwm",
+  "nets": [
+    ["ground#1.GND","LED1.2","U1.CN10-5"],
+    ["LED1.1","R1.2"],
+    ["R1.1","U1.CN10-4"],
+    ["U1.CN10-13","U1.CN10-31"]
+  ]
+}

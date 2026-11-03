@@ -1,0 +1,14 @@
+{
+  "source": "tests/data/emul-1.28.0/lab2-rgb-pwm.emul",
+  "nets": [
+    ["ground#1.GND","VD1G.2"],
+    ["ground#2.GND","VD1R.2"],
+    ["ground#3.GND","VD1B.2"],
+    ["R2.1","VD1R.1"],
+    ["R2.2","U1.P4-7"],
+    ["R3.1","VD1G.1"],
+    ["R3.2","U1.P4-5"],
+    ["R4.1","U1.P12-5"],
+    ["R4.2","VD1B.1"]
+  ]
+}
