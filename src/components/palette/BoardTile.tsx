@@ -1,12 +1,13 @@
 import { cn } from "@/lib/utils"
 import type { PaletteEntry } from "./items"
-import { startDrag, usePaletteActions } from "./palette-actions"
+import { useDragOut, usePaletteActions } from "./palette-actions"
 import { FavouriteButton } from "./FavouriteButton"
 
 /** A board in the palette: its photo on top, the name students use, the MCU and clock, what sets it apart. */
 export function BoardTile({ entry }: { entry: PaletteEntry }) {
   const { activate, armed, favourites } = usePaletteActions()
   const def = entry.def
+  const drag = useDragOut(def)
   const card = def.board
   if (!card) return null
   // Clock and logic level first: what a student compares boards by; then what sets this one apart.
@@ -16,8 +17,7 @@ export function BoardTile({ entry }: { entry: PaletteEntry }) {
     <div className="group/tile relative flex min-w-0">
       <button
         type="button"
-        draggable
-        onDragStart={(e) => startDrag(e, def)}
+        {...drag}
         onClick={(e) => activate(def, e)}
         aria-pressed={inHand}
         title={`${entry.name} · ${card.vendor}\n${card.mcu}, ${card.mhz} MHz, ${card.volts} V logic`}

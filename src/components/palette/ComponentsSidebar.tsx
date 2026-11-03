@@ -25,7 +25,7 @@ import { isModified } from "@/schematic/hdl"
 import { getDef, registry } from "@/schematic/registry"
 import { BoardTile } from "./BoardTile"
 import { useQuickLists } from "./recents"
-import { Actions, startDrag, usePaletteActions, type PaletteActions } from "./palette-actions"
+import { Actions, clickEndsDrag, useDragOut, usePaletteActions, type PaletteActions } from "./palette-actions"
 import { FavouriteButton } from "./FavouriteButton"
 import { hdlCreateMatch, highlight, requestPartUrl, searchParts, similarParts, toolHints } from "./search"
 
@@ -39,6 +39,12 @@ type ComponentsSidebarProps = React.ComponentProps<typeof Sidebar> & {
   onHdlNew?: (language: HdlLanguage) => void
   onHdlImport?: () => void
   onHdlOpen?: (id: string) => void
+  /** Show one group alone, open: what a group icon of the folded palette slides out. */
+  only?: string
+  /** The search box got the focus (a sheet grows to full height for the keyboard). */
+  onSearchFocus?: () => void
+  /** Focus the search box on mount: the folded palette's search icon opens it ready to type. */
+  autoFocusSearch?: boolean
 }
 
 /** Queries that show what the search understands: a kind, two words, a family, a part number, a need. */
@@ -109,16 +115,16 @@ function PartRow({ entry, ranges = [], matched, variant, selected }: { entry: Pa
   const item = entry.def
   const title = entry.family ? `${entry.family.variants.length} variants; this places ${item.name}, the inspector switches it` : item.description
   const inHand = armed === item.id
+  const drag = useDragOut(item)
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        draggable
-        onDragStart={(e) => startDrag(e, item)}
+        {...drag}
         onClick={(e) => activate(item, e)}
         title={title}
         isActive={inHand || selected}
         aria-pressed={inHand}
-        className="cursor-grab text-[13px] active:cursor-grabbing [&>svg]:size-[18px]"
+        className="cursor-grab text-[13px] active:cursor-grabbing pointer-coarse:h-11 [&>svg]:size-[18px]"
       >
         <item.icon />
         <span className="min-w-[40%] truncate">
@@ -146,9 +152,53 @@ function PartRow({ entry, ranges = [], matched, variant, selected }: { entry: Pa
   )
 }
 
+/** A part as a tile: its symbol large over its name. A wide panel shows the everyday parts this way, as a phone does. */
+function PartTile({ entry }: { entry: PaletteEntry }) {
+  const { activate, armed } = usePaletteActions()
+  const item = entry.def
+  const inHand = armed === item.id
+  const drag = useDragOut(item)
+  return (
+    <button
+      type="button"
+      {...drag}
+      onClick={(e) => activate(item, e)}
+      title={item.description ?? entry.name}
+      aria-pressed={inHand}
+      className={cn(
+        "flex min-w-0 cursor-grab flex-col items-center gap-1 rounded-lg border bg-background px-1 pt-2.5 pb-1.5 outline-hidden hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-sidebar-ring active:cursor-grabbing [&>svg]:size-6",
+        inHand && "border-foreground ring-1 ring-foreground",
+      )}
+    >
+      <item.icon />
+      <span className="w-full truncate text-center text-[11px]">{entry.name}</span>
+    </button>
+  )
+}
+
+function QuickChip({ def }: { def: ComponentDef }) {
+  const { activate, armed } = usePaletteActions()
+  const drag = useDragOut(def)
+  return (
+    <button
+      type="button"
+      {...drag}
+      onClick={(e) => activate(def, e)}
+      title={def.description ?? def.name}
+      aria-pressed={armed === def.id}
+      className={cn(
+        "flex h-[26px] max-w-[11rem] min-w-0 cursor-grab items-center gap-1.5 rounded-full border bg-background pr-2.5 pl-1.5 text-xs outline-hidden hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring active:cursor-grabbing pointer-coarse:h-9 [&>svg]:size-4 [&>svg]:shrink-0",
+        armed === def.id && "border-foreground bg-foreground text-background hover:bg-foreground",
+      )}
+    >
+      <def.icon />
+      <span className="truncate">{def.name}</span>
+    </button>
+  )
+}
+
 /** Favourite or recent parts: round chips with the part's icon and name, wrapping. */
 function QuickStrip({ label, ids, action }: { label: string; ids: readonly string[]; action?: React.ReactNode }) {
-  const { activate, armed } = usePaletteActions()
   const defs = ids.flatMap((id) => getDef(id) ?? [])
   if (defs.length === 0) return null
   return (
@@ -156,22 +206,7 @@ function QuickStrip({ label, ids, action }: { label: string; ids: readonly strin
       <Heading action={action}>{label}</Heading>
       <div className="flex flex-wrap gap-1.5 px-2 pb-1.5">
         {defs.map((def) => (
-          <button
-            key={def.id}
-            type="button"
-            draggable
-            onDragStart={(e) => startDrag(e, def)}
-            onClick={(e) => activate(def, e)}
-            title={def.description ?? def.name}
-            aria-pressed={armed === def.id}
-            className={cn(
-              "flex h-[26px] max-w-[11rem] min-w-0 cursor-grab items-center gap-1.5 rounded-full border bg-background pr-2.5 pl-1.5 text-xs outline-hidden hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring active:cursor-grabbing [&>svg]:size-4 [&>svg]:shrink-0",
-              armed === def.id && "border-foreground bg-foreground text-background hover:bg-foreground",
-            )}
-          >
-            <def.icon />
-            <span className="truncate">{def.name}</span>
-          </button>
+          <QuickChip key={def.id} def={def} />
         ))}
       </div>
     </SidebarGroup>
@@ -329,7 +364,7 @@ function SearchIntro({ onExample }: { onExample: (q: string) => void }) {
   )
 }
 
-export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdlImport, onHdlOpen, ...props }: ComponentsSidebarProps) {
+export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdlImport, onHdlOpen, only, onSearchFocus, autoFocusSearch, ...props }: ComponentsSidebarProps) {
   const library = useLibrary()
   const quick = useQuickLists()
   const [query, setQuery] = React.useState("")
@@ -349,10 +384,29 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
     setSelected(0)
   }
 
+  // A drag's end runs in a listener set up at its start: it reads what is in hand now, not then.
+  const inHand = React.useRef(armed)
+  React.useEffect(() => {
+    inHand.current = armed
+  }, [armed])
+
   const actions = React.useMemo<PaletteActions>(
     () => ({
       // A click has a pointer behind it (detail ≥ 1); Enter or Space on a focused row has none.
-      activate: (def, e) => (e.detail === 0 ? onPick?.(def) : onArm?.(def)),
+      activate: (def, e) => {
+        if (clickEndsDrag()) return
+        if (e.detail === 0) onPick?.(def)
+        else onArm?.(def)
+      },
+      // A drag takes the part (not toggles it); let go off the field, nothing stays in hand.
+      take: (def) => {
+        const now = inHand.current
+        if (def && now !== def.id) onArm?.(def)
+        else if (!def && now) {
+          const held = getDef(now)
+          if (held) onArm?.(held)
+        }
+      },
       armed,
       favourites,
     }),
@@ -379,7 +433,11 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
               data-slot="palette-search"
               value={query}
               onChange={(e) => ask(e.target.value)}
-              onFocus={() => setFocused(true)}
+              autoFocus={autoFocusSearch}
+              onFocus={() => {
+                setFocused(true)
+                onSearchFocus?.()
+              }}
               onBlur={() => setFocused(false)}
               onKeyDown={(e) => {
                 const rows = search.pickable
@@ -419,23 +477,23 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
             )}
           </div>
         </SidebarHeader>
-        <SidebarContent className="gap-0">
+        <SidebarContent className="@container gap-0">
           {q ? (
             <SearchResults query={query} search={search} selected={selected} onHdlNew={onHdlNew} onHdlImport={onHdlImport} />
           ) : (
             <>
               {focused && <SearchIntro onExample={ask} />}
-              <QuickStrip label="Recent" ids={recent} />
-              <QuickStrip label="Favourites" ids={quick.favourites} action={<StarIcon className="size-3.5 fill-amber-400 text-amber-500" />} />
+              {!only && <QuickStrip label="Recent" ids={recent} />}
+              {!only && <QuickStrip label="Favourites" ids={quick.favourites} action={<StarIcon className="size-3.5 fill-amber-400 text-amber-500" />} />}
             </>
           )}
-          {hdl.length > 0 && (
+          {hdl.length > 0 && (!only || only === HDL_GROUP) && (
             // The project's own modules: only this project has them, and they are what it is about.
             <PaletteSection
               label="Project modules"
               aside="HDL"
               count={hdl.length}
-              open={groupsOpen.isOpen(HDL_GROUP)}
+              open={only === HDL_GROUP || groupsOpen.isOpen(HDL_GROUP)}
               onOpenChange={(open) => groupsOpen.setOpen(HDL_GROUP, open)}
               action={
                 !q &&
@@ -452,8 +510,6 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
                   return (
                     <SidebarMenuItem key={module.id}>
                       <SidebarMenuButton
-                        draggable={!!def}
-                        onDragStart={(e) => def && startDrag(e, def)}
                         onClick={(e) => (def ? actions.activate(def, e) : onHdlOpen?.(module.id))}
                         title={def ? def.description : "Not built yet: open to build"}
                         isActive={!!def && armed === def.id}
@@ -481,9 +537,9 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
           )}
           {!q && (
             <>
-              {(hdl.length > 0 || recent.length > 0 || quick.favourites.length > 0) && <SidebarSeparator className="my-1.5" />}
-              {paletteGroups.map((group) => (
-                <PaletteSection key={group.id} label={group.label} aside={group.aside} count={group.entries.length} open={groupsOpen.isOpen(group.id)} onOpenChange={(open) => groupsOpen.setOpen(group.id, open)}>
+              {!only && (hdl.length > 0 || recent.length > 0 || quick.favourites.length > 0) && <SidebarSeparator className="my-1.5" />}
+              {paletteGroups.filter((group) => !only || group.id === only).map((group) => (
+                <PaletteSection key={group.id} label={group.label} aside={group.aside} count={group.entries.length} open={group.id === only || groupsOpen.isOpen(group.id)} onOpenChange={(open) => groupsOpen.setOpen(group.id, open)}>
                   {group.id === "boards" ? (
                     <div className="grid grid-cols-2 gap-1.5 px-1 pt-0.5 pb-2">
                       {group.entries.map((entry) => (
@@ -495,7 +551,15 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
                       {group.id === "mcus" && (
                         <p className="mx-2 mb-1 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">Needs power, a clock, reset and decoupling wired by you. A board has them.</p>
                       )}
-                      <SidebarMenu>
+                      {group.id === "basics" && (
+                        // A panel wide enough (a phone's sheet, a palette dragged wider) shows the everyday parts as tiles.
+                        <div className="hidden grid-cols-[repeat(auto-fill,minmax(5.25rem,1fr))] gap-1.5 px-1 pt-0.5 pb-2 @min-[20rem]:grid">
+                          {group.entries.map((entry) => (
+                            <PartTile key={entry.key} entry={entry} />
+                          ))}
+                        </div>
+                      )}
+                      <SidebarMenu className={group.id === "basics" ? "@min-[20rem]:hidden" : undefined}>
                         {group.entries.map((entry) => (
                           <PartRow key={entry.key} entry={entry} />
                         ))}
@@ -504,7 +568,7 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
                   )}
                 </PaletteSection>
               ))}
-              {library.length === 0 && (
+              {!only && library.length === 0 && (
                 // No modules yet: one way in, at the end, not a section of buttons above the parts.
                 <SidebarGroup className="py-0.5">
                   <SidebarMenu>

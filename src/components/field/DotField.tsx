@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/context-menu"
 import { Inspector } from "@/components/inspector/Inspector"
 import { WirePalette } from "@/components/inspector/WirePalette"
-import { PALETTE_DRAG_TYPE, paletteGroups } from "@/components/palette/items"
+import { paletteGroups } from "@/components/palette/items"
+import { paletteDrag } from "@/components/palette/palette-actions"
 import { bendsOnRoute, GRID as FIELD_GRID, nudgeRoutes, objectPins, objectRect, resolvePin, routeBox, Router, snap, touches, unionOf, type FlipAxis, type Point } from "@/schematic/geometry"
 import { SpatialIndex } from "@/schematic/spatial"
 import { fieldDetail } from "./detail"
@@ -906,8 +907,13 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   // --- field pointer handling: pan or marquee --------------------------------
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (armed && e.button === 0 && !isPanStart(e)) placeArmed(e, armed)
-    else if (isPanStart(e)) startPan(e)
+    if (armed && e.button === 0 && !isPanStart(e)) {
+      // A finger may be panning to find the spot: the part lands on a tap, when the finger comes up where it went down.
+      if (e.pointerType === "touch") {
+        tap.current = { x: e.clientX, y: e.clientY }
+        startPan(e)
+      } else placeArmed(e, armed)
+    } else if (isPanStart(e)) startPan(e)
     // A click on bare field while probing is a miss, not a selection.
     else if (measure.active) return
     else if (e.button === 0 && pending?.mode === "click") {
@@ -955,6 +961,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const tapped = tap.current && Math.hypot(e.clientX - tap.current.x, e.clientY - tap.current.y) < TAP_SLOP
     tap.current = null
+    // A part dragged out of the palette lands where the button comes up.
+    if (armed && paletteDrag.active && e.type === "pointerup") return placeArmed(e, armed)
+    if (armed && tapped && e.type === "pointerup") {
+      endPan(e)
+      return placeArmed(e, armed)
+    }
     if (tapped && e.type === "pointerup") {
       sch.deselectAll()
       setHoveredWire(null)
@@ -970,18 +982,6 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (rect) sch.selectInRect(rect)
   }
 
-  // --- drag-and-drop from the palette ----------------------------------------
-  const onDragOver = (e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes(PALETTE_DRAG_TYPE)) return
-    e.preventDefault()
-    e.dataTransfer.dropEffect = "copy"
-  }
-  const onDrop = (e: React.DragEvent) => {
-    const defId = e.dataTransfer.getData(PALETTE_DRAG_TYPE)
-    if (!defId) return
-    e.preventDefault()
-    if (addFree(defId, toWorld(e.clientX, e.clientY))) placed(defId)
-  }
 
   // --- keyboard --------------------------------------------------------------
   /** Keys typed into a text field are the field's; buttons (a just-clicked palette entry) are fine. */
@@ -1137,9 +1137,20 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       <ContextMenuTrigger data-slot="dot-field" className={cn("flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background", className)} {...props}>
         <div data-slot="dot-field-stage" className="relative min-h-0 flex-1 overflow-hidden">
           {armed && (
-            <div data-slot="placement-hint" className="pointer-events-none absolute bottom-16 left-1/2 z-20 -translate-x-1/2 rounded-md border bg-background/95 px-3 py-1.5 text-xs whitespace-nowrap shadow-sm backdrop-blur-sm">
-              Click the field to place <span className="font-medium">{getDef(armed)?.name ?? armed}</span>
-              <span className="text-muted-foreground"> · Shift+click places more · Esc cancels</span>
+            <div
+              data-slot="placement-hint"
+              className="absolute bottom-16 left-1/2 z-20 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-3 rounded-md border bg-background/95 py-1 pr-1 pl-3 text-xs whitespace-nowrap shadow-sm backdrop-blur-sm pointer-coarse:top-3 pointer-coarse:bottom-auto pointer-coarse:rounded-full pointer-coarse:border-foreground pointer-coarse:bg-foreground pointer-coarse:text-background"
+            >
+              <span className="truncate">
+                <span className="pointer-coarse:hidden">Click the field to place </span>
+                <span className="hidden pointer-coarse:inline">Placing </span>
+                <span className="font-semibold">{getDef(armed)?.name ?? armed}</span>
+                <span className="text-muted-foreground pointer-coarse:hidden"> · Shift+click places more · Esc cancels</span>
+                <span className="hidden opacity-75 pointer-coarse:inline"> · tap the bench</span>
+              </span>
+              <button type="button" onClick={() => onArmedChange?.(null)} className="shrink-0 rounded px-2 py-0.5 font-medium hover:bg-muted pointer-coarse:hover:bg-transparent">
+                Cancel
+              </button>
             </div>
           )}
           <div
@@ -1171,8 +1182,6 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 setPending(null)
               }
             }}
-            onDragOver={onDragOver}
-            onDrop={onDrop}
           >
             <div
               ref={contentRef}
