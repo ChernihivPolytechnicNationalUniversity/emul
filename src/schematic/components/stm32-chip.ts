@@ -138,7 +138,7 @@ export function stm32Chip(chip: ChipProfile, pkg: Package, description: string):
     id: chip.id,
     name: chip.name.replace(/[TU]6$/, ""),
     description,
-    category: "Chips",
+    category: "mcus",
     icon: ChipIcon,
     prefix: "DD",
     width: WIDTH,

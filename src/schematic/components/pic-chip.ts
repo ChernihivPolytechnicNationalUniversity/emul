@@ -98,7 +98,7 @@ export function picChip(chip: PicProfile, pkg: Package, description: string, id 
     name: pkg.name === "PDIP-18" ? chip.name : `${chip.name} ${pkg.name}`,
     description,
     keywords: ["PIC", "PIC16", "Microchip", "16F628", "16F627", "16F648"],
-    category: "Chips",
+    category: "mcus",
     icon: ChipIcon,
     prefix: "DD",
     width: WIDTH,

@@ -129,7 +129,7 @@ function buzzerDef(preset: BuzzerPreset): ComponentDef {
     id: buzzerDefId(preset),
     name: preset.name,
     description: describe(preset),
-    category: "Sound",
+    category: "sound",
     keywords: ["buzzer", "beeper", "sounder", "zummer", "transducer", preset.badge, ...BUZZER_KINDS[preset.kind].split(", ")],
     icon: BuzzerIcon,
     prefix: "BZ",

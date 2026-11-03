@@ -115,7 +115,7 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string, id 
     name: pkg.name === "PDIP-28" ? chip.name : `${chip.name} ${pkg.name}`,
     description,
     keywords: ["AVR", "ATmega", "Arduino", "328P"],
-    category: "Chips",
+    category: "mcus",
     icon: ChipIcon,
     prefix: "DD",
     width: WIDTH,

@@ -31,7 +31,7 @@ export const polyfuse: ComponentDef = {
   name: "Resettable fuse (PTC)",
   description:
     "Bourns MF-MSMF polyfuse, 1812 SMD (Arduino's USB fuse is the MF-MSMF050): conducts below Ihold, trips somewhere up to Itrip — sooner the harder it is pushed — and, tripped, lets through only what keeps 0.8 W in it. Take the power away and it cools and resets.",
-  category: "Passive",
+  category: "power",
   icon: PolyfuseIcon,
   prefix: "F",
   defaults: { model: "MF-MSMF050" },

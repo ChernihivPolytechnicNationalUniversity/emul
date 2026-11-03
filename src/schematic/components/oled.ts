@@ -48,7 +48,7 @@ function i2cModule(id: string, name: string, rows: 64 | 32): ComponentDef {
     id,
     name,
     description: `SSD1306 OLED, 128 × ${rows}, on I²C at 0x3C. Dark until the firmware enables the charge pump (8Dh 14h) and turns the display on (AFh); the RAM holds noise until it is cleared. Board details (regulator, pull-ups, RC reset) from vendor and forum descriptions.`,
-    category: "Displays",
+    category: "displays",
     keywords: ["OLED", "SSD1306", "I2C", "IIC", `128x${rows}`, rows === 64 ? "0.96" : "0.91", "display"],
     icon: OledIcon,
     prefix: "DS",
@@ -82,7 +82,7 @@ export const oledSpi: ComponentDef = {
   name: "OLED 0.96\" 128×64 SPI (SSD1306)",
   description:
     "SSD1306 OLED, 128 × 64, 4-wire SPI: D0 clock (10 MHz max), D1 data, DC picks command or data with every eighth bit, CS selects. Pulse RES low (3 µs or more) before use — nothing on the board does it. Dark until the charge pump (8Dh 14h) and the display (AFh) are on.",
-  category: "Displays",
+  category: "displays",
   keywords: ["OLED", "SSD1306", "SPI", "128x64", "0.96", "display", "7-pin"],
   icon: OledIcon,
   prefix: "DS",

@@ -3,6 +3,7 @@ import type { HdlNetlist } from "emul-shared/hdl"
 import type { BreakpointSpec } from "@/debug/protocol"
 import type { MemoryRegion } from "@/mcu/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
+import type { Category } from "./categories"
 import type { Icon } from "./icons"
 import type { WireColorKey } from "./wire-colors"
 
@@ -414,8 +415,8 @@ export type ComponentDef = {
   id: string
   name: string
   description?: string
-  /** Palette group. */
-  category: string
+  /** Palette group: one of the closed list in categories.ts. */
+  category: Category
   /** More names the palette search finds the component by (the part numbers it can be). */
   keywords?: string[]
   icon: Icon

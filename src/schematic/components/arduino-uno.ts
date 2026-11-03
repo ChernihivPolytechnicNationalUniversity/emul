@@ -285,7 +285,7 @@ export const arduinoUno: ComponentDef = {
   name: "Arduino Uno",
   description: "ATmega328P, 16 MHz, USB serial, 7–12 V jack",
   keywords: ["Arduino", "Uno", "UNO R3", "Rev3", "ATmega328P", "AVR", "A000066", "ATmega16U2"],
-  category: "Boards",
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,

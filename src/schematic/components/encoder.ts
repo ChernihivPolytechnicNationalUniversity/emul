@@ -64,7 +64,7 @@ export const encoderEc11: ComponentDef = {
   name: "Rotary encoder (ALPS EC11E)",
   description:
     "Incremental encoder with detents and a push switch: A and B close to C in quadrature, A first turning clockwise, half a cycle per detent (rest alternately both open, both closed). 10 mA 5 V rating; bounce 2 ms max when switched on. Pull A, B and D up yourself.",
-  category: "Switches",
+  category: "input",
   keywords: ["encoder", "rotary", "quadrature", "EC11", "ALPS", ...Object.keys(EC11E_PARTS)],
   icon: EncoderIcon,
   prefix: "SW",
@@ -107,7 +107,7 @@ export const ky040: ComponentDef = {
   name: "Rotary encoder module KY-040",
   description:
     "Encoder board: 20 detents / 20 pulses (a full cycle per detent, at rest both open), 10 kΩ pull-ups on CLK and DT to +, SW straight to the switch with no pull-up fitted — enable the MCU's. No maker's schematic exists: built from the forum and Wokwi descriptions.",
-  category: "Switches",
+  category: "input",
   keywords: ["encoder", "rotary", "KY-040", "KY040", "quadrature", "module"],
   icon: EncoderIcon,
   prefix: "SW",

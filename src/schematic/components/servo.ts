@@ -15,7 +15,7 @@ export const servoSg90: ComponentDef = {
   name: "Servo SG90",
   description:
     "TowerPro SG90 9 g micro servo: 20 ms (50 Hz) pulses, 1.5 ms the middle, ~1 ms all the way left (−90°), ~2 ms all the way right (+90°); 0.1 s/60° at 4.8 V; dead band 10 µs. Past ±90° the horn stalls on its stop and draws the stall current.",
-  category: "Motors",
+  category: "sound",
   keywords: ["servo", "SG90", "TowerPro", "Tower Pro", "micro servo", "PWM"],
   icon: ServoIcon,
   prefix: "M",

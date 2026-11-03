@@ -59,7 +59,7 @@ export const lcd1602: ComponentDef = {
   name: "LCD 1602 (HD44780)",
   description:
     "16 × 2 character LCD, HD44780-compatible controller, 8- or 4-bit parallel bus. Initialise it by instruction, wait out the busy flag (an instruction sent while busy is lost), and set V0 for VDD − V0 ≈ 4.2 V — at 5 V on V0's pot, with V0 on ground the unlit dots darken, and the module is blank on 3.3 V.",
-  category: "Displays",
+  category: "displays",
   keywords: ["LCD", "1602", "16x2", "HD44780", "character", "KS0066", "ST7066", "LCD1602"],
   icon: CharacterLcdIcon,
   prefix: "DS",
@@ -88,7 +88,7 @@ export const lcd1602I2c: ComponentDef = {
   name: "LCD 1602 with I²C backpack",
   description:
     "The 16 × 2 module on a PCF8574 backpack: P0 RS, P1 R/W, P2 E, P3 backlight, P4–P7 D4–D7, so the controller runs in 4-bit mode. Address 0x27 (0x3F with a PCF8574AT), A0–A2 pads open; 4.7 kΩ pull-ups on SDA and SCL to VCC; 100 kHz. If the glass is blank or shows blocks, turn the contrast pot.",
-  category: "Displays",
+  category: "displays",
   keywords: ["LCD", "1602", "16x2", "I2C", "IIC", "PCF8574", "backpack", "HD44780", "LCD1602", "0x27", "0x3F"],
   icon: CharacterLcdIcon,
   prefix: "DS",

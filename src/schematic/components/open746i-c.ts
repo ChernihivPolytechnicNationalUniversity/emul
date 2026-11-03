@@ -699,7 +699,7 @@ export const open746ic: ComponentDef = {
   id: "open746i-c",
   name: "Open746I-C",
   description: "STM32F746IG · Waveshare",
-  category: "Boards",
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,

@@ -62,7 +62,7 @@ export const keypad4x4: ComponentDef = {
   name: "Keypad 4×4",
   description:
     "Matrix membrane keypad (Parallax #27899): 16 keys, each closing its row to its column — scan the rows, read the columns. No diodes: three keys at a rectangle's corners ghost the fourth. 24 V DC, 30 mA rating; contact resistance under 100 Ω.",
-  category: "Switches",
+  category: "input",
   keywords: ["keypad", "keyboard", "matrix", "membrane", "4x4", "27899"],
   icon: KeypadIcon,
   prefix: "SW",

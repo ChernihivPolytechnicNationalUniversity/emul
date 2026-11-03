@@ -346,7 +346,7 @@ export const arduinoNano: ComponentDef = {
   name: "Arduino Nano",
   description: "ATmega328P, 16 MHz, USB serial",
   keywords: ["Arduino", "Nano", "ATmega328P", "AVR", "A000005", "FT232RL", "CH340"],
-  category: "Boards",
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,

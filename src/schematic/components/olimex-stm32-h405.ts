@@ -230,7 +230,7 @@ export const olimexStm32H405: ComponentDef = {
   id: "olimex-stm32-h405",
   name: "Olimex STM32-H405",
   description: "STM32F405RG",
-  category: "Boards",
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,

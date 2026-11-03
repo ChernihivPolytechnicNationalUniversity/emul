@@ -351,7 +351,7 @@ function addressableDef(p: Product): ComponentDef {
     id: p.id,
     name: p.name,
     description: p.description,
-    category: p.category,
+    category: "leds",
     keywords: p.parts.map((s) => s.part),
     icon: iconOf(p),
     prefix: p.shape.kind === "driver" ? "U" : "LED",

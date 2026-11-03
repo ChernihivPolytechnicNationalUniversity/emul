@@ -202,7 +202,7 @@ export const netduinoPlus2: ComponentDef = {
   id: "netduino-plus-2",
   name: "Netduino Plus 2",
   description: "STM32F405RG",
-  category: "Boards",
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,

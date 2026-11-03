@@ -209,7 +209,7 @@ function display({ id, name, polarity, digits, parts }: { id: string; name: stri
     id,
     name,
     description: `Kingbright 0.56" ${digits === 1 ? "single" : "four"}-digit display, common ${polarity} (${leadsText}). Each segment follows its sheet's I–V curve and burns open on its own past its DC rating (derated with the ambient), its peak rating (1/10 duty, 0.1 ms) or 5 V reversed.`,
-    category: "Displays",
+    category: "leds",
     keywords: ["7-segment", "seven segment", "7seg", "LED display", "Kingbright", `common ${polarity}`, ...parts],
     icon: SevenSegmentIcon,
     prefix: "DS",

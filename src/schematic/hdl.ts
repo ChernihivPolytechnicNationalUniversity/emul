@@ -1,10 +1,10 @@
 import { portPins, type HdlLanguage, type HdlNetlist, type HdlPort } from "emul-shared/hdl"
 import type { SourceFile } from "emul-shared/source"
+import { HDL_CATEGORY } from "./categories"
 import { HdlIcon } from "./icons"
 import type { ComponentDef, Element, HdlModule, PinDef } from "./types"
 
 export const HDL_PREFIX = "hdl:"
-export const HDL_CATEGORY = "HDL"
 
 const ABS_MAX = 7
 const PIN_CURRENT = 25e-3

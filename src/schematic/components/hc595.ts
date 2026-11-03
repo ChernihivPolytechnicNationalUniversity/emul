@@ -61,7 +61,7 @@ function shiftRegister({ id, supply, description, source }: Variant): ComponentD
     id,
     name: part,
     description: `${FUNCTION} ${description}`,
-    category: "Logic ICs",
+    category: "ics",
     keywords: ["595", "shift register", "serial to parallel", "SIPO"],
     icon: ShiftRegisterIcon,
     prefix: "U",

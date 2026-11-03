@@ -101,7 +101,7 @@ export const lcd7f: ComponentDef = {
   id: "lcd7-f",
   name: "7inch LCD (F)",
   description: "1024×600 RGB, GT911 touch",
-  category: "Displays",
+  category: "displays",
   icon: DisplayIcon,
   prefix: "LCD",
   width: W,

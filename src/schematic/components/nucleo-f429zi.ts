@@ -263,7 +263,7 @@ export const nucleoF429zi: ComponentDef = {
   id: "nucleo-f429zi",
   name: "Nucleo-144",
   description: "STM32F429ZI",
-  category: "Boards",
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,

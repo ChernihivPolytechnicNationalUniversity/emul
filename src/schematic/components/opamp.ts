@@ -87,7 +87,7 @@ function opampDef(p: OpampPreset): ComponentDef {
     id: `opamp-${p.id}`,
     name: generic ? "Op amp" : p.part,
     description: p.description,
-    category: "Op amps",
+    category: "ics",
     keywords: p.keywords,
     icon: OpAmpIcon,
     prefix: "U",
