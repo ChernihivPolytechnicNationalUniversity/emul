@@ -270,7 +270,7 @@ export type Value = number | string | ((props: Record<string, string>) => number
  * the rest of the part keeps working on its own (the other half of a potentiometer).
  */
 /** `slow`: fails only by heating, never at once past 20 × its rating (a supply whose protection rides out a µs inrush). */
-export type Limits = { power?: Value; current?: Value; voltage?: Value; reverse?: Value; surge?: Value; tau?: Value; fail?: "open" | "short"; fatal?: boolean; aboveSupply?: Value; slow?: boolean }
+export type Limits = { power?: Value; current?: Value; voltage?: Value; reverse?: Value; surge?: Value; tau?: Value; fail?: "open" | "short"; fatal?: boolean; aboveSupply?: Value; slow?: boolean; overstress?: { seconds: Value; surgeVoltage?: Value; reverseSurge?: Value } }
 
 export type Element =
   /** `live` names a pin-reader key the simulation loop answers with the resistance to use right now (an MCU's supply load by power mode). */

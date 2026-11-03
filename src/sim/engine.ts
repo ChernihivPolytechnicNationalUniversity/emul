@@ -363,6 +363,9 @@ export class Engine {
   private readonly indV: Float64Array
   /** Accumulated overload (seconds × excess ratio). */
   private readonly stress: Float64Array
+  private readonly overstressed: Float64Array
+  private readonly overstressElements: Int32Array
+  private readonly rRated: Float64Array
   /** Load against the heating rating each element last ran at, for the settled steps. */
   private readonly rRatio: Float64Array
   /** Last junction voltages used for limiting: [vd | vbe] and [vbc]. */
@@ -605,6 +608,7 @@ export class Engine {
     this.partKeys = net.elements.map((el) => (el.kind === "SW" ? partKey(el.object, el.part) : ""))
     this.padElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "GPIO" || (el.kind === "R" && el.live) ? [i] : [])))
     this.diodeElements = Int32Array.from(net.elements.flatMap((el, i) => (el.kind === "D" && el.part ? [i] : [])))
+    this.overstressElements = Int32Array.from(net.elements.flatMap((el, i) => (el.limits?.overstress ? [i] : [])))
     this.limitsOf = net.elements.map((el) => el.limits)
     this.isDiode = Uint8Array.from(net.elements, (el) => (el.kind === "D" ? 1 : 0))
     this.heatDt = new Float64Array(net.elements.length)
@@ -636,6 +640,8 @@ export class Engine {
     this.indI = new Float64Array(m)
     this.indV = new Float64Array(m)
     this.stress = new Float64Array(m)
+    this.overstressed = new Float64Array(m)
+    this.rRated = new Float64Array(m)
     this.rRatio = new Float64Array(m)
     this.jA = new Float64Array(m)
     this.jB = new Float64Array(m)
@@ -739,6 +745,7 @@ export class Engine {
       this.indI[to] = prev.indI[from]
       this.indV[to] = prev.indV[from]
       this.stress[to] = prev.stress[from]
+      this.overstressed[to] = prev.overstressed[from]
       this.rRatio[to] = prev.rRatio[from]
       this.msI[to] = prev.msI[from]
       this.msV[to] = prev.msV[from]
@@ -1141,6 +1148,8 @@ export class Engine {
       if (heat > 1) return false
       this.stress[i] = heat
     }
+    const overstressed = this.overstressElements
+    for (let j = 0; j < overstressed.length; j++) if (this.overstressTime(overstressed[j], dt) > this.limitsOf[overstressed[j]]!.overstress!.seconds) return false
     const ptcs = this.ptcElements
     for (let j = 0; j < ptcs.length; j++) {
       const i = ptcs[j]
@@ -1163,7 +1172,15 @@ export class Engine {
         this.msV[i] = this.ema(this.msV[i], v * v, dt)
         this.msP[i] = this.ema(this.msP[i], this.rPower[i], dt)
       }
+    for (let j = 0; j < overstressed.length; j++) this.overstressed[overstressed[j]] = this.overstressTime(overstressed[j], dt)
     return true
+  }
+
+  private overstressTime(i: number, dt: number): number {
+    const lim = this.limitsOf[i]!
+    const v = this.rRated[i]
+    const over = (lim.voltage !== undefined && v > lim.voltage) || (lim.reverse !== undefined && -v > lim.reverse)
+    return Math.max(0, this.overstressed[i] + (over ? dt : -dt))
   }
 
   private see(i: number, amps: number, dt: number) {
@@ -3410,6 +3427,7 @@ export class Engine {
     this.rCurrent[i] = cur
     this.rVoltage[i] = v
     this.rPower[i] = p
+    this.rRated[i] = ratedV
     // A step the solver could not settle is not evidence of anything: an exponential evaluated
     // at a stray iterate reads megawatts. Such a step still shows its (flagged) numbers, but it
     // must not heat a part, break one, or poison the running averages.
@@ -3441,11 +3459,23 @@ export class Engine {
     if (lim.reverse !== undefined && -ratedV / lim.reverse > load) load = -ratedV / lim.reverse
     this.rLoad[i] = load
 
-    if (voltageMax !== undefined && Math.abs(ratedV) > voltageMax)
-      return this.fail(el, lim.fail, "voltage", Math.abs(ratedV), voltageMax, "V")
-    // Polarity: an electrolytic the wrong way round breaks down long before its rating.
-    if (lim.reverse !== undefined && -ratedV > lim.reverse)
-      return this.fail(el, lim.fail, "reverse voltage", -ratedV, lim.reverse, "V")
+    const os = lim.overstress
+    if (os) {
+      if (os.surgeVoltage !== undefined && ratedV > os.surgeVoltage) return this.fail(el, lim.fail, "surge voltage", ratedV, os.surgeVoltage, "V")
+      if (os.reverseSurge !== undefined && -ratedV > os.reverseSurge) return this.fail(el, lim.fail, "reverse voltage", -ratedV, os.reverseSurge, "V")
+      const over = voltageMax !== undefined && ratedV > voltageMax
+      this.overstressed[i] = this.overstressTime(i, dt)
+      if (this.overstressed[i] > os.seconds) {
+        const [what, actual, rated] = over ? ["voltage", ratedV, voltageMax!] : ["reverse voltage", -ratedV, lim.reverse!]
+        return this.failWith(el, lim.fail, `${what} ${formatSI(actual, "V")} past the ${formatSI(rated, "V")} rating for over ${formatSI(os.seconds, "s")}`)
+      }
+    } else {
+      if (voltageMax !== undefined && Math.abs(ratedV) > voltageMax)
+        return this.fail(el, lim.fail, "voltage", Math.abs(ratedV), voltageMax, "V")
+      // Polarity: an electrolytic the wrong way round breaks down long before its rating.
+      if (lim.reverse !== undefined && -ratedV > lim.reverse)
+        return this.fail(el, lim.fail, "reverse voltage", -ratedV, lim.reverse, "V")
+    }
     if (el.kind === "SW") {
       const weldCurrent = lim.surge ?? Infinity
       const melt = Math.abs(cur) / weldCurrent
