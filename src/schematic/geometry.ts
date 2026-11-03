@@ -5,8 +5,7 @@ import type { ComponentDef, PinDef, PinRef, PlacedObject, Point, Rotation, Side,
 
 export type { Point }
 
-/** Grid pitch in world px. Object coordinates are snapped to it, so it is a document constant. */
-export const GRID = 24
+export { GRID } from "./grid"
 
 /** Outward direction of a pin once the component is rotated; 45° steps add the diagonals. */
 export type Direction = Side | "top-right" | "bottom-right" | "bottom-left" | "top-left"

@@ -171,3 +171,22 @@ function beyond(groups: Partition, against: Partition): string[][] {
 }
 
 export const partitionDiff = (want: Partition, got: Partition) => ({ missing: beyond(want, got), extra: beyond(got, want) })
+
+export const OVERLAPS_THE_MIGRATION_MUST_REROUTE: Record<string, string[][]> = {
+  "nucleo-serial": [["TERM1.RX", "TERM1.TX", "U1.VCP-RX", "U1.VCP-TX"]],
+  "open746-touch": [["TERM1.RX", "TERM1.TX", "U1.P3-7", "U1.VCP-RX", "U1.VCP-TX"]],
+  "charge-boost-chips": [["LED1.2", "LED2.2", "U1.CHRG", "U1.STDBY"]],
+  "system-exam": [["C5.1", "C5.2", "D2.2", "D3.2", "D4.1", "D5.1", "R10.1", "R10.2"]],
+  "emul-1.28.0--lab2-rgb-pwm.emul": [["R2.2", "R3.2", "U1.P4-5", "U1.P4-7"]],
+}
+
+export function withMerges(partition: Partition, merges: readonly string[][]): Partition {
+  let groups = partition.map((g) => [...g])
+  for (const merge of merges) {
+    const members = new Set(merge)
+    const touched = groups.filter((g) => g.some((k) => members.has(k)))
+    const joined = touched.flat()
+    groups = [...groups.filter((g) => !touched.includes(g)), [...joined, ...merge.filter((k) => !joined.includes(k))]]
+  }
+  return canonical(groups)
+}

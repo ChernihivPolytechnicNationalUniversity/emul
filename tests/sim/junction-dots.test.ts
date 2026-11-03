@@ -16,11 +16,11 @@ const dots = (wires: readonly WireSegment[], pins: readonly WirePin[]) => juncti
 
 describe("a dot at every point where three or more conductor ends meet, a pin counting as one, and nowhere else (design.md §3.2)", () => {
   it("a bend of one wire: two ends, no dot", () => {
-    expect(dots(path(c(0, 0), c(4, 0), c(4, 4)), [pin("A:1", c(0, 0)), pin("B:1", c(4, 4))])).toEqual([])
+    expect.soft(dots(path(c(0, 0), c(4, 0), c(4, 4)), [pin("A:1", c(0, 0)), pin("B:1", c(4, 4))]), "a bend").toEqual([])
   })
 
   it("a wire ending on a pin: two ends, no dot", () => {
-    expect(dots([w(c(0, 0), c(4, 0))], [pin("A:1", c(0, 0)), pin("B:1", c(4, 0))])).toEqual([])
+    expect.soft(dots([w(c(0, 0), c(4, 0))], [pin("A:1", c(0, 0)), pin("B:1", c(4, 0))]), "a wire on a pin").toEqual([])
   })
 
   it("two pins butted, R1 onto LED1: two ends, no dot, but one net", () => {
@@ -30,19 +30,19 @@ describe("a dot at every point where three or more conductor ends meet, a pin co
   })
 
   it("a T, a wire ending on another: three ends, a dot", () => {
-    expect(dots([w(c(0, 0), c(8, 0)), w(c(4, 4), c(4, 0))], [pin("A:1", c(0, 0)), pin("B:1", c(8, 0)), pin("C:1", c(4, 4))])).toEqual([c(4, 0)])
+    expect.soft(dots([w(c(0, 0), c(8, 0)), w(c(4, 4), c(4, 0))], [pin("A:1", c(0, 0)), pin("B:1", c(8, 0)), pin("C:1", c(4, 4))]), "a T").toEqual([c(4, 0)])
   })
 
   it("a wire ending on a pin that another wire also ends on: three ends, a dot on the pin", () => {
-    expect(dots([w(c(0, 0), c(4, 0)), w(c(4, 0), c(4, 4))], [pin("A:1", c(0, 0)), pin("R1:1", c(4, 0)), pin("B:1", c(4, 4))])).toEqual([c(4, 0)])
+    expect.soft(dots([w(c(0, 0), c(4, 0)), w(c(4, 0), c(4, 4))], [pin("A:1", c(0, 0)), pin("R1:1", c(4, 0)), pin("B:1", c(4, 4))]), "a pin with two wires").toEqual([c(4, 0)])
   })
 
   it("three pins on one point: three ends, a dot", () => {
-    expect(dots([], [pin("A:1", c(2, 2)), pin("B:1", c(2, 2)), pin("C:1", c(2, 2))])).toEqual([c(2, 2)])
+    expect.soft(dots([], [pin("A:1", c(2, 2)), pin("B:1", c(2, 2)), pin("C:1", c(2, 2))]), "three pins").toEqual([c(2, 2)])
   })
 
   it("four ends: a dot", () => {
-    expect(dots([...path(c(0, 2), c(2, 2), c(4, 2)), ...path(c(2, 0), c(2, 2), c(2, 4))], [])).toEqual([c(2, 2)])
+    expect.soft(dots([...path(c(0, 2), c(2, 2), c(4, 2)), ...path(c(2, 0), c(2, 2), c(2, 4))], []), "four ends").toEqual([c(2, 2)])
   })
 
   it("two wires crossing: no end there, never a dot, and two nets", () => {
@@ -78,7 +78,7 @@ describe("the junction register's dot cases (junctions.md)", () => {
 
   it("branches arriving from both sides of one point: four ends, a dot (13)", () => {
     const pins = [pin("A:1", c(0, 4)), pin("B:1", c(8, 4)), pin("C:1", c(4, 0)), pin("D:1", c(4, 8))]
-    expect(dots([w(c(0, 4), c(8, 4)), w(c(4, 0), c(4, 4)), w(c(4, 8), c(4, 4))], pins)).toEqual([c(4, 4)])
+    expect.soft(dots([w(c(0, 4), c(8, 4)), w(c(4, 0), c(4, 4)), w(c(4, 8), c(4, 4))], pins), "four ends at one point").toEqual([c(4, 4)])
   })
 
   it("a third wire ended on a pin that already has two: four ends and a pin, still one dot (14)", () => {

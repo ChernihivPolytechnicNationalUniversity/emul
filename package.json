@@ -21,6 +21,7 @@
     "field-drag": "tsx --tsconfig tsconfig.app.json scripts/field-drag.ts",
     "geom-bench": "tsx --tsconfig tsconfig.app.json scripts/geom-bench.ts",
     "pin-partitions": "tsx --tsconfig tsconfig.app.json scripts/pin-partitions.ts",
+    "wire-bench": "tsx --tsconfig tsconfig.app.json scripts/wire-bench.ts",
     "mcu-jit": "tsx --tsconfig tsconfig.app.json scripts/mcu-jit.ts",
     "symbols": "tsx --tsconfig tsconfig.app.json scripts/symbols.ts",
     "st-sources": "tsx --tsconfig tsconfig.app.json scripts/st-sources.ts",

@@ -4,7 +4,7 @@ import { GRID, objectPins, Router } from "@/schematic/geometry"
 import { designatorRects, fieldRouter } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject, Point, Schematic, Wire } from "@/schematic/types"
-import { canonical, duplicateRefs, geometricGroups, inventory, partitionDiff, pinPartition, polylineSegments, renamed, stableNames, type Partition, type RefPin, type RefSegment } from "../lib/pin-partition"
+import { canonical, duplicateRefs, geometricGroups, inventory, OVERLAPS_THE_MIGRATION_MUST_REROUTE, partitionDiff, pinPartition, polylineSegments, renamed, stableNames, withMerges, type Partition, type RefPin, type RefSegment } from "../lib/pin-partition"
 import { fixturePath, PARTITIONS, partitionDocuments, readFixture } from "../lib/partition-documents"
 import { SCHEMATIC_CASES } from "../lib/schematic-cases"
 
@@ -165,13 +165,6 @@ function frozenPartition(doc: Schematic, corners = polylineSegments) {
 
 const everyVertex = (pts: readonly Point[]): RefSegment[] => pts.slice(1).flatMap((p, i) => (p.x === pts[i].x && p.y === pts[i].y ? [] : [{ a: pts[i], b: p }]))
 
-const OVERLAPS_THE_MIGRATION_MUST_REROUTE: Record<string, string[][]> = {
-  "nucleo-serial": [["TERM1.RX", "TERM1.TX", "U1.VCP-RX", "U1.VCP-TX"]],
-  "open746-touch": [["TERM1.RX", "TERM1.TX", "U1.P3-7", "U1.VCP-RX", "U1.VCP-TX"]],
-  "charge-boost-chips": [["LED1.2", "LED2.2", "U1.CHRG", "U1.STDBY"]],
-  "system-exam": [["C5.1", "C5.2", "D2.2", "D3.2", "D4.1", "D5.1", "R10.1", "R10.2"]],
-  "emul-1.28.0--lab2-rgb-pwm.emul": [["R2.2", "R3.2", "U1.P4-5", "U1.P4-7"]],
-}
 
 describe("the reference against today's buildNets, every wire routed by today's router and frozen", () => {
   it("agrees on every document whose frozen routes keep off other nets' wiring and pins", () => {
@@ -232,13 +225,3 @@ describe("the reference against today's buildNets, every wire routed by today's 
   })
 })
 
-function withMerges(partition: Partition, merges: readonly string[][]): Partition {
-  let groups = partition.map((g) => [...g])
-  for (const merge of merges) {
-    const members = new Set(merge)
-    const touched = groups.filter((g) => g.some((k) => members.has(k)))
-    const joined = touched.flat()
-    groups = [...groups.filter((g) => !touched.includes(g)), [...joined, ...merge.filter((k) => !joined.includes(k))]]
-  }
-  return canonical(groups)
-}

@@ -1,12 +1,12 @@
-import { GRID } from "../geometry"
+import { GRID } from "../grid"
 import type { PinKind, Point } from "../types"
 import type { WireColorKey } from "../wire-colors"
 
 export const HALF_CELL = GRID / 2
 
-export type WireSegment = { id: string; a: Point; b: Point; color?: WireColorKey }
+export type WireSegment = { readonly id: string; readonly a: Readonly<Point>; readonly b: Readonly<Point>; readonly color?: WireColorKey }
 
-export type WirePin = { key: string; at: Point; socket?: boolean; kind?: PinKind }
+export type WirePin = { readonly key: string; readonly at: Readonly<Point>; readonly socket?: boolean; readonly kind?: PinKind }
 
 export type LineKey = string
 
@@ -44,8 +44,5 @@ export function contains(s: WireSegment, p: Point): boolean {
   return p.x === s.a.x && p.y >= Math.min(s.a.y, s.b.y) && p.y <= Math.max(s.a.y, s.b.y)
 }
 
-export const isEndOf = (s: WireSegment, p: Point) => samePoint(s.a, p) || samePoint(s.b, p)
 
-export const insideOf = (s: WireSegment, p: Point) => contains(s, p) && !isEndOf(s, p)
 
-export const sameColor = (a: WireSegment, b: WireSegment) => a.color === b.color
