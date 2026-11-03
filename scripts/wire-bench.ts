@@ -41,6 +41,43 @@ function ladder(rungs: number): WireSegment[] {
   return out
 }
 
+function comb(n: number): WireSegment[] {
+  const teeth = n >> 1
+  const out: WireSegment[] = []
+  for (let i = 0; i < teeth; i++) out.push(seg(CELL * i, 0, CELL * (i + 1), 0), seg(CELL * i, 0, CELL * i, CELL))
+  return out
+}
+
+function bigNetEdit(n: number) {
+  const wires = comb(n)
+  const graph = new WireGraph()
+  graph.of(wires, [])
+  const tooth = wires[wires.length - 1]
+  const samples: number[] = []
+  let present = true
+  for (let i = 0; i < 9; i++) {
+    const started = performance.now()
+    graph.apply(present ? { removed: [tooth] } : { added: [tooth] })
+    samples.push(performance.now() - started)
+    present = !present
+  }
+  return median(samples.slice(1))
+}
+
+function copiedPins(n: number) {
+  const { wires, pins } = rows(n, false)
+  const graph = new WireGraph()
+  graph.of(wires, pins)
+  const samples: number[] = []
+  for (let i = 0; i < 9; i++) {
+    const copies = pins.map((p) => ({ ...p, at: { ...p.at } }))
+    const started = performance.now()
+    graph.of(wires, copies)
+    samples.push(performance.now() - started)
+  }
+  return median(samples.slice(1))
+}
+
 function rows(n: number, aligned: boolean): { wires: WireSegment[]; pins: WirePin[] } {
   const wires: WireSegment[] = []
   const pins: WirePin[] = []
@@ -71,7 +108,7 @@ function oneEdit(n: number, aligned: boolean) {
     const edit = adding ? commitEdit(current, pins, { add: [branch] }) : commitEdit(current, pins, { remove: [branch] })
     normal.push(performance.now() - started)
     started = performance.now()
-    graph.apply(edit, edit.wires, pins)
+    graph.apply(edit)
     graphed.push(performance.now() - started)
     current = edit.wires
   }
@@ -99,25 +136,29 @@ const results = SIZES.map((n) => {
     const graph = new WireGraph()
     graph.of(wires, [])
     const started = performance.now()
-    graph.apply({ added: spine }, [...wires, ...spine], [])
+    graph.apply({ added: spine })
     merges.push(performance.now() - started)
   }
   const merge = median(merges)
   const aligned = oneEdit(n, true)
   const sparse = oneEdit(n, false)
   console.log(`  ${String(n).padStart(8)}   ${ms(overlap).padStart(29)}   ${ms(merge).padStart(24)}   ${ms(aligned.normalising)} / ${ms(aligned.applying)}${" ".repeat(10)}   ${ms(sparse.normalising)} / ${ms(sparse.applying)}`)
-  console.log(`  ${" ".repeat(8)}   four-way ladder of ${Math.round(n / 3)} rungs, normalised whole: ${ms(rails)}`)
-  return { n, overlap, rails, merge, aligned, sparse }
+  const big = bigNetEdit(n)
+  const copies = copiedPins(n)
+  console.log(`  ${" ".repeat(8)}   four-way ladder of ${Math.round(n / 3)} rungs, normalised whole: ${ms(rails)}; a tooth off a ${n}-segment net: ${ms(big)}; the same ${2 * n} pins as fresh objects: ${ms(copies)}`)
+  return { n, overlap, rails, merge, aligned, sparse, big, copies }
 })
 
 console.log("")
 const large = results[results.length - 1]
 check(`${large.n} overlapping segments normalised whole`, large.overlap, 300)
-check(`a ${Math.round(large.n / 3)}-rung four-way ladder normalised whole`, large.rails, 300)
+check(`a ${Math.round(large.n / 3)}-rung four-way ladder normalised whole`, large.rails, 120)
 check(`merging ${large.n} nets`, large.merge, 400)
 check(`one edit on ${large.n} aligned rows: normalise`, large.aligned.normalising, 5)
 check(`one edit on ${large.n} aligned rows: graph`, large.aligned.applying, 1)
 check(`one edit on ${large.n} sparse rows: normalise`, large.sparse.normalising, 5)
 check(`one edit on ${large.n} sparse rows: graph`, large.sparse.applying, 1)
-console.log(`\n${7 - failed}/7 checks passed`)
+check(`a tooth taken off a ${large.n}-segment net: graph`, large.big, 60)
+check(`the graph handed ${2 * large.n} value-equal pins`, large.copies, 2)
+console.log(`\n${9 - failed}/9 checks passed`)
 if (failed) process.exitCode = 1

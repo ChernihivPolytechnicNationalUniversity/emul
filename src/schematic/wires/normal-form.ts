@@ -258,9 +258,10 @@ function runsOnLine(index: WireIndex, line: LineKey, members: readonly number[],
     if (lo < min) min = lo
     if (hi > max) max = hi
   }
+  const offLattice = new Set<number>()
   for (const c of index.cutsOnLine.get(line) ?? []) {
     if (c <= min || c >= max) continue
-    if (!Number.isInteger(c / HALF_CELL)) throw new Error(`a pin at ${c} on ${line} lies on a wire but off the half-cell lattice`)
+    if (!Number.isInteger(c / HALF_CELL)) offLattice.add(c)
     cuts.add(c)
   }
   const stops = [...cuts].sort((a, b) => a - b)
@@ -272,6 +273,7 @@ function runsOnLine(index: WireIndex, line: LineKey, members: readonly number[],
     const hi = stops[k + 1]
     while (next < byStart.length && lowOf(wires[byStart[next]]) <= lo) open.push(byStart[next++])
     while (open.size && highOf(wires[open.peek()]) <= lo) open.pop()
+    if (open.size && offLattice.has(lo)) throw new Error(`a pin at ${lo} on ${line} lies on a wire but off the half-cell lattice`)
     if (!open.size) {
       if (run) emit(run)
       run = null
@@ -360,9 +362,12 @@ export function commitEdit(previous: readonly WireSegment[], pins: readonly Wire
   const result = normaliseEdit(raw, pins, { segments: [...add, ...remove], points: edit.points }, newId)
   const replaced = new Set(result.removed)
   const fresh = new Set(add)
-  return {
-    wires: result.wires,
-    added: [...add.filter((s) => !replaced.has(s)), ...result.added],
-    removed: [...remove, ...result.removed.filter((s) => !fresh.has(s))],
+  const added = new Set([...add.filter((s) => !replaced.has(s)), ...result.added])
+  const removed = new Set([...remove, ...result.removed.filter((s) => !fresh.has(s))])
+  for (const s of added) {
+    if (!removed.has(s)) continue
+    added.delete(s)
+    removed.delete(s)
   }
+  return { wires: result.wires, added: [...added], removed: [...removed] }
 }

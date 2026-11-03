@@ -4,7 +4,7 @@ import { fieldRouter } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
 import type { Point, Schematic } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
-import { danglingEnds, junctionsOf, pinPartition, WireGraph, wireNets, type WireNets } from "@/schematic/wires/graph"
+import { danglingEnds, junctionsOf, pinPartition, WireGraph, wireNets } from "@/schematic/wires/graph"
 import { commitEdit, normalise, type Touched } from "@/schematic/wires/normal-form"
 import { HALF_CELL, type WirePin, type WireSegment } from "@/schematic/wires/segment"
 import { canonical, geometricGroups, OVERLAPS_THE_MIGRATION_MUST_REROUTE, polylineSegments, renamed, withMerges } from "../lib/pin-partition"
@@ -150,6 +150,11 @@ describe("the normal form: N1–N4 after every edit, one source of truth for the
   it("a pin off the half-cell lattice lying on a wire is refused rather than cutting it off the lattice", () => {
     expect.soft(() => normalise([w(c(0, 0), c(4, 0))], [pin("X:1", { x: 30, y: 0 })]), "a pin at 30 px").toThrow(/off the half-cell lattice/)
     expect.soft(normalise([w(c(0, 0), c(4, 0))], [pin("X:1", { x: 30, y: 5 })], undefined, ids()).length, "off the lattice and off the wire: no harm").toBe(1)
+    const gap = [w(c(0, 0), c(1, 0)), w(c(2, 0), c(3, 0))]
+    expect.soft(normalise(gap, [pin("X:1", { x: 30, y: 0 })], undefined, ids()), "in the gap between two wires on its line: no harm").toBe(gap)
+    expect.soft(normalise(gap, [pin("X:1", { x: 30, y: 0 })], { segments: gap }, ids()), "the same, local").toBe(gap)
+    const column = [w(c(0, 0), c(0, 1)), w(c(0, 2), c(0, 3))]
+    expect.soft(normalise(column, [pin("X:1", { x: 0, y: 30 })], undefined, ids()), "in a vertical gap").toBe(column)
   })
 
   it("an edit touches only the wires through the points it changed: every other wire is the same object", () => {
@@ -174,45 +179,43 @@ describe("the derived graph", () => {
     const one = graph.of([twins[0]], pins)
     expect.soft(() => graph.of(twins, pins), "fed to the graph").toThrow(/share the id same/)
     expect.soft(pinPartition(one), "the graph unchanged by the refused input").toEqual([["A:1", "B:1"]])
-    expect.soft(() => graph.apply({ added: [twins[1]] }, twins, pins), "applied as a delta").toThrow(/share the id same/)
+    expect.soft(() => graph.apply({ added: [twins[1]] }), "applied as a delta").toThrow(/share the id same/)
     expect.soft(pinPartition(graph.of([twins[0]], pins)), "and still unchanged").toEqual([["A:1", "B:1"]])
   })
 
-  it("a view always reads its own document: kept across an update it still answers for the wiring it was made from, and the new view for the new", () => {
-    const pins: WirePin[] = [{ key: "A:1", at: c(0, 0), kind: "power" }, { key: "B:1", at: c(4, 0), kind: "analog" }]
+  it("a view answers until the graph takes its next edit, then refuses rather than mix two documents; the graph stays sound", () => {
+    const pins: WirePin[] = [{ key: "A:1", at: c(0, 0), kind: "power" }, { key: "B:1", at: c(4, 0), kind: "analog" }, { key: "C:1", at: c(0, 4) }, { key: "D:1", at: c(4, 4) }]
     const graph = new WireGraph()
-    const wired = [w(c(0, 0), c(4, 0))]
-    const kept = graph.of(wired, pins)
-    const read = (v: WireNets) => ({ nets: v.nets.length, partition: pinPartition(v), kinds: v.nets.map((n) => [...v.kindsOf(n)]), connected: v.connected("A:1"), segment: !!v.netOfSegment(wired[0].id) })
-    const before = read(kept)
-    expect.soft(before, "before").toEqual({ nets: 1, partition: [["A:1", "B:1"]], kinds: [["power", "analog"]], connected: true, segment: true })
-    const now = graph.of([], pins)
-    expect.soft(read(now), "the new view: the wire gone").toEqual({ nets: 0, partition: [], kinds: [], connected: false, segment: false })
-    expect.soft(read(kept), "the kept view: still its own wiring").toEqual(before)
-    expect.soft(read(now), "and the new one again").toEqual({ nets: 0, partition: [], kinds: [], connected: false, segment: false })
+    const a = w(c(0, 0), c(4, 0))
+    const b = w(c(0, 4), c(4, 4))
+    const kept = graph.of([a], pins)
+    const net = kept.netOfSegment(a.id)!
+    expect.soft({ pins: [...kept.pinsOf(net)].sort(), kinds: [...kept.kindsOf(net)] }, "before").toEqual({ pins: ["A:1", "B:1"], kinds: ["power", "analog"] })
+    const now = graph.of([a, b], pins)
+    for (const [what, read] of [["nets", () => kept.nets], ["pinsOf", () => kept.pinsOf(net)], ["netOfSegment", () => kept.netOfSegment(a.id)], ["junctions", () => kept.junctions()]] as const)
+      expect.soft(read, `the old view's ${what}`).toThrow(/out of date/)
+    expect.soft(now.netOfSegment(a.id), "the new view keeps the old net's id").toBe(net)
+    const after = graph.apply({ removed: [b] })
+    expect.soft(pinPartition(after), "an edit after the refused reads lands on the true state").toEqual([["A:1", "B:1"]])
   })
 
-  it("a net's kinds are its pins' kinds, NC pads left out", () => {
-    const pins: WirePin[] = [{ key: "U1:VDD", at: c(0, 0), kind: "power" }, { key: "U1:PA0", at: c(4, 0), kind: "digital" }, { key: "U1:NC", at: c(8, 0), kind: "nc" }]
-    const nets = wireNets(path(undefined, c(0, 0), c(4, 0), c(8, 0)), pins)
-    expect.soft([...nets.kindsOf(nets.nets[0])].sort(), "power and digital").toEqual(["digital", "power"])
+  it("the graph refuses a delta that does not match it, and stays as it was", () => {
+    const pins = [pin("A:1", c(0, 0)), pin("B:1", c(4, 0))]
+    const a = w(c(0, 0), c(4, 0))
+    const graph = new WireGraph()
+    graph.of([a], pins)
+    expect.soft(() => graph.apply({ removed: [w(c(0, 0), c(4, 0))] }), "removing a wire it does not hold").toThrow(/not in the graph/)
+    expect.soft(() => graph.apply({ removed: [a, a] }), "removing one twice").toThrow(/removed twice/)
+    expect.soft(() => graph.apply({ pinsRemoved: [pin("A:1", c(9, 9))] }), "removing a pin from where it is not").toThrow(/not in the graph as given/)
+    expect.soft(pinPartition(graph.of([a], pins)), "unchanged").toEqual([["A:1", "B:1"]])
   })
 
-  it("an edit keeps the ids of the nets it does not touch, and a grown or split net keeps its own on one side", () => {
-    const pins = [pin("A:1", c(0, 0)), pin("B:1", c(8, 0)), pin("C:1", c(4, 4)), pin("D:1", c(0, 10)), pin("E:1", c(8, 10))]
-    const graph = new WireGraph()
-    const spine = [w(c(0, 0), c(4, 0)), w(c(4, 0), c(8, 0))]
-    const other = w(c(0, 10), c(8, 10))
-    const before = graph.of([...spine, other], pins)
-    const spineNet = before.netOfSegment(spine[0].id)
-    const otherNet = before.netOfSegment(other.id)
-    const branch = w(c(4, 0), c(4, 4))
-    const grown = graph.of([...spine, other, branch], pins)
-    expect.soft(grown.netOfSegment(spine[0].id), "the spine's net grew a branch and kept its id").toBe(spineNet)
-    expect.soft(grown.netOfSegment(other.id), "the other net, untouched, kept its id").toBe(otherNet)
-    const split = graph.of([spine[0], other, branch], pins)
-    expect.soft([split.netOfSegment(spine[0].id)], "split: the side that keeps a piece of it keeps the id").toEqual([spineNet])
-    expect.soft(split.netOfSegment(other.id), "the other net still").toBe(otherNet)
+  it("a committed edit's delta is the exact difference: a wire removed and put back, or removed twice, is no change", () => {
+    const a = w(c(0, 0), c(4, 0))
+    const again = commitEdit([a], [], { remove: [a], add: [a] }, ids())
+    expect.soft({ added: again.added, removed: again.removed }, "removed and put back").toEqual({ added: [], removed: [] })
+    const twice = commitEdit([a], [], { remove: [a, a] }, ids())
+    expect.soft(twice.removed, "removed twice, listed once").toEqual([a])
   })
 
   it("pins handed over again as fresh objects with the same values change nothing: the same view comes back", () => {
@@ -235,7 +238,7 @@ describe("the derived graph", () => {
     const edit = commitEdit([spine], pins, { add: [branch] }, ids())
     expect.soft(edit.removed, "the spine replaced").toEqual([spine])
     expect.soft(edit.added.map((s) => s.id).sort(), "by its two halves, and the branch").toEqual([branch.id, spine.id, "n1"].sort())
-    const delta = byDelta.apply(edit, edit.wires, pins)
+    const delta = byDelta.apply(edit)
     const diff = byDiff.of(edit.wires, pins)
     expect.soft(pinPartition(delta), "partition").toEqual(pinPartition(diff))
     expect.soft(sortedPoints(junctionsOf(delta)), "dots").toEqual(sortedPoints(junctionsOf(diff)))
@@ -357,11 +360,7 @@ describe("random edit sequences against the brute-force reference (junctions.md 
         const committed = commitEdit(wires, livePins, { add: edit.added, remove: edit.removed, points: edit.moved }, counter(`c${seed}-${step}-`))
         expect.soft(geometryOf(committed.wires), `${where}: committing gives the same document`).toEqual(geometryOf(local))
         const moved = (p: WirePin, q: WirePin | undefined) => !q || q.at.x !== p.at.x || q.at.y !== p.at.y
-        const viaDelta = deltaGraph.apply(
-          { added: committed.added, removed: committed.removed, pinsAdded: livePins.filter((p) => moved(p, lastPins.find((q) => q.key === p.key))), pinsRemoved: lastPins.filter((p) => moved(p, livePins.find((q) => q.key === p.key))) },
-          committed.wires,
-          livePins,
-        )
+        const viaDelta = deltaGraph.apply({ added: committed.added, removed: committed.removed, pinsAdded: livePins.filter((p) => moved(p, lastPins.find((q) => q.key === p.key))), pinsRemoved: lastPins.filter((p) => moved(p, livePins.find((q) => q.key === p.key))) })
         expect.soft(canonical(pinPartition(viaDelta)), `${where}: the graph fed the edit's delta`).toEqual(want)
         expect.soft(sortedPoints(junctionsOf(viaDelta)), `${where}: its dots`).toEqual(bruteJunctions(committed.wires, livePins))
         lastPins = livePins

@@ -29,15 +29,6 @@ const NO_KINDS: ReadonlySet<PinKind> = new Set()
 
 const samePinEntry = (a: WirePin, b: WirePin) => a === b || (a.key === b.key && a.at.x === b.at.x && a.at.y === b.at.y && !!a.socket === !!b.socket && a.kind === b.kind)
 
-function changedWindow<T>(before: readonly T[], after: readonly T[], same: (a: T, b: T) => boolean): [readonly T[], readonly T[]] {
-  const shorter = Math.min(before.length, after.length)
-  let head = 0
-  while (head < shorter && same(before[head], after[head])) head++
-  let tail = 0
-  while (tail < shorter - head && same(before[before.length - 1 - tail], after[after.length - 1 - tail])) tail++
-  return [before.slice(head, before.length - tail), after.slice(head, after.length - tail)]
-}
-
 const isJunction = (v: Vertex) => v.ends.size + v.pins.size >= 3
 
 const isDangling = (v: Vertex) => v.ends.size === 1 && v.pins.size === 0
@@ -54,42 +45,60 @@ export class WireGraph {
   private junctionPoints = new Map<string, Point>()
   private danglingPoints = new Map<string, Point>()
   private nextNet = 0
-  private lastWires: readonly WireSegment[] = []
-  private lastPins: readonly WirePin[] = []
+  private version = 0
+  private lastWires: readonly WireSegment[] | null = null
+  private lastPins: readonly WirePin[] | null = null
   private netList: readonly string[] | null = null
   private kinds = new Map<string, ReadonlySet<PinKind>>()
   private junctionList: readonly Point[] | null = null
   private danglingList: readonly Point[] | null = null
-  private view: WireNets = this.viewOf(this.lastWires, this.lastPins)
+  private view: WireNets = this.viewAt(0)
 
   of(wires: readonly WireSegment[], pins: readonly WirePin[]): WireNets {
     if (wires === this.lastWires && pins === this.lastPins) return this.view
-    const [oldSegments, newSegments] = changedWindow(this.lastWires, wires, (a, b) => a === b)
-    const [oldPins, newPins] = changedWindow(this.lastPins, pins, samePinEntry)
-    const kept = new Set(newSegments)
-    const before = new Set(oldSegments)
-    const oldByKey = new Map(oldPins.map((p) => [p.key, p]))
-    const newByKey = new Map(newPins.map((p) => [p.key, p]))
-    return this.apply(
-      {
-        added: newSegments.filter((s) => !before.has(s)),
-        removed: oldSegments.filter((s) => !kept.has(s)),
-        pinsAdded: newPins.filter((p) => !oldByKey.has(p.key) || !samePinEntry(oldByKey.get(p.key)!, p)),
-        pinsRemoved: oldPins.filter((p) => !newByKey.has(p.key) || !samePinEntry(p, newByKey.get(p.key)!)),
-      },
-      wires,
-      pins,
-    )
+    const added: WireSegment[] = []
+    const pinsAdded: WirePin[] = []
+    for (const s of wires) if (this.segments.get(s.id) !== s) added.push(s)
+    for (const p of pins) {
+      const known = this.pins.get(p.key)
+      if (!known || !samePinEntry(known, p)) pinsAdded.push(p)
+    }
+    const unchanged = !added.length && !pinsAdded.length && wires.length === this.segments.size && pins.length === this.pins.size
+    const view = unchanged ? this.view : this.apply(this.difference(wires, pins, added, pinsAdded))
+    this.lastWires = wires
+    this.lastPins = pins
+    return view
   }
 
-  apply(delta: WireDelta, wires: readonly WireSegment[], pins: readonly WirePin[]): WireNets {
+  private difference(wires: readonly WireSegment[], pins: readonly WirePin[], added: WireSegment[], pinsAdded: WirePin[]): WireDelta {
+    const incoming = new Map<string, WireSegment>()
+    for (const s of wires) {
+      if (incoming.has(s.id)) throw new Error(`two wires share the id ${s.id}`)
+      incoming.set(s.id, s)
+    }
+    const incomingPins = new Map<string, WirePin>()
+    for (const p of pins) {
+      if (incomingPins.has(p.key)) throw new Error(`two pins share the key ${p.key}`)
+      incomingPins.set(p.key, p)
+    }
+    const removed: WireSegment[] = []
+    const pinsRemoved: WirePin[] = []
+    for (const [id, s] of this.segments) if (incoming.get(id) !== s) removed.push(s)
+    for (const [key, p] of this.pins) {
+      const next = incomingPins.get(key)
+      if (!next || !samePinEntry(p, next)) pinsRemoved.push(p)
+    }
+    return { added, removed, pinsAdded, pinsRemoved }
+  }
+
+  apply(delta: WireDelta): WireNets {
     const added = delta.added ?? []
     const removed = delta.removed ?? []
     const pinsAdded = delta.pinsAdded ?? []
     const pinsRemoved = delta.pinsRemoved ?? []
     this.check(added, removed, pinsAdded, pinsRemoved)
-    this.lastWires = wires
-    this.lastPins = pins
+    this.lastWires = null
+    this.lastPins = null
     if (!added.length && !removed.length && !pinsAdded.length && !pinsRemoved.length) return this.view
 
     const dirtyNets = new Set<string>()
@@ -119,7 +128,7 @@ export class WireGraph {
     this.kinds = new Map()
     this.junctionList = null
     this.danglingList = null
-    this.view = this.viewOf(wires, pins)
+    this.view = this.viewAt(++this.version)
     return this.view
   }
 
@@ -127,6 +136,7 @@ export class WireGraph {
     const leaving = new Set<string>()
     for (const s of removed) {
       if (this.segments.get(s.id) !== s) throw new Error(`wire ${s.id} is removed but is not in the graph`)
+      if (leaving.has(s.id)) throw new Error(`wire ${s.id} is removed twice`)
       leaving.add(s.id)
     }
     const arriving = new Set<string>()
@@ -136,7 +146,9 @@ export class WireGraph {
     }
     const pinsLeaving = new Set<string>()
     for (const p of pinsRemoved) {
-      if (!this.pins.has(p.key)) throw new Error(`pin ${p.key} is removed but is not in the graph`)
+      const held = this.pins.get(p.key)
+      if (!held || !samePinEntry(held, p)) throw new Error(`pin ${p.key} is removed but is not in the graph as given`)
+      if (pinsLeaving.has(p.key)) throw new Error(`pin ${p.key} is removed twice`)
       pinsLeaving.add(p.key)
     }
     const pinsArriving = new Set<string>()
@@ -269,11 +281,10 @@ export class WireGraph {
     return set
   }
 
-  private viewOf(wires: readonly WireSegment[], pins: readonly WirePin[]): WireNets {
-    const graph = this
+  private viewAt(version: number): WireNets {
     const now = () => {
-      if (graph.lastWires !== wires || graph.lastPins !== pins) graph.of(wires, pins)
-      return graph
+      if (this.version !== version) throw new Error("this view of the wires is out of date: the graph has taken an edit since")
+      return this
     }
     return {
       get nets() {
