@@ -63,7 +63,7 @@ import { TextCanvas } from "./TextCanvas"
 import { labelArea, labelCanvasFits, SymbolRaster, TextRaster } from "./symbol-raster"
 import { PendingWireLayer, WireLayer, type PendingWire } from "./WireLayer"
 import { bentWirePoints, pendingPoints } from "./pending-wire"
-import { GhostLayer, type Ghost } from "./GhostLayer"
+import { GhostLayer, PlacementGhost, type Ghost } from "./GhostLayer"
 import { casingTrim, wireCornerRadius } from "./wire-style"
 import { BendDrag, MoveDrag, planBend, planMove } from "./move-drag"
 import { ContactPreview } from "./contact-preview"
@@ -148,6 +148,11 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
   onMovePreview?: (move: { ids: string[]; dx: number; dy: number } | null) => void
   onWirePreview?: (points: Point[] | null) => void
   ghosts?: readonly Ghost[]
+  /** A part taken from the palette: a click on the field puts it there, Shift+click puts it and keeps it in hand. */
+  armed?: string | null
+  onArmedChange?: (defId: string | null) => void
+  /** A part placed from the palette, by a click, a drop or the keyboard. */
+  onPlaced?: (defId: string) => void
   projectName?: string
 }
 
@@ -175,7 +180,7 @@ function pinAt(clientX: number, clientY: number): PinRef | null {
   return target?.kind === "pin" ? target.ref : null
 }
 
-export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, projectName, children, ...props }: DotFieldProps) {
+export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, armed = null, onArmedChange, onPlaced, projectName, children, ...props }: DotFieldProps) {
   const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, toWorld, isPanStart, startPan, movePan, endPan, setOnPinchStart } = useViewport(grid)
   const marquee = useSelection(toWorld, worldPerPixel, grid)
   const { boxRef: marqueeRef } = marquee
@@ -404,6 +409,18 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (added) revealPlaced([added], 0, 0)
     return added
   })
+  // Stable for the menu's handle, which is built once.
+  const placed = useEvent((defId: string) => onPlaced?.(defId))
+  /** The armed part where the pointer is: the spot is the student's, nothing is nudged. */
+  const placeArmed = useEvent((e: React.PointerEvent, defId: string) => {
+    const added = sch.add(defId, toWorld(e.clientX, e.clientY))
+    if (!added) return
+    sch.selectObject(added.id)
+    placed(defId)
+    if (!e.shiftKey) onArmedChange?.(null)
+  })
+  /** Where the pointer is over the field while a part is in hand: the ghost's spot. */
+  const [armedAt, setArmedAt] = React.useState<Point | null>(null)
   const copy = React.useCallback(() => {
     const c = copySelected()
     if (!c) return
@@ -473,7 +490,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   React.useImperativeHandle(
     ref,
     () => ({
-      addAtCenter: (defId) => addFree(defId, viewCenter()),
+      addAtCenter: (defId) => {
+        if (addFree(defId, viewCenter())) placed(defId)
+      },
       load: (next) => {
         // A new document has no simulation history: drop the frozen picture as well.
         setSimRunning(false)
@@ -554,7 +573,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       },
       openHdl: (id) => setHdlId(id),
     }),
-    [addFree, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle, exportImage],
+    [addFree, placed, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle, exportImage],
   )
 
   // --- moving objects -------------------------------------------------------
@@ -887,7 +906,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   // --- field pointer handling: pan or marquee --------------------------------
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (isPanStart(e)) startPan(e)
+    if (armed && e.button === 0 && !isPanStart(e)) placeArmed(e, armed)
+    else if (isPanStart(e)) startPan(e)
     // A click on bare field while probing is a miss, not a selection.
     else if (measure.active) return
     else if (e.button === 0 && pending?.mode === "click") {
@@ -915,6 +935,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     onPointerWorld?.(toWorld(e.clientX, e.clientY))
+    if (armed && e.pointerType !== "touch") setArmedAt(toWorld(e.clientX, e.clientY))
     if (movePan(e)) return
     if (drag.active) {
       trackMove(toWorld(e.clientX, e.clientY))
@@ -959,7 +980,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const defId = e.dataTransfer.getData(PALETTE_DRAG_TYPE)
     if (!defId) return
     e.preventDefault()
-    addFree(defId, toWorld(e.clientX, e.clientY))
+    if (addFree(defId, toWorld(e.clientX, e.clientY))) placed(defId)
   }
 
   // --- keyboard --------------------------------------------------------------
@@ -975,6 +996,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const key = e.key.toLowerCase()
     if (e.key === "Delete" || e.key === "Backspace") {
       sch.removeSelected()
+    } else if (e.key === "Escape" && armed) {
+      onArmedChange?.(null)
     } else if (e.key === "Escape") {
       if (measure.active) measure.stop()
       sch.deselectAll()
@@ -1051,7 +1074,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
   }, [onKey, onCopy, onCut, onPaste])
 
-  const cursor = panning ? "cursor-grabbing" : spaceHeld ? "cursor-grab" : "cursor-precise"
+  const cursor = panning ? "cursor-grabbing" : spaceHeld ? "cursor-grab" : armed ? "cursor-copy" : "cursor-precise"
   const probeReading = sim.probe(PROBE_ID)
   const { selectedObjects, selectedWires, doc: schDoc, setPart } = sch
   const selectedObjectList = React.useMemo(
@@ -1113,6 +1136,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     <ContextMenu>
       <ContextMenuTrigger data-slot="dot-field" className={cn("flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background", className)} {...props}>
         <div data-slot="dot-field-stage" className="relative min-h-0 flex-1 overflow-hidden">
+          {armed && (
+            <div data-slot="placement-hint" className="pointer-events-none absolute bottom-16 left-1/2 z-20 -translate-x-1/2 rounded-md border bg-background/95 px-3 py-1.5 text-xs whitespace-nowrap shadow-sm backdrop-blur-sm">
+              Click the field to place <span className="font-medium">{getDef(armed)?.name ?? armed}</span>
+              <span className="text-muted-foreground"> · Shift+click places more · Esc cancels</span>
+            </div>
+          )}
           <div
             ref={containerRef}
             data-slot="dot-field-viewport"
@@ -1126,11 +1155,17 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
             onPointerLeave={() => {
+              setArmedAt(null)
               forgetHover()
               onPointerWorld?.(null)
             }}
             onContextMenu={(e) => {
               menuPoint.current = toWorld(e.clientX, e.clientY)
+              if (armed) {
+                e.preventDefault()
+                onArmedChange?.(null)
+                return
+              }
               if (pending) {
                 e.preventDefault()
                 setPending(null)
@@ -1202,6 +1237,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 onPinPointerUp={onPinPointerUp}
               />
               <PendingWireLayer objects={docObjects} index={index} pending={pending} grid={grid} scale={scale} part="marks" />
+              {armed && armedAt && <PlacementGhost defId={armed} at={armedAt} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} />}
               {ghosts && ghosts.length > 0 && (
                 <GhostLayer ghosts={ghosts} objects={docObjects} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} />
               )}

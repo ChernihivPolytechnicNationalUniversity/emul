@@ -5,6 +5,7 @@ import { DEFAULT_TEXT_SCALE } from "@/components/field/text-scale"
 import { MenuBar } from "@/components/menu/MenuBar"
 import { GRID } from "@/schematic/geometry"
 import { ComponentsSidebar } from "@/components/palette/ComponentsSidebar"
+import { notePlaced } from "@/components/palette/recents"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -27,7 +28,7 @@ import { ShareDialog } from "@/components/share/ShareDialog"
 
 /** Height of the menu bar; the sidebar is fixed, so it has to be told to start below it. */
 const MENU_H = 28
-const SIDEBAR_WIDTH = "16rem"
+const SIDEBAR_WIDTH = "18rem"
 
 const emptyState: FieldState = {
   hasSelection: false,
@@ -53,6 +54,21 @@ export default function App() {
   /** On a phone the palette is a sheet over the field, closed until asked for and closed again after a pick. */
   const [paletteSheet, setPaletteSheet] = React.useState(false)
   const isMobile = useIsMobile()
+  /** A part taken from the palette, waiting for a click on the field. */
+  const [armed, setArmed] = React.useState<string | null>(null)
+  // "/" goes to the palette's search from anywhere outside a text field, as on most sites.
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || !t || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable || t.closest('[data-slot="code-panel"]')) return
+      e.preventDefault()
+      if (isMobile) setPaletteSheet(true)
+      else setSidebarOpen(true)
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[data-slot="palette-search"]')?.focus())
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [isMobile])
   const fileInput = React.useRef<HTMLInputElement>(null)
   /** Set while an example that came programmed is on its way to the field: it starts once loaded. */
   const autorun = React.useRef(false)
@@ -351,7 +367,13 @@ export default function App() {
           <ComponentsSidebar
             onPick={(item) => {
               setPaletteSheet(false)
+              setArmed(null)
               field.current?.addAtCenter(item.id)
+            }}
+            armed={armed}
+            onArm={(item) => {
+              setPaletteSheet(false)
+              setArmed((a) => (a === item.id ? null : item.id))
             }}
             onHdlNew={(language) => {
               setPaletteSheet(false)
@@ -383,6 +405,9 @@ export default function App() {
               onMovePreview={live.onMove}
               onWirePreview={live.onWire}
               ghosts={ghosts}
+              armed={armed}
+              onArmedChange={setArmed}
+              onPlaced={notePlaced}
               projectName={projects.current?.name}
             >
               <LiveCursors peers={live.peers} />

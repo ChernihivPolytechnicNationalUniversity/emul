@@ -1,9 +1,12 @@
+import { getDef } from "./registry"
+import type { ComponentDef } from "./types"
+
 /**
- * Parts the palette shows as one row: the same thing in several variants (part numbers, revisions,
- * polarities). A variant is a part of its own, with the id saved projects know it by; the family
- * only gathers them. Variants share their pins and where they sit (not always the part's size), so switching
- * one for another in the inspector keeps every wire: `tests/sim/catalogue.test.ts` checks it, and
- * fails when two parts that could be one row are left apart.
+ * Parts the palette shows as one row: the same kind of thing in several variants (part numbers,
+ * revisions, polarities, sizes). A variant is a part of its own, with the id saved projects know it
+ * by; the family only gathers them. The inspector swaps a part only for a variant with the same pins
+ * in the same places, so a swap never moves a wire (`swapsFor`); other variants are a search away.
+ * `tests/sim/catalogue.test.ts` fails when two parts with the same pins are left as two rows.
  *
  * The first variant is the one a click on the row places.
  */
@@ -139,55 +142,47 @@ export const FAMILIES: readonly Family[] = [
       ["ws2812e", "WS2812E"],
       ["sk6812", "SK6812"],
       ["sk6812rgbw", "SK6812RGBW"],
+      ["ws2812-6pin", "WS2812 (6-pin)"],
+      ["ws2812s", "WS2812S"],
+      ["ws2813", "WS2813"],
+      ["ws2813b", "WS2813B"],
+      ["ws2813b-rgbw", "WS2813B-RGBW"],
+      ["ws2815", "WS2815"],
+      ["ws2815b", "WS2815B"],
       ["ws2815b-4pin", "WS2815B (4-pin)"],
+      ["ws2816", "WS2816"],
+      ["ws2916", "WS2916"],
+      ["ws2916a-rgbw", "WS2916A-RGBW"],
     ],
     hint: "WS2812B · SK6812 …",
   },
   {
-    id: "addressable-led-6pin",
-    name: "Addressable LED, 6-pin",
+    id: "led-module",
+    name: "LED strip / ring / matrix",
     variants: [
-      ["ws2812-6pin", "WS2812 (6-pin)"],
-      ["ws2812s", "WS2812S"],
+      ["led-stick-8", "Stick ×8"],
+      ["led-ring-12", "Ring ×12"],
+      ["led-ring-16", "Ring ×16"],
+      ["led-ring-24", "Ring ×24"],
+      ["led-matrix-8x8", "Matrix 8×8"],
     ],
-    hint: "WS2812 · WS2812S",
+    hint: "WS2812B",
   },
   {
-    id: "addressable-led-backup",
-    name: "Addressable LED, BIN",
-    variants: [
-      ["ws2813", "WS2813"],
-      ["ws2815", "WS2815"],
-      ["ws2813b-rgbw", "WS2813B-RGBW"],
-      ["ws2916a-rgbw", "WS2916A-RGBW"],
-    ],
-    hint: "WS2813 · WS2815 …",
-  },
-  {
-    id: "addressable-led-relay",
-    name: "Addressable LED, BI/BO",
-    variants: [
-      ["ws2813b", "WS2813B"],
-      ["ws2816", "WS2816"],
-      ["ws2916", "WS2916"],
-    ],
-    hint: "WS2813B · WS2816 …",
-  },
-  {
-    id: "led-driver-3",
-    name: "LED driver, 3-channel",
+    id: "led-driver",
+    name: "LED driver",
     variants: [
       ["ws2811", "WS2811"],
       ["ws2913", "WS2913"],
-    ],
-  },
-  {
-    id: "led-driver-5-backup",
-    name: "LED driver, 5-ch + BIN",
-    variants: [
+      ["ws2818", "WS2818"],
+      ["ws2801", "WS2801"],
+      ["ws2814", "WS2814"],
+      ["ws2814b", "WS2814B"],
       ["ws2805", "WS2805"],
       ["ws2914", "WS2914"],
+      ["ws2915", "WS2915"],
     ],
+    hint: "WS2811 …",
   },
 ]
 
@@ -198,6 +193,21 @@ export const familyOf = (defId: string): Family | undefined => BY_PART.get(defId
 
 /** How the variant `defId` is told apart within its family. */
 export const variantLabel = (defId: string): string | undefined => BY_PART.get(defId)?.variants.find(([id]) => id === defId)?.[1]
+
+// Pins by where they sit: a variant may be bigger or smaller, a wire stays put if its pin does.
+export const pinLayout = (d: ComponentDef) => d.pins.map((p) => `${p.id}@${p.x},${p.y}${p.side}`).sort().join(" ")
+
+/** The variants a placed part can become in the inspector: its family's, with the same pins in the same places. */
+export function swapsFor(defId: string): (readonly [string, string])[] {
+  const family = familyOf(defId)
+  const own = getDef(defId)
+  if (!family || !own) return []
+  const layout = pinLayout(own)
+  return family.variants.filter(([id]) => {
+    const def = getDef(id)
+    return def !== undefined && pinLayout(def) === layout
+  })
+}
 
 const HINT_BUDGET = 20
 

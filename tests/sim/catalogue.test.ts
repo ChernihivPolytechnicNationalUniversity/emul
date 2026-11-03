@@ -3,8 +3,7 @@ import { describe, expect, it } from "vitest"
 import { CATEGORIES, categoryLabel, isPaletteCategory } from "@/schematic/categories"
 import * as icons from "@/schematic/icons"
 import { getDef, registry } from "@/schematic/registry"
-import { FAMILIES, familyOf } from "@/schematic/families"
-import type { ComponentDef } from "@/schematic/types"
+import { FAMILIES, familyOf, pinLayout, swapsFor } from "@/schematic/families"
 
 // The palette's rules, checked for every part so that a new part cannot break them:
 // a closed set of groups in a fixed order, names that fit a palette row, no clashes, English
@@ -123,8 +122,7 @@ describe("part icons", () => {
   })
 })
 
-// Pins by where they sit: a variant may be bigger or smaller, a wire stays put if its pin does.
-const pinsOf = (d: ComponentDef) => d.pins.map((p) => `${p.id}@${p.x},${p.y}${p.side}`).sort().join(" ")
+const pinsOf = pinLayout
 
 describe("families", () => {
   it("gather parts that exist, each in one family only", () => {
@@ -149,12 +147,14 @@ describe("families", () => {
     }
   })
 
-  it("hold variants that swap without touching a wire: one group, the same pins in the same places", () => {
+  it("keep to one group, and offer in the inspector only swaps that leave every wire in place", () => {
     for (const f of FAMILIES) {
       const [first, ...rest] = f.variants.map(([id]) => getDef(id)!)
-      for (const def of rest) {
-        expect.soft(def.category, `${f.id}: ${def.id}`).toBe(first.category)
-        expect.soft(pinsOf(def), `${f.id}: ${def.id} has other pins than ${first.id}`).toBe(pinsOf(first))
+      for (const def of rest) expect.soft(def.category, `${f.id}: ${def.id}`).toBe(first.category)
+      for (const [id] of f.variants) {
+        const swaps = swapsFor(id)
+        expect.soft(swaps.map(([v]) => v), `${id} swaps for itself`).toContain(id)
+        for (const [other] of swaps) expect.soft(pinsOf(getDef(other)!), `${id} → ${other}`).toBe(pinsOf(getDef(id)!))
       }
     }
   })

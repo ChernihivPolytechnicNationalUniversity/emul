@@ -10,7 +10,7 @@ export { PALETTE_DRAG_TYPE }
 /** One palette row: a part of its own, or a family whose row places `def`, the variant picked. */
 export type PaletteEntry = { key: string; name: string; def: ComponentDef; family?: Family; hint?: string }
 
-export type PaletteGroup = { id: string; label: string; items: ComponentDef[]; entries: PaletteEntry[] }
+export type PaletteGroup = { id: string; label: string; aside?: string; items: ComponentDef[]; entries: PaletteEntry[] }
 
 const familyEntry = (family: Family, def = getDef(family.variants[0][0])!): PaletteEntry => ({ key: family.id, name: family.name, def, family })
 
@@ -30,9 +30,9 @@ function entriesOf(items: ComponentDef[]): PaletteEntry[] {
 }
 
 /** The registry in the palette's groups, in their fixed order; parts keep registry order inside a group. */
-export const paletteGroups: PaletteGroup[] = CATEGORIES.map(({ id, label }) => {
-  const items = registry.filter((def) => def.category === id)
-  return { id, label, items, entries: entriesOf(items) }
+export const paletteGroups: PaletteGroup[] = CATEGORIES.map((c) => {
+  const items = registry.filter((def) => def.category === c.id)
+  return { id: c.id, label: c.label, aside: "aside" in c ? c.aside : undefined, items, entries: entriesOf(items) }
 }).filter((g) => g.items.length > 0)
 
 /** Search hits as palette rows: the first hit of a family stands for it and places the variant that matched. */

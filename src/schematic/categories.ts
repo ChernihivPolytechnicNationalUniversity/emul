@@ -5,8 +5,8 @@
  */
 export const CATEGORIES = [
   { id: "basics", label: "Basics" },
-  { id: "boards", label: "Boards" },
-  { id: "mcus", label: "Microcontrollers" },
+  { id: "boards", label: "Boards", aside: "ready to run" },
+  { id: "mcus", label: "Microcontrollers", aside: "bare chips" },
   { id: "leds", label: "LEDs & indicators" },
   { id: "displays", label: "Displays" },
   { id: "input", label: "Input" },
@@ -18,6 +18,9 @@ export const CATEGORIES = [
 ] as const
 
 export type PaletteCategory = (typeof CATEGORIES)[number]["id"]
+
+/** Groups a newcomer opens first; the rest start folded, so the whole catalogue fits on a screen. */
+export const OPEN_AT_FIRST: readonly PaletteCategory[] = ["basics"]
 
 /** A project's own HDL modules: listed with the project, not in the library's groups. */
 export const HDL_CATEGORY = "hdl"

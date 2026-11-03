@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
-import { familyOf } from "@/schematic/families"
+import { familyOf, swapsFor } from "@/schematic/families"
 import { getDef, hdlModule } from "@/schematic/registry"
 import { isHdlDef, isModified } from "@/schematic/hdl"
 import type { FlipAxis } from "@/schematic/geometry"
@@ -98,6 +98,8 @@ export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmwa
   const object = selected.length === 1 ? selected[0] : null
   const def = object && getDef(object.def)
   const family = def ? familyOf(def.id) : undefined
+  // Only variants a swap leaves every wire on: the same pins in the same places.
+  const swaps = def ? swapsFor(def.id) : []
   const open = sections.isOpen("panel")
 
   return (
@@ -179,9 +181,9 @@ export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmwa
           )}
           <Section id="properties" label="Properties" sections={sections}>
             <FieldGroup className="gap-4">
-              {family && onVariant && (
+              {family && onVariant && swaps.length > 1 && (
                 <PropEditor
-                  field={{ key: "variant", label: `Variant · ${family.name}`, type: "select", options: family.variants.map(([value, label]) => ({ value, label })) }}
+                  field={{ key: "variant", label: `Variant · ${family.name}`, type: "select", options: swaps.map(([value, label]) => ({ value, label })) }}
                   value={def.id}
                   onChange={(v) => onVariant(object.id, v)}
                 />

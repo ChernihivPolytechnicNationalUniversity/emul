@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { registry, getDef } from "@/schematic/registry"
-import { FAMILIES, familyOf } from "@/schematic/families"
+import { FAMILIES, familyOf, swapsFor } from "@/schematic/families"
 import { keptProps } from "@/schematic/use-schematic"
 import { hitEntries, paletteGroups } from "@/components/palette/items"
 import { searchParts } from "@/components/palette/search"
@@ -78,5 +78,16 @@ describe("switching a variant", () => {
     const keys = Object.keys(generic.defaults ?? {})
     expect(keys.length).toBeGreaterThan(0)
     expect(keptProps({ ref: "U2", ...generic.defaults }, generic, lm358)).toEqual({ ref: "U2" })
+  })
+})
+
+describe("the inspector's variant switch", () => {
+  it("offers only variants a swap leaves every wire on", () => {
+    const swaps = swapsFor("ws2812b").map(([id]) => id)
+    expect(swaps).toContain("sk6812")
+    // The 6-pin WS2812 and the WS2813's backup input have other pins: a search away, not a swap.
+    expect(swaps).not.toContain("ws2812-6pin")
+    expect(swaps).not.toContain("ws2813")
+    expect(swapsFor("resistor")).toEqual([])
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { registry } from "@/schematic/registry"
-import { searchParts, toolHints } from "@/components/palette/search"
+import { searchParts, similarParts, toolHints } from "@/components/palette/search"
 
 // What a student types, and what the palette must answer. The queries come from the palette audit:
 // a part's own name, the word a datasheet or a lab sheet uses, the silkscreen on a board, a typo.
@@ -155,5 +155,22 @@ describe("tools that are not parts", () => {
     expect(toolHints("scope").map((t) => t.where)).toEqual(["Simulate → Oscilloscope"])
     expect(toolHints("logic analyzer").map((t) => t.where)).toEqual(["Simulate → Logic analyser"])
     expect(toolHints("resistor")).toEqual([])
+  })
+})
+
+describe("when the words do not all match", () => {
+  it("a forgiven typo says what it was read as", () => {
+    expect(searchParts(registry, "capasitor")[0].correction).toBe("capacitor")
+    expect(searchParts(registry, "ressistor")[0].correction).toBe("resistor")
+    expect(searchParts(registry, "capacitor")[0].correction).toBeUndefined()
+  })
+
+  it("parts that match some of the words are offered as similar", () => {
+    expect(ids("blue pill")).toEqual([])
+    const similar = similarParts(registry, "blue pill").map((h) => h.def.id)
+    expect(similar.length).toBeGreaterThan(0)
+    expect(similar.length).toBeLessThanOrEqual(3)
+    expect(similar[0]).toMatch(/^weact-blackpill/)
+    expect(similarParts(registry, "qqzzxx")).toEqual([])
   })
 })

@@ -18,6 +18,8 @@ export type SearchHit = {
   matched?: string
   /** Found only after a typo in the query was forgiven. */
   corrected: boolean
+  /** The word a forgiven typo was read as, from the part's name or keywords. */
+  correction?: string
 }
 
 const EXACT = 100
@@ -64,7 +66,7 @@ function compact(text: string): { text: string; at: number[] } {
 }
 
 type Field = { text: string; compact: { text: string; at: number[] }; weight: number; inside: boolean; scattered: boolean }
-type Match = { score: number; range?: [number, number][] }
+type Match = { score: number; range?: [number, number][]; word?: string }
 
 function field(text: string, weight: number, inside: boolean, scattered = false): Field {
   const norm = normalize(text)
@@ -136,7 +138,7 @@ function withinOneEdit(a: string, b: string): boolean {
 function matchTypo(token: string, f: Field): Match {
   if (token.length < 5 || f.weight < KEYWORD) return { score: 0 }
   for (const m of f.text.matchAll(/[a-z0-9]+/g))
-    if (m[0].length >= 5 && withinOneEdit(token, m[0])) return { score: TYPO, range: [[m.index, m.index + m[0].length]] }
+    if (m[0].length >= 5 && withinOneEdit(token, m[0])) return { score: TYPO, range: [[m.index, m.index + m[0].length]], word: m[0] }
   return { score: 0 }
 }
 
@@ -180,13 +182,17 @@ function score(entry: Entry, tokens: string[], whole: string, match: (token: str
   let total = 0
   const ranges: [number, number][] = []
   let matched: string | undefined
+  let correction: string | undefined
   for (const token of tokens) {
     const byName = match(token, entry.name)
+    correction ??= byName.word
     let best = byName.score * NAME
     let keyword: number | undefined
     entry.keywords.forEach((f, i) => {
-      const s = match(token, f).score * KEYWORD
+      const m = match(token, f)
+      const s = m.score * KEYWORD
       if (s > best) [best, keyword] = [s, i]
+      if (s > 0) correction ??= m.word
     })
     for (const f of entry.rest) best = Math.max(best, match(token, f).score * f.weight)
     if (best === 0) return undefined
@@ -196,7 +202,7 @@ function score(entry: Entry, tokens: string[], whole: string, match: (token: str
   }
   if (entry.name.text === whole) total += WHOLE_NAME
   else if (tokens.length > 1 && entry.keywords.some((k) => k.text === whole)) total += WHOLE_KEYWORD
-  return { def: entry.def, score: total, ranges: merge(ranges), matched, corrected: false }
+  return { def: entry.def, score: total, ranges: merge(ranges), matched, corrected: false, correction }
 }
 
 /** Where the words of `query` sit in `text`, for a label that is not a part's own name (a family's). */
@@ -216,7 +222,7 @@ export function searchParts(defs: readonly ComponentDef[], query: string): Searc
     list
       .map((e) => {
         const hit = score(e, tokens, whole, match)
-        return hit && { hit: { ...hit, corrected }, e }
+        return hit && { hit: { ...hit, corrected, correction: corrected ? hit.correction : undefined }, e }
       })
       .filter((x) => x !== undefined)
       .sort((a, b) => b.hit.score - a.hit.score || a.e.group - b.e.group || a.e.order - b.e.order)
@@ -227,6 +233,17 @@ export function searchParts(defs: readonly ComponentDef[], query: string): Searc
     const m = matchField(token, f)
     return m.score > 0 ? m : matchTypo(token, f)
   }, true)
+}
+
+/** For a query nothing matches in full: the best parts that match one of its words, a few. */
+export function similarParts(defs: readonly ComponentDef[], query: string, count = 3): SearchHit[] {
+  const words = normalize(query).trim().split(/\s+/).filter((w) => w.length >= 3)
+  if (words.length < 2) return []
+  const best = new Map<ComponentDef, SearchHit>()
+  for (const word of words)
+    for (const hit of searchParts(defs, word).slice(0, count))
+      if ((best.get(hit.def)?.score ?? -1) < hit.score) best.set(hit.def, hit)
+  return [...best.values()].sort((a, b) => b.score - a.score).slice(0, count)
 }
 
 /** What a student may look for among the parts that is a tool of the simulator instead. */
@@ -243,6 +260,14 @@ export function toolHints(query: string): ToolHint[] {
   const q = normalize(query).trim().replace(/\s+/g, " ")
   if (q.length < 3) return []
   return TOOLS.filter((t) => t.words.some((w) => w.startsWith(q) || q.includes(w))).map(({ name, where, shortcut }) => ({ name, where, shortcut }))
+}
+
+const HDL_WORDS = ["vhdl", "verilog", "hdl", "fpga"]
+
+/** Whether the query asks for an HDL module, which the student writes rather than picks: offer to create one. */
+export function hdlCreateMatch(query: string): boolean {
+  const q = normalize(query).trim()
+  return q.length >= 3 && HDL_WORDS.some((w) => w.startsWith(q) || q.startsWith(w))
 }
 
 /** A GitHub issue asking for a part the palette lacks, its title filled in with what was searched for. */
