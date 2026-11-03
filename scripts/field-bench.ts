@@ -26,6 +26,8 @@ const DEV_SERVER = process.env.EMUL_URL ?? "http://localhost:5173/"
 const VIEWPORT = { width: 1600, height: 1000 }
 const LOAD_TIMEOUT_MS = 120_000
 const SETTLE_MS = 2500
+const LANDING_TIMEOUT_MS = 15_000
+const TITLE_HOLD_MS = 1000
 const WORKING_ZOOM = 0.48
 const CANVAS_BAND_ZOOM = 0.14
 const CANVAS_BAND_OBJECTS = 1200
@@ -90,18 +92,45 @@ async function waitUntilDrawn(page: Page) {
   throw new Error("the field never settled")
 }
 
+const pageTitle = (page: Page) => page.evaluate(() => document.title)
+
+async function landingSettled(page: Page) {
+  const deadline = Date.now() + LANDING_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (!(await pageTitle(page)).startsWith("εmul")) return
+    await page.waitForTimeout(100)
+  }
+}
+
+async function holdsTitle(page: Page, name: string) {
+  const deadline = Date.now() + LOAD_TIMEOUT_MS
+  let since = 0
+  while (Date.now() < deadline) {
+    const title = await pageTitle(page)
+    if (!title.startsWith(`${name} `)) since = 0
+    else if (!since) since = Date.now()
+    else if (Date.now() - since >= TITLE_HOLD_MS) return
+    await page.waitForTimeout(100)
+  }
+  throw new Error(`the field never settled on ${name}: it shows “${await pageTitle(page)}”`)
+}
+
 async function openField(browser: Browser, doc: Schematic) {
   const page = await browser.newPage({ viewport: VIEWPORT })
   await page.goto(DEV_SERVER, { waitUntil: "domcontentloaded" })
   await page.waitForSelector("[data-slot=dot-field-viewport]")
+  await landingSettled(page)
+  const name = `stress-${doc.objects.length}`
   const started = Date.now()
   await page.setInputFiles("input[type=file]", {
-    name: `stress-${doc.objects.length}.emul`,
+    name: `${name}.emul`,
     mimeType: "application/octet-stream",
-    buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name: `stress-${doc.objects.length}`, schematic: doc })),
+    buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name, schematic: doc })),
   })
+  await holdsTitle(page, name)
   await waitUntilDrawn(page)
   const mountMs = Date.now() - started
+  console.log(`  on screen: “${await pageTitle(page)}”`)
   await page.waitForSelector("[data-slot=zoom-controls]")
   await page.waitForTimeout(SETTLE_MS)
   return { page, mountMs }

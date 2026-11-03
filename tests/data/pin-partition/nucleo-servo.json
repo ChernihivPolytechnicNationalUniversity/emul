@@ -1,5 +1,9 @@
 {
   "source": "example nucleo-servo",
+  "objects": [
+    "M1 (servo-sg90)",
+    "U1 (nucleo-f429zi)"
+  ],
   "nets": [
     ["M1.GND","U1.CN10-22"],
     ["M1.SIG","U1.CN10-4"],

@@ -1,5 +1,10 @@
 {
   "source": "example nucleo-keypad",
+  "objects": [
+    "SW1 (keypad-4x4)",
+    "TERM1 (serial-terminal)",
+    "U1 (nucleo-f429zi)"
+  ],
   "nets": [
     ["SW1.C1","U1.CN10-10"],
     ["SW1.C2","U1.CN10-12"],

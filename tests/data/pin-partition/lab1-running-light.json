@@ -1,4 +1,7 @@
 {
   "source": "example lab1-running-light",
+  "objects": [
+    "U1 (open746i-c)"
+  ],
   "nets": []
 }

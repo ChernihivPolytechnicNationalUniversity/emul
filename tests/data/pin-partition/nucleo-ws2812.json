@@ -1,5 +1,9 @@
 {
   "source": "example nucleo-ws2812",
+  "objects": [
+    "LED1 (led-stick-8)",
+    "U1 (nucleo-f429zi)"
+  ],
   "nets": [
     ["LED1.DIN","U1.CN10-4"],
     ["LED1.GND","U1.CN10-22"],

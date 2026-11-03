@@ -1,7 +1,12 @@
 {
   "source": "example nucleo-oled",
+  "objects": [
+    "DS1 (oled-ssd1306-i2c)",
+    "ground (ground)",
+    "U1 (nucleo-f429zi)"
+  ],
   "nets": [
-    ["DS1.GND","ground#1.GND"],
+    ["DS1.GND","ground.GND"],
     ["DS1.SCL","U1.CN7-2"],
     ["DS1.SDA","U1.CN7-4"],
     ["DS1.VCC","U1.CN8-7"]

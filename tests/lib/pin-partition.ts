@@ -8,25 +8,38 @@ const JUNCTION = "junction"
 
 export const isJunctionObject = (o: PlacedObject) => o.def === JUNCTION
 
+function anonymousName(o: PlacedObject): string {
+  const def = getDef(o.def)
+  const keys = (def?.fields ?? []).map((f) => f.key).filter((k) => k !== "ref").sort()
+  const values = keys.flatMap((k) => {
+    const v = o.props?.[k] ?? def?.defaults?.[k]
+    return v ? [`${k}=${v}`] : []
+  })
+  return values.length ? `${o.def}{${values.join(",")}}` : o.def
+}
+
 export function stableNames(objects: readonly PlacedObject[]): ReadonlyMap<string, string> {
   const names = new Map<string, string>()
   const taken = new Map<string, number>()
-  const unnamed = new Map<string, number>()
   for (const o of objects) {
     const ref = o.props?.ref
-    let name: string
-    if (ref) {
-      const seen = (taken.get(ref) ?? 0) + 1
-      taken.set(ref, seen)
-      name = seen === 1 ? ref : `${ref}#${seen}`
-    } else {
-      const n = (unnamed.get(o.def) ?? 0) + 1
-      unnamed.set(o.def, n)
-      name = `${o.def}#${n}`
+    if (!ref) {
+      names.set(o.id, anonymousName(o))
+      continue
     }
-    names.set(o.id, name)
+    const seen = (taken.get(ref) ?? 0) + 1
+    taken.set(ref, seen)
+    names.set(o.id, seen === 1 ? ref : `${ref}#${seen}`)
   }
   return names
+}
+
+export function inventory(objects: readonly PlacedObject[]): string[] {
+  const names = stableNames(objects)
+  return objects
+    .filter((o) => !isJunctionObject(o))
+    .map((o) => `${names.get(o.id)} (${o.def})`)
+    .sort(byKey)
 }
 
 export function duplicateRefs(objects: readonly PlacedObject[]): string[] {
@@ -35,13 +48,21 @@ export function duplicateRefs(objects: readonly PlacedObject[]): string[] {
   return [...seen].filter(([, n]) => n > 1).map(([ref]) => ref)
 }
 
-const byKey = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true })
+const byKey = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true }) || (a < b ? -1 : a > b ? 1 : 0)
+
+function byGroup(a: readonly string[], b: readonly string[]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    const order = byKey(a[i], b[i])
+    if (order) return order
+  }
+  return a.length - b.length
+}
 
 export function canonical(groups: Iterable<Iterable<string>>): Partition {
   return [...groups]
-    .map((g) => [...new Set(g)].sort(byKey))
+    .map((g) => [...g].sort(byKey))
     .filter((g) => g.length > 1)
-    .sort((a, b) => byKey(a[0], b[0]))
+    .sort(byGroup)
 }
 
 export function renamed(objects: readonly PlacedObject[], groups: Iterable<Iterable<string>>): Partition {
@@ -73,22 +94,17 @@ export function pinPartition(doc: Schematic, grid: number): Partition {
   return renamed(doc.objects, groups.values())
 }
 
-export type RefPin = { key: string; at: Point; socket?: boolean }
+export type RefPin = { key: string; at: Point; socket?: boolean; nc?: boolean }
 export type RefSegment = { a: Point; b: Point }
 
 const same = (p: Point, q: Point) => p.x === q.x && p.y === q.y
 
 const isEndOf = (p: Point, s: RefSegment) => same(p, s.a) || same(p, s.b)
 
-const LEGACY_DIAGONAL_SLACK = 1e-6
-
 function onSegment(p: Point, s: RefSegment): boolean {
   if (s.a.y === s.b.y) return p.y === s.a.y && p.x >= Math.min(s.a.x, s.b.x) && p.x <= Math.max(s.a.x, s.b.x)
   if (s.a.x === s.b.x) return p.x === s.a.x && p.y >= Math.min(s.a.y, s.b.y) && p.y <= Math.max(s.a.y, s.b.y)
-  if (isEndOf(p, s)) return true
-  const cross = (s.b.x - s.a.x) * (p.y - s.a.y) - (s.b.y - s.a.y) * (p.x - s.a.x)
-  const within = p.x >= Math.min(s.a.x, s.b.x) && p.x <= Math.max(s.a.x, s.b.x) && p.y >= Math.min(s.a.y, s.b.y) && p.y <= Math.max(s.a.y, s.b.y)
-  return within && Math.abs(cross) <= LEGACY_DIAGONAL_SLACK * Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y)
+  return isEndOf(p, s)
 }
 
 export function pinOnSegmentConnects(pin: RefPin, s: RefSegment): boolean {
@@ -114,9 +130,10 @@ export function geometricGroups(pins: readonly RefPin[], segments: readonly RefS
     if (a !== b) parent[a] = b
   }
   const P = pins.length
-  for (let i = 0; i < P; i++) for (let j = i + 1; j < P; j++) if (same(pins[i].at, pins[j].at)) union(i, j)
-  for (let i = 0; i < P; i++) for (let s = 0; s < segments.length; s++) if (pinOnSegmentConnects(pins[i], segments[s])) union(i, P + s)
-  for (let s = 0; s < segments.length; s++) for (let t = s + 1; t < segments.length; t++) if (segmentsConnect(segments[s], segments[t])) union(P + s, P + t)
+  const isConductor = (s: RefSegment) => !same(s.a, s.b)
+  for (let i = 0; i < P; i++) for (let j = i + 1; j < P; j++) if (!pins[i].nc && !pins[j].nc && same(pins[i].at, pins[j].at)) union(i, j)
+  for (let i = 0; i < P; i++) for (let s = 0; s < segments.length; s++) if (isConductor(segments[s]) && pinOnSegmentConnects(pins[i], segments[s])) union(i, P + s)
+  for (let s = 0; s < segments.length; s++) for (let t = s + 1; t < segments.length; t++) if (isConductor(segments[s]) && isConductor(segments[t]) && segmentsConnect(segments[s], segments[t])) union(P + s, P + t)
   const groups = new Map<number, string[]>()
   for (let i = 0; i < P; i++) {
     const root = find(i)

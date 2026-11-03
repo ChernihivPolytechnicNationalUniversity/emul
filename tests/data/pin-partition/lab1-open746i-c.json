@@ -1,4 +1,7 @@
 {
   "source": "example lab1-open746i-c",
+  "objects": [
+    "U1 (open746i-c)"
+  ],
   "nets": []
 }

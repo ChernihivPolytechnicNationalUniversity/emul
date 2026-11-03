@@ -1,5 +1,9 @@
 {
   "source": "example nucleo-melody",
+  "objects": [
+    "BZ1 (buzzer-pkm13epyh4000-a0)",
+    "U1 (nucleo-f429zi)"
+  ],
   "nets": [
     ["BZ1.1","U1.CN7-10"],
     ["BZ1.2","U1.CN7-8"]

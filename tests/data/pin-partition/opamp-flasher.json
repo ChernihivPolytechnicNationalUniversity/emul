@@ -1,15 +1,31 @@
 {
   "source": "example opamp-flasher",
+  "objects": [
+    "C1 (capacitor)",
+    "ground (ground)",
+    "ground (ground)",
+    "ground (ground)",
+    "ground (ground)",
+    "LED1 (led)",
+    "LED2 (led)",
+    "R1 (resistor)",
+    "R2 (resistor)",
+    "R3 (resistor)",
+    "R4 (resistor)",
+    "supply{imax=1 A,rint=15 mΩ,value=+9V,voltage=9 V} (supply)",
+    "supply{imax=1 A,rint=15 mΩ,value=−9V,voltage=-9 V} (supply)",
+    "U1 (opamp-generic)"
+  ],
   "nets": [
     ["C1.1","R1.1","U1.IN-"],
-    ["C1.2","ground#1.GND"],
-    ["ground#2.GND","LED1.2"],
-    ["ground#3.GND","LED2.1"],
-    ["ground#4.GND","R2.2"],
+    ["C1.2","ground.GND"],
+    ["ground.GND","LED1.2"],
+    ["ground.GND","LED2.1"],
+    ["ground.GND","R2.2"],
     ["LED1.1","LED2.2","R4.2"],
     ["R1.2","R3.2","R4.1","U1.OUT"],
     ["R2.1","R3.1","U1.IN+"],
-    ["supply#1.V","U1.V+"],
-    ["supply#2.V","U1.V-"]
+    ["supply{imax=1 A,rint=15 mΩ,value=+9V,voltage=9 V}.V","U1.V+"],
+    ["supply{imax=1 A,rint=15 mΩ,value=−9V,voltage=-9 V}.V","U1.V-"]
   ]
 }

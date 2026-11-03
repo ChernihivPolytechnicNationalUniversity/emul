@@ -1,5 +1,9 @@
 {
   "source": "example open746-cube",
+  "objects": [
+    "LCD1 (lcd7-f)",
+    "U1 (open746i-c)"
+  ],
   "nets": [
     ["LCD1.1","U1.P15-1"],
     ["LCD1.2","U1.P15-2"],

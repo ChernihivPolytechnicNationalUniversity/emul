@@ -1,5 +1,10 @@
 {
   "source": "example nucleo-encoder",
+  "objects": [
+    "SW1 (ky-040)",
+    "TERM1 (serial-terminal)",
+    "U1 (nucleo-f429zi)"
+  ],
   "nets": [
     ["SW1.CLK","U1.CN10-21"],
     ["SW1.DT","U1.CN10-19"],

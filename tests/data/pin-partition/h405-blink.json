@@ -1,4 +1,7 @@
 {
   "source": "example h405-blink",
+  "objects": [
+    "U1 (olimex-stm32-h405)"
+  ],
   "nets": []
 }

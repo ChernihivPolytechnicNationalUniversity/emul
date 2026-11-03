@@ -15,7 +15,7 @@ import {
 import { Inspector } from "@/components/inspector/Inspector"
 import { WirePalette } from "@/components/inspector/WirePalette"
 import { PALETTE_DRAG_TYPE, paletteGroups } from "@/components/palette/items"
-import { bendsOnRoute, GRID as FIELD_GRID, nudgeRoutes, objectPins, objectRect, resolvePin, routeBox, Router, snap, touches, unionOf, type FlipAxis, type Point } from "@/schematic/geometry"
+import { bendsOnRoute, GRID as FIELD_GRID, nudgeRoutes, objectPins, objectRect, resolvePin, routeBox, snap, touches, unionOf, type FlipAxis, type Point } from "@/schematic/geometry"
 import { SpatialIndex } from "@/schematic/spatial"
 import { fieldDetail } from "./detail"
 import { savedTextScale, saveTextScale } from "./text-scale"
@@ -30,7 +30,7 @@ import type { SourceFile } from "emul-shared/source"
 import { bytesToBase64 } from "@/lib/bytes"
 import { useEvent } from "@/hooks/use-event"
 import { useSchematic, type Clip } from "@/schematic/use-schematic"
-import { contactCheck, designatorRects, freeSpot, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
+import { contactCheck, designatorRects, fieldRouter, freeSpot, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
 import { toast } from "sonner"
 import { DT } from "@/sim/speeds"
 import { useSimulation } from "@/sim/use-simulation"
@@ -271,7 +271,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   React.useEffect(() => debug.onRunning(simRunning), [debug, simRunning])
 
   const { objects: docObjects, wires: docWires } = sch.doc
-  const [router] = React.useState(() => new Router(designatorRects))
+  const [router] = React.useState(fieldRouter)
   const nets = React.useMemo(() => buildNets(docObjects, docWires, grid), [docObjects, docWires, grid])
   const { sim, simStore, restart, started, sendSerial, debug: debugApi } = useSimulation(sch.doc, simRunning, {
     speed,

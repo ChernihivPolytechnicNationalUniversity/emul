@@ -1,13 +1,27 @@
 {
   "source": "example lissajous",
+  "objects": [
+    "G1 (ac-source)",
+    "G2 (ac-source)",
+    "G3 (ac-source)",
+    "G4 (ac-source)",
+    "ground (ground)",
+    "ground (ground)",
+    "ground (ground)",
+    "ground (ground)",
+    "R1 (resistor)",
+    "R2 (resistor)",
+    "R3 (resistor)",
+    "R4 (resistor)"
+  ],
   "nets": [
-    ["G1.-","ground#1.GND","R1.2"],
+    ["G1.-","ground.GND","R1.2"],
     ["G1.+","R1.1"],
-    ["G2.-","ground#2.GND","R2.2"],
+    ["G2.-","ground.GND","R2.2"],
     ["G2.+","R2.1"],
-    ["G3.-","ground#3.GND","R3.2"],
+    ["G3.-","ground.GND","R3.2"],
     ["G3.+","R3.1"],
-    ["G4.-","ground#4.GND","R4.2"],
+    ["G4.-","ground.GND","R4.2"],
     ["G4.+","R4.1"]
   ]
 }

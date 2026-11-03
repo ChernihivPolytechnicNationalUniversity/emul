@@ -1,4 +1,4 @@
-import { DIR, intersects, objectPins, objectRect, objectSize, orientationOf, orientOffset, placedText, resolvePinIn, routeBox, touches, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
+import { DIR, intersects, objectPins, objectRect, objectSize, orientationOf, orientOffset, placedText, resolvePinIn, routeBox, Router, touches, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
 import { getDef } from "./registry"
 import { BoxIndex, BUCKET_CELLS } from "./spatial"
 import { PointGrid } from "./contacts"
@@ -100,6 +100,8 @@ export function designatorRects(object: PlacedObject, grid: number): readonly Re
   labelCache.set(object, { grid, rects })
   return rects
 }
+
+export const fieldRouter = () => new Router(designatorRects)
 
 export function footprints(object: PlacedObject, grid: number): { body: Quad; contour: Quad[]; labels: Quad[] } | null {
   const body = footprint(object, grid)
