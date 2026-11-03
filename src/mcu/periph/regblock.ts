@@ -21,6 +21,7 @@ export abstract class RegBlock extends WordPeripheral {
   private readonly defs = new Map<number, RegDef>()
   /** Accesses to offsets that have no register, for diagnostics. */
   readonly unknown = new Map<number, number>()
+  changes = 0
 
   constructor(name: string, base: number, size: number, defs: RegDef[]) {
     super(name, base, size)
@@ -30,6 +31,7 @@ export abstract class RegBlock extends WordPeripheral {
   }
 
   reset(): void {
+    this.changes++
     this.regs.fill(0)
     for (const d of this.defs.values()) this.regs[d.offset >>> 2] = (d.reset ?? 0) >>> 0
   }
@@ -54,6 +56,7 @@ export abstract class RegBlock extends WordPeripheral {
     for (const d of this.defs.values()) {
       if (d.name === name) {
         this.regs[d.offset >>> 2] = value >>> 0
+        this.changes++
         return
       }
     }
@@ -87,6 +90,7 @@ export abstract class RegBlock extends WordPeripheral {
     if (d.w1c) next = (next & ~(value & d.w1c)) >>> 0
     const result = this.onWrite(d, next, old, value)
     this.regs[i] = (result === undefined ? next : result) >>> 0
+    this.changes++
   }
 
   /** Hook: transform the value software reads. */

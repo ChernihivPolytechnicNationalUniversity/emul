@@ -594,6 +594,10 @@ export class Adc extends RegBlock implements Clocked {
     this.resumeRegular()
   }
 
+  get converting(): boolean {
+    return this.active
+  }
+
   private setActive(on: boolean) {
     if (on === this.active) return
     this.active = on

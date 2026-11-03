@@ -342,6 +342,21 @@ export class Rcc extends RegBlock {
     return (this.get(reg) & (1 << bit)) !== 0
   }
 
+  pllVcoHz(): number {
+    const cfg = this.regs[1]
+    const m = cfg & 0x3f
+    const src = cfg & (1 << 22) ? this.hseHz() : HSI_HZ
+    return m === 0 ? 0 : (src / m) * ((cfg >>> 6) & 0x1ff)
+  }
+
+  plli2sVcoHz(): number {
+    const cfg = this.regs[1]
+    const i2s = this.regs[0x84 >>> 2]
+    const m = this.plli2sm ? i2s & 0x3f : cfg & 0x3f
+    const src = cfg & (1 << 22) ? this.hseHz() : HSI_HZ
+    return m === 0 ? 0 : (src / m) * ((i2s >>> 6) & 0x1ff)
+  }
+
   pllOutput(): { p: number; q: number } {
     const cfg = this.get("PLLCFGR")
     const m = cfg & 0x3f

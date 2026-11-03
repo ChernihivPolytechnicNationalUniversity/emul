@@ -7,6 +7,8 @@
  * the pin-outs, ARM DDI0439 (Cortex-M4) and DDI0489 (Cortex-M7) for the ID registers.
  */
 
+import { DS8626_SUPPLY, type SupplyTables } from "./supply"
+
 export type MemoryRegion = {
   name: string
   base: number
@@ -56,6 +58,8 @@ export type ChipElectrical = {
    * the low-power regulator, and under-drive; Standby with the RTC running.
    */
   idd: { run: [number, number]; sleep: [number, number]; stop: number; stopLp: number; stopUd?: number; standby: number }
+  supply?: SupplyTables
+  coreRegulator?: { volts: number; inrushAmps: number }
   /** Wake-up latency, s: leaving Stop on the main regulator, the low-power regulator, under-drive; leaving Standby. */
   wakeup: { stop: number; stopLp: number; stopUd?: number; standby: number }
   /** Internal pull-up on NRST, Ω. */
@@ -135,6 +139,7 @@ export type DacProfile = {
 
 export type ChipProfile = {
   family?: "stm32"
+  notBonded?: readonly string[]
   /**
    * Which reference-manual variant the part follows where one manual covers several lines:
    * F405/F407 vs F42x/F43x in RM0090 (blocks present, PWR/RCC/FLASH/SYSCFG/ADC/I²C/FSMC details), F7.
@@ -360,6 +365,8 @@ const DS8626_ELECTRICAL: ChipElectrical = {
     falling: [2.04, 2.19, 2.35, 2.51, 2.66, 2.84, 2.93, 3.03],
   },
   pads: DS8626_DS9405_PADS,
+  supply: DS8626_SUPPLY,
+  coreRegulator: { volts: 1.26, inrushAmps: 0.16 },
 }
 
 /**
@@ -403,7 +410,7 @@ const F40X_DIE = {
 export const STM32F407VG: ChipProfile = { ...F40X_DIE, id: "stm32f407vg", name: "STM32F407VGT6" }
 
 /** STM32F405RGT6 (Olimex STM32-H405, Netduino Plus 2): LQFP64, PA–PC + PD2 + PH0/PH1 bonded, no ETH/DCMI. */
-export const STM32F405RG: ChipProfile = { ...F40X_DIE, id: "stm32f405rg", name: "STM32F405RGT6" }
+export const STM32F405RG: ChipProfile = { ...F40X_DIE, id: "stm32f405rg", name: "STM32F405RGT6", notBonded: ["ETH_MAC", "DCMI"] }
 
 const DS10314_ELECTRICAL: ChipElectrical = {
   vdd: 3.3,

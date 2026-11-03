@@ -42,6 +42,7 @@ const LOCKSTEP_LEAD = 1e-6
 const NRST_LOW = 0.3 * 3.3
 /** VBAT keeps the backup domain above this (the datasheet's 1.65 V minimum). */
 const VBAT_MIN = 1.65
+const VBAT_LOAD_RESOLUTION = 0.01
 /** BOOT0 counts as high above this (a TTL-ish threshold on the 3.3 V part). */
 const BOOT_HIGH = 0.5 * 3.3
 /** Below this on its VCC an oscillator module puts out nothing. */
@@ -279,6 +280,8 @@ class McuInstance {
   boot0Net: number | undefined = undefined
   /** Net of VBAT (undefined: unsolved or absent, treated as VDD: nothing survives an outage). */
   vbatNet: number | undefined = undefined
+  vbatOhms: number | null = null
+  vddDown = true
   vrefNet: number | undefined = undefined
   vrefWired = false
   vref: number | undefined = undefined
@@ -1451,9 +1454,10 @@ export class SimLoop {
     }
     const inst = this.mcus.get(object)
     // A board's own chips (not its MCU's pads) answer below, as any digital part does.
-    if (inst?.mcu.loaded && (node === "$idd" || inst.pads.has(node) || !this.digitalParts.has(object))) {
+    if (inst?.mcu.loaded && (node === "$idd" || node === "$vbat" || inst.pads.has(node) || !this.digitalParts.has(object))) {
       // The supply load follows the power mode: the resistance that draws the mode's current.
       if (node === "$idd") return () => (inst.mcu.loaded ? inst.mcu.chip.electrical.vdd / inst.idd : null)
+      if (node === "$vbat") return () => inst.vbatOhms
       const pad = inst.pads.get(node)
       if (!pad) return () => null
       // The drive is recomputed only when the core's pads changed (its version counts every
@@ -1488,6 +1492,15 @@ export class SimLoop {
       }
     }
     return () => null
+  }
+
+  private backupDomainOhms(inst: McuInstance): number | null {
+    const engine = this.engine
+    if (!engine || !inst.mcu.loaded || !inst.vddDown || inst.vbatNet === undefined || inst.vbatNet === GROUND) return null
+    const vbat = Math.round(engine.v[inst.vbatNet] / VBAT_LOAD_RESOLUTION) * VBAT_LOAD_RESOLUTION
+    if (!(vbat > VBAT_MIN)) return null
+    const amps = inst.mcu.backupDomainCurrent?.(vbat) ?? 0
+    return amps > 0 ? vbat / amps : null
   }
 
   /** After a solver step, feed the node voltages back into the MCU input registers. */
@@ -2043,6 +2056,7 @@ export class SimLoop {
         const vbatUp = inst.vbatNet !== undefined && inst.vbatNet !== GROUND && engine.v[inst.vbatNet] > VBAT_MIN
         // An AVR has its own power-on threshold (VPOT) and brown-out detector, handled in its model.
         const outage = vdd < (inst.mcu.chip.family === "avr" || inst.mcu.chip.family === "pic" ? inst.mcu.porThreshold : Math.max(VDD_POR, inst.mcu.porThreshold))
+        inst.vddDown = outage
         if (outage || nrst < NRST_LOW) {
           if (inst.powered) {
             inst.powered = false
@@ -2122,6 +2136,11 @@ export class SimLoop {
       let refresh = this.padsDirty
       this.padsDirty = false
       for (const inst of mcus) {
+        if (inst.vbatNet !== undefined) {
+          const vbatOhms = this.backupDomainOhms(inst)
+          if (vbatOhms !== inst.vbatOhms) refresh = true
+          inst.vbatOhms = vbatOhms
+        }
         const live = !inst.burnt && inst.powered
         if (live !== inst.padsLive) refresh = true
         inst.padsLive = live

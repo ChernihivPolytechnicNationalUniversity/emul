@@ -133,13 +133,42 @@ contradict each other the row points to a decision (D1–D47) taken as real sili
 | CAN, USB OTG, Ethernet, SDIO, SAI, QSPI, CRC, RNG | **missing** |
 | BOOT0 pin, boot from SRAM/system memory | done: BOOT0 (sampled as reset is released; the bare chips expose the pin) with BOOT1 = PB2 picks flash, system memory or SRAM on the F4 and aliases it at address 0, as does SYSCFG MEMRMP; the F7 boots from BOOT_ADD0/1. On the F746 a 40 kΩ pull-down on BOOT0 is assumed (DS10916 lists none); harmless on the Open746I-C, where MCU.R1 drives it either way. **System memory holds a stub** (sleeps forever) instead of ST's UART/USB DFU bootloader — reported in the inspector when booted into |
 
-**Supply current** is a datasheet typical per mode, not a model of what the code does: run and
-sleep scale with HCLK (all peripherals clocked), Stop by regulator, Standby with the RTC on. A
-core sleeping 97 % of the time between SysTicks reads as the blend, and an ammeter on the
-board sees the same number. **VBAT draws nothing:** a board's `mcuVbat` keeps the backup domain
-through an outage while it stays above 1.65 V, but no chip's backup-domain current (DS8626
-Table 25: 0.1 µA with the RTC off to 1.68 µA with the RTC and backup SRAM on) loads the cell, so a
-coin cell's time left counts only its own self-discharge.
+**Supply current** is a datasheet typical per mode. On the F405/F407 (`ChipElectrical.supply`,
+`src/mcu/supply.ts`, `tests/sim/ds8626-supply.test.ts`) it follows what the firmware switched on,
+from DS8626 Rev 12's own tables: Table 20 (instruction cache on, or code in SRAM) or Table 21 (ICEN
+off; DCEN alone does not count) by HCLK with every peripheral clock off, plus Table 28's µA/MHz for
+each clock enabled in RCC on its bus clock (in Sleep, Table 22's base and only the clocks LPENR keeps;
+on the F405 never Ethernet or the camera interface, which it does not have), the bus matrix while a
+DMA, Ethernet or USB HS master is on, SPI2/3 or I2S2/3 by I2SMOD. **Estimates, not datasheet
+statements**: the base rows up to 144 MHz are taken as Scale 2 measurements (the tables do not
+state VOS; every column jumps from 144 to 168 MHz) and Scale 1 there costs Table 14 note 1's
+"around 10 %" from 30 MHz up; the PLLs are the midpoint of Tables 36/37's min and max; the HSE
+crystal oscillator is DS8626 Rev 4 Table 31's 532 µA, a figure for 25 MHz and CL 10 pF that Rev 5
+dropped. On top: 1.6 mA per ADC with ADON and Table 67's 300 µA of VREF+ while converting, 0.8 mA
+per enabled DAC channel (Table 28 note 4), the compensation cell's 0.22 mA, HSI 60 µA, LSI 0.4 µA,
+the LSE as Table 24's RTC-on minus RTC-off difference, the backup regulator, the main PLL where the
+tables do not already hold it (HCLK ≤ 25 MHz or not from the PLL; an HSE above 25 MHz with the PLL
+beside it is counted twice) and PLLI2S, and flash program/erase (Table 39, by each operation's
+PSIZE; x64 has no figure and is taken as x32 with a note) for the share of cycles the flash stalls
+the core — a stall never carries the core past the loop's step: the rest of it waits into the next,
+so a 16 µs word program near a step's end keeps its 0.192 µC. The LSE oscillator selects Tables
+24/25's "low-speed oscillator and RTC ON" row whether RTCEN is set or not (the tables do not separate
+the two; the oscillator dominates); an LSI-clocked RTC in Standby is the RTC-off row and the LSI. Stop by
+regulator and flash power-down (Table 23), with an ADC or DAC left on and the backup domain; Standby
+by the backup regulator and the LSE at the supply voltage (Table 24). With every Table 28 clock on,
+the sum lands on all 33 "all peripherals enabled" rows of Tables 20–22 within 0.5 mA + 2.3 % (the
+worst, Table 20 at 144 MHz, 1.34 mA over). The current is drawn as such at whatever VDD the board
+gives: the loop's resistance is scaled from the nominal 3.3 V by VDD averaged over 10 ms and held to
+10 mV, so ripple does not re-stamp the circuit every step. Not taken in: Table 26's 1.8 V run
+series, the I/O switching current into the pads' own capacitance (Table 27), SSCG (Table 38),
+temperature. **VBAT**: on the STM32-H405 (the one board that passes its VBAT pin to `mcuModel`), whenever
+VDD is under its power-on threshold — a board never powered as well as one cut off — and VBAT is
+above 1.65 V, the backup domain loads the pin with Table 25's current for the backup regulator and
+LSE state at the pin's voltage (the reset state's 0.1 µA once the domain is lost), refreshed as that
+voltage moves; nothing while VDD is up, RESET held or not (`tests/sim/olimex-h405.test.ts`). Other parts keep the older line: run
+and sleep scale with HCLK (all peripherals clocked), Stop by regulator, Standby with the RTC on, and
+their VBAT draws nothing. Everywhere: a core sleeping 97 % of the time between SysTicks reads as the
+blend, and an ammeter on the board sees the same number.
 
 The MCU side is complete apart from the long tail of blocks no lab has needed (CAN, USB,
 Ethernet…); what is still to build is in `plan.md`.
