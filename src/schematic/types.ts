@@ -473,6 +473,24 @@ export type ComponentDef = {
   panel?: PanelSpec
   /** Free-form reference data shown in the inspector later. */
   info?: Record<string, string>
+  /** A ready-to-run board's palette tile; every part in the "boards" group has one. */
+  board?: BoardCard
+}
+
+/** What a board's palette tile says about it, so that a student knows which board it is. */
+export type BoardCard = {
+  /** Who makes it. */
+  vendor: string
+  /** The MCU as its datasheet names it: also one of the part's keywords. */
+  mcu: string
+  /** The MCU's top clock on this board. */
+  mhz: number
+  /** I/O logic level. */
+  volts: 3.3 | 5
+  /** What sets it apart, a word or two each. */
+  tags: string[]
+  /** A photo of the real board in `public/boards/`: landscape, main USB on the left, background cut away, 192 × 128 WebP. */
+  photo: string
 }
 
 /** LTDC output lines a parallel RGB panel takes. */

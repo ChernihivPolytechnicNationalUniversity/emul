@@ -61,7 +61,7 @@ const ec11Pins: PinDef[] = [
 
 export const encoderEc11: ComponentDef = {
   id: "encoder-ec11",
-  name: "Rotary encoder (ALPS EC11E)",
+  name: "Rotary encoder EC11E",
   description:
     "Incremental encoder with detents and a push switch: A and B close to C in quadrature, A first turning clockwise, half a cycle per detent (rest alternately both open, both closed). 10 mA 5 V rating; bounce 2 ms max when switched on. Pull A, B and D up yourself.",
   category: "input",
@@ -104,7 +104,7 @@ const KY040_PULSES = 20
 
 export const ky040: ComponentDef = {
   id: "ky-040",
-  name: "Rotary encoder module KY-040",
+  name: "Encoder module KY-040",
   description:
     "Encoder board: 20 detents / 20 pulses (a full cycle per detent, at rest both open), 10 kΩ pull-ups on CLK and DT to +, SW straight to the switch with no pull-up fitted — enable the MCU's. No maker's schematic exists: built from the forum and Wokwi descriptions.",
   category: "input",

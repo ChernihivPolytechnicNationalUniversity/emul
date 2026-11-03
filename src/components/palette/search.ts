@@ -1,4 +1,5 @@
 import { CATEGORIES, categoryLabel, isPaletteCategory } from "@/schematic/categories"
+import { familyOf } from "@/schematic/families"
 import type { ComponentDef } from "@/schematic/types"
 
 // The palette's search: every word typed must match somewhere in a part (its name, a keyword, its
@@ -152,7 +153,8 @@ function index(defs: readonly ComponentDef[]): Entry[] {
       order,
       group: GROUP_ORDER.get(def.category) ?? CATEGORIES.length,
       name: field(def.name, NAME, true, true),
-      keywords: (def.keywords ?? []).map((k) => field(k, KEYWORD, true)),
+      // A family's name finds each of its variants, as a keyword would.
+      keywords: [...(def.keywords ?? []), ...[familyOf(def.id)?.name ?? []].flat()].map((k) => field(k, KEYWORD, true)),
       rest: [
         ...(isPaletteCategory(def.category) ? [field(categoryLabel(def.category), GROUP, false)] : []),
         ...(def.description ? [field(def.description, DESCRIPTION, false)] : []),
@@ -190,11 +192,18 @@ function score(entry: Entry, tokens: string[], whole: string, match: (token: str
     if (best === 0) return undefined
     total += best
     if (byName.range) ranges.push(...byName.range)
-    if (keyword !== undefined && byName.score === 0 && matched === undefined) matched = entry.def.keywords![keyword]
+    if (keyword !== undefined && byName.score === 0 && matched === undefined) matched = entry.def.keywords?.[keyword]
   }
   if (entry.name.text === whole) total += WHOLE_NAME
   else if (tokens.length > 1 && entry.keywords.some((k) => k.text === whole)) total += WHOLE_KEYWORD
   return { def: entry.def, score: total, ranges: merge(ranges), matched, corrected: false }
+}
+
+/** Where the words of `query` sit in `text`, for a label that is not a part's own name (a family's). */
+export function highlight(text: string, query: string): [number, number][] {
+  const f = field(text, NAME, true)
+  const tokens = normalize(query).trim().split(/\s+/).filter(Boolean)
+  return merge(tokens.flatMap((t) => matchField(t, f).range ?? []))
 }
 
 /** Parts that match every word of `query`, best first; none for a blank query. */

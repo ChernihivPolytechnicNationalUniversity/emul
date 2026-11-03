@@ -14,13 +14,14 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { PALETTE_DRAG_TYPE, paletteGroups, useLibrary } from "./items"
+import { PALETTE_DRAG_TYPE, hitEntries, paletteGroups, useLibrary, type PaletteEntry } from "./items"
 import { useGroupsOpen } from "./collapsed-groups"
 import type { ComponentDef } from "@/schematic/types"
 import type { HdlLanguage } from "emul-shared/hdl"
 import { HdlIcon } from "@/schematic/icons"
 import { registry } from "@/schematic/registry"
-import { requestPartUrl, searchParts, toolHints, type SearchHit } from "./search"
+import { BoardTile } from "./BoardTile"
+import { highlight, requestPartUrl, searchParts, toolHints, type SearchHit } from "./search"
 
 type ComponentsSidebarProps = React.ComponentProps<typeof Sidebar> & {
   /** Called when an item is clicked (drag-and-drop onto the field comes later). */
@@ -66,7 +67,9 @@ function Highlighted({ text, ranges }: { text: string; ranges: [number, number][
   return <>{parts}</>
 }
 
-function PartRow({ item, onPick, ranges = [], hint, active }: { item: ComponentDef; onPick?: (item: ComponentDef) => void; ranges?: [number, number][]; hint?: string; active?: boolean }) {
+function PartRow({ entry, onPick, ranges = [], active }: { entry: PaletteEntry; onPick?: (item: ComponentDef) => void; ranges?: [number, number][]; active?: boolean }) {
+  const item = entry.def
+  const title = entry.family ? `Places ${item.name}; ${entry.family.variants.length - 1} more variants in the inspector` : item.description
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
@@ -76,15 +79,15 @@ function PartRow({ item, onPick, ranges = [], hint, active }: { item: ComponentD
           e.dataTransfer.effectAllowed = "copy"
         }}
         onClick={() => onPick?.(item)}
-        title={item.description}
+        title={title}
         isActive={active}
         className="cursor-grab active:cursor-grabbing [&>svg]:size-5"
       >
         <item.icon />
         <span className="min-w-0 truncate">
-          <Highlighted text={item.name} ranges={ranges} />
+          <Highlighted text={entry.name} ranges={ranges} />
         </span>
-        {hint && <span className="ml-auto max-w-[45%] shrink-0 truncate text-xs text-muted-foreground" title={`Found by "${hint}"`}>{hint}</span>}
+        {entry.hint && <span className="ml-auto max-w-[45%] shrink-0 truncate text-xs text-muted-foreground">{entry.hint}</span>}
       </SidebarMenuButton>
     </SidebarMenuItem>
   )
@@ -92,6 +95,7 @@ function PartRow({ item, onPick, ranges = [], hint, active }: { item: ComponentD
 
 function SearchResults({ query, hits, onPick }: { query: string; hits: SearchHit[]; onPick?: (item: ComponentDef) => void }) {
   const tools = toolHints(query)
+  const rows = hitEntries(hits)
   return (
     <SidebarGroup>
       {tools.map((t) => (
@@ -111,12 +115,12 @@ function SearchResults({ query, hits, onPick }: { query: string; hits: SearchHit
       {hits.length > 0 ? (
         <>
           <div className="px-2 pb-1 text-xs text-muted-foreground" aria-live="polite">
-            {hits[0].corrected ? `Nothing matches “${query.trim()}”; close spellings:` : `${hits.length} ${hits.length === 1 ? "part" : "parts"}`}
+            {hits[0].corrected ? `Nothing matches “${query.trim()}”; close spellings:` : `${rows.length} ${rows.length === 1 ? "part" : "parts"}`}
           </div>
           <SidebarGroupContent>
             <SidebarMenu>
-              {hits.map((hit, i) => (
-                <PartRow key={hit.def.id} item={hit.def} ranges={hit.corrected ? [] : hit.ranges} hint={hit.matched} active={i === 0} onPick={onPick} />
+              {rows.map((row, i) => (
+                <PartRow key={row.key} entry={row} ranges={row.hit.corrected ? [] : row.family ? highlight(row.name, query) : row.hit.ranges} active={i === 0} onPick={onPick} />
               ))}
             </SidebarMenu>
           </SidebarGroupContent>
@@ -224,11 +228,22 @@ export function ComponentsSidebar({ onPick, onHdlNew, onHdlImport, onHdlOpen, ..
         ) : (
           paletteGroups.map((group) => (
             <PaletteSection key={group.id} label={group.label} open={groupsOpen.isOpen(group.id)} onOpenChange={(open) => groupsOpen.setOpen(group.id, open)}>
-              <SidebarMenu>
-                {group.items.map((item) => (
-                  <PartRow key={item.id} item={item} onPick={onPick} />
-                ))}
-              </SidebarMenu>
+              {group.id === "boards" ? (
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-0.5 px-2 pb-1">
+                  {group.entries.map((entry) => (
+                    <BoardTile key={entry.key} entry={entry} onPick={onPick} />
+                  ))}
+                </div>
+              ) : (
+                <>
+                  {group.id === "mcus" && <p className="mx-2 mb-1 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">Bare chips: power, clock, reset and decoupling are yours to wire. A board has them.</p>}
+                  <SidebarMenu>
+                    {group.entries.map((entry) => (
+                      <PartRow key={entry.key} entry={entry} onPick={onPick} />
+                    ))}
+                  </SidebarMenu>
+                </>
+              )}
             </PaletteSection>
           ))
         )}

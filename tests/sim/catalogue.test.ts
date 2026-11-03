@@ -1,27 +1,19 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { CATEGORIES, categoryLabel, isPaletteCategory } from "@/schematic/categories"
 import * as icons from "@/schematic/icons"
 import { getDef, registry } from "@/schematic/registry"
+import { FAMILIES, familyOf } from "@/schematic/families"
+import type { ComponentDef } from "@/schematic/types"
 
 // The palette's rules, checked for every part so that a new part cannot break them:
 // a closed set of groups in a fixed order, names that fit a palette row, no clashes, English
 // throughout, a known icon, and ids that saved projects keep loading by.
 
 const NAME_BUDGET = 26
-// Names too long for a palette row today. They become families with variants (the qualifier moves
-// into the variant), and this list only shrinks: a new long name fails.
-const LONG_NAMES = new Set([
-  "Rotary encoder (ALPS EC11E)",
-  "Rotary encoder module KY-040",
-  "7-segment display, common anode",
-  "7-segment display, common cathode",
-  "4-digit 7-segment display, common anode",
-  "4-digit 7-segment display, common cathode",
-  'OLED 0.96" 128×64 I²C (SSD1306)',
-  'OLED 0.91" 128×32 I²C (SSD1306)',
-  'OLED 0.96" 128×64 SPI (SSD1306)',
-])
+const VARIANT_BUDGET = 20
+// Different parts that happen to have the same pins in the same places: not variants of one thing.
+const DISTINCT = new Set(["resistor", "capacitor", "capacitor-polarized", "inductor", "led", "pushbutton", "switch", "diode", "zener", "voltmeter", "ammeter", "battery", "dc-source", "ac-source", "pulse-source"])
 // Parts the palette shows with no description; the list only shrinks.
 const NO_DESCRIPTION = new Set(["resistor", "potentiometer", "capacitor", "capacitor-polarized", "inductor", "diode", "zener", "led", "npn", "pnp", "pushbutton", "switch", "ground", "supply"])
 
@@ -57,6 +49,28 @@ describe("palette groups", () => {
   })
 })
 
+describe("boards", () => {
+  it("each carry a tile that says which board it is", () => {
+    for (const def of registry) {
+      const card = def.board
+      if (def.category !== "boards") {
+        expect.soft(card, `${def.id} is no board: no tile`).toBeUndefined()
+        continue
+      }
+      expect.soft(card, `${def.id}: give it a board card`).toBeDefined()
+      if (!card) continue
+      expect.soft(card.vendor.trim(), def.id).toBeTruthy()
+      // Search finds a board by its MCU: the tile's MCU is one of its keywords.
+      expect.soft(def.keywords ?? [], `${def.id}: ${card.mcu} among the keywords`).toContain(card.mcu)
+      expect.soft(card.mhz, def.id).toBeGreaterThan(0)
+      expect.soft(card.tags.length, `${def.id}: two tags at most`).toBeLessThanOrEqual(2)
+      for (const tag of card.tags) expect.soft(tag.length, `${def.id}: "${tag}"`).toBeLessThanOrEqual(10)
+      // A photo of the real board: the drawing alone does not tell a beginner which board is on the desk.
+      expect.soft(existsSync(`public/boards/${card.photo}`), `${def.id}: public/boards/${card.photo}`).toBe(true)
+    }
+  })
+})
+
 describe("part names", () => {
   it("are unique however they are spelled", () => {
     const seen = new Map<string, string>()
@@ -68,8 +82,9 @@ describe("part names", () => {
   })
 
   it("fit a palette row", () => {
-    for (const def of registry) if (!LONG_NAMES.has(def.name)) expect.soft(def.name.length, `${def.id}: "${def.name}"`).toBeLessThanOrEqual(NAME_BUDGET)
-    for (const name of LONG_NAMES) expect.soft(registry.some((d) => d.name === name), `"${name}" is gone: drop it from LONG_NAMES`).toBe(true)
+    // A family's row shows the family's name; a part of its own shows its name.
+    for (const def of registry) if (!familyOf(def.id)) expect.soft(def.name.length, `${def.id}: "${def.name}"`).toBeLessThanOrEqual(NAME_BUDGET)
+    for (const f of FAMILIES) expect.soft(f.name.length, `family ${f.id}: "${f.name}"`).toBeLessThanOrEqual(NAME_BUDGET)
   })
 
   it("and descriptions are given", () => {
@@ -105,5 +120,53 @@ describe("part icons", () => {
   it("come from the icon set", () => {
     const known = new Set<unknown>(Object.values(icons))
     for (const def of registry) expect.soft(known.has(def.icon), def.id).toBe(true)
+  })
+})
+
+// Pins by where they sit: a variant may be bigger or smaller, a wire stays put if its pin does.
+const pinsOf = (d: ComponentDef) => d.pins.map((p) => `${p.id}@${p.x},${p.y}${p.side}`).sort().join(" ")
+
+describe("families", () => {
+  it("gather parts that exist, each in one family only", () => {
+    const seen = new Set<string>()
+    for (const f of FAMILIES) {
+      expect.soft(f.variants.length, f.id).toBeGreaterThanOrEqual(2)
+      expect.soft(getDef(f.id), `family id ${f.id} is a part id`).toBeUndefined()
+      for (const [id] of f.variants) {
+        expect.soft(getDef(id), `${f.id}: no part ${id}`).toBeDefined()
+        expect.soft(seen.has(id), `${id} is in two families`).toBe(false)
+        seen.add(id)
+      }
+    }
+    expect(new Set(FAMILIES.map((f) => f.id)).size).toBe(FAMILIES.length)
+  })
+
+  it("tell their variants apart in a few words", () => {
+    for (const f of FAMILIES) {
+      const labels = f.variants.map(([, label]) => label)
+      expect.soft(new Set(labels).size, `${f.id}: two variants share a label`).toBe(labels.length)
+      for (const label of labels) expect.soft(label.length, `${f.id}: "${label}"`).toBeLessThanOrEqual(VARIANT_BUDGET)
+    }
+  })
+
+  it("hold variants that swap without touching a wire: one group, the same pins in the same places", () => {
+    for (const f of FAMILIES) {
+      const [first, ...rest] = f.variants.map(([id]) => getDef(id)!)
+      for (const def of rest) {
+        expect.soft(def.category, `${f.id}: ${def.id}`).toBe(first.category)
+        expect.soft(pinsOf(def), `${f.id}: ${def.id} has other pins than ${first.id}`).toBe(pinsOf(first))
+      }
+    }
+  })
+
+  it("take in every part that could be one: the same pins in the same group make a family", () => {
+    const loose = new Map<string, string[]>()
+    for (const def of registry) {
+      if (familyOf(def.id) || DISTINCT.has(def.id)) continue
+      const key = `${def.category} ${pinsOf(def)}`
+      loose.set(key, [...(loose.get(key) ?? []), def.id])
+    }
+    for (const ids of loose.values()) expect.soft(ids, "variants of one part: make them a family in families.ts, or list them in DISTINCT").toHaveLength(1)
+    for (const id of DISTINCT) expect.soft(familyOf(id), `${id} is in a family: drop it from DISTINCT`).toBeUndefined()
   })
 })

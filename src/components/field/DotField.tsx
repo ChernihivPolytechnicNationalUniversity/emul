@@ -1257,6 +1257,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             damage={sim.damage}
             sim={sim}
             onChange={sch.setProps}
+            onVariant={sch.setVariant}
             onFirmware={onFirmware}
             onSerial={sendSerial}
             onCode={(id) => {

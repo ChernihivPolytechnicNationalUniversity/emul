@@ -261,9 +261,10 @@ const model: Element[] = [
 
 export const nucleoF429zi: ComponentDef = {
   id: "nucleo-f429zi",
-  name: "Nucleo-144",
+  name: "Nucleo-F429ZI",
+  board: { vendor: "STMicroelectronics", mcu: "STM32F429ZI", mhz: 180, volts: 3.3, tags: ["ST-LINK"], photo: "nucleo-f429zi.webp" },
   description: "STM32F429ZI",
-  keywords: ["STM32", "STM32F429ZI", "NUCLEO-F429ZI", "Nucleo", "MB1137", "ST-LINK", "Cortex-M4"],
+  keywords: ["STM32", "STM32F429ZI", "NUCLEO-F429ZI", "Nucleo", "Nucleo-144", "MB1137", "ST-LINK", "Cortex-M4"],
   category: "boards",
   icon: BoardIcon,
   prefix: "U",

@@ -201,6 +201,7 @@ const model: Element[] = [
 export const netduinoPlus2: ComponentDef = {
   id: "netduino-plus-2",
   name: "Netduino Plus 2",
+  board: { vendor: "Secret Labs", mcu: "STM32F405RG", mhz: 168, volts: 3.3, tags: ["Ethernet"], photo: "netduino-plus-2.webp" },
   description: "STM32F405RG",
   keywords: ["STM32", "STM32F405RG", "Netduino", "Ethernet", "ENC28J60", "Cortex-M4"],
   category: "boards",

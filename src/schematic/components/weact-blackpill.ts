@@ -291,6 +291,7 @@ function blackPill(chip: ChipProfile, id: string, mcu: string): ComponentDef {
     name: `WeAct Black Pill ${chip.name.slice(5, 9)}${chip.line === "f401" ? chip.name.slice(9, 11) : ""}`,
     description: chip.name.slice(0, 11),
     keywords: ["STM32", chip.name.slice(0, 11), "Black Pill", "WeAct", "Cortex-M4"],
+    board: { vendor: "WeAct Studio", mcu: chip.name.slice(0, 11), mhz: chip.line === "f411" ? 100 : 84, volts: 3.3, tags: ["USB-C"], photo: "weact-blackpill-f411.webp" },
     category: "boards",
     icon: BoardIcon,
     prefix: "U",
