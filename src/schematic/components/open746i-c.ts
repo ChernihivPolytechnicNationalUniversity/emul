@@ -699,6 +699,7 @@ export const open746ic: ComponentDef = {
   id: "open746i-c",
   name: "Open746I-C",
   description: "STM32F746IG · Waveshare",
+  keywords: ["STM32", "STM32F746IG", "STM32F7", "Cortex-M7", "Waveshare", "Open7XXI-C"],
   category: "boards",
   icon: BoardIcon,
   prefix: "U",

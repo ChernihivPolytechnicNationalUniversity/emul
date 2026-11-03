@@ -21,6 +21,7 @@ const PINS: PinDef[] = [
 export const ne555: ComponentDef = {
   id: "ne555",
   name: "NE555",
+  keywords: ["555", "555 timer", "timer", "NE555P", "astable", "monostable"],
   description:
     "Precision timer, PDIP-8 (TI NE555): timing from microseconds to hours, astable or monostable, the period and duty cycle set by the resistors and capacitor wired to it; CONT moves both thresholds (2/3 and 1/3 VCC). 4.5–16 V; the output sinks or sources up to 200 mA. No settings: select it while running to read frequency, period and duty.",
   category: "ics",

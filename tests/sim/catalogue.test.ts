@@ -77,6 +77,11 @@ describe("part names", () => {
     for (const id of NO_DESCRIPTION) expect.soft(getDef(id)?.description, `${id} has a description now: drop it from NO_DESCRIPTION`).toBeUndefined()
   })
 
+  it("come with the words a student searches by", () => {
+    // The name alone finds a part only by its name: a "pot" or a "GND" needs saying.
+    for (const def of registry) expect.soft(def.keywords?.length ?? 0, `${def.id}: give it keywords`).toBeGreaterThan(0)
+  })
+
   it("are English, like the rest of the interface", () => {
     for (const def of registry) {
       const texts = [def.name, def.description ?? "", ...(def.keywords ?? []), ...(def.fields ?? []).map((f) => f.label)]

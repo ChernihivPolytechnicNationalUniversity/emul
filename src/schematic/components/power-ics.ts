@@ -13,6 +13,7 @@ export const tp4056Chip: ComponentDef = {
   id: "tp4056",
   name: "TP4056",
   description: "1 A linear Li-ion charger, SOP-8. Charge current 1200 / R_PROG (1.2 kΩ = 1 A); trickle below 2.9 V, 4.2 V float, ends at C/10. CE high to run; TEMP to GND without an NTC.",
+  keywords: ["charger", "battery charger", "Li-ion", "lithium"],
   category: "power",
   icon: ChipIcon,
   prefix: "U",
@@ -38,6 +39,7 @@ export const dw03Chip: ComponentDef = {
   id: "dw03",
   name: "DW03",
   description: "One-cell Li-ion protection with its MOSFETs inside, SOT-23-5: cell minus on GND, the pack's minus on VM. Overcharge 4.3 V, over-discharge 2.4 V, 3.5 A, short 20 A.",
+  keywords: ["battery protection", "protection", "Li-ion", "lithium"],
   category: "power",
   icon: ChipIcon,
   prefix: "U",
@@ -57,6 +59,7 @@ export const dw03Chip: ComponentDef = {
 export const mt3608Chip: ComponentDef = {
   id: "mt3608",
   name: "MT3608",
+  keywords: ["boost", "step-up", "DC-DC", "converter"],
   description:
     "1.2 MHz boost, SOT-23-6: the inductor from the supply to SW, a Schottky from SW to the output, a divider from the output to FB (0.6 V). Simulated averaged over its switching; it finds the diode on SW. EN high to run.",
   category: "power",
@@ -105,6 +108,7 @@ export const ncp1117Element = (nodes: { in: string; out: string; gnd: string }, 
 export const ncp1117Chip: ComponentDef = {
   id: "ncp1117",
   name: "NCP1117",
+  keywords: ["LDO", "regulator", "voltage regulator", "linear regulator", "1117"],
   description:
     "onsemi's 1 A low-dropout regulator, SOT-223, fixed 1.5–12 V (Arduino Uno's 5 V). About 1 V of dropout (0.95 V at 100 mA, 1.07 V at 800 mA), 1.5 A into a short, 6 mA of its own, 20 V at most on its input.",
   category: "power",
@@ -166,6 +170,7 @@ export const LP2985_33_GQ = LP2985.iq / 4.3
 export const lp2985Chip: ComponentDef = {
   id: "lp2985",
   name: "LP2985",
+  keywords: ["LDO", "regulator", "voltage regulator", "linear regulator", "low noise"],
   description:
     "TI's 150 mA low-noise LDO with shutdown, SOT-23-5, fixed 1.8–5 V (Arduino Uno's 3.3 V). 180 mV of dropout at 150 mA, 375 mA into a short, 69 µA of its own; ON/OFF high to run, low for 1 µA. 16 V in, 18 V at most.",
   category: "power",

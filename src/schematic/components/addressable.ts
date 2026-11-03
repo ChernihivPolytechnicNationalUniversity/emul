@@ -344,6 +344,23 @@ function iconOf(p: Product) {
   }
 }
 
+/** What a student calls the part rather than its number. Adafruit sells WS2812B and SK6812 pixels as NeoPixels. */
+function searchWords(p: Product): string[] {
+  const neo = p.parts.some((s) => /^(WS2812B|SK6812)/.test(s.part)) ? ["NeoPixel"] : []
+  switch (p.shape.kind) {
+    case "driver":
+      return ["LED driver", "addressable"]
+    case "stick":
+      return ["strip", "bar", "addressable", ...neo]
+    case "ring":
+      return ["ring", "addressable", ...neo]
+    case "matrix":
+      return ["panel", "addressable", ...neo]
+    default:
+      return ["addressable", "smart LED", "RGB LED", ...neo]
+  }
+}
+
 function addressableDef(p: Product): ComponentDef {
   const g = geometry(p)
   const layout = layoutOf(p)
@@ -352,7 +369,7 @@ function addressableDef(p: Product): ComponentDef {
     name: p.name,
     description: p.description,
     category: "leds",
-    keywords: p.parts.map((s) => s.part),
+    keywords: [...p.parts.map((s) => s.part), ...searchWords(p)],
     icon: iconOf(p),
     prefix: p.shape.kind === "driver" ? "U" : "LED",
     // The number printed on the part: the table's keys tell revisions apart ("-2016", "-6P").

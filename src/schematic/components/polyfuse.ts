@@ -29,6 +29,7 @@ const body: BodyShape[] = [
 export const polyfuse: ComponentDef = {
   id: "polyfuse",
   name: "Resettable fuse (PTC)",
+  keywords: ["fuse", "PTC", "polyfuse", "PolySwitch", "resettable", "MF-MSMF", "Bourns"],
   description:
     "Bourns MF-MSMF polyfuse, 1812 SMD (Arduino's USB fuse is the MF-MSMF050): conducts below Ihold, trips somewhere up to Itrip — sooner the harder it is pushed — and, tripped, lets through only what keeps 0.8 W in it. Take the power away and it cools and resets.",
   category: "power",

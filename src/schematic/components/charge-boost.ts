@@ -69,6 +69,7 @@ const model: Element[] = [
 export const chargeBoostModule: ComponentDef = {
   id: "lx-lcbst",
   name: "LX-LCBST charger + boost",
+  keywords: ["Li-ion", "lithium", "TP4056", "DW03", "MT3608", "module"],
   description:
     "TP4056 Li-ion charger (1 A from USB-C or IN+, trickle below 2.9 V, stops at C/10), DW03 protection (4.3 V, 2.4 V, 3.5 A, short) and an MT3608 boost to the output set by the trimmer (4.2–28 V).",
   category: "power",

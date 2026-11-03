@@ -138,6 +138,7 @@ export function stm32Chip(chip: ChipProfile, pkg: Package, description: string):
     id: chip.id,
     name: chip.name.replace(/[TU]6$/, ""),
     description,
+    keywords: ["STM32", chip.name.slice(0, 7), chip.line === "f7" ? "Cortex-M7" : "Cortex-M4", "ARM", "MCU"],
     category: "mcus",
     icon: ChipIcon,
     prefix: "DD",

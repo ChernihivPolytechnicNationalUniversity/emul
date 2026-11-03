@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ChevronDownIcon, FileUpIcon, PencilIcon, PlusIcon, SearchIcon } from "lucide-react"
+import { ChevronDownIcon, ExternalLinkIcon, FileUpIcon, PencilIcon, PlusIcon, SearchIcon, WrenchIcon } from "lucide-react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Sidebar,
@@ -19,6 +19,8 @@ import { useGroupsOpen } from "./collapsed-groups"
 import type { ComponentDef } from "@/schematic/types"
 import type { HdlLanguage } from "emul-shared/hdl"
 import { HdlIcon } from "@/schematic/icons"
+import { registry } from "@/schematic/registry"
+import { requestPartUrl, searchParts, toolHints, type SearchHit } from "./search"
 
 type ComponentsSidebarProps = React.ComponentProps<typeof Sidebar> & {
   /** Called when an item is clicked (drag-and-drop onto the field comes later). */
@@ -46,6 +48,93 @@ function PaletteSection({ label, open, onOpenChange, children }: { label: string
 
 const HDL_GROUP = "hdl"
 
+/** The name with the letters the query matched picked out. */
+function Highlighted({ text, ranges }: { text: string; ranges: [number, number][] }) {
+  if (ranges.length === 0) return <>{text}</>
+  const parts: React.ReactNode[] = []
+  let at = 0
+  for (const [a, b] of ranges) {
+    if (a > at) parts.push(text.slice(at, a))
+    parts.push(
+      <mark key={a} className="rounded-[2px] bg-primary/15 font-semibold text-inherit">
+        {text.slice(a, b)}
+      </mark>,
+    )
+    at = b
+  }
+  if (at < text.length) parts.push(text.slice(at))
+  return <>{parts}</>
+}
+
+function PartRow({ item, onPick, ranges = [], hint, active }: { item: ComponentDef; onPick?: (item: ComponentDef) => void; ranges?: [number, number][]; hint?: string; active?: boolean }) {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(PALETTE_DRAG_TYPE, item.id)
+          e.dataTransfer.effectAllowed = "copy"
+        }}
+        onClick={() => onPick?.(item)}
+        title={item.description}
+        isActive={active}
+        className="cursor-grab active:cursor-grabbing [&>svg]:size-5"
+      >
+        <item.icon />
+        <span className="min-w-0 truncate">
+          <Highlighted text={item.name} ranges={ranges} />
+        </span>
+        {hint && <span className="ml-auto max-w-[45%] shrink-0 truncate text-xs text-muted-foreground" title={`Found by "${hint}"`}>{hint}</span>}
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  )
+}
+
+function SearchResults({ query, hits, onPick }: { query: string; hits: SearchHit[]; onPick?: (item: ComponentDef) => void }) {
+  const tools = toolHints(query)
+  return (
+    <SidebarGroup>
+      {tools.map((t) => (
+        <div key={t.name} className="mx-2 mb-1 flex items-start gap-2 rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground">
+          <WrenchIcon className="mt-0.5 size-3.5 shrink-0" />
+          <span>
+            {t.name} is a tool, not a part: <span className="font-medium text-foreground">{t.where}</span>
+            {t.shortcut && (
+              <>
+                {" "}
+                or press <kbd className="rounded border bg-background px-1 font-mono">{t.shortcut}</kbd>
+              </>
+            )}
+          </span>
+        </div>
+      ))}
+      {hits.length > 0 ? (
+        <>
+          <div className="px-2 pb-1 text-xs text-muted-foreground" aria-live="polite">
+            {hits[0].corrected ? `Nothing matches “${query.trim()}”; close spellings:` : `${hits.length} ${hits.length === 1 ? "part" : "parts"}`}
+          </div>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {hits.map((hit, i) => (
+                <PartRow key={hit.def.id} item={hit.def} ranges={hit.corrected ? [] : hit.ranges} hint={hit.matched} active={i === 0} onPick={onPick} />
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </>
+      ) : (
+        <div className="px-4 py-6 text-center text-sm text-muted-foreground" aria-live="polite">
+          <p>No parts match “{query.trim()}”.</p>
+          <a href={requestPartUrl(query)} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline">
+            Request this part
+            <ExternalLinkIcon className="size-3.5" />
+          </a>
+          <p className="mt-1 text-xs">Opens a GitHub issue with the name filled in.</p>
+        </div>
+      )}
+    </SidebarGroup>
+  )
+}
+
 export function ComponentsSidebar({ onPick, onHdlNew, onHdlImport, onHdlOpen, ...props }: ComponentsSidebarProps) {
   const library = useLibrary()
   const [query, setQuery] = React.useState("")
@@ -53,9 +142,7 @@ export function ComponentsSidebar({ onPick, onHdlNew, onHdlImport, onHdlOpen, ..
   const groupsOpen = useGroupsOpen(q)
 
   const hdl = library.filter((e) => !q || e.module.name.toLowerCase().includes(q))
-  const groups = paletteGroups
-    .map((g) => ({ ...g, items: g.items.filter((i) => !q || i.name.toLowerCase().includes(q) || i.keywords?.some((k) => k.toLowerCase().includes(q))) }))
-    .filter((g) => g.items.length > 0)
+  const hits = React.useMemo(() => searchParts(registry, query), [query])
 
   return (
     <Sidebar {...props}>
@@ -66,17 +153,23 @@ export function ComponentsSidebar({ onPick, onHdlNew, onHdlImport, onHdlOpen, ..
           <SidebarInput
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search…"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && hits[0]) {
+                e.preventDefault()
+                onPick?.(hits[0].def)
+              } else if (e.key === "Escape") {
+                e.preventDefault()
+                if (query) setQuery("")
+                else e.currentTarget.blur()
+              }
+            }}
+            placeholder="Search parts…"
+            aria-label="Search parts"
             className="pl-8"
           />
         </div>
       </SidebarHeader>
       <SidebarContent>
-        {groups.length === 0 && hdl.length === 0 && q && (
-          <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-            Nothing found
-          </div>
-        )}
         {(!q || hdl.length > 0) && (
           <PaletteSection label="HDL · VHDL / Verilog" open={groupsOpen.isOpen(HDL_GROUP)} onOpenChange={(open) => groupsOpen.setOpen(HDL_GROUP, open)}>
             <SidebarMenu>
@@ -126,29 +219,19 @@ export function ComponentsSidebar({ onPick, onHdlNew, onHdlImport, onHdlOpen, ..
             </SidebarMenu>
           </PaletteSection>
         )}
-        {groups.map((group) => (
-          <PaletteSection key={group.id} label={group.label} open={groupsOpen.isOpen(group.id)} onOpenChange={(open) => groupsOpen.setOpen(group.id, open)}>
-            <SidebarMenu>
-              {group.items.map((item) => (
-                <SidebarMenuItem key={item.id}>
-                  <SidebarMenuButton
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData(PALETTE_DRAG_TYPE, item.id)
-                      e.dataTransfer.effectAllowed = "copy"
-                    }}
-                    onClick={() => onPick?.(item)}
-                    title={item.description}
-                    className="cursor-grab active:cursor-grabbing [&>svg]:size-5"
-                  >
-                    <item.icon />
-                    <span>{item.name}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </PaletteSection>
-        ))}
+        {q ? (
+          <SearchResults query={query} hits={hits} onPick={onPick} />
+        ) : (
+          paletteGroups.map((group) => (
+            <PaletteSection key={group.id} label={group.label} open={groupsOpen.isOpen(group.id)} onOpenChange={(open) => groupsOpen.setOpen(group.id, open)}>
+              <SidebarMenu>
+                {group.items.map((item) => (
+                  <PartRow key={item.id} item={item} onPick={onPick} />
+                ))}
+              </SidebarMenu>
+            </PaletteSection>
+          ))
+        )}
       </SidebarContent>
     </Sidebar>
   )

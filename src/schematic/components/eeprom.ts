@@ -16,6 +16,7 @@ export const eeprom24c: ComponentDef = {
   id: "eeprom-24c",
   name: "EEPROM 24Cxx",
   description: "I²C EEPROM, 128 B – 32 KB",
+  keywords: ["EEPROM", "24C02", "24LC256", "AT24C", "I2C", "memory", "storage"],
   category: "ics",
   icon: MemoryIcon,
   prefix: "U",

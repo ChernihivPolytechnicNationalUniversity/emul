@@ -17,6 +17,7 @@ export const crystal: ComponentDef = {
   id: "crystal",
   name: "Crystal",
   description: "Quartz crystal for the MCU's HSE (OSC_IN/OSC_OUT) or LSE (OSC32_IN/OSC32_OUT). Starts in 2 ms; a 32.768 kHz watch crystal in 2 s.",
+  keywords: ["quartz", "XTAL", "HSE", "LSE", "32.768 kHz", "watch crystal"],
   category: "ics",
   icon: CrystalIcon,
   prefix: "ZQ",
@@ -51,6 +52,7 @@ export const RESONATOR_STARTUP = 0.5e-3
 export const resonator: ComponentDef = {
   id: "resonator",
   name: "Ceramic resonator",
+  keywords: ["resonator", "ceramic", "XTAL", "Murata", "CSTCE16M0V53"],
   description:
     "Three-pin ceramic resonator with its load capacitors built in (Murata CSTCE16M0V53, Arduino Uno's 16 MHz): the outer pins across XTAL1/XTAL2 or OSC_IN/OSC_OUT, the middle one to ground. Coarser than quartz: ±0.5 % as made, ±0.3 % with temperature, ±0.2 % with age; the deviation sets where this part sits.",
   category: "ics",
@@ -89,6 +91,7 @@ export const oscillator: ComponentDef = {
   id: "oscillator",
   name: "Clock oscillator",
   description: "Canned oscillator module: a ready clock into OSC_IN for HSE bypass mode (or OSC32_IN for LSE bypass). Needs VCC.",
+  keywords: ["oscillator", "clock", "oscillator module", "HSE bypass"],
   category: "ics",
   icon: OscillatorIcon,
   prefix: "G",

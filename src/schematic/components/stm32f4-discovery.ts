@@ -229,6 +229,7 @@ export const stm32f4Discovery: ComponentDef = {
   id: "stm32f4-discovery",
   name: "STM32F4-Discovery",
   description: "STM32F407VG",
+  keywords: ["STM32", "STM32F407VG", "STM32F4DISCOVERY", "STM32F407G-DISC1", "Discovery", "Disco", "MB997", "MB997A", "Cortex-M4"],
   category: "boards",
   icon: BoardIcon,
   prefix: "U",

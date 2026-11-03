@@ -230,6 +230,7 @@ export const olimexStm32H405: ComponentDef = {
   id: "olimex-stm32-h405",
   name: "Olimex STM32-H405",
   description: "STM32F405RG",
+  keywords: ["STM32", "STM32F405RG", "Olimex", "H405", "Cortex-M4"],
   category: "boards",
   icon: BoardIcon,
   prefix: "U",

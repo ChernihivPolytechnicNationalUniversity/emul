@@ -290,6 +290,7 @@ function blackPill(chip: ChipProfile, id: string, mcu: string): ComponentDef {
     id,
     name: `WeAct Black Pill ${chip.name.slice(5, 9)}${chip.line === "f401" ? chip.name.slice(9, 11) : ""}`,
     description: chip.name.slice(0, 11),
+    keywords: ["STM32", chip.name.slice(0, 11), "Black Pill", "WeAct", "Cortex-M4"],
     category: "boards",
     icon: BoardIcon,
     prefix: "U",
