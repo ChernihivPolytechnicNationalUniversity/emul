@@ -236,7 +236,7 @@ function Row({ record, cs }: { record: Datasheet; cs: Characteristic[] }) {
   const c = cs[0]
   const k = KINDS[c.kind]
   const chips = [...(c.at ?? []).map(formatCondition), ...(c.per ? [PER[c.per]] : [])]
-  const text = c.set ? c.set.map((n) => formatNumber(n, k.quantity)).join(" │ ") : formatCharacteristic(c)
+  const text = formatCharacteristic(c)
   const [value, limit] = text.split(" ⚠ ")
   const [frame, w] = useWidth()
   return (
@@ -253,7 +253,7 @@ function Row({ record, cs }: { record: Datasheet; cs: Characteristic[] }) {
             </span>
           ))}
         </span>
-        <span className="text-[12.5px] font-medium whitespace-nowrap tabular-nums">
+        <span className={cn("text-right text-[12.5px] font-medium tabular-nums", c.set ? "min-w-0 font-mono text-[11.5px]" : "whitespace-nowrap")}>
           {cs.length > 1
             ? cs.map((g, i) => (
                 <span key={i} className="ml-1.5 first:ml-0">

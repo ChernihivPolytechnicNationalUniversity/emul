@@ -269,7 +269,19 @@ export function formatValue(v: Value, quantity: Quantity): string {
 /** A characteristic as the hover card's short line: the value, the limit after a ⚠. */
 export function formatCharacteristic(c: Characteristic): string {
   const q = KINDS[c.kind].quantity
-  if (c.set) return c.set.map((n) => formatNumber(n, q)).join(" │ ")
+  if (c.set) {
+    // Runs of three or more in a row read as a range: 0x20–0x27.
+    const sorted = [...c.set].sort((a, b) => a - b)
+    const runs: [number, number][] = []
+    for (const n of sorted) {
+      const last = runs[runs.length - 1]
+      if (last && n === last[1] + 1) last[1] = n
+      else runs.push([n, n])
+    }
+    return runs
+      .flatMap(([a, b]) => (b - a >= 2 ? [`${formatNumber(a, q)}–${formatNumber(b, q)}`] : a === b ? [formatNumber(a, q)] : [formatNumber(a, q), formatNumber(b, q)]))
+      .join(" │ ")
+  }
   const value = c.value ? formatValue(c.value, q) : ""
   const limit = c.limit?.max !== undefined ? formatLevel(c.limit.max, q) : undefined
   return [value, limit && `⚠ ${limit}`].filter(Boolean).join(" ")

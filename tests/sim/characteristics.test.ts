@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { allDefs } from "@/schematic/registry"
 import { hasDatasheet } from "@/schematic/datasheets"
-import { type Characteristic, type Condition, formatCondition, formatValue, formatNumber, KINDS, type Level, QUANTITIES } from "@/schematic/characteristics"
+import { type Characteristic, type Condition, formatCharacteristic, formatCondition, formatValue, formatNumber, KINDS, type Level, QUANTITIES } from "@/schematic/characteristics"
 
 /**
  * The characteristics are a closed system: the registry (KINDS, QUANTITIES) holds every label,
@@ -39,6 +39,8 @@ describe("characteristic text (reference strings first)", () => {
     [formatNumber(400e3, "frequency"), "400 kHz"],
     [formatNumber(630e-9, "wavelength"), "630 nm"],
     [formatNumber(0x3c, "address"), "0x3C"],
+    [formatCharacteristic({ kind: "address", set: [0x3c, 0x3d], cite: { page: 1 } }), "0x3C │ 0x3D"],
+    [formatCharacteristic({ kind: "address", set: [0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f], cite: { page: 1 } }), "0x20–0x27 │ 0x38–0x3F"],
     [formatCondition({ supply: 4.5 }), "4.5 V"],
     [formatCondition({ load: { ohms: 2000 } }), "→ 2 kΩ"],
     [formatCondition({ path: ["RCLK", "QA"] }), "RCLK→QA"],
