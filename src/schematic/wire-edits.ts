@@ -244,12 +244,46 @@ type NetLook = {
   corners: readonly PinCorner[]
 }
 
-const looks = new WeakMap<object, NetLook>()
+const looks = new WeakMap<object, { look: NetLook; at: Point }>()
+
+const sameShift = (p: Point, q: Point) => p.x === q.x && p.y === q.y
+
+function shiftedLook(look: NetLook, d: Point, view: WireNets): NetLook {
+  const by = (p: Readonly<Point>): Point => ({ x: p.x + d.x, y: p.y + d.y })
+  const runs = new Map<string, Run>()
+  const runOf = new Map<string, Run>()
+  for (const [id, run] of look.runOf) {
+    let moved = runs.get(run.id)
+    if (!moved) runs.set(run.id, (moved = { id: run.id, segments: run.segments.map((s) => view.segment(s.id)!), points: run.points.map(by) }))
+    runOf.set(id, moved)
+  }
+  const routeOf = new Map<string, RoutedWire>()
+  for (const [id, route] of look.routeOf) {
+    const leads = route.leads && { ...(route.leads.start && { start: by(route.leads.start) }), ...(route.leads.end && { end: by(route.leads.end) }) }
+    routeOf.set(id, leads ? { id, pts: route.pts.map(by), owner: [], leads } : { id, pts: route.pts.map(by), owner: [] })
+  }
+  const flowOf = new Map<string, FlowRun>()
+  for (const [id, run] of runs) flowOf.set(id, { id, a: pointKey(run.points[0]), b: pointKey(run.points[run.points.length - 1]) })
+  return {
+    ...look,
+    runOf,
+    routeOf,
+    flowOf,
+    pinVertex: look.pinVertex.map(([key]) => [key, pointKey(view.pin(key)!.at)] as const),
+    corners: look.corners.map((c) => ({ at: by(c.at), a: by(c.a), b: by(c.b) })),
+  }
+}
 
 function lookOf(view: WireNets, net: string): NetLook {
   const token = view.token(net)
   const known = token && looks.get(token)
-  if (known) return known
+  const at = view.offset()
+  if (known && sameShift(known.at, at)) return known.look
+  if (known) {
+    const look = shiftedLook(known.look, { x: at.x - known.at.x, y: at.y - known.at.y }, view)
+    looks.set(token, { look, at })
+    return look
+  }
   const segments = view.segmentsOf(net).map((id) => view.segment(id)!)
   const pins = view.pinsOf(net).map((key) => view.pin(key)!)
   const runs = runsOf(segments, pins)
@@ -286,7 +320,7 @@ function lookOf(view: WireNets, net: string): NetLook {
     contacts,
     corners: turns.corners,
   }
-  if (token) looks.set(token, look)
+  if (token) looks.set(token, { look, at })
   return look
 }
 

@@ -14,6 +14,7 @@ export type WireNets = {
   token: (net: string) => object | undefined
   segment: (id: string) => WireSegment | undefined
   pin: (key: string) => WirePin | undefined
+  offset: () => Point
 }
 
 export type WireDelta = {
@@ -51,6 +52,7 @@ export class WireGraph {
   private danglingPoints = new Map<string, Point>()
   private nextNet = 0
   private version = 0
+  private moved: Point = { x: 0, y: 0 }
   private lastWires: readonly WireSegment[] | null = null
   private lastPins: readonly WirePin[] | null = null
   private netList: readonly string[] | null = null
@@ -127,7 +129,7 @@ export class WireGraph {
     const shifted = (points: Map<string, Point>) => new Map([...points.values()].map((p) => by(p)).map((p) => [pointKey(p), p] as const))
     this.junctionPoints = shifted(this.junctionPoints)
     this.danglingPoints = shifted(this.danglingPoints)
-    for (const [id, net] of this.members) this.members.set(id, { segments: net.segments, pins: net.pins })
+    this.moved = by(this.moved)
     this.junctionList = null
     this.danglingList = null
     this.view = this.viewAt(++this.version)
@@ -380,6 +382,7 @@ export class WireGraph {
       token: (net) => now().members.get(net),
       segment: (id) => now().segments.get(id),
       pin: (key) => now().pins.get(key),
+      offset: () => now().moved,
     }
   }
 }
