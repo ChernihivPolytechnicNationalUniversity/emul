@@ -1,6 +1,7 @@
 import * as React from "react"
 import { createPortal } from "react-dom"
-import { ExternalLinkIcon } from "lucide-react"
+import { CpuIcon, ExternalLinkIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { docUrl, hasDatasheet } from "@/schematic/datasheets"
 import { familyOf, variantLabel } from "@/schematic/families"
 import { ensureDefs, getDef, getDefsVersion, getMeta, subscribeDefs, type PartMeta } from "@/schematic/registry"
@@ -248,16 +249,19 @@ function BoardContent({ meta, board, def }: { meta: PartMeta; board: BoardCard; 
           </a>
         )}
         {chip && (
-          <button
-            type="button"
-            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            title={`Place the bare ${chip.name}, without the board`}
             onClick={(e) => {
               hideCard()
               activate(chip, e)
             }}
           >
-            Chip on its own: {chip.name} →
-          </button>
+            <CpuIcon data-icon="inline-start" />
+            {chip.name} alone
+          </Button>
         )}
       </div>
     </>
