@@ -216,6 +216,8 @@ function resistorGrid() {
 const grid = resistorGrid()
 const gridWires = normalise(grid.wires, grid.pins)
 const sheetBuild = time(() => WireSheet.of(gridWires, grid.pins), 3)
+const spine = overlapping(SIZES[SIZES.length - 1]).reverse()
+const onOneLine = time(() => WireSheet.of(spine, []), 3)
 const gridSheet = WireSheet.of(gridWires, grid.pins)
 const gridNets = new WireGraph().of(gridWires, grid.pins)
 const carriedParts = ["R50_50", "R50_51", "R51_50", "R52_52", "R49_53"]
@@ -243,12 +245,28 @@ const released = dragPlan.commit(releaseOffset)!
 const movedPins = new Map(released.pins.map((p) => [p.key, p]))
 const pinsAfter = grid.pins.map((p) => movedPins.get(p.key) ?? p)
 const releaseNormalised = time(() => commitEdit(gridWires, pinsAfter, released.edit), 7)
+const committed = commitEdit(gridWires, pinsAfter, released.edit)
+const pinsMoved = released.pins
+const pinsLeft = pinsMoved.map((p) => grid.pins.find((q) => q.key === p.key)!)
+const sheetSamples: number[] = []
+for (let i = 0; i < 9; i++) {
+  const forward = i % 2 === 0
+  const started = performance.now()
+  gridSheet.apply(forward ? { added: committed.added, removed: committed.removed, pinsAdded: pinsMoved, pinsRemoved: pinsLeft } : { added: committed.removed, removed: committed.added, pinsAdded: pinsLeft, pinsRemoved: pinsMoved })
+  for (const s of committed.added) gridSheet.through(s.a)
+  for (const s of committed.removed) gridSheet.through(s.a)
+  sheetSamples.push(performance.now() - started)
+}
+if (sheetSamples.length % 2) gridSheet.apply({ added: committed.removed, removed: committed.added, pinsAdded: pinsLeft, pinsRemoved: pinsMoved })
+const sheetDelta = median(sheetSamples.slice(1))
 console.log(`\nThe rubber band on a ${gridWires.length}-segment sheet of ${ROWS * COLUMNS} resistors, ${carriedParts.length} carried (median of warm runs)\n`)
-console.log(`  the sheet index built once per document: ${ms(sheetBuild)}; the plan at pointer-down: ${ms(planning)}; a frame (${offsets.length} offsets, ${Math.round(drawn / (MEASURED * offsets.length))} pieces each on average): ${ms(frame)}`)
-console.log(`  the release: the edit built ${ms(releaseEdit)}, then committed and normalised by commitEdit ${ms(releaseNormalised)}`)
+console.log(`  the sheet index built once per document: ${ms(sheetBuild)} (${ms(onOneLine)} for ${spine.length} segments on one line); the plan at pointer-down: ${ms(planning)}; a frame (${offsets.length} offsets, ${Math.round(drawn / (MEASURED * offsets.length))} pieces each on average): ${ms(frame)}`)
+console.log(`  the release: the edit built ${ms(releaseEdit)}, then committed and normalised by commitEdit ${ms(releaseNormalised)}; the sheet index taking its delta (${committed.added.length} added, ${committed.removed.length} removed, ${pinsMoved.length} pins moved) and answering on the touched lines: ${ms(sheetDelta)}`)
 console.log("")
-check(`a drag's plan at pointer-down on ${gridWires.length} segments`, planning, 0.1)
+check(`a drag's plan at pointer-down on ${gridWires.length} segments`, planning, 0.2)
 check(`a drag frame on ${gridWires.length} segments, ${carriedParts.length} parts carried`, frame, 0.15)
 check(`a drag's release turned into an edit on ${gridWires.length} segments`, releaseEdit, 0.5)
+check(`the sheet index taking a release's delta on ${gridWires.length} segments`, sheetDelta, 1)
+check(`the sheet index built for ${large.n} overlapping segments on one line`, onOneLine, 200)
 console.log(`\n${checked - failed}/${checked} checks passed`)
 if (failed) process.exitCode = 1

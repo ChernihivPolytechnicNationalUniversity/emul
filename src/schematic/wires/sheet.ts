@@ -16,57 +16,79 @@ export const columnCode = (x: number): LineCode => x * 2 + 1
 
 export const lineCodeOf = (s: { a: Point; b: Point }): LineCode => (isHorizontal(s as WireSegment) ? rowCode(s.a.y) : columnCode(s.a.x))
 
-type Placed = { mark: SheetMark; along: number }
+type Placed = { readonly mark: SheetMark; readonly along: number; readonly line: LineCode }
+
+function firstAtLeast<T>(list: readonly T[], value: number, key: (item: T) => number, strictly = false): number {
+  let top = 0
+  let bottom = list.length
+  while (top < bottom) {
+    const middle = (top + bottom) >> 1
+    const at = key(list[middle])
+    if (at < value || (strictly && at === value)) top = middle + 1
+    else bottom = middle
+  }
+  return top
+}
+
+const alongOf = (placed: Placed) => placed.along
 
 class Line {
-  readonly runs = new Set<WireSegment>()
-  readonly marks = new Set<Placed>()
-  private byStart: WireSegment[] = []
+  private readonly runs: WireSegment[] = []
+  private readonly placed: Placed[] = []
   private reach: number[] = []
-  private markOrder: Placed[] = []
-  private stale = false
-
-  touch() {
-    this.stale = true
-  }
+  private reachStale = false
 
   get empty() {
-    return this.runs.size === 0 && this.marks.size === 0
+    return this.runs.length === 0 && this.placed.length === 0
   }
 
-  private settle() {
-    if (!this.stale) return
-    this.stale = false
-    this.byStart = [...this.runs].sort((s, t) => lowOf(s) - lowOf(t))
-    let furthest = -Infinity
-    this.reach = this.byStart.map((s) => (furthest = Math.max(furthest, highOf(s))))
-    this.markOrder = [...this.marks].sort((m, n) => m.along - n.along)
+  load(runs: readonly WireSegment[], placed: readonly Placed[]) {
+    this.runs.push(...runs)
+    this.runs.sort((s, t) => lowOf(s) - lowOf(t))
+    this.placed.push(...placed)
+    this.placed.sort((m, n) => m.along - n.along)
+    this.reachStale = true
+  }
+
+  addRun(s: WireSegment) {
+    this.runs.splice(firstAtLeast(this.runs, lowOf(s), lowOf), 0, s)
+    this.reachStale = true
+  }
+
+  removeRun(s: WireSegment) {
+    for (let i = firstAtLeast(this.runs, lowOf(s), lowOf); i < this.runs.length && lowOf(this.runs[i]) === lowOf(s); i++) {
+      if (this.runs[i] !== s) continue
+      this.runs.splice(i, 1)
+      this.reachStale = true
+      return
+    }
+  }
+
+  addMark(placed: Placed) {
+    this.placed.splice(firstAtLeast(this.placed, placed.along, alongOf), 0, placed)
+  }
+
+  removeMark(placed: Placed) {
+    for (let i = firstAtLeast(this.placed, placed.along, alongOf); i < this.placed.length && this.placed[i].along === placed.along; i++) {
+      if (this.placed[i] !== placed) continue
+      this.placed.splice(i, 1)
+      return
+    }
   }
 
   overlapping(lo: number, hi: number, into: WireSegment[]) {
-    this.settle()
-    const starts = this.byStart
-    let top = 0
-    let bottom = starts.length
-    while (top < bottom) {
-      const middle = (top + bottom) >> 1
-      if (lowOf(starts[middle]) <= hi) top = middle + 1
-      else bottom = middle
+    const runs = this.runs
+    if (this.reachStale) {
+      this.reachStale = false
+      let furthest = -Infinity
+      this.reach = runs.map((s) => (furthest = Math.max(furthest, highOf(s))))
     }
-    for (let i = top - 1; i >= 0 && this.reach[i] >= lo; i--) if (highOf(starts[i]) >= lo) into.push(starts[i])
+    for (let i = firstAtLeast(runs, hi, lowOf, true) - 1; i >= 0 && this.reach[i] >= lo; i--) if (highOf(runs[i]) >= lo) into.push(runs[i])
   }
 
   within(lo: number, hi: number, into: SheetMark[]) {
-    this.settle()
-    const order = this.markOrder
-    let top = 0
-    let bottom = order.length
-    while (top < bottom) {
-      const middle = (top + bottom) >> 1
-      if (order[middle].along < lo) top = middle + 1
-      else bottom = middle
-    }
-    for (let i = top; i < order.length && order[i].along <= hi; i++) into.push(order[i].mark)
+    const placed = this.placed
+    for (let i = firstAtLeast(placed, lo, alongOf); i < placed.length && placed[i].along <= hi; i++) into.push(placed[i].mark)
   }
 }
 
@@ -81,7 +103,41 @@ export class WireSheet {
   private readonly placed = new Map<WireSegment | WirePin, Placed[]>()
 
   static of(wires: readonly WireSegment[], pins: readonly WirePin[]): WireSheet {
-    return new WireSheet().apply({ added: wires, pinsAdded: pins })
+    const sheet = new WireSheet()
+    const runs = new Map<LineCode, WireSegment[]>()
+    const marks = new Map<LineCode, Placed[]>()
+    const gather = <T>(into: Map<LineCode, T[]>, line: LineCode, item: T) => {
+      const list = into.get(line)
+      if (list) list.push(item)
+      else into.set(line, [item])
+    }
+    const place = (owner: WireSegment | WirePin, at: Point, mark: SheetMark) => {
+      const entries: Placed[] = [
+        { mark, along: at.x, line: rowCode(at.y) },
+        { mark, along: at.y, line: columnCode(at.x) },
+      ]
+      for (const placed of entries) gather(marks, placed.line, placed)
+      const known = sheet.placed.get(owner)
+      if (known) known.push(...entries)
+      else sheet.placed.set(owner, entries)
+    }
+    for (const s of wires) {
+      if (sheet.segments.has(s.id)) throw new Error(`two wires share the id ${s.id}`)
+      sheet.segments.set(s.id, s)
+      gather(runs, lineCodeOf(s), s)
+      for (const end of [s.a, s.b]) {
+        gather(sheet.ends, pointCode(end), s)
+        place(s, end, { at: end, segment: s })
+      }
+    }
+    for (const p of pins) {
+      if (sheet.pins.has(p.key)) throw new Error(`two pins share the key ${p.key}`)
+      sheet.pins.set(p.key, p)
+      gather(sheet.pinsAtPoint, pointCode(p.at), p)
+      place(p, p.at, { at: p.at, pin: p })
+    }
+    for (const code of new Set([...runs.keys(), ...marks.keys()])) sheet.line(code).load(runs.get(code) ?? [], marks.get(code) ?? [])
+    return sheet
   }
 
   get size() {
@@ -142,29 +198,23 @@ export class WireSheet {
   }
 
   private mark(owner: WireSegment | WirePin, at: Point, mark: SheetMark) {
-    const entries = this.placed.get(owner) ?? []
-    for (const [code, along] of [[rowCode(at.y), at.x], [columnCode(at.x), at.y]] as const) {
-      const placed = { mark, along }
-      const line = this.line(code)
-      line.marks.add(placed)
-      line.touch()
-      entries.push(placed)
-    }
-    this.placed.set(owner, entries)
+    const entries: Placed[] = [
+      { mark, along: at.x, line: rowCode(at.y) },
+      { mark, along: at.y, line: columnCode(at.x) },
+    ]
+    for (const placed of entries) this.line(placed.line).addMark(placed)
+    const known = this.placed.get(owner)
+    if (known) known.push(...entries)
+    else this.placed.set(owner, entries)
   }
 
-  private unmark(owner: WireSegment | WirePin, points: readonly Point[]) {
+  private unmark(owner: WireSegment | WirePin) {
     const entries = this.placed.get(owner)
     if (!entries) return
     this.placed.delete(owner)
-    for (const at of points) {
-      for (const code of [rowCode(at.y), columnCode(at.x)]) {
-        const line = this.lines.get(code)
-        if (!line) continue
-        for (const placed of entries) line.marks.delete(placed)
-        line.touch()
-        this.release(code)
-      }
+    for (const placed of entries) {
+      this.lines.get(placed.line)?.removeMark(placed)
+      this.release(placed.line)
     }
   }
 
@@ -172,9 +222,7 @@ export class WireSheet {
     const known = this.segments.get(s.id)
     if (known) this.detachSegment(known)
     this.segments.set(s.id, s)
-    const line = this.line(lineCodeOf(s))
-    line.runs.add(s)
-    line.touch()
+    this.line(lineCodeOf(s)).addRun(s)
     for (const end of [s.a, s.b]) {
       const code = pointCode(end)
       const list = this.ends.get(code)
@@ -189,19 +237,15 @@ export class WireSheet {
     if (!held) return
     this.segments.delete(s.id)
     const code = lineCodeOf(held)
-    const line = this.lines.get(code)
-    if (line) {
-      line.runs.delete(held)
-      line.touch()
-      this.release(code)
-    }
+    this.lines.get(code)?.removeRun(held)
+    this.release(code)
     for (const end of [held.a, held.b]) {
       const at = pointCode(end)
       const list = this.ends.get(at)?.filter((t) => t !== held)
       if (list?.length) this.ends.set(at, list)
       else this.ends.delete(at)
     }
-    this.unmark(held, [held.a, held.b])
+    this.unmark(held)
   }
 
   private attachPin(p: WirePin) {
@@ -223,6 +267,6 @@ export class WireSheet {
     const list = this.pinsAtPoint.get(code)?.filter((q) => q !== held)
     if (list?.length) this.pinsAtPoint.set(code, list)
     else this.pinsAtPoint.delete(code)
-    this.unmark(held, [held.at])
+    this.unmark(held)
   }
 }
