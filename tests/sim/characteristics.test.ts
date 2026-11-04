@@ -10,7 +10,7 @@ import { type Characteristic, type Condition, formatCondition, formatValue, form
  */
 
 // Parts with a datasheet record still on the old free-text `specs`. Only shrinks: lower the max with it.
-const ON_FREE_TEXT_MAX = 35
+const ON_FREE_TEXT_MAX = 0
 
 const ALLOWED_KEYS = new Set(["kind", "value", "set", "limit", "at", "per", "colour", "cite", "limitCite"])
 const VALUE_KEYS = new Set(["min", "typ", "max", "sym", "release", "approx"])
@@ -29,6 +29,7 @@ describe("characteristic text (reference strings first)", () => {
     [formatValue({ min: 3.15 }, "voltage"), "≥ 3.15 V"],
     [formatValue({ max: 25e6 }, "frequency"), "≤ 25 MHz"],
     [formatValue({ max: 6e-3, sym: true }, "current"), "±6 mA"],
+    [formatValue({ min: 10, max: 18, sym: true }, "voltage"), "±10–18 V"],
     [formatValue({ typ: 17e-9 }, "time"), "17 ns"],
     [formatValue({ typ: 4.3, release: 4.1 }, "voltage"), "4.3 ↘ 4.1 V"],
     [formatValue({ typ: { rail: "VCC", offset: -1.7 } }, "voltage"), "VCC − 1.7 V"],

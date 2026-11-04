@@ -146,13 +146,16 @@ const RECORDS: Record<string, Datasheet> = {
     maker: "Nexperia",
     package: "PDIP-16",
     docs: [DOCS["nexperia-74hc595"]],
-    specs: [
-      { label: "Supply", value: "4.5–5.5 V (7 V abs max)", cite: { page: 7, at: "Table 5 Recommended operating conditions; Table 4" } },
-      { label: "Input levels", value: "VIH 2.0 V min, VIL 0.8 V max", cite: { page: 8, at: "Table 6 Static characteristics" } },
-      { label: "Output current", value: "±6 mA at 4.5 V (VOH ≥ 3.7 V)", cite: { page: 8, at: "Table 6 Static characteristics" } },
-      { label: "Output current (abs max)", value: "±35 mA Qn, ±25 mA Q7S, 70 mA through VCC or GND", cite: { page: 6, at: "Table 4 Limiting values" } },
-      { label: "Max clock", value: "52 MHz typ, 30 MHz min at 25 °C", cite: { page: 11, at: "Table 7 Dynamic characteristics" } },
-      { label: "Propagation delay", value: "24 ns typ, STCP to Qn", cite: { page: 11, at: "Table 7 Dynamic characteristics" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 4.5, max: 5.5 }, limit: { max: 7 }, cite: { page: 7, at: "Table 5" }, limitCite: { page: 6, at: "Table 4" } },
+      { kind: "inputHigh", value: { min: 2 }, cite: { page: 8, at: "Table 6" } },
+      { kind: "inputLow", value: { max: 0.8 }, cite: { page: 8, at: "Table 6" } },
+      { kind: "outputHigh", value: { min: 3.7 }, at: [{ supply: 4.5 }, { load: { amps: 6e-3 } }], cite: { page: 8, at: "Table 6" } },
+      { kind: "outputCurrent", value: { max: 6e-3, sym: true }, limit: { max: 35e-3, sym: true }, per: "pin", at: [{ supply: 4.5 }], cite: { page: 8, at: "Table 6" }, limitCite: { page: 6, at: "Table 4" } },
+      { kind: "supplyCurrent", limit: { max: 70e-3, sym: true }, cite: { page: 6, at: "Table 4" } },
+      { kind: "clock", value: { min: 30e6, typ: 52e6 }, at: [{ temp: 25 }], cite: { page: 11, at: "Table 7" } },
+      { kind: "delay", value: { typ: 24e-9 }, at: [{ path: ["RCLK", "QA"] }], cite: { page: 11, at: "Table 7" } },
     ],
     modelled: [
       { what: "Function-table logic, QH' always driven", cite: { page: 5, at: "Table 3 Function table" }, test: "tests/sim/hc595.test.ts" },

@@ -141,13 +141,15 @@ const RECORDS: Record<string, Datasheet> = {
   "lcd-1602": {
     maker: "Hitachi",
     docs: [DOCS["hitachi-hd44780u"], DOCS["sitronix-st7066u"], DOCS["vishay-lcd016m002b"]],
-    specs: [
-      { label: "Supply", value: "4.7–5.3 V, 1.2 mA typ (5 V module)", cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
-      { label: "Supply (abs max)", value: "−0.3 to +7.0 V", cite: { page: 47, at: "Absolute Maximum Ratings" } },
-      { label: "Contrast VDD − V0", value: "4.2 V typ (3.8–4.6 V) at 25 °C", cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
-      { label: "Backlight LED", value: "VF 4.2 V typ; IF 20 mA typ, 40 mA max (edge-lit)", cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
-      { label: "Execution time", value: "37 µs; return home 1.52 ms (fOSC 270 kHz)", cite: { page: 24, at: "Table 6" } },
-      { label: "Enable cycle", value: "500 ns min, E high 230 ns min (4.5–5.5 V)", cite: { page: 52, at: "Bus Timing Characteristics" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 4.7, max: 5.3 }, limit: { min: -0.3, max: 7 }, cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" }, limitCite: { page: 47, at: "Abs Max" } },
+      { kind: "supplyCurrent", value: { typ: 1.2e-3 }, cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
+      { kind: "contrast", value: { min: 3.8, typ: 4.2, max: 4.6 }, at: [{ temp: 25 }], cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
+      { kind: "forwardVoltage", value: { typ: 4.2 }, cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
+      { kind: "forwardCurrent", value: { typ: 20e-3, max: 40e-3 }, cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
+      { kind: "execution", value: { typ: 37e-6 }, at: [{ freq: 270e3 }], cite: { page: 24, at: "Table 6" } },
+      { kind: "pulse", value: { min: 230e-9 }, cite: { page: 52, at: "Bus Timing" } },
     ],
     modelled: [
       { what: "Instruction set with execution times", cite: { page: 24, at: "Table 6" }, test: "tests/sim/lcd1602.test.ts" },
@@ -177,13 +179,11 @@ const RECORDS: Record<string, Datasheet> = {
   "lcd-1602-i2c": {
     maker: "NXP",
     docs: [DOCS["nxp-pcf8574"], DOCS["ti-scps068k"], DOCS["hitachi-hd44780u"], DOCS["sitronix-st7066u"], DOCS["vishay-lcd016m002b"]],
-    specs: [
-      { label: "Module supply", value: "4.7–5.3 V", cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
-      { label: "PCF8574 supply", value: "2.5–6.0 V", cite: { page: 16, at: "Table 9" } },
-      { label: "Supply (abs max)", value: "−0.5 to +7 V", cite: { page: 15, at: "Table 7" } },
-      { label: "I²C clock", value: "100 kHz max", cite: { page: 17, at: "Table 10" } },
-      { label: "Address, PCF8574", value: "0x20–0x27", cite: { page: 5, at: "Table 4" } },
-      { label: "Address, PCF8574A", value: "0x38–0x3F", cite: { page: 6, at: "Table 5" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 4.7, max: 5.3 }, limit: { min: -0.5, max: 7 }, cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" }, limitCite: { page: 15, at: "Table 7" } },
+      { kind: "busClock", value: { max: 100e3 }, cite: { page: 17, at: "Table 10" } },
+      { kind: "address", set: [0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f], cite: { page: 5, at: "Tables 4, 5" } },
     ],
     modelled: [
       { what: "Address 0x27, set by pads", cite: { page: 5, at: "Table 4" }, test: "tests/sim/lcd1602.test.ts" },

@@ -90,13 +90,15 @@ const RECORDS: Record<string, Datasheet> = {
   "rgb-led": {
     maker: "Kingbright",
     docs: [DOCS["kb-l154a4surkqbdzgw"]],
-    specs: [
-      { label: "Forward voltage", value: "R 1.95 V typ (2.5 max), B 3.3 V (4.0), G 3.3 V (4.1) at 20 mA", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
-      { label: "DC current (abs max)", value: "R 30 mA, B 30 mA, G 25 mA", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Peak current (abs max)", value: "R 185, B 150, G 150 mA (1/10 duty, 0.1 ms)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Power (abs max)", value: "R 75, B 120, G 102.5 mW", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Reverse voltage (abs max)", value: "5 V", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Dominant wavelength", value: "R 630, B 465, G 525 nm at 20 mA", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+    specs: [],
+    characteristics: [
+      { kind: "forwardVoltage", value: { typ: 1.95, max: 2.5 }, at: [{ load: { amps: 20e-3 } }], colour: "red", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardVoltage", value: { typ: 3.3, max: 4.1 }, at: [{ load: { amps: 20e-3 } }], colour: "green", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardVoltage", value: { typ: 3.3, max: 4 }, at: [{ load: { amps: 20e-3 } }], colour: "blue", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardCurrent", limit: { max: 30e-3 }, colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "forwardCurrent", limit: { max: 25e-3 }, colour: "green", cite: { page: 2, at: "Abs Max" } },
+      { kind: "forwardCurrent", limit: { max: 30e-3 }, colour: "blue", cite: { page: 2, at: "Abs Max" } },
+      { kind: "reverseVoltage", limit: { max: 5 }, cite: { page: 2, at: "Abs Max" } },
     ],
     modelled: [
       { what: "Common cathode on lead 2", cite: { page: 1, at: "Package Dimensions" }, test: "tests/sim/rgb-led.test.ts" },

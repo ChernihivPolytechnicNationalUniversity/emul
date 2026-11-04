@@ -76,6 +76,7 @@ export const KINDS = {
   dropout: { label: "Dropout", quantity: "voltage", visual: "range", glyph: "rail" },
   currentLimit: { label: "Current limit", quantity: "current", visual: "range", glyph: "arrow" },
   switching: { label: "Switching", quantity: "frequency", visual: "log", glyph: "sine" },
+  feedback: { label: "Feedback", quantity: "voltage", visual: "range", glyph: "rail" },
   // thermal
   temperature: { label: "Temperature", quantity: "temperature", visual: "range", glyph: "thermo", limit: true },
   thermal: { label: "Thermal", quantity: "thermalResistance", visual: "range", glyph: "thermo" },
@@ -134,6 +135,8 @@ export const KINDS = {
   torque: { label: "Torque", quantity: "torque", visual: "range", glyph: "gear" },
   speed: { label: "Speed", quantity: "time", visual: "log", glyph: "gear" },
   pulseWidth: { label: "Pulse width", quantity: "time", visual: "range", glyph: "clock" },
+  deadBand: { label: "Dead band", quantity: "time", visual: "log", glyph: "clock" },
+  actuation: { label: "Actuation", quantity: "force", visual: "range", glyph: "gear" },
   detents: { label: "Detents", quantity: "count", visual: "tokens", glyph: "gear", set: true },
   // digital
   address: { label: "Address", quantity: "address", visual: "tokens", glyph: "chip", set: true },
@@ -247,7 +250,7 @@ export function formatValue(v: Value, quantity: Quantity): string {
   const big = nums.length ? Math.max(...nums.map(Math.abs)) : undefined
   const f = (l: Level) => formatLevel(l, quantity, big)
   const approx = v.approx ? "~" : ""
-  if (v.sym && v.max !== undefined) return `±${f(v.max)}`
+  if (v.sym && v.max !== undefined) return typeof v.min === "number" ? `±${bare(f(v.min))}–${f(v.max)}` : `±${f(v.max)}`
   if (v.typ !== undefined && v.release !== undefined) return `${bare(f(v.typ))} ${v.release < (v.typ as number) ? "↘" : "↗"} ${formatNumber(v.release, quantity, big)}`
   if (v.typ !== undefined) return approx + f(v.typ)
   if (v.min !== undefined && v.max !== undefined) {

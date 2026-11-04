@@ -254,13 +254,14 @@ const RECORDS: Record<string, Datasheet> = {
   "seven-segment-ca": {
     maker: "Kingbright",
     docs: [DOCS["kb-sa56-11ewa"], DOCS["kb-sa56-11srwa"], DOCS["kb-sa56-11gwa"], DOCS["kb-sa56-11sykwa"], DOCS["kb-sa56-11cgkwa"]],
-    specs: [
-      { label: "Forward voltage", value: "1.9 V typ, 2.3 V max at 10 mA, red (SA56-11EWA)", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
-      { label: "DC current (abs max)", value: "30 mA per segment, red (SA56-11EWA)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Peak current (abs max)", value: "160 mA (1/10 duty, 0.1 ms), red (SA56-11EWA)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Power per segment (abs max)", value: "75 mW, red (SA56-11EWA)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Reverse voltage (abs max)", value: "5 V", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Operating temperature", value: "−40 to +85 °C", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+    specs: [],
+    characteristics: [
+      { kind: "forwardVoltage", value: { typ: 1.9, max: 2.3 }, at: [{ load: { amps: 10e-3 } }], colour: "red", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardCurrent", limit: { max: 30e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "peakCurrent", limit: { max: 160e-3 }, colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "dissipation", limit: { max: 75e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "reverseVoltage", limit: { max: 5 }, cite: { page: 2, at: "Abs Max" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 2, at: "Abs Max" } },
     ],
     modelled: [
       { what: "I–V fit within 20 mV", cite: { page: 3, at: "Forward Current vs. Forward Voltage" }, test: "tests/sim/seven-segment.test.ts" },
@@ -284,13 +285,14 @@ const RECORDS: Record<string, Datasheet> = {
   "seven-segment-cc": {
     maker: "Kingbright",
     docs: [DOCS["kb-sc56-11ewa"], DOCS["kb-sc56-11srwa"], DOCS["kb-sc56-11gwa"], DOCS["kb-sc56-11sykwa"], DOCS["kb-sc56-11cgkwa"]],
-    specs: [
-      { label: "Forward voltage", value: "1.9 V typ, 2.3 V max at 10 mA, red (SC56-11EWA)", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
-      { label: "DC current (abs max)", value: "30 mA per segment, red (SC56-11EWA)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Peak current (abs max)", value: "160 mA (1/10 duty, 0.1 ms), red (SC56-11EWA)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Power per segment (abs max)", value: "75 mW, red (SC56-11EWA)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Reverse voltage (abs max)", value: "5 V", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Operating temperature", value: "−40 to +85 °C", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+    specs: [],
+    characteristics: [
+      { kind: "forwardVoltage", value: { typ: 1.9, max: 2.3 }, at: [{ load: { amps: 10e-3 } }], colour: "red", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardCurrent", limit: { max: 30e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "peakCurrent", limit: { max: 160e-3 }, colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "dissipation", limit: { max: 75e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "reverseVoltage", limit: { max: 5 }, cite: { page: 2, at: "Abs Max" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 2, at: "Abs Max" } },
     ],
     modelled: [
       { what: "I–V fit within 20 mV", cite: { page: 3, at: "Forward Current vs. Forward Voltage" }, test: "tests/sim/seven-segment.test.ts" },
@@ -314,13 +316,14 @@ const RECORDS: Record<string, Datasheet> = {
   "seven-segment-4-ca": {
     maker: "Kingbright",
     docs: [DOCS["kb-ca56-12ewa"], DOCS["kb-ca56-12srwa"]],
-    specs: [
-      { label: "Forward voltage", value: "1.9 V typ, 2.3 V max at 10 mA, red (CA56-12EWA)", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
-      { label: "DC current (abs max)", value: "30 mA per segment, red (CA56-12EWA)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Peak current (abs max)", value: "160 mA (1/10 duty, 0.1 ms), red (CA56-12EWA)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Power per segment (abs max)", value: "75 mW, red (CA56-12EWA)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Reverse voltage (abs max)", value: "5 V", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Operating temperature", value: "−40 to +85 °C", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+    specs: [],
+    characteristics: [
+      { kind: "forwardVoltage", value: { typ: 1.9, max: 2.3 }, at: [{ load: { amps: 10e-3 } }], colour: "red", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardCurrent", limit: { max: 30e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "peakCurrent", limit: { max: 160e-3 }, colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "dissipation", limit: { max: 75e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "reverseVoltage", limit: { max: 5 }, cite: { page: 2, at: "Abs Max" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 2, at: "Abs Max" } },
     ],
     modelled: [
       { what: "I–V fit within 20 mV", cite: { page: 3, at: "Forward Current vs. Forward Voltage" }, test: "tests/sim/seven-segment.test.ts" },
@@ -345,13 +348,14 @@ const RECORDS: Record<string, Datasheet> = {
   "seven-segment-4-cc": {
     maker: "Kingbright",
     docs: [DOCS["kb-cc56-12ewa"], DOCS["kb-cc56-12srwa"]],
-    specs: [
-      { label: "Forward voltage", value: "1.9 V typ, 2.3 V max at 10 mA, red (CC56-12EWA)", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
-      { label: "DC current (abs max)", value: "30 mA per segment, red (CC56-12EWA)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Peak current (abs max)", value: "160 mA (1/10 duty, 0.1 ms), red (CC56-12EWA)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Power per segment (abs max)", value: "75 mW, red (CC56-12EWA)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Reverse voltage (abs max)", value: "5 V", cite: { page: 2, at: "Absolute Maximum Ratings" } },
-      { label: "Operating temperature", value: "−40 to +85 °C", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+    specs: [],
+    characteristics: [
+      { kind: "forwardVoltage", value: { typ: 1.9, max: 2.3 }, at: [{ load: { amps: 10e-3 } }], colour: "red", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardCurrent", limit: { max: 30e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "peakCurrent", limit: { max: 160e-3 }, colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "dissipation", limit: { max: 75e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "reverseVoltage", limit: { max: 5 }, cite: { page: 2, at: "Abs Max" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 2, at: "Abs Max" } },
     ],
     modelled: [
       { what: "I–V fit within 20 mV", cite: { page: 3, at: "Forward Current vs. Forward Voltage" }, test: "tests/sim/seven-segment.test.ts" },

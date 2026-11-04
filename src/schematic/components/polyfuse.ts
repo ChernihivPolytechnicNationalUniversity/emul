@@ -83,13 +83,16 @@ const RECORDS: Record<string, Datasheet> = {
   "polyfuse": {
     maker: "Bourns",
     docs: [DOCS["bourns-mf-msmf"]],
-    specs: [
-      { label: "Vmax / Imax (MF-MSMF050)", value: "15 V / 100 A", cite: { page: 1, at: "Electrical Characteristics" } },
-      { label: "Ihold / Itrip (MF-MSMF050)", value: "0.50 A / 1.00 A at 23 °C", cite: { page: 1, at: "Electrical Characteristics" } },
-      { label: "Resistance (MF-MSMF050)", value: "0.15 Ω min, 1.0 Ω R1max", cite: { page: 1, at: "Electrical Characteristics" } },
-      { label: "Time to trip (MF-MSMF050)", value: "0.15 s max at 8 A", cite: { page: 1, at: "Electrical Characteristics" } },
-      { label: "Tripped dissipation", value: "0.8 W typical", cite: { page: 1, at: "Electrical Characteristics" } },
-      { label: "Operating temperature", value: "−40 to +85 °C", cite: { page: 3, at: "Environmental Characteristics" } },
+    specs: [],
+    characteristics: [
+      { kind: "input", limit: { max: 15 }, cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "peakCurrent", limit: { max: 100 }, cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "hold", value: { typ: 0.5 }, at: [{ temp: 23 }], cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "trip", value: { typ: 1 }, at: [{ temp: 23 }], cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "onResistance", value: { min: 0.15, max: 1 }, cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "tripTime", value: { max: 0.15 }, at: [{ load: { amps: 8 } }], cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "dissipation", value: { typ: 0.8 }, cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 3, at: "Environmental Characteristics" } },
     ],
     modelled: [
       { what: "Six ratings from the table", cite: { page: 1, at: "Electrical Characteristics" } },

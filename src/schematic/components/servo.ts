@@ -51,13 +51,14 @@ const RECORDS: Record<string, Datasheet> = {
   "servo-sg90": {
     maker: "TowerPro",
     docs: [DOCS["towerpro-sg90"], DOCS["rapid-37-1330"]],
-    specs: [
-      { label: "Supply", value: "4.8 V (~5 V)", cite: { page: 1, at: "Specifications" } },
-      { label: "Pulse width", value: "~1 ms −90°, 1.5 ms 0°, ~2 ms +90°", cite: { page: 2 } },
-      { label: "Speed", value: "0.1 s/60° at 4.8 V", cite: { doc: "rapid-37-1330", page: 1 } },
-      { label: "Stall torque", value: "1.8 kgf·cm at 4.8 V", cite: { doc: "rapid-37-1330", page: 1 } },
-      { label: "Dead band", value: "10 µs", cite: { page: 1, at: "Specifications" } },
-      { label: "Temperature", value: "0–55 °C", cite: { page: 1, at: "Specifications" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { typ: 4.8 }, cite: { page: 1, at: "Specifications" } },
+      { kind: "pulseWidth", value: { min: 1e-3, typ: 1.5e-3, max: 2e-3, approx: true }, cite: { page: 2 } },
+      { kind: "speed", value: { typ: 0.1 }, at: [{ supply: 4.8 }], cite: { doc: "rapid-37-1330", page: 1 } },
+      { kind: "torque", value: { typ: 0.1765 }, at: [{ supply: 4.8 }, { state: "stall" }], cite: { doc: "rapid-37-1330", page: 1 } },
+      { kind: "deadBand", value: { typ: 10e-6 }, cite: { page: 1, at: "Specifications" } },
+      { kind: "temperature", value: { min: 0, max: 55 }, cite: { page: 1, at: "Specifications" } },
     ],
     modelled: [
       { what: "Pulse width sets the angle", cite: { page: 2 }, test: "tests/sim/servo.test.ts" },

@@ -154,12 +154,12 @@ const RECORDS: Record<string, Datasheet> = {
   "encoder-ec11": {
     maker: "ALPS Alpine",
     docs: [DOCS["alps-ec11e"]],
-    specs: [
-      { label: "Contact rating", value: "10 mA 5 V DC (1–10 mA resistive)", cite: { page: 2, at: "List of Varieties" } },
-      { label: "Detents / pulses", value: "30 / 15 (EC11E15244G1); 18 / 9; 36 / 18", cite: { page: 7, at: "Product List" } },
-      { label: "Push switch rating", value: "0.1 A 5 V DC", cite: { page: 2, at: "List of Varieties" } },
-      { label: "Push switch contact", value: "100 mΩ max (200 mΩ after life)", cite: { page: 2, at: "List of Varieties" } },
-      { label: "Operating temperature", value: "−40 to +85 °C", cite: { page: 2, at: "List of Varieties" } },
+    specs: [],
+    characteristics: [
+      { kind: "contactRating", value: { min: 1e-3, max: 10e-3 }, at: [{ supply: 5 }], cite: { page: 2, at: "List of Varieties" } },
+      { kind: "detents", set: [18, 30, 36], cite: { page: 7, at: "Product List" } },
+      { kind: "contactResistance", value: { max: 0.1 }, cite: { page: 2, at: "List of Varieties" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 2, at: "List of Varieties" } },
     ],
     modelled: [
       { what: "A, B quadrature to C", test: "tests/sim/encoder.test.ts" },

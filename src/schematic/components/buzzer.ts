@@ -161,12 +161,13 @@ const RECORDS: Record<string, Datasheet> = {
   "buzzer-cem-1203-42": {
     maker: "CUI Devices / Same Sky",
     docs: [DOCS["samesky-cem-1203-42"]],
-    specs: [
-      { label: "Rated drive", value: "3.5 Vo-p square, 2048 Hz, ½ duty", cite: { page: 1, at: "Specifications" } },
-      { label: "Operating voltage", value: "3.0–5.0 Vo-p", cite: { page: 1, at: "Specifications" } },
-      { label: "Current", value: "35 mA max at rated drive", cite: { page: 1, at: "Specifications" } },
-      { label: "Sound level", value: "85 dB(A) min, 95 typ at 10 cm", cite: { page: 1, at: "Specifications" } },
-      { label: "Coil resistance", value: "42 Ω (36–48)", cite: { page: 1, at: "Specifications" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 3, typ: 3.5, max: 5 }, cite: { page: 1, at: "Specifications" } },
+      { kind: "tone", value: { typ: 2048 }, cite: { page: 1, at: "Specifications" } },
+      { kind: "supplyCurrent", value: { max: 35e-3 }, at: [{ state: "ratedDrive" }], cite: { page: 1, at: "Specifications" } },
+      { kind: "soundLevel", value: { min: 85, typ: 95 }, at: [{ distance: 0.1 }], cite: { page: 1, at: "Specifications" } },
+      { kind: "coil", value: { min: 36, typ: 42, max: 48 }, cite: { page: 1, at: "Specifications" } },
     ],
     modelled: [
       { what: "Coil as series RL", cite: { page: 1, at: "Specifications" }, test: "tests/sim/buzzer-datasheets.test.ts" },
@@ -193,13 +194,13 @@ const RECORDS: Record<string, Datasheet> = {
   "buzzer-at-1224-twt-5v-2": {
     maker: "PUI Audio",
     docs: [DOCS["pui-at-1224-twt-5v-2-r"]],
-    specs: [
-      { label: "Rated drive", value: "5 V0-p square, 2400 Hz", cite: { page: 1, at: "Specifications" } },
-      { label: "Operating voltage", value: "3–7 V0-p", cite: { page: 1, at: "Specifications" } },
-      { label: "Current", value: "40 mA max at rated voltage", cite: { page: 1, at: "Specifications" } },
-      { label: "Coil resistance", value: "47 ± 7 Ω", cite: { page: 1, at: "Specifications" } },
-      { label: "Resonance", value: "2400 ± 500 Hz", cite: { page: 1, at: "Specifications" } },
-      { label: "Sound level", value: "87 dB(A) min at 10 cm", cite: { page: 1, at: "Specifications" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 3, typ: 5, max: 7 }, cite: { page: 1, at: "Specifications" } },
+      { kind: "tone", value: { min: 1900, typ: 2400, max: 2900 }, cite: { page: 1, at: "Specifications" } },
+      { kind: "supplyCurrent", value: { max: 40e-3 }, at: [{ state: "ratedDrive" }], cite: { page: 1, at: "Specifications" } },
+      { kind: "soundLevel", value: { min: 87 }, at: [{ distance: 0.1 }], cite: { page: 1, at: "Specifications" } },
+      { kind: "coil", value: { min: 40, typ: 47, max: 54 }, cite: { page: 1, at: "Specifications" } },
     ],
     modelled: [
       { what: "Coil as series RL", cite: { page: 1, at: "Specifications" }, test: "tests/sim/buzzer-datasheets.test.ts" },
@@ -225,12 +226,13 @@ const RECORDS: Record<string, Datasheet> = {
   "buzzer-cmt-0904-83t": {
     maker: "CUI Devices / Same Sky",
     docs: [DOCS["samesky-cmt-0904-83t"]],
-    specs: [
-      { label: "Rated drive", value: "3.0 Vo-p square, 2730 Hz, ½ duty", cite: { page: 1, at: "Specifications" } },
-      { label: "Operating voltage", value: "2.0–5.0 Vo-p", cite: { page: 1, at: "Specifications" } },
-      { label: "Current", value: "90 mA max at rated drive", cite: { page: 1, at: "Specifications" } },
-      { label: "Sound level", value: "83 dB min at 10 cm", cite: { page: 1, at: "Specifications" } },
-      { label: "Coil resistance", value: "15 Ω (13–17)", cite: { page: 1, at: "Specifications" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 2, typ: 3, max: 5 }, cite: { page: 1, at: "Specifications" } },
+      { kind: "tone", value: { typ: 2730 }, cite: { page: 1, at: "Specifications" } },
+      { kind: "supplyCurrent", value: { max: 90e-3 }, at: [{ state: "ratedDrive" }], cite: { page: 1, at: "Specifications" } },
+      { kind: "soundLevel", value: { min: 83 }, at: [{ distance: 0.1 }], cite: { page: 1, at: "Specifications" } },
+      { kind: "coil", value: { min: 13, typ: 15, max: 17 }, cite: { page: 1, at: "Specifications" } },
     ],
     modelled: [
       { what: "Coil as series RL", cite: { page: 1, at: "Specifications" }, test: "tests/sim/buzzer-datasheets.test.ts" },
@@ -255,12 +257,12 @@ const RECORDS: Record<string, Datasheet> = {
   "buzzer-tmb12a05": {
     maker: "Huaneng",
     docs: [DOCS["huaneng-tmb12a05"]],
-    specs: [
-      { label: "Rated voltage", value: "5 V DC", cite: { page: 2, at: "Specification table" } },
-      { label: "Operating voltage", value: "3–7 V DC", cite: { page: 2, at: "Specification table" } },
-      { label: "Current", value: "30 mA max", cite: { page: 2, at: "Specification table" } },
-      { label: "Sound level", value: "95 dB min at 10 cm", cite: { page: 2, at: "Specification table" } },
-      { label: "Tone", value: "2400 ± 300 Hz", cite: { page: 2, at: "Specification table" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 3, typ: 5, max: 7 }, cite: { page: 2, at: "Specification table" } },
+      { kind: "tone", value: { min: 2100, typ: 2400, max: 2700 }, cite: { page: 2, at: "Specification table" } },
+      { kind: "supplyCurrent", value: { max: 30e-3 }, cite: { page: 2, at: "Specification table" } },
+      { kind: "soundLevel", value: { min: 95 }, at: [{ distance: 0.1 }], cite: { page: 2, at: "Specification table" } },
     ],
     modelled: [
       { what: "96.6 dB, 23.0 mA", cite: { page: 6, at: "Test Report" }, test: "tests/sim/buzzer.test.ts" },
@@ -287,13 +289,13 @@ const RECORDS: Record<string, Datasheet> = {
   "buzzer-sdc1610m5-01": {
     maker: "TDK",
     docs: [DOCS["tdk-sdc-catalogue"]],
-    specs: [
-      { label: "Rated voltage", value: "5 V DC", cite: { page: 3, at: "Specifications" } },
-      { label: "Operating voltage", value: "4–8 V DC", cite: { page: 3, at: "Specifications" } },
-      { label: "Current", value: "30 mA max average", cite: { page: 3, at: "Specifications" } },
-      { label: "Sound level", value: "85 dB(A) min at 10 cm", cite: { page: 3, at: "Specifications" } },
-      { label: "Tone", value: "2400 Hz ±20 %", cite: { page: 3, at: "Specifications" } },
-      { label: "Temperature", value: "−10 to +70 °C", cite: { page: 3, at: "Specifications" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 4, typ: 5, max: 8 }, cite: { page: 3, at: "Specifications" } },
+      { kind: "tone", value: { min: 1920, typ: 2400, max: 2880 }, cite: { page: 3, at: "Specifications" } },
+      { kind: "supplyCurrent", value: { max: 30e-3 }, cite: { page: 3, at: "Specifications" } },
+      { kind: "soundLevel", value: { min: 85 }, at: [{ distance: 0.1 }], cite: { page: 3, at: "Specifications" } },
+      { kind: "temperature", value: { min: -10, max: 70 }, cite: { page: 3, at: "Specifications" } },
     ],
     modelled: [
       { what: "Curve values at 5 V", cite: { page: 3, at: "Input voltage vs. characteristics" }, test: "tests/sim/buzzer-datasheets.test.ts" },
@@ -322,12 +324,12 @@ const RECORDS: Record<string, Datasheet> = {
   "buzzer-cmi-9650c-030": {
     maker: "CUI Devices / Same Sky",
     docs: [DOCS["samesky-cmi-9650c-030"]],
-    specs: [
-      { label: "Rated voltage", value: "3.0 V DC", cite: { page: 1, at: "Specifications" } },
-      { label: "Operating voltage", value: "2.0–5.0 V DC", cite: { page: 1, at: "Specifications" } },
-      { label: "Current", value: "15 mA max at rated voltage", cite: { page: 1, at: "Specifications" } },
-      { label: "Sound level", value: "78 dB(A) min at 10 cm", cite: { page: 1, at: "Specifications" } },
-      { label: "Tone", value: "2700–3000 Hz", cite: { page: 1, at: "Specifications" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 2, typ: 3, max: 5 }, cite: { page: 1, at: "Specifications" } },
+      { kind: "tone", value: { min: 2700, max: 3000 }, cite: { page: 1, at: "Specifications" } },
+      { kind: "supplyCurrent", value: { max: 15e-3 }, at: [{ state: "ratedDrive" }], cite: { page: 1, at: "Specifications" } },
+      { kind: "soundLevel", value: { min: 78 }, at: [{ distance: 0.1 }], cite: { page: 1, at: "Specifications" } },
     ],
     modelled: [
       { what: "Curve values at 3 V", cite: { page: 2, at: "Performance curves" }, test: "tests/sim/buzzer-datasheets.test.ts" },
@@ -353,11 +355,12 @@ const RECORDS: Record<string, Datasheet> = {
   "buzzer-pkm13epyh4000-a0": {
     maker: "Murata",
     docs: [DOCS["murata-pkm13epyh4000-a0"], DOCS["murata-p37e"]],
-    specs: [
-      { label: "Sound level", value: "70 dB min at 10 cm, 3 Vp-p 4 kHz square", cite: { doc: "murata-p37e", page: 15, at: "Piezoelectric Sounders External Drive Pin Type Taping" } },
-      { label: "Input voltage", value: "30 Vp-p max", cite: { doc: "murata-p37e", page: 15, at: "Piezoelectric Sounders External Drive Pin Type Taping" } },
-      { label: "Capacitance", value: "5.5 nF ±30 % at 1 kHz", cite: { doc: "murata-p37e", page: 15, at: "Piezoelectric Sounders External Drive Pin Type Taping" } },
-      { label: "Temperature", value: "−40 to +85 °C", cite: { doc: "murata-p37e", page: 15, at: "Piezoelectric Sounders External Drive Pin Type Taping" } },
+    specs: [],
+    characteristics: [
+      { kind: "input", limit: { max: 30 }, cite: { doc: "murata-p37e", page: 15, at: "External Drive Pin Type Taping" } },
+      { kind: "soundLevel", value: { min: 70 }, at: [{ distance: 0.1 }, { freq: 4e3 }], cite: { doc: "murata-p37e", page: 15, at: "External Drive Pin Type Taping" } },
+      { kind: "capacitance", value: { min: 3.85e-9, typ: 5.5e-9, max: 7.15e-9 }, at: [{ freq: 1e3 }], cite: { doc: "murata-p37e", page: 15, at: "External Drive Pin Type Taping" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { doc: "murata-p37e", page: 15, at: "External Drive Pin Type Taping" } },
     ],
     modelled: [
       { what: "Static C plus motional branch", cite: { doc: "murata-p37e", page: 15, at: "Piezoelectric Sounders External Drive Pin Type Taping" }, test: "tests/sim/buzzer-datasheets.test.ts" },
@@ -386,11 +389,12 @@ const RECORDS: Record<string, Datasheet> = {
   "buzzer-pkm17epp-2002-b0": {
     maker: "Murata",
     docs: [DOCS["murata-p37e"]],
-    specs: [
-      { label: "Sound level", value: "70 dB min at 10 cm, 3 Vo-p 2 kHz square", cite: { page: 11, at: "Piezoelectric Sounders External Drive Pin Type" } },
-      { label: "Input voltage", value: "25 Vo-p max, with polarity", cite: { page: 11, at: "Piezoelectric Sounders External Drive Pin Type" } },
-      { label: "Capacitance", value: "34 nF ±30 % at 120 Hz", cite: { page: 11, at: "Piezoelectric Sounders External Drive Pin Type" } },
-      { label: "Temperature", value: "−20 to +70 °C", cite: { page: 11, at: "Piezoelectric Sounders External Drive Pin Type" } },
+    specs: [],
+    characteristics: [
+      { kind: "input", limit: { max: 25 }, cite: { page: 11, at: "External Drive Pin Type" } },
+      { kind: "soundLevel", value: { min: 70 }, at: [{ distance: 0.1 }, { freq: 2e3 }], cite: { page: 11, at: "External Drive Pin Type" } },
+      { kind: "capacitance", value: { min: 23.8e-9, typ: 34e-9, max: 44.2e-9 }, at: [{ freq: 120 }], cite: { page: 11, at: "External Drive Pin Type" } },
+      { kind: "temperature", value: { min: -20, max: 70 }, cite: { page: 11, at: "External Drive Pin Type" } },
     ],
     modelled: [
       { what: "Static C plus motional branch", cite: { page: 11, at: "Piezoelectric Sounders External Drive Pin Type" }, test: "tests/sim/buzzer-datasheets.test.ts" },
@@ -418,12 +422,13 @@ const RECORDS: Record<string, Datasheet> = {
   "buzzer-pkb24spch3601-b0": {
     maker: "Murata",
     docs: [DOCS["murata-p37e"]],
-    specs: [
-      { label: "Supply", value: "3.0–15.0 V DC", cite: { page: 24, at: "Piezoelectric Buzzers Pin Type" } },
-      { label: "Sound level", value: "90 dB min at 10 cm, 12 V DC", cite: { page: 24, at: "Piezoelectric Buzzers Pin Type" } },
-      { label: "Tone", value: "3.6 ± 0.5 kHz at 12 V", cite: { page: 24, at: "Piezoelectric Buzzers Pin Type" } },
-      { label: "Current", value: "16 mA max at 12 V", cite: { page: 24, at: "Piezoelectric Buzzers Pin Type" } },
-      { label: "Temperature", value: "−20 to +70 °C", cite: { page: 24, at: "Piezoelectric Buzzers Pin Type" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 3, max: 15 }, cite: { page: 24, at: "Buzzers Pin Type" } },
+      { kind: "soundLevel", value: { min: 90 }, at: [{ distance: 0.1 }, { supply: 12 }], cite: { page: 24, at: "Buzzers Pin Type" } },
+      { kind: "tone", value: { min: 3.1e3, typ: 3.6e3, max: 4.1e3 }, at: [{ supply: 12 }], cite: { page: 24, at: "Buzzers Pin Type" } },
+      { kind: "supplyCurrent", value: { max: 16e-3 }, at: [{ supply: 12 }], cite: { page: 24, at: "Buzzers Pin Type" } },
+      { kind: "temperature", value: { min: -20, max: 70 }, cite: { page: 24, at: "Buzzers Pin Type" } },
     ],
     modelled: [
       { what: "Curve values at 12 V", cite: { page: 24, at: "Voltage-Sound Pressure Level/Voltage-Consumption Current" }, test: "tests/sim/buzzer-datasheets.test.ts" },

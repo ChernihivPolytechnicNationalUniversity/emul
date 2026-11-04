@@ -91,12 +91,12 @@ const RECORDS: Record<string, Datasheet> = {
   "keypad-4x4": {
     maker: "Parallax",
     docs: [DOCS["parallax-27899"], DOCS["adafruit-3844"]],
-    specs: [
-      { label: "Maximum rating", value: "24 V DC, 30 mA", cite: { page: 1, at: "Key Specifications" } },
-      { label: "Interface", value: "8 pins to a 4 × 4 matrix", cite: { page: 1, at: "Key Specifications" } },
-      { label: "Operating temperature", value: "0 to 50 °C", cite: { page: 1, at: "Key Specifications" } },
-      { label: "Contact resistance", value: "< 100 Ω", cite: { doc: "adafruit-3844", at: "Technical Details" } },
-      { label: "Actuation force", value: "160–180 g", cite: { doc: "adafruit-3844", at: "Technical Details" } },
+    specs: [],
+    characteristics: [
+      { kind: "contactRating", limit: { max: 30e-3 }, at: [{ supply: 24 }], cite: { page: 1, at: "Key Specifications" } },
+      { kind: "contactResistance", value: { max: 100 }, cite: { doc: "adafruit-3844", at: "Technical Details" } },
+      { kind: "actuation", value: { min: 1.569, max: 1.765 }, cite: { doc: "adafruit-3844", at: "Technical Details" } },
+      { kind: "temperature", value: { min: 0, max: 50 }, cite: { page: 1, at: "Key Specifications" } },
     ],
     modelled: [
       { what: "Key closes row to column", cite: { page: 2, at: "Figure 1" }, test: "tests/sim/keypad.test.ts" },

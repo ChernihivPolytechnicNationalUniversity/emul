@@ -112,13 +112,16 @@ const RECORDS: Record<string, Datasheet> = {
   "lx-lcbst": {
     maker: "NanJing Top Power",
     docs: [DOCS["toppower-tp4056"], DOCS["pjsemi-dw03"], DOCS["aerosemi-mt3608"]],
-    specs: [
-      { label: "Charger supply", value: "4.0–8.0 V", cite: { page: 5, at: "Electrical Characteristics" } },
-      { label: "Float voltage", value: "4.2 V ±1 %", cite: { page: 5, at: "Electrical Characteristics, VFLOAT" } },
-      { label: "Overcharge / over-discharge", value: "4.3 V / 2.4 V", cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table (printed as a second Absolute Maximum Ratings)" } },
-      { label: "Overcurrent / short", value: "3.5 A / 20 A", cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table (printed as a second Absolute Maximum Ratings)" } },
-      { label: "Boost output", value: "up to 28 V", cite: { doc: "aerosemi-mt3608", page: 1, at: "Features" } },
-      { label: "Boost switch limit", value: "4 A", cite: { doc: "aerosemi-mt3608", page: 3, at: "Electrical Characteristics, SW Current Limit" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 4, max: 8 }, cite: { page: 5, at: "Electrical Characteristics" } },
+      { kind: "float", value: { min: 4.158, typ: 4.2, max: 4.242 }, cite: { page: 5, at: "VFLOAT" } },
+      { kind: "overcharge", value: { typ: 4.3 }, cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table" } },
+      { kind: "overdischarge", value: { typ: 2.4 }, cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table" } },
+      { kind: "overcurrent", value: { typ: 3.5 }, cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table" } },
+      { kind: "shortCircuit", value: { typ: 20 }, cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table" } },
+      { kind: "output", value: { max: 28 }, cite: { doc: "aerosemi-mt3608", page: 1, at: "Features" } },
+      { kind: "currentLimit", value: { typ: 4 }, cite: { doc: "aerosemi-mt3608", page: 3, at: "SW Current Limit" } },
     ],
     modelled: [
       { what: "1 A charge from USB-C", test: "tests/sim/charge-boost.test.ts" },

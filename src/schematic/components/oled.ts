@@ -117,13 +117,13 @@ const RECORDS: Record<string, Datasheet> = {
   "oled-ssd1306-i2c": {
     maker: "Solomon Systech",
     docs: [DOCS["solomon-ssd1306"]],
-    specs: [
-      { label: "Logic supply VDD", value: "1.65–3.3 V", cite: { page: 48, at: "Table 12-1" } },
-      { label: "VDD (abs max)", value: "−0.3 to +4 V", cite: { page: 47, at: "Table 11-1" } },
-      { label: "Input voltage (abs max)", value: "VSS − 0.3 to VDD + 0.3 V", cite: { page: 47, at: "Table 11-1" } },
-      { label: "I²C clock", value: "2.5 µs cycle min (400 kHz)", cite: { page: 54, at: "Table 13-6" } },
-      { label: "Address", value: "0x3C or 0x3D (SA0)", cite: { page: 19, at: "§8.1.5" } },
-      { label: "Segment current", value: "100 µA at contrast FFh", cite: { page: 48, at: "Table 12-1" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 1.65, max: 3.3 }, limit: { min: -0.3, max: 4 }, cite: { page: 48, at: "Table 12-1" }, limitCite: { page: 47, at: "Table 11-1" } },
+      { kind: "pinVoltage", limit: { min: { rail: "GND", offset: -0.3 }, max: { rail: "VDD", offset: 0.3 } }, cite: { page: 47, at: "Table 11-1" } },
+      { kind: "busClock", value: { max: 400e3 }, cite: { page: 54, at: "Table 13-6" } },
+      { kind: "address", set: [0x3c, 0x3d], cite: { page: 19, at: "§8.1.5" } },
+      { kind: "segmentCurrent", value: { typ: 100e-6 }, per: "segment", cite: { page: 48, at: "Table 12-1" } },
     ],
     modelled: [
       { what: "Full command table, multi-byte included", cite: { page: 28, at: "Table 9-1" }, test: "tests/sim/ssd1306.test.ts" },
@@ -153,13 +153,13 @@ const RECORDS: Record<string, Datasheet> = {
   "oled-ssd1306-i2c-32": {
     maker: "Solomon Systech",
     docs: [DOCS["solomon-ssd1306"]],
-    specs: [
-      { label: "Logic supply VDD", value: "1.65–3.3 V", cite: { page: 48, at: "Table 12-1" } },
-      { label: "VDD (abs max)", value: "−0.3 to +4 V", cite: { page: 47, at: "Table 11-1" } },
-      { label: "Input voltage (abs max)", value: "VSS − 0.3 to VDD + 0.3 V", cite: { page: 47, at: "Table 11-1" } },
-      { label: "I²C clock", value: "2.5 µs cycle min (400 kHz)", cite: { page: 54, at: "Table 13-6" } },
-      { label: "Address", value: "0x3C or 0x3D (SA0)", cite: { page: 19, at: "§8.1.5" } },
-      { label: "Segment current", value: "100 µA at contrast FFh", cite: { page: 48, at: "Table 12-1" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 1.65, max: 3.3 }, limit: { min: -0.3, max: 4 }, cite: { page: 48, at: "Table 12-1" }, limitCite: { page: 47, at: "Table 11-1" } },
+      { kind: "pinVoltage", limit: { min: { rail: "GND", offset: -0.3 }, max: { rail: "VDD", offset: 0.3 } }, cite: { page: 47, at: "Table 11-1" } },
+      { kind: "busClock", value: { max: 400e3 }, cite: { page: 54, at: "Table 13-6" } },
+      { kind: "address", set: [0x3c, 0x3d], cite: { page: 19, at: "§8.1.5" } },
+      { kind: "segmentCurrent", value: { typ: 100e-6 }, per: "segment", cite: { page: 48, at: "Table 12-1" } },
     ],
     modelled: [
       { what: "Full command table, multi-byte included", cite: { page: 28, at: "Table 9-1" }, test: "tests/sim/ssd1306.test.ts" },
@@ -186,13 +186,13 @@ const RECORDS: Record<string, Datasheet> = {
   "oled-ssd1306-spi": {
     maker: "Solomon Systech",
     docs: [DOCS["solomon-ssd1306"]],
-    specs: [
-      { label: "Logic supply VDD", value: "1.65–3.3 V", cite: { page: 48, at: "Table 12-1" } },
-      { label: "VDD (abs max)", value: "−0.3 to +4 V", cite: { page: 47, at: "Table 11-1" } },
-      { label: "Input voltage (abs max)", value: "VSS − 0.3 to VDD + 0.3 V", cite: { page: 47, at: "Table 11-1" } },
-      { label: "SPI clock", value: "100 ns cycle min (10 MHz)", cite: { page: 52, at: "Table 13-4" } },
-      { label: "Reset pulse", value: "RES# low 3 µs min", cite: { page: 49, at: "Table 13-1" } },
-      { label: "Segment current", value: "100 µA at contrast FFh", cite: { page: 48, at: "Table 12-1" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 1.65, max: 3.3 }, limit: { min: -0.3, max: 4 }, cite: { page: 48, at: "Table 12-1" }, limitCite: { page: 47, at: "Table 11-1" } },
+      { kind: "pinVoltage", limit: { min: { rail: "GND", offset: -0.3 }, max: { rail: "VDD", offset: 0.3 } }, cite: { page: 47, at: "Table 11-1" } },
+      { kind: "busClock", value: { max: 10e6 }, cite: { page: 52, at: "Table 13-4" } },
+      { kind: "pulse", value: { min: 3e-6 }, cite: { page: 49, at: "Table 13-1" } },
+      { kind: "segmentCurrent", value: { typ: 100e-6 }, per: "segment", cite: { page: 48, at: "Table 12-1" } },
     ],
     modelled: [
       { what: "Full command table, multi-byte included", cite: { page: 28, at: "Table 9-1" }, test: "tests/sim/ssd1306.test.ts" },
