@@ -43,7 +43,19 @@ function monacoOperatingSystem(hints: Browser["hints"]): number {
 
 const PLATFORMS: Platform[] = ["apple", "windows", "linux", "chromeos"]
 
+const RECORDED: Record<string, { userAgent: string; platform: string; uaDataPlatform: string | null; maxTouchPoints: number }> = JSON.parse(readFileSync(new URL("../data/keyboard-platforms/presses.json", import.meta.url), "utf8")).browsers
+const recordedOn = (machine: string): Platform => (machine.startsWith("macOS") ? "apple" : machine.startsWith("Windows") ? "windows" : "linux")
+
 describe("the platform", () => {
+  it("is read right from what real Safari, Chrome, Edge and Firefox reported on macOS, Windows and Linux, and as Monaco reads it", () => {
+    for (const [machine, b] of Object.entries(RECORDED)) {
+      const hints = { userAgent: b.userAgent, platform: b.platform, maxTouchPoints: b.maxTouchPoints, userAgentData: b.uaDataPlatform === null ? null : { platform: b.uaDataPlatform } }
+      expect.soft(detectPlatform(hints), machine).toBe(recordedOn(machine))
+      expect.soft(detectPlatform(hints) === "apple", `${machine}: Monaco`).toBe(monacoOperatingSystem(hints) === MONACO_MAC)
+    }
+  })
+
+
   it("is read the same way Monaco reads it, so the field and the code editor take the same command key", () => {
     for (const b of BROWSERS) {
       expect.soft(detectPlatform(b.hints), b.name).toBe(b.is)
