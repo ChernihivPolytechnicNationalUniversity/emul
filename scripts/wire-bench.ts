@@ -12,7 +12,9 @@ import type { PlacedObject, Schematic } from "@/schematic/types"
 import { WireGraph } from "@/schematic/wires/graph"
 import { boardDocuments } from "./lib/stress"
 import { commitEdit, normalise } from "@/schematic/wires/normal-form"
+import { planDrag } from "@/schematic/wires/drag"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
+import { WireSheet } from "@/schematic/wires/sheet"
 
 const CELL = 24
 const HALF = CELL / 2
@@ -131,8 +133,10 @@ function oneEdit(n: number, aligned: boolean) {
 
 const ms = (v: number) => `${v.toFixed(2)} ms`.padStart(11)
 let failed = 0
+let checked = 0
 const check = (what: string, got: number, limit: number) => {
   const ok = got <= limit
+  checked++
   if (!ok) failed++
   console.log(`  ${ok ? "✓" : "✗"} ${what.padEnd(52)} ${ms(got)}   at most ${ms(limit)}`)
 }
@@ -236,5 +240,79 @@ check(`a drag's placement check set up on ${BOARDS} boards`, dragStart, 30)
 check(`${FENCED} parts fenced in by ${FENCE * FENCE} grounds taken out to clear spots`, fencedIn, 300)
 check(`an old file's ${2 * STRIP_WIRES} crowded wires frozen`, frozen, 600)
 check(`the wire currents per terminal for ${SUPPLIES} power supplies`, flowBuilt, 150)
-console.log(`\n${14 - failed}/14 checks passed`)
+
+const ROWS = 100
+const COLUMNS = 100
+function resistorGrid() {
+  const wires: WireSegment[] = []
+  const pins: WirePin[] = []
+  const heading = new Map<string, { x: number; y: number }>()
+  for (let r = 0; r < ROWS; r++)
+    for (let k = 0; k < COLUMNS; k++) {
+      const x = 8 * CELL * k
+      const y = 4 * CELL * r
+      pins.push({ key: `R${r}_${k}:1`, at: { x, y } }, { key: `R${r}_${k}:2`, at: { x: x + 4 * CELL, y } })
+      heading.set(`R${r}_${k}:1`, { x: -1, y: 0 })
+      heading.set(`R${r}_${k}:2`, { x: 1, y: 0 })
+      if (k + 1 < COLUMNS) wires.push(seg(x + 4 * CELL, y, x + 8 * CELL, y))
+      if (r + 1 < ROWS) wires.push(seg(x + 4 * CELL, y, x + 4 * CELL, y + 4 * CELL))
+    }
+  return { wires, pins, heading }
+}
+const grid = resistorGrid()
+const gridWires = normalise(grid.wires, grid.pins)
+const sheetBuild = time(() => WireSheet.of(gridWires, grid.pins), 3)
+const spine = overlapping(SIZES[SIZES.length - 1]).reverse()
+const onOneLine = time(() => WireSheet.of(spine, []), 3)
+const gridSheet = WireSheet.of(gridWires, grid.pins)
+const gridNets = new WireGraph().of(gridWires, grid.pins)
+const carriedParts = ["R50_50", "R50_51", "R51_50", "R52_52", "R49_53"]
+const request = { pins: carriedParts.flatMap((p) => [`${p}:1`, `${p}:2`]), heading: (key: string) => grid.heading.get(key) }
+const planning = time(() => planDrag(gridSheet, gridNets, request), 25)
+const dragPlan = planDrag(gridSheet, gridNets, request)
+const offsets: { x: number; y: number }[] = []
+for (let dx = -6; dx <= 6; dx++) for (let dy = -6; dy <= 6; dy++) offsets.push({ x: dx * CELL, y: dy * CELL })
+const WARM = 20
+const MEASURED = 5
+const frameSamples: number[] = []
+let drawn = 0
+for (let round = 0; round < WARM + MEASURED; round++)
+  for (const offset of offsets) {
+    const started = performance.now()
+    const pieces = dragPlan.frame(offset).pieces.length
+    if (round < WARM) continue
+    frameSamples.push(performance.now() - started)
+    drawn += pieces
+  }
+const frame = median(frameSamples)
+const releaseOffset = { x: 2 * CELL, y: CELL }
+const releaseEdit = time(() => dragPlan.commit(releaseOffset), 25)
+const released = dragPlan.commit(releaseOffset)!
+const movedPins = new Map(released.pins.map((p) => [p.key, p]))
+const pinsAfter = grid.pins.map((p) => movedPins.get(p.key) ?? p)
+const releaseNormalised = time(() => commitEdit(gridWires, pinsAfter, released.edit), 7)
+const committed = commitEdit(gridWires, pinsAfter, released.edit)
+const pinsMoved = released.pins
+const pinsLeft = pinsMoved.map((p) => grid.pins.find((q) => q.key === p.key)!)
+const sheetSamples: number[] = []
+for (let i = 0; i < 9; i++) {
+  const forward = i % 2 === 0
+  const started = performance.now()
+  gridSheet.apply(forward ? { added: committed.added, removed: committed.removed, pinsAdded: pinsMoved, pinsRemoved: pinsLeft } : { added: committed.removed, removed: committed.added, pinsAdded: pinsLeft, pinsRemoved: pinsMoved })
+  for (const s of committed.added) gridSheet.through(s.a)
+  for (const s of committed.removed) gridSheet.through(s.a)
+  sheetSamples.push(performance.now() - started)
+}
+if (sheetSamples.length % 2) gridSheet.apply({ added: committed.removed, removed: committed.added, pinsAdded: pinsLeft, pinsRemoved: pinsMoved })
+const sheetDelta = median(sheetSamples.slice(1))
+console.log(`\nThe rubber band on a ${gridWires.length}-segment sheet of ${ROWS * COLUMNS} resistors, ${carriedParts.length} carried (median of warm runs)\n`)
+console.log(`  the sheet index built once per document: ${ms(sheetBuild)} (${ms(onOneLine)} for ${spine.length} segments on one line); the plan at pointer-down: ${ms(planning)}; a frame (${offsets.length} offsets, ${Math.round(drawn / (MEASURED * offsets.length))} pieces each on average): ${ms(frame)}`)
+console.log(`  the release: the edit built ${ms(releaseEdit)}, then committed and normalised by commitEdit ${ms(releaseNormalised)}; the sheet index taking its delta (${committed.added.length} added, ${committed.removed.length} removed, ${pinsMoved.length} pins moved) and answering on the touched lines: ${ms(sheetDelta)}`)
+console.log("")
+check(`a drag's plan at pointer-down on ${gridWires.length} segments`, planning, 0.2)
+check(`a drag frame on ${gridWires.length} segments, ${carriedParts.length} parts carried`, frame, 0.15)
+check(`a drag's release turned into an edit on ${gridWires.length} segments`, releaseEdit, 0.5)
+check(`the sheet index taking a release's delta on ${gridWires.length} segments`, sheetDelta, 1)
+check(`the sheet index built for ${large.n} overlapping segments on one line`, onOneLine, 200)
+console.log(`\n${checked - failed}/${checked} checks passed`)
 if (failed) process.exitCode = 1
