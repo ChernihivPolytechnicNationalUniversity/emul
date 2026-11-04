@@ -138,6 +138,12 @@ export const KINDS = {
   deadBand: { label: "Dead band", quantity: "time", visual: "log", glyph: "clock" },
   actuation: { label: "Actuation", quantity: "force", visual: "range", glyph: "gear" },
   detents: { label: "Detents", quantity: "count", visual: "tokens", glyph: "gear", set: true },
+  // boards and MCUs
+  flash: { label: "Flash", quantity: "memory", visual: "log", glyph: "chip" },
+  ram: { label: "RAM", quantity: "memory", visual: "log", glyph: "chip" },
+  eeprom: { label: "EEPROM", quantity: "memory", visual: "log", glyph: "chip" },
+  ioPins: { label: "I/O pins", quantity: "count", visual: "range", glyph: "chip" },
+  ioLevel: { label: "Logic level", quantity: "voltage", visual: "range", glyph: "rail", limit: true },
   // digital
   address: { label: "Address", quantity: "address", visual: "tokens", glyph: "chip", set: true },
 } as const satisfies Record<string, KindDef>
@@ -221,6 +227,11 @@ const trim = (v: number) => {
 export function formatNumber(v: number, quantity: Quantity, prefixFrom?: number): string {
   const q = QUANTITIES[quantity]
   if (quantity === "address") return `0x${v.toString(16).toUpperCase().padStart(2, "0")}`
+  // Memory in binary units, as every datasheet gives it: 32768 B is 32 KB.
+  if (quantity === "memory") {
+    const [f, u] = v >= 1024 ** 2 ? [1024 ** 2, "MB"] : v >= 1024 ? [1024, "KB"] : [1, "B"]
+    return `${trim(v / f)} ${u}`
+  }
   const shown = "factor" in q ? v * q.factor : v
   if (!PREFIXED.has(q.unit)) return q.unit ? `${trim(shown)} ${q.unit}` : trim(shown)
   const ref = Math.abs(prefixFrom ?? shown)

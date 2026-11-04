@@ -140,6 +140,7 @@ const DECADES: Partial<Record<Quantity, [number, number, [number, string][]]>> =
   current: [-9, 0, [[-9, "nA"], [-6, "µA"], [-3, "mA"], [0, "A"]]],
   slewRate: [5, 9, [[6, "1"], [8, "100"]]],
   capacitance: [-12, -3, [[-12, "pF"], [-9, "nF"], [-6, "µF"]]],
+  memory: [1, 7, [[2, "100 B"], [3, "1 KB"], [6, "1 MB"]]],
 }
 
 /** A decade ruler with a pointer at the value. */
