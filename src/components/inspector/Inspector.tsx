@@ -1,13 +1,14 @@
 import type { EepromSnapshot } from "@/sim/digital"
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs"
 import { PartTab } from "@/components/parts/PartTab"
+import { flipFavourite, useQuickLists } from "@/components/palette/recents"
 import type { HdlSnapshot } from "@/sim/hdl"
 import { HC595_LINKS, HC595_OUTPUTS, shiftRegisterOfDef, type ShiftRegisterSnapshot } from "@/sim/hc595"
 import { BUZZER_KINDS, buzzerOfDef, type BuzzerSnapshot } from "@/sim/buzzer"
 import { productById } from "@/sim/addressable/products"
 import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
-import { ChevronDownIcon, CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
+import { ChevronDownIcon, CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon, StarIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { chipById } from "@/mcu/chip"
 import { avrChipById } from "@/mcu/avr/chip"
@@ -25,7 +26,7 @@ import { familyOf, swapsFor } from "@/schematic/families"
 import { getDef, hdlModule } from "@/schematic/registry"
 import { isHdlDef, isModified } from "@/schematic/hdl"
 import type { FlipAxis } from "@/schematic/geometry"
-import type { Damage, PlacedObject, PropField } from "@/schematic/types"
+import type { ComponentDef, Damage, PlacedObject, PropField } from "@/schematic/types"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import type { SimReadout } from "@/sim/use-simulation"
 import { formatSI, SI_PREFIXES, UNIT_PREFIXES, joinValue, splitValue } from "@/sim/units"
@@ -94,6 +95,23 @@ function Section({ id, label, sections, open = true, action, children }: { id: s
 
 type InspectorTab = "properties" | "part" | "readings"
 
+/** The palette's star, on the part in the inspector: pin what is on the bench to the top of the palette. */
+function PinStar({ defId, name }: { defId: string; name: string }) {
+  const { favourites } = useQuickLists()
+  const on = favourites.includes(defId)
+  return (
+    <Button variant="ghost" size="icon-sm" onClick={() => flipFavourite(defId)} aria-pressed={on} aria-label={on ? `Unpin ${name}` : `Pin ${name} to the palette`} title={on ? "Unpin from the palette" : "Pin to the top of the palette"}>
+      <StarIcon className={on ? "fill-amber-400 text-amber-500" : undefined} />
+    </Button>
+  )
+}
+
+/** Under the part's name, as on its datasheet: who makes it, in what package. */
+function maker(def: ComponentDef): string | undefined {
+  const record = def.datasheet
+  return record && "docs" in record ? [record.maker, record.package].filter(Boolean).join(" · ") : undefined
+}
+
 /** The tab stays as picked from one selected part to the next, for this page: comparing parts' datasheets is a walk across the bench. */
 function useInspectorTab() {
   return React.useState<InspectorTab>("properties")
@@ -113,10 +131,11 @@ export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmwa
   return (
     <Card data-slot="inspector" className={cn("max-h-[calc(100%-1.5rem)] w-72 gap-4 overflow-y-auto py-4 shadow-md", !open && "py-3", className)} {...props}>
       <CardHeader className="px-4">
-        <CardTitle className="text-sm">{def ? def.name : `${selected.length} components`}</CardTitle>
-        {open && def?.description && <CardDescription className="col-span-2">{def.description}</CardDescription>}
+        <CardTitle className="text-sm">{def ? [object?.props?.ref, def.name].filter(Boolean).join(" · ") : `${selected.length} components`}</CardTitle>
+        {open && def && maker(def) && <CardDescription className="col-span-2 text-xs">{maker(def)}</CardDescription>}
         <CardAction className="row-span-1">
           <ButtonGroup>
+            {def && <PinStar defId={def.id} name={def.name} />}
             <Button variant="ghost" size="icon-sm" onClick={() => sections.setOpen("panel", !open)} aria-label={open ? "Collapse the inspector" : "Expand the inspector"} aria-expanded={open}>
               <ChevronDownIcon className={cn("transition-transform duration-200 ease-out motion-reduce:transition-none", open && "rotate-180")} />
             </Button>

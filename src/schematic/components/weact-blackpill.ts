@@ -4,6 +4,8 @@ import { mcuModel } from "../mcu-model"
 import type { ComponentDef, Element, PartDef, PinDef, PinKind } from "../types"
 import { LED_COLORS } from "./basic"
 import { boardArt } from "./weact-blackpill-art"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * WeAct Studio Black Pill, MiniF4x1Cx V3.1, with an STM32F411CEU6, F401CCU6 or F401CEU6: one PCB for all three
@@ -331,3 +333,30 @@ export const weactBlackpillF401ce = blackPill(STM32F401CE, "weact-blackpill-f401
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [weactBlackpillF411, weactBlackpillF401ce, weactBlackpillF401cc]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "weact-blackpill-f411": {
+    maker: "WeAct Studio",
+    docs: [DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS["st-ds10314"], DOCS["st-rm0383"]],
+    specs: [],
+    modelled: [],
+    notModelled: [{ what: "USB (the device stack and the ROM DFU bootloader), the W25Qxx SPI flash footprint U3 (not fitted), the SWD wire protocol (P3's pins work as PA13/PA14; the built-in debugger reaches the core directly), the SB1 solder bridge across D4" }],
+  },
+  "weact-blackpill-f401ce": {
+    maker: "WeAct Studio",
+    docs: [DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS["st-ds10086"], DOCS["st-rm0383"]],
+    specs: [],
+    modelled: [],
+    notModelled: [{ what: "USB (the device stack and the ROM DFU bootloader), the W25Qxx SPI flash footprint U3 (not fitted), the SWD wire protocol (P3's pins work as PA13/PA14; the built-in debugger reaches the core directly), the SB1 solder bridge across D4" }],
+  },
+  "weact-blackpill-f401cc": {
+    maker: "WeAct Studio",
+    docs: [DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS["st-ds9716"], DOCS["st-rm0383"]],
+    specs: [],
+    modelled: [],
+    notModelled: [{ what: "USB (the device stack and the ROM DFU bootloader), the W25Qxx SPI flash footprint U3 (not fitted), the SWD wire protocol (P3's pins work as PA13/PA14; the built-in debugger reaches the core directly), the SB1 solder bridge across D4" }],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

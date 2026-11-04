@@ -94,7 +94,16 @@ export function PlacementGhost({ defId, at, grid, scale, detail, sim, colorOf, r
     )
   }
   return (
-    <div data-slot="placement-ghost" className="pointer-events-none absolute top-0 left-0 opacity-60 [&_*]:pointer-events-none!">
+    <div data-slot="placement-ghost" className="pointer-events-none absolute top-0 left-0 opacity-60">
+      <PartDrawing object={object} grid={grid} detail={detail} sim={sim} />
+    </div>
+  )
+}
+
+/** One part as the field draws it at this level of detail, body and pins, with nothing to press: a ghost, a preview. */
+export function PartDrawing({ object, grid, detail, sim }: { object: PlacedObject; grid: number; detail: FieldDetail; sim: SimStore }) {
+  return (
+    <div className="pointer-events-none [&_*]:pointer-events-none!">
       <div className="absolute top-0 left-0">
         <ComponentView
           object={object}

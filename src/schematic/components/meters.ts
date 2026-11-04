@@ -6,6 +6,7 @@
  */
 import { AmmeterIcon, VoltmeterIcon } from "../icons"
 import type { ComponentDef } from "../types"
+import { BASIC_RECORDS } from "./basic-records"
 
 const W = 4
 const H = 3
@@ -75,3 +76,6 @@ export const meterComponents: ComponentDef[] = [voltmeter, ammeter]
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = meterComponents
+
+// What the meters model and leave out: no one meter's datasheet sets them (basic-records.ts).
+for (const def of defs) def.datasheet ??= BASIC_RECORDS[def.id]

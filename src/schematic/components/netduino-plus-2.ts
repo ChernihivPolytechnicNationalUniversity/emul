@@ -3,6 +3,9 @@ import { BoardIcon } from "../icons"
 import { mcuModel } from "../mcu-model"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind } from "../types"
 import { LED_COLORS } from "./basic"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
+import { NOT_MODELLED as ENC28J60 } from "@/sim/enc28j60"
 
 /**
  * Netduino Plus 2, Rev A (Secret Labs CW0034, STM32F405RGT6). Sources (docs/netduino-plus-2/
@@ -235,3 +238,16 @@ export const netduinoPlus2: ComponentDef = {
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [netduinoPlus2]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "netduino-plus-2": {
+    maker: "Secret Labs",
+    docs: [DOCS["secretlabs-cw0034"], DOCS["mchp-ds39662e"], DOCS["mchp-ds80349c"], DOCS["onsemi-mc33269"], DOCS["st-st1s12"], DOCS["st-ds8626"]],
+    specs: [],
+    modelled: [],
+    notModelled: [{ what: "MicroSD card, the ENC28J60's network side (no cable to another host: what it sends goes nowhere, nothing arrives), the MCO1 clock as a signal (the ENC28J60 is clocked whenever it is powered), the VIN/USB comparator (both sources feed +5V)" }, ...ENC28J60.map((what) => ({ what: `ENC28J60: ${what}` }))],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

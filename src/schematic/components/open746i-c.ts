@@ -4,6 +4,8 @@ import { mcuModel } from "../mcu-model"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind, Side } from "../types"
 import { BOUNCE_FIELDS } from "./basic"
 import { boardArt, cellAt, FFC_PINS, FRAME, moduleArt, MODULE_PAD, onModule, PC13_LINK, PITCH, POWER_JMP, SEATS, SMD_MM } from "./open746i-c-art"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * Waveshare Open746I-C: the mother board with the Core746I module (STM32F746IGT6, 8 MB SDRAM)
@@ -748,3 +750,16 @@ export const open746ic: ComponentDef = {
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [open746ic]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "open746i-c": {
+    maker: "Waveshare",
+    docs: [DOCS["waveshare-open746i-c-sch"], DOCS["waveshare-core746i-sch"], DOCS["st-ds10916"], DOCS["st-rm0385"], DOCS["silabs-cp2102"], DOCS["mchp-mic2025"]],
+    specs: [],
+    modelled: [],
+    notModelled: [{ what: "JTAG/SWD (no debugger; no pull resistors on the module), the 4.3\" LCD header P14 (RGB as P15, XPT2046 touch on PF7/PF8/PF9 with CS PF6, PENIRQ PD7 and BUSY PD11, backlight PA3), the MIC2025's switch from 5 V to the module's USB (its enable polarity, -1 or -2, is not printed), RTS following the PC's terminal (held high, as the bench found it), the fast fall the census found on PA13 and PB3 (the pin lab saw no resistive pull-down on either: pulled up, both read VDD), the PC's 15 kΩ on D−/D+ behind the module USB, PDR_ON's 3-pad solder jumper COMP.J2 (its bridged side is not printed), the module's decoupling" }],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

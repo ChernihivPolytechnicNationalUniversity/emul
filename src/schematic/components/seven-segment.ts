@@ -10,6 +10,8 @@
 import { SevenSegmentIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef } from "../types"
 import { chromaticityColor } from "./rgb-led"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 type Knot = readonly [celsius: number, milliamps: number]
 
@@ -246,3 +248,37 @@ export const sevenSegmentComponents: ComponentDef[] = [
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = sevenSegmentComponents
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "seven-segment-ca": {
+    maker: "Kingbright",
+    docs: [DOCS["kb-sa56-11ewa"], DOCS["kb-sa56-11srwa"], DOCS["kb-sa56-11gwa"], DOCS["kb-sa56-11sykwa"], DOCS["kb-sa56-11cgkwa"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "seven-segment-cc": {
+    maker: "Kingbright",
+    docs: [DOCS["kb-sc56-11ewa"], DOCS["kb-sc56-11srwa"], DOCS["kb-sc56-11gwa"], DOCS["kb-sc56-11sykwa"], DOCS["kb-sc56-11cgkwa"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "seven-segment-4-ca": {
+    maker: "Kingbright",
+    docs: [DOCS["kb-ca56-12ewa"], DOCS["kb-ca56-12srwa"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "seven-segment-4-cc": {
+    maker: "Kingbright",
+    docs: [DOCS["kb-cc56-12ewa"], DOCS["kb-cc56-12srwa"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

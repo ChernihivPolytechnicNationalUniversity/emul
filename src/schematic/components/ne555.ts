@@ -2,6 +2,8 @@ import { NE555 } from "@/sim/ne555"
 import { TimerIcon } from "../icons"
 import { pinNumbers } from "../pin-numbers"
 import type { ComponentDef, PinDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const W = 10
 const H = 10
@@ -62,3 +64,17 @@ export const ne555: ComponentDef = {
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [ne555]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "ne555": {
+    maker: "Texas Instruments",
+    package: "PDIP-8",
+    docs: [DOCS["ti-slfs022k"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

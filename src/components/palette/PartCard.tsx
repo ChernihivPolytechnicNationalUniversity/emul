@@ -1,13 +1,13 @@
 import * as React from "react"
 import { createPortal } from "react-dom"
 import { ExternalLinkIcon } from "lucide-react"
-import { docUrl, DOCS, hasDatasheet } from "@/schematic/datasheets"
+import { docUrl, hasDatasheet } from "@/schematic/datasheets"
 import { familyOf, variantLabel } from "@/schematic/families"
 import { getDef, getDefsVersion, getMeta, subscribeDefs } from "@/schematic/registry"
 import { SpecList, SymbolPreview } from "@/components/parts/PartFacts"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FavouriteButton } from "./FavouriteButton"
-import { hideCard, keepCard, leavePart, useCardAnchor } from "./part-card"
+import { HOLD_MS, hideCard, holdCard, keepCard, leavePart, releaseCard, useCardAnchor } from "./part-card"
 
 const WIDTH = 360
 const GAP = 8
@@ -15,8 +15,39 @@ const MARGIN = 8
 /** Variant chips the card shows before "+N". */
 const CHIPS = 3
 
-/** The hover card beside the palette: what the part is, its key numbers, what is modelled, its datasheet. */
+/** The hover card beside the palette: what the part is, its key numbers, its datasheet. */
 export function PartCard() {
+  const anchor = useCardAnchor()
+  // A new part, a new card: its line starts again from the top.
+  return anchor ? <CardBody key={anchor.id} /> : null
+}
+
+/**
+ * A faint line that runs once round the card's edge; when it closes the card is held, and the
+ * pointer may cross other parts on the way to it. The wait shown, not announced.
+ */
+function HoldLine() {
+  const line = React.useRef<SVGRectElement>(null)
+  React.useEffect(() => {
+    const el = line.current
+    if (!el) return
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const t = setTimeout(holdCard, HOLD_MS)
+      return () => clearTimeout(t)
+    }
+    const run = el.animate([{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], { duration: HOLD_MS, easing: "linear", fill: "forwards" })
+    run.onfinish = holdCard
+    return () => run.cancel()
+  }, [])
+  return (
+    <svg aria-hidden className="pointer-events-none absolute inset-0 size-full overflow-visible text-muted-foreground/45">
+      <rect ref={line} width="100%" height="100%" rx={12} fill="none" stroke="currentColor" strokeWidth={1} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1} />
+    </svg>
+  )
+}
+
+/** The hover card beside the palette: what the part is, its key numbers, what is modelled, its datasheet. */
+function CardBody() {
   const anchor = useCardAnchor()
   const version = React.useSyncExternalStore(subscribeDefs, getDefsVersion)
   const card = React.useRef<HTMLDivElement>(null)
@@ -28,13 +59,24 @@ export function PartCard() {
 
   React.useEffect(() => {
     if (!anchor) return
-    // Scrolling the palette or pressing anywhere puts the card away: it would stand beside the wrong row.
-    window.addEventListener("wheel", hideCard, { passive: true })
-    window.addEventListener("pointerdown", hideCard)
+    // Scrolling the palette or pressing anywhere else puts the card away: it would stand beside the
+    // wrong row. A press on the card itself (its datasheet link, its star) is the card being used.
+    const outside = (e: Event) => {
+      if (!(e.target instanceof Node && card.current?.contains(e.target))) hideCard()
+    }
+    // A held card stays while the pointer crosses the palette towards it; out of both, it goes.
+    const away = (e: PointerEvent) => {
+      if (!anchor.held || !(e.target instanceof Element)) return
+      if (!card.current?.contains(e.target) && !e.target.closest('[data-slot="sidebar"]')) releaseCard()
+    }
+    window.addEventListener("pointermove", away)
+    window.addEventListener("wheel", outside, { passive: true })
+    window.addEventListener("pointerdown", outside)
     window.addEventListener("keydown", hideCard)
     return () => {
-      window.removeEventListener("wheel", hideCard)
-      window.removeEventListener("pointerdown", hideCard)
+      window.removeEventListener("pointermove", away)
+      window.removeEventListener("wheel", outside)
+      window.removeEventListener("pointerdown", outside)
       window.removeEventListener("keydown", hideCard)
     }
   }, [anchor])
@@ -47,7 +89,7 @@ export function PartCard() {
   const record = def?.datasheet
   const sheet = hasDatasheet(record) ? record : undefined
   const family = familyOf(anchor.id)
-  const doc = sheet && DOCS[sheet.docs[0]]
+  const doc = sheet?.docs[0]
 
   // Beside the palette, level with the row; kept on screen, flipped up from the row's bottom near the foot.
   const room = window.innerHeight - MARGIN
@@ -62,10 +104,11 @@ export function PartCard() {
       data-slot="part-card"
       role="tooltip"
       onPointerEnter={keepCard}
-      onPointerLeave={leavePart}
-      className="fixed z-50 flex flex-col gap-3 rounded-xl border bg-popover px-4 py-3.5 text-[13px] text-popover-foreground shadow-[0_16px_44px_rgba(0,0,0,.16)] animate-in fade-in-0 zoom-in-95 duration-100 motion-reduce:animate-none"
+      onPointerLeave={() => (anchor.held ? releaseCard() : leavePart())}
+      className="fixed z-50 isolate flex flex-col gap-3 rounded-xl border bg-popover px-4 py-3.5 text-[13px] text-popover-foreground shadow-[0_16px_44px_rgba(0,0,0,.16)] animate-in fade-in-0 zoom-in-95 duration-100 motion-reduce:animate-none"
       style={{ top, left, width: WIDTH }}
     >
+      <HoldLine />
       <div className="flex gap-3.5">
         {meta.board ? (
           <img src={`${import.meta.env.BASE_URL}boards/${meta.board.photo}`} alt="" className="size-24 shrink-0 rounded-[10px] border bg-muted/40 object-contain" />

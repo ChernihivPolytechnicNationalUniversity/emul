@@ -3,6 +3,8 @@ import { dw03, mt3608, tp4056 } from "../power-model"
 import { parseValue } from "@/sim/units"
 import { LED_COLORS } from "./basic"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 
 const W = 12
@@ -97,3 +99,16 @@ export const chargeBoostModule: ComponentDef = {
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [chargeBoostModule]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "lx-lcbst": {
+    maker: "NanJing Top Power",
+    docs: [DOCS["toppower-tp4056"], DOCS["pjsemi-dw03"], DOCS["aerosemi-mt3608"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

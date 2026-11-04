@@ -10,6 +10,8 @@
  */
 import { CharacterLcdIcon } from "../icons"
 import type { BodyShape, ComponentDef, ModelElement as Element, PinDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const W = 20
 const H = 9
@@ -134,3 +136,23 @@ export const lcdModules: ComponentDef[] = [lcd1602, lcd1602I2c]
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = lcdModules
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "lcd-1602": {
+    maker: "Hitachi",
+    docs: [DOCS["hitachi-hd44780u"], DOCS["sitronix-st7066u"], DOCS["vishay-lcd016m002b"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "lcd-1602-i2c": {
+    maker: "NXP",
+    docs: [DOCS["nxp-pcf8574"], DOCS["ti-scps068k"], DOCS["hitachi-hd44780u"], DOCS["sitronix-st7066u"], DOCS["vishay-lcd016m002b"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

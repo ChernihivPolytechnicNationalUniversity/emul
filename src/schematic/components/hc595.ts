@@ -2,6 +2,8 @@ import { HC595_INPUTS, HC595_LINKS, HC595_OUTPUTS, SHIFT_REGISTER_DEFS, shiftReg
 import { ShiftRegisterIcon } from "../icons"
 import { pinNumbers } from "../pin-numbers"
 import type { ComponentDef, Element, PinDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const W = 8
 const H = 14
@@ -101,3 +103,25 @@ export { HC595_LINKS }
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [hc595, hct595]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "hc595": {
+    maker: "Texas Instruments",
+    package: "PDIP-16",
+    docs: [DOCS["ti-scls041j"], DOCS["nexperia-74hc595"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "hct595": {
+    maker: "Nexperia",
+    package: "PDIP-16",
+    docs: [DOCS["nexperia-74hc595"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

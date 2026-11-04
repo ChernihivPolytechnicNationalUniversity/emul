@@ -1,6 +1,8 @@
 import { ATMEGA328P, type AvrProfile } from "@/mcu/avr/chip"
 import { ChipIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PinDef, PinKind, PropField } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * AVR parts as bare chips, drawn like the STM32 ones: an IC body with every package pin,
@@ -218,3 +220,25 @@ export const atmega328pAu = avrChip(ATMEGA328P, TQFP32, "8-bit AVR MCU, TQFP-32 
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [atmega328p, atmega328pAu]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "atmega328p": {
+    maker: "Microchip",
+    package: "PDIP-28",
+    docs: [DOCS["mchp-ds40002061b"], DOCS["mchp-ds80000855c"], DOCS["mchp-ds40002198c"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "atmega328p-au": {
+    maker: "Microchip",
+    package: "TQFP-32",
+    docs: [DOCS["mchp-ds40002061b"], DOCS["mchp-ds80000855c"], DOCS["mchp-ds40002198c"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

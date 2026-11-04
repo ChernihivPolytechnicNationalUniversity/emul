@@ -7,6 +7,8 @@ import { LED_COLORS } from "./basic"
 import { RESONATOR_STARTUP } from "./clock"
 import { MF_MSMF } from "./polyfuse"
 import { LP2985_33_GQ, lp2985Element, ncp1117Element } from "./power-ics"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * Arduino UNO Rev3 (A000066), from the Rev3e schematic and Eagle files (UNO-TH_Rev3e, 06/03/19),
@@ -320,3 +322,16 @@ export const arduinoUno: ComponentDef = {
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [arduinoUno]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "arduino-uno": {
+    maker: "Arduino",
+    docs: [DOCS["arduino-a000066-ds"], DOCS["arduino-uno-rev3e-sch"], DOCS["mchp-ds40002061b"], DOCS["onsemi-fdn340p"], DOCS["onsemi-ncp1117"], DOCS["ti-slvs522s"], DOCS["ti-slos263y"], DOCS["bourns-mf-msmf"], DOCS["murata-cstce16m0v53"]],
+    specs: [],
+    modelled: [],
+    notModelled: [{ what: "The boot loader (Optiboot): the boot section is empty, so a reset runs straight into the sketch" }, { what: "The ATmega16U2's own firmware and USB (DTR auto-reset when a port opens, the TX/RX LEDs' pulse stretch, ICSP1, JP2)" }, { what: "The USB ESD varistors and the ferrite" }, { what: "L2, AVCC's 10 µH filter (159 kHz with C10, beyond the solver's step)" }],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

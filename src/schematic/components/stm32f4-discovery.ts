@@ -4,6 +4,11 @@ import { mcuModel } from "../mcu-model"
 import { boardArt } from "./stm32f4-discovery-art"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind } from "../types"
 import { LED_COLORS } from "./basic"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
+import { NOT_MODELLED as CS43L22 } from "@/sim/cs43l22"
+import { NOT_MODELLED as LIS } from "@/sim/lis-accel"
+import { NOT_MODELLED as MP45DT02 } from "@/sim/mp45dt02"
 
 /**
  * STM32F4-Discovery (MB997, STM32F407VGT6). Sources (docs/stm32f4-discovery/board-checklist.md):
@@ -282,3 +287,16 @@ export const stm32f4Discovery: ComponentDef = {
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [stm32f4Discovery]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "stm32f4-discovery": {
+    maker: "STMicroelectronics",
+    docs: [DOCS["st-um1472"], DOCS["st-mb997-sch"], DOCS["st-ds8626"], DOCS["cirrus-cs43l22"], DOCS["st-lis302dl"], DOCS["st-lis3dsh"], DOCS["st-mp45dt02"], DOCS["st-ld3985"], DOCS["st-bat60j"], DOCS["everlight-19-217-bhc"], DOCS["everlight-19-217-s2c"], DOCS["everlight-19-213sygc"], DOCS["everlight-19-213-r6c"]],
+    specs: [],
+    modelled: [{ what: "LIS302DL/LIS3DSH on SPI (Roll/Pitch below), CS43L22 on I²C and I²S to the bench speaker, MP45DT02 PDM microphone (Sound below)" }],
+    notModelled: [{ what: "The accelerometers' click/free-fall engines, state machines and FIFO" }, { what: "The CS43L22's speaker path, tone/limiter and analog performance" }, { what: "The microphone's frequency response" }, { what: "USB OTG (STMPS2141, LD7, LD8 over-current)" }, { what: "The ST-LINK (LD1 COM, SWD, its MCO as a separate source)" }, { what: "MCK as a 256·Fs square (the codec takes 256·Fs while it is driven)" }, ...LIS.map((what) => ({ what: `LIS302DL/LIS3DSH: ${what}` })), ...CS43L22.map((what) => ({ what: `CS43L22: ${what}` })), ...MP45DT02.map((what) => ({ what: `MP45DT02: ${what}` }))],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

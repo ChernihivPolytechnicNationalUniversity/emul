@@ -1,5 +1,7 @@
 import { DisplayIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PanelSignal, PinDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * Waveshare 7inch Capacitive Touch LCD (F): a 1024 × 600 panel on a 24-bit parallel RGB
@@ -128,3 +130,16 @@ export const lcd7f: ComponentDef = {
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [lcd7f]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "lcd7-f": {
+    maker: "Waveshare",
+    docs: [DOCS["waveshare-lcd7f-sch"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

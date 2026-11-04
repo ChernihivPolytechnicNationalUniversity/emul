@@ -9,6 +9,8 @@
 import { KeypadIcon } from "../icons"
 import type { ComponentDef, Element, PartDef, PinDef } from "../types"
 import { BOUNCE_FIELDS } from "./basic"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const LEGENDS = [
   ["1", "2", "3", "A"],
@@ -83,3 +85,16 @@ export const keypad4x4: ComponentDef = {
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [keypad4x4]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "keypad-4x4": {
+    maker: "Parallax",
+    docs: [DOCS["parallax-27899"], DOCS["adafruit-3844"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

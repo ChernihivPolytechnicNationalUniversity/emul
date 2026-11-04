@@ -6,6 +6,8 @@ import { avrFields, avrMcuModel, AVR_ALT } from "./avr-chip"
 import { LED_COLORS } from "./basic"
 import { crystalStartup } from "./clock"
 import { PITCH } from "./open746i-c-art"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * Arduino Nano 3.x (A000005), from the Arduino schematic "NanoV3.3" (23/01/19), the A000005
@@ -378,3 +380,16 @@ export const arduinoNano: ComponentDef = {
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [arduinoNano]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "arduino-nano": {
+    maker: "Arduino",
+    docs: [DOCS["arduino-a000005-ds"], DOCS["arduino-a000005-sch"], DOCS["arduino-a000005-pinout"], DOCS["mchp-ds40002061b"], DOCS["ti-snos412q"], DOCS["ftdi-ds-ft232r"], DOCS["vishay-ss1p3l"], DOCS["bourns-mf-msmf"]],
+    specs: [],
+    modelled: [],
+    notModelled: [{ what: "The boot loader: the boot section is empty, so a reset runs through its erased words straight into the sketch (no upload delay, no LED flicker on D13)" }, { what: "The USB side of the FT232RL (DTR auto-reset when a port opens, the drivers)" }, { what: "The CBUS LEDs' pulse stretch" }],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

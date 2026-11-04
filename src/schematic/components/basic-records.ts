@@ -1,3 +1,4 @@
+import { DOCS } from "../datasheets/docs"
 import type { NoDatasheet } from "../types"
 
 // The everyday parts are no one product: their values are typed in the inspector, so no datasheet
@@ -10,11 +11,13 @@ const IDEAL = "An ideal element of the schematic, not a product: nothing to look
 export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   resistor: {
     none: GENERIC,
+    sources: [DOCS["yageo-cfr"], DOCS["vishay-mbb0207"], DOCS["vishay-nfr25"]],
     modelled: [{ what: "Ohm's law at the set resistance" }, { what: "Power over its rating heats it and burns it open, on the film's thermal time constant", test: "tests/sim/engine-overstress.test.ts" }],
     notModelled: [{ what: "Tolerance and temperature coefficient: the resistance is exact" }, { what: "Lead inductance and stray capacitance" }, { what: "Noise" }],
   },
   potentiometer: {
     none: GENERIC,
+    sources: [DOCS["bourns-trimmer-primer"]],
     modelled: [{ what: "Two track halves split at the wiper position" }, { what: "The wiper current limit and the track's power rating" }],
     notModelled: [{ what: "Taper (log/anti-log): the track is linear" }, { what: "Wiper noise and contact resistance" }, { what: "Tolerance of the total resistance" }],
   },
@@ -25,6 +28,7 @@ export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   },
   "capacitor-polarized": {
     none: GENERIC,
+    sources: [DOCS["nichicon-uvr"], DOCS["tdk-alu-general"]],
     modelled: [
       { what: "ESR from the Nichicon UVR tan δ table, or as typed", test: "tests/sim/supply-inrush.test.ts" },
       { what: "Reverse voltage past its rating breaks it down short", test: "tests/sim/physics.test.ts" },
@@ -52,6 +56,7 @@ export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   },
   led: {
     none: GENERIC,
+    sources: [DOCS["vishay-tlhx54"], DOCS["vishay-tlhb5400"], DOCS["osram-ls-q976"], DOCS["osram-lb-q39g"], DOCS["kb-apt1608surck"], DOCS["kb-apt1608qbc-d"]],
     modelled: [
       { what: "Forward voltage by colour, current and reverse ratings" },
       { what: "Brightness as the eye sees it, glowing from a fraction of a milliamp", test: "tests/sim/led-eye.test.ts" },
@@ -71,6 +76,7 @@ export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   },
   nmos: {
     none: GENERIC,
+    sources: [DOCS["vishay-2n7000"]],
     modelled: [
       { what: "Threshold and Rds(on) as set, with the body diode" },
       { what: "Avalanche past its Vds, surviving a pulse up to its EAS", test: "tests/sim/physics.test.ts" },
@@ -84,6 +90,7 @@ export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   },
   pushbutton: {
     none: GENERIC,
+    sources: [DOCS["omron-b3f"]],
     modelled: [{ what: "Contact resistance and current rating" }, { what: "Contact bounce: a burst of re-strikes on each press and release", test: "tests/sim/joystick-bounce.test.ts" }],
     notModelled: [{ what: "Arcing and contact wear" }],
   },

@@ -18,6 +18,8 @@ import {
 import { formatSI } from "@/sim/units"
 import { BuzzerIcon } from "../icons"
 import type { ComponentDef, ModelElement, PinDef, PropField } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const HEATING_TAU = 3
 
@@ -156,3 +158,72 @@ export const isBuzzerDef = (defId: string) => buzzerOfDef(defId) !== undefined
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = buzzers
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "buzzer-cem-1203-42": {
+    maker: "CUI Devices / Same Sky",
+    docs: [DOCS["samesky-cem-1203-42"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "buzzer-at-1224-twt-5v-2": {
+    maker: "PUI Audio",
+    docs: [DOCS["pui-at-1224-twt-5v-2-r"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "buzzer-cmt-0904-83t": {
+    maker: "CUI Devices / Same Sky",
+    docs: [DOCS["samesky-cmt-0904-83t"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "buzzer-tmb12a05": {
+    maker: "Huaneng",
+    docs: [DOCS["huaneng-tmb12a05"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "buzzer-sdc1610m5-01": {
+    maker: "TDK",
+    docs: [DOCS["tdk-sdc-catalogue"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "buzzer-cmi-9650c-030": {
+    maker: "CUI Devices / Same Sky",
+    docs: [DOCS["samesky-cmi-9650c-030"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "buzzer-pkm13epyh4000-a0": {
+    maker: "Murata",
+    docs: [DOCS["murata-pkm13epyh4000-a0"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "buzzer-pkm17epp-2002-b0": {
+    maker: "Murata",
+    docs: [DOCS["murata-p37e"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "buzzer-pkb24spch3601-b0": {
+    maker: "Murata",
+    docs: [DOCS["murata-p37e"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

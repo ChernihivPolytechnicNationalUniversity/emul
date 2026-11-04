@@ -17,6 +17,8 @@
 import { EncoderIcon } from "../icons"
 import type { ComponentDef, PartDef, PinDef } from "../types"
 import { BOUNCE_FIELDS } from "./basic"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /** 360°/s, the ALPS measuring speed: a quarter-cycle takes a quarter of 360° / pulses. */
 const quarterAt360 = (pulses: number) => 1 / (4 * pulses)
@@ -147,3 +149,16 @@ export const encoderComponents: ComponentDef[] = [encoderEc11, ky040]
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = encoderComponents
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "encoder-ec11": {
+    maker: "ALPS Alpine",
+    docs: [DOCS["alps-ec11e"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

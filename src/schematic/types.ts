@@ -412,7 +412,7 @@ export type PropField =
 export type ModelElement = Element & { label?: string }
 
 /** Where in a document a statement is: a page (the PDF's page, which url#page=N opens), and or a section, table or figure. */
-export type Cite = { doc?: string; page?: number; at?: string }
+export type Cite = { /** A DocRecord key; the record's first document when absent. */ doc?: string; page?: number; at?: string }
 
 /** A number the card and the Part tab show, with where the datasheet gives it. */
 export type Spec = { label: string; value: string; cite: Cite }
@@ -420,18 +420,31 @@ export type Spec = { label: string; value: string; cite: Cite }
 /** Something the model does or leaves out; a modelled claim names the test that holds it to the datasheet. */
 export type Claim = { what: string; cite?: Cite; test?: string }
 
-/** A part with a datasheet: its maker, the documents (key into DOCS, first the one the numbers come from), the numbers, what is modelled and what is not. */
+/**
+ * A document parts cite (src/schematic/datasheets/docs.ts): the maker's copy, never ours (makers'
+ * terms, TI's non-commercial ones), an archived copy beside it, and the day the link was seen to
+ * serve it. `rev` is the revision that URL serves, which may be newer than the one first read.
+ */
+export type DocRecord = { key: string; maker: string; id: string; title: string; rev?: string; url: string; archive?: string; checked: string; note?: string }
+
+/** A part with a datasheet: its maker, the documents (first the one the numbers come from), the numbers, what is modelled and what is not. */
 export type Datasheet = {
   maker: string
   package?: string
-  docs: [string, ...string[]]
+  docs: [DocRecord, ...DocRecord[]]
   specs: Spec[]
   modelled: Claim[]
   notModelled: Claim[]
 }
 
 /** A part that is not one product (an ideal source, a ground, a generic resistor): why there is no datasheet, and still what is modelled. */
-export type NoDatasheet = { none: string; modelled: Claim[]; notModelled: Claim[] }
+export type NoDatasheet = {
+  none: string
+  modelled: Claim[]
+  notModelled: Claim[]
+  /** Datasheets of real parts the model's defaults and behaviour were taken from (a resistor's overload from Vishay's and Yageo's). */
+  sources?: DocRecord[]
+}
 
 /** A part as the generated catalogue lists it (catalogue.gen.ts): the icon by name, the file its definition loads from. */
 export type CatalogueEntry = Pick<ComponentDef, "id" | "name" | "description" | "category" | "keywords" | "width" | "height" | "prefix" | "chip" | "board"> & {

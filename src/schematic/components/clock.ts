@@ -10,6 +10,8 @@
 import { CrystalIcon, OscillatorIcon } from "../icons"
 import { crystalStartup, RESONATOR_STARTUP } from "../clock-startup"
 import type { ComponentDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 
 export const crystal: ComponentDef = {
@@ -131,3 +133,16 @@ export { crystalStartup, RESONATOR_STARTUP }
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [crystal, resonator, oscillator]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "resonator": {
+    maker: "Murata",
+    docs: [DOCS["murata-cstce16m0v53"]],
+    specs: [],
+    modelled: [],
+    notModelled: [{ what: "The frequency's own drift with temperature and age (set the deviation), the built-in capacitors and ESR" }],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

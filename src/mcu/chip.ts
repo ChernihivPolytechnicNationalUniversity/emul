@@ -3,7 +3,7 @@
  * models are in place. A profile is data only — memory map, core identity, device id — so
  * the SoC class stays one and the same for every part.
  *
- * Sources: RM0090 §2.3 (F42x memory map), RM0385 §2.3 (F74x memory map), DS9405/DS10693 for
+ * Sources: RM0090 §2.3 (F42x memory map), RM0385 §2.3 (F74x memory map), DS9405/DS10916 for
  * the pin-outs, ARM DDI0439 (Cortex-M4) and DDI0489 (Cortex-M7) for the ID registers.
  */
 

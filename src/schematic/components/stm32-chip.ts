@@ -2,6 +2,8 @@ import { STM32F401CC, STM32F401CE, STM32F405RG, STM32F407VG, STM32F411CE, STM32F
 import { ChipIcon } from "../icons"
 import { mcuModel } from "../mcu-model"
 import type { BodyShape, ComponentDef, Element, PinDef, PinKind } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * STM32 parts as bare chips: an IC symbol with every signal pin of the package brought out,
@@ -285,3 +287,65 @@ export const stm32f401ce = stm32Chip(STM32F401CE, UFQFPN48_F4X1, "Cortex-M4F MCU
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [stm32f746ig, stm32f429zi, stm32f407vg, stm32f405rg, stm32f411ce, stm32f401ce, stm32f401cc]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "stm32f746ig": {
+    maker: "STMicroelectronics",
+    package: "LQFP176",
+    docs: [DOCS["st-ds10916"], DOCS["st-rm0385"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0489"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "stm32f429zi": {
+    maker: "STMicroelectronics",
+    package: "LQFP144",
+    docs: [DOCS["st-ds9405"], DOCS["st-rm0090"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "stm32f407vg": {
+    maker: "STMicroelectronics",
+    package: "LQFP100",
+    docs: [DOCS["st-ds8626"], DOCS["st-rm0090"], DOCS["st-es0182"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "stm32f405rg": {
+    maker: "STMicroelectronics",
+    package: "LQFP64",
+    docs: [DOCS["st-ds8626"], DOCS["st-rm0090"], DOCS["st-es0182"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "stm32f411ce": {
+    maker: "STMicroelectronics",
+    package: "UFQFPN48",
+    docs: [DOCS["st-ds10314"], DOCS["st-rm0383"], DOCS["st-es0287"], DOCS["st-an4073"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "stm32f401ce": {
+    maker: "STMicroelectronics",
+    package: "UFQFPN48",
+    docs: [DOCS["st-ds10086"], DOCS["st-rm0368"], DOCS["st-es0299"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "stm32f401cc": {
+    maker: "STMicroelectronics",
+    package: "UFQFPN48",
+    docs: [DOCS["st-ds9716"], DOCS["st-rm0368"], DOCS["st-es0222"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

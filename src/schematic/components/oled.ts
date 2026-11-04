@@ -11,6 +11,8 @@
 import { OLED_SUPPLY_KEY } from "@/sim/ssd1306"
 import { OledIcon } from "../icons"
 import type { ComponentDef, ModelElement, PinDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * SDA, SCL and the SPI inputs: Table 11-1 rates Vin to VDD + 0.3 V, where the pins' ESD diodes
@@ -109,3 +111,30 @@ export const oledModules: ComponentDef[] = [oledI2c, oledI2c32, oledSpi]
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = oledModules
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "oled-ssd1306-i2c": {
+    maker: "Solomon Systech",
+    docs: [DOCS["solomon-ssd1306"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "oled-ssd1306-i2c-32": {
+    maker: "Solomon Systech",
+    docs: [DOCS["solomon-ssd1306"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "oled-ssd1306-spi": {
+    maker: "Solomon Systech",
+    docs: [DOCS["solomon-ssd1306"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

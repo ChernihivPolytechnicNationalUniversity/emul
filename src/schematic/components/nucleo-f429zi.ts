@@ -4,6 +4,8 @@ import { mcuModel } from "../mcu-model"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind, Side } from "../types"
 import { LED_COLORS } from "./basic"
 import { BOARD_MM, boardArt, CN7_SHIFT, FRAME, PITCH, ZIO } from "./nucleo-f429zi-art"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * NUCLEO-F429ZI (Nucleo-144, MB1137). Pin data from ST UM1974, Table 16; the board drawn to
@@ -293,3 +295,16 @@ export const nucleoF429zi: ComponentDef = {
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [nucleoF429zi]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "nucleo-f429zi": {
+    maker: "STMicroelectronics",
+    docs: [DOCS["st-um1974"], DOCS["st-ds9405"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

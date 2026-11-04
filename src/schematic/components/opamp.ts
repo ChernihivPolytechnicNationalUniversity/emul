@@ -3,6 +3,8 @@ import { parseValue } from "@/sim/units"
 import { OpAmpIcon } from "../icons"
 import { pinNumbers } from "../pin-numbers"
 import type { BodyShape, ComponentDef, ModelElement, PinDef, PropField, NoDatasheet } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * Op amps as the schematic draws them: a triangle, IN− above IN+ on its left edge, the output at
@@ -116,3 +118,49 @@ export const opamps: ComponentDef[] = OPAMP_PRESETS.map(opampDef)
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = opamps
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "opamp-lm358": {
+    maker: "Texas Instruments",
+    package: "PDIP-8",
+    docs: [DOCS["ti-slos068ab"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "opamp-lm741": {
+    maker: "Texas Instruments",
+    package: "PDIP-8",
+    docs: [DOCS["ti-snosc25d"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "opamp-tl072": {
+    maker: "Texas Instruments",
+    package: "PDIP-8",
+    docs: [DOCS["ti-slos080w"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "opamp-mcp6002": {
+    maker: "Microchip",
+    package: "PDIP-8",
+    docs: [DOCS["mchp-ds20001733l"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "opamp-lmv358": {
+    maker: "Texas Instruments",
+    package: "VSSOP-8",
+    docs: [DOCS["ti-slos263y"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

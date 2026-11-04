@@ -1,30 +1,32 @@
 import * as React from "react"
 import { ExternalLinkIcon } from "lucide-react"
 import { cn } from "cn"
-import { citedDoc, citeLabel, docUrl, DOCS, hasDatasheet } from "@/schematic/datasheets"
+import { citedDoc, citeLabel, docUrl, hasDatasheet } from "@/schematic/datasheets"
 import { GRID, objectRect } from "@/schematic/geometry"
-import type { Claim, ComponentDef, Datasheet, NoDatasheet, PlacedObject } from "@/schematic/types"
-import type { WireColorKey } from "@/schematic/wire-colors"
-import { FieldCanvas } from "@/components/field/FieldCanvas"
-import { SymbolRaster } from "@/components/field/symbol-raster"
+import type { Claim, ComponentDef, Datasheet, DocRecord, NoDatasheet, PlacedObject } from "@/schematic/types"
+import { PartDrawing } from "@/components/field/GhostLayer"
+import { fieldDetail } from "@/components/field/detail"
+import { SimStore } from "@/sim/sim-store"
+import { packagePins } from "./pinout"
 
 // What a part is, as the hover card and the inspector's Part tab show it: the symbol as the field
 // draws it, the numbers with their datasheet page, what is modelled and what is not, the documents.
 
-const previewRaster = new SymbolRaster()
-const NO_ROUTES: never[] = []
-const wireColor = (): WireColorKey => "black"
+/** Nothing runs in a preview: no readings, no glow. */
+const idle = new SimStore()
 
-/** The part's own symbol, drawn by the field's painter and fitted into a square. */
+/** The part's own symbol as the field draws it at this size (body, labels, pins), fitted into a square. */
 export function SymbolPreview({ def, size, className }: { def: ComponentDef; size: number; className?: string }) {
   const object = React.useMemo<PlacedObject>(() => ({ id: "preview", def: def.id, x: 0, y: 0, props: { ...def.defaults } }), [def])
   const box = objectRect(object, GRID)
   const view = { x: box.x - GRID, y: box.y - GRID, w: box.w + 2 * GRID, h: box.h + 2 * GRID }
   const scale = Math.min(size / view.w, size / view.h)
+  // A preview is never a crowd of parts: always the drawn detail, never the zoomed-out canvas.
+  const detail = React.useMemo(() => ({ ...fieldDetail(GRID, scale, 1), canvas: false }), [scale])
   return (
     <div className={cn("relative shrink-0 overflow-hidden rounded-[10px] border bg-muted/40", className)} style={{ width: size, height: size }} aria-hidden>
       <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${(size - view.w * scale) / 2}px, ${(size - view.h * scale) / 2}px) scale(${scale}) translate(${-view.x}px, ${-view.y}px)` }}>
-        <FieldCanvas objects={[object]} routes={NO_ROUTES} view={view} grid={GRID} scale={scale} colorOf={wireColor} raster={previewRaster} />
+        <PartDrawing object={object} grid={GRID} detail={detail} sim={idle} />
       </div>
     </div>
   )
@@ -94,28 +96,35 @@ export function ModelClaims({ record }: { record: Datasheet | NoDatasheet }) {
   )
 }
 
-/** The documents: each to the maker's copy, its archived copy beside it, and when the link was checked. */
-export function DocLinks({ record }: { record: Datasheet }) {
-  const docs = record.docs.map((k) => DOCS[k]).filter((d) => d !== undefined)
+/** The documents, one to a line: the maker's copy, its revision, its archived copy; when the links were checked. */
+export function DocLinks({ docs, label }: { docs: readonly DocRecord[]; label?: string }) {
   const checked = docs.map((d) => d.checked).sort()[0]
+  const link = "inline-flex items-center gap-1 font-medium text-primary hover:underline"
   return (
-    <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 border-t pt-2.5 text-[12.5px]">
-      {docs.map((d) => (
-        <React.Fragment key={d.id}>
-          <a href={d.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-medium text-primary hover:underline">
-            {d.id}
-            {d.rev && ` rev ${d.rev}`}
-            <ExternalLinkIcon className="size-3" />
-          </a>
-          {d.archive && (
-            <a href={d.archive} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-medium text-primary hover:underline" title={`Archived copy of ${d.id}`}>
-              archive
+    <div className="border-t pt-2.5 text-[12.5px]">
+      {label && <p className="mb-1 text-[11.5px] text-muted-foreground">{label}</p>}
+      <ul className="grid grid-cols-[auto_1fr_auto] items-baseline gap-x-2.5 gap-y-1">
+        {docs.map((d) => (
+          <li key={d.key} className="contents">
+            <a href={d.url} target="_blank" rel="noopener noreferrer" className={link} title={[d.maker, d.title, d.note].filter(Boolean).join(" · ")}>
+              {d.id}
               <ExternalLinkIcon className="size-3" />
             </a>
-          )}
-        </React.Fragment>
-      ))}
-      {checked && <span className="ml-auto text-[11.5px] text-muted-foreground">checked {checked}</span>}
+            <span className="truncate text-[11.5px] text-muted-foreground" title={d.rev}>
+              {d.rev && `rev ${d.rev}`}
+            </span>
+            {d.archive ? (
+              <a href={d.archive} target="_blank" rel="noopener noreferrer" className={cn(link, "text-[11.5px]")} title={`Archived copy of ${d.id}`}>
+                archive
+                <ExternalLinkIcon className="size-3" />
+              </a>
+            ) : (
+              <span />
+            )}
+          </li>
+        ))}
+      </ul>
+      {checked && <p className="mt-1.5 text-right text-[11.5px] text-muted-foreground">checked {checked}</p>}
     </div>
   )
 }
@@ -126,10 +135,9 @@ export function DocLinks({ record }: { record: Datasheet }) {
  * package with every pin numbered 1…n and few enough to read (a board's headers are not a package).
  */
 export function Pinout({ def }: { def: ComponentDef }) {
-  const numbered = def.pins.filter((p) => p.connectorPin !== undefined && !p.connector)
-  const n = numbered.length
-  const byNumber = new Map(numbered.map((p) => [p.connectorPin!, p]))
-  if (n < 3 || n > 28 || n % 2 !== 0 || byNumber.size !== n || ![...byNumber.keys()].every((k) => k >= 1 && k <= n)) return null
+  const byNumber = packagePins(def)
+  if (!byNumber) return null
+  const n = byNumber.size
   const half = n / 2
   const name = (k: number) => byNumber.get(k)!.label || byNumber.get(k)!.id
   return (

@@ -1,6 +1,8 @@
 import { LedIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PinDef } from "../types"
 import { PART_NUMBER, RATED_TEST_CURRENT, AMBIENT, type RgbDie, L154A4SURKQBDZGW, COMMON_CATHODE_LEAD, ambientOf, deratedCurrent, intensityVsAmbient, luminousIntensity, chromaticityColor, type DieLight, rgbLedGlow } from "@/sim/rgb-led-light"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const WIDTH = 4
 const HEIGHT = 6
@@ -81,3 +83,16 @@ export { PART_NUMBER, RATED_TEST_CURRENT, AMBIENT, type RgbDie, L154A4SURKQBDZGW
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = rgbLeds
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "rgb-led": {
+    maker: "Kingbright",
+    docs: [DOCS["kb-l154a4surkqbdzgw"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

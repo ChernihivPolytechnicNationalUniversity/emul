@@ -14,6 +14,8 @@ import { SINK_K, sinkGate, SUPPLY_KEY } from "@/sim/addressable/light"
 import { chipCount, partOf, PRODUCTS, type Layout as LayoutId, type Product } from "@/sim/addressable/products"
 import { PixelIcon, PixelMatrixIcon, PixelRingIcon, PixelStickIcon, ChipIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind, Side } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 type PinSpec = { id: string; label: string; kind?: PinKind; note: string }
 
@@ -398,3 +400,226 @@ export const isAddressableDef = (id: string) => PRODUCTS.some((p) => p.id === id
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = addressableComponents
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "ws2812b": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2812": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812-4pin"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2812-6pin": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812-2012"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2812s": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812s"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2812a": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812a-5054"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2812c": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812c"], DOCS["ws-ws2812c-2020"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2812d": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812d-f5"], DOCS["ws-ws2812d-f8"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2812e": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "sk6812": {
+    maker: "LED COLOR (Shenzhen LED Color Opto Electronic)",
+    docs: [DOCS["ledcolor-sk6812"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "sk6812rgbw": {
+    maker: "Opsco Optoelectronics",
+    docs: [DOCS["opsco-sk6812rgbw"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2813": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2813-v14"], DOCS["ws-ws2813e"], DOCS["ws-ws2813-mini"], DOCS["ws-ws2813a-v7"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2813b": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2813b-v5"], DOCS["ws-ws2813b-v6"], DOCS["ws-ws2813c-2121"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2813b-rgbw": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2813b-rgbw"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2815b": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2815b-v1"], DOCS["ws-ws2815b-rgbw-v1"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2816": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2816b"], DOCS["ws-ws2816c-2121"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2916": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2916a"], DOCS["ws-ws2916b"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2916a-rgbw": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2916a-rgbw"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "led-stick-8": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "led-ring-12": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "led-ring-16": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "led-ring-24": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "led-matrix-8x8": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2811": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2811-v11"], DOCS["ws-ws2811-2011"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2913": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2913"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2818": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2818b"], DOCS["ws-ws2818f"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2814": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2814a"], DOCS["ws-ws2814f"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2814b": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2814b"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2805": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2805"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2914": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2914"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2915": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2915"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ws2801": {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2801s"], DOCS["ws-ws2801-2008"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

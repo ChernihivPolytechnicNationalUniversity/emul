@@ -1,6 +1,8 @@
 import { PIC_CHIPS, type PicProfile } from "@/mcu/pic/chip"
 import { ChipIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PinDef, PinKind, PropField } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * PIC16F62x parts as bare chips, drawn like the AVR ones: an IC body with every package pin, names
@@ -174,3 +176,105 @@ export const picChips: ComponentDef[] = PIC_CHIPS.map((c) =>
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = picChips
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "pic16f627": {
+    maker: "Microchip",
+    package: "PDIP-18",
+    docs: [DOCS["mchp-ds40044g"], DOCS["mchp-ds40300c"], DOCS["mchp-ds33023a"], DOCS["mchp-ds30034d"], DOCS["mchp-ds80073f"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "pic16f627-04": {
+    maker: "Microchip",
+    package: "PDIP-18",
+    docs: [DOCS["mchp-ds40044g"], DOCS["mchp-ds40300c"], DOCS["mchp-ds33023a"], DOCS["mchp-ds30034d"], DOCS["mchp-ds80073f"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "pic16f628": {
+    maker: "Microchip",
+    package: "PDIP-18",
+    docs: [DOCS["mchp-ds40044g"], DOCS["mchp-ds40300c"], DOCS["mchp-ds33023a"], DOCS["mchp-ds30034d"], DOCS["mchp-ds80073f"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "pic16f628-04": {
+    maker: "Microchip",
+    package: "PDIP-18",
+    docs: [DOCS["mchp-ds40044g"], DOCS["mchp-ds40300c"], DOCS["mchp-ds33023a"], DOCS["mchp-ds30034d"], DOCS["mchp-ds80073f"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "pic16lf627": {
+    maker: "Microchip",
+    package: "PDIP-18",
+    docs: [DOCS["mchp-ds40044g"], DOCS["mchp-ds40300c"], DOCS["mchp-ds33023a"], DOCS["mchp-ds30034d"], DOCS["mchp-ds80073f"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "pic16lf628": {
+    maker: "Microchip",
+    package: "PDIP-18",
+    docs: [DOCS["mchp-ds40044g"], DOCS["mchp-ds40300c"], DOCS["mchp-ds33023a"], DOCS["mchp-ds30034d"], DOCS["mchp-ds80073f"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "pic16f627a": {
+    maker: "Microchip",
+    package: "PDIP-18",
+    docs: [DOCS["mchp-ds40044g"], DOCS["mchp-ds33023a"], DOCS["mchp-ds41196g"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "pic16f628a": {
+    maker: "Microchip",
+    package: "PDIP-18",
+    docs: [DOCS["mchp-ds40044g"], DOCS["mchp-ds33023a"], DOCS["mchp-ds41196g"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "pic16f648a": {
+    maker: "Microchip",
+    package: "PDIP-18",
+    docs: [DOCS["mchp-ds40044g"], DOCS["mchp-ds33023a"], DOCS["mchp-ds41196g"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "pic16lf627a": {
+    maker: "Microchip",
+    package: "PDIP-18",
+    docs: [DOCS["mchp-ds40044g"], DOCS["mchp-ds33023a"], DOCS["mchp-ds41196g"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "pic16lf628a": {
+    maker: "Microchip",
+    package: "PDIP-18",
+    docs: [DOCS["mchp-ds40044g"], DOCS["mchp-ds33023a"], DOCS["mchp-ds41196g"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "pic16lf648a": {
+    maker: "Microchip",
+    package: "PDIP-18",
+    docs: [DOCS["mchp-ds40044g"], DOCS["mchp-ds33023a"], DOCS["mchp-ds41196g"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

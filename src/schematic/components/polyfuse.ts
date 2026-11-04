@@ -6,6 +6,8 @@
  */
 import { PolyfuseIcon } from "../icons"
 import type { BodyShape, ComponentDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 type Row = { vmax: number; imax: number; hold: number; trip: number; rmin: number; r1max: number; at: number; within: number; pd: number }
 
@@ -74,3 +76,16 @@ export const polyfuse: ComponentDef = {
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [polyfuse]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "polyfuse": {
+    maker: "Bourns",
+    docs: [DOCS["bourns-mf-msmf"]],
+    specs: [],
+    modelled: [],
+    notModelled: [{ what: "The spread between Rmin and R1max (it starts at Rmin and returns to it after a trip), the resistance's rise as it warms below a trip, the ambient temperature's effect on Ihold" }],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

@@ -1,6 +1,8 @@
 import { ChipIcon } from "../icons"
 import { dw03, mt3608, tp4056 } from "../power-model"
 import type { BodyShape, ComponentDef, ModelElement, Value } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const chipBody = (w: number, h: number, part: string, what: string, y: number): BodyShape[] => [
   { type: "rect", x: 1, y: 0.5, w: w - 2, h: h - 1, rx: 0.2, fill: "board" },
@@ -205,3 +207,49 @@ export const powerIcs = [tp4056Chip, dw03Chip, mt3608Chip, ncp1117Chip, lp2985Ch
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = powerIcs
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "tp4056": {
+    maker: "NanJing Top Power",
+    package: "SOP-8 with exposed pad",
+    docs: [DOCS["toppower-tp4056"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "dw03": {
+    maker: "PJSEMI",
+    package: "SOT-23-5 (pin 1 NC)",
+    docs: [DOCS["pjsemi-dw03"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "mt3608": {
+    maker: "Aerosemi",
+    package: "SOT-23-6 (pin 6 NC)",
+    docs: [DOCS["aerosemi-mt3608"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+  "ncp1117": {
+    maker: "onsemi",
+    package: "SOT-223",
+    docs: [DOCS["onsemi-ncp1117"]],
+    specs: [],
+    modelled: [],
+    notModelled: [{ what: "The safe-operating-area limit, the ambient temperature (25 °C), the ground current's rise with load, line and load regulation, ripple rejection, the adjustable part, reverse current from OUT to IN" }],
+  },
+  "lp2985": {
+    maker: "Texas Instruments",
+    package: "SOT-23-5 (DBV)",
+    docs: [DOCS["ti-slvs522s"]],
+    specs: [],
+    modelled: [],
+    notModelled: [{ what: "The ambient temperature (25 °C), the input's UVLO (2.2 V rising), the ground current's rise with load (765 µA at 150 mA), the bypass pin's noise, the legacy chip's figures" }],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

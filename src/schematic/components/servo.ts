@@ -6,6 +6,8 @@
 import { SERVO_SUPPLY_KEY } from "@/sim/servo"
 import { ServoIcon } from "../icons"
 import type { ComponentDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const W = 9
 const H = 6
@@ -43,3 +45,16 @@ export const servoSg90: ComponentDef = {
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [servoSg90]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "servo-sg90": {
+    maker: "TowerPro",
+    docs: [DOCS["towerpro-sg90"], DOCS["rapid-37-1330"]],
+    specs: [],
+    modelled: [],
+    notModelled: [],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]
