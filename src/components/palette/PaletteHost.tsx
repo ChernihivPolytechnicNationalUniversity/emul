@@ -1,7 +1,8 @@
 import * as React from "react"
-import { PanelLeftOpenIcon, PlusIcon, SearchIcon, StarIcon } from "lucide-react"
+import { PlusIcon, SearchIcon, StarIcon } from "lucide-react"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { PaletteMode, WidthClass } from "@/hooks/use-size-class"
 import { HdlIcon } from "@/schematic/icons"
 import { ComponentsSidebar } from "./ComponentsSidebar"
@@ -42,7 +43,7 @@ export function PaletteHost({ mode, widthClass, open, onOpenChange, width, onWid
         </SheetContent>
       </Sheet>
     )
-  if (mode === "rail" || !open) return <RailWithFlyout docked={mode === "dock"} onUnfold={() => onOpenChange(true)} sidebar={sidebar} />
+  if (mode === "rail" || !open) return <RailWithFlyout sidebar={sidebar} />
   return <Dock width={width} widthClass={widthClass} onWidthChange={onWidthChange} onFold={() => onOpenChange(false)} sidebar={sidebar} />
 }
 
@@ -101,8 +102,40 @@ function Dock({ width, widthClass, onWidthChange, onFold, sidebar }: { width: nu
   )
 }
 
+type RailItem = { id: string; label: string; hint?: string; icon: React.ReactNode }
+
+/** One icon of the rail; its name (and its group's count) shows at once beside it, not as a slow native title. */
+function RailButton({ item, shown, onClick }: { item: RailItem; shown: boolean; onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={item.label}
+            aria-expanded={shown}
+            onClick={onClick}
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/80 outline-hidden hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring [&>svg]:size-4",
+              shown && "bg-sidebar-accent text-sidebar-foreground",
+            )}
+          />
+        }
+      >
+        {item.icon}
+      </TooltipTrigger>
+      {!shown && (
+        <TooltipContent side="right" sideOffset={8}>
+          {item.label}
+          {item.hint && <span className="text-background/60 tabular-nums">{item.hint}</span>}
+        </TooltipContent>
+      )}
+    </Tooltip>
+  )
+}
+
 /** The palette folded to a column of icons: search, favourites, a group each. A click slides the group out over the field. */
-function RailWithFlyout({ docked, onUnfold, sidebar }: { docked: boolean; onUnfold: () => void; sidebar: SidebarProps }) {
+function RailWithFlyout({ sidebar }: { sidebar: SidebarProps }) {
   const [shown, setShown] = React.useState<string | null>(null)
   const library = useLibrary()
   const quick = useQuickLists()
@@ -121,15 +154,16 @@ function RailWithFlyout({ docked, onUnfold, sidebar }: { docked: boolean; onUnfo
     }
   }, [shown])
 
-  const items: { id: string; label: string; icon: React.ReactNode }[] = [
-    { id: "search", label: "Search parts", icon: <SearchIcon /> },
+  // Search and the quick lists first, set off by a line from the groups; a group's tip names it and counts its parts.
+  const tools: RailItem[] = [
+    { id: "search", label: "Search parts", hint: "/", icon: <SearchIcon /> },
     ...(quick.favourites.length || quick.recent.length ? [{ id: "quick", label: "Recent and favourites", icon: <StarIcon /> }] : []),
-    ...(library.length ? [{ id: "hdl", label: "Project modules", icon: <HdlIcon /> }] : []),
-    ...paletteGroups.map((g) => {
-      const Icon = g.entries[0].def.icon
-      return { id: g.id, label: g.label, icon: <Icon /> }
-    }),
+    ...(library.length ? [{ id: "hdl", label: "Project modules", hint: String(library.length), icon: <HdlIcon /> }] : []),
   ]
+  const groups: RailItem[] = paletteGroups.map((g) => {
+    const Icon = g.entries[0].def.icon
+    return { id: g.id, label: g.label, hint: String(g.entries.length), icon: <Icon /> }
+  })
   React.useEffect(() => {
     const search = () => setShown("search")
     window.addEventListener(PALETTE_SEARCH_EVENT, search)
@@ -141,28 +175,14 @@ function RailWithFlyout({ docked, onUnfold, sidebar }: { docked: boolean; onUnfo
 
   return (
     <div ref={host} data-slot="palette-rail" className="relative z-30 flex h-full shrink-0 border-r bg-sidebar" style={{ width: RAIL_PX }}>
-      <nav aria-label="Part groups" className="flex w-full flex-col items-center gap-1 overflow-y-auto py-2">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            title={item.label}
-            aria-label={item.label}
-            aria-expanded={shown === item.id}
-            onClick={() => setShown((s) => (s === item.id ? null : item.id))}
-            className={cn(
-              "flex size-10 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground outline-hidden hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring [&>svg]:size-5",
-              shown === item.id && "bg-sidebar-accent",
-            )}
-          >
-            {item.icon}
-          </button>
+      <nav aria-label="Part groups" className="flex w-full flex-col items-center gap-0.5 overflow-y-auto py-1.5">
+        {tools.map((item) => (
+          <RailButton key={item.id} item={item} shown={shown === item.id} onClick={() => setShown((s) => (s === item.id ? null : item.id))} />
         ))}
-        {docked && (
-          <button type="button" title="Unfold the palette" aria-label="Unfold the palette" onClick={onUnfold} className="mt-auto flex size-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent [&>svg]:size-5">
-            <PanelLeftOpenIcon />
-          </button>
-        )}
+        <div role="separator" className="my-1 h-px w-5 shrink-0 bg-sidebar-border" />
+        {groups.map((item) => (
+          <RailButton key={item.id} item={item} shown={shown === item.id} onClick={() => setShown((s) => (s === item.id ? null : item.id))} />
+        ))}
       </nav>
       {shown && (
         <div data-slot="palette-flyout" className="absolute inset-y-0 w-80 border-r bg-sidebar shadow-lg" style={{ left: RAIL_PX }}>

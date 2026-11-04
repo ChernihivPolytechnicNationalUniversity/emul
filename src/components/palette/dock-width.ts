@@ -47,7 +47,7 @@ export function saveFolded(folded: boolean) {
 }
 
 /** The width of the folded palette's icon column, px. */
-export const RAIL_PX = 56
+export const RAIL_PX = 44
 
 /** "/" on a tablet: the icon column opens its search. */
 export const PALETTE_SEARCH_EVENT = "emul:palette-search"
