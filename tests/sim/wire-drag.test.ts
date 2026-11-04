@@ -268,6 +268,44 @@ describe("jogs never touch another net (rule 5)", () => {
   })
 })
 
+describe("rule 5's last resort and the landing (design.md §6.3, §6.7)", () => {
+  it("a jog with no clean place re-routes the wire's private run up to its first pin or branch, not just the jogged piece", () => {
+    const blockers: WirePin[] = [8, 9, 10, 11, 12].map((x) => ({ key: `X${x}:1`, at: c(x, -1) }))
+    const sheet = sheetOf([part("R1", c(0, 0), c(4, 0)), part("R2", c(12, 4), c(12, 8))], [w(c(4, 0), c(8, 0), "red"), w(c(8, 0), c(12, 0), "blue"), w(c(12, 0), c(12, 4), "blue")], blockers)
+    const corner = sheet.wires.find((s) => s.a.x === c(12, 0).x && s.b.x === c(12, 0).x)!
+    const { wires, pins, blocked, frame } = drag(sheet, { parts: ["R1"] }, cells(0, -2))
+    expect.soft(frame.reroutes.map((r) => r.run.map((s) => s.id)), "the run goes on round the corner to R2's pin").toEqual([[corner.id]])
+    expect.soft(blocked, "a route was found").toBe(false)
+    expect.soft(wires.some((s) => s.id === corner.id && samePlace(s.a, corner.a) && samePlace(s.b, corner.b)), "the piece round the corner was laid again").toBe(false)
+    expect.soft(pinPartition(wireNets(wires, pins)), "no blocker joined").toEqual([["R1:2", "R2:1"]])
+    expect.soft(normalFormViolations(wires, pins), "normal form").toEqual([])
+  })
+
+  it("a blocked release lands on the nearest offset that is clean, the shorter drag first", () => {
+    const sheet = sheetOf([part("R1", c(0, 0), c(4, 0)), part("R2", c(8, 4), c(8, 8)), part("X", c(6, 2), c(6, -2))], path(c(4, 0), c(8, 0), c(8, 4)))
+    const plan = planOf(sheet, { parts: ["R1"] })
+    expect.soft(plan.lands(cells(0, 2)), "two cells down slides the wire over X's pin").toBe(false)
+    expect.soft(plan.nearestClean(cells(0, 2)), "one cell down is the nearest clean offset").toEqual(cells(0, 1))
+    expect.soft(plan.nearestClean(cells(0, 1)), "a clean offset is its own landing").toEqual(cells(0, 1))
+  })
+})
+
+describe("far ends that are not pins", () => {
+  it("a wire ending on a T slides the T along its bus", () => {
+    const sheet = sheetOf([part("A", c(-4, 0), c(0, 0)), part("B", c(12, 0), c(16, 0)), part("R1", c(6, 4), c(6, 8))], [w(c(0, 0), c(12, 0)), w(c(6, 4), c(6, 0))])
+    const { wires, pins } = drag(sheet, { parts: ["R1"] }, cells(2, 1))
+    expect.soft(geometryOf(wires), "the stem two cells right and one longer, the T with it").toEqual(geometryOf([w(c(0, 0), c(8, 0)), w(c(8, 0), c(12, 0)), w(c(8, 5), c(8, 0))]))
+    expect.soft(junctionsOf(wireNets(wires, pins)), "the dot moved with the T").toEqual([c(8, 0)])
+  })
+
+  it("a wire between two carried parts moves with them, its bend taking both axes", () => {
+    const sheet = sheetOf([part("R1", c(0, 0), c(4, 0)), part("R2", c(8, 4), c(8, 8))], path(c(4, 0), c(8, 0), c(8, 4)))
+    const { wires, frame } = drag(sheet, { parts: ["R1", "R2"] }, cells(3, 2))
+    expect.soft(geometryOf(wires), "the whole wire translated").toEqual(geometryOf(path(c(7, 2), c(11, 2), c(11, 6))))
+    expect.soft(frame.pieces.filter((p) => p.kind === "jog"), "and no jog").toEqual([])
+  })
+})
+
 describe("what the drag commits", () => {
   it("a moved wire landing along its own net keeps the colour of the wire that was there first (findings.md 1.18)", () => {
     const sheet = sheetOf([part("A", c(-4, 0), c(0, 0)), part("B", c(10, 0), c(14, 0)), part("R1", c(-2, 3), c(2, 3))], [w(c(0, 0), c(10, 0), "red"), ...path(c(2, 3), c(6, 3), c(6, 0)).map((s) => ({ ...s, color: "blue" as const }))])

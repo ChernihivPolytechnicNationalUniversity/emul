@@ -36,6 +36,7 @@ export type DragReroute = {
   readonly to: Point
   readonly net: string
   readonly pieces: readonly string[]
+  readonly run: readonly WireSegment[]
   readonly color?: WireColorKey
   readonly source?: string
   readonly leave?: Point
@@ -284,20 +285,44 @@ export class DragPlan {
   }
 
   commit(move: Point | DragMove, newId: NewId = randomId): DragCommit | null {
+    const released = this.release(move)
+    if (!released) return null
+    const { frame, pieces, rerouted } = released
+    return { edit: this.editOf(frame, pieces, rerouted, newId), pins: [...frame.pins].map(([key, at]) => ({ ...this.sheet.pin(key)!, at })), joins: frame.joins }
+  }
+
+  lands(move: Point | DragMove): boolean {
+    return this.release(move) !== null
+  }
+
+  nearestClean(offset: Point, reach = 4): Point | null {
+    const candidates: { at: Point; rank: number }[] = []
+    for (let dx = -reach; dx <= reach; dx++)
+      for (let dy = -reach; dy <= reach; dy++) {
+        const at = { x: offset.x + dx * GRID, y: offset.y + dy * GRID }
+        candidates.push({ at, rank: (dx * dx + dy * dy) * 1e9 + Math.hypot(at.x, at.y) })
+      }
+    candidates.sort((p, q) => p.rank - q.rank)
+    return candidates.find(({ at }) => this.lands(at))?.at ?? null
+  }
+
+  private release(move: Point | DragMove): { frame: DragFrame; pieces: readonly DragPiece[]; rerouted: readonly WireSegment[] } | null {
     const builder = new FrameBuilder(this, asMove(move))
     const frame = builder.build()
     if (frame.blocked) return null
     let pieces: readonly DragPiece[] = frame.pieces
+    const rerouted: WireSegment[] = []
     for (const reroute of frame.reroutes) {
       const routed = builder.reroute(reroute, pieces)
       if (!routed) return null
       const gone = new Set(reroute.pieces)
       pieces = [...pieces.filter((p) => !gone.has(p.id)), ...routed]
+      rerouted.push(...reroute.run)
     }
-    return { edit: this.editOf(frame, pieces, newId), pins: [...frame.pins].map(([key, at]) => ({ ...this.sheet.pin(key)!, at })), joins: frame.joins }
+    return { frame, pieces, rerouted }
   }
 
-  private editOf(frame: DragFrame, pieces: readonly DragPiece[], newId: NewId): WireEdit {
+  private editOf(frame: DragFrame, pieces: readonly DragPiece[], rerouted: readonly WireSegment[], newId: NewId): WireEdit {
     if (!pieces.length && !frame.replaced.size && !frame.pins.size) return {}
     const kept = new Set<string>()
     const unchanged = new Set<DragPiece>()
@@ -309,7 +334,7 @@ export class DragPlan {
       kept.add(piece.source)
       unchanged.add(piece)
     }
-    const remove = [...frame.replaced].filter((id) => !kept.has(id)).map((id) => this.sheet.segment(id)!)
+    const remove = [...[...frame.replaced].filter((id) => !kept.has(id)).map((id) => this.sheet.segment(id)!), ...rerouted]
     const add: WireSegment[] = []
     for (const piece of pieces) {
       if (unchanged.has(piece)) continue
@@ -800,7 +825,9 @@ class FrameBuilder {
       if (placed) continue
       const pieces = this.splitPieces(split, split.candidates[0] ?? (split.horizontal ? split.fixedAfter.x : split.fixedAfter.y))
       this.pieces.push(...pieces)
-      this.reroutes.push({ from: split.fixedAfter, to: split.movingAfter, net: split.net, pieces: pieces.map((p) => p.id), color: split.source.color, source: split.source.id, leave: split.leave, arrive: split.arrive })
+      const { run, end } = this.privateRun(split)
+      const leave = run.length ? this.sheet.pinsAt(end).map((p) => this.plan.headingOf(p.key)).find((h) => h) : split.leave
+      this.reroutes.push({ from: end, to: split.movingAfter, net: split.net, pieces: pieces.map((p) => p.id), run, color: split.source.color, source: split.source.id, leave, arrive: split.arrive })
     }
   }
 
@@ -828,8 +855,26 @@ class FrameBuilder {
       if (placed) continue
       const pieces = this.jointPieces(point, ordered[0], net, color)
       this.pieces.push(...pieces)
-      this.reroutes.push({ from: point.at, to: target, net, pieces: pieces.map((p) => p.id), color, leave: anchorHeading, arrive: carriedHeading })
+      this.reroutes.push({ from: point.at, to: target, net, pieces: pieces.map((p) => p.id), run: [], color, leave: anchorHeading, arrive: carriedHeading })
     }
+  }
+
+  private privateRun(split: Split): { run: WireSegment[]; end: Point } {
+    const run: WireSegment[] = []
+    let end = split.fixedAfter
+    let through = split.source
+    if (!samePoint(end, split.source.a) && !samePoint(end, split.source.b)) return { run, end }
+    for (;;) {
+      if (this.sheet.pinsAt(end).length || this.plan.movingAt(pointCode(end)) || this.shifts.has(pointCode(end))) break
+      const ends = this.sheet.endsAt(end)
+      if (ends.length !== 2) break
+      const next = ends[0] === through ? ends[1] : ends[0]
+      if (this.gone.has(next) || run.includes(next)) break
+      run.push(next)
+      through = next
+      end = otherEnd(next, end)
+    }
+    return { run, end }
   }
 
   private anchorPaths(from: Point, to: Point, heading: Point | undefined): Path[] {
