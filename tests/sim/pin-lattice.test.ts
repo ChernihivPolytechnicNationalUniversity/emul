@@ -328,6 +328,20 @@ describe("an old file's diagonal parts move onto the lattice without changing th
     expect.soft(notes, "the note").toEqual(["Q1 stood at 45°, where only a two-pin part can stand now: turned to 0°."])
   })
 
+  it("a multi-pin part turns in place even where a cell's shift would set its pin on the pin it is wired to", () => {
+    const q = placedAs("npn", { rotation: 45, mirror: false }, 4, 4, "Q1")
+    const inPlace = migrated(q)
+    const base = at(inPlace, "B")
+    const r = { ...placedAs("resistor", { rotation: 0, mirror: false }, 0, 0, "R1") }
+    const pin2 = at(r, "2")
+    const resistor = { ...r, x: r.x + base.x - GRID - pin2.x, y: r.y + base.y - pin2.y }
+    const old = { objects: [q, resistor], wires: [{ id: "w", from: { object: "R1", pin: "2" }, to: { object: "Q1", pin: "B" } }], parts: {}, version: 2 } as Schematic
+    const { doc } = upgraded(old)
+    const turned = doc.objects.find((o) => o.id === "Q1")!
+    expect.soft([turned.x, turned.y, turned.rotation ?? 0], "Q1 turned where it stood").toEqual([inPlace.x, inPlace.y, inPlace.rotation ?? 0])
+    expect.soft(doc.wires.map((w) => w.id), "its wire kept").toEqual(["w"])
+  })
+
   it("a file without diagonal parts comes through untouched, and an upgraded file is not upgraded again", () => {
     const plain = examples.find((e) => e.id === "battery-life")!.build(GRID)
     expect.soft(upgraded({ ...plain, version: 2 } as Schematic).doc.objects, "nothing to move").toBe(plain.objects)

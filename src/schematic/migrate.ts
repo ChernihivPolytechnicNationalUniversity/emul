@@ -125,6 +125,7 @@ function pinsMiddleBefore(o: PlacedObject, def: ComponentDef): Point {
 type Placement = { object: PlacedObject; cost: number }
 
 const NEAREST_SQUARES = 4
+const SHIFTED_TURN = 1000
 const SQUARES_AROUND = 2
 
 function squaresAround(o: PlacedObject, def: ComponentDef): Placement[] {
@@ -147,7 +148,7 @@ function turnedTo(o: PlacedObject, def: ComponentDef, rotation: Rotation, dx: nu
   const { rotation: _diagonal, ...rest } = o
   return {
     object: { ...rest, ...(rotation && { rotation }), x: (Math.round(o.x / GRID + half - size.w / 2) + dx) * GRID, y: (Math.round(o.y / GRID + half - size.h / 2) + dy) * GRID },
-    cost: dx * dx + dy * dy + (rotation === (o.rotation ?? 0) - 45 ? 0 : 0.5),
+    cost: (dx || dy ? SHIFTED_TURN : 0) + dx * dx + dy * dy + (rotation === (o.rotation ?? 0) - 45 ? 0 : 0.5),
   }
 }
 
