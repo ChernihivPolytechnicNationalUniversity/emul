@@ -131,31 +131,36 @@ export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmwa
   return (
     <Card data-slot="inspector" className={cn("max-h-[calc(100%-6.75rem)] w-72 gap-4 overflow-y-auto py-4 shadow-md", !open && "py-3", className)} {...props}>
       <CardHeader className="px-4">
-        <CardTitle className="text-sm">{def ? [object?.props?.ref, def.name].filter(Boolean).join(" · ") : `${selected.length} components`}</CardTitle>
-        {open && def && maker(def) && <CardDescription className="col-span-2 text-xs">{maker(def)}</CardDescription>}
+        {/* The name keeps the width: star and fold beside it, the bench tools in their own row below. */}
+        <CardTitle className="truncate text-sm leading-7" title={def ? [object?.props?.ref, def.name].filter(Boolean).join(" · ") : `${selected.length} components`}>
+          {def ? [object?.props?.ref, def.name].filter(Boolean).join(" · ") : `${selected.length} components`}
+        </CardTitle>
+        {open && def && maker(def) && <CardDescription className="col-span-2 -mt-1 text-xs">{maker(def)}</CardDescription>}
         <CardAction className="row-span-1">
           <ButtonGroup>
             {def && <PinStar defId={def.id} name={def.name} />}
             <Button variant="ghost" size="icon-sm" onClick={() => sections.setOpen("panel", !open)} aria-label={open ? "Collapse the inspector" : "Expand the inspector"} aria-expanded={open}>
               <ChevronDownIcon className={cn("transition-transform duration-200 ease-out motion-reduce:transition-none", open && "rotate-180")} />
             </Button>
-            <Button variant="ghost" size="icon-sm" onClick={() => onRotate(-45)} aria-label="Rotate 45° counter-clockwise">
-              <RotateCcwIcon />
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={() => onRotate(45)} aria-label="Rotate 45° clockwise">
-              <RotateCwIcon />
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={() => onFlip("horizontal")} aria-label="Mirror horizontally">
-              <FlipHorizontal2Icon />
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={() => onFlip("vertical")} aria-label="Mirror vertically">
-              <FlipVertical2Icon />
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={onDelete} aria-label="Delete" className="text-destructive">
-              <Trash2Icon />
-            </Button>
           </ButtonGroup>
         </CardAction>
+        <ButtonGroup className="col-span-2 -ml-2">
+          <Button variant="ghost" size="icon-sm" onClick={() => onRotate(-45)} aria-label="Rotate 45° counter-clockwise" title="Rotate 45° counter-clockwise">
+            <RotateCcwIcon />
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => onRotate(45)} aria-label="Rotate 45° clockwise" title="Rotate 45° clockwise">
+            <RotateCwIcon />
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => onFlip("horizontal")} aria-label="Mirror horizontally" title="Mirror horizontally">
+            <FlipHorizontal2Icon />
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => onFlip("vertical")} aria-label="Mirror vertically" title="Mirror vertically">
+            <FlipVertical2Icon />
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={onDelete} aria-label="Delete" title="Delete" className="ml-auto text-destructive">
+            <Trash2Icon />
+          </Button>
+        </ButtonGroup>
       </CardHeader>
       {open && object && def && (
         <CardContent className="flex flex-col gap-4 px-4">

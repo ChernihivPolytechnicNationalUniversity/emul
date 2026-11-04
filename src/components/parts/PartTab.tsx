@@ -29,8 +29,14 @@ export function PartTab({ def }: { def: ComponentDef }) {
     <div data-slot="part-tab" className="flex flex-col gap-3.5">
       {def.description && <p className="text-[12.5px] leading-normal text-muted-foreground">{def.description}</p>}
       <div className="flex gap-3">
-        {/* The package's pins where they can be drawn as a DIP; the part as the field draws it otherwise. */}
-        {hasPinout(def) ? <Pinout def={def} /> : <SymbolPreview def={def} size={104} />}
+        {/* A board by its photo, as in the palette; a chip by its package pins; anything else as the field draws it. */}
+        {def.board ? (
+          <img src={`${import.meta.env.BASE_URL}boards/${def.board.photo}`} alt="" className="size-[104px] shrink-0 rounded-[10px] border bg-muted/40 object-contain" />
+        ) : hasPinout(def) ? (
+          <Pinout def={def} />
+        ) : (
+          <SymbolPreview def={def} size={104} />
+        )}
         {sheet && <SpecList record={sheet} className="content-start" />}
       </div>
       {record ? <ModelClaims record={record} /> : pending && (pending.modelled.length > 0 || pending.notModelled.length > 0) && <ModelClaims record={{ none: "", ...pending }} />}
