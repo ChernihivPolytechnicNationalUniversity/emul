@@ -1,5 +1,6 @@
 import * as React from "react"
 import { ensureDefs, type PartMeta } from "@/schematic/registry"
+import { hideCard, hoverPart, leavePart } from "./part-card"
 
 /** What every row of the palette does, shared rather than threaded through each list. */
 export type PaletteActions = {
@@ -36,9 +37,15 @@ export function useDragOut(def: PartMeta) {
   const { take } = usePaletteActions()
   return {
     draggable: false,
-    onPointerEnter: () => prefetch(def.id),
+    onPointerEnter: (e: React.PointerEvent) => {
+      prefetch(def.id)
+      // A finger has no hover: the card is for a mouse or a pen resting on the row.
+      if (e.pointerType !== "touch") hoverPart(def.id, e.currentTarget)
+    },
+    onPointerLeave: leavePart,
     onFocus: () => prefetch(def.id),
     onPointerDown: (e: React.PointerEvent) => {
+      hideCard()
       if (e.button !== 0 || e.pointerType === "touch") return
       const from = { x: e.clientX, y: e.clientY }
       const move = (ev: PointerEvent) => {

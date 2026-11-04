@@ -411,6 +411,28 @@ export type PropField =
 
 export type ModelElement = Element & { label?: string }
 
+/** Where in a document a statement is: a page (the PDF's page, which url#page=N opens), and or a section, table or figure. */
+export type Cite = { doc?: string; page?: number; at?: string }
+
+/** A number the card and the Part tab show, with where the datasheet gives it. */
+export type Spec = { label: string; value: string; cite: Cite }
+
+/** Something the model does or leaves out; a modelled claim names the test that holds it to the datasheet. */
+export type Claim = { what: string; cite?: Cite; test?: string }
+
+/** A part with a datasheet: its maker, the documents (key into DOCS, first the one the numbers come from), the numbers, what is modelled and what is not. */
+export type Datasheet = {
+  maker: string
+  package?: string
+  docs: [string, ...string[]]
+  specs: Spec[]
+  modelled: Claim[]
+  notModelled: Claim[]
+}
+
+/** A part that is not one product (an ideal source, a ground, a generic resistor): why there is no datasheet, and still what is modelled. */
+export type NoDatasheet = { none: string; modelled: Claim[]; notModelled: Claim[] }
+
 /** A part as the generated catalogue lists it (catalogue.gen.ts): the icon by name, the file its definition loads from. */
 export type CatalogueEntry = Pick<ComponentDef, "id" | "name" | "description" | "category" | "keywords" | "width" | "height" | "prefix" | "chip" | "board"> & {
   icon: string
@@ -477,8 +499,10 @@ export type ComponentDef = {
   meter?: MeterSpec
   /** An RGB panel fed by an MCU's LCD controller: which pins carry which signal, and what it accepts. */
   panel?: PanelSpec
-  /** Free-form reference data shown in the inspector later. */
+  /** Reference data the inspector's Part tab lists under Details: what a board carries, where its LEDs sit. */
   info?: Record<string, string>
+  /** Where the part's numbers come from and what the model leaves out: the hover card and the Part tab read it (src/schematic/datasheets.ts). */
+  datasheet?: Datasheet | NoDatasheet
   /** A ready-to-run board's palette tile; every part in the "boards" group has one. */
   board?: BoardCard
 }

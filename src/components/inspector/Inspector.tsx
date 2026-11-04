@@ -1,4 +1,6 @@
 import type { EepromSnapshot } from "@/sim/digital"
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs"
+import { PartTab } from "@/components/parts/PartTab"
 import type { HdlSnapshot } from "@/sim/hdl"
 import { HC595_LINKS, HC595_OUTPUTS, shiftRegisterOfDef, type ShiftRegisterSnapshot } from "@/sim/hc595"
 import { BUZZER_KINDS, buzzerOfDef, type BuzzerSnapshot } from "@/sim/buzzer"
@@ -90,8 +92,16 @@ function Section({ id, label, sections, open = true, action, children }: { id: s
   )
 }
 
+type InspectorTab = "properties" | "part" | "readings"
+
+/** The tab stays as picked from one selected part to the next, for this page: comparing parts' datasheets is a walk across the bench. */
+function useInspectorTab() {
+  return React.useState<InspectorTab>("properties")
+}
+
 export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmware, onSerial, onCode, onHdl, onRotate, onFlip, onDelete, className, ...props }: InspectorProps) {
   const sections = useSectionsOpen()
+  const [tab, setTab] = useInspectorTab()
   if (selected.length === 0) return null
   const object = selected.length === 1 ? selected[0] : null
   const def = object && getDef(object.def)
@@ -144,6 +154,13 @@ export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmwa
               </AlertDescription>
             </Alert>
           )}
+          <Tabs value={tab} onValueChange={(v) => setTab(v as InspectorTab)}>
+            <TabsList>
+              <TabsTab value="properties">Properties</TabsTab>
+              <TabsTab value="part">Part</TabsTab>
+              <TabsTab value="readings">Readings</TabsTab>
+            </TabsList>
+            <TabsPanel value="properties" className="flex flex-col gap-4">
           {def.chip && (
             <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? avrChipById(def.chip)?.name ?? def.chip} sim={sim} sections={sections} onChange={onChange} onFirmware={onFirmware} onCode={onCode} />
           )}
@@ -207,12 +224,18 @@ export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmwa
               </Field>
             </FieldGroup>
           </Section>
-          {sim.live && !damage[object.id]?.fatal && (
-            // A board's readings are dozens of internal elements: there on request, not in the way.
-            <Section id={def.hideIdle ? "board-readings" : "readings"} label="Live readings" sections={sections} open={!def.hideIdle}>
-              <LiveReadings object={object} sim={sim} />
-            </Section>
-          )}
+            </TabsPanel>
+            <TabsPanel value="part">
+              <PartTab def={def} />
+            </TabsPanel>
+            <TabsPanel value="readings">
+              {sim.live && !damage[object.id]?.fatal ? (
+                <LiveReadings object={object} sim={sim} />
+              ) : (
+                <p className="text-xs text-muted-foreground">{damage[object.id]?.fatal ? "Burnt out: nothing to read." : "Run the simulation to read its voltages and currents."}</p>
+              )}
+            </TabsPanel>
+          </Tabs>
         </CardContent>
       )}
     </Card>

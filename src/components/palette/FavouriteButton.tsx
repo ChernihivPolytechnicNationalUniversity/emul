@@ -1,14 +1,17 @@
+import type * as React from "react"
 import { StarIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { PartMeta } from "@/schematic/registry"
 import { usePaletteActions } from "./palette-actions"
 import { flipFavourite } from "./recents"
 
-export function FavouriteButton({ def, className }: { def: PartMeta; className?: string }) {
+/** The star that pins a part. Rendered as a row's menu action, it passes on what the row puts on it (data-sidebar, position): the row keeps room for it. */
+export function FavouriteButton({ def, className, ...props }: { def: PartMeta } & Omit<React.ComponentProps<"button">, "onClick">) {
   const { favourites } = usePaletteActions()
   const on = favourites.has(def.id)
   return (
     <button
+      {...props}
       type="button"
       onClick={(e) => {
         e.stopPropagation()

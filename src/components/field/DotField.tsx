@@ -1268,7 +1268,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 onPinPointerUp={onPinPointerUp}
               />
               <PendingWireLayer objects={docObjects} index={index} pending={pending} grid={grid} scale={scale} part="marks" />
-              {armed && armedAt && <PlacementGhost defId={armed} at={armedAt} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} />}
+              {armed && armedAt && <PlacementGhost defId={armed} at={armedAt} grid={grid} scale={scale} detail={detail} sim={simStore} colorOf={colorOf} raster={symbolRaster} />}
               {ghosts && ghosts.length > 0 && (
                 <GhostLayer ghosts={ghosts} objects={docObjects} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} />
               )}

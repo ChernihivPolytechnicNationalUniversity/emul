@@ -1,4 +1,5 @@
 import { LED_COLORS } from "../led-colors"
+import { BASIC_RECORDS } from "./basic-records"
 import {
   AcSourceIcon,
   BatteryIcon,
@@ -901,6 +902,9 @@ export const basicComponents: ComponentDef[] = [
 ]
 
 export { LED_COLORS }
+
+// What each everyday part models and leaves out (basic-records.ts): no datasheet sets them.
+for (const def of basicComponents) def.datasheet ??= BASIC_RECORDS[def.id]
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = basicComponents

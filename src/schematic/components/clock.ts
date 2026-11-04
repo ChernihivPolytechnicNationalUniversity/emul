@@ -37,6 +37,11 @@ export const crystal: ComponentDef = {
   ],
   // An open circuit at DC: nothing for the analog engine to solve.
   model: [],
+  datasheet: {
+    none: "A generic crystal: its frequency is set in the inspector, not taken from one product's datasheet.",
+    modelled: [{ what: "The RCC sees HSE or LSE ready after the start-up time the MCU's datasheet gives (ST DS9405 Tables 33 and 35): 2 ms for a MHz crystal, 2 s for 32.768 kHz" }, { what: "The clock tree runs at the frequency written on it" }],
+    notModelled: [{ what: "The oscillation itself: the analog engine steps at 20 µs and never sees the waveform" }, { what: "Load capacitors, drive level and frequency tolerance" }],
+  },
 }
 
 /**
@@ -115,6 +120,11 @@ export const oscillator: ComponentDef = {
   // The module draws a few milliamps; OUT drives nothing the engine can follow.
   // A few milliamps from VCC; the 3.3 V part is dead past its absolute maximum supply.
   model: [{ kind: "R", a: "VCC", b: "GND", value: 1e3, limits: { voltage: "{vmax}", fail: "short" } }],
+  datasheet: {
+    none: "A generic oscillator module: its frequency and supply rating are set in the inspector, not taken from one product's datasheet.",
+    modelled: [{ what: "A ready clock into OSC_IN for HSE bypass (or OSC32_IN for LSE), at the frequency written on it" }, { what: "A few milliamps from VCC; dead past its supply rating" }],
+    notModelled: [{ what: "The output waveform: OUT drives nothing the analog engine follows" }, { what: "Frequency tolerance and jitter" }],
+  },
 }
 
 export { crystalStartup, RESONATOR_STARTUP }

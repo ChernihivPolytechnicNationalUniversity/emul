@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils"
 import { hitEntries, paletteGroups, useLibrary, type PaletteEntry } from "./items"
 import { VirtualRows, type RowSlot } from "./VirtualRows"
+import { PartCard } from "./PartCard"
 import { useGroupsOpen } from "./collapsed-groups"
 import type { PartMeta } from "@/schematic/registry"
 import type { HdlLanguage } from "emul-shared/hdl"
@@ -125,13 +126,15 @@ function PartRow({ entry, ranges = [], matched, variant, selected, slot }: { ent
         title={title}
         isActive={inHand || selected}
         aria-pressed={inHand}
-        className="cursor-grab text-[13px] active:cursor-grabbing pointer-coarse:h-11 [&>svg]:size-[18px]"
+        // The hint keeps the right edge; it gives way to the star on hover and focus. Only a pinned
+        // part, whose star always shows, keeps the star's room.
+        className={cn("cursor-grab text-[13px] active:cursor-grabbing pointer-coarse:h-11 [&>svg]:size-[18px]", !favourites.has(item.id) && "group-has-data-[sidebar=menu-action]/menu-item:pr-2")}
       >
         <item.icon />
         <span className="min-w-[40%] truncate">
           <Highlighted text={entry.name} ranges={ranges} />
         </span>
-        <span className="ml-auto flex max-w-[50%] shrink-0 items-center gap-1 truncate text-[11px] text-muted-foreground group-hover/menu-item:invisible">
+        <span className="ml-auto flex max-w-[50%] shrink-0 items-center gap-1 truncate text-[11px] text-muted-foreground group-focus-within/menu-item:invisible group-hover/menu-item:invisible">
           {variant ? (
             <mark className={cn(MARK, "truncate")}>{variant}</mark>
           ) : matched ? (
@@ -604,6 +607,7 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
             </>
           )}
         </SidebarContent>
+        <PartCard />
       </Sidebar>
     </Actions.Provider>
   )

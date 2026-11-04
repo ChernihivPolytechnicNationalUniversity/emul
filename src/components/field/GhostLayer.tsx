@@ -4,6 +4,10 @@ import { getDef, getDefsVersion, getMeta, subscribeDefs } from "@/schematic/regi
 import type { PlacedObject } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
 import { FieldCanvas } from "./FieldCanvas"
+import { ComponentView } from "./ComponentView"
+import { PinLayer } from "./PinLayer"
+import type { FieldDetail } from "./detail"
+import type { SimStore } from "@/sim/sim-store"
 import type { SymbolRaster } from "./symbol-raster"
 
 export type Ghost = { key: string | number; color: string; ids: readonly string[]; dx: number; dy: number }
@@ -65,33 +69,69 @@ function placementObject(defId: string, at: { x: number; y: number }, grid: numb
   return { id: "placing", def: defId, x: snap(at.x - (def.width * grid) / 2, grid), y: snap(at.y - (def.height * grid) / 2, grid) }
 }
 
-export function PlacementGhost({ defId, at, grid, scale, colorOf, raster }: { defId: string; at: { x: number; y: number }; grid: number; scale: number; colorOf: (wireId: string) => WireColorKey; raster: SymbolRaster }) {
+const NOTHING = new Set<string>()
+const NO_CONTACTS = new Map<string, string>()
+const NO_PARTS = {}
+const ignore = () => {}
+const unconnected = () => false
+
+/**
+ * The part in hand, drawn as the field draws a placed one (its body and its pins, at the field's
+ * level of detail) and see-through. Zoomed far out the field paints parts on a canvas, so does the ghost.
+ */
+export function PlacementGhost({ defId, at, grid, scale, detail, sim, colorOf, raster }: { defId: string; at: { x: number; y: number }; grid: number; scale: number; detail: FieldDetail; sim: SimStore; colorOf: (wireId: string) => WireColorKey; raster: SymbolRaster }) {
   // Redrawn when a file of parts arrives: the part in hand may be the one that was loading.
   const version = React.useSyncExternalStore(subscribeDefs, getDefsVersion)
   const object = React.useMemo(() => (void version, placementObject(defId, at, grid)), [defId, at, grid, version])
   if (!object) return <LoadingGhost defId={defId} at={at} grid={grid} scale={scale} />
-  const box = objectRect(object, grid)
-  const view = { x: box.x - grid, y: box.y - grid, w: box.w + 2 * grid, h: box.h + 2 * grid }
+  if (detail.canvas) {
+    const box = objectRect(object, grid)
+    const view = { x: box.x - grid, y: box.y - grid, w: box.w + 2 * grid, h: box.h + 2 * grid }
+    return (
+      <div data-slot="placement-ghost" className="pointer-events-none absolute top-0 left-0 opacity-60">
+        <FieldCanvas objects={[object]} routes={NO_ROUTES} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={raster} />
+      </div>
+    )
+  }
   return (
-    <div data-slot="placement-ghost" className="pointer-events-none absolute top-0 left-0 opacity-60">
-      <FieldCanvas objects={[object]} routes={NO_ROUTES} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={raster} />
+    <div data-slot="placement-ghost" className="pointer-events-none absolute top-0 left-0 opacity-60 [&_*]:pointer-events-none!">
+      <div className="absolute top-0 left-0">
+        <ComponentView
+          object={object}
+          grid={grid}
+          detail={detail}
+          sheeted={false}
+          selected={false}
+          parts={NO_PARTS}
+          sim={sim}
+          onBodyPointerDown={ignore}
+          onBodyPointerMove={ignore}
+          onBodyPointerUp={ignore}
+          onBodyContextMenu={ignore}
+          onPartChange={ignore}
+        />
+      </div>
+      <PinLayer objects={[object]} grid={grid} detail={detail} connected={unconnected} contacts={NO_CONTACTS} selected={NOTHING} onPinPointerDown={ignore} onPinPointerMove={ignore} onPinPointerUp={ignore} />
     </div>
   )
 }
 
-/** A part whose file is still loading: a dashed box of its size from the catalogue, where it will land. */
+/** Cells the stand-in icon spans at most: a board's icon is not drawn board-sized. */
+const LOADING_ICON_CELLS = 3
+
+/**
+ * A part whose file is still loading: its palette icon (the same IEC symbol) under the pointer,
+ * as faint as the ghost, until the part itself can be drawn. The catalogue has the icon from the start.
+ */
 function LoadingGhost({ defId, at, grid, scale }: { defId: string; at: { x: number; y: number }; grid: number; scale: number }) {
   const meta = getMeta(defId)
   if (!meta) return null
-  const x = snap(at.x - (meta.width * grid) / 2, grid)
-  const y = snap(at.y - (meta.height * grid) / 2, grid)
+  const size = Math.min(meta.width, meta.height, LOADING_ICON_CELLS) * grid
+  const Icon = meta.icon
   return (
-    <div
-      data-slot="placement-ghost"
-      data-loading=""
-      className="pointer-events-none absolute animate-pulse rounded-sm border-dashed border-muted-foreground/60"
-      // World units, like the field's canvases; the line keeps 2 screen px at any zoom.
-      style={{ left: x, top: y, width: meta.width * grid, height: meta.height * grid, borderWidth: 2 / scale }}
-    />
+    <div data-slot="placement-ghost" data-loading="" className="pointer-events-none absolute text-foreground opacity-60" style={{ left: at.x - size / 2, top: at.y - size / 2, width: size, height: size }}>
+      {/* The icon draws in a 24-unit box: its line stays about 1.5 screen px at any zoom. */}
+      <Icon width={size} height={size} strokeWidth={(1.5 * 24) / (size * scale)} />
+    </div>
   )
 }

@@ -2,7 +2,7 @@ import { GENERIC_OPAMP, OPAMP_PRESETS, type OpampPreset } from "@/sim/opamp"
 import { parseValue } from "@/sim/units"
 import { OpAmpIcon } from "../icons"
 import { pinNumbers } from "../pin-numbers"
-import type { BodyShape, ComponentDef, ModelElement, PinDef, PropField } from "../types"
+import type { BodyShape, ComponentDef, ModelElement, PinDef, PropField, NoDatasheet } from "../types"
 
 /**
  * Op amps as the schematic draws them: a triangle, IN− above IN+ on its left edge, the output at
@@ -98,6 +98,13 @@ function opampDef(p: OpampPreset): ComponentDef {
     body,
     parts: [],
     model: modelOf(p),
+    ...(generic && {
+      datasheet: {
+        none: "An idealised op amp, close to the textbook's: every figure is set in the inspector. The named op amps beside it are real parts off their datasheets.",
+        modelled: [{ what: "Open-loop gain, gain-bandwidth, slew rate, offset, output swing to the rails and its current limit, as set", test: "tests/sim/opamp.test.ts" }],
+        notModelled: [{ what: "Input bias current and noise" }, { what: "Common-mode and supply rejection" }],
+      } satisfies NoDatasheet,
+    }),
     info: {
       ...(p.dip && { Package: `${p.dip.package}: this amplifier on pins ${p.dip.inp} (IN+), ${p.dip.inn} (IN−), ${p.dip.out} (OUT), supply ${p.dip.vcc} (V+) and ${p.dip.vee} (V−); ${p.dip.others}` }),
       Source: p.source,
