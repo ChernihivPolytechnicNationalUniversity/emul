@@ -20,7 +20,7 @@ import type { Datasheet } from "@/schematic/types"
 // gives only numbers. Marks by shape: a band for the range, a dot for typ, a red tick and hatch
 // beyond the abs max, an arc for hysteresis, a dashed outline for an estimate.
 
-const H = 24
+const H = 28
 const RED = "var(--color-red-600)"
 const GREEN = "var(--color-green-600)"
 
@@ -68,11 +68,11 @@ function RangeBar({ c, w: W }: { c: Characteristic; w: number }) {
           <line x1="0" y1="0" x2="0" y2="4" stroke={RED} strokeWidth="1" opacity=".45" />
         </pattern>
       </defs>
-      <line x1={x(lo)} x2={x(hi)} y1={11} y2={11} className="stroke-border" />
+      <line x1={x(lo)} x2={x(hi)} y1={11} y2={11} className="stroke-muted-foreground/50" />
       {limits.map((l) => (l > 0 ? <rect key={l} x={x(l)} y={6} width={x(hi) - x(l)} height={10} fill="url(#abs-hatch)" /> : <rect key={l} x={x(lo)} y={6} width={x(l) - x(lo)} height={10} fill="url(#abs-hatch)" />))}
       {band && band[1] > band[0] && <rect x={x(band[0])} y={6} width={Math.max(2, x(band[1]) - x(band[0]))} height={10} rx={2} fill={GREEN} fillOpacity={0.18} stroke={GREEN} strokeDasharray={v?.approx ? "2 1.5" : undefined} />}
       {limits.map((l) => <line key={`t${l}`} x1={x(l)} x2={x(l)} y1={3} y2={17} stroke={RED} strokeWidth={2} />)}
-      {limits.filter((l) => l > 0).map((l) => <text key={`n${l}`} x={x(l)} y={23.5} fontSize={7} textAnchor="middle" fill={RED}>{formatNumber(l, KINDS[c.kind].quantity)}</text>)}
+      {limits.filter((l) => l > 0).map((l) => <text key={`n${l}`} x={Math.min(x(l), W - 2)} y={26} fontSize={9} textAnchor={x(l) > W - 24 ? "end" : "middle"} fill={RED}>{formatNumber(l, KINDS[c.kind].quantity)}</text>)}
       {typ !== undefined && <circle cx={x(typ)} cy={11} r={3} className="fill-foreground" />}
     </svg>
   )
@@ -94,8 +94,8 @@ function RailBar({ c, w: W }: { c: Characteristic; w: number }) {
       {zone && <rect x={x(zone[0])} y={7} width={x(zone[1]) - x(zone[0])} height={8} fill="var(--color-blue-500)" fillOpacity={0.25} />}
       {at !== undefined && <line x1={x(at)} x2={x(at)} y1={3} y2={19} className="stroke-foreground" strokeWidth={1.6} />}
       {v.release !== undefined && at !== undefined && <path d={`M${x(at)} 4 Q ${(x(at) + x(v.release)) / 2} -2 ${x(v.release)} 4`} fill="none" stroke="var(--color-violet-500)" strokeWidth={1.2} />}
-      <text x={4} y={21.5} fontSize={6} className="fill-muted-foreground">GND</text>
-      <text x={W - 4} y={21.5} fontSize={6} textAnchor="end" className="fill-muted-foreground">VCC</text>
+      <text x={4} y={26} fontSize={9} className="fill-muted-foreground">GND</text>
+      <text x={W - 4} y={26} fontSize={9} textAnchor="end" className="fill-muted-foreground">VCC</text>
     </svg>
   )
 }
@@ -119,9 +119,9 @@ function LogRuler({ c, w: W }: { c: Characteristic; w: number }) {
   const at = x(Math.log10(Math.abs(n)))
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden>
-      <line x1={x(a)} x2={x(b)} y1={10} y2={10} className="stroke-border" />
-      {Array.from({ length: b - a + 1 }, (_, i) => a + i).map((e) => <line key={e} x1={x(e)} x2={x(e)} y1={(e - a) % 3 ? 8 : 6} y2={(e - a) % 3 ? 12 : 14} className="stroke-border" />)}
-      {anchors.map(([e, t]) => <text key={e} x={x(e)} y={21.5} fontSize={6} textAnchor="middle" className="fill-muted-foreground">{t}</text>)}
+      <line x1={x(a)} x2={x(b)} y1={10} y2={10} className="stroke-muted-foreground/50" />
+      {Array.from({ length: b - a + 1 }, (_, i) => a + i).map((e) => <line key={e} x1={x(e)} x2={x(e)} y1={(e - a) % 3 ? 8 : 6} y2={(e - a) % 3 ? 12 : 14} className="stroke-muted-foreground/50" />)}
+      {anchors.map(([e, t]) => <text key={e} x={x(e)} y={26} fontSize={9} textAnchor={e === a ? "start" : e === b ? "end" : "middle"} className="fill-muted-foreground">{t}</text>)}
       <path d={`M${at - 3.5} 1 h7 l-3.5 4z`} className="fill-foreground" />
       <line x1={at} x2={at} y1={4} y2={15} className="stroke-foreground" strokeWidth={1.8} strokeDasharray={v.approx ? "2 1.5" : undefined} />
     </svg>
@@ -141,7 +141,7 @@ function LevelMeter({ c, w: W }: { c: Characteristic; w: number }) {
       <rect x={4} y={7} width={W - 8} height={6} rx={3} className="fill-muted" />
       <rect x={4} y={7} width={x(typ) - 4} height={6} rx={3} fill="var(--color-amber-500)" />
       {min !== undefined && <line x1={x(min)} x2={x(min)} y1={4} y2={16} className="stroke-foreground" strokeWidth={1.4} />}
-      {([[30, "whisper"], [60, "talk"], [85, "alarm"], [120, "pain"]] as const).map(([d, t]) => <text key={d} x={x(d)} y={21.5} fontSize={6} textAnchor="middle" className="fill-muted-foreground">{t}</text>)}
+      {([[30, "whisper"], [60, "talk"], [85, "alarm"], [120, "pain"]] as const).map(([d, t]) => <text key={d} x={x(d)} y={26} fontSize={9} textAnchor="middle" className="fill-muted-foreground">{t}</text>)}
     </svg>
   )
 }
