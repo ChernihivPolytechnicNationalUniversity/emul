@@ -76,6 +76,7 @@ import { FieldPanel, FieldToggle, type FieldTarget, type PeerSelection } from "@
 import { fieldEntries, searchField, type FieldHit } from "@/components/explorer/field-index"
 import { runtimeProblems, sortProblems, staticProblems } from "@/components/explorer/problems"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useSizeClass } from "@/hooks/use-size-class"
 import { useSampled } from "@/hooks/use-sampled"
 
 /** 1 cell = 2.54 mm (0.1"), the standard header pitch, so pins land on grid nodes. */
@@ -1233,10 +1234,17 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const [fieldOverCode, setFieldOverCode] = React.useState(false)
   const codeShown = codeOpen || !!hdlOpen
   if (!codeShown && fieldOverCode) setFieldOverCode(false)
-  const fieldShown = fieldOpen && (!codeShown || fieldOverCode)
+  // Under the large size class the field is too narrow to give a column away: the explorer stays folded,
+  // whatever a wider window left saved, until it is opened here on purpose.
+  const { width: widthClass } = useSizeClass()
+  const roomy = widthClass === "large" || widthClass === "xl"
+  const [fieldOverNarrow, setFieldOverNarrow] = React.useState(false)
+  if (roomy && fieldOverNarrow) setFieldOverNarrow(false)
+  const fieldShown = fieldOpen && (!codeShown || fieldOverCode) && (roomy || fieldOverNarrow)
   const showField = React.useCallback((open: boolean) => {
     setFieldOpen(open)
     setFieldOverCode(open)
+    setFieldOverNarrow(open)
   }, [setFieldOpen])
   const fieldSearch = React.useRef<HTMLInputElement>(null)
   const [fieldQuery, setFieldQuery] = React.useState("")
