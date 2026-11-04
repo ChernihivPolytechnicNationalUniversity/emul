@@ -83,9 +83,30 @@ const RECORDS: Record<string, Datasheet> = {
   "polyfuse": {
     maker: "Bourns",
     docs: [DOCS["bourns-mf-msmf"]],
-    specs: [],
-    modelled: [],
-    notModelled: [{ what: "The spread between Rmin and R1max (it starts at Rmin and returns to it after a trip), the resistance's rise as it warms below a trip, the ambient temperature's effect on Ihold" }],
+    specs: [
+      { label: "Vmax / Imax (MF-MSMF050)", value: "15 V / 100 A", cite: { page: 1, at: "Electrical Characteristics" } },
+      { label: "Ihold / Itrip (MF-MSMF050)", value: "0.50 A / 1.00 A at 23 °C", cite: { page: 1, at: "Electrical Characteristics" } },
+      { label: "Resistance (MF-MSMF050)", value: "0.15 Ω min, 1.0 Ω R1max", cite: { page: 1, at: "Electrical Characteristics" } },
+      { label: "Time to trip (MF-MSMF050)", value: "0.15 s max at 8 A", cite: { page: 1, at: "Electrical Characteristics" } },
+      { label: "Tripped dissipation", value: "0.8 W typical", cite: { page: 1, at: "Electrical Characteristics" } },
+      { label: "Operating temperature", value: "−40 to +85 °C", cite: { page: 3, at: "Environmental Characteristics" } },
+    ],
+    modelled: [
+      { what: "Six ratings from the table: MF-MSMF010, 014, 020, 030, 035/33X and 050", cite: { page: 1, at: "Electrical Characteristics" } },
+      { what: "Starts at Rmin (0.15 Ω for the MF-MSMF050)", cite: { page: 1, at: "Electrical Characteristics" }, test: "tests/sim/polyfuse.test.ts" },
+      { what: "Heats with I² and trips: the listed current trips it within the listed maximum time (8 A in 0.15 s)", cite: { page: 1, at: "Electrical Characteristics" }, test: "tests/sim/polyfuse.test.ts" },
+      { what: "Holds Ihold without tripping and trips at Itrip, slowly", cite: { page: 3, at: "Test Procedures and Requirements, Hold Current" }, test: "tests/sim/polyfuse.test.ts" },
+      { what: "Tripped, its resistance keeps 0.8 W in it", cite: { page: 1, at: "Electrical Characteristics" }, test: "tests/sim/polyfuse.test.ts" },
+      { what: "Stays tripped while powered and resets once unpowered and cool; the reset time is assumed (the sheet gives none)", test: "tests/sim/polyfuse.test.ts" },
+      { what: "Tripping across more than Vmax destroys it", cite: { page: 1, at: "Electrical Characteristics" }, test: "tests/sim/polyfuse.test.ts" },
+    ],
+    notModelled: [
+      { what: "The spread between Rmin and R1max (it starts at Rmin and returns to it after a trip)", cite: { page: 1, at: "Electrical Characteristics" } },
+      { what: "The resistance's rise as it warms below a trip" },
+      { what: "The ambient temperature's effect on Ihold", cite: { page: 9, at: "Thermal Derating Table" } },
+      { what: "The typical time-to-trip curves: one point, the table's maximum time, sets the timing", cite: { page: 7, at: "Typical Time to Trip at 23 °C" } },
+      { what: "The series' other ratings (MF-MSMF075 and up, the /33X, /60X variants)", cite: { page: 1, at: "Electrical Characteristics" } },
+    ],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

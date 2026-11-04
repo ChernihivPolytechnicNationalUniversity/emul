@@ -52,9 +52,33 @@ const RECORDS: Record<string, Datasheet> = {
   "servo-sg90": {
     maker: "TowerPro",
     docs: [DOCS["towerpro-sg90"], DOCS["rapid-37-1330"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
+    specs: [
+      { label: "Supply", value: "4.8 V (~5 V)", cite: { page: 1, at: "Specifications" } },
+      { label: "Pulse width", value: "~1 ms −90°, 1.5 ms 0°, ~2 ms +90°", cite: { page: 2 } },
+      { label: "Speed", value: "0.1 s/60° at 4.8 V", cite: { doc: "rapid-37-1330", page: 1 } },
+      { label: "Stall torque", value: "1.8 kgf·cm at 4.8 V", cite: { doc: "rapid-37-1330", page: 1 } },
+      { label: "Dead band", value: "10 µs", cite: { page: 1, at: "Specifications" } },
+      { label: "Temperature", value: "0–55 °C", cite: { page: 1, at: "Specifications" } },
+    ],
+    modelled: [
+      { what: "Pulse width sets the angle: 1.5 ms the middle, 1 ms −90°, 2 ms +90°, linear between", cite: { page: 2 }, test: "tests/sim/servo.test.ts" },
+      { what: "The horn travels at 0.1 s/60°, not at once", cite: { page: 1, at: "Specifications" }, test: "tests/sim/servo.test.ts" },
+      { what: "A change inside the 10 µs dead band does not move it", cite: { page: 1, at: "Specifications" }, test: "tests/sim/servo.test.ts" },
+      { what: "A pulse asking past ±90° drives the horn onto its stop, where it stalls and draws 750 mA (a vendor figure; these sheets give no current)", test: "tests/sim/servo.test.ts" },
+      { what: "Supply current as a live load: 4 mA at rest, 90 mA moving", test: "tests/sim/servo.test.ts" },
+      { what: "Follows the pulses a firmware's timer PWM makes on a Nucleo", test: "tests/sim/nucleo-servo.test.ts" },
+      { what: "Without pulses the motor is off and the horn stays where it is", test: "tests/sim/servo.test.ts" },
+      { what: "Below 3 V the electronics do not answer (the sheets give no minimum; 3 V is the SG92R's)" },
+    ],
+    notModelled: [
+      { what: "Torque and load: nothing pushes on the horn, and the 1.8 kgf·cm stall torque plays no part", cite: { page: 1, at: "Specifications" } },
+      { what: "Speed and current change with supply voltage: the 4.8 V figures hold at any voltage", cite: { doc: "rapid-37-1330", page: 1 } },
+      { what: "Acceleration, overshoot and hunting: the horn moves at a constant speed and stops dead" },
+      { what: "The motor's pulsed current and the noise it puts on the supply: three steady levels only" },
+      { what: "Overheating or wear from a long stall or an over-voltage supply" },
+      { what: "The pulse period is not checked: any repetition rate up to about 40 ms is followed" },
+      { what: "Operating temperature range", cite: { page: 1, at: "Specifications" } },
+    ],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

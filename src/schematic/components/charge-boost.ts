@@ -106,9 +106,32 @@ const RECORDS: Record<string, Datasheet> = {
   "lx-lcbst": {
     maker: "NanJing Top Power",
     docs: [DOCS["toppower-tp4056"], DOCS["pjsemi-dw03"], DOCS["aerosemi-mt3608"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
+    specs: [
+      { label: "Charger supply", value: "4.0–8.0 V", cite: { page: 5, at: "Electrical Characteristics" } },
+      { label: "Float voltage", value: "4.2 V ±1 %", cite: { page: 5, at: "Electrical Characteristics, VFLOAT" } },
+      { label: "Overcharge / over-discharge", value: "4.3 V / 2.4 V", cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table (printed as a second Absolute Maximum Ratings)" } },
+      { label: "Overcurrent / short", value: "3.5 A / 20 A", cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table (printed as a second Absolute Maximum Ratings)" } },
+      { label: "Boost output", value: "up to 28 V", cite: { doc: "aerosemi-mt3608", page: 1, at: "Features" } },
+      { label: "Boost switch limit", value: "4 A", cite: { doc: "aerosemi-mt3608", page: 3, at: "Electrical Characteristics, SW Current Limit" } },
+    ],
+    modelled: [
+      { what: "Charges at 1 A (R_PROG 1.2 kΩ at 1200 V / R_PROG) from the USB-C's 5 V, CHRG lit", test: "tests/sim/charge-boost.test.ts" },
+      { what: "Trickles below 2.9 V at a tenth of the set current", cite: { page: 5, at: "Electrical Characteristics, VTRIKL" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "Holds the cell at 4.2 V, stops at C/10, then lights STDBY", cite: { page: 9, at: "Charge Termination" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "Boosts the cell to the trimmer's output (4.2–28 V) through a 2.2 kΩ divider to the 0.6 V feedback", cite: { doc: "aerosemi-mt3608", page: 6, at: "Setting the Output Voltage" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "An overload pulls the output down at about 2 A from the cell", cite: { doc: "aerosemi-mt3608", page: 3, at: "Electrical Characteristics, SW Current Limit" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "A shorted output trips the DW03, which stays off until a charger is plugged in", cite: { doc: "pjsemi-dw03", page: 6, at: "Overcurrent Condition" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "An empty cell is cut off at 2.4 V; a charger releases it", cite: { doc: "pjsemi-dw03", page: 5, at: "Overdischarge Condition" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "More than 8 V on IN+ destroys the TP4056", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/charge-boost.test.ts" },
+    ],
+    notModelled: [
+      { what: "The TP4056's charge-current law 1100 V / R_PROG: its table gives 900 mA for 1.2 kΩ", cite: { page: 9, at: "Programming Charge Current" } },
+      { what: "The TP4056's thermal regulation (charge current cut back near 145 °C)", cite: { page: 8, at: "Operation" } },
+      { what: "The MT3608's switching: 1.2 MHz ripple on the output", cite: { doc: "aerosemi-mt3608", page: 3, at: "Electrical Characteristics, Switching Frequency" } },
+      { what: "The boost's efficiency change with load and input voltage (fixed 90 %)", cite: { doc: "aerosemi-mt3608", page: 4, at: "Typical Performance Characteristics" } },
+      { what: "The DW03's over-temperature protection", cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table (printed as a second Absolute Maximum Ratings), TSHD" } },
+      { what: "USB-C's CC lines: VBUS is a fixed 5 V when plugged in" },
+    ],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]
