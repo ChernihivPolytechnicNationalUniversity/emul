@@ -156,9 +156,30 @@ const RECORDS: Record<string, Datasheet> = {
   "encoder-ec11": {
     maker: "ALPS Alpine",
     docs: [DOCS["alps-ec11e"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
+    specs: [
+      { label: "Contact rating", value: "10 mA 5 V DC (1–10 mA resistive)", cite: { page: 2, at: "List of Varieties" } },
+      { label: "Detents / pulses", value: "30 / 15 (EC11E15244G1); 18 / 9; 36 / 18", cite: { page: 7, at: "Product List" } },
+      { label: "Push switch rating", value: "0.1 A 5 V DC", cite: { page: 2, at: "List of Varieties" } },
+      { label: "Push switch contact", value: "100 mΩ max (200 mΩ after life)", cite: { page: 2, at: "List of Varieties" } },
+      { label: "Operating temperature", value: "−40 to +85 °C", cite: { page: 2, at: "List of Varieties" } },
+    ],
+    modelled: [
+      { what: "A and B close to C in quadrature, A first turning clockwise", test: "tests/sim/encoder.test.ts" },
+      { what: "Detents and pulses per part, half a cycle per detent, resting alternately both open and both closed", cite: { page: 7, at: "Product List" }, test: "tests/sim/encoder.test.ts" },
+      { what: "A quarter-cycle takes 1/(4 × pulses) s, the 360°/s the maker measures at", test: "tests/sim/encoder.test.ts" },
+      { what: "Optional bounce: each make and break a burst settling within 2 ms", test: "tests/sim/encoder.test.ts" },
+      { what: "Push switch SPST at 100 mΩ, D to E", cite: { page: 2, at: "List of Varieties" }, test: "tests/sim/nucleo-encoder.test.ts" },
+      { what: "Contacts rated 10 mA 5 V DC: more reads over 100 % and the contact does not break", cite: { page: 2, at: "List of Varieties" } },
+      { what: "A closed contact is 2.14 kΩ, the bound the 1.5 V sliding-noise spec sets" },
+    ],
+    notModelled: [
+      { what: "Minimum operating current (1 mA): a contact below it closes as cleanly", cite: { page: 2, at: "List of Varieties" } },
+      { what: "Turning speed: every detent runs at the 360°/s measuring speed", cite: { page: 40, at: "Pulse count process" } },
+      { what: "Chattering and sliding noise as waveforms: a closed contact is a fixed resistance" },
+      { what: "Detent torque and push force: the knob turns a detent per click", cite: { page: 2, at: "List of Varieties" } },
+      { what: "Wear: 15,000 cycles of rotation, 20,000 presses", cite: { page: 2, at: "List of Varieties" } },
+      { what: "Insulation resistance and voltage proof", cite: { page: 2, at: "List of Varieties" } },
+    ],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

@@ -92,9 +92,26 @@ const RECORDS: Record<string, Datasheet> = {
   "keypad-4x4": {
     maker: "Parallax",
     docs: [DOCS["parallax-27899"], DOCS["adafruit-3844"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
+    specs: [
+      { label: "Maximum rating", value: "24 V DC, 30 mA", cite: { page: 1, at: "Key Specifications" } },
+      { label: "Interface", value: "8 pins to a 4 × 4 matrix", cite: { page: 1, at: "Key Specifications" } },
+      { label: "Operating temperature", value: "0 to 50 °C", cite: { page: 1, at: "Key Specifications" } },
+      { label: "Contact resistance", value: "< 100 Ω", cite: { doc: "adafruit-3844", at: "Technical Details" } },
+      { label: "Actuation force", value: "160–180 g", cite: { doc: "adafruit-3844", at: "Technical Details" } },
+    ],
+    modelled: [
+      { what: "Each key closes its row to its column and nothing else", cite: { page: 2, at: "Figure 1" }, test: "tests/sim/keypad.test.ts" },
+      { what: "Header pins 1–4 columns, 5–8 rows, as Parallax numbers them", cite: { page: 2, at: "How it Works" }, test: "tests/sim/keypad.test.ts" },
+      { what: "No diodes: three keys held at a rectangle's corners ghost the fourth", test: "tests/sim/keypad.test.ts" },
+      { what: "Contact resistance 100 Ω by default, Adafruit's bound; editable", cite: { doc: "adafruit-3844", at: "Technical Details" }, test: "tests/sim/keypad.test.ts" },
+      { what: "30 mA is a switching rating: a key carrying more reads over 100 % and does not break", cite: { page: 1, at: "Key Specifications" }, test: "tests/sim/keypad.test.ts" },
+    ],
+    notModelled: [
+      { what: "A maker's bounce time: neither sheet gives one; the optional 5 ms is a retailer's figure" },
+      { what: "The 24 V rating: no limit on the voltage across a key", cite: { page: 1, at: "Key Specifications" } },
+      { what: "Actuation force and travel: a key is pressed or not", cite: { doc: "adafruit-3844", at: "Technical Details" } },
+      { what: "Ambient temperature: the 0–50 °C range is not checked", cite: { page: 1, at: "Key Specifications" } },
+    ],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

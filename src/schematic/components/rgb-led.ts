@@ -90,9 +90,30 @@ const RECORDS: Record<string, Datasheet> = {
   "rgb-led": {
     maker: "Kingbright",
     docs: [DOCS["kb-l154a4surkqbdzgw"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
+    specs: [
+      { label: "Forward voltage", value: "R 1.95 V typ (2.5 max), B 3.3 V (4.0), G 3.3 V (4.1) at 20 mA", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { label: "DC current (abs max)", value: "R 30 mA, B 30 mA, G 25 mA", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { label: "Peak current (abs max)", value: "R 185, B 150, G 150 mA (1/10 duty, 0.1 ms)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { label: "Power (abs max)", value: "R 75, B 120, G 102.5 mW", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { label: "Reverse voltage (abs max)", value: "5 V", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { label: "Dominant wavelength", value: "R 630, B 465, G 525 nm at 20 mA", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+    ],
+    modelled: [
+      { what: "Leads: 1 red anode, 2 common cathode, 3 blue anode, 4 green anode", cite: { page: 1, at: "Package Dimensions" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Each die follows its digitised I–V curve, and within ±0.1 V on the dashed part past the DC rating", cite: { page: 3, at: "Forward Current vs. Forward Voltage (blue p. 4, green p. 5)" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Each die burns open on its own past its DC rating (derated above 25 °C), its peak (1/10 duty, 0.1 ms) or 5 V reversed", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Derating along the sheet's curve, to nothing at 85 °C", cite: { page: 3, at: "Forward Current Derating Curve" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Junction capacitance of 35, 100 and 45 pF across the dies", cite: { page: 2, at: "Electrical / Optical Characteristics" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Light follows the intensity vs current and vs ambient curves; the glow mixes the three dies' dominant wavelengths", cite: { page: 3, at: "Luminous Intensity vs. Forward Current" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Ambient field −40 to +85 °C, the operating range", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/rgb-led.test.ts" },
+    ],
+    notModelled: [
+      { what: "Viewing angle (2θ½ = 60°): no beam is drawn", cite: { page: 2, at: "Selection Guide" } },
+      { what: "Spectral half-width (28, 25, 30 nm): the glow is the dominant wavelength", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Electrostatic discharge damage", cite: { page: 1 } },
+      { what: "Ageing over the part's life", cite: { page: 1, at: "Features" } },
+      { what: "Soldering heat (260 °C for 3 s / 5 s)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+    ],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]
