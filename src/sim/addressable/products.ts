@@ -338,6 +338,21 @@ export const SHEETS: Record<string, SheetNumbers> = {
     switching: { page: 3 },
     left: [{ what: "White colour temperature", page: 3 }],
   },
+  // The akizuki copy of "WS2815B" V1.0 is the 6-pin part with pin 1 VCC, the WS2815 pinout.
+  ws2815: {
+    supply: { min: 9.5, max: 13.5, page: 2 },
+    current: { typ: 10 * mA, page: 3 },
+    wavelength: { R: { min: 620 * nm, max: 625 * nm }, G: { min: 515 * nm, max: 525 * nm }, B: { min: 465 * nm, max: 475 * nm }, page: 3 },
+    rate: { typ: 800e3, page: 1 },
+    reset: { min: 280 * us, page: 3 },
+    // Printed 0.7VDD beside VIL 0.3 VCC: the die's rail, pin 1 VCC ("IC power supply"); 0.7 × the 12 V VDD would be past p. 2's 5.3 V input.
+    vih: { times: 0.7, rail: "VCC", page: 3 },
+    temperature: { min: -25, max: 85, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 2.1 * mA, page: 3 },
+    intensity: { page: 3 },
+    switching: { page: 3 },
+  },
   ws2815b: {
     supply: { min: 9.5, max: 13.5, page: 2 },
     current: { typ: 12 * mA, page: 3 },

@@ -460,6 +460,10 @@ const DOC_LIST: Record<string, Docs> = {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2813b-rgbw"]],
   },
+  ws2815: {
+    maker: "Worldsemi",
+    docs: [DOCS["ws-ws2815b-v1-akizuki"]],
+  },
   "ws2815b": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2815b-v1"], DOCS["ws-ws2815b-rgbw-v1"]],
@@ -647,18 +651,6 @@ for (const def of defs) {
 
 /** Parts whose datasheet could not be found: the model's numbers come from its sister parts' sheets. */
 const NO_SHEET: Record<string, NoDatasheet> = {
-  ws2815: {
-    basis: "generic",
-    none: "No WS2815 datasheet (the V1.1 of 2017 the model was built from) could be found at Worldsemi, its distributors or the web archive; only WS2815B sheets are published.",
-    modelled: [
-      { what: "24-bit GRB words, MSB first", test: TESTS.chain },
-      { what: "Backup input skips dead chip", test: TESTS.chain },
-      { what: "Regulates its own VCC", test: TESTS.bench },
-      { what: "Ignores data below VIH", test: TESTS.chain },
-    ],
-    notModelled: [{ what: "Numbers unconfirmed by any sheet" }, { what: "Operating temperature range" }],
-    sources: [DOCS["ws-ws2815b-v1"]],
-  },
   "ws2815b-4pin": {
     basis: "generic",
     none: "No datasheet for the 4-pin WS2815B-V1-4P or WS2815B-RGBW-4P could be found at Worldsemi, its distributors or the web archive.",

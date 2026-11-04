@@ -250,6 +250,71 @@ describe("addressable LEDs on the bench", () => {
     expect(dead.snap.damage[dead.ic.id], "24 V straight on VDD").toBeDefined()
   })
 
+  it("a WS2811 runs on 5.5 V straight on VDD and shorts on 6 V (V1.52 p. 2: VDD +3.5~+5.5 V)", () => {
+    const build = (volts: string, seconds: number) => {
+      const { doc, place, wire } = builder(GRID)
+      const supply = place("dc-source", 0, 0, { value: volts, imax: "3 A" })
+      const ic = place("ws2811", 20, 0, { value: "WS2811" })
+      const gnd = place("ground", 4, 20)
+      wire(supply, "+", ic, "VDD")
+      wire(supply, "-", gnd, "GND")
+      wire(ic, "GND", gnd, "GND")
+      wire(ic, "DIN", gnd, "GND")
+      return { snap: start(doc).run(seconds), ic }
+    }
+    // Long enough for the shunt regulator to heat (its rating's time constant is 1 s).
+    const ok = build("5.5 V", 2)
+    expect(ok.snap.damage[ok.ic.id], "5.5 V is in the rated range").toBeUndefined()
+    expect(led(ok.snap, ok.ic.id).powered).toBe(true)
+    const dead = build("6 V", 0.05)
+    expect(dead.snap.damage[dead.ic.id], "6 V is past it").toBeDefined()
+  })
+
+  it("a WS2811's OUTR stands 18 V and breaks down at 22 V (V1.52 p. 2: VOUT 20 V)", () => {
+    const build = (volts: string) => {
+      const { doc, place, wire } = builder(GRID)
+      const supply = place("dc-source", 0, 0, { value: "5 V", imax: "3 A" })
+      const high = place("dc-source", 40, 0, { value: volts, imax: "3 A" })
+      const r = place("resistor", 30, 10, { value: "10 kΩ", power: "0.25" })
+      const ic = place("ws2811", 20, 0, { value: "WS2811" })
+      const gnd = place("ground", 4, 20)
+      wire(supply, "+", ic, "VDD")
+      wire(supply, "-", gnd, "GND")
+      wire(high, "-", gnd, "GND")
+      wire(ic, "GND", gnd, "GND")
+      wire(ic, "DIN", gnd, "GND")
+      // The output off: OUTR sits at the high supply.
+      wire(high, "+", r, "1")
+      wire(r, "2", ic, "OUTR")
+      return { snap: start(doc).run(0.02), ic }
+    }
+    const ok = build("18 V")
+    expect(ok.snap.damage[ok.ic.id], "18 V on OUTR").toBeUndefined()
+    const dead = build("22 V")
+    expect(dead.snap.damage[dead.ic.id]?.fail, "22 V on OUTR").toBe("short")
+  })
+
+  it("a WS2805's DIN takes 5.5 V at VDD 5 V and opens at 7 V (V1.6 p. 3: DIN withstand VDD−0.7 ~ VDD+0.7 V)", () => {
+    const build = (volts: string) => {
+      const { doc, place, wire } = builder(GRID)
+      const supply = place("dc-source", 0, 0, { value: "5 V", imax: "3 A" })
+      const data = place("dc-source", 40, 0, { value: volts, imax: "3 A" })
+      const ic = place("ws2805", 20, 0, { value: "WS2805" })
+      const gnd = place("ground", 4, 20)
+      wire(supply, "+", ic, "VDD")
+      wire(supply, "-", gnd, "GND")
+      wire(data, "-", gnd, "GND")
+      wire(ic, "GND", gnd, "GND")
+      wire(ic, "BIN", gnd, "GND")
+      wire(data, "+", ic, "DIN")
+      return { snap: start(doc).run(0.02), ic }
+    }
+    const ok = build("5.5 V")
+    expect(ok.snap.damage[ok.ic.id], "5.5 V on DIN").toBeUndefined()
+    const dead = build("7 V")
+    expect(dead.snap.damage[dead.ic.id]?.fail, "7 V on DIN").toBe("open")
+  })
+
   it("a series resistor in the data line (330 Ω, as the datasheets advise) keeps the bits exact", () => {
     const { doc, place, wire } = builder(GRID)
     const u = nucleo(place)
