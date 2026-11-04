@@ -141,6 +141,15 @@ export default function App() {
     () => live.peers.flatMap((p) => (p.moving ? [{ key: p.clientId, color: p.color, ...p.moving }] : [])),
     [live.peers],
   )
+  const peerSelections = React.useMemo(
+    () => live.peers.filter((p) => p.selected.length).map((p) => ({ clientId: p.clientId, name: p.name, color: p.color, ids: p.selected })),
+    [live.peers],
+  )
+  /** On a phone: the palette sheet's Field tab, the field's problem count, a tap that lowers the sheet. */
+  const [fieldSlot, setFieldSlot] = React.useState<HTMLElement | null>(null)
+  const [problemCount, setProblemCount] = React.useState(0)
+  const [fieldPeek, setFieldPeek] = React.useState(0)
+  const onFieldPicked = React.useCallback(() => setFieldPeek((n) => n + 1), [])
   const [projectsOpen, setProjectsOpen] = React.useState(false)
   const [shareOpen, setShareOpen] = React.useState(false)
 
@@ -385,6 +394,7 @@ export default function App() {
             onOpenChange={setPaletteOpen}
             width={paletteWidth}
             onWidthChange={setPaletteWidth}
+            field={{ slot: setFieldSlot, count: problemCount, peek: fieldPeek }}
             sidebar={{
               onPick: (item) => {
                 setArmed(null)
@@ -421,6 +431,11 @@ export default function App() {
               onArmedChange={setArmed}
               onPlaced={notePlaced}
               onHdlImport={importHdl}
+              peerSelections={peerSelections}
+              onSelectionShare={live.room ? live.onSelect : undefined}
+              fieldSlot={paletteMode === "bottom-sheet" ? fieldSlot : null}
+              onFieldPicked={onFieldPicked}
+              onProblemCount={setProblemCount}
               projectName={projects.current?.name}
             >
               <LiveCursors peers={live.peers} />

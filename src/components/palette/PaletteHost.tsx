@@ -22,6 +22,18 @@ type PaletteHostProps = {
   width: number
   onWidthChange: (px: number) => void
   sidebar: SidebarProps
+  /** On a phone, the sheet's second tab: the field explorer, drawn by the field into this slot. */
+  field?: FieldTab
+}
+
+/** The field explorer as a tab of the phone's sheet. */
+export type FieldTab = {
+  /** Where the field draws its explorer. */
+  slot: (el: HTMLElement | null) => void
+  /** Problems (errors and warnings) on the field, shown on the tab. */
+  count: number
+  /** Changes when a row was tapped: the sheet goes down to its lowest height, the field in sight. */
+  peek: number
 }
 
 /**
@@ -29,8 +41,8 @@ type PaletteHostProps = {
  * to a column of group icons; that column on a tablet, a group sliding out over the field; a sheet
  * from the side when the screen is short; a sheet from the bottom on a phone held upright.
  */
-export function PaletteHost({ mode, widthClass, open, onOpenChange, width, onWidthChange, sidebar }: PaletteHostProps) {
-  if (mode === "bottom-sheet") return <BottomSheet open={open} onOpenChange={onOpenChange} sidebar={sidebar} />
+export function PaletteHost({ mode, widthClass, open, onOpenChange, width, onWidthChange, sidebar, field }: PaletteHostProps) {
+  if (mode === "bottom-sheet") return <BottomSheet open={open} onOpenChange={onOpenChange} sidebar={sidebar} hasField={!!field} fieldSlot={field?.slot} fieldCount={field?.count ?? 0} fieldPeek={field?.peek ?? 0} />
   if (mode === "side-sheet")
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
@@ -205,8 +217,16 @@ type Detent = (typeof DETENTS)[number]
 const HEIGHT: Record<Detent, string> = { peek: "11rem", half: "52dvh", full: "calc(100dvh - 3rem)" }
 
 /** A phone's palette: a sheet from the bottom at three heights, the "+" button when it is down. */
-function BottomSheet({ open, onOpenChange, sidebar }: { open: boolean; onOpenChange: (open: boolean) => void; sidebar: SidebarProps }) {
+function BottomSheet({ open, onOpenChange, sidebar, hasField, fieldSlot, fieldCount, fieldPeek }: { open: boolean; onOpenChange: (open: boolean) => void; sidebar: SidebarProps; hasField: boolean; fieldSlot?: FieldTab["slot"]; fieldCount: number; fieldPeek: number }) {
   const [detent, setDetent] = React.useState<Detent>("half")
+  const [tab, setTab] = React.useState<"parts" | "field">("parts")
+  // A row of the field tab tapped: down to the lowest height, the field shows what it points at.
+  const lastPeek = React.useRef(fieldPeek)
+  React.useEffect(() => {
+    if (fieldPeek === lastPeek.current) return
+    lastPeek.current = fieldPeek
+    setDetent("peek")
+  }, [fieldPeek])
   const sheet = React.useRef<HTMLDivElement>(null)
   const drag = React.useRef<{ y: number; height: number } | null>(null)
   const [live, setLive] = React.useState<number | null>(null)
@@ -215,7 +235,7 @@ function BottomSheet({ open, onOpenChange, sidebar }: { open: boolean; onOpenCha
     return (
       <button
         type="button"
-        aria-label="Add a part"
+        aria-label={fieldCount ? `Add a part; ${fieldCount} problems on the field` : "Add a part"}
         onClick={() => {
           setDetent("half")
           onOpenChange(true)
@@ -223,6 +243,7 @@ function BottomSheet({ open, onOpenChange, sidebar }: { open: boolean; onOpenCha
         className="fixed right-3 bottom-20 z-40 flex size-14 items-center justify-center rounded-2xl bg-foreground text-background shadow-lg active:scale-95 [&>svg]:size-6"
       >
         <PlusIcon />
+        {!!fieldCount && <span className="absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-semibold text-white tabular-nums ring-2 ring-background">{fieldCount}</span>}
       </button>
     )
 
@@ -275,7 +296,24 @@ function BottomSheet({ open, onOpenChange, sidebar }: { open: boolean; onOpenCha
       >
         <span className="h-1 w-9 rounded-full bg-muted-foreground/40" />
       </div>
-      <ComponentsSidebar collapsible="none" className="min-h-0 w-full flex-1" onSearchFocus={() => setDetent("full")} {...sheetSidebar} />
+      {hasField && (
+        <div role="tablist" aria-label="Parts or the field" className="flex shrink-0 gap-1 px-3 pb-1">
+          {(["parts", "field"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              aria-selected={tab === t}
+              onClick={() => setTab(t)}
+              className={cn("flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium", tab === t ? "bg-background shadow-sm" : "text-muted-foreground")}
+            >
+              {t === "parts" ? "Parts" : "Field"}
+              {t === "field" && !!fieldCount && <span className="rounded-full bg-red-100 px-1.5 text-[11px] text-red-700 tabular-nums dark:bg-red-500/20 dark:text-red-300">{fieldCount}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      {tab === "field" && hasField ? <div ref={fieldSlot} className="flex min-h-0 w-full flex-1 flex-col" /> : <ComponentsSidebar collapsible="none" className="min-h-0 w-full flex-1" onSearchFocus={() => setDetent("full")} {...sheetSidebar} />}
     </div>
   )
 }

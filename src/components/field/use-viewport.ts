@@ -181,10 +181,10 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   const reset = React.useCallback(() => animateTo({ x: 0, y: 0, scale: 1 }), [animateTo])
   /** Zoom and pan so that a world rectangle fills the view, with some margin. */
   const fitTo = React.useCallback(
-    (r: { x: number; y: number; w: number; h: number }, margin = 48) => {
+    (r: { x: number; y: number; w: number; h: number }, margin = 48, maxScale = MAX_SCALE) => {
       const { width, height } = measure()
       if (!width || !height) return
-      const scale = clamp(Math.min((width - 2 * margin) / r.w, (height - 2 * margin) / r.h), MIN_SCALE, MAX_SCALE)
+      const scale = clamp(Math.min((width - 2 * margin) / r.w, (height - 2 * margin) / r.h, maxScale), MIN_SCALE, MAX_SCALE)
       animateTo({
         scale,
         x: width / 2 - (r.x + r.w / 2) * scale,
@@ -211,6 +211,25 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
       if (dx || dy) animateTo({ ...t, x: t.x + dx, y: t.y + dy })
     },
     [animateTo, measure],
+  )
+  /**
+   * Bring a world rectangle into sight the least that will do: nothing if it is on screen clear of
+   * the edges; a pan if it is off; a zoom in only when it would be drawn smaller than `minPx`
+   * (never past `maxScale`), and out only when it does not fit. A found part, a problem's pin.
+   */
+  const show = React.useCallback(
+    (r: Rect, { margin = 48, minPx = 24, maxScale = 1 }: { margin?: number; minPx?: number; maxScale?: number } = {}) => {
+      const { width, height } = measure()
+      if (!width || !height) return
+      const t = target.current
+      let scale = t.scale
+      const side = Math.max(1, Math.min(r.w, r.h))
+      if (side * scale < minPx) scale = Math.max(scale, Math.min(minPx / side, maxScale))
+      scale = clamp(Math.min(scale, (width - 2 * margin) / Math.max(1, r.w), (height - 2 * margin) / Math.max(1, r.h)), MIN_SCALE, MAX_SCALE)
+      if (scale === t.scale) return reveal(r, margin)
+      animateTo({ scale, x: width / 2 - (r.x + r.w / 2) * scale, y: height / 2 - (r.y + r.h / 2) * scale })
+    },
+    [animateTo, measure, reveal],
   )
   const panBy = React.useCallback(
     (dx: number, dy: number) => setNow((v) => ({ ...v, x: v.x + dx, y: v.y + dy })),
@@ -436,6 +455,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     reset,
     fitTo,
     reveal,
+    show,
     toWorld,
     isPanStart,
     startPan,
