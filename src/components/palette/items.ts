@@ -1,7 +1,7 @@
 import * as React from "react"
 import { catalogue, getMeta, getLibraryVersion, libraryEntries, subscribeLibrary, PALETTE_DRAG_TYPE } from "@/schematic/registry"
 import { familyHint, familyOf, variantLabel, type Family } from "@/schematic/families"
-import type { SearchHit } from "./search"
+import { searchParts, similarParts, type SearchHit } from "./search"
 import { CATEGORIES } from "@/schematic/categories"
 import type { PartMeta } from "@/schematic/registry"
 
@@ -58,3 +58,13 @@ export function useLibrary() {
     return libraryEntries()
   }, [version])
 }
+
+/** A search's rows: its hits, or for a query nothing matches in full a few similar parts; `pickable` is what the arrow keys walk and Enter places. */
+export function searchRows(query: string) {
+  const hits = searchParts(catalogue, query)
+  const rows = hitEntries(hits)
+  const similar = hits.length === 0 ? hitEntries(similarParts(catalogue, query)) : []
+  return { hits, rows, similar, pickable: rows.length ? rows : similar }
+}
+
+export type SearchRows = ReturnType<typeof searchRows>

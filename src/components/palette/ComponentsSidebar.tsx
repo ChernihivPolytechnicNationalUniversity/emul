@@ -16,7 +16,7 @@ import {
   SidebarSeparator,
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
-import { hitEntries, paletteGroups, useLibrary, type PaletteEntry } from "./items"
+import { paletteGroups, searchRows, useLibrary, type PaletteEntry, type SearchRows } from "./items"
 import { VirtualRows, type RowSlot } from "./VirtualRows"
 import { PartCard } from "./PartCard"
 import { useGroupsOpen } from "./collapsed-groups"
@@ -24,12 +24,12 @@ import type { PartMeta } from "@/schematic/registry"
 import type { HdlLanguage } from "emul-shared/hdl"
 import { HdlIcon } from "@/schematic/icons"
 import { isModified } from "@/schematic/hdl"
-import { catalogue, ensureDefs, getMeta } from "@/schematic/registry"
+import { ensureDefs, getMeta } from "@/schematic/registry"
 import { BoardTile } from "./BoardTile"
 import { useQuickLists } from "./recents"
 import { Actions, clickEndsDrag, useDragOut, usePaletteActions, type PaletteActions } from "./palette-actions"
 import { FavouriteButton } from "./FavouriteButton"
-import { hdlCreateMatch, highlight, requestPartUrl, searchParts, similarParts, toolHints } from "./search"
+import { hdlCreateMatch, highlight, requestPartUrl, toolHints } from "./search"
 
 type ComponentsSidebarProps = React.ComponentProps<typeof Sidebar> & {
   /** Place the part at once, at the centre of the view: the keyboard's way in. */
@@ -53,7 +53,7 @@ type ComponentsSidebarProps = React.ComponentProps<typeof Sidebar> & {
 const EXAMPLES = ["led", "lcd i2c", "stm32", "ws2812", "regulator 3.3"]
 
 /** A heading over a run of rows, in the palette's one style: small capitals, a count, an action on the right. */
-function Heading({ children, count, aside, action, className }: { children: React.ReactNode; count?: number; aside?: string; action?: React.ReactNode; className?: string }) {
+export function Heading({ children, count, aside, action, className }: { children: React.ReactNode; count?: number; aside?: string; action?: React.ReactNode; className?: string }) {
   return (
     <div className={cn("flex h-7 items-center gap-1.5 px-2 text-[11px] font-semibold tracking-[.02em] text-muted-foreground uppercase", className)}>
       <span className="truncate">
@@ -107,12 +107,12 @@ function Highlighted({ text, ranges }: { text: string; ranges: [number, number][
   return <>{parts}</>
 }
 
-function Kbd({ children }: { children: React.ReactNode }) {
+export function Kbd({ children }: { children: React.ReactNode }) {
   return <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-b-2 bg-background px-1 font-mono text-[10px] leading-none text-muted-foreground">{children}</kbd>
 }
 
 /** One part, one row: icon, name, and on the right what tells it apart (variants, the word that found it). */
-function PartRow({ entry, ranges = [], matched, variant, selected, slot }: { entry: PaletteEntry; ranges?: [number, number][]; matched?: string; variant?: string; selected?: boolean; slot?: RowSlot }) {
+export function PartRow({ entry, ranges = [], matched, variant, selected, slot }: { entry: PaletteEntry; ranges?: [number, number][]; matched?: string; variant?: string; selected?: boolean; slot?: RowSlot }) {
   const { activate, armed, favourites } = usePaletteActions()
   const item = entry.def
   const title = entry.family ? `${entry.family.variants.length} variants; this places ${item.name}, the inspector switches it` : item.description
@@ -237,16 +237,11 @@ function HdlCreateItems({ onHdlNew, onHdlImport }: Pick<ComponentsSidebarProps, 
 }
 
 /** The search's rows, also what the arrow keys walk through and Enter places. */
-function useSearchRows(query: string) {
-  return React.useMemo(() => {
-    const hits = searchParts(catalogue, query)
-    const rows = hitEntries(hits)
-    const similar = hits.length === 0 ? hitEntries(similarParts(catalogue, query)) : []
-    return { hits, rows, similar, pickable: rows.length ? rows : similar }
-  }, [query])
+function useSearchRows(query: string): SearchRows {
+  return React.useMemo(() => searchRows(query), [query])
 }
 
-function SearchResults({ query, search, selected, onHdlNew, onHdlImport }: { query: string; search: ReturnType<typeof useSearchRows>; selected: number } & Pick<ComponentsSidebarProps, "onHdlNew" | "onHdlImport">) {
+export function SearchResults({ query, search, selected, onHdlNew, onHdlImport }: { query: string; search: SearchRows; selected: number } & Pick<ComponentsSidebarProps, "onHdlNew" | "onHdlImport">) {
   const { hits, rows, similar } = search
   const tools = toolHints(query)
   const asked = query.trim()
