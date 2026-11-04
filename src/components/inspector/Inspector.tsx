@@ -127,6 +127,7 @@ export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmwa
   // Only variants a swap leaves every wire on: the same pins in the same places.
   const swaps = def ? swapsFor(def.id) : []
   const open = sections.isOpen("panel")
+  const readable = !!object && sim.live && !damage[object.id]?.fatal
 
   return (
     <Card data-slot="inspector" className={cn("max-h-[calc(100%-6.75rem)] w-72 gap-4 overflow-y-auto py-4 shadow-md", !open && "py-3", className)} {...props}>
@@ -178,11 +179,14 @@ export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmwa
               </AlertDescription>
             </Alert>
           )}
-          <Tabs value={tab} onValueChange={(v) => setTab(v as InspectorTab)}>
+          <Tabs value={tab === "readings" && !readable ? "properties" : tab} onValueChange={(v) => setTab(v as InspectorTab)}>
             <TabsList>
               <TabsTab value="properties">Properties</TabsTab>
               <TabsTab value="part">Part</TabsTab>
-              <TabsTab value="readings">Readings</TabsTab>
+              {/* Nothing to read until the simulation runs (or once the part is burnt): the tab says so and stays shut. */}
+              <TabsTab value="readings" disabled={!readable} title={readable ? undefined : damage[object.id]?.fatal ? "Burnt out: nothing to read" : "Run the simulation to read it"}>
+                Readings
+              </TabsTab>
             </TabsList>
             <TabsPanel value="properties" className="flex flex-col gap-4">
           {def.chip && (

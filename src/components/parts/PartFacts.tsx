@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ExternalLinkIcon } from "lucide-react"
+import { CheckIcon, ExternalLinkIcon, MinusIcon } from "lucide-react"
 import { cn } from "cn"
 import { citedDoc, citeLabel, docUrl, hasDatasheet } from "@/schematic/datasheets"
 import { GRID, objectRect } from "@/schematic/geometry"
@@ -122,11 +122,16 @@ function Claims({ title, claims, record, tone }: { title: string; claims: Claim[
         <span className={cn("size-[7px] rounded-full", tone === "ok" ? "bg-green-600" : "bg-amber-600")} />
         {title}
       </p>
-      <ul className="mt-1 space-y-0.5 text-[12.5px] leading-normal">
+      {/* One line each: its mark, the claim, its page in a column of its own, so a wrapped claim never runs into the next. */}
+      <ul className="mt-1.5 grid grid-cols-[auto_1fr_auto] gap-x-2 gap-y-1 text-[12.5px] leading-snug">
         {claims.map((c) => (
-          <li key={`${c.part ?? ""}${c.what}`}>
-            {c.part && <span className="mr-1 text-muted-foreground">{c.part}</span>}
-            {c.what} {hasDatasheet(record) && <CiteLink record={record} cite={c.cite} />}
+          <li key={`${c.part ?? ""}${c.what}`} className="contents">
+            {tone === "ok" ? <CheckIcon aria-hidden className="mt-[3px] size-3 text-green-600" /> : <MinusIcon aria-hidden className="mt-[3px] size-3 text-amber-600" />}
+            <span>
+              {c.part && <span className="mr-1 text-muted-foreground">{c.part}</span>}
+              {c.what}
+            </span>
+            <span className="text-right">{hasDatasheet(record) && <CiteLink record={record} cite={c.cite} />}</span>
           </li>
         ))}
       </ul>
