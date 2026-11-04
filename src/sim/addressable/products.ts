@@ -104,3 +104,410 @@ export function chipCount(shape: ProductShape): number {
 
 /** The part an object of a product is, by its props (the first of the list by default). */
 export const partOf = (product: Product, props: Record<string, string>) => product.parts.find((p) => p.part === props.value) ?? product.parts[0]
+
+// --- datasheet numbers ---------------------------------------------------------------------------
+
+/**
+ * Where a number is: the PDF page (url#page=N, 1-based) of the product's first document, or of
+ * `doc` (a DocRecord key the product's record lists).
+ */
+export type SheetAt = { page: number; doc?: string }
+/** A number as printed: base SI (V, A, Hz, s, m, °C). */
+export type SheetValue = { min?: number; typ?: number; max?: number } & SheetAt
+/** One value per LED colour. */
+export type SheetColours = Partial<Record<"R" | "G" | "B", { min?: number; typ?: number; max?: number }>> & SheetAt
+
+/**
+ * The key numbers of a product, read from its datasheet (the first document of its record unless
+ * a cite names another), each with its page; the inspector's characteristics and the record's
+ * not-modelled list are generated from this table (src/schematic/components/addressable.ts).
+ * A field the sheet does not give is absent: nothing here is filled in from another part.
+ */
+export type SheetNumbers = {
+  /** Operating supply (the "Ratings" row Worldsemi prints under absolute maximum); `abs` when a separate maximum is printed. */
+  supply: SheetValue & { abs?: number; absPage?: number }
+  /** Forward voltage of each LED in the package. */
+  forwardVoltage?: SheetColours
+  /** LED current (a pixel) or sink current (a driver) per channel, or for the package when the sheet gives the sum. */
+  current?: SheetValue & { per?: "channel" | "package"; abs?: number; absPage?: number }
+  /** White channel current, when it differs. */
+  currentWhite?: SheetValue
+  /** Dominant wavelength of each colour. */
+  wavelength?: SheetColours
+  /** Constant-current feedback voltage (WS2801's xFB pins). */
+  feedback?: SheetValue
+  /** Data rate (single wire) or clock (two wire). */
+  rate?: SheetValue
+  /** Reset / latch low time that ends a frame. */
+  reset?: SheetValue
+  /** Input high threshold: a fraction of a rail, or volts. */
+  vih?: ({ times: number; rail: "VDD" | "VCC" } | { volts: number; typ?: true }) & SheetAt
+  /** Operating temperature. */
+  temperature?: SheetValue
+  /** DIN → DO (or CKI → CKO) propagation. */
+  delay?: SheetValue & { path: readonly [string, string] }
+  /** Supply current with the outputs off. */
+  quiescent?: SheetValue
+  /** Pages of numbers the model leaves out. */
+  intensity?: SheetAt
+  /** The switching table's fall time and input capacitance. */
+  switching?: SheetAt
+  /** Further features the sheet describes that the model leaves out, each in five words at most. */
+  left?: readonly ({ what: string } & SheetAt)[]
+}
+
+const ns = 1e-9
+const us = 1e-6
+const mA = 1e-3
+const nm = 1e-9
+const DIN_DO = ["DIN", "DO"] as const
+
+/** WS2812B (2013), the sheet the modules' default part comes from. */
+const WS2812B_2013: SheetNumbers = {
+  supply: { min: 3.5, max: 5.3, page: 2 },
+  forwardVoltage: { R: { min: 2.0, max: 2.2 }, G: { min: 3.0, max: 3.4 }, B: { min: 3.0, max: 3.4 }, page: 3 },
+  wavelength: { R: { min: 620 * nm, max: 625 * nm }, G: { min: 522 * nm, max: 525 * nm }, B: { min: 465 * nm, max: 467 * nm }, page: 3 },
+  rate: { typ: 800e3, page: 1 },
+  reset: { min: 50 * us, page: 3 },
+  vih: { times: 0.7, rail: "VDD", page: 3 },
+  temperature: { min: -25, max: 80, page: 2 },
+  delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+  intensity: { page: 3 },
+  switching: { page: 3 },
+  left: [{ what: "Reverse-connection protection", page: 1 }],
+}
+
+export const SHEETS: Record<string, SheetNumbers> = {
+  ws2812b: WS2812B_2013,
+  "led-stick-8": WS2812B_2013,
+  "led-ring-12": WS2812B_2013,
+  "led-ring-16": WS2812B_2013,
+  "led-ring-24": WS2812B_2013,
+  "led-matrix-8x8": WS2812B_2013,
+  ws2812: {
+    supply: { min: 3.7, max: 5.3, page: 2 },
+    current: { typ: 12.5 * mA, page: 3 },
+    wavelength: { R: { min: 620 * nm, typ: 623 * nm, max: 625 * nm }, G: { min: 520 * nm, typ: 523 * nm, max: 525 * nm }, B: { min: 449 * nm, typ: 451 * nm, max: 454 * nm }, page: 3 },
+    rate: { typ: 800e3, page: 1 },
+    reset: { min: 280 * us, page: 3 },
+    vih: { times: 0.7, rail: "VDD", page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 2 },
+    quiescent: { max: 0.6 * mA, page: 3 },
+    intensity: { page: 3 },
+    switching: { page: 2 },
+  },
+  "ws2812-6pin": {
+    supply: { min: 4.5, max: 5.5, abs: 6, page: 3 },
+    forwardVoltage: { R: { min: 1.8, max: 2.2 }, G: { min: 3.0, max: 3.2 }, B: { min: 3.2, max: 3.4 }, page: 4 },
+    current: { typ: 18.5 * mA, page: 3 },
+    rate: { typ: 800e3, page: 1 },
+    reset: { min: 50 * us, page: 4 },
+    vih: { times: 0.7, rail: "VDD", page: 3 },
+    temperature: { min: -25, max: 80, page: 3 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    intensity: { page: 4 },
+    switching: { page: 3 },
+  },
+  ws2812s: {
+    supply: { min: 3.7, max: 5.3, page: 2 },
+    current: { min: 15.5 * mA, typ: 16.5 * mA, max: 17.5 * mA, page: 3 },
+    wavelength: { R: { min: 620 * nm, max: 630 * nm }, G: { min: 520 * nm, max: 530 * nm }, B: { min: 465 * nm, max: 475 * nm }, page: 3 },
+    rate: { typ: 800e3, page: 1 },
+    reset: { min: 280 * us, page: 3 },
+    vih: { times: 0.7, rail: "VDD", page: 3 },
+    temperature: { min: -25, max: 85, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.7 * mA, page: 3 },
+    intensity: { page: 3 },
+    switching: { page: 3 },
+  },
+  ws2812a: {
+    supply: { min: 3.7, max: 5.7, page: 3 },
+    current: { typ: 34 * mA, page: 4 },
+    wavelength: { R: { min: 622 * nm, typ: 624 * nm, max: 627 * nm }, G: { min: 524 * nm, typ: 526 * nm, max: 529 * nm }, B: { min: 463 * nm, typ: 465 * nm, max: 468 * nm }, page: 4 },
+    rate: { typ: 800e3, page: 1 },
+    reset: { min: 280 * us, page: 4 },
+    vih: { times: 0.7, rail: "VDD", page: 3 },
+    temperature: { min: -40, max: 65, page: 3 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 4 },
+    quiescent: { typ: 0.6 * mA, page: 3 },
+    intensity: { page: 4 },
+    switching: { page: 4 },
+  },
+  ws2812c: {
+    supply: { min: 3.7, max: 5.3, page: 2 },
+    current: { typ: 5 * mA, page: 3 },
+    wavelength: { R: { min: 620 * nm, max: 630 * nm }, G: { min: 515 * nm, max: 525 * nm }, B: { min: 465 * nm, max: 475 * nm }, page: 3 },
+    rate: { typ: 800e3, page: 1 },
+    reset: { min: 280 * us, page: 3 },
+    vih: { times: 0.7, rail: "VDD", page: 3 },
+    temperature: { min: -25, max: 65, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.6 * mA, page: 3 },
+    intensity: { page: 3 },
+    switching: { page: 3 },
+  },
+  ws2812d: {
+    supply: { min: 3.7, max: 5.3, page: 2 },
+    rate: { typ: 800e3, page: 1 },
+    reset: { min: 280 * us, page: 4 },
+    vih: { volts: 2.7, page: 3 },
+    temperature: { min: -25, max: 85, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    switching: { page: 3 },
+  },
+  ws2812e: {
+    supply: { min: 3.7, max: 5.3, page: 2 },
+    current: { typ: 16 * mA, page: 3 },
+    wavelength: { R: { min: 620 * nm, max: 630 * nm }, G: { min: 515 * nm, max: 525 * nm }, B: { min: 465 * nm, max: 475 * nm }, page: 3 },
+    rate: { typ: 800e3, page: 1 },
+    reset: { min: 280 * us, page: 3 },
+    vih: { times: 0.7, rail: "VDD", page: 2 },
+    temperature: { min: -25, max: 85, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 2 },
+    quiescent: { typ: 0.7 * mA, page: 3 },
+    intensity: { page: 3 },
+    switching: { page: 2 },
+  },
+  sk6812: {
+    supply: { typ: 5.2, page: 4 },
+    forwardVoltage: { R: { min: 2.0, max: 2.2 }, G: { min: 3.0, max: 3.3 }, B: { min: 3.0, max: 3.3 }, page: 5 },
+    rate: { typ: 800e3, page: 4 },
+    reset: { typ: 80 * us, page: 5 },
+    vih: { volts: 3.4, typ: true, page: 4 },
+    temperature: { min: -40, max: 85, page: 3 },
+    delay: { max: 500 * ns, path: DIN_DO, page: 4 },
+    quiescent: { typ: 1 * mA, page: 4 },
+    intensity: { page: 5 },
+    left: [
+      { what: "Power polarity protection", page: 2 },
+      { what: "4 kV ESD rating", page: 3 },
+    ],
+  },
+  sk6812rgbw: {
+    supply: { min: 3.5, max: 5.5, page: 4 },
+    wavelength: { R: { min: 620 * nm, max: 630 * nm }, G: { min: 515 * nm, max: 525 * nm }, B: { min: 460 * nm, max: 470 * nm }, page: 3 },
+    rate: { typ: 800e3, page: 4 },
+    reset: { typ: 80 * us, page: 5 },
+    vih: { volts: 3.4, page: 4 },
+    temperature: { min: -40, max: 85, page: 4 },
+    delay: { max: 500 * ns, path: DIN_DO, page: 4 },
+    quiescent: { typ: 1 * mA, page: 4 },
+    left: [
+      { what: "White colour temperature bins", page: 3 },
+      { what: "Output rise and fall", page: 4 },
+      { what: "Reflow and moisture handling", page: 13 },
+    ],
+  },
+  ws2813: {
+    supply: { min: 3.7, max: 5.3, page: 2 },
+    current: { typ: 16 * mA, page: 3 },
+    wavelength: { R: { min: 620 * nm, max: 625 * nm }, G: { min: 515 * nm, max: 525 * nm }, B: { min: 465 * nm, max: 475 * nm }, page: 3 },
+    rate: { typ: 800e3, page: 1 },
+    reset: { min: 280 * us, page: 3 },
+    vih: { times: 0.7, rail: "VDD", page: 3 },
+    temperature: { min: -25, max: 85, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.7 * mA, page: 3 },
+    intensity: { page: 3 },
+    switching: { page: 3 },
+  },
+  ws2813b: {
+    supply: { min: 3.7, max: 5.3, page: 2 },
+    current: { typ: 16 * mA, page: 3 },
+    wavelength: { R: { min: 620 * nm, typ: 623 * nm, max: 630 * nm }, G: { min: 510 * nm, typ: 520 * nm, max: 520 * nm }, B: { min: 465 * nm, typ: 471 * nm, max: 475 * nm }, page: 3 },
+    rate: { typ: 800e3, page: 1 },
+    reset: { min: 280 * us, page: 3 },
+    vih: { times: 0.7, rail: "VDD", page: 3 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { max: 0.6 * mA, page: 3 },
+    intensity: { page: 3 },
+    switching: { page: 3 },
+  },
+  "ws2813b-rgbw": {
+    supply: { min: 3.7, max: 5.3, page: 2 },
+    current: { typ: 15 * mA, page: 3 },
+    wavelength: { R: { min: 620 * nm, max: 630 * nm }, G: { min: 515 * nm, max: 525 * nm }, B: { min: 465 * nm, max: 475 * nm }, page: 3 },
+    rate: { typ: 800e3, page: 1 },
+    reset: { min: 280 * us, page: 4 },
+    vih: { times: 0.7, rail: "VDD", page: 3 },
+    temperature: { min: -25, max: 85, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { max: 0.6 * mA, page: 3 },
+    intensity: { page: 3 },
+    switching: { page: 3 },
+    left: [{ what: "White colour temperature", page: 3 }],
+  },
+  ws2815b: {
+    supply: { min: 9.5, max: 13.5, page: 2 },
+    current: { typ: 12 * mA, page: 3 },
+    wavelength: { R: { min: 620 * nm, typ: 623 * nm, max: 630 * nm }, G: { min: 510 * nm, typ: 520 * nm, max: 520 * nm }, B: { min: 465 * nm, typ: 471 * nm, max: 475 * nm }, page: 3 },
+    rate: { typ: 800e3, page: 1 },
+    reset: { min: 280 * us, page: 3 },
+    vih: { volts: 2.7, page: 3 },
+    temperature: { min: -40, max: 65, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { max: 2 * mA, page: 3 },
+    intensity: { page: 3 },
+    switching: { page: 3 },
+    left: [{ what: "Rated power consumption", page: 2 }],
+  },
+  ws2816: {
+    supply: { min: 3.3, max: 5.5, page: 2 },
+    current: { typ: 20 * mA, per: "package", page: 3 },
+    wavelength: { R: { min: 620 * nm, max: 625 * nm }, G: { min: 520 * nm, max: 525 * nm }, B: { min: 467 * nm, max: 472 * nm }, page: 3 },
+    reset: { min: 280 * us, page: 4 },
+    vih: { times: 0.7, rail: "VDD", page: 3 },
+    temperature: { min: -40, max: 65, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.7 * mA, max: 1 * mA, page: 3 },
+    intensity: { page: 3 },
+    switching: { page: 3 },
+    left: [
+      { what: "Internal 4-bit gamma correction", page: 1 },
+      { what: "120° viewing angle", page: 3 },
+    ],
+  },
+  ws2916: {
+    supply: { min: 3.7, max: 5.3, page: 3 },
+    current: { typ: 16 * mA, per: "package", page: 3 },
+    wavelength: { R: { min: 620 * nm, max: 630 * nm }, G: { min: 525 * nm, max: 530 * nm }, B: { min: 465 * nm, max: 475 * nm }, page: 4 },
+    reset: { min: 280 * us, page: 4 },
+    vih: { times: 0.55, rail: "VDD", page: 3 },
+    temperature: { min: -25, max: 65, page: 3 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.6 * mA, page: 3 },
+    intensity: { page: 4 },
+    switching: { page: 3 },
+  },
+  "ws2916a-rgbw": {
+    supply: { min: 3.5, max: 5.7, page: 3 },
+    current: { typ: 30 * mA, page: 4 },
+    currentWhite: { typ: 60 * mA, page: 4 },
+    wavelength: { R: { min: 620 * nm, max: 630 * nm }, G: { min: 520 * nm, max: 530 * nm }, B: { min: 465 * nm, max: 475 * nm }, page: 4 },
+    reset: { min: 280 * us, page: 4 },
+    vih: { times: 0.55, rail: "VDD", page: 3 },
+    temperature: { min: -40, max: 85, page: 3 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 4 },
+    quiescent: { typ: 0.3 * mA, page: 3 },
+    intensity: { page: 4 },
+    switching: { page: 4 },
+    left: [{ what: "White colour temperature", page: 4 }],
+  },
+  // --- drivers ---
+  ws2811: {
+    supply: { min: 3.5, max: 5.5, page: 2 },
+    current: { min: 15.5 * mA, typ: 16.5 * mA, max: 17.5 * mA, page: 3 },
+    rate: { typ: 800e3, page: 3 },
+    reset: { min: 280 * us, page: 4 },
+    vih: { times: 0.7, rail: "VDD", page: 3 },
+    temperature: { min: -25, max: 85, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.6 * mA, page: 3 },
+    switching: { page: 3 },
+  },
+  ws2818: {
+    supply: { min: 3.5, max: 5.8, page: 2 },
+    current: { min: 14.5 * mA, typ: 16 * mA, max: 17.5 * mA, page: 3 },
+    rate: { min: 600e3, page: 3 },
+    reset: { min: 280 * us, page: 4 },
+    vih: { times: 0.5, rail: "VDD", page: 3 },
+    temperature: { min: -25, max: 85, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.35 * mA, page: 3 },
+    switching: { page: 3 },
+  },
+  ws2814: {
+    supply: { min: 3.7, max: 5.8, page: 2 },
+    current: { min: 13.5 * mA, typ: 15.5 * mA, max: 17.5 * mA, page: 3 },
+    rate: { typ: 800e3, page: 3 },
+    reset: { min: 350 * us, page: 3 },
+    vih: { times: 0.7, rail: "VDD", page: 3 },
+    temperature: { min: -40, max: 85, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.6 * mA, page: 3 },
+    switching: { page: 3 },
+    left: [{ what: "2.5 kV ESD rating", page: 2 }],
+  },
+  ws2814b: {
+    supply: { min: 3.7, max: 5.8, page: 3 },
+    current: { min: 13.5 * mA, typ: 15.5 * mA, max: 17.5 * mA, page: 3 },
+    rate: { min: 600e3, page: 3 },
+    reset: { min: 280 * us, page: 4 },
+    vih: { times: 0.55, rail: "VDD", page: 3 },
+    temperature: { min: -40, max: 85, page: 3 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.4 * mA, page: 3 },
+    switching: { page: 3 },
+  },
+  ws2805: {
+    supply: { min: 3.5, max: 5.8, page: 3 },
+    current: { min: 14.5 * mA, typ: 16 * mA, max: 17.5 * mA, page: 3 },
+    rate: { typ: 800e3, page: 3 },
+    reset: { min: 280 * us, page: 4 },
+    vih: { times: 0.55, rail: "VDD", page: 3 },
+    temperature: { min: -40, max: 85, page: 3 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.6 * mA, page: 3 },
+    switching: { page: 3 },
+  },
+  ws2913: {
+    supply: { min: 3.5, max: 5.7, page: 2 },
+    current: { min: 15 * mA, typ: 17 * mA, max: 19 * mA, page: 3 },
+    rate: { typ: 800e3, page: 3 },
+    reset: { min: 280 * us, page: 3 },
+    vih: { times: 0.55, rail: "VDD", page: 3 },
+    temperature: { min: -40, max: 85, page: 2 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.8 * mA, page: 3 },
+    switching: { page: 3 },
+    left: [
+      { what: "Delayed output turn-on", page: 1 },
+      { what: "Channel current mismatch", page: 3 },
+    ],
+  },
+  ws2914: {
+    supply: { min: 3.5, max: 5.7, page: 3 },
+    current: { min: 28 * mA, typ: 30 * mA, max: 35 * mA, page: 3 },
+    currentWhite: { min: 58 * mA, typ: 60 * mA, max: 70 * mA, page: 3 },
+    rate: { typ: 800e3, page: 3 },
+    reset: { min: 280 * us, page: 4 },
+    vih: { times: 0.6, rail: "VDD", page: 3 },
+    temperature: { min: -40, max: 85, page: 3 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.3 * mA, page: 3 },
+    switching: { page: 3 },
+    left: [{ what: "W1 W2 in parallel", page: 3 }],
+  },
+  ws2915: {
+    supply: { min: 3.5, max: 5.7, page: 3 },
+    current: { typ: 30 * mA, page: 3 },
+    rate: { typ: 800e3, page: 3 },
+    reset: { min: 280 * us, page: 4 },
+    vih: { times: 0.55, rail: "VDD", page: 3 },
+    temperature: { min: -40, max: 85, page: 3 },
+    delay: { max: 300 * ns, path: DIN_DO, page: 3 },
+    quiescent: { typ: 0.3 * mA, page: 3 },
+    switching: { page: 3 },
+    left: [
+      { what: "Grounded SET 4-channel mode", page: 2 },
+      { what: "Channel current mismatch", page: 3 },
+    ],
+  },
+  ws2801: {
+    supply: { min: 3.3, max: 5.5, abs: 6, absPage: 2, page: 3 },
+    current: { min: 5 * mA, max: 30 * mA, abs: 50 * mA, absPage: 2, page: 3 },
+    feedback: { min: 0.582, typ: 0.6, max: 0.618, page: 3 },
+    rate: { max: 25e6, page: 2 },
+    reset: { min: 500 * us, page: 14 },
+    vih: { times: 0.8, rail: "VDD", page: 3 },
+    temperature: { min: -40, max: 85, page: 1 },
+    delay: { typ: 8 * ns, path: ["CKI", "CKO"], page: 4 },
+    quiescent: { typ: 1 * mA, max: 1.5 * mA, page: 3 },
+    left: [
+      { what: "Constant-voltage drive mode", page: 2 },
+      { what: "Output current rise time", page: 4 },
+      { what: "Hot swap", page: 1 },
+    ],
+  },
+}

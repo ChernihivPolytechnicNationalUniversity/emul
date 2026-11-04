@@ -11,11 +11,13 @@
  * its shunt regulator, a WS2815's VCC its series one.
  */
 import { SINK_K, sinkGate, SUPPLY_KEY } from "@/sim/addressable/light"
-import { chipCount, partOf, PRODUCTS, type Layout as LayoutId, type Product } from "@/sim/addressable/products"
+import { chipCount, partOf, PRODUCTS, SHEETS, type Layout as LayoutId, type Product, type SheetAt, type SheetColours, type SheetNumbers } from "@/sim/addressable/products"
+import { wordBits } from "@/sim/addressable/spec"
+import type { Characteristic, Value } from "../characteristics"
 import { PixelIcon, PixelMatrixIcon, PixelRingIcon, PixelStickIcon, ChipIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind, Side } from "../types"
 import { DOCS } from "../datasheets/docs"
-import type { Datasheet } from "../types"
+import type { Cite, Claim, Datasheet, NoDatasheet } from "../types"
 
 type PinSpec = { id: string; label: string; kind?: PinKind; note: string }
 
@@ -401,225 +403,271 @@ export const isAddressableDef = (id: string) => PRODUCTS.some((p) => p.id === id
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = addressableComponents
 
-// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
-// The key numbers with their pages are still to be added (specs).
-const RECORDS: Record<string, Datasheet> = {
+// Datasheet records: the documents this file's parts cite (first the one the numbers come from), the
+// key numbers generated from the product's table (SHEETS in src/sim/addressable/products.ts), what
+// the model does (from the chip spec, each held by a test) and what it leaves out.
+type Docs = Pick<Datasheet, "maker" | "docs">
+const DOC_LIST: Record<string, Docs> = {
   "ws2812b": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2812": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812-4pin"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2812-6pin": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812-2012"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2812s": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812s"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2812a": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812a-5054"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2812c": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812c"], DOCS["ws-ws2812c-2020"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2812d": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812d-f5"], DOCS["ws-ws2812d-f8"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2812e": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "sk6812": {
     maker: "LED COLOR (Shenzhen LED Color Opto Electronic)",
     docs: [DOCS["ledcolor-sk6812"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "sk6812rgbw": {
     maker: "Opsco Optoelectronics",
     docs: [DOCS["opsco-sk6812rgbw"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2813": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2813-v14"], DOCS["ws-ws2813e"], DOCS["ws-ws2813-mini"], DOCS["ws-ws2813a-v7"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2813b": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2813b-v5"], DOCS["ws-ws2813b-v6"], DOCS["ws-ws2813c-2121"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2813b-rgbw": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2813b-rgbw"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2815b": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2815b-v1"], DOCS["ws-ws2815b-rgbw-v1"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2816": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2816b"], DOCS["ws-ws2816c-2121"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2916": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2916a"], DOCS["ws-ws2916b"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2916a-rgbw": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2916a-rgbw"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "led-stick-8": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "led-ring-12": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "led-ring-16": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "led-ring-24": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "led-matrix-8x8": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2811": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2811-v11"], DOCS["ws-ws2811-2011"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2913": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2913"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2818": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2818b"], DOCS["ws-ws2818f"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2814": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2814a"], DOCS["ws-ws2814f"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2814b": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2814b"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2805": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2805"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2914": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2914"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2915": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2915"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
   "ws2801": {
     maker: "Worldsemi",
     docs: [DOCS["ws-ws2801s"], DOCS["ws-ws2801-2008"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
   },
 }
-for (const def of defs) def.datasheet ??= RECORDS[def.id]
+
+const TESTS = {
+  chain: "tests/sim/addressable.test.ts",
+  bench: "tests/sim/addressable-bench.test.ts",
+  variants: "tests/sim/addressable-variants.test.ts",
+} as const
+
+const COLOURS = { R: "red", G: "green", B: "blue" } as const
+
+/** The table's numbers as characteristics, most telling first, at most eight rows. */
+function characteristicsOf(p: Product, n: SheetNumbers): Characteristic[] {
+  const pixel = p.parts[0].light.kind === "pixel"
+  const cite = (at: SheetAt, where: string): Cite => ({ ...(at.doc ? { doc: at.doc } : {}), page: at.page, at: where })
+  const value = ({ min, typ, max }: { min?: number; typ?: number; max?: number }): Value => ({ ...(min !== undefined ? { min } : {}), ...(typ !== undefined ? { typ } : {}), ...(max !== undefined ? { max } : {}) })
+  const rows: Characteristic[] = []
+  const s = n.supply
+  rows.push({
+    kind: "supply",
+    value: value(s),
+    ...(s.abs !== undefined ? { limit: { max: s.abs } } : {}),
+    cite: cite(s, "Absolute maximum ratings"),
+    ...(s.absPage !== undefined ? { limitCite: { page: s.absPage, at: "Absolute maximum ratings" } } : {}),
+  })
+  const colours = (kind: "forwardVoltage" | "wavelength", c: SheetColours | undefined, where: string) => {
+    if (!c) return
+    for (const k of ["R", "G", "B"] as const) {
+      const v = c[k]
+      if (v) rows.push({ kind, value: value(v), colour: COLOURS[k], cite: cite(c, where) })
+    }
+  }
+  colours("forwardVoltage", n.forwardVoltage, "RGB chip characteristics")
+  const currentKind = pixel ? "forwardCurrent" : "outputCurrent"
+  if (n.current) {
+    const c = n.current
+    rows.push({
+      kind: currentKind,
+      value: value(c),
+      per: c.per ?? "channel",
+      ...(c.abs !== undefined ? { limit: { max: c.abs } } : {}),
+      cite: cite(c, pixel ? "LED characteristics" : "Electrical parameters"),
+      ...(c.absPage !== undefined ? { limitCite: { page: c.absPage, at: "Absolute maximum ratings" } } : {}),
+    })
+  }
+  if (n.currentWhite) rows.push({ kind: currentKind, value: value(n.currentWhite), per: "channel", colour: "white", cite: cite(n.currentWhite, pixel ? "LED characteristics" : "Electrical parameters") })
+  if (n.feedback) rows.push({ kind: "feedback", value: value(n.feedback), cite: cite(n.feedback, "Electrical characteristics") })
+  // The colours of a pixel whose sheet gives no forward voltages.
+  if (!n.forwardVoltage) colours("wavelength", n.wavelength, "LED characteristics")
+  if (n.rate) rows.push({ kind: "busClock", value: value(n.rate), cite: cite(n.rate, p.parts[0].input.kind === "clocked" ? "Absolute maximum ratings" : "Data rate") })
+  if (n.reset) rows.push({ kind: "pulse", value: value(n.reset), cite: cite(n.reset, p.parts[0].input.kind === "clocked" ? "Latch" : "Data transfer time, RES") })
+  if (n.vih) {
+    const v = n.vih
+    const level = "volts" in v ? v.volts : { rail: v.rail, times: v.times }
+    rows.push({ kind: "inputHigh", value: "volts" in v && v.typ ? { typ: level } : { min: level }, cite: cite(v, "Electrical characteristics") })
+  }
+  if (n.temperature) rows.push({ kind: "temperature", value: value(n.temperature), cite: cite(n.temperature, "Absolute maximum ratings") })
+  if (n.delay) rows.push({ kind: "delay", value: value(n.delay), at: [{ path: n.delay.path }], cite: cite(n.delay, "Switching characteristics") })
+  if (n.quiescent) rows.push({ kind: "quiescent", value: value(n.quiescent), cite: cite(n.quiescent, "Electrical characteristics") })
+  return rows.slice(0, 8)
+}
+
+/** What the model does for this product, each claim held by a test. */
+function modelledOf(p: Product): Claim[] {
+  const specs = p.parts
+  const first = specs[0]
+  const any = (f: (s: (typeof specs)[number]) => boolean) => specs.some(f)
+  const clocked = first.input.kind === "clocked"
+  const levels = first.fields.filter((f) => f.role === "level")
+  const order = levels.map((f) => (f.channel === "W2" ? "W" : f.channel)).join("")
+  const out: Claim[] = [{ what: `${wordBits(first)}-bit ${order} words, MSB first`, test: levels.some((f) => f.bits === 16) ? TESTS.variants : TESTS.chain }]
+  if (clocked) {
+    out.push({ what: "Shifts SDI on CKI edges", test: TESTS.chain }, { what: "Latches when CKI idles", test: TESTS.chain }, { what: "Relays later bits at SDO", test: TESTS.chain })
+  } else {
+    out.push({ what: "Latches on the reset low", test: TESTS.chain }, { what: "Relays later words at DO", test: TESTS.chain }, { what: "Flags pulses outside timing windows", test: TESTS.chain }, { what: "Ignores data below VIH", test: TESTS.chain })
+  }
+  out.push({ what: "Dark below supply minimum", test: TESTS.chain })
+  out.push(first.light.kind === "pixel" ? { what: "LED current drawn from supply", test: TESTS.chain } : { what: "PWM-gated constant-current outputs", test: TESTS.chain })
+  out.push({ what: "Idles at quiescent current", test: TESTS.bench }, { what: "Die shorts past abs max", test: TESTS.bench })
+  if (any((s) => !!s.header)) out.push({ what: "5-bit current gain header", test: TESTS.variants })
+  if (any((s) => s.input.kind === "nrz" && !!s.input.backup)) out.push({ what: "Backup input skips dead chip", test: TESTS.chain })
+  if (any((s) => s.input.kind === "nrz" && !!s.input.relay)) out.push({ what: "BO repeats the input", test: TESTS.variants })
+  if (any((s) => s.input.kind === "nrz" && !!s.input.bidirectional)) out.push({ what: "V6 DIN and DOUT interchangeable", test: TESTS.variants })
+  if (any((s) => s.strap?.high?.kind === "timing")) out.push({ what: "SET selects 400 kHz timing", test: TESTS.variants })
+  if (any((s) => s.strap?.low?.kind === "invert")) out.push({ what: "POL low inverts outputs", test: TESTS.variants })
+  if (first.light.kind === "sink" && first.light.feedback) out.push({ what: "Feedback resistor sets current", test: TESTS.bench })
+  if (first.clamp !== undefined) out.push({ what: "Shunt regulator clamps VDD", test: TESTS.bench })
+  if (first.regulator !== undefined) out.push({ what: "Regulates its own VCC", test: TESTS.bench })
+  if (p.layout === "pixel-6pin") out.push({ what: "Runs only with VCC up", test: TESTS.bench })
+  if (chipCount(p.shape) === 1) out.push({ what: "Dead-chip fault option", test: TESTS.bench })
+  return out.slice(0, 12)
+}
+
+/** What the sheet gives that the model leaves out. */
+function notModelledOf(p: Product, n: SheetNumbers): Claim[] {
+  const at = (a: SheetAt, where: string): Cite => ({ ...(a.doc ? { doc: a.doc } : {}), page: a.page, at: where })
+  const out: Claim[] = []
+  if (n.forwardVoltage) out.push({ what: "LED forward voltage drop", cite: at(n.forwardVoltage, "RGB chip characteristics") })
+  if (n.intensity) out.push({ what: "Luminous intensity per colour", cite: at(n.intensity, "LED characteristics") })
+  if (n.temperature) out.push({ what: "Operating temperature range", cite: at(n.temperature, "Absolute maximum ratings") })
+  if (n.switching) out.push({ what: "Output fall time, input capacitance", cite: at(n.switching, "Switching characteristics") })
+  for (const l of n.left ?? []) out.push({ what: l.what, cite: at(l, "Features") })
+  if (p.parts[0].light.kind === "pixel" && chipCount(p.shape) > 1) out.push({ what: "Module board, connectors, capacitors" })
+  return out.slice(0, 10)
+}
+
+for (const def of defs) {
+  const p = PRODUCTS.find((x) => x.id === def.id)
+  const docs = DOC_LIST[def.id]
+  const sheet = SHEETS[def.id]
+  if (!p || def.datasheet) continue
+  if (docs && sheet) def.datasheet = { ...docs, specs: [], characteristics: characteristicsOf(p, sheet), modelled: modelledOf(p), notModelled: notModelledOf(p, sheet) }
+}
+
+/** Parts whose datasheet could not be found: the model's numbers come from its sister parts' sheets. */
+const NO_SHEET: Record<string, NoDatasheet> = {
+  ws2815: {
+    none: "No WS2815 datasheet (the V1.1 of 2017 the model was built from) could be found at Worldsemi, its distributors or the web archive; only WS2815B sheets are published.",
+    modelled: [
+      { what: "24-bit GRB words, MSB first", test: TESTS.chain },
+      { what: "Backup input skips dead chip", test: TESTS.chain },
+      { what: "Regulates its own VCC", test: TESTS.bench },
+      { what: "Ignores data below VIH", test: TESTS.chain },
+    ],
+    notModelled: [{ what: "Numbers unconfirmed by any sheet" }, { what: "Operating temperature range" }],
+    sources: [DOCS["ws-ws2815b-v1"]],
+  },
+  "ws2815b-4pin": {
+    none: "No datasheet for the 4-pin WS2815B-V1-4P or WS2815B-RGBW-4P could be found at Worldsemi, its distributors or the web archive.",
+    modelled: [
+      { what: "24-bit GRB words, MSB first", test: TESTS.chain },
+      { what: "Latches on the reset low", test: TESTS.chain },
+      { what: "Ignores data below VIH", test: TESTS.chain },
+      { what: "Die shorts past abs max", test: TESTS.bench },
+    ],
+    notModelled: [{ what: "Numbers unconfirmed by any sheet" }, { what: "Operating temperature range" }],
+    sources: [DOCS["ws-ws2815b-v1"], DOCS["ws-ws2815b-rgbw-v1"]],
+  },
+}
+for (const def of defs) def.datasheet ??= NO_SHEET[def.id]

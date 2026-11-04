@@ -156,18 +156,24 @@ describe("nothing left behind", () => {
       if (record.characteristics?.length) expect.soft(record.specs, `${def.id}: drop the free-text specs it replaced`).toEqual([])
   })
 
-  it("gives every powered IC its supply, every LED its forward voltage, once the part is typed", () => {
-    const REQUIRED: Partial<Record<string, readonly (keyof typeof KINDS)[]>> = {
-      ics: ["supply"],
-      displays: ["supply"],
-      leds: ["forwardVoltage"],
-      mcus: ["supply"],
+  it("gives every powered IC its supply, every LED its forward voltage or its supply, once the part is typed", () => {
+    // Each entry is one requirement met by any of its kinds: a lone LED by its forward voltage, a
+    // pixel with its own driver (WS2812, WS2811…) by its supply, since its sheet gives no Vf.
+    const REQUIRED: Partial<Record<string, readonly (readonly (keyof typeof KINDS)[])[]>> = {
+      ics: [["supply"]],
+      displays: [["supply"]],
+      leds: [["forwardVoltage", "supply"]],
+      mcus: [["supply"]],
     }
     for (const { def, record } of records()) {
       if (!record.characteristics?.length) continue
+      const kinds = record.characteristics.map((c) => c.kind)
       // A supply only for a part that takes one: a resonator or a crystal has no power pin.
       const powered = def.pins.some((p) => p.kind === "power")
-      for (const kind of REQUIRED[def.category] ?? []) if (kind !== "supply" || powered) expect.soft(record.characteristics.map((c) => c.kind), `${def.id} (${def.category}) needs ${kind}`).toContain(kind)
+      for (const anyOf of REQUIRED[def.category] ?? []) {
+        if (anyOf.length === 1 && anyOf[0] === "supply" && !powered) continue
+        expect.soft(anyOf.some((k) => kinds.includes(k)), `${def.id} (${def.category}) needs ${anyOf.join(" or ")}`).toBe(true)
+      }
     }
   })
 })

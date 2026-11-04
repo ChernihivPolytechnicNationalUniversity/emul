@@ -35,9 +35,6 @@ const PENDING = new Set<string>([
   // MCUs
   "atmega328p", "atmega328p-au", "pic16f627", "pic16f627-04", "pic16f627a", "pic16f628", "pic16f628-04", "pic16f628a", "pic16f648a", "pic16lf627", "pic16lf627a", "pic16lf628", "pic16lf628a", "pic16lf648a",
   "stm32f401cc", "stm32f401ce", "stm32f405rg", "stm32f407vg", "stm32f411ce", "stm32f429zi", "stm32f746ig",
-  // addressable LEDs
-  "led-matrix-8x8", "led-ring-12", "led-ring-16", "led-ring-24", "led-stick-8", "sk6812", "sk6812rgbw", "ws2801", "ws2805", "ws2811", "ws2812", "ws2812-6pin", "ws2812a", "ws2812b", "ws2812c", "ws2812d", "ws2812e",
-  "ws2812s", "ws2813", "ws2813b", "ws2813b-rgbw", "ws2814", "ws2814b", "ws2815", "ws2815b", "ws2815b-4pin", "ws2816", "ws2818", "ws2913", "ws2914", "ws2915", "ws2916", "ws2916a-rgbw",
 ])
 
 const num = (l: Level | undefined) => (typeof l === "number" ? l : undefined)
