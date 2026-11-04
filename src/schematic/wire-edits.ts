@@ -9,6 +9,7 @@ import type { ComponentDef, HdlModule, LegacyWire, PartState, PinRef, PlacedObje
 import type { WireColorKey } from "./wire-colors"
 import { clearOf, Conductors } from "./wires/conductors"
 import { WireGraph, type WireNets } from "./wires/graph"
+import { WireSheet } from "./wires/sheet"
 import { commitEdit, normalise, normaliseEdit } from "./wires/normal-form"
 import { contains, pointKey, samePoint, seededIds, type WirePin, type WireSegment } from "./wires/segment"
 
@@ -234,7 +235,7 @@ export function reoriented(before: Schematic, after: Schematic, ids: ReadonlySet
 
 export type Clip = { objects: PlacedObject[]; wires: WireSegment[]; parts: Record<string, PartState> }
 
-export function clipOf(doc: Schematic, ids: ReadonlySet<string>, known?: Wiring): Clip | null {
+export function clipOf(doc: Schematic, ids: ReadonlySet<string>, known?: Wiring, _segments?: ReadonlySet<string>): Clip | null {
   if (!ids.size) return null
   const objects = doc.objects.filter((o) => ids.has(o.id))
   const wires = travelling(doc, ids, known)
@@ -256,6 +257,7 @@ export type Wiring = {
   dots: readonly Point[]
   dangling: readonly Point[]
   corners: readonly PinCorner[]
+  sheet: WireSheet
 }
 
 type NetLook = {
@@ -422,5 +424,6 @@ function derivedWiring(graph: WireGraph, doc: Pick<Schematic, "objects" | "wires
     dots: view.junctions(),
     dangling: view.dangling(),
     corners,
+    sheet: WireSheet.of(doc.wires, pins),
   }
 }

@@ -6,6 +6,9 @@ import { getDef } from "@/schematic/registry"
 import type { LegacyWire as Wire, PlacedObject } from "@/schematic/types"
 import type { WireSegment } from "@/schematic/wires/segment"
 import { routesOf } from "../lib/routes"
+import { PartDrag } from "@/schematic/rubber-band"
+import { inNormalForm, wiringOf } from "@/schematic/wire-edits"
+import { WireGraph } from "@/schematic/wires/graph"
 import { boardDocuments } from "../../scripts/lib/stress"
 
 const c = (v: number) => v * GRID
@@ -319,7 +322,17 @@ describe("parts do not pile onto each other", () => {
 })
 
 describe("wires keep off the words", () => {
-  it.todo("a part cannot stand where the wire the rubber band lays from one of its pins would run through someone's label (phase 4, design.md §6.3)")
+  it("the wire the rubber band lays from a pin runs clear of another part's label and body when a clear place exists (phase 4, design.md §6.3, §5.1: text never blocks a part, so the wire goes round it)", () => {
+    const named = (id: string, x: number, y: number): PlacedObject => ({ ...part(id, "resistor", x, y), props: { ref: id, value: "1 kΩ" } })
+    const r9 = named("R9", 3, 2)
+    const doc = inNormalForm({ objects: [named("R1", 0, 0), named("R2", 10, 0), r9], wires: [{ id: "w", a: { x: c(4), y: c(1) }, b: { x: c(10), y: c(1) } }], parts: {} })
+    const landed = new PartDrag(doc, wiringOf(new WireGraph(), doc), { objects: new Set(["R2"]) }).landed(0, c(3))
+    const obstacles = [objectRect(r9, GRID), ...designatorRects(r9, GRID)]
+    const crossing = landed.doc.wires.filter((s) => obstacles.some((r) => Math.max(s.a.x, s.b.x) > r.x && Math.min(s.a.x, s.b.x) < r.x + r.w && Math.max(s.a.y, s.b.y) > r.y && Math.min(s.a.y, s.b.y) < r.y + r.h))
+    expect.soft(landed.at, "R2 dropped where it was let go").toEqual({ x: 0, y: c(3) })
+    expect.soft(crossing.map((s) => [s.a.x / GRID, s.a.y / GRID, s.b.x / GRID, s.b.y / GRID]), "no piece of the wire through R9 or its label").toEqual([])
+    expect.soft(landed.doc.wires.every((s) => s.a.x === s.b.x || s.a.y === s.b.y), "and every piece orthogonal").toBe(true)
+  })
 
   it("a wire from a crystal to an oscillator below it goes round the crystal's frequency", () => {
     const q = part("q", "crystal", 0, 0)

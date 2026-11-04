@@ -5,6 +5,9 @@ import { GRID, objectPins, type Point } from "@/schematic/geometry"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import { moved, recoloured, removed, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
+import { PartDrag, SegmentDrag } from "@/schematic/rubber-band"
+import { lineCodeOf, WireSheet, type SheetMark } from "@/schematic/wires/sheet"
+import type { WirePin, WireSegment } from "@/schematic/wires/segment"
 
 function random(seed: number) {
   let s = seed >>> 0
@@ -90,5 +93,50 @@ describe("the kept-up turns at pins are derived from the pins, not carried along
       known = wiringOf(graph, doc)
       expect.soft(turns(known), `${id} step ${step}`).toEqual(turns(wiringOf(new WireGraph(), doc)))
     }
+  })
+})
+
+function sheetShape(sheet: WireSheet, wires: readonly WireSegment[], pins: readonly WirePin[]) {
+  const ids = (list: readonly WireSegment[]) => list.map((s) => s.id).sort().join(" ")
+  const marks = (list: readonly SheetMark[]) => list.map((m) => `${m.at.x},${m.at.y}:${m.segment?.id ?? m.pin!.key}`).sort().join(" ")
+  const out: string[] = []
+  for (const s of wires) {
+    const line = lineCodeOf(s)
+    out.push(`${s.id} a[${ids(sheet.endsAt(s.a))}] b[${ids(sheet.endsAt(s.b))}] along[${ids(sheet.along(line, -1e9, 1e9))}] marks[${marks(sheet.marks(line, -1e9, 1e9))}] seg=${JSON.stringify(sheet.segment(s.id))}`)
+  }
+  for (const p of pins) out.push(`${p.key} at[${sheet.pinsAt(p.at).map((q) => q.key).sort().join(" ")}] through[${ids(sheet.through(p.at))}] pin=${JSON.stringify(sheet.pin(p.key))}`)
+  return out.sort()
+}
+
+describe("the sheet index the rubber band reads is kept up by each commit's delta (design.md §11; kickoff: the sheet lives in the store beside the graph)", () => {
+  it.each(["metronome", "nucleo-74hc595", "system-exam", "power-supply"])("%s: thirty random drags with wires, segment drags, deletions and recolourings leave a sheet equal to one built afresh, and the wiring equal to a fresh one", (id) => {
+    const rng = random(id.length * 104729)
+    let doc: Schematic = { ...examples.find((e) => e.id === id)!.build(GRID) }
+    const graph = new WireGraph()
+    let known = wiringOf(graph, doc)
+    let n = 0
+    const newId = () => `k${n++}`
+    for (let step = 0; step < 30; step++) {
+      const action = rng.int(0, 4)
+      const d = () => rng.pick([-2, -1, 1, 2]) * GRID
+      if (action === 0) doc = new PartDrag(doc, known, { objects: new Set([rng.pick(doc.objects).id]) }).landed(d(), d(), newId).doc
+      else if (action === 1 && doc.wires.length) doc = new SegmentDrag(doc, known, rng.pick(doc.wires).id).landed(d(), d(), newId).doc
+      else if (action === 2) doc = new PartDrag(doc, known, { objects: new Set([rng.pick(doc.objects).id]) }, { detach: true }).landed(d(), 0, newId).doc
+      else if (action === 3 && doc.wires.length) doc = removed(doc, new Set(), new Set([rng.pick(doc.wires).id]), newId)
+      else if (doc.wires.length) doc = recoloured(doc, [[rng.pick(doc.wires).id, rng.pick(["red", "blue", undefined] as const)]], newId)
+      known = wiringOf(graph, doc)
+      const fresh = wiringOf(new WireGraph(), doc)
+      expect.soft(shape(known), `${id} step ${step} (action ${action}): the wiring`).toEqual(shape(fresh))
+      expect.soft(sheetShape(known.sheet, doc.wires, known.pins), `${id} step ${step} (action ${action}): the sheet`).toEqual(sheetShape(WireSheet.of(doc.wires, known.pins), doc.wires, known.pins))
+    }
+  })
+
+  it("a one-part commit on a large sheet takes the sheet's delta rather than building it again", () => {
+    const doc: Schematic = { ...examples.find((e) => e.id === "system-exam")!.build(GRID) }
+    const graph = new WireGraph()
+    const before = wiringOf(graph, doc)
+    const one = doc.objects.find((o) => o.def === "resistor")!
+    const after = wiringOf(graph, moved(doc, new Map([[one.id, { x: one.x, y: one.y }]]), GRID, 0, () => "m", before))
+    expect.soft(after.sheet, "the same index object, updated in place").toBe(before.sheet)
   })
 })

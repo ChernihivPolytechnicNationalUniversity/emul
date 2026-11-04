@@ -107,6 +107,71 @@ const dots = (page: Page, id: string) =>
 
 const blockedNow = (page: Page, id: string) => page.evaluate((objectId) => document.querySelector(`[data-body="${CSS.escape(objectId)}"]`)?.hasAttribute("data-blocked") ?? false, id)
 
+const cellPoint = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
+const resistorAt = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
+const wiredPair = (): Schematic => ({
+  objects: [resistorAt("R1", 10, 10), resistorAt("R2", 20, 10), resistorAt("R3", 14, 16, 90)],
+  wires: [{ id: "w1", a: cellPoint(14, 11), b: cellPoint(20, 11) }],
+  parts: {},
+})
+const countOf = (page: Page, selector: string) => page.evaluate((s) => document.querySelectorAll(s).length, selector)
+const pieces = (page: Page) =>
+  page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-piece]")].map((e) => e.getAttribute("data-piece")!.split(" ").map(Number)))
+const orthogonal = (piece: number[]) => piece[0] === piece[2] || piece[1] === piece[3]
+
+async function wiresFollowTheDrag(page: Page) {
+  console.log("\nwires follow a dragged part, and Alt leaves them behind (design.md §6.3)")
+  await openDoc(page, "drag-with-wires", wiredPair())
+  const frame = await fieldFrame(page)
+  await dragBy(page, frame.toScreen(cellPoint(22, 11)), frame.toScreen(cellPoint(22, 14)), false)
+  const drawn = await pieces(page)
+  expect("mid-drag the rubber band draws the wire, every piece horizontal or vertical", drawn.length > 0 && drawn.every(orthogonal), true)
+  await page.mouse.up()
+  await page.waitForTimeout(800)
+  expect("dropped: R2 three cells lower", (await frame.worldOf("R2")).y, 13 * GRID)
+  expect("dropped: the wire still reaches R2, no open end", await countOf(page, "[data-dangling]"), 0)
+  await shoot(page, "drag-with-wires")
+  await page.keyboard.down("Alt")
+  await dragBy(page, frame.toScreen(cellPoint(22, 14)), frame.toScreen(cellPoint(26, 14)))
+  await page.keyboard.up("Alt")
+  expect("Alt-dragged: R2 moved alone, the wire's end hangs where its pin was", await countOf(page, "[data-dangling]"), 1)
+}
+
+async function drawFromAWire(page: Page) {
+  console.log("\na wire drawn from a wire with W, and the drawing keys (design.md §6.1)")
+  await openDoc(page, "draw-from-wire", wiredPair())
+  const frame = await fieldFrame(page)
+  const onWire = frame.toScreen(cellPoint(15, 11))
+  await page.mouse.move(onWire.x, onWire.y)
+  await page.keyboard.press("w")
+  const pin = frame.toScreen(cellPoint(15, 16))
+  await page.mouse.move(pin.x, pin.y, { steps: 8 })
+  await page.mouse.click(pin.x, pin.y)
+  await page.waitForTimeout(600)
+  expect("W on a wire starts a branch: a dot where it starts", await page.evaluate(() => [...document.querySelectorAll("[data-junction]")].map((e) => e.getAttribute("data-junction"))), [`${15 * GRID},${11 * GRID}`])
+  const lower = frame.toScreen(cellPoint(15, 20))
+  await page.mouse.click(lower.x, lower.y)
+  const corner = frame.toScreen(cellPoint(19, 22))
+  await page.mouse.move(corner.x, corner.y, { steps: 6 })
+  await page.mouse.click(corner.x, corner.y)
+  const further = frame.toScreen(cellPoint(23, 24))
+  await page.mouse.move(further.x, further.y, { steps: 6 })
+  await page.keyboard.press("Backspace")
+  await page.waitForTimeout(200)
+  expect("Backspace takes the corner back, and the wire is still being drawn", await countOf(page, "[data-slot=pending-wire-route] path"), 2)
+  await page.keyboard.press("Enter")
+  await page.waitForTimeout(600)
+  expect("Enter finishes it where the pointer is, the end left hanging", await countOf(page, "[data-dangling]"), 1)
+  const free = frame.toScreen(cellPoint(10, 11))
+  await page.mouse.click(free.x, free.y)
+  const away = frame.toScreen(cellPoint(6, 4))
+  await page.mouse.move(away.x, away.y, { steps: 6 })
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(400)
+  expect("Esc drops the wire being drawn: nothing added", [await countOf(page, "[data-slot=pending-wire-route]"), await countOf(page, "[data-dangling]")], [0, 1])
+  await shoot(page, "draw-from-wire")
+}
+
 async function zoomAcrossPinDetail(page: Page) {
   const pinsDrawn = () => page.evaluate(() => document.querySelectorAll("[data-slot=pins] [data-pin]").length > 0)
   await page.keyboard.down("Control")
@@ -388,6 +453,8 @@ const errors: string[] = []
 page.on("pageerror", (e) => errors.push(String(e)))
 try {
   await contactsFollowTheDrag(page)
+  await wiresFollowTheDrag(page)
+  await drawFromAWire(page)
   await bridgeBuiltByHand(page)
   await noPluggingIntoHeaders(page)
   await freedSlotTakesTheDrop(page)

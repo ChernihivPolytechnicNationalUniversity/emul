@@ -1,0 +1,384 @@
+import { describe, expect, it } from "vitest"
+import { GRID, objectRect, type Point } from "@/schematic/geometry"
+import { junctionAt, junctionJoins } from "@/schematic/junction-tool"
+import { changeMessage, netChanges, netName, NO_CHANGE } from "@/schematic/net-names"
+import type { PlacedObject, Schematic } from "@/schematic/types"
+import { pastedInto } from "@/schematic/use-schematic"
+import { drawEndAt, drawnTo, flipPosture, isRefusal, pointerAt, previewOf, startDrawing, withCorner, withoutCorner, type DrawEnd, type Drawing } from "@/schematic/wire-draw"
+import { clipOf, inNormalForm, removed, wiringOf, type Wiring } from "@/schematic/wire-edits"
+import { chainOf, inRect, segmentNearest } from "@/schematic/wire-select"
+import { wirePins } from "@/schematic/migrate-wires"
+import { danglingEnds, junctionsOf, pinPartition, WireGraph, wireNets } from "@/schematic/wires/graph"
+import type { WireSegment } from "@/schematic/wires/segment"
+import { geometryOf, normalFormViolations, sortedPoints } from "../lib/wire-reference"
+
+const c = (v: number) => v * GRID
+const at = (x: number, y: number): Point => ({ x: c(x), y: c(y) })
+const resistor = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "resistor", x: c(x), y: c(y), props: { ref: id }, ...(rotation && { rotation }) })
+const ground = (id: string, x: number, y: number): PlacedObject => ({ id, def: "ground", x: c(x), y: c(y), props: { ref: id } })
+const supply = (id: string, x: number, y: number, label: string): PlacedObject => ({ id, def: "supply", x: c(x), y: c(y), props: { ref: id, value: label } })
+let serial = 0
+const seg = (a: Point, b: Point, color?: WireSegment["color"]): WireSegment => ({ id: `s${++serial}`, a, b, ...(color && { color }) })
+const path = (...pts: Point[]) => pts.slice(1).map((p, i) => seg(pts[i], p))
+const docOf = (objects: PlacedObject[], wires: WireSegment[] = []): Schematic => inNormalForm({ objects, wires, parts: {} })
+const wiringFor = (doc: Schematic): Wiring => wiringOf(new WireGraph(), doc)
+const viewOf = (doc: Schematic) => wireNets(doc.wires, wirePins(doc.objects))
+const partition = (doc: Schematic) => pinPartition(viewOf(doc))
+let fresh = 0
+const newId = () => `d${++fresh}`
+
+function drawing(doc: Schematic, from: Point): { wiring: Wiring; d: Drawing } {
+  const wiring = wiringFor(doc)
+  const started = startDrawing(wiring, drawEndAt(wiring, from))
+  if (isRefusal(started)) throw new Error(`the drawing could not start at (${from.x / GRID}, ${from.y / GRID}): ${started.refused}`)
+  return { wiring, d: started }
+}
+
+const towards = (d: Drawing, ...points: Point[]) => points.reduce(pointerAt, d)
+
+function drawn(doc: Schematic, from: Point, target: Point, moves: Point[] = [target]): Schematic {
+  const { wiring, d } = drawing(doc, from)
+  const result = drawnTo(doc, wiring, towards(d, ...moves), drawEndAt(wiring, target), newId)
+  if (isRefusal(result)) throw new Error(`refused: ${result.refused} at (${result.at.x / GRID}, ${result.at.y / GRID})`)
+  return result
+}
+
+const field = (p: Point): DrawEnd => ({ kind: "field", at: p })
+
+describe("drawing a wire: where it goes while the pointer moves (design.md §6.1)", () => {
+  it("from a pin, the first leg runs along the pin's axis when the pointer lies ahead of it (Horizon, tool_draw_line_net.cpp:183–194: the posture from the starting pin's orientation)", () => {
+    const doc = docOf([resistor("R1", 0, 0)])
+    const { wiring, d } = drawing(doc, at(4, 1))
+    expect.soft(previewOf(doc, wiring, pointerAt(d, at(8, 4))).points, "out of R1's right pin to the right, then down").toEqual([at(4, 1), at(8, 1), at(8, 4)])
+    expect.soft(previewOf(doc, wiring, pointerAt(d, at(9, 1))).points, "level ahead: one straight leg").toEqual([at(4, 1), at(9, 1)])
+  })
+
+  it("from a pin, a pointer beside or behind it turns the wire at the pin itself, never out past the pin and back (design.md §6.1, §13.4: no detour the user did not draw)", () => {
+    const doc = docOf([resistor("R1", 0, 0)])
+    const { wiring, d } = drawing(doc, at(4, 1))
+    expect.soft(previewOf(doc, wiring, pointerAt(d, at(4, 5))).points, "straight below the pin: straight down").toEqual([at(4, 1), at(4, 5)])
+    expect.soft(previewOf(doc, wiring, pointerAt(d, at(2, 4))).points, "behind and below: down from the pin, then back").toEqual([at(4, 1), at(4, 4), at(2, 4)])
+  })
+
+  it("anywhere else the corner keeps the axis the pointer first moved along, and `/` flips it (KiCad, sch_line_wire_bus_tool.cpp computeBreakPoint and the posture action)", () => {
+    const doc = docOf([resistor("R1", 0, 0)])
+    const { wiring, d } = drawing(doc, at(10, 10))
+    const down = towards(d, at(10, 12), at(14, 15))
+    expect.soft(previewOf(doc, wiring, down).points, "moved down first: down, then across").toEqual([at(10, 10), at(10, 15), at(14, 15)])
+    expect.soft(previewOf(doc, wiring, flipPosture(down)).points, "`/`: across, then down").toEqual([at(10, 10), at(14, 10), at(14, 15)])
+    const across = towards(d, at(13, 10), at(14, 15))
+    expect.soft(previewOf(doc, wiring, across).points, "moved across first: across, then down").toEqual([at(10, 10), at(14, 10), at(14, 15)])
+  })
+
+  it("a click on empty field fixes the corner and the next leg starts across the last one; Backspace takes the last click back (Altium Place Wire: Backspace removes the last vertex)", () => {
+    const doc = docOf([resistor("R1", 0, 0)])
+    const { wiring, d } = drawing(doc, at(10, 10))
+    const first = pointerAt(d, at(14, 12))
+    expect.soft(previewOf(doc, wiring, first).points, "the first L").toEqual([at(10, 10), at(14, 10), at(14, 12)])
+    const clicked = withCorner(doc, wiring, first, at(14, 12))
+    if (isRefusal(clicked)) throw new Error("a corner on empty field is never refused")
+    expect.soft(previewOf(doc, wiring, pointerAt(clicked, at(16, 16))).points, "the next L leaves the corner across the last leg").toEqual([at(10, 10), at(14, 10), at(14, 12), at(16, 12), at(16, 16)])
+    const back = withoutCorner(pointerAt(clicked, at(14, 12)))
+    expect.soft(previewOf(doc, wiring, back).points, "Backspace: as before the click").toEqual(previewOf(doc, wiring, first).points)
+  })
+
+  it("over a target pin, when the plain L would cross a body, the preview takes a path round it and says so (design.md §6.1 completion)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 4), resistor("R9", 6, -2, 90)])
+    const { wiring, d } = drawing(doc, at(4, 1))
+    const target = drawEndAt(wiring, at(10, 5))
+    const preview = previewOf(doc, wiring, pointerAt(d, at(10, 5)), target)
+    const body = objectRect(doc.objects[2], GRID)
+    const through = preview.points.slice(1).some((p, i) => {
+      const q = preview.points[i]
+      return Math.max(p.x, q.x) > body.x && Math.min(p.x, q.x) < body.x + body.w && Math.max(p.y, q.y) > body.y && Math.min(p.y, q.y) < body.y + body.h
+    })
+    expect.soft(preview.routed, "the router's path, not the plain L").toBe(true)
+    expect.soft(through, "it does not cross R9").toBe(false)
+    expect.soft(preview.points.at(-1), "and still ends on R2's pin").toEqual(at(10, 5))
+  })
+})
+
+describe("drawing a wire: where it can start and how it ends (design.md §6.1, §6.4)", () => {
+  it("finished on a pin it auto-terminates: the wire is committed and the two pins are one net (Altium: a click on a hotspot ends the wire; KiCad IsTerminalPoint)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 4)])
+    const after = drawn(doc, at(4, 1), at(10, 5))
+    expect.soft(geometryOf(after.wires), "out of R1 along its axis, then down onto R2's pin").toEqual(geometryOf(path(at(4, 1), at(10, 1), at(10, 5))))
+    expect.soft(partition(after), "one net").toEqual([["R1:2", "R2:1"]])
+    expect.soft(danglingEnds(viewOf(after)), "no open end").toEqual([])
+    expect.soft(normalFormViolations(after.wires, wirePins(after.objects)), "normal form").toEqual([])
+  })
+
+  it("finished on a wire's interior it splits the wire there and the T gets its dot (IEC 61082-1 T-connection; KiCad AddJunction on a 3-exit point; junctions.md 2)", () => {
+    const doc = docOf([resistor("R2", 0, 0), resistor("R3", 12, 0), resistor("R1", 7, 4, 90)], [seg(at(4, 1), at(12, 1))])
+    const after = drawn(doc, at(8, 4), at(8, 1))
+    expect.soft(sortedPoints(junctionsOf(viewOf(after))), "the dot at the T").toEqual([at(8, 1)])
+    expect.soft(partition(after), "three pins on one net").toEqual([["R1:1", "R2:2", "R3:1"]])
+  })
+
+  it("finished on a dangling end of its own net it continues that wire: collinear, one straight wire, no dot (junctions.md 29)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 0)], [seg(at(4, 1), at(6, 1))])
+    const after = drawn(doc, at(10, 1), at(6, 1))
+    expect.soft(geometryOf(after.wires), "one wire from R1 to R2").toEqual(geometryOf([seg(at(4, 1), at(10, 1))]))
+    expect.soft(junctionsOf(viewOf(after)), "no dot").toEqual([])
+  })
+
+  it("Enter or a double-click on empty field finishes it there, the end left dangling (design.md §6.1; KiCad's finish action)", () => {
+    const doc = docOf([resistor("R1", 0, 0)])
+    const { wiring, d } = drawing(doc, at(4, 1))
+    const after = drawnTo(doc, wiring, pointerAt(d, at(8, 3)), field(at(8, 3)), newId)
+    if (isRefusal(after)) throw new Error(after.refused)
+    expect.soft(geometryOf(after.wires), "out and down").toEqual(geometryOf(path(at(4, 1), at(8, 1), at(8, 3))))
+    expect.soft(danglingEnds(viewOf(after)), "the end hangs where it was finished").toEqual([at(8, 3)])
+  })
+
+  it("started on empty field with the wire tool (W) it hangs at its start (design.md §6.1; KiCad W)", () => {
+    const doc = docOf([resistor("R1", 0, 0)])
+    const after = drawn(doc, at(8, 3), at(4, 1))
+    expect.soft(geometryOf(after.wires), "across first, the way the pointer moved, then up onto the pin").toEqual(geometryOf(path(at(8, 3), at(4, 3), at(4, 1))))
+    expect.soft(danglingEnds(viewOf(after)), "the start hangs").toEqual([at(8, 3)])
+  })
+
+  it("started on a dangling end it continues the wire: straight on, one wire (KiCad auto_start_wires on a dangling end)", () => {
+    const doc = docOf([resistor("R1", 0, 0)], [seg(at(4, 1), at(6, 1))])
+    const wiring = wiringFor(doc)
+    expect.soft(drawEndAt(wiring, at(6, 1)).kind, "the end is an end").toBe("end")
+    const { d } = drawing(doc, at(6, 1))
+    const after = drawnTo(doc, wiring, pointerAt(d, at(9, 1)), field(at(9, 1)), newId)
+    if (isRefusal(after)) throw new Error(after.refused)
+    expect.soft(geometryOf(after.wires), "one wire").toEqual(geometryOf([seg(at(4, 1), at(9, 1))]))
+  })
+
+  it("started on a wire it is a branch: the wire splits where it starts and the T gets its dot (design.md §6.4; KiCad starts a wire on a wire and splits on commit)", () => {
+    const doc = docOf([resistor("R2", 0, 0), resistor("R3", 12, 0), resistor("R1", 7, 4, 90)], [seg(at(4, 1), at(12, 1))])
+    const wiring = wiringFor(doc)
+    expect.soft(drawEndAt(wiring, at(8, 1)).kind, "a point on a wire").toBe("wire")
+    const after = drawn(doc, at(8, 1), at(8, 4))
+    expect.soft(sortedPoints(junctionsOf(viewOf(after))), "the dot where it started").toEqual([at(8, 1)])
+    expect.soft(partition(after), "three pins on one net").toEqual([["R1:1", "R2:2", "R3:1"]])
+  })
+
+  it("started on a wire and drawn along it to R1's pin and on to R3, it is one wire with the dot on R1's pin, its start point gone (junctions.md 22)", () => {
+    const doc = docOf([resistor("R2", 0, 0), resistor("R1", 7, 1, 90), resistor("R3", 12, 0)], [seg(at(4, 1), at(8, 1))])
+    const after = drawn(doc, at(6, 1), at(12, 1))
+    expect.soft(geometryOf(after.wires), "the spine and the new wire, split only at R1's pin").toEqual(geometryOf([seg(at(4, 1), at(8, 1)), seg(at(8, 1), at(12, 1))]))
+    expect.soft(junctionsOf(viewOf(after)), "the dot on R1's pin").toEqual([at(8, 1)])
+    expect.soft(partition(after), "one net").toEqual([["R1:1", "R2:2", "R3:1"]])
+  })
+
+  it("the same, turned off halfway between R2 and R1, splits the spine where it leaves (junctions.md 23)", () => {
+    const doc = docOf([resistor("R2", 0, 0), resistor("R1", 7, 1, 90)], [seg(at(4, 1), at(8, 1))])
+    const { wiring, d } = drawing(doc, at(5, 1))
+    const after = drawnTo(doc, wiring, towards(d, at(7, 1), at(6, 4)), field(at(6, 4)), newId)
+    if (isRefusal(after)) throw new Error(after.refused)
+    expect.soft(geometryOf(after.wires), "the spine split at the leaving point").toEqual(geometryOf([seg(at(4, 1), at(6, 1)), seg(at(6, 1), at(8, 1)), seg(at(6, 1), at(6, 4))]))
+    expect.soft(junctionsOf(viewOf(after)), "the dot at the leaving point").toEqual([at(6, 1)])
+  })
+
+  it("a wire crossing another net's wire is a crossing, never a connection (ГОСТ 2.721-74 item 5; IEC 61082-1 Fig. 30)", () => {
+    const doc = docOf([resistor("A", -4, 2), resistor("B", 10, 2), resistor("R1", 3, -4, 90)], [seg(at(0, 3), at(10, 3))])
+    const after = drawn(doc, at(4, 0), at(4, 6), [at(4, 6)])
+    expect.soft(junctionsOf(viewOf(after)), "no dot at the crossing").toEqual([])
+    expect.soft(partition(after), "two nets").toEqual([["A:2", "B:1"]])
+  })
+})
+
+describe("drawing a wire: connections are made by ends (design.md §6.7; junctions.md principle 3)", () => {
+  function foreignStub() {
+    return docOf([resistor("A", 0, 0), resistor("R4", 6, 4, 90)], [seg(at(4, 1), at(10, 1))])
+  }
+
+  it("a wire that would lie along another net's wire is refused while drawing: the preview says why and the click does nothing (junctions.md 9; KiCad joins silent overlaps, Altium's documented trap)", () => {
+    const doc = foreignStub()
+    const { wiring, d } = drawing(doc, at(7, 4))
+    const moved = pointerAt(d, at(12, 1))
+    const preview = previewOf(doc, wiring, moved)
+    expect.soft(preview.points, "up out of R4's pin, then along the stub").toEqual([at(7, 4), at(7, 1), at(12, 1)])
+    expect.soft(preview.refused?.refused, "along a wire of another net").toBe("along")
+    expect.soft(isRefusal(withCorner(doc, wiring, moved, at(12, 1))), "the corner click is refused").toBe(true)
+    expect.soft(isRefusal(drawnTo(doc, wiring, moved, field(at(12, 1)), newId)), "finishing there is refused").toBe(true)
+  })
+
+  it("a wire that would pass over another net's pin without ending there is refused; ended on that pin it joins, and the join is shown before the click (junctions.md 10, 12; ГОСТ 2.721-74 item 6 note 3; Altium: a wire across a pin connects it)", () => {
+    const doc = docOf(
+      [resistor("R2", 0, 0), ground("G1", 3, 2), resistor("R1", 7, 1, 90), supply("V1", 7, -3, "VCC"), resistor("R3", 12, 0)],
+      [seg(at(4, 1), at(4, 2)), seg(at(8, -1), at(8, 1))],
+    )
+    const { wiring, d } = drawing(doc, at(4, 1))
+    const across = previewOf(doc, wiring, pointerAt(d, at(12, 1)), drawEndAt(wiring, at(12, 1)))
+    expect.soft(across.refused?.refused, "over R1's pin").toBe("over")
+    expect.soft(across.refused?.at, "named where").toEqual(at(8, 1))
+    const onPin = previewOf(doc, wiring, pointerAt(d, at(8, 1)), drawEndAt(wiring, at(8, 1)))
+    expect.soft(onPin.refused, "ending on R1's pin is allowed").toBeNull()
+    expect.soft(onPin.joins.map((g) => [...g]).sort(), "both nets lit before the click").toEqual([["G1:GND", "R2:2"], ["R1:1", "V1:V"]])
+    const after = drawn(doc, at(4, 1), at(8, 1))
+    const change = netChanges(wiringFor(doc).circuit.nets, wiringFor(after).circuit.nets)
+    expect.soft(change.joined.length, "one join").toBe(1)
+    expect.soft(changeMessage(after.objects, change), "named in the status line").toBe("GND and VCC joined")
+  })
+
+  it("a wire of another net drawn along the spine is refused (junctions.md 24)", () => {
+    const doc = docOf([resistor("R2", 0, 0), resistor("R1", 7, 1, 90), resistor("R3", 12, 0), resistor("R5", 5, 4, 90)], [seg(at(4, 1), at(8, 1))])
+    const { wiring, d } = drawing(doc, at(6, 4))
+    const preview = previewOf(doc, wiring, towards(d, at(6, 3), at(12, 1)), drawEndAt(wiring, at(12, 1)))
+    expect.soft(preview.refused?.refused, "up onto the spine and along it").toBe("along")
+  })
+
+  it("a corner of the drawn wire never lands on another net's pin or wire end (ГОСТ 2.721-74 item 5 note: no bend on another line; design.md §6.7)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R7", 8, 0)])
+    const { wiring, d } = drawing(doc, at(4, 1))
+    const preview = previewOf(doc, wiring, pointerAt(d, at(8, 4)))
+    expect.soft(preview.points, "out, then down: the corner on R7's pin").toEqual([at(4, 1), at(8, 1), at(8, 4)])
+    expect.soft(preview.refused?.refused, "a corner on a foreign pin").toBe("corner")
+  })
+
+  it("a crossing cannot be reached: a wire may neither start nor end on one (design.md §6.4; junctions.md 28)", () => {
+    const doc = docOf([resistor("A", -4, 4), resistor("B", 10, 4), resistor("C", 4, -4, 90), resistor("D", 4, 10, 90), resistor("R1", 12, 10)], [seg(at(0, 5), at(10, 5)), seg(at(5, 0), at(5, 10))])
+    const wiring = wiringFor(doc)
+    expect.soft(drawEndAt(wiring, at(5, 5)).kind, "the point is a crossing").toBe("crossing")
+    expect.soft(isRefusal(startDrawing(wiring, drawEndAt(wiring, at(5, 5)))), "no wire starts there").toBe(true)
+    const { d } = drawing(doc, at(12, 11))
+    const preview = previewOf(doc, wiring, pointerAt(d, at(5, 5)), drawEndAt(wiring, at(5, 5)))
+    expect.soft(preview.refused, "no wire ends there").not.toBeNull()
+  })
+
+  it("two dangling ends of different nets drawn together join, shown before and named after (junctions.md 16)", () => {
+    const doc = docOf(
+      [resistor("A", 0, 0), ground("G1", 3, 2), resistor("B", 14, 0), supply("V1", 13, -3, "VCC")],
+      [seg(at(4, 1), at(4, 2)), seg(at(4, 1), at(6, 1)), seg(at(14, -1), at(14, 1)), seg(at(14, 1), at(10, 1))],
+    )
+    const { wiring, d } = drawing(doc, at(6, 1))
+    const preview = previewOf(doc, wiring, pointerAt(d, at(10, 1)), drawEndAt(wiring, at(10, 1)))
+    expect.soft(preview.joins.length, "both nets lit").toBe(2)
+    const after = drawn(doc, at(6, 1), at(10, 1))
+    expect.soft(changeMessage(after.objects, netChanges(wiringFor(doc).circuit.nets, wiringFor(after).circuit.nets)), "named").toBe("GND and VCC joined")
+  })
+})
+
+describe("the junction tool, the only way to join a crossing (design.md §6.4; OrCAD's junction on crossing wires; EasyEDA's junction flag; IEC 61082 / IEEE 315 discourage four-way joins)", () => {
+  function crossing() {
+    return docOf(
+      [resistor("A", -4, 4), resistor("B", 10, 4), resistor("C", 4, -4, 90), resistor("D", 4, 10, 90)],
+      [seg(at(0, 5), at(10, 5)), seg(at(5, 0), at(5, 10))],
+    )
+  }
+
+  it("on a crossing it splits both wires there: four ends, a dot, the two nets one, named before the click (junctions.md 32)", () => {
+    const doc = crossing()
+    const wiring = wiringFor(doc)
+    expect.soft(junctionJoins(wiring, at(5, 5)).map((g) => [...g]).sort(), "both nets named before").toEqual([["A:2", "B:1"], ["C:2", "D:1"]])
+    const after = junctionAt(doc, wiring, at(5, 5), newId)
+    if ("refused" in after) throw new Error(after.refused)
+    expect.soft(after.wires.length, "four ends").toBe(4)
+    expect.soft(junctionsOf(viewOf(after)), "a dot").toEqual([at(5, 5)])
+    expect.soft(partition(after), "one net").toEqual([["A:2", "B:1", "C:2", "D:1"]])
+    expect.soft(normalFormViolations(after.wires, wirePins(after.objects)), "normal form").toEqual([])
+  })
+
+  it("anywhere but a crossing it is refused and the document is left as it was (EasyEDA: a junction flag only where wires cross)", () => {
+    const doc = crossing()
+    const wiring = wiringFor(doc)
+    for (const p of [at(2, 5), at(20, 20), at(0, 5)]) {
+      const result = junctionAt(doc, wiring, p, newId)
+      expect.soft("refused" in result && result.refused, `at (${p.x / GRID}, ${p.y / GRID})`).toBe("no-crossing")
+    }
+  })
+})
+
+describe("selecting wires (design.md §6.2)", () => {
+  function bent() {
+    return docOf([resistor("R1", 0, 0), resistor("R2", 12, 6)], [seg(at(4, 1), at(8, 1), "red"), seg(at(8, 1), at(8, 7), "blue"), seg(at(8, 7), at(12, 7), "blue")])
+  }
+
+  it("a click picks the segment under the pointer, not its whole run (KiCad, Altium: a click selects one wire segment)", () => {
+    const doc = bent()
+    const wiring = wiringFor(doc)
+    const middle = doc.wires.find((s) => s.a.x === s.b.x)!
+    const run = wiring.runBySegment.get(middle.id)!
+    expect.soft(segmentNearest(run, { x: c(8) + 3, y: c(4) }), "the upright piece").toBe(middle.id)
+  })
+
+  it("a double-click picks the run: every segment up to the next pins, branches or dangling ends, across a change of colour (design.md §6.2)", () => {
+    const doc = bent()
+    const wiring = wiringFor(doc)
+    expect.soft([...chainOf(wiring, doc.wires[0].id)].sort(), "the red piece and the two blue ones").toEqual(doc.wires.map((s) => s.id).sort())
+  })
+
+  it("a run stops at a branch (design.md §6.2)", () => {
+    const doc = docOf([resistor("R2", 0, 0), resistor("R3", 12, 0), resistor("R1", 7, 4, 90)], [seg(at(4, 1), at(12, 1)), seg(at(8, 4), at(8, 1))])
+    const wiring = wiringFor(doc)
+    const left = doc.wires.find((s) => Math.min(s.a.x, s.b.x) === c(4))!
+    expect.soft(chainOf(wiring, left.id), "only the piece from R2's pin to the T").toEqual([left.id])
+  })
+
+  it("the marquee picks the segments wholly inside it as well as the parts; a part's wires are not picked with it (KiCad: a window selects enclosed wires)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 12, 0)], [seg(at(4, 1), at(8, 1)), seg(at(8, 1), at(8, 5)), seg(at(8, 5), at(12, 5)), seg(at(12, 5), at(12, 1))])
+    const picked = inRect(doc, { x: c(-1), y: c(-1), w: c(10), h: c(4) })
+    expect.soft(picked.objects, "R1").toEqual(["R1"])
+    expect.soft(picked.wires, "the first piece only: the second leaves the box").toEqual([doc.wires[0].id])
+  })
+})
+
+describe("deleting wires (design.md §6.5)", () => {
+  it("the segment between two dots deleted: both dots become bends, the net splits in two and the split is named (junctions.md 30)", () => {
+    const doc = docOf(
+      [resistor("R1", 0, 0), resistor("R2", 2, 4, 90), resistor("R3", 16, 0), resistor("R4", 9, 4, 90)],
+      [seg(at(4, 1), at(16, 1)), seg(at(3, 4), at(3, 3)), seg(at(3, 3), at(6, 3)), seg(at(6, 3), at(6, 1)), seg(at(10, 4), at(10, 1))],
+    )
+    const before = wiringFor(doc)
+    expect.soft(sortedPoints(junctionsOf(before.view)), "two dots").toEqual([at(6, 1), at(10, 1)])
+    const between = doc.wires.find((s) => s.a.y === c(1) && s.b.y === c(1) && Math.min(s.a.x, s.b.x) === c(6))!
+    const after = removed(doc, new Set(), new Set([between.id]), newId)
+    expect.soft(junctionsOf(viewOf(after)), "no dot left").toEqual([])
+    const change = netChanges(before.circuit.nets, wiringFor(after).circuit.nets)
+    expect.soft(change.split.length, "one net split").toBe(1)
+    expect.soft(changeMessage(after.objects, change), "named").toBe("R1.2 and R3.1 split apart")
+  })
+
+  it("a run deleted takes the whole chain between its pins and branches, and its dot goes with it (design.md §6.5)", () => {
+    const doc = docOf([resistor("R2", 0, 0), resistor("R3", 12, 0), resistor("R1", 7, 4, 90)], [seg(at(4, 1), at(12, 1)), seg(at(8, 4), at(8, 3), "red"), seg(at(8, 3), at(8, 1), "blue")])
+    const wiring = wiringFor(doc)
+    const branch = doc.wires.find((s) => s.color === "red")!
+    const after = removed(doc, new Set(), new Set(chainOf(wiring, branch.id)), newId)
+    expect.soft(geometryOf(after.wires), "the spine, whole again").toEqual(geometryOf([seg(at(4, 1), at(12, 1))]))
+    expect.soft(junctionsOf(viewOf(after)), "no dot").toEqual([])
+  })
+})
+
+describe("merges and splits are always named (design.md §6.7, N5)", () => {
+  it("a net is named GND when it holds a ground, by its rail's label when it holds a supply, else by its first pin", () => {
+    const objects = [resistor("R1", 0, 0), resistor("R2", 6, 0), ground("G1", 0, 6), supply("V1", 6, 6, "+5V")]
+    expect.soft(netName(objects, ["G1:GND", "R1:1"]), "ground").toBe("GND")
+    expect.soft(netName(objects, ["R2:2", "V1:V"]), "rail").toBe("+5V")
+    expect.soft(netName(objects, ["R2:1", "R1:2"]), "first pin by name").toBe("R1.2")
+  })
+
+  it("an edit that joins or splits nothing reports nothing, even when a net was derived again", () => {
+    expect.soft(netChanges([["A:1", "B:1"]], [["A:1", "B:1"]]), "the same groups").toEqual(NO_CHANGE)
+    expect.soft(changeMessage([], NO_CHANGE), "no message").toBeNull()
+  })
+
+  it("three nets joined at once are named together, ground first, rails next (design.md §6.7)", () => {
+    const objects = [resistor("R1", 0, 0), resistor("R2", 6, 0), resistor("R3", 12, 0), ground("G1", 0, 6), supply("V1", 6, 6, "VCC")]
+    const change = netChanges([["G1:GND", "R1:1"], ["R2:2", "V1:V"], ["R3:1", "R3:2"]], [["G1:GND", "R1:1", "R2:2", "R3:1", "R3:2", "V1:V"]])
+    expect.soft(changeMessage(objects, change), "one message").toBe("GND, VCC and R3.1 joined")
+  })
+})
+
+describe("copying and pasting with wires (design.md §6.6)", () => {
+  it("a part copied with half of a branch in the selection brings no half-wires; the original is untouched (junctions.md 18; KiCad copies the segments in the selection)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 12, 0), resistor("R3", 7, 4, 90)], [seg(at(4, 1), at(12, 1)), seg(at(8, 4), at(8, 1))])
+    const inside = inRect(doc, { x: c(-1), y: c(-1), w: c(10), h: c(4) })
+    const clip = clipOf(doc, new Set(inside.objects), wiringFor(doc), new Set(inside.wires))!
+    expect.soft(clip.objects.map((o) => o.id), "R1").toEqual(["R1"])
+    expect.soft(geometryOf(clip.wires), "the piece wholly inside, from R1 to the T, and nothing beyond").toEqual(geometryOf([seg(at(4, 1), at(8, 1))]))
+  })
+
+  it("pasted wires keep their shape, and an end landing on a wire connects there by the ordinary rule (design.md §6.6)", () => {
+    const doc = docOf([resistor("R2", 0, 10), resistor("R3", 12, 10)], [seg(at(4, 11), at(12, 11))])
+    const clip = { objects: [resistor("R1", 7, 4, 90)], wires: [seg(at(8, 8), at(8, 9))], parts: {} }
+    const after = pastedInto(doc, clip, 0, c(2), (old) => `${old}'`, newId)
+    expect.soft(geometryOf(after.wires.filter((s) => s.a.x === s.b.x)), "the pasted wire two cells lower, its end on the spine").toEqual(geometryOf([seg(at(8, 10), at(8, 11))]))
+    expect.soft(junctionsOf(viewOf(after)), "the spine split where it landed").toEqual([at(8, 11)])
+    expect.soft(partition(after), "the pasted resistor's pin on the spine's net").toEqual([["R1':2", "R2:2", "R3:1"]])
+  })
+})

@@ -5,6 +5,9 @@ import { getDef } from "@/schematic/registry"
 import { elementTerminals, terminalName } from "@/schematic/terminals"
 import type { Schematic } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
+import { flippedWithWires } from "@/schematic/rubber-band"
+import { wiringOf } from "@/schematic/wire-edits"
+import { WireGraph } from "@/schematic/wires/graph"
 
 const def = (id: string) => getDef(id)!
 
@@ -49,5 +52,12 @@ describe("a two-terminal part reads its current and voltage from pin 1 to pin 2,
     expect(b.voltage).toBeNear(-5, 0.01)
   })
 
-  it.todo("mirroring a part does not rewire it: its wires follow its pins, the same pin stays on the supply, and the readings keep their sign (phase 4, design.md §6.6)")
+  it("mirroring a part does not rewire it: its wires follow its pins, the same pin stays on the supply, and the readings keep their sign (phase 4, design.md §6.6, §13.17)", () => {
+    const { doc, r } = divider("1")
+    const mirrored = flippedWithWires(doc, wiringOf(new WireGraph(), doc), new Set([r.id]), "horizontal").doc
+    expect.soft(mirrored.objects.find((o) => o.id === r.id)?.mirror, "the resistor is mirrored").toBe(true)
+    const a = reading(mirrored, r.id)
+    expect.soft(a.current * 1e3, "pin 1 still on the supply: +5 mA").toBeNear(5, 0.01)
+    expect.soft(a.voltage, "and +5 V").toBeNear(5, 0.01)
+  })
 })

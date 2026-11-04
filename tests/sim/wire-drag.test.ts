@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { GRID, objectPins } from "@/schematic/geometry"
+import { wirePins } from "@/schematic/migrate-wires"
+import { changeMessage, netChanges } from "@/schematic/net-names"
+import { flippedWithWires, PartDrag, SegmentDrag, TurnRun } from "@/schematic/rubber-band"
+import { inNormalForm, wiringOf } from "@/schematic/wire-edits"
 import { rotateSelection } from "@/schematic/orient"
 import type { PlacedObject, Point, Schematic } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
 import { type DragConflict, type DragFrame, type DragMove, normalOffset, planDrag } from "@/schematic/wires/drag"
-import { junctionsOf, pinPartition, type WireNets, WireGraph, wireNets } from "@/schematic/wires/graph"
+import { danglingEnds, junctionsOf, pinPartition, type WireNets, WireGraph, wireNets } from "@/schematic/wires/graph"
 import { commitEdit, normalise } from "@/schematic/wires/normal-form"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
 import { columnCode, rowCode, WireSheet } from "@/schematic/wires/sheet"
@@ -532,5 +536,175 @@ describe("random drags on random documents against the brute-force reference", (
       }
     }
     expect.soft(tally.clean, `most drags land clean: ${JSON.stringify(tally)}`).toBeGreaterThan(700)
+  })
+})
+
+describe("the rubber band wired to the document: dragging parts and segments (design.md §6.3, §13.19)", () => {
+  const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
+  const by = (x: number, y: number) => [x * GRID, y * GRID] as const
+  const resistor = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
+  const ground = (id: string, x: number, y: number): PlacedObject => ({ id, def: "ground", x: x * GRID, y: y * GRID, props: { ref: id } })
+  const supply = (id: string, x: number, y: number, label: string): PlacedObject => ({ id, def: "supply", x: x * GRID, y: y * GRID, props: { ref: id, value: label } })
+  let n = 0
+  const wire = (a: Point, b: Point, color?: WireColorKey): WireSegment => ({ id: `doc${++n}`, a, b, ...(color && { color }) })
+  const chain = (...pts: Point[]) => pts.slice(1).map((p, i) => wire(pts[i], p))
+  const docOf = (objects: PlacedObject[], wires: WireSegment[] = []): Schematic => inNormalForm({ objects, wires, parts: {} })
+  const wiringFor = (doc: Schematic) => wiringOf(new WireGraph(), doc)
+  const viewOf = (doc: Schematic) => wireNets(doc.wires, wirePins(doc.objects))
+  const nets = (doc: Schematic) => pinPartition(viewOf(doc))
+  const placeOf = (doc: Schematic, id: string) => {
+    const o = doc.objects.find((p) => p.id === id)!
+    return { x: o.x / GRID, y: o.y / GRID, rotation: o.rotation ?? 0, mirror: !!o.mirror }
+  }
+  const ids = counter("p")
+  const carried = (...objects: string[]) => ({ objects: new Set(objects) })
+
+  it("a part dragged keeps its wire attached and orthogonal: a straight pin-to-pin wire becomes a Z that leaves each pin along its axis (design.md §13.19 Q2; KiCad orthoLineDrag; Altium Drag Orthogonal)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 0)], [wire(at(4, 1), at(10, 1))])
+    const landed = new PartDrag(doc, wiringFor(doc), carried("R2")).landed(...by(0, 2), ids)
+    expect.soft(placeOf(landed.doc, "R2"), "R2 where it was dropped").toEqual({ x: 10, y: 2, rotation: 0, mirror: false })
+    expect.soft(geometryOf(landed.doc.wires), "out of R1 one step, down, on into R2").toEqual(geometryOf(chain(at(4, 1), at(5, 1), at(5, 3), at(10, 3))))
+    expect.soft(nets(landed.doc), "still one net").toEqual([["R1:2", "R2:1"]])
+    expect.soft(normalFormViolations(landed.doc.wires, wirePins(landed.doc.objects)), "normal form").toEqual([])
+  })
+
+  it("a wire whose far end hangs free travels whole with the part, bends and all (design.md §13.19 Q6; KiCad orthoLineDrag: nothing attached, the wire translates)", () => {
+    const doc = docOf([resistor("R1", 0, 0)], chain(at(4, 1), at(7, 1), at(7, 3)))
+    const landed = new PartDrag(doc, wiringFor(doc), carried("R1")).landed(...by(2, 2), ids)
+    expect.soft(geometryOf(landed.doc.wires), "the whole hanging wire moved by the same offset").toEqual(geometryOf(chain(at(6, 3), at(9, 3), at(9, 5))))
+  })
+
+  it("a wire the re-route cannot lay clean does not cancel the drop: the part lands where it was dropped, the wire is left unlaid, marked and named, and no net merges (design.md §13.19 Q9, §6.7; KiCad, Altium and OrCAD never refuse a drop)", () => {
+    const fence = [wire(at(9.5, 5), at(7, 5)), wire(at(10, 4.5), at(10, 2.5)), wire(at(10, 5.5), at(10, 8))]
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 0)], [wire(at(4, 1), at(10, 1)), ...fence])
+    const drag = new PartDrag(doc, wiringFor(doc), carried("R2"))
+    expect.soft(drag.blocked(...by(0, 4)), "the offset itself is not blocked").toBe(false)
+    const landed = drag.landed(...by(0, 4), ids)
+    expect.soft(landed.at, "dropped where it was let go").toEqual(at(0, 4))
+    expect.soft(placeOf(landed.doc, "R2"), "R2 moved").toEqual({ x: 10, y: 4, rotation: 0, mirror: false })
+    expect.soft(landed.unlaid.map((u) => u.pin), "R2's wire named as not laid").toEqual(["R2:1"])
+    expect.soft(nets(landed.doc), "no net joined to the fence, and R2's pin left open rather than wired through it").toEqual([])
+    expect.soft(normalFormViolations(landed.doc.wires, wirePins(landed.doc.objects)), "normal form").toEqual([])
+  })
+
+  it("an offset that puts a pin on a crossing is blocked, and the drop lands on the nearest clean offset (junctions.md 28; design.md §6.7)", () => {
+    const doc = docOf(
+      [resistor("A", -4, 4), resistor("B", 10, 4), resistor("C", 4, -4, 90), resistor("D", 4, 10, 90), resistor("R1", 14, 10)],
+      [wire(at(0, 5), at(10, 5)), wire(at(5, 0), at(5, 10))],
+    )
+    const drag = new PartDrag(doc, wiringFor(doc), carried("R1"))
+    expect.soft(drag.blocked(...by(-13, -6)), "R1's right pin on the crossing").toBe(true)
+    const landed = drag.landed(...by(-13, -6), ids)
+    expect.soft(landed.at, "somewhere else").not.toEqual(at(-13, -6))
+    expect.soft(drag.blocked(landed.at.x, landed.at.y), "a clean offset").toBe(false)
+    expect.soft(nets(landed.doc).some((g) => g.includes("A:2") && g.includes("C:2")), "the crossing's nets kept apart").toBe(false)
+  })
+
+  it("Alt held at the start detaches: the part moves alone and its old pin points become dangling ends (KiCad M, LTspice F7; design.md §6.3)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 0)], [wire(at(4, 1), at(10, 1))])
+    const landed = new PartDrag(doc, wiringFor(doc), carried("R2"), { detach: true }).landed(...by(0, 3), ids)
+    expect.soft(geometryOf(landed.doc.wires), "the wire where it was").toEqual(geometryOf([wire(at(4, 1), at(10, 1))]))
+    expect.soft(danglingEnds(viewOf(landed.doc)), "its end hangs where R2's pin was").toEqual([at(10, 1)])
+    expect.soft(nets(landed.doc), "R2 off the net").toEqual([])
+  })
+
+  it("a part dropped with one pin on a wire splits it there and the pin joins, with a dot (junctions.md 25); a lone pin joining a net is no merge to flash", () => {
+    const doc = docOf([resistor("R2", 0, 0), resistor("R3", 12, 0), resistor("R4", 20, 20, 90)], [wire(at(4, 1), at(12, 1))])
+    const before = wiringFor(doc)
+    const landed = new PartDrag(doc, before, carried("R4")).landed(...by(-13, -19), ids)
+    expect.soft(junctionsOf(viewOf(landed.doc)), "the dot under R4's pin").toEqual([at(8, 1)])
+    expect.soft(nets(landed.doc), "R4 on the net").toEqual([["R2:2", "R3:1", "R4:1"]])
+    expect.soft(netChanges(before.circuit.nets, wiringFor(landed.doc).circuit.nets).joined, "nothing to flash").toEqual([])
+  })
+
+  it("dragging a segment moves it along its normal and its neighbours stretch (design.md §6.3, dragging a segment; LibrePCB, KiCad)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 4)], chain(at(4, 1), at(7, 1), at(7, 5), at(10, 5)))
+    const middle = doc.wires.find((s) => s.a.x === s.b.x)!
+    const landed = new SegmentDrag(doc, wiringFor(doc), middle.id).landed(...by(1.2, 5))
+    expect.soft(geometryOf(landed.doc.wires), "the upright piece one cell right").toEqual(geometryOf(chain(at(4, 1), at(8, 1), at(8, 5), at(10, 5))))
+  })
+
+  it("two dangling ends of different nets brought together by a dragged segment join, lit in the frame and named after (junctions.md 16)", () => {
+    const doc = docOf(
+      [resistor("A", 0, 0), ground("G1", 3, 2), resistor("B", 14, 3), supply("V1", 13, 0, "VCC")],
+      [wire(at(4, 1), at(4, 2)), wire(at(4, 1), at(6, 1)), wire(at(6, 1), at(6, 4)), wire(at(14, 2), at(14, 4)), wire(at(14, 4), at(8, 4))],
+    )
+    const before = wiringFor(doc)
+    const upright = doc.wires.find((s) => s.a.x === at(6, 0).x && s.b.x === at(6, 0).x)!
+    const drag = new SegmentDrag(doc, before, upright.id)
+    expect.soft(drag.frame(...by(2, 0)).joins.length, "the join lit before the release").toBe(1)
+    const landed = drag.landed(...by(2, 0))
+    expect.soft(changeMessage(landed.doc.objects, netChanges(before.circuit.nets, wiringFor(landed.doc).circuit.nets)), "named").toBe("GND and VCC joined")
+  })
+})
+
+describe("turning and mirroring with wires (design.md §6.6, §13.17, §13.19 Q14)", () => {
+  const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
+  const resistor = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
+  const led = (id: string, x: number, y: number): PlacedObject => ({ id, def: "led", x: x * GRID, y: y * GRID, props: { ref: id } })
+  const npn = (id: string, x: number, y: number): PlacedObject => ({ id, def: "npn", x: x * GRID, y: y * GRID, props: { ref: id } })
+  const ground = (id: string, x: number, y: number): PlacedObject => ({ id, def: "ground", x: x * GRID, y: y * GRID, props: { ref: id } })
+  const supply = (id: string, x: number, y: number): PlacedObject => ({ id, def: "supply", x: x * GRID, y: y * GRID, props: { ref: id, value: "+5V" } })
+  let n = 0
+  const wire = (a: Point, b: Point): WireSegment => ({ id: `t${++n}`, a, b })
+  const chain = (...pts: Point[]) => pts.slice(1).map((p, i) => wire(pts[i], p))
+  const docOf = (objects: PlacedObject[], wires: WireSegment[] = []): Schematic => inNormalForm({ objects, wires, parts: {} })
+  const wiringFor = (doc: Schematic) => wiringOf(new WireGraph(), doc)
+  const viewOf = (doc: Schematic) => wireNets(doc.wires, wirePins(doc.objects))
+  const nets = (doc: Schematic) => pinPartition(viewOf(doc))
+  const placeOf = (doc: Schematic, id: string) => {
+    const o = doc.objects.find((p) => p.id === id)!
+    return { x: o.x / GRID, y: o.y / GRID, rotation: o.rotation ?? 0 }
+  }
+  const ids = counter("t")
+
+  it("a selection turns as one body about its middle: the parts swing round it, the wire between them turns with them and nothing is rubber-banded inside (design.md §13.19 Q14; KiCad and Altium turn a selection as a group)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 6, 0)], [wire(at(4, 1), at(6, 1))])
+    const run = new TurnRun(doc, wiringFor(doc), new Set(["R1", "R2"]))
+    run.turned(1, ids)
+    const done = run.turned(1, ids)
+    expect.soft([placeOf(done.doc, "R1"), placeOf(done.doc, "R2")], "R1 above R2, both standing").toEqual([
+      { x: 4, y: -4, rotation: 90 },
+      { x: 4, y: 2, rotation: 90 },
+    ])
+    expect.soft(geometryOf(done.doc.wires), "the wire between them turned with them").toEqual(geometryOf([wire(at(5, 0), at(5, 2))]))
+  })
+
+  it("a run of R presses is one turn: R then Shift+R gives back the drawing it started from, wires and all (design.md §6.6)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 0), resistor("R3", 0, 6)], [wire(at(4, 1), at(10, 1)), ...chain(at(0, 1), at(-2, 1), at(-2, 7), at(0, 7))])
+    const run = new TurnRun(doc, wiringFor(doc), new Set(["R1"]))
+    run.turned(1, ids)
+    const back = run.turned(-1, ids)
+    expect.soft(geometryOf(back.doc.wires), "the wires as they were").toEqual(geometryOf(doc.wires))
+    expect.soft(placeOf(back.doc, "R1"), "R1 as it was").toEqual(placeOf(doc, "R1"))
+  })
+
+  it("R pressed twice on a part with a branch on its pin leaves the wiring of a single right-angle turn: a short wire to the spine, no jog from the diagonal stop (junctions.md 17)", () => {
+    const doc = docOf([resistor("R2", 0, 1), resistor("R1", 0, 5), resistor("R3", 0, 9)], chain(at(4, 2), at(4, 6), at(4, 10)))
+    const run = new TurnRun(doc, wiringFor(doc), new Set(["R1"]))
+    run.turned(1, ids)
+    const done = run.turned(1, ids)
+    expect.soft(geometryOf(done.doc.wires), "the spine put, a short wire from R1's lower pin").toEqual(geometryOf([...chain(at(4, 2), at(4, 8), at(4, 10)), wire(at(2, 8), at(4, 8))]))
+    expect.soft(junctionsOf(viewOf(done.doc)), "the dot where it meets the spine").toEqual([at(4, 8)])
+  })
+
+  it("an LED mirrored keeps its circuit: each wire follows its own pin, no pin lands on the other's wire end (design.md §13.17; ГОСТ 2.702: a mirrored symbol is the same element)", () => {
+    const doc = docOf([led("D1", 0, 0), supply("V1", -5, -3), ground("G1", 7, 2)], [...chain(at(-4, -1), at(-4, 1), at(0, 1)), ...chain(at(4, 1), at(8, 1), at(8, 2))])
+    const before = nets(doc)
+    const done = flippedWithWires(doc, wiringFor(doc), new Set(["D1"]), "horizontal", ids)
+    expect.soft(done.doc.objects.find((o) => o.id === "D1")?.mirror, "mirrored").toBe(true)
+    expect.soft(nets(done.doc), "the anode still on the rail, the cathode still on ground").toEqual(before)
+    expect.soft(normalFormViolations(done.doc.wires, wirePins(done.doc.objects)), "normal form").toEqual([])
+  })
+
+  it("a transistor mirrored keeps its circuit: base, collector and emitter each keep their wire (design.md §13.17)", () => {
+    const doc = docOf(
+      [npn("Q1", 0, 0), resistor("R1", -8, 1), resistor("R2", 2, -6, 90), ground("G1", 2, 6)],
+      [wire(at(-4, 2), at(0, 2)), wire(at(3, -2), at(3, 0)), wire(at(3, 4), at(3, 6))],
+    )
+    const before = nets(doc)
+    const done = flippedWithWires(doc, wiringFor(doc), new Set(["Q1"]), "horizontal", ids)
+    expect.soft(nets(done.doc), "the same three nets").toEqual(before)
+    expect.soft(normalFormViolations(done.doc.wires, wirePins(done.doc.objects)), "normal form").toEqual([])
   })
 })
