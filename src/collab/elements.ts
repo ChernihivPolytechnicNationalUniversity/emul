@@ -1,4 +1,15 @@
+import { SCHEMATIC_VERSION, upgradedFrom } from "@/schematic/migrate"
 import type { HdlModule, PartState, PlacedObject, Schematic, Wire } from "@/schematic/types"
+
+export const ROOM_VERSION = "version"
+
+export const roomVersion = () => String(SCHEMATIC_VERSION)
+
+export function onThisVersion(stored: Schematic, stamp: string | undefined): { doc: Schematic; upgraded: boolean } {
+  const version = Number(stamp) || undefined
+  if (version !== undefined && version >= SCHEMATIC_VERSION) return { doc: stored, upgraded: false }
+  return { doc: upgradedFrom(stored, version).doc, upgraded: true }
+}
 
 const FIRMWARE = ["firmware", "firmwareData", "firmwareBuild"] as const
 

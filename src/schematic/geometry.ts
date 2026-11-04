@@ -1,5 +1,5 @@
 import { bodyBounds } from "./body"
-import { getDef, getPin } from "./registry"
+import { getDef } from "./registry"
 import { SpatialIndex } from "./spatial"
 import type { BodyShape, ComponentDef, PinDef, PinRef, PlacedObject, Point, Rotation, Side, Wire } from "./types"
 
@@ -131,10 +131,14 @@ export const allowedRotations = (def: ComponentDef): readonly Rotation[] => ROTA
 
 export type Turn = 1 | -1
 
-export function nextRotation(def: ComponentDef, rotation: Rotation, turn: Turn): Rotation {
-  for (let step = 1; step <= ROTATIONS.length; step++) {
-    const next = ROTATIONS[(ROTATIONS.indexOf(rotation) + turn * step + ROTATIONS.length * step) % ROTATIONS.length]
-    if (rotationAllowed(def, next)) return next
+export type Step = 45 | 90
+
+export function nextRotation(def: ComponentDef, rotation: Rotation, turn: Turn, step: Step = 45): Rotation {
+  for (const stride of step === 90 ? [2, 1] : [1]) {
+    for (let k = 1; k <= ROTATIONS.length; k++) {
+      const next = ROTATIONS[(ROTATIONS.indexOf(rotation) + turn * stride * k + ROTATIONS.length * stride * k) % ROTATIONS.length]
+      if (rotationAllowed(def, next)) return next
+    }
   }
   return rotation
 }
@@ -257,32 +261,45 @@ export function orientedPins(def: ComponentDef, orientation: Orientation): reado
   return (slots[slot] ??= def.pins.map((raw) => orientPin(raw, def, orientation)))
 }
 
+const orientedPinIndexes = new WeakMap<readonly PlacedPin[], ReadonlyMap<string, PlacedPin>>()
+
+function orientedPin(def: ComponentDef, orientation: Orientation, id: string): PlacedPin | undefined {
+  const pins = orientedPins(def, orientation)
+  let index = orientedPinIndexes.get(pins)
+  if (!index) {
+    const byId = new Map<string, PlacedPin>()
+    for (const pin of pins) if (!byId.has(pin.id)) byId.set(pin.id, pin)
+    orientedPinIndexes.set(pins, (index = byId))
+  }
+  return index.get(id)
+}
+
 const placementOf = (obj: PlacedObject, grid: number) => `${obj.id}|${obj.def}|${obj.x}|${obj.y}|${obj.rotation ?? 0}|${obj.mirror ? "m" : ""}|${grid}`
 
-const placedPins = new WeakMap<PlacedObject, { placement: string; pins: readonly ObjectPin[] }>()
+const placedPins = new WeakMap<PlacedObject, { placement: string; def: ComponentDef; pins: readonly ObjectPin[] }>()
+
+const NO_PINS: readonly ObjectPin[] = []
 
 /**
  * Every pin of a placed object, in world coordinates. Used wherever pins have to be found by
  * position rather than by name: touching pins, hit-testing, contact dots.
  */
 export function objectPins(obj: PlacedObject, grid: number): readonly ObjectPin[] {
+  const def = getDef(obj.def)
+  if (!def) return NO_PINS
   const placement = placementOf(obj, grid)
   const cached = placedPins.get(obj)
-  if (cached && cached.placement === placement) return cached.pins
-  const def = getDef(obj.def)
-  const pins: readonly ObjectPin[] = def
-    ? orientedPins(def, orientationOf(obj)).map((pin) => ({ key: `${obj.id}:${pin.id}`, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }))
-    : []
-  placedPins.set(obj, { placement, pins })
+  if (cached && cached.placement === placement && cached.def === def) return cached.pins
+  const pins: readonly ObjectPin[] = orientedPins(def, orientationOf(obj)).map((pin) => ({ key: `${obj.id}:${pin.id}`, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }))
+  placedPins.set(obj, { placement, def, pins })
   return pins
 }
 
 /** World-space center of a pin. */
 export function pinPoint(obj: PlacedObject, pinId: string, grid: number): Point | null {
   const def = getDef(obj.def)
-  const raw = def && getPin(def, pinId)
-  if (!def || !raw) return null
-  const pin = orientPin(raw, def, orientationOf(obj))
+  const pin = def && orientedPin(def, orientationOf(obj), pinId)
+  if (!def || !pin) return null
   return { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid }
 }
 
@@ -334,12 +351,6 @@ export type Route = {
   owner: number[]
 }
 
-/**
- * Where the wire's stub leaves the pin. A diagonal pin sits off the grid — a lead of n cells
- * rotated 45° spans n/√2 — so its stub end is snapped back onto the grid: the pin stays exactly
- * where the symbol draws it, everything downstream stays orthogonal, and two diagonal pins
- * meeting at a corner land their stubs on the same node.
- */
 const stubEnd = (p: Point, side: Direction, stub: number, grid: number): Point => {
   const d = DIR[side]
   const end = { x: p.x + d.x * stub * grid, y: p.y + d.y * stub * grid }
@@ -821,9 +832,8 @@ export function resolvePinIn(index: ReadonlyMap<string, PlacedObject>, ref: PinR
   const obj = index.get(ref.object)
   if (!obj) return null
   const def = getDef(obj.def)
-  const raw = def && getPin(def, ref.pin)
-  if (!def || !raw) return null
-  const pin = orientPin(raw, def, orientationOf(obj))
+  const pin = def && orientedPin(def, orientationOf(obj), ref.pin)
+  if (!def || !pin) return null
   return { obj, def, pin, point: { x: obj.x + pin.x * grid, y: obj.y + pin.y * grid } }
 }
 

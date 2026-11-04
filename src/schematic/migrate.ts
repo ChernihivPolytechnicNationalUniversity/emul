@@ -1,7 +1,7 @@
 import { GRID, orientationOf, orientPin, pinPoint, type Point } from "./geometry"
 import { partsOnTheLattice, uprightOnTheLattice } from "./migrate-lattice"
 import { BOARD_IN_1_28, RENUMBERED_SINCE_1_28 } from "./migrate-open746i-c"
-import { getDef, getPin } from "./registry"
+import { getDef, getPin, withLibrary } from "./registry"
 import { partKey, type ComponentDef, type PinRef, type PlacedObject, type Schematic, type Wire } from "./types"
 
 const savedAsHctSelect = (o: PlacedObject) => o.def === "hc595" && o.props?.value === "74HCT595"
@@ -34,15 +34,21 @@ export const stamped = (doc: Schematic): VersionedSchematic => ({ ...doc, versio
 export function upgraded(doc: Schematic): Upgrade {
   const from = versionOf(doc)
   if (from >= SCHEMATIC_VERSION) return { doc, notes: [] }
-  const notes: string[] = []
-  let now = doc
-  for (const step of steps.slice(from - 1)) {
-    const next = step(now)
-    now = next.doc
-    notes.push(...next.notes)
-  }
-  return { doc: stamped(now), notes }
+  return withLibrary(doc.library, () => {
+    const notes: string[] = []
+    let now = doc
+    for (const step of steps.slice(from - 1)) {
+      const next = step(now)
+      now = next.doc
+      notes.push(...next.notes)
+    }
+    return { doc: stamped(now), notes }
+  })
 }
+
+const BEFORE_VERSIONS = 2
+
+export const upgradedFrom = (doc: Schematic, version: number | undefined): Upgrade => upgraded({ ...doc, version: version ?? BEFORE_VERSIONS } as VersionedSchematic)
 
 const OPEN746 = "open746i-c"
 const LCD7 = "lcd7-f"

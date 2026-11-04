@@ -344,7 +344,7 @@ export function partsOnTheLattice(doc: Schematic, newId: () => string = () => cr
       const away = Math.hypot(placed.x / GRID + half - was.x, placed.y / GRID + half - was.y)
       if (away > FAR_CELLS) notes.push(`${nameOf(o)} moved ${Math.round(away)} cells onto the grid: nearer, its pins would have touched another net's.`)
     }
-    if (isDiagonal(o.rotation ?? 0) && !isDiagonal(placed.rotation ?? 0)) notes.push(`${nameOf(o)} stood at ${o.rotation}°, where only a two-pin part can stand now: turned to ${placed.rotation ?? 0}°.`)
+    if (isDiagonal(o.rotation ?? 0) && !isDiagonal(placed.rotation ?? 0)) notes.push(`${nameOf(o)} stood at ${o.rotation}°, which it cannot take now: turned to ${placed.rotation ?? 0}°.`)
     else if (!isDiagonal(o.rotation ?? 0) && changedByTheLattice(def) && (placed.x !== o.x || placed.y !== o.y)) notes.push(`${nameOf(o)} moved ${Math.round(Math.hypot(placed.x - o.x, placed.y - o.y) / GRID)} cell${Math.hypot(placed.x - o.x, placed.y - o.y) > GRID ? "s" : ""}: its pins, now on the grid, would have touched another net's where it stood.`)
   }
   if (folded.length) {

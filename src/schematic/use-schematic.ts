@@ -6,7 +6,7 @@ import { normalizeDebug } from "@/debug/saved"
 import { intersects, objectRect, snap, type FlipAxis, type Point, type Rect, type Turn } from "./geometry"
 import { flipSelection, rotateSelection } from "./orient"
 import { getDef } from "./registry"
-import { migrated } from "./migrate"
+import { migrated, SCHEMATIC_VERSION, upgradedFrom } from "./migrate"
 import {
   emptySchematic,
   partKey,
@@ -83,6 +83,12 @@ function keepLive(target: Schematic, current: Schematic): Schematic {
 export type Clip = Pick<Schematic, "objects" | "wires" | "parts">
 
 export const clipOnTheLattice = (clip: Clip): Clip => ({ ...clip, objects: clip.objects.map(migrated) })
+
+export function clipOfThisVersion(clip: Clip, version: number | undefined): Clip {
+  if (version !== undefined && version >= SCHEMATIC_VERSION) return clip
+  const { doc } = upgradedFrom({ objects: clip.objects, wires: clip.wires, parts: clip.parts }, version)
+  return { objects: doc.objects, wires: doc.wires, parts: doc.parts }
+}
 
 export function pastedInto(doc: Schematic, clip: Clip, dx: number, dy: number, idOf: (old: string) => string, newId: () => string): Schematic {
   const ids = new Map(clip.objects.map((o) => [o.id, idOf(o.id)]))

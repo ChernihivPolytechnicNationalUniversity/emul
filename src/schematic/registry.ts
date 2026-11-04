@@ -81,6 +81,17 @@ export function subscribeLibrary(listener: () => void): () => void {
 
 export const getLibraryVersion = () => libraryVersion
 
+export function withLibrary<T>(modules: readonly HdlModule[] | undefined, run: () => T): T {
+  if (!modules) return run()
+  const before = [...library.values()].map((entry) => entry.module)
+  setLibrary(modules)
+  try {
+    return run()
+  } finally {
+    setLibrary(before)
+  }
+}
+
 export function libraryEntries(): { module: HdlModule; def: ComponentDef | null }[] {
   return [...library.values()]
 }

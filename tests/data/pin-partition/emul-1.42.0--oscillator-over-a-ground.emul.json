@@ -1,0 +1,8 @@
+{
+  "source": "tests/data/emul-1.42.0/oscillator-over-a-ground.emul",
+  "objects": [
+    "G1 (oscillator)",
+    "ground@5,4 (ground)"
+  ],
+  "nets": []
+}

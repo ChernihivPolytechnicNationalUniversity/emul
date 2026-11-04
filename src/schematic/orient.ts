@@ -1,4 +1,4 @@
-import { flipped, nextRotation, objectRect, objectSize, orientationOf, snap, type FlipAxis, type Point, type Turn } from "./geometry"
+import { diagonalSquare, flipped, nextRotation, objectRect, objectSize, orientationOf, snap, type FlipAxis, type Point, type Step, type Turn } from "./geometry"
 import { getDef } from "./registry"
 import type { PlacedObject, Schematic, Wire } from "./types"
 
@@ -54,14 +54,20 @@ export function flipSelection(doc: Schematic, ids: ReadonlySet<string>, axis: Fl
 
 const turningCell = ({ w, h }: { w: number; h: number }) => ({ x: Math.floor(w / 2), y: Math.floor(h / 2) })
 
+const standsOnADiagonal = (o: PlacedObject, ids: ReadonlySet<string>) => {
+  const def = getDef(o.def)
+  return !ids.has(o.id) || !def || diagonalSquare(def) !== null
+}
+
 export function rotateSelection(doc: Schematic, ids: ReadonlySet<string>, turn: Turn, grid: number): Schematic {
   const turned = new Set<string>()
+  const step: Step = doc.objects.every((o) => standsOnADiagonal(o, ids)) ? 45 : 90
   const objects = doc.objects.map((o) => {
     if (!ids.has(o.id)) return o
     const def = getDef(o.def)
     if (!def) return o
     turned.add(o.id)
-    const rotation = nextRotation(def, o.rotation ?? 0, turn)
+    const rotation = nextRotation(def, o.rotation ?? 0, turn, step)
     const before = turningCell(objectSize(def, o.rotation))
     const after = turningCell(objectSize(def, rotation))
     return { ...o, rotation, x: o.x + (before.x - after.x) * grid, y: o.y + (before.y - after.y) * grid }

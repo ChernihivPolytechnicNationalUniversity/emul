@@ -4,7 +4,7 @@ import * as Y from "yjs"
 import { COLLAB_PATH, ROOM_ELEMENTS, ROOM_META } from "emul-shared/room"
 import { useEvent } from "@/hooks/use-event"
 import type { Point, Schematic } from "@/schematic/types"
-import { join, split } from "./elements"
+import { join, onThisVersion, ROOM_VERSION, roomVersion, split } from "./elements"
 import { anonymousIdentity, withAnimal, type Identity } from "./identity"
 
 export type Move = { ids: string[]; dx: number; dy: number }
@@ -83,7 +83,14 @@ export function useLive(merge: (doc: Schematic) => void): Live {
     s.ydoc.transact(() => {
       for (const [k, v] of next) if (s.elements.get(k) !== v) s.elements.set(k, v)
       for (const k of [...s.elements.keys()]) if (!next.has(k)) s.elements.delete(k)
+      if (s.meta.get(ROOM_VERSION) !== roomVersion()) s.meta.set(ROOM_VERSION, roomVersion())
     })
+  }
+
+  const stored = (s: Session) => {
+    const { doc, upgraded } = onThisVersion(current()!, s.meta.get(ROOM_VERSION))
+    if (upgraded) push(s, doc)
+    return doc
   }
 
   const teardown = useEvent(() => {
@@ -173,7 +180,7 @@ export function useLive(merge: (doc: Schematic) => void): Live {
     setHostedRoom(id)
     s.meta.set("name", name)
     if (s.elements.size === 0) push(s, doc)
-    else merge(current()!)
+    else merge(stored(s))
     s.ready = true
   })
 
@@ -184,7 +191,7 @@ export function useLive(merge: (doc: Schematic) => void): Live {
       return null
     }
     s.ready = true
-    return { name: s.meta.get("name") ?? "Live bench", doc: current()! }
+    return { name: s.meta.get("name") ?? "Live bench", doc: stored(s) }
   })
 
   const onChange = React.useCallback((doc: Schematic) => {

@@ -37,6 +37,7 @@ const at = (o: PlacedObject, pin: string) => objectPins(o, GRID).find((p) => p.p
 const cells = (p: Point) => ({ x: p.x / GRID, y: p.y / GRID })
 const leadEnds = (path: string) => [...path.matchAll(/L(-?[\d.e-]+) (-?[\d.e-]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }))
 const diagonalParts = registry.filter((def) => diagonalSquare(def) !== null)
+const upright0: Orientation = { rotation: 0, mirror: false }
 const refOf = (doc: Schematic, id: string) => doc.objects.find((o) => o.id === id)?.props?.ref
 
 const STANDS_ON_A_DIAGONAL = ["ac-source", "ammeter", "battery", "capacitor", "capacitor-polarized", "crystal", "dc-source", "diode", "inductor", "led", "polyfuse", "pulse-source", "pushbutton", "resistor", "switch", "voltmeter", "zener"]
@@ -234,6 +235,20 @@ describe("R turns to the next orientation the part allows (design.md §4.3, §6.
         expect.soft(middle(right, turned), `${def.id} ${start}: one right angle turns about the same cell`).toEqual(middle(part, box))
       }
     }
+  })
+
+  it("a selection turns as one: with a part that may not stand on a diagonal, every part turns 90°; with only parts that may, 45° (the user, 2026-11-04)", () => {
+    const mixed: Schematic = { objects: [placedAs("resistor", upright0, 0, 0, "R1"), placedAs("npn", upright0, 8, 0, "Q1"), placedAs("tp4056", upright0, 16, 0, "U1")], wires: [], parts: {} }
+    const all = new Set(mixed.objects.map((o) => o.id))
+    const turns = (doc: Schematic) => doc.objects.map((o) => o.rotation ?? 0)
+    const once = rotateSelection(mixed, all, 1, GRID)
+    expect.soft(turns(once), "one press").toEqual([90, 90, 90])
+    expect.soft(turns(rotateSelection(once, all, 1, GRID)), "two presses").toEqual([180, 180, 180])
+    expect.soft(turns(rotateSelection(mixed, all, -1, GRID)), "Shift+R").toEqual([270, 270, 270])
+    const bridge: Schematic = { objects: diamond().map((d) => ({ ...d, rotation: undefined })), wires: [], parts: {} }
+    expect.soft(turns(rotateSelection(bridge, new Set(bridge.objects.map((o) => o.id)), 1, GRID)), "four diodes").toEqual([45, 45, 45, 45])
+    const alone = rotateSelection(mixed, new Set(["R1"]), 1, GRID)
+    expect.soft(turns(alone), "the resistor alone").toEqual([45, 0, 0])
   })
 
   it("a part on its diagonal sits half a cell right of and below the middle it turned about", () => {
@@ -459,6 +474,30 @@ describe("the room a meter on its diagonal keeps for its own wires is its drawin
   })
 })
 
+describe("the text sheet writes a diagonal meter's letter where the field draws it (phase 2 review)", () => {
+  const written: Written[] = []
+  beforeEach(() => {
+    written.length = 0
+    vi.stubGlobal("Path2D", class { addPath() {} })
+    vi.stubGlobal("DOMMatrix", class { scale() { return this } })
+    vi.stubGlobal("OffscreenCanvas", class { constructor() { return tracingCanvas([], [], written) } })
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it.each(diagonalOrientations.map((o) => [`${o.rotation}${o.mirror ? "m" : ""}`, o] as const))("a voltmeter at %s", (_, o) => {
+    const texts = new TextRaster()
+    texts.setPalette(palette)
+    expect.soft(texts.get(getDef("voltmeter")!, o, GRID, 1, { boost: 1, pinSize: 0.4 }), "drawn").not.toBeNull()
+    const letter = written.find((w) => w.text === "V")
+    expect.soft(letter, "the V").toBeDefined()
+    if (!letter) return
+    const expected = framePoint(getDef("voltmeter")!, o, { x: 2, y: 1.04 })
+    const margin = 6 * GRID
+    expect.soft(letter.at.x - margin, "x, px").toBeNear(expected.x * GRID, 1e-6)
+    expect.soft(letter.at.y - margin, "y, px").toBeNear(expected.y * GRID, 1e-6)
+  })
+})
+
 describe("which two-pin parts stand on a diagonal, on made-up parts (phase 2 review)", () => {
   const base = getDef("resistor")!
   const twoPins = (a: Partial<ComponentDef["pins"][number]>, b: Partial<ComponentDef["pins"][number]>, id: string): ComponentDef => ({ ...base, id, pins: [{ ...base.pins[0], ...a }, { ...base.pins[1], ...b }] })
@@ -466,6 +505,8 @@ describe("which two-pin parts stand on a diagonal, on made-up parts (phase 2 rev
     expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "left" }, { x: 4, y: 1, side: "right" }, "span-4")), "span 4").toBe(3)
     expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "left" }, { x: 6, y: 1, side: "right" }, "span-6")), "span 6").toBe(4)
     expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "left" }, { x: 2, y: 1, side: "right" }, "span-2")), "span 2").toBeNull()
+    expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "left" }, { x: 3, y: 1, side: "right" }, "span-3")), "span 3, a 2-cell square").toBe(2)
+    expect.soft(diagonalSquare(twoPins({ x: 1, y: 2, side: "bottom" }, { x: 3, y: 2, side: "bottom" }, "both-down")), "both facing down").toBeNull()
     expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "left" }, { x: 5, y: 1, side: "right" }, "span-5")), "span 5").toBeNull()
     expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "right" }, { x: 4, y: 1, side: "left" }, "facing")), "facing each other").toBeNull()
     expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "left" }, { x: 4, y: 1, side: "left" }, "same-way")), "facing the same way").toBeNull()
@@ -496,6 +537,15 @@ describe("a pin name the field does not draw is no obstacle", () => {
     expect.soft(placementCheck({ objects: d3away, wires: [wire], routes, grid: GRID }, [d3away[2]])(-c(9), -c(9)), "D3 brought back past that wire: its cathode's name hides on landing").toBe(false)
     const d1away = [away(parts[0]), parts[1], parts[2], parts[3], supply]
     expect.soft(placementCheck({ objects: d1away, wires: [wire], routes: [], grid: GRID }, [d1away[0]])(-c(9), -c(9)), "D1 brought back: D3's name it lands on hides").toBe(false)
+  })
+
+  it("names hidden by a contact among the parts that stand still, or among the parts carried together, are no obstacle either", () => {
+    const [d1, , d3] = diamond()
+    const beside = placedAs("capacitor", { rotation: 90, mirror: false }, -2, 1, "C1")
+    expect.soft(placementCheck(scene([d1, d3, beside]), [beside])(0, 0), "a capacitor beside the corner where D1 and D3 meet").toBe(false)
+    expect.soft(placementCheck(scene([d3, beside]), [beside])(0, 0), "…but over D3's cathode name when D3 stands alone").toBe(true)
+    expect.soft(placementCheck(scene([d1, d3, beside]), [d1, d3])(0, 0), "D1 and D3 carried together past the capacitor").toBe(false)
+    expect.soft(placementCheck(scene([d3, beside]), [d3])(0, 0), "…but D3 carried alone").toBe(true)
   })
 
   it("a name the field does draw still blocks: a lone part's pin name under another part's body is refused", () => {

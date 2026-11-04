@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { readProjectFile } from "@/project/project-store"
+import { onThisVersion } from "@/collab/elements"
+import { parseProject, readProjectFile } from "@/project/project-store"
+import { setLibrary } from "@/schematic/registry"
 import { builder } from "@/schematic/builder"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, objectRect, type Orientation, type Point } from "@/schematic/geometry"
@@ -9,8 +11,8 @@ import { migrated, SCHEMATIC_VERSION, upgraded } from "@/schematic/migrate"
 import { buildNets } from "@/schematic/nets"
 import { freeSpot, placementCheck } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
-import type { PlacedObject, Rotation, Schematic } from "@/schematic/types"
-import { clipOnTheLattice, pastedInto, type Clip } from "@/schematic/use-schematic"
+import type { HdlModule, PlacedObject, Rotation, Schematic } from "@/schematic/types"
+import { clipOfThisVersion, clipOnTheLattice, pastedInto, type Clip } from "@/schematic/use-schematic"
 import { SimLoop } from "@/sim/loop"
 
 const ROOT = join(import.meta.dirname, "..", "..")
@@ -49,11 +51,14 @@ function before(o: PlacedObject, pinId: string): Point {
   const height = was.height ?? def.height
   const pin = { ...def.pins.find((p) => p.id === pinId)!, ...was.pins?.[pinId] }
   const turn = ((o.rotation ?? 0) * Math.PI) / 180
-  const [cos, sin] = [Math.round(Math.cos(turn)), Math.round(Math.sin(turn))]
+  const exact = (v: number) => (Math.abs(v - Math.round(v)) < 1e-9 ? Math.round(v) : v)
+  const [cos, sin] = [exact(Math.cos(turn)), exact(Math.sin(turn))]
   const box = { w: def.width * Math.abs(cos) + height * Math.abs(sin), h: def.width * Math.abs(sin) + height * Math.abs(cos) }
-  const v = { x: pin.x - def.width / 2, y: pin.y - height / 2 }
+  const v = { x: (o.mirror ? -1 : 1) * (pin.x - def.width / 2), y: pin.y - height / 2 }
   return { x: o.x + (v.x * cos - v.y * sin + box.w / 2) * GRID, y: o.y + (v.x * sin + v.y * cos + box.h / 2) * GRID }
 }
+
+const INVERTER: HdlModule = { id: "hdl:inv", name: "inv", files: [], built: "inv", netlist: { top: "inv", language: "verilog", nets: 3, ports: [{ name: "a", dir: "input", bits: [1], offset: 0, upto: false }, { name: "y", dir: "output", bits: [2], offset: 0, upto: false }], cells: [["$_NOT_", 1, 2]], init: [] } as never }
 
 const OLD = join(ROOT, "tests", "data", "emul-1.42.0")
 
@@ -130,7 +135,7 @@ describe("an old file's diagonal parts move onto the lattice without changing th
     const q1 = doc.objects.find((o) => o.def === "npn")!
     expect.soft(q1.rotation ?? 0, "Q1 on a right angle").toBe(0)
     for (const { point } of objectPins(q1, GRID)) expect.soft([whole(point.x / GRID), whole(point.y / GRID)], "its pins on whole cells").toEqual([true, true])
-    expect.soft(notes, "the note").toEqual(["Q1 stood at 45°, where only a two-pin part can stand now: turned to 0°."])
+    expect.soft(notes, "the note").toEqual(["Q1 stood at 45°, which it cannot take now: turned to 0°."])
   })
 
   it("a multi-pin part turns in place even where a cell's shift would set its pin on the pin it is wired to", () => {
@@ -279,5 +284,102 @@ describe("a paste from an older εmul turns a part off a diagonal before it look
     expect.soft([q.x, q.y, q.rotation ?? 0], "where the room was found").toEqual([probes[0].x + spot.x, probes[0].y + spot.y, 0])
     expect.soft(placementCheck({ objects: pasted.objects, wires: [], routes: [], grid: GRID }, [q])(0, 0), "not refused where it landed").toBe(false)
     expect.soft(objectRect(q, GRID).w, "a right-angle box").toBe(objectRect({ ...q, rotation: undefined }, GRID).w)
+  })
+})
+
+describe("an old file's HDL parts are known while it is upgraded, though the field has not loaded its library yet (phase 2 review)", () => {
+  const file = (objects: PlacedObject[]) => JSON.stringify({ objects, wires: [], parts: {}, library: [INVERTER], version: 2 })
+
+  it("a diagonal part next to an HDL part does not land its pin on the HDL part's input", () => {
+    setLibrary([])
+    const { doc } = parseProject(file([{ id: "U1", def: "hdl:inv", x: 0, y: 0, props: { ref: "U1" } }, { id: "R1", def: "resistor", x: c(-3), y: c(-3), rotation: 45, props: { ref: "R1" } }]))!
+    setLibrary([INVERTER])
+    expect.soft(connected(doc), "R1 touches nothing of U1").toEqual([])
+    setLibrary([])
+  })
+
+  it("an HDL part saved on a diagonal turns to a right angle, and its pins are there once the field loads the library", () => {
+    setLibrary([])
+    const { doc, notes } = parseProject(file([{ id: "U1", def: "hdl:inv", x: 0, y: 0, rotation: 45, props: { ref: "U1" } }, { id: "R1", def: "resistor", x: c(9), y: 0, rotation: 45, props: { ref: "R1" } }]))!
+    const u1 = doc.objects.find((o) => o.id === "U1")!
+    expect.soft((u1.rotation ?? 0) % 90, "U1 on a right angle").toBe(0)
+    expect.soft(notes.some((n) => n.startsWith("U1 stood at 45°")), "and named").toBe(true)
+    setLibrary([INVERTER])
+    expect.soft(objectPins(u1, GRID).map((p) => p.pin.id).sort(), "U1's pins on the field").toEqual(["GND", "VCC", "a", "y"])
+    setLibrary([])
+  })
+})
+
+describe("a live room or a clip from before the lattice is upgraded on its way in, and one from now is left alone (phase 2 review)", () => {
+  it("a room with no version stamp is upgraded as the file would be; a stamped room is taken as it is, even a second time", async () => {
+    const stored = await rawOld("led-diamond.emul")
+    const { doc, upgraded: changed } = onThisVersion(stored, undefined)
+    expect.soft(changed, "upgraded").toBe(true)
+    expect.soft(connected(doc), "the LEDs left apart, as in the file").toEqual([])
+    const again = onThisVersion(doc, String(SCHEMATIC_VERSION))
+    expect.soft(again.upgraded, "a stamped room is not upgraded").toBe(false)
+    expect.soft(again.doc, "nor changed").toBe(doc)
+  })
+
+  it("a clip copied in an older tab carries no version and is upgraded before it is pasted; one carrying this version is pasted as it is", async () => {
+    const stored = await rawOld("led-diamond.emul")
+    const clip: Clip = { objects: stored.objects, wires: stored.wires, parts: stored.parts }
+    const pasted = pastedInto({ objects: [], wires: [], parts: {} }, clipOfThisVersion(clip, undefined), 0, 0, (id) => id, () => "w")
+    expect.soft(connected(pasted), "the LEDs pasted apart").toEqual([])
+    expect.soft(clipOfThisVersion(clip, SCHEMATIC_VERSION), "a clip of this version is untouched").toBe(clip)
+  })
+})
+
+describe("the upgrade's finer rules (phase 2 review)", () => {
+  it("a wire between two pins that already met, on parts the upgrade does not move, is left alone", () => {
+    const a = placedAs("resistor", upright(0), 0, 0, "R1")
+    const b = placedAs("resistor", upright(0), 4, 0, "R2")
+    const wire = { id: "w", from: { object: "R1", pin: "2" }, to: { object: "R2", pin: "1" } }
+    const { doc } = upgraded(old([a, b, placedAs("led", upright(45), 10, 10, "LED1")], [wire]))
+    expect.soft(doc.wires.map((w) => w.id), "the wire stays").toEqual(["w"])
+  })
+
+  it("a meter an old file left on its diagonal takes the square nearest the old middle of its pins, though its pins sit off its box's middle", () => {
+    for (const rotation of [45, 135, 225, 315] as Rotation[])
+      for (const mirror of [false, true])
+      for (const [x, y] of [[5, 5], [5, 6], [6, 5], [6, 6], [7, 4]]) {
+        const meter = { ...placedAs("voltmeter", { rotation, mirror }, x, y, "PV1") }
+        const { doc } = upgraded(old([meter]))
+        const moved = doc.objects[0]
+        const [plus, minus] = [before(meter, "+"), before(meter, "-")]
+        const middle = { x: (plus.x + minus.x) / 2 / GRID, y: (plus.y + minus.y) / 2 / GRID }
+        expect.soft([moved.x / GRID, moved.y / GRID], `${rotation}${mirror ? "m" : ""} at (${x}, ${y}): the square round the old middle`).toEqual([Math.round(middle.x - 1.5), Math.round(middle.y - 1.5)])
+      }
+  })
+
+  it("a multi-pin part whose turn back would touch another net turns forward instead", () => {
+    const q = placedAs("npn", upright(45), 4, 4, "Q1")
+    const back = migrated(q)
+    const emitter = at(back, "E")
+    const ground = groundOn("GND", emitter)
+    const { doc, notes } = upgraded(old([q, ground]))
+    const turned = doc.objects.find((o) => o.id === "Q1")!
+    expect.soft(turned.rotation ?? 0, "turned forward to 90°").toBe(90)
+    expect.soft(connected(doc), "the emitter left off the ground").toEqual([])
+    expect.soft(notes, "named").toEqual(["Q1 stood at 45°, which it cannot take now: turned to 90°."])
+  })
+
+  it("a part with no clean square within reach is left nearest and the upgrade says the circuit could not be kept", () => {
+    const r = placedAs("resistor", upright(45), 0, 0, "R1")
+    const grounds: PlacedObject[] = []
+    for (let x = -5; x <= 7; x++) for (let y = -5; y <= 7; y++) grounds.push(groundOn(`G${x}_${y}`, { x: c(x), y: c(y) }))
+    const { notes } = upgraded(old([r, ...grounds]))
+    expect.soft(notes.some((n) => n.includes("could not be kept") && n.includes("R1")), "said, naming R1").toBe(true)
+  })
+})
+
+describe("a part whose definition arrives after its pins were first asked for gets its pins (phase 2 review)", () => {
+  it("an HDL part asked before its library is loaded has no pins, and all of them once it is", () => {
+    setLibrary([])
+    const u1: PlacedObject = { id: "U1", def: "hdl:inv", x: 0, y: 0, props: { ref: "U1" } }
+    expect.soft(objectPins(u1, GRID), "unknown, no pins").toEqual([])
+    setLibrary([INVERTER])
+    expect.soft(objectPins(u1, GRID).map((p) => p.pin.id).sort(), "known, all of them").toEqual(["GND", "VCC", "a", "y"])
+    setLibrary([])
   })
 })
