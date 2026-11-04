@@ -496,7 +496,7 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
                 <XIcon className="size-3.5" />
               </button>
             ) : (
-              <span className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2" aria-hidden>
+              <span className="pointer-events-none absolute top-1/2 right-2 flex -translate-y-1/2 items-center" aria-hidden>
                 <Kbd>/</Kbd>
               </span>
             )}
