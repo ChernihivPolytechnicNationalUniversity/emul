@@ -388,6 +388,8 @@ function useWarmQuickParts(recent: readonly string[], favourites: readonly strin
 
 /** The folded palette's star: the recent and favourite parts, without the groups under them. */
 export const QUICK_GROUP = "quick"
+/** The folded palette's search: the box and what to ask it, then its hits; not every group under it. */
+export const SEARCH_GROUP = "search"
 
 export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdlImport, onHdlOpen, only, onSearchFocus, autoFocusSearch, ...props }: ComponentsSidebarProps) {
   const library = useLibrary()
@@ -510,7 +512,7 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
             <SearchResults query={searched} search={search} selected={selected} onHdlNew={onHdlNew} onHdlImport={onHdlImport} />
           ) : (
             <>
-              {focused && <SearchIntro onExample={ask} />}
+              {(focused || only === SEARCH_GROUP) && <SearchIntro onExample={ask} />}
               {(!only || only === QUICK_GROUP) && <QuickStrip label="Recent" ids={recent} />}
               {(!only || only === QUICK_GROUP) && <QuickStrip label="Favourites" ids={quick.favourites} action={<StarIcon className="size-3.5 fill-amber-400 text-amber-500" />} />}
             </>
