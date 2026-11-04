@@ -353,7 +353,7 @@ type McuSheet = { doc: string; mhz: number; flash: number; ram: number; table2: 
 /** One record per board: the same V3.1 PCB, its own MCU's datasheet for the chip's numbers. */
 const record = (m: McuSheet): Datasheet => ({
   maker: "WeAct Studio",
-  docs: [DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS[m.doc], DOCS["st-rm0383"]],
+  docs: [DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS[m.doc]],
   specs: [],
   characteristics: [
     { kind: "clock", value: { max: m.mhz * 1e6 }, cite: { doc: m.doc, page: m.table2.counts, at: "Table 2" } },
