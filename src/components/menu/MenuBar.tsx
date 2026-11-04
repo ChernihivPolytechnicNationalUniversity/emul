@@ -292,6 +292,23 @@ export function MenuBar({
               Reset view
               <MenubarShortcut>⌘0</MenubarShortcut>
             </MenubarItem>
+            <MenubarItem onClick={act((f) => f.fitAll())}>
+              Fit all
+              <MenubarShortcut>⇧1</MenubarShortcut>
+            </MenubarItem>
+            <MenubarItem onClick={act((f) => f.zoomToSelection())}>
+              Zoom to selection
+              <MenubarShortcut>⇧2</MenubarShortcut>
+            </MenubarItem>
+            <MenubarSeparator />
+            <MenubarItem onClick={act((f) => f.find())}>
+              Find on the field…
+              <MenubarShortcut>⌘F</MenubarShortcut>
+            </MenubarItem>
+            <MenubarItem onClick={act((f) => f.nextProblem())}>
+              Next problem
+              <MenubarShortcut>F8</MenubarShortcut>
+            </MenubarItem>
             <MenubarSeparator />
             <MenubarSub>
               <MenubarSubTrigger>Schematic text size</MenubarSubTrigger>

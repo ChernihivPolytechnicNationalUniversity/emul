@@ -1,5 +1,5 @@
 import * as React from "react"
-import { flushSync } from "react-dom"
+import { createPortal, flushSync } from "react-dom"
 import { cn } from "@/lib/utils"
 import {
   ContextMenu,
@@ -72,6 +72,11 @@ import { ZoomControls } from "./ZoomControls"
 import { useMeasure, MAX_HELD, PROBE_ID, type ProbePoint } from "./use-measure"
 import { useSelection, type Rect } from "./use-selection"
 import { useViewport } from "./use-viewport"
+import { FieldPanel, FieldToggle, type FieldTarget, type PeerSelection } from "@/components/explorer/FieldPanel"
+import { fieldEntries, searchField, type FieldHit } from "@/components/explorer/field-index"
+import { runtimeProblems, sortProblems, staticProblems } from "@/components/explorer/problems"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { useSampled } from "@/hooks/use-sampled"
 
 /** 1 cell = 2.54 mm (0.1"), the standard header pitch, so pins land on grid nodes. */
 const GRID = FIELD_GRID
@@ -113,6 +118,14 @@ export type DotFieldHandle = {
   newHdl: (language: HdlLanguage) => void
   importHdl: (files: SourceFile[]) => void
   openHdl: (id: string) => void
+  /** Everything on the field in view (Shift+1). */
+  fitAll: () => void
+  /** The selection in view (Shift+2, F), everything when nothing is selected. */
+  zoomToSelection: () => void
+  /** Open the field explorer's search (⌘F). */
+  find: () => void
+  /** Go to the next problem (F8). */
+  nextProblem: () => void
 }
 
 /** What the menu needs to know to label and enable its items. */
@@ -154,6 +167,16 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
   onPlaced?: (defId: string) => void
   /** Pick .vhd / .v files to import: a search for HDL in Quick Insert offers it. */
   onHdlImport?: () => void
+  /** What the others in a live session have selected: avatars on the explorer's rows. */
+  peerSelections?: readonly PeerSelection[]
+  /** This client's selection changed: the others' explorers show it. */
+  onSelectionShare?: (ids: string[]) => void
+  /** On a phone: the palette sheet's "Field" tab, where the explorer is drawn. */
+  fieldSlot?: HTMLElement | null
+  /** On a phone, a row was tapped: the sheet goes down so the field shows what it points at. */
+  onFieldPicked?: () => void
+  /** How many problems the field has, for the sheet's tab. */
+  onProblemCount?: (count: number) => void
   projectName?: string
 }
 
@@ -161,6 +184,15 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
 type ScreenPoint = { x: number; y: number }
 
 const EMPTY_IDS: ReadonlySet<string> = new Set()
+const NO_PEERS: readonly PeerSelection[] = []
+const FIELD_OPEN_KEY = "emul.field.open"
+const savedFieldOpen = () => {
+  try {
+    return localStorage.getItem(FIELD_OPEN_KEY) === "1"
+  } catch {
+    return false
+  }
+}
 /** How far a finger may wander and still have tapped, px. */
 const TAP_SLOP = 8
 
@@ -184,8 +216,8 @@ function pinAt(clientX: number, clientY: number): PinRef | null {
   return target?.kind === "pin" ? target.ref : null
 }
 
-export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, armed = null, onArmedChange, onPlaced, onHdlImport, projectName, children, ...props }: DotFieldProps) {
-  const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, toWorld, isPanStart, startPan, movePan, endPan, setOnPinchStart } = useViewport(grid)
+export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, armed = null, onArmedChange, onPlaced, onHdlImport, peerSelections = NO_PEERS, onSelectionShare, fieldSlot = null, onFieldPicked, onProblemCount, projectName, children, ...props }: DotFieldProps) {
+  const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, show, toWorld, isPanStart, startPan, movePan, endPan, setOnPinchStart } = useViewport(grid)
   const marquee = useSelection(toWorld, worldPerPixel, grid)
   const { boxRef: marqueeRef } = marquee
   const sch = useSchematic(grid)
@@ -549,6 +581,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     setHdlId(id)
   })
 
+  /** The explorer's commands, made further down: the menu reaches them through here. */
+  const explorerKeys = React.useRef<(Pick<DotFieldHandle, "fitAll" | "zoomToSelection" | "find" | "nextProblem"> & { previousProblem: () => void }) | null>(null)
   const { load } = sch
   React.useImperativeHandle(
     ref,
@@ -628,6 +662,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         setHdlId(id)
       },
       openHdl: (id) => setHdlId(id),
+      fitAll: () => explorerKeys.current?.fitAll(),
+      zoomToSelection: () => explorerKeys.current?.zoomToSelection(),
+      find: () => explorerKeys.current?.find(),
+      nextProblem: () => explorerKeys.current?.nextProblem(),
     }),
     [addFreeLoaded, inOrder, placed, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle, exportImage, newHdl],
   )
@@ -1057,7 +1095,19 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return inTextField(e) ? "text" : "field"
   }
   const onKey = useEvent((e: KeyboardEvent) => {
-    if (!e.repeat && opensQuickInsert(e, keyTarget(e))) {
+    const where = keyTarget(e)
+    // ⌘F finds on the field from the bench or the explorer; pressed again in its box, it is the browser's.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f") {
+      const inBox = (e.target as HTMLElement | null)?.closest?.('[data-slot="field-search"]')
+      if (inBox || where !== "field") return
+      e.preventDefault()
+      return explorerKeys.current?.find()
+    }
+    if (where === "field" && e.key === "F8" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault()
+      return e.shiftKey ? explorerKeys.current?.previousProblem() : explorerKeys.current?.nextProblem()
+    }
+    if (!e.repeat && opensQuickInsert(e, where)) {
       // Open already: Ctrl+K closes it, "A" is a letter for its box and never shuts it.
       if (quick) {
         e.preventDefault()
@@ -1082,6 +1132,14 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       sch.deselectAll()
       setPending(null)
       setHoveredWire(null)
+    } else if (!mod && !e.altKey && e.shiftKey && !pending && sch.selectedWires.size === 0 && (e.code === "Digit1" || e.code === "Digit2" || e.code === "Digit0")) {
+      // Shift+1 everything, Shift+2 the selection, Shift+0 life size; a selected wire keeps its colour keys.
+      e.preventDefault()
+      if (e.code === "Digit1") explorerKeys.current?.fitAll()
+      else if (e.code === "Digit2") explorerKeys.current?.zoomToSelection()
+      else reset()
+    } else if (!mod && !e.altKey && !e.shiftKey && key === "f") {
+      explorerKeys.current?.zoomToSelection()
     } else if (!mod && !e.altKey && WIRE_COLOR_BY_CODE.has(e.code) && (pending || sch.selectedWires.size > 0)) {
       const color = WIRE_COLOR_BY_CODE.get(e.code)
       e.preventDefault()
@@ -1160,6 +1218,125 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     () => docObjects.filter((o) => selectedObjects.has(o.id)),
     [docObjects, selectedObjects],
   )
+  // --- field explorer --------------------------------------------------------
+  const isPhone = useIsMobile()
+  const [fieldOpen, setFieldOpenState] = React.useState(savedFieldOpen)
+  const setFieldOpen = React.useCallback((open: boolean) => {
+    setFieldOpenState(open)
+    try {
+      localStorage.setItem(FIELD_OPEN_KEY, open ? "1" : "0")
+    } catch {
+      // Storage off: the panel stays as set until the page reloads.
+    }
+  }, [])
+  // The code panel is wide: while it is open the explorer folds to its column, unless opened over it on purpose.
+  const [fieldOverCode, setFieldOverCode] = React.useState(false)
+  const codeShown = codeOpen || !!hdlOpen
+  if (!codeShown && fieldOverCode) setFieldOverCode(false)
+  const fieldShown = fieldOpen && (!codeShown || fieldOverCode)
+  const showField = React.useCallback((open: boolean) => {
+    setFieldOpen(open)
+    setFieldOverCode(open)
+  }, [setFieldOpen])
+  const fieldSearch = React.useRef<HTMLInputElement>(null)
+  const [fieldQuery, setFieldQuery] = React.useState("")
+  const [hitIndex, setHitIndex] = React.useState(-1)
+  const searchedFor = React.useDeferredValue(fieldQuery)
+  const fieldIndex = React.useMemo(() => fieldEntries(docObjects), [docObjects])
+  const hits = React.useMemo(() => searchField(docObjects, searchedFor, fieldIndex), [docObjects, searchedFor, fieldIndex])
+  const searching = searchedFor.trim() !== ""
+  /** While a search is on, the field shows its hits and dims the rest. */
+  const lit = React.useMemo(() => (searching ? new Set(hits.map((h) => h.object)) : null), [searching, hits])
+  const objectById = React.useMemo(() => new Map(docObjects.map((o) => [o.id, o])), [docObjects])
+  const staticFound = React.useMemo(() => staticProblems(docObjects, nets), [docObjects, nets])
+  // The solver reports many times a second; the list follows a few times a second.
+  const runtimeSim = useSampled(sim, 250)
+  const problems = React.useMemo(() => sortProblems([...staticFound, ...runtimeProblems(docObjects, runtimeSim)], docObjects), [staticFound, docObjects, runtimeSim])
+  const [activeProblem, setActiveProblem] = React.useState<string | null>(null)
+  /** The pointer on an explorer row: the field rings the object, the camera stays. */
+  const [hoverObject, setHoverObject] = React.useState<string | null>(null)
+  /** A pin the search or a problem went to: a ring on the field. */
+  const [markedPin, setMarkedPin] = React.useState<{ object: string; pin: string } | null>(null)
+
+  const rectOf = React.useCallback((target: FieldTarget) => {
+    const o = objectById.get(target.object)
+    if (!o) return null
+    if (target.pin) {
+      const at = objectPins(o, grid).find((p) => p.pin.id === target.pin)?.point
+      if (at) return { x: at.x - grid, y: at.y - grid, w: 2 * grid, h: 2 * grid }
+    }
+    return objectRect(o, grid)
+  }, [objectById, grid])
+  /** Select what a row points at and bring it into sight, moving the camera only if it has to. */
+  const goTo = useEvent((target: FieldTarget, add?: boolean) => {
+    const r = rectOf(target)
+    if (!r) return
+    sch.selectObject(target.object, add)
+    setMarkedPin(target.pin ? { object: target.object, pin: target.pin } : null)
+    show(r, { minPx: target.pin ? 48 : 24 })
+  })
+  /** The hits of what is typed now: a key straight after typing can come before the deferred list has caught up. */
+  const currentHits = () => (fieldQuery === searchedFor ? hits : searchField(docObjects, fieldQuery, fieldIndex))
+  const goToHit = useEvent((i: number) => {
+    const hit: FieldHit | undefined = currentHits()[i]
+    if (!hit) return
+    setHitIndex(i)
+    goTo(hit.kind === "pin" ? { object: hit.object, pin: hit.pin } : { object: hit.object })
+  })
+  const stepHit = useEvent((delta: 1 | -1) => {
+    const n = currentHits().length
+    if (!n) return
+    goToHit(hitIndex < 0 ? (delta > 0 ? 0 : n - 1) : (hitIndex + delta + n) % n)
+  })
+  const onFieldQuery = React.useCallback((q: string) => {
+    setFieldQuery(q)
+    setHitIndex(-1)
+    setMarkedPin(null)
+  }, [])
+  const goToProblem = useEvent((key: string) => {
+    const p = problems.find((x) => x.key === key)
+    if (!p) return
+    setActiveProblem(key)
+    if (p.object) goTo({ object: p.object, pin: p.pin })
+  })
+  /** F8 / Shift+F8: the next or previous problem, round the list. */
+  const stepProblem = useEvent((delta: 1 | -1) => {
+    if (!problems.length) return
+    const at = problems.findIndex((p) => p.key === activeProblem)
+    const next = problems[at < 0 ? (delta > 0 ? 0 : problems.length - 1) : (at + delta + problems.length) % problems.length]!
+    goToProblem(next.key)
+  })
+  /** ⌘F: the explorer opens with its search box ready; the text in it selected to type over. */
+  const openFind = useEvent(() => {
+    showField(true)
+    requestAnimationFrame(() => {
+      fieldSearch.current?.focus()
+      fieldSearch.current?.select()
+    })
+  })
+  const boundsOf = React.useCallback((objs: readonly PlacedObject[]) => {
+    const r = unionOf(objs.map((o) => objectRect(o, grid)))
+    return { x: r.x - grid, y: r.y - grid, w: r.w + 2 * grid, h: r.h + 2 * grid }
+  }, [grid])
+  /** Shift+1: everything on the field in view, no closer than twice life size. */
+  const fitAll = useEvent(() => {
+    if (docObjects.length) fitTo(boundsOf(docObjects), 48, 2)
+  })
+  /** Shift+2 / F: the selection in view, or everything when nothing is selected. */
+  const zoomToSelection = useEvent(() => {
+    if (!selectedObjectList.length) return fitAll()
+    fitTo(boundsOf(selectedObjectList), 64, 2)
+  })
+  React.useLayoutEffect(() => {
+    explorerKeys.current = { fitAll, zoomToSelection, find: openFind, nextProblem: () => stepProblem(1), previousProblem: () => stepProblem(-1) }
+  })
+  React.useEffect(() => onProblemCount?.(problems.filter((p) => p.severity !== "info").length), [problems, onProblemCount])
+  // The others in a live session see what this client has selected.
+  React.useEffect(() => onSelectionShare?.([...selectedObjects]), [selectedObjects, onSelectionShare])
+  const fieldDocked = fieldShown && !isPhone
+  const markRect = hoverObject ? rectOf({ object: hoverObject }) : null
+  const pinRect = markedPin ? rectOf(markedPin) : null
+
   const selectedWireList = React.useMemo(
     () => [...selectedWires].map((id) => wireById.get(id)).filter((w) => w !== undefined),
     [selectedWires, wireById],
@@ -1170,7 +1347,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const objectViews = React.useMemo(
     () =>
       visibleObjects.map((o) => (
-        <div key={o.id} data-body={o.id} className="absolute top-0 left-0">
+        <div key={o.id} data-body={o.id} className="absolute top-0 left-0 transition-opacity duration-150 motion-reduce:transition-none" style={lit && !lit.has(o.id) ? { opacity: 0.22 } : undefined}>
           <ComponentView
             object={o}
             grid={grid}
@@ -1187,7 +1364,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           />
         </div>
       )),
-    [visibleObjects, grid, detail, labelsOnCanvas, sheeted, selectedObjects, schDoc.parts, simStore, onBodyPointerDown, onBodyPointerMove, onBodyPointerUp, onBodyContextMenu, setPart],
+    [visibleObjects, grid, detail, labelsOnCanvas, sheeted, selectedObjects, schDoc.parts, simStore, onBodyPointerDown, onBodyPointerMove, onBodyPointerUp, onBodyContextMenu, setPart, lit],
   )
   const across = (a: ProbePoint, b: ProbePoint | null) => `${a.label} → ${b ? b.label : "ground"}`
   const scopeChannels = [
@@ -1209,6 +1386,31 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         ]
       : []),
   ]
+
+  // Docked under the explorer while it is open; floating over the field otherwise (and on a phone, across its top, at most half the field high).
+  const inspector = (
+  <Inspector
+    className={fieldDocked ? "max-h-none w-full gap-3 rounded-none border-0 py-3 shadow-none ring-0" : "absolute top-12 right-3 max-h-[calc(100%-9rem)] max-md:top-3 max-md:left-14 max-md:w-auto max-md:max-h-[45%]"}
+    selected={selectedObjectList}
+    damage={sim.damage}
+    sim={sim}
+    onChange={sch.setProps}
+    onVariant={sch.setVariant}
+    onFirmware={onFirmware}
+    onSerial={sendSerial}
+    onCode={(id) => {
+      setCodeBoardId(id)
+      setCodeOpen(true)
+    }}
+    onHdl={setHdlId}
+    onRotate={(d) => sch.rotate(sch.selectedObjects, d)}
+    onFlip={(axis) => sch.flip(sch.selectedObjects, axis)}
+    onDelete={sch.removeSelected}
+    onPointerDown={(e) => e.stopPropagation()}
+    onTouchStart={(e) => e.stopPropagation()}
+    onKeyDown={keepKeys}
+  />
+  )
 
   return (
     <div className="relative flex h-full w-full overflow-hidden">
@@ -1276,6 +1478,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             <div
               ref={contentRef}
               data-slot="dot-field-content"
+              data-dim={lit ? "" : undefined}
               className="absolute top-0 left-0 origin-top-left"
             >
               <div ref={overlayRef} data-slot="dot-field-overlay" className="contents">
@@ -1283,7 +1486,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               </div>
               {detail.canvas ? (
                 <>
-                  <FieldCanvas objects={staticObjects} routes={staticRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedWires} />
+                  <FieldCanvas objects={staticObjects} routes={staticRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedWires} lit={lit} />
                   <div ref={dragLayerRef} data-slot="field-drag-layer" className="pointer-events-none absolute top-0 left-0">
                     {lifted.size > 0 && <FieldCanvas objects={liftedObjects} routes={liftedRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedWires} />}
                   </div>
@@ -1338,6 +1541,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               <PendingWireLayer objects={docObjects} index={index} pending={pending} grid={grid} scale={scale} part="marks" />
               {armed && armedAt && <PlacementGhost defId={armed} at={armedAt} grid={grid} scale={scale} detail={detail} sim={simStore} colorOf={colorOf} raster={symbolRaster} />}
               {quick && quickPreview && <PlacementGhost defId={quickPreview} at={quick.world} grid={grid} scale={scale} detail={detail} sim={simStore} colorOf={colorOf} raster={symbolRaster} />}
+              {markRect && (
+                <div data-slot="field-hover-mark" className="pointer-events-none absolute rounded-md ring-2 ring-sky-500/70" style={{ left: markRect.x - 4 / scale, top: markRect.y - 4 / scale, width: markRect.w + 8 / scale, height: markRect.h + 8 / scale, ["--tw-ring-width" as string]: `${2 / scale}px` }} />
+              )}
+              {pinRect && (
+                <div data-slot="field-pin-mark" className="pointer-events-none absolute rounded-full border-amber-500 motion-safe:animate-pulse" style={{ left: pinRect.x + pinRect.w / 2 - 10 / scale, top: pinRect.y + pinRect.h / 2 - 10 / scale, width: 20 / scale, height: 20 / scale, borderWidth: 3 / scale }} />
+              )}
               {ghosts && ghosts.length > 0 && (
                 <GhostLayer ghosts={ghosts} objects={docObjects} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} />
               )}
@@ -1386,28 +1595,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onTouchStart={(e) => e.stopPropagation()}
             />
           )}
-          {/* On a phone the inspector spans the top beside the palette button, at most half the field high. */}
-          <Inspector
-            className="absolute top-3 right-3 max-md:left-14 max-md:w-auto max-md:max-h-[45%]"
-            selected={selectedObjectList}
-            damage={sim.damage}
-            sim={sim}
-            onChange={sch.setProps}
-            onVariant={sch.setVariant}
-            onFirmware={onFirmware}
-            onSerial={sendSerial}
-            onCode={(id) => {
-              setCodeBoardId(id)
-              setCodeOpen(true)
-            }}
-            onHdl={setHdlId}
-            onRotate={(d) => sch.rotate(sch.selectedObjects, d)}
-            onFlip={(axis) => sch.flip(sch.selectedObjects, axis)}
-            onDelete={sch.removeSelected}
-            onPointerDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            onKeyDown={keepKeys}
-          />
+          {!isPhone && !fieldShown && <FieldToggle problems={problems} onOpen={() => showField(true)} className="absolute top-3 right-3 z-10" />}
+          {!fieldDocked && inspector}
           {/* A phone has no Escape: a wire left hanging in click mode needs a way out. */}
           {pending?.mode === "click" && (
             <Button
@@ -1562,6 +1751,57 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+      {isPhone &&
+        fieldSlot &&
+        createPortal(
+          <FieldPanel
+            sheet
+            open
+            onOpenChange={() => {}}
+            objects={docObjects}
+            problems={problems}
+            activeProblem={activeProblem}
+            onProblem={(key) => (goToProblem(key), onFieldPicked?.())}
+            selected={selectedObjects}
+            sim={sim}
+            peers={peerSelections}
+            query={fieldQuery}
+            onQueryChange={onFieldQuery}
+            hits={hits}
+            hitIndex={hitIndex}
+            onStep={stepHit}
+            onHit={(i) => (goToHit(i), onFieldPicked?.())}
+            onPick={(target, add) => (goTo(target, add), onFieldPicked?.())}
+            onHover={setHoverObject}
+            onLeave={() => (document.activeElement as HTMLElement | null)?.blur()}
+            searchRef={fieldSearch}
+          />,
+          fieldSlot,
+        )}
+      {!isPhone && (
+        <FieldPanel
+          open={fieldShown}
+          onOpenChange={showField}
+          objects={docObjects}
+          problems={problems}
+          activeProblem={activeProblem}
+          onProblem={goToProblem}
+          selected={selectedObjects}
+          sim={sim}
+          peers={peerSelections}
+          query={fieldQuery}
+          onQueryChange={onFieldQuery}
+          hits={hits}
+          hitIndex={hitIndex}
+          onStep={stepHit}
+          onHit={goToHit}
+          onPick={(target, add) => goTo(target, add)}
+          onHover={setHoverObject}
+          onLeave={() => (document.activeElement as HTMLElement | null)?.blur()}
+          searchRef={fieldSearch}
+          inspector={fieldDocked && selectedObjectList.length ? inspector : null}
+        />
+      )}
       {quick && (
         <QuickInsert
           at={quick.client}
