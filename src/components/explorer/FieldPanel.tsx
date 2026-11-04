@@ -2,6 +2,7 @@ import * as React from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { ChevronDownIcon, ChevronUpIcon, CircleXIcon, InfoIcon, PanelRightCloseIcon, PanelRightIcon, SearchIcon, TriangleAlertIcon, XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { KEYMAP, labelFor } from "@/lib/keymap"
 import { useSampled } from "@/hooks/use-sampled"
 import { getDef, getMeta } from "@/schematic/registry"
 import { partKey, type PlacedObject } from "@/schematic/types"
@@ -267,11 +268,11 @@ function OpenPanel({ onOpenChange, objects, problems, activeProblem, onProblem, 
               </button>
             </>
           ) : (
-            <kbd className={cn(KBD, "pointer-coarse:hidden")}>⌘F</kbd>
+            <kbd className={cn(KBD, "pointer-coarse:hidden")}>{labelFor(KEYMAP.find)}</kbd>
           )}
         </span>
         </div>
-        {searching && <p className="mt-1 px-1 text-[10.5px] text-muted-foreground pointer-coarse:hidden">↵ next · ⇧↵ back · ⌘F again: the browser’s own find</p>}
+        {searching && <p className="mt-1 px-1 text-[10.5px] text-muted-foreground pointer-coarse:hidden">↵ next · ⇧↵ back · {labelFor(KEYMAP.find)} again: the browser’s own find</p>}
       </div>
       <div ref={scroller} id="field-list" role="listbox" aria-label={searching ? "Matches on the field" : "On the field"} className="min-h-0 flex-1 overflow-y-auto pb-2" onPointerLeave={() => onHover(null)}>
         {items.length === 0 ? (
@@ -371,7 +372,7 @@ function ProblemRow({ problem, active, byId, onClick, onHover }: { problem: Prob
           <span className="block text-muted-foreground">{problem.detail}</span>
           {problem.fix && <span className="mt-0.5 block font-medium text-emerald-700 dark:text-emerald-400">→ {problem.fix}</span>}
           <span className="mt-1 flex items-center gap-1 text-[10.5px] text-muted-foreground">
-            <kbd className={KBD}>F8</kbd> next <kbd className={KBD}>⇧F8</kbd> back
+            <kbd className={KBD}>{labelFor(KEYMAP.nextProblem)}</kbd> next <kbd className={KBD}>{labelFor(KEYMAP.previousProblem)}</kbd> back
           </span>
         </span>
       )}
@@ -423,7 +424,7 @@ export function FieldToggle({ problems, onOpen, className }: { problems: readonl
   const worst: Severity | null = counts.error ? "error" : counts.warning ? "warning" : null
   const n = counts.error + counts.warning
   return (
-    <Button variant="ghost" size="icon-sm" className={cn("relative", className)} onClick={onOpen} aria-label={n ? `Show the field: ${n} problems` : "Show the field"} title="Field: parts and problems · ⌘F finds">
+    <Button variant="ghost" size="icon-sm" className={cn("relative", className)} onClick={onOpen} aria-label={n ? `Show the field: ${n} problems` : "Show the field"} title={`Field: parts and problems · ${labelFor(KEYMAP.find)} finds`}>
       <PanelRightIcon />
       {worst && (
         <span className={cn("absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white tabular-nums ring-2 ring-background", worst === "error" ? "bg-red-600" : "bg-amber-500")}>{n}</span>

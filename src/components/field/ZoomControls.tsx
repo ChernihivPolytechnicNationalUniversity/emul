@@ -1,4 +1,5 @@
 import { MinusIcon, PlusIcon, MaximizeIcon } from "lucide-react"
+import { KEYMAP, labelFor } from "@/lib/keymap"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -38,20 +39,20 @@ export function ZoomControls({
           <TooltipTrigger render={<Button variant="outline" size="icon" onClick={onZoomOut} />}>
             <MinusIcon />
           </TooltipTrigger>
-          <TooltipContent>Zoom out (Ctrl −)</TooltipContent>
+          <TooltipContent>Zoom out ({labelFor(KEYMAP.zoomOut)})</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger render={<Button variant="outline" size="icon" onClick={onZoomIn} />}>
             <PlusIcon />
           </TooltipTrigger>
-          <TooltipContent>Zoom in (Ctrl +)</TooltipContent>
+          <TooltipContent>Zoom in ({labelFor(KEYMAP.zoomIn)})</TooltipContent>
         </Tooltip>
         <ButtonGroupSeparator />
         <Tooltip>
           <TooltipTrigger render={<Button variant="outline" size="icon" onClick={onReset} />}>
             <MaximizeIcon />
           </TooltipTrigger>
-          <TooltipContent>Reset view (Ctrl 0)</TooltipContent>
+          <TooltipContent>Reset view ({labelFor(KEYMAP.zoomReset)})</TooltipContent>
         </Tooltip>
       </ButtonGroup>
     </div>

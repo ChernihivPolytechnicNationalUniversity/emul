@@ -19,7 +19,7 @@ import { SpatialIndex } from "@/schematic/spatial"
 import { fieldDetail } from "./detail"
 import { savedTextScale, saveTextScale } from "./text-scale"
 import { buildNets } from "@/schematic/nets"
-import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, WIRE_COLOR_BY_CODE, type WireColorKey } from "@/schematic/wire-colors"
+import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, wireColorFor, type WireColorKey } from "@/schematic/wire-colors"
 import { partKey, pinKey, type PinRef, type PlacedObject, type Schematic } from "@/schematic/types"
 import { afterDefs, defIds, defsQueue, ensureDefs, getDef, getMeta, notifyLibrary, partInitial, pinName, setLibrary } from "@/schematic/registry"
 import { newModuleId, TEMPLATES } from "@/schematic/hdl"
@@ -27,6 +27,9 @@ import type { HdlLanguage } from "emul-shared/hdl"
 import { languageOf } from "emul-shared/hdl"
 import type { SourceFile } from "emul-shared/source"
 import { bytesToBase64 } from "@/lib/bytes"
+import { composing, dispatch, keepsPageInPlace, matches, matchesAny, matchesDigitPlace, ownsKeys, typesAhead } from "@/lib/keys"
+import { KEYMAP, labelFor, stopUnlessAppCommand } from "@/lib/keymap"
+import { addsToSelection, primaryClick } from "@/lib/pointer"
 import { useEvent } from "@/hooks/use-event"
 import { useSchematic, type Clip } from "@/schematic/use-schematic"
 import { contactCheck, designatorRects, freeSpot, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
@@ -484,7 +487,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (!c) return
     setClip(c)
     pasted.current = 0
-    navigator.clipboard?.writeText(JSON.stringify({ emul: c })).catch(() => {})
+    const text = JSON.stringify({ emul: c })
+    navigator.clipboard?.writeText(text).catch(() => {})
+    return text
   }, [copySelected])
   const paste = React.useCallback(
     (c: Clip | null = clip) => {
@@ -499,8 +504,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (c) pasteFree(c, grid, grid)
   }, [copySelected, pasteFree, grid])
   const cut = React.useCallback(() => {
-    copy()
+    const text = copy()
     sch.removeSelected()
+    return text
   }, [copy, sch])
 
   const initialDoc = React.useRef(sch.doc)
@@ -713,9 +719,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
 
   const onBodyPointerDown = useEvent((e: React.PointerEvent<SVGSVGElement>, id: string) => {
-    if (e.button !== 0 || spaceHeld) return
+    if (!primaryClick(e) || spaceHeld) return
     e.stopPropagation()
-    beginMove(e, id, e.shiftKey || e.ctrlKey || e.metaKey)
+    beginMove(e, id, addsToSelection(e))
     e.currentTarget.setPointerCapture(e.pointerId)
   })
   const onBodyPointerMove = useEvent((e: React.PointerEvent<SVGSVGElement>) => {
@@ -848,7 +854,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   }
 
   const onPinPointerDown = useEvent((e: React.PointerEvent<SVGElement>, object: string, pin: string) => {
-    if (e.button !== 0) return
+    if (!primaryClick(e)) return
     e.stopPropagation()
     if (measure.active) {
       const tip = probeAtPin({ object, pin })
@@ -901,7 +907,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const [bend] = React.useState(() => new BendDrag())
   React.useEffect(() => () => bend.cancel(), [bend])
   const onBendPointerDown = useEvent((e: React.PointerEvent<SVGGElement>, wire: string, index: number) => {
-    if (e.button !== 0) return
+    if (!primaryClick(e)) return
     e.stopPropagation()
     const content = contentRef.current
     const w = wireById.get(wire)
@@ -940,7 +946,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
 
   const onWirePointerDown = useEvent((e: React.PointerEvent<SVGPathElement>, id: string) => {
-    if (e.button !== 0) return
+    if (!primaryClick(e)) return
     e.stopPropagation()
     if (measure.active) {
       const tip = probeOnWire(id, e.clientX, e.clientY)
@@ -948,7 +954,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       return
     }
     if (pending?.mode === "click" && tapInto(id, e.clientX, e.clientY)) return
-    sch.selectWire(id, e.shiftKey || e.ctrlKey || e.metaKey)
+    sch.selectWire(id, addsToSelection(e))
     marquee.clear()
   })
   const onWirePointerEnter = useEvent((id: string) => {
@@ -1010,17 +1016,17 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     } else if (isPanStart(e)) startPan(e)
     // A click on bare field while probing is a miss, not a selection.
     else if (measure.active) return
-    else if (e.button === 0 && pending?.mode === "click") {
+    else if (primaryClick(e) && pending?.mode === "click") {
       if (!finishAt(e.clientX, e.clientY))
         setPending({
           ...pending,
           points: [...pending.points, snapPoint(toWorld(e.clientX, e.clientY))],
         })
-    } else if (e.button === 0) {
+    } else if (primaryClick(e)) {
       const onCanvas = detail.canvas ? objectAt(e.clientX, e.clientY) : null
       if (onCanvas) {
         e.currentTarget.setPointerCapture(e.pointerId)
-        beginMove(e, onCanvas, e.shiftKey || e.ctrlKey || e.metaKey)
+        beginMove(e, onCanvas, addsToSelection(e))
         return
       }
       // A finger on bare field pans, the way every map does; a tap clears the selection.
@@ -1079,37 +1085,21 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
 
   // --- keyboard --------------------------------------------------------------
-  /** A card over the field (inspector, scope, analyser) keeps its keys from the field's shortcuts, all but Ctrl+K: Quick Insert opens from anywhere. */
+  /** A card over the field (inspector, scope, analyser) keeps its keys from the field's shortcuts, all but the app's commands and Quick Insert's: those work from anywhere. */
   const keepKeys = (e: React.KeyboardEvent) => {
-    if (!opensQuickInsert(e, "text")) e.stopPropagation()
+    if (!opensQuickInsert(e.nativeEvent, "text")) stopUnlessAppCommand(e)
   }
-  /** Keys typed into a text field are the field's; buttons (a just-clicked palette entry) are fine. */
-  // Monaco types through an EditContext on a plain div, so the code panel counts as a text field too.
-  const inTextField = (e: Event) => {
+  /** Where a key was typed: the code editor and a dialog keep every key; a text field keeps its letters. */
+  const keyTarget = (e: KeyboardEvent): KeyTarget => {
     const t = e.target as HTMLElement | null
-    return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable || !!t.closest?.('[data-slot="code-panel"]'))
-  }
-  /** Where a key was typed, for the shortcuts a text field or the code editor keeps for itself. */
-  const keyTarget = (e: Event): KeyTarget => {
-    const t = e.target as HTMLElement | null
-    if (t?.closest?.('[data-slot="code-panel"], .monaco-editor')) return "code"
-    return inTextField(e) ? "text" : "field"
+    if (t?.closest?.('[data-slot="code-panel"], .monaco-editor, [role="dialog"], [role="alertdialog"]')) return "code"
+    return ownsKeys(e.target) ? "text" : "field"
   }
   const onKey = useEvent((e: KeyboardEvent) => {
+    if (composing(e)) return
     const where = keyTarget(e)
-    // ⌘F finds on the field from the bench or the explorer; pressed again in its box, it is the browser's.
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f") {
-      const inBox = (e.target as HTMLElement | null)?.closest?.('[data-slot="field-search"]')
-      if (inBox || where !== "field") return
-      e.preventDefault()
-      return explorerKeys.current?.find()
-    }
-    if (where === "field" && e.key === "F8" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault()
-      return e.shiftKey ? explorerKeys.current?.previousProblem() : explorerKeys.current?.nextProblem()
-    }
     if (!e.repeat && opensQuickInsert(e, where)) {
-      // Open already: Ctrl+K closes it, "A" is a letter for its box and never shuts it.
+      // Open already: the command key's K closes it, "A" is a letter for its box and never shuts it.
       if (quick) {
         e.preventDefault()
         if (e.ctrlKey || e.metaKey) closeQuick()
@@ -1121,73 +1111,84 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       e.preventDefault()
       return openQuick()
     }
-    if (inTextField(e)) return
-    const mod = e.ctrlKey || e.metaKey
-    const key = e.key.toLowerCase()
-    if (e.key === "Delete" || e.key === "Backspace") {
+    if (where !== "field") return
+    // ⌘F finds on the field from the bench or the explorer; in its own box (a text field) it is the browser's.
+    if (matches(e, KEYMAP.find) && !e.defaultPrevented) {
+      e.preventDefault()
+      return explorerKeys.current?.find()
+    }
+    if (matchesAny(e, KEYMAP.remove) && (!e.defaultPrevented || keepsPageInPlace(e))) {
       sch.removeSelected()
-    } else if (e.key === "Escape" && armed) {
-      onArmedChange?.(null)
-    } else if (e.key === "Escape") {
+      return
+    }
+    if (matches(e, KEYMAP.deselect) && e.isTrusted && !e.defaultPrevented) {
+      // A part in hand is put down first; the selection stays.
+      if (armed) return void onArmedChange?.(null)
       if (measure.active) measure.stop()
       sch.deselectAll()
       setPending(null)
       setHoveredWire(null)
-    } else if (!mod && !e.altKey && e.shiftKey && !pending && sch.selectedWires.size === 0 && (e.code === "Digit1" || e.code === "Digit2" || e.code === "Digit0")) {
-      // Shift+1 everything, Shift+2 the selection, Shift+0 life size; a selected wire keeps its colour keys.
+      return
+    }
+    const commands = [
+      { keys: KEYMAP.undo, run: () => sch.undo() },
+      { keys: KEYMAP.redo, run: () => sch.redo() },
+      { keys: KEYMAP.selectAll, run: () => sch.selectAll() },
+      { keys: KEYMAP.duplicate, run: duplicate },
+      { keys: KEYMAP.code, run: () => setCodeOpen((o) => !o) },
+    ]
+    // A menu or a list that types ahead keeps plain letters; the explorer's list is the field's own and does not.
+    const typing = typesAhead(e.target) && !(e.target as HTMLElement | null)?.closest?.('[data-slot="field-panel"]')
+    if (dispatch(e, commands) || typing) return
+    const color = pending || sch.selectedWires.size > 0 ? wireColorFor(e) : undefined
+    if (color) {
       e.preventDefault()
-      if (e.code === "Digit1") explorerKeys.current?.fitAll()
-      else if (e.code === "Digit2") explorerKeys.current?.zoomToSelection()
-      else reset()
-    } else if (!mod && !e.altKey && !e.shiftKey && key === "f") {
-      explorerKeys.current?.zoomToSelection()
-    } else if (!mod && !e.altKey && WIRE_COLOR_BY_CODE.has(e.code) && (pending || sch.selectedWires.size > 0)) {
-      const color = WIRE_COLOR_BY_CODE.get(e.code)
-      e.preventDefault()
-      if (!color) return
       if (pending) setPending({ ...pending, color, chosen: true })
       else paintSelected(color, e.shiftKey)
-    } else if (mod && key === "z") {
-      e.preventDefault()
-      if (e.shiftKey) sch.redo()
-      else sch.undo()
-    } else if (mod && key === "y") {
-      e.preventDefault()
-      sch.redo()
-    } else if (mod && key === "a") {
-      e.preventDefault()
-      sch.selectAll()
-    } else if (mod && key === "d") {
-      e.preventDefault()
-      duplicate()
-    } else if (mod && key === "j") {
-      e.preventDefault()
-      setCodeOpen((o) => !o)
-    } else if (!mod && !e.altKey && key === "m") {
-      measure.toggle()
-    } else if (!mod && !e.altKey && key === "o") {
-      setScopeOpen((o) => !o)
-    } else if (!mod && !e.altKey && key === "l") {
-      setLogicOpen((o) => !o)
-    } else if (!mod && !e.altKey && key === "r") {
-      if (sch.selectedObjects.size) sch.rotate(sch.selectedObjects, e.shiftKey ? -45 : 45)
-    } else if (!mod && !e.altKey && (key === "x" || key === "y")) {
-      if (sch.selectedObjects.size) sch.flip(sch.selectedObjects, key === "x" ? "horizontal" : "vertical")
+      return
     }
+    // Shift+1 everything, Shift+2 the selection, Shift+0 life size, on the digits' places; a wire being
+    // drawn or selected keeps the digits for its colours.
+    if (!pending && sch.selectedWires.size === 0 && !e.defaultPrevented) {
+      const view = [
+        { keys: KEYMAP.fitAll, run: () => explorerKeys.current?.fitAll() },
+        { keys: KEYMAP.zoomToSelection, run: () => explorerKeys.current?.zoomToSelection() },
+        { keys: KEYMAP.actualSize, run: reset },
+      ].find(({ keys }) => matchesDigitPlace(e, keys))
+      if (view) {
+        e.preventDefault()
+        return view.run()
+      }
+    }
+    const selected = () => sch.selectedObjects.size > 0
+    dispatch(e, [
+      { keys: KEYMAP.measure, run: () => measure.toggle() },
+      { keys: KEYMAP.scope, run: () => setScopeOpen((o) => !o) },
+      { keys: KEYMAP.logic, run: () => setLogicOpen((o) => !o) },
+      { keys: KEYMAP.rotate, when: selected, run: () => sch.rotate(sch.selectedObjects, 45) },
+      { keys: KEYMAP.rotateBack, when: selected, run: () => sch.rotate(sch.selectedObjects, -45) },
+      { keys: KEYMAP.flipHorizontal, when: selected, run: () => sch.flip(sch.selectedObjects, "horizontal") },
+      { keys: KEYMAP.flipVertical, when: selected, run: () => sch.flip(sch.selectedObjects, "vertical") },
+      { keys: KEYMAP.zoomToSelection, run: () => explorerKeys.current?.zoomToSelection() },
+      { keys: KEYMAP.nextProblem, run: () => explorerKeys.current?.nextProblem() },
+      { keys: KEYMAP.previousProblem, run: () => explorerKeys.current?.previousProblem() },
+    ])
   })
   // Cut/copy/paste ride the native events so the system clipboard sees them too.
   const onCopy = useEvent((e: ClipboardEvent) => {
-    if (inTextField(e) || !sch.selectedObjects.size) return
+    if (ownsKeys(e.target) || !sch.selectedObjects.size) return
     e.preventDefault()
-    copy()
+    const text = copy()
+    if (text) e.clipboardData?.setData("text/plain", text)
   })
   const onCut = useEvent((e: ClipboardEvent) => {
-    if (inTextField(e) || !sch.selectedObjects.size) return
+    if (ownsKeys(e.target) || !sch.selectedObjects.size) return
     e.preventDefault()
-    cut()
+    const text = cut()
+    if (text) e.clipboardData?.setData("text/plain", text)
   })
   const onPaste = useEvent((e: ClipboardEvent) => {
-    if (inTextField(e)) return
+    if (ownsKeys(e.target)) return
     e.preventDefault()
     const text = e.clipboardData?.getData("text/plain")
     let external: Clip | null = null
@@ -1665,72 +1666,72 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       <ContextMenuContent className="w-64">
         <ContextMenuItem onClick={() => openQuick(menuClient.current)}>
           Add here…
-          <ContextMenuShortcut>A</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.addHere[1])}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!sch.canUndo} onClick={sch.undo}>
           Undo
-          <ContextMenuShortcut>⌘Z</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.undo)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!sch.canRedo} onClick={sch.redo}>
           Redo
-          <ContextMenuShortcut>⇧⌘Z</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.redo)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!hasObjects} onClick={cut}>
           Cut
-          <ContextMenuShortcut>⌘X</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.cut)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasObjects} onClick={copy}>
           Copy
-          <ContextMenuShortcut>⌘C</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.copy)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!clip} onClick={() => paste()}>
           Paste
-          <ContextMenuShortcut>⌘V</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.paste)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasObjects} onClick={duplicate}>
           Duplicate
-          <ContextMenuShortcut>⌘D</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.duplicate)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!hasObjects} onClick={() => sch.rotate(sch.selectedObjects, 45)}>
           Rotate 45° clockwise
-          <ContextMenuShortcut>R</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.rotate)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasObjects} onClick={() => sch.rotate(sch.selectedObjects, -45)}>
           Rotate 45° counter-clockwise
-          <ContextMenuShortcut>⇧R</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.rotateBack)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasObjects} onClick={() => sch.flip(sch.selectedObjects, "horizontal")}>
           Mirror horizontally
-          <ContextMenuShortcut>X</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.flipHorizontal)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasObjects} onClick={() => sch.flip(sch.selectedObjects, "vertical")}>
           Mirror vertically
-          <ContextMenuShortcut>Y</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.flipVertical)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasSelection} onClick={sch.removeSelected}>
           Delete
-          <ContextMenuShortcut>Del</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.remove)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!selectedBoard} onClick={() => setCodeOpen(true)}>
           Source code
-          <ContextMenuShortcut>⌘J</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.code)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onClick={zoomIn}>
           Zoom in
-          <ContextMenuShortcut>⌘+</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.zoomIn)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem onClick={zoomOut}>
           Zoom out
-          <ContextMenuShortcut>⌘−</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.zoomOut)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem onClick={reset}>
           Reset view
-          <ContextMenuShortcut>⌘0</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.zoomReset)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={sch.doc.wires.length === 0} onClick={autoColorAllNets}>
@@ -1742,7 +1743,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         <ContextMenuSeparator />
         <ContextMenuItem disabled={isEmpty} onClick={sch.selectAll}>
           Select all
-          <ContextMenuShortcut>⌘A</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.selectAll)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem
           disabled={!hasSelection}
@@ -1752,7 +1753,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           }}
         >
           Deselect
-          <ContextMenuShortcut>Esc</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.deselect)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem variant="destructive" disabled={isEmpty} onClick={sch.clear}>
           Clear field

@@ -1,8 +1,11 @@
+import { keymapFor } from "@/lib/keymap"
+import { matchesAny, type KeyPress } from "@/lib/keys"
+import { currentPlatform, type Platform } from "@/lib/platform"
 import { getMeta } from "@/schematic/registry"
 import { searchRows, type PaletteEntry } from "./items"
 
 // Quick Insert: the palette's search opened where the student is working, not at the edge of the
-// screen. "A" with the pointer on the field, Ctrl+K (⌘K) from anywhere but the code, or "Add here…"
+// screen. "A" with the pointer on the field, Ctrl+K (⌘K on a Mac) from anywhere but the code, or "Add here…"
 // in the field's menu open it; the part picked goes where it was opened. It is the same search and
 // the same rows as the palette's, so a query finds the same parts in the same order in both places.
 
@@ -13,16 +16,14 @@ export type KeyLike = { key: string; ctrlKey?: boolean; metaKey?: boolean; altKe
 export type KeyTarget = "field" | "text" | "code"
 
 /**
- * Whether this key opens Quick Insert. "A" is a letter like any other in a text field, so it opens
- * the panel only from the bench; Ctrl+K types nothing, so it opens it from a text field too. The code
- * editor keeps both: Ctrl+K starts its own chords there.
+ * Whether this key opens Quick Insert (the keymap's addHere). "A" is a letter like any other in a text
+ * field, so it opens the panel only from the bench; the command key's K types nothing, so it opens it
+ * from a text field too. The code editor keeps both: Ctrl+K starts its own chords there.
  */
-export function opensQuickInsert(e: KeyLike, target: KeyTarget): boolean {
-  if (target === "code" || e.altKey || e.shiftKey) return false
-  const mod = !!(e.ctrlKey || e.metaKey)
-  const key = e.key.toLowerCase()
-  if (mod) return key === "k"
-  return key === "a" && target === "field"
+export function opensQuickInsert(e: KeyPress, target: KeyTarget, platform: Platform = currentPlatform()): boolean {
+  if (target === "code") return false
+  const hit = matchesAny(e, keymapFor(platform).addHere, platform)
+  return !!hit && (!!hit.mod || target === "field")
 }
 
 /** A run of rows under a heading, for a blank query: the parts a student keeps reaching for. */

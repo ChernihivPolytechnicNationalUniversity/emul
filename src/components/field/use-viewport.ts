@@ -1,5 +1,8 @@
 import * as React from "react"
 import type { Rect } from "@/schematic/geometry"
+import { dispatch, ownsKeys, typesAhead } from "@/lib/keys"
+import { KEYMAP } from "@/lib/keymap"
+import { wheelZooms } from "@/lib/pointer"
 import { dotGridStyle } from "./dot-grid"
 import { easeFactor, frameClock } from "./easing"
 
@@ -254,7 +257,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       const r = el.getBoundingClientRect()
-      if (e.ctrlKey || e.metaKey) {
+      if (wheelZooms(e)) {
         // Mouse wheel notches (|deltaY| ≈ 100) zoom by a fixed step; trackpad pinch sends
         // many small deltas and scales continuously.
         const notch = Math.abs(e.deltaY) >= 50
@@ -274,9 +277,8 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   const [spaceHeld, setSpaceHeld] = React.useState(false)
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null
-      const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
-      if (e.code === "Space" && !e.repeat && !typing) {
+      const typing = ownsKeys(e.target) || typesAhead(e.target) || (e.target as HTMLElement | null)?.tagName === "INPUT"
+      if (e.code === "Space" && !e.repeat && !typing && !e.defaultPrevented) {
         e.preventDefault()
         setSpaceHeld(true)
       }
@@ -425,17 +427,11 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return
-      if (e.key === "=" || e.key === "+") {
-        e.preventDefault()
-        zoomIn()
-      } else if (e.key === "-") {
-        e.preventDefault()
-        zoomOut()
-      } else if (e.key === "0") {
-        e.preventDefault()
-        reset()
-      }
+      dispatch(e, [
+        { keys: KEYMAP.zoomIn, run: zoomIn },
+        { keys: KEYMAP.zoomOut, run: zoomOut },
+        { keys: KEYMAP.zoomReset, run: reset },
+      ])
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
