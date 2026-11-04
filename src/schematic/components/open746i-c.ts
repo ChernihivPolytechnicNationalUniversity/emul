@@ -817,14 +817,14 @@ export const defs: ComponentDef[] = [open746ic]
 const RECORDS: Record<string, Datasheet> = {
   "open746i-c": {
     maker: "Waveshare",
-    docs: [DOCS["waveshare-open746i-c-sch"], DOCS["waveshare-core746i-sch"], DOCS["st-ds10916"], DOCS["st-rm0385"], DOCS["silabs-cp2102"], DOCS["mchp-mic2025"]],
+    docs: [DOCS["waveshare-open746i-c-um"], DOCS["waveshare-open746i-c-sch"], DOCS["waveshare-core746i-sch"], DOCS["st-ds10916"], DOCS["st-rm0385"], DOCS["silabs-cp2102"], DOCS["mchp-mic2025"]],
     specs: [],
     characteristics: [
       { kind: "clock", value: { max: 216e6 }, cite: { doc: "st-ds10916", page: 16, at: "Table 2" } },
       { kind: "flash", value: { typ: 1048576 }, cite: { doc: "st-ds10916", page: 15, at: "Table 2" } },
       { kind: "ram", value: { typ: 327680 }, cite: { doc: "st-ds10916", page: 15, at: "Table 2" } },
-      { kind: "ioLevel", value: { typ: 3.3 }, limit: { max: 4 }, cite: { page: 1, at: "3.3V rail" }, limitCite: { doc: "st-ds10916", page: 102, at: "Table 15" } },
-      { kind: "input", value: { typ: 5 }, cite: { page: 1, at: "5VDC" } },
+      { kind: "ioLevel", value: { typ: 3.3 }, limit: { max: 4 }, cite: { doc: "waveshare-open746i-c-sch", page: 1, at: "3.3V rail" }, limitCite: { doc: "st-ds10916", page: 102, at: "Table 15" } },
+      { kind: "input", value: { typ: 5 }, cite: { doc: "waveshare-open746i-c-sch", page: 1, at: "5VDC" } },
       { kind: "ioPins", value: { typ: 140 }, cite: { doc: "st-ds10916", page: 16, at: "Table 2" } },
     ],
     modelled: [

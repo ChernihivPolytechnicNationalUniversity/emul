@@ -304,7 +304,7 @@ export const defs: ComponentDef[] = [nucleoF429zi]
 const RECORDS: Record<string, Datasheet> = {
   "nucleo-f429zi": {
     maker: "STMicroelectronics",
-    docs: [DOCS["st-um1974"], DOCS["st-ds9405"]],
+    docs: [DOCS["st-um1974"], DOCS["st-mb1137-sch"], DOCS["st-ds9405"]],
     specs: [],
     characteristics: [
       { kind: "clock", value: { max: 180e6 }, cite: { doc: "st-ds9405", page: 17, at: "Table 2" } },

@@ -303,7 +303,7 @@ export const defs: ComponentDef[] = [stm32f4Discovery]
 const RECORDS: Record<string, Datasheet> = {
   "stm32f4-discovery": {
     maker: "STMicroelectronics",
-    docs: [DOCS["st-um1472"], DOCS["st-mb997-sch"], DOCS["st-ds8626"], DOCS["cirrus-cs43l22"], DOCS["st-lis302dl"], DOCS["st-lis3dsh"], DOCS["st-mp45dt02"], DOCS["st-ld3985"], DOCS["st-bat60j"], DOCS["everlight-19-217-bhc"], DOCS["everlight-19-217-s2c"], DOCS["everlight-19-213sygc"], DOCS["everlight-19-213-r6c"]],
+    docs: [DOCS["st-um1472"], DOCS["st-mb997-sch"], DOCS["st-ds8626"], DOCS["cirrus-cs43l22"], DOCS["st-lis302dl"], DOCS["st-lis3dsh"], DOCS["st-mp45dt02"]],
     specs: [],
     characteristics: [
       { kind: "clock", value: { max: 168e6 }, cite: { doc: "st-ds8626", page: 16, at: "Table 2" } },

@@ -410,7 +410,7 @@ type Docs = Pick<Datasheet, "maker" | "docs">
 const DOC_LIST: Record<string, Docs> = {
   "ws2812b": {
     maker: "Worldsemi",
-    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"]],
+    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"]],
   },
   "ws2812": {
     maker: "Worldsemi",
@@ -478,23 +478,23 @@ const DOC_LIST: Record<string, Docs> = {
   },
   "led-stick-8": {
     maker: "Worldsemi",
-    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
+    docs: [DOCS["ws-ws2812b-2013"], DOCS["adafruit-1426"], DOCS["ledcolor-sk6812"]],
   },
   "led-ring-12": {
     maker: "Worldsemi",
-    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
+    docs: [DOCS["ws-ws2812b-2013"], DOCS["adafruit-1643"], DOCS["ledcolor-sk6812"]],
   },
   "led-ring-16": {
     maker: "Worldsemi",
-    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
+    docs: [DOCS["ws-ws2812b-2013"], DOCS["adafruit-1463"], DOCS["ledcolor-sk6812"]],
   },
   "led-ring-24": {
     maker: "Worldsemi",
-    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
+    docs: [DOCS["ws-ws2812b-2013"], DOCS["adafruit-1586"], DOCS["ledcolor-sk6812"]],
   },
   "led-matrix-8x8": {
     maker: "Worldsemi",
-    docs: [DOCS["ws-ws2812b-2013"], DOCS["ws-ws2812b-v5"], DOCS["ws-ws2812b-v6"], DOCS["ws-ws2812b-v7"], DOCS["ws-ws2812b-mini-v3"], DOCS["ws-ws2812b-2020"], DOCS["ws-ws2812c"], DOCS["ws-ws2812e"], DOCS["ws-ws2812e-v5"], DOCS["ledcolor-sk6812"], DOCS["opsco-sk6812rgbw"]],
+    docs: [DOCS["ws-ws2812b-2013"], DOCS["adafruit-1487"], DOCS["ledcolor-sk6812"]],
   },
   "ws2811": {
     maker: "Worldsemi",

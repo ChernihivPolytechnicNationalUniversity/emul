@@ -331,7 +331,7 @@ const KB = 1024
 
 const SHEETS: Record<string, Stm32Sheet> = {
   stm32f746ig: {
-    docs: [DOCS["st-ds10916"], DOCS["st-rm0385"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0489"]],
+    docs: [DOCS["st-ds10916"], DOCS["st-rm0385"], DOCS["st-es0290"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0489"]],
     vdd: [1.7, 3.6], vddAt: { page: 104, at: "Table 18" }, vddAbsMax: 4.0, vddAbsAt: { page: 102, at: "Table 15" },
     hclk: 216e6, hclkAt: { page: 104, at: "Table 18" },
     flash: 1024 * KB, ram: 320 * KB, memoryAt: { page: 15, at: "Table 2" }, gpios: 140, gpiosAt: { page: 16, at: "Table 2" },
@@ -339,7 +339,7 @@ const SHEETS: Record<string, Stm32Sheet> = {
     ambientAt: { page: 105, at: "Table 18" }, junctionMax: 125, junctionAt: { page: 103, at: "Table 17" },
   },
   stm32f429zi: {
-    docs: [DOCS["st-ds9405"], DOCS["st-rm0090"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
+    docs: [DOCS["st-ds9405"], DOCS["st-rm0090"], DOCS["st-es0206"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
     vdd: [1.7, 3.6], vddAt: { page: 95, at: "Table 17" }, vddAbsMax: 4.0, vddAbsAt: { page: 93, at: "Table 14" },
     hclk: 180e6, hclkAt: { page: 95, at: "Table 17" },
     flash: 2048 * KB, ram: 256 * KB, memoryAt: { page: 16, at: "Table 2" }, gpios: 114, gpiosAt: { page: 16, at: "Table 2" },

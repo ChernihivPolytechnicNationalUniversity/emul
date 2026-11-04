@@ -26,6 +26,7 @@ export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   capacitor: {
     basis: "generic",
     none: GENERIC,
+    sources: [DOCS["kemet-c1002"]],
     modelled: [{ what: "Charges at set capacitance" }, { what: "Fails short past rated voltage" }],
     notModelled: [{ what: "ESR, ESL and leakage" }, { what: "DC-bias and temperature drift" }, { what: "Tolerance" }],
   },
@@ -43,12 +44,14 @@ export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   inductor: {
     basis: "generic",
     none: GENERIC,
+    sources: [DOCS["bourns-rlb"]],
     modelled: [{ what: "Current at set inductance", test: "tests/sim/physics.test.ts" }, { what: "Voltage kick when broken", test: "tests/sim/physics.test.ts" }, { what: "Its current rating" }],
     notModelled: [{ what: "No core saturation" }, { what: "Winding resistance and core loss" }, { what: "Self-resonance" }],
   },
   diode: {
     basis: "generic",
     none: GENERIC,
+    sources: [DOCS["onsemi-1n914"], DOCS["vishay-1n4148"]],
     modelled: [
       { what: "Set forward drop and ratings" },
       { what: "Fails short past its ratings", test: "tests/sim/physics.test.ts" },
@@ -58,13 +61,14 @@ export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   zener: {
     basis: "generic",
     none: GENERIC,
+    sources: [DOCS["vishay-bzx55"]],
     modelled: [{ what: "Breakdown at set Zener voltage" }, { what: "Forward drop of 0.7 V" }, { what: "Fails short past rated power" }],
     notModelled: [{ what: "Sharp knee, no dynamic resistance" }, { what: "The Zener voltage's temperature coefficient" }, { what: "Tolerance" }],
   },
   led: {
     basis: "generic",
     none: GENERIC,
-    sources: [DOCS["vishay-tlhx54"], DOCS["vishay-tlhb5400"], DOCS["osram-ls-q976"], DOCS["osram-lb-q39g"], DOCS["kb-apt1608surck"], DOCS["kb-apt1608qbc-d"]],
+    sources: [DOCS["vishay-tlhx54"], DOCS["osram-ls-q976"], DOCS["osram-lb-q39g"], DOCS["kb-apt1608surck"]],
     modelled: [
       { what: "Forward voltage set by colour" },
       { what: "Current and reverse ratings" },
@@ -76,12 +80,14 @@ export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   npn: {
     basis: "generic",
     none: GENERIC,
+    sources: [DOCS["diotec-bc546"], DOCS["onsemi-bc546"]],
     modelled: [{ what: "Current gain β" }, { what: "Saturation through collector resistance" }, { what: "Fails short past its ratings" }],
     notModelled: [{ what: "Switching times and junction capacitances" }, { what: "β drift with current, temperature" }, { what: "Early effect" }],
   },
   pnp: {
     basis: "generic",
     none: GENERIC,
+    sources: [DOCS["diotec-bc556"], DOCS["onsemi-bc556b"]],
     modelled: [{ what: "Current gain β" }, { what: "Saturation through collector resistance" }, { what: "Fails short past its ratings" }],
     notModelled: [{ what: "Switching times and junction capacitances" }, { what: "β drift with current, temperature" }, { what: "Early effect" }],
   },
@@ -100,6 +106,7 @@ export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   pmos: {
     basis: "generic",
     none: GENERIC,
+    sources: [DOCS["infineon-irf9540n"]],
     modelled: [{ what: "Threshold and Rds(on) as set" }, { what: "With body diode" }, { what: "Avalanches past its Vds" }, { what: "Survives pulses up to EAS" }],
     notModelled: [{ what: "Gate charge and switching times" }, { what: "Rds(on)'s rise with temperature" }, { what: "Subthreshold leakage" }],
   },
@@ -113,12 +120,14 @@ export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   switch: {
     basis: "generic",
     none: GENERIC,
+    sources: [DOCS["nkk-e-toggles"]],
     modelled: [{ what: "Contact resistance and current rating" }, { what: "Contact bounce on each change", test: "tests/sim/joystick-bounce.test.ts" }],
     notModelled: [{ what: "Arcing and contact wear" }],
   },
   battery: {
     basis: "generic",
     none: "A cell is chosen by its chemistry in the inspector: the discharge curves are the chemistry's, not one maker's datasheet.",
+    sources: [DOCS["energizer-alkaline"]],
     modelled: [
       { what: "Chemistry's discharge curve", test: "tests/sim/battery.test.ts" },
       { what: "Internal resistance rises towards empty", test: "tests/sim/battery.test.ts" },
@@ -149,6 +158,7 @@ export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   transformer: {
     basis: "generic",
     none: GENERIC,
+    sources: [DOCS["triad-vpp24-420"]],
     modelled: [{ what: "Primary and secondary voltages" }, { what: "Winding resistances" }, { what: "Magnetising inductance" }, { what: "Overload heats it", test: "tests/sim/physics.test.ts" }, { what: "DC on primary burns winding", test: "tests/sim/physics.test.ts" }],
     notModelled: [{ what: "Core saturation and hysteresis" }, { what: "Leakage inductance and inter-winding capacitance" }],
   },

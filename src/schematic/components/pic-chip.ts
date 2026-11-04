@@ -272,8 +272,8 @@ const RECORDS: Record<string, Datasheet> = Object.fromEntries(
   PIC_CHIPS.map((chip) => {
     const sheet = chip.revisionA ? SHEET_A : SHEET_ORIGINAL
     const docs: Datasheet["docs"] = chip.revisionA
-      ? [DOCS["mchp-ds40044g"], DOCS["mchp-ds33023a"], DOCS["mchp-ds41196g"]]
-      : [DOCS["mchp-ds40044g"], DOCS["mchp-ds40300c"], DOCS["mchp-ds33023a"], DOCS["mchp-ds30034d"], DOCS["mchp-ds80073f"]]
+      ? [DOCS["mchp-ds40044g"], DOCS["mchp-ds33023a"], DOCS["mchp-ds31029a"], DOCS["mchp-ds80151n"], DOCS["mchp-ds41196g"]]
+      : [DOCS["mchp-ds40044g"], DOCS["mchp-ds40300c"], DOCS["mchp-ds33023a"], DOCS["mchp-ds31029a"], DOCS["mchp-ds30034d"], DOCS["mchp-ds80073f"]]
     const record: Datasheet = {
       maker: "Microchip",
       package: PDIP18.name,

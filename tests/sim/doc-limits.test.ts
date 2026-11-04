@@ -40,14 +40,7 @@ const SOURCES: Record<"ideal" | "tool" | "generic", readonly [number, number]> =
  * Parts whose documents are not yet within the rules. Only shrinks: a part brought within them comes
  * off (the test fails until it does), and no part joins.
  */
-const PENDING = new Set<string>([
-  "arduino-uno", "battery", "capacitor", "diode", "inductor", "lcd7-f", "led", "led-matrix-8x8",
-  "led-ring-12", "led-ring-16", "led-ring-24", "led-stick-8", "netduino-plus-2", "npn", "nucleo-f429zi", "open746i-c",
-  "oscillator", "pic16f627", "pic16f627-04", "pic16f627a", "pic16f628", "pic16f628-04", "pic16f628a", "pic16f648a",
-  "pic16lf627", "pic16lf627a", "pic16lf628", "pic16lf628a", "pic16lf648a", "pmos", "pnp", "resonator",
-  "stm32f4-discovery", "stm32f429zi", "stm32f746ig", "switch", "transformer", "weact-blackpill-f401cc", "weact-blackpill-f401ce", "weact-blackpill-f411",
-  "ws2812b", "zener",
-])
+const PENDING = new Set<string>([])
 
 function problems(def: ComponentDef): string[] {
   const record = def.datasheet

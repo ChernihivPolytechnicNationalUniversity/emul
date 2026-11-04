@@ -339,7 +339,7 @@ export const defs: ComponentDef[] = [arduinoUno]
 const RECORDS: Record<string, Datasheet> = {
   "arduino-uno": {
     maker: "Arduino",
-    docs: [DOCS["arduino-a000066-ds"], DOCS["arduino-uno-rev3e-sch"], DOCS["mchp-ds40002061b"], DOCS["onsemi-fdn340p"], DOCS["onsemi-ncp1117"], DOCS["ti-slvs522s"], DOCS["ti-slos263y"], DOCS["bourns-mf-msmf"], DOCS["murata-cstce16m0v53"]],
+    docs: [DOCS["arduino-a000066-ds"], DOCS["arduino-uno-rev3e-sch"], DOCS["mchp-ds40002061b"], DOCS["onsemi-fdn340p"], DOCS["onsemi-ncp1117"], DOCS["ti-slvs522s"], DOCS["ti-slos263y"], DOCS["bourns-mf-msmf"]],
     specs: [],
     characteristics: [
       { kind: "clock", value: { max: 16e6 }, cite: { page: 2, at: "Features" } },

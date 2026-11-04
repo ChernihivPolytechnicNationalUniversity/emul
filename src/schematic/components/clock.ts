@@ -131,6 +131,7 @@ export const oscillator: ComponentDef = {
   datasheet: {
     basis: "generic",
     none: "A generic oscillator module: its frequency and supply rating are set in the inspector, not taken from one product's datasheet.",
+    sources: [DOCS["sitime-sit8008b"]],
     modelled: [{ what: "HSE or LSE bypass clock" }, { what: "Runs at marked frequency" }, { what: "A few milliamps from VCC" }, { what: "Dead past its supply rating" }],
     notModelled: [{ what: "OUT waveform invisible to analog" }, { what: "Frequency tolerance and jitter" }],
   },
@@ -146,25 +147,25 @@ export const defs: ComponentDef[] = [crystal, resonator, oscillator]
 const RECORDS: Record<string, Datasheet> = {
   "resonator": {
     maker: "Murata",
-    docs: [DOCS["murata-cstce16m0v53"]],
+    docs: [DOCS["murata-p16e"], DOCS["murata-cstce16m0v53"]],
     specs: [],
     characteristics: [
-      { kind: "frequency", value: { typ: 16e6 }, cite: { at: "Specifications" } },
-      { kind: "tolerance", value: { max: 0.005, sym: true }, cite: { at: "Specifications" } },
-      { kind: "temperature", value: { min: -20, max: 80 }, cite: { at: "Specifications" } },
-      { kind: "capacitance", value: { typ: 15e-12 }, cite: { at: "Specifications" } },
+      { kind: "frequency", value: { typ: 16e6 }, cite: { doc: "murata-p16e", page: 26, at: "CSTCE_V specifications" } },
+      { kind: "tolerance", value: { max: 0.005, sym: true }, cite: { doc: "murata-p16e", page: 26, at: "CSTCE_V specifications" } },
+      { kind: "temperature", value: { min: -20, max: 80 }, cite: { doc: "murata-p16e", page: 26, at: "CSTCE_V specifications" } },
+      { kind: "capacitance", value: { typ: 15e-12 }, cite: { doc: "murata-p16e", page: 5, at: "Part numbering, load capacity" } },
     ],
     modelled: [
-      { what: "MCU runs at 16 MHz", cite: { at: "Specifications" }, test: "tests/sim/resonator.test.ts" },
+      { what: "MCU runs at 16 MHz", cite: { doc: "murata-p16e", page: 26, at: "CSTCE_V specifications" }, test: "tests/sim/resonator.test.ts" },
       { what: "Works either way round", test: "tests/sim/resonator.test.ts" },
-      { what: "Deviation shifts the clock", cite: { at: "Specifications" }, test: "tests/sim/resonator.test.ts" },
+      { what: "Deviation shifts the clock", cite: { doc: "murata-p16e", page: 26, at: "CSTCE_V specifications" }, test: "tests/sim/resonator.test.ts" },
       { what: "Outer pins on XTAL needed", test: "tests/sim/resonator.test.ts" },
       { what: "Ready after 0.5 ms, assumed" },
     ],
     notModelled: [
-      { what: "Drift with temperature and age", cite: { at: "Specifications" } },
+      { what: "Drift with temperature and age", cite: { doc: "murata-p16e", page: 26, at: "CSTCE_V specifications" } },
       { what: "Deviation is set by hand" },
-      { what: "Built-in capacitors and ESR", cite: { at: "Specifications" } },
+      { what: "Built-in capacitors and ESR", cite: { doc: "murata-p16e", page: 5, at: "Part numbering, load capacity" } },
     ],
   },
 }
