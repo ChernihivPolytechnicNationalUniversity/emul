@@ -3,7 +3,8 @@ import { ChipIcon } from "../icons"
 import { mcuModel } from "../mcu-model"
 import type { BodyShape, ComponentDef, Element, PinDef, PinKind } from "../types"
 import { DOCS } from "../datasheets/docs"
-import type { Datasheet } from "../types"
+import type { Claim, Datasheet } from "../types"
+import type { Characteristic } from "../characteristics"
 
 /**
  * STM32 parts as bare chips: an IC symbol with every signal pin of the package brought out,
@@ -294,64 +295,267 @@ export const stm32f401ce = stm32Chip(STM32F401CE, UFQFPN48_F4X1, "Cortex-M4F MCU
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [stm32f746ig, stm32f429zi, stm32f407vg, stm32f405rg, stm32f411ce, stm32f401ce, stm32f401cc]
 
-// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
-// The key numbers with their pages are still to be added (specs).
-const RECORDS: Record<string, Datasheet> = {
-  "stm32f746ig": {
-    maker: "STMicroelectronics",
-    package: "LQFP176",
+// --- datasheet records -----------------------------------------------------------------------
+// The key numbers of each part, read from its datasheet (PDF page indices, as url#page=N opens
+// them): one row per chip, the characteristics generated from it. Every STM32 here is the
+// "6" temperature suffix (−40 to 85 °C ambient).
+
+type Page = { page: number; at: string }
+
+type Stm32Sheet = {
+  docs: Datasheet["docs"]
+  /** VDD range (general operating conditions) and its abs max (voltage characteristics). */
+  vdd: [min: number, max: number]
+  vddAt: Page
+  vddAbsMax: number
+  vddAbsAt: Page
+  /** Highest fHCLK. */
+  hclk: number
+  hclkAt: Page
+  /** Flash and SRAM (system SRAM incl. CCM/DTCM) in bytes, GPIOs of this package: the features table. */
+  flash: number
+  ram: number
+  memoryAt: Page
+  gpios: number
+  gpiosAt: Page
+  /** ±8 mA with the standard VOL/VOH (output driving current); 25 mA abs max (current characteristics). */
+  driveAt: Page
+  pinAbsAt: Page
+  /** Ambient range for suffix 6; maximum junction temperature (thermal characteristics). */
+  ambientAt: Page
+  junctionMax: number
+  junctionAt: Page
+}
+
+const KB = 1024
+
+const SHEETS: Record<string, Stm32Sheet> = {
+  stm32f746ig: {
     docs: [DOCS["st-ds10916"], DOCS["st-rm0385"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0489"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
+    vdd: [1.7, 3.6], vddAt: { page: 104, at: "Table 18" }, vddAbsMax: 4.0, vddAbsAt: { page: 102, at: "Table 15" },
+    hclk: 216e6, hclkAt: { page: 104, at: "Table 18" },
+    flash: 1024 * KB, ram: 320 * KB, memoryAt: { page: 15, at: "Table 2" }, gpios: 140, gpiosAt: { page: 16, at: "Table 2" },
+    driveAt: { page: 146, at: "Output driving current" }, pinAbsAt: { page: 103, at: "Table 16" },
+    ambientAt: { page: 105, at: "Table 18" }, junctionMax: 125, junctionAt: { page: 103, at: "Table 17" },
   },
-  "stm32f429zi": {
-    maker: "STMicroelectronics",
-    package: "LQFP144",
+  stm32f429zi: {
     docs: [DOCS["st-ds9405"], DOCS["st-rm0090"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
+    vdd: [1.7, 3.6], vddAt: { page: 95, at: "Table 17" }, vddAbsMax: 4.0, vddAbsAt: { page: 93, at: "Table 14" },
+    hclk: 180e6, hclkAt: { page: 95, at: "Table 17" },
+    flash: 2048 * KB, ram: 256 * KB, memoryAt: { page: 16, at: "Table 2" }, gpios: 114, gpiosAt: { page: 16, at: "Table 2" },
+    driveAt: { page: 137, at: "Output driving current" }, pinAbsAt: { page: 94, at: "Table 15" },
+    ambientAt: { page: 96, at: "Table 17" }, junctionMax: 125, junctionAt: { page: 94, at: "Table 16" },
   },
-  "stm32f407vg": {
-    maker: "STMicroelectronics",
-    package: "LQFP100",
+  stm32f407vg: {
     docs: [DOCS["st-ds8626"], DOCS["st-rm0090"], DOCS["st-es0182"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
+    vdd: [1.8, 3.6], vddAt: { page: 81, at: "Table 14" }, vddAbsMax: 4.0, vddAbsAt: { page: 80, at: "Table 11" },
+    hclk: 168e6, hclkAt: { page: 81, at: "Table 14" },
+    flash: 1024 * KB, ram: 192 * KB, memoryAt: { page: 15, at: "Table 2" }, gpios: 82, gpiosAt: { page: 16, at: "Table 2" },
+    driveAt: { page: 118, at: "Output driving current" }, pinAbsAt: { page: 81, at: "Table 12" },
+    ambientAt: { page: 82, at: "Table 14" }, junctionMax: 125, junctionAt: { page: 81, at: "Table 13" },
   },
-  "stm32f405rg": {
-    maker: "STMicroelectronics",
-    package: "LQFP64",
+  stm32f405rg: {
     docs: [DOCS["st-ds8626"], DOCS["st-rm0090"], DOCS["st-es0182"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
+    vdd: [1.8, 3.6], vddAt: { page: 81, at: "Table 14" }, vddAbsMax: 4.0, vddAbsAt: { page: 80, at: "Table 11" },
+    hclk: 168e6, hclkAt: { page: 81, at: "Table 14" },
+    flash: 1024 * KB, ram: 192 * KB, memoryAt: { page: 15, at: "Table 2" }, gpios: 51, gpiosAt: { page: 16, at: "Table 2" },
+    driveAt: { page: 118, at: "Output driving current" }, pinAbsAt: { page: 81, at: "Table 12" },
+    ambientAt: { page: 82, at: "Table 14" }, junctionMax: 125, junctionAt: { page: 81, at: "Table 13" },
   },
-  "stm32f411ce": {
-    maker: "STMicroelectronics",
-    package: "UFQFPN48",
+  stm32f411ce: {
     docs: [DOCS["st-ds10314"], DOCS["st-rm0383"], DOCS["st-es0287"], DOCS["st-an4073"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
+    vdd: [1.7, 3.6], vddAt: { page: 63, at: "Table 14" }, vddAbsMax: 4.0, vddAbsAt: { page: 61, at: "Table 11" },
+    hclk: 100e6, hclkAt: { page: 63, at: "Table 14" },
+    flash: 512 * KB, ram: 128 * KB, memoryAt: { page: 13, at: "Table 2" }, gpios: 36, gpiosAt: { page: 13, at: "Table 2" },
+    driveAt: { page: 100, at: "Output driving current" }, pinAbsAt: { page: 62, at: "Table 12" },
+    ambientAt: { page: 64, at: "Table 14" }, junctionMax: 130, junctionAt: { page: 62, at: "Table 13" },
   },
-  "stm32f401ce": {
-    maker: "STMicroelectronics",
-    package: "UFQFPN48",
+  stm32f401ce: {
     docs: [DOCS["st-ds10086"], DOCS["st-rm0368"], DOCS["st-es0299"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
+    vdd: [1.7, 3.6], vddAt: { page: 60, at: "Table 14" }, vddAbsMax: 4.0, vddAbsAt: { page: 58, at: "Table 11" },
+    hclk: 84e6, hclkAt: { page: 60, at: "Table 14" },
+    flash: 512 * KB, ram: 96 * KB, memoryAt: { page: 10, at: "Table 2" }, gpios: 36, gpiosAt: { page: 11, at: "Table 2" },
+    driveAt: { page: 93, at: "Output driving current" }, pinAbsAt: { page: 59, at: "Table 12" },
+    ambientAt: { page: 61, at: "Table 14" }, junctionMax: 125, junctionAt: { page: 59, at: "Table 13" },
   },
-  "stm32f401cc": {
-    maker: "STMicroelectronics",
-    package: "UFQFPN48",
+  stm32f401cc: {
     docs: [DOCS["st-ds9716"], DOCS["st-rm0368"], DOCS["st-es0222"], DOCS["arm-ddi0403e"], DOCS["arm-ddi0439"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
+    vdd: [1.7, 3.6], vddAt: { page: 59, at: "Table 14" }, vddAbsMax: 4.0, vddAbsAt: { page: 57, at: "Table 11" },
+    hclk: 84e6, hclkAt: { page: 59, at: "Table 14" },
+    flash: 256 * KB, ram: 64 * KB, memoryAt: { page: 11, at: "Table 2" }, gpios: 36, gpiosAt: { page: 11, at: "Table 2" },
+    driveAt: { page: 91, at: "Output driving current" }, pinAbsAt: { page: 58, at: "Table 12" },
+    ambientAt: { page: 60, at: "Table 14" }, junctionMax: 130, junctionAt: { page: 58, at: "Table 13" },
   },
 }
+
+function characteristics(s: Stm32Sheet): Characteristic[] {
+  return [
+    { kind: "supply", value: { min: s.vdd[0], max: s.vdd[1] }, limit: { max: s.vddAbsMax }, cite: s.vddAt, limitCite: s.vddAbsAt },
+    { kind: "clock", value: { max: s.hclk }, cite: s.hclkAt },
+    { kind: "flash", value: { typ: s.flash }, cite: s.memoryAt },
+    { kind: "ram", value: { typ: s.ram }, cite: s.memoryAt },
+    { kind: "ioPins", value: { typ: s.gpios }, cite: s.gpiosAt },
+    { kind: "pinCurrent", value: { max: 8e-3, sym: true }, limit: { max: 25e-3, sym: true }, per: "pin", cite: s.driveAt, limitCite: s.pinAbsAt },
+    { kind: "temperature", value: { min: -40, max: 85 }, limit: { max: s.junctionMax }, cite: s.ambientAt, limitCite: s.junctionAt },
+  ]
+}
+
+// What the model does, with the test that holds it: the tests run one part of a line, and the
+// line's other parts run the same blocks (src/mcu/periph) from their profiles.
+const T = {
+  core: "tests/firmware/mcu-test.test.ts",
+  bare: "tests/sim/stm32-bare-chips.test.ts",
+  dies: "tests/sim/lab1-sim.test.ts",
+  f4: {
+    tim: "tests/firmware/mcu-tim.test.ts",
+    uart: "tests/firmware/mcu-uart.test.ts",
+    spi: "tests/firmware/mcu-spi.test.ts",
+    i2c: "tests/firmware/mcu-i2c.test.ts",
+    adc: "tests/firmware/mcu-adc.test.ts",
+    dma: "tests/firmware/mcu-dma.test.ts",
+    lp: "tests/firmware/mcu-lp.test.ts",
+  },
+}
+const claim = (what: string, test: string): Claim => ({ what, test })
+
+const MODELLED: Record<string, Claim[]> = {
+  stm32f746ig: [
+    claim("Cortex-M7 core with FPU", T.core),
+    claim("Runs unmodified HAL firmware", "tests/sim/lab1.test.ts"),
+    claim("Clock tree, PLL and crystal", "tests/firmware/chip-clock.test.ts"),
+    claim("Alternate functions per datasheet table", "tests/sim/stm32f746-pad-tables.test.ts"),
+    claim("Timers with PWM and capture", "tests/sim/stm32f746-tim-capture.test.ts"),
+    claim("USART serial with line options", "tests/sim/usart-line-options.test.ts"),
+    claim("I²C master transfers", "tests/sim/mcu-i2c-v2.test.ts"),
+    claim("12-bit ADC and DAC", "tests/sim/adc-model.test.ts"),
+    claim("LTDC, DMA2D and SDRAM display", "tests/sim/lcd.test.ts"),
+    claim("MPU memory protection", "tests/sim/stm32f746-mpu.test.ts"),
+    claim("Pads burn past absolute maximum", "tests/sim/stm32f746-pad-ratings.test.ts"),
+    claim("Dies above 4 V supply", T.dies),
+  ],
+  stm32f429zi: [
+    claim("Cortex-M4F core with FPU", T.core),
+    claim("Runs unmodified HAL firmware", "tests/firmware/mcu-blink.test.ts"),
+    claim("Clock tree, PLL and crystal", "tests/firmware/chip-clock.test.ts"),
+    claim("Timers with PWM and capture", T.f4.tim),
+    claim("USART asynchronous serial", T.f4.uart),
+    claim("SPI master transfers", T.f4.spi),
+    claim("I²C master transfers", T.f4.i2c),
+    claim("12-bit ADC and DAC", T.f4.adc),
+    claim("DMA memory and peripheral transfers", T.f4.dma),
+    claim("Sleep and Stop wake-ups", T.f4.lp),
+    claim("Pads burn past absolute maximum", "tests/sim/stm32f405-pad-ratings.test.ts"),
+    claim("Dies above 4 V supply", T.dies),
+  ],
+}
+const F40X_MODELLED = [
+  claim("Cortex-M4F core with FPU", T.core),
+  claim("Runs unmodified HAL firmware", T.bare),
+  claim("Clock tree, PLL and crystal", T.bare),
+  claim("Alternate functions per datasheet table", "tests/sim/stm32f40x-pad-tables.test.ts"),
+  claim("Timers with PWM and capture", T.f4.tim),
+  claim("USART asynchronous serial", T.f4.uart),
+  claim("SPI master transfers", T.f4.spi),
+  claim("12-bit ADC and DAC", T.f4.adc),
+  claim("I²S audio clocks and standards", "tests/sim/stm32f4-i2s.test.ts"),
+  claim("Supply current per peripheral", "tests/sim/ds8626-supply.test.ts"),
+  claim("Pads burn past absolute maximum", "tests/sim/stm32f405-pad-ratings.test.ts"),
+  claim("Dies above 4 V supply", T.dies),
+]
+const F4X1_MODELLED = [
+  claim("Cortex-M4F core with FPU", T.core),
+  claim("Runs unmodified HAL firmware", T.bare),
+  claim("Clock tree, PLL and crystal", T.bare),
+  claim("Alternate functions per datasheet table", "tests/sim/stm32f4x1-pad-tables.test.ts"),
+  claim("Timers with PWM and capture", T.f4.tim),
+  claim("USART asynchronous serial", T.f4.uart),
+  claim("SPI master transfers", T.f4.spi),
+  claim("I²C master transfers", T.f4.i2c),
+  claim("12-bit ADC", T.f4.adc),
+  claim("PC13 burns past 3 mA", "tests/sim/blackpill-blink.test.ts"),
+  claim("Dies above 4 V supply", T.dies),
+]
+MODELLED.stm32f407vg = F40X_MODELLED
+MODELLED.stm32f405rg = F40X_MODELLED
+MODELLED.stm32f411ce = F4X1_MODELLED
+MODELLED.stm32f401ce = F4X1_MODELLED
+MODELLED.stm32f401cc = F4X1_MODELLED
+
+// What the model leaves out: blocks the datasheet lists that firmware finds unmodelled (reported
+// when touched), with the datasheet's functional-overview page.
+const gap = (what: string, page: number, at: string): Claim => ({ what, cite: { page, at } })
+const NOT_MODELLED: Record<string, Claim[]> = {
+  stm32f746ig: [
+    gap("USB OTG FS and HS", 43, "§3.33, §3.34"),
+    gap("Ethernet MAC", 42, "§3.31"),
+    gap("bxCAN controllers", 43, "§3.32"),
+    gap("SDMMC card interface", 42, "§3.30"),
+    gap("SAI and SPDIFRX audio", 40, "§3.26, §3.27"),
+    gap("Quad-SPI memory interface", 23, "§3.9"),
+    gap("Camera interface (DCMI)", 44, "§3.36"),
+    gap("Random number generator", 44, "§3.37"),
+    gap("HDMI-CEC", 44, "§3.35"),
+    gap("ST system bootloader", 25, "§3.15"),
+  ],
+  stm32f429zi: [
+    gap("USB OTG FS and HS", 41, "§3.33, §3.34"),
+    gap("Ethernet MAC", 40, "§3.31"),
+    gap("bxCAN controllers", 40, "§3.32"),
+    gap("SDIO card interface", 40, "§3.30"),
+    gap("SAI audio interface", 39, "§3.27"),
+    gap("Camera interface (DCMI)", 42, "§3.35"),
+    gap("Random number generator", 42, "§3.36"),
+    gap("CRC calculation unit", 22, "§3.5"),
+    gap("RTC tamper and timestamp", 33, "§3.20"),
+    gap("ST system bootloader", 26, "§3.15"),
+  ],
+  stm32f407vg: [
+    gap("USB OTG FS and HS", 39, "§3.30, §3.31"),
+    gap("Ethernet MAC", 38, "§3.28"),
+    gap("bxCAN controllers", 39, "§3.29"),
+    gap("SDIO card interface", 38, "§3.27"),
+    gap("Camera interface (DCMI)", 40, "§3.32"),
+    gap("Random number generator", 40, "§3.33"),
+    gap("CRC calculation unit", 22, "§3.5"),
+    gap("RTC tamper and timestamp", 32, "§3.19"),
+    gap("ST system bootloader", 25, "§3.13"),
+  ],
+  stm32f405rg: [
+    gap("USB OTG FS and HS", 39, "§3.30, §3.31"),
+    gap("bxCAN controllers", 39, "§3.29"),
+    gap("SDIO card interface", 38, "§3.27"),
+    gap("Random number generator", 40, "§3.33"),
+    gap("CRC calculation unit", 22, "§3.5"),
+    gap("RTC tamper and timestamp", 32, "§3.19"),
+    gap("ST system bootloader", 25, "§3.13"),
+  ],
+  stm32f411ce: [
+    gap("USB OTG full speed", 32, "§3.27"),
+    gap("SDIO card interface", 32, "§3.26"),
+    gap("CRC calculation unit", 18, "§3.6"),
+    gap("RTC tamper and timestamp", 27, "§3.18"),
+    gap("ST system bootloader", 21, "§3.13"),
+  ],
+  stm32f401ce: [
+    gap("USB OTG full speed", 31, "§3.26"),
+    gap("SDIO card interface", 30, "§3.25"),
+    gap("CRC calculation unit", 16, "§3.5"),
+    gap("RTC tamper and timestamp", 26, "§3.17"),
+    gap("ST system bootloader", 19, "§3.12"),
+  ],
+  stm32f401cc: [
+    gap("USB OTG full speed", 30, "§3.26"),
+    gap("SDIO card interface", 29, "§3.25"),
+    gap("CRC calculation unit", 16, "§3.5"),
+    gap("RTC tamper and timestamp", 25, "§3.17"),
+    gap("ST system bootloader", 18, "§3.12"),
+  ],
+}
+
+const RECORDS: Record<string, Datasheet> = Object.fromEntries(
+  Object.entries(SHEETS).map(([id, s]) => [
+    id,
+    { maker: "STMicroelectronics", package: defs.find((d) => d.id === id)!.info!.Package, docs: s.docs, specs: [], characteristics: characteristics(s), modelled: MODELLED[id], notModelled: NOT_MODELLED[id] },
+  ]),
+)
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

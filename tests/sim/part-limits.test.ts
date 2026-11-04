@@ -31,11 +31,7 @@ const NOTHING_LEFT_OUT = new Set(["ground", "junction"])
  * Parts not yet within their limits. The list only shrinks: a part brought within its limits comes
  * off it (the test fails until it does), and no part may join it.
  */
-const PENDING = new Set<string>([
-  // MCUs
-  "atmega328p", "atmega328p-au", "pic16f627", "pic16f627-04", "pic16f627a", "pic16f628", "pic16f628-04", "pic16f628a", "pic16f648a", "pic16lf627", "pic16lf627a", "pic16lf628", "pic16lf628a", "pic16lf648a",
-  "stm32f401cc", "stm32f401ce", "stm32f405rg", "stm32f407vg", "stm32f411ce", "stm32f429zi", "stm32f746ig",
-])
+const PENDING = new Set<string>([])
 
 const num = (l: Level | undefined) => (typeof l === "number" ? l : undefined)
 

@@ -2,7 +2,8 @@ import { ATMEGA328P, type AvrProfile } from "@/mcu/avr/chip"
 import { ChipIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PinDef, PinKind, PropField } from "../types"
 import { DOCS } from "../datasheets/docs"
-import type { Datasheet } from "../types"
+import type { Claim, Datasheet } from "../types"
+import type { Characteristic } from "../characteristics"
 
 /**
  * AVR parts as bare chips, drawn like the STM32 ones: an IC body with every package pin,
@@ -229,24 +230,50 @@ export const atmega328pAu = avrChip(ATMEGA328P, TQFP32, "8-bit AVR MCU, TQFP-32"
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [atmega328p, atmega328pAu]
 
-// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
-// The key numbers with their pages are still to be added (specs).
-const RECORDS: Record<string, Datasheet> = {
-  "atmega328p": {
-    maker: "Microchip",
-    package: "PDIP-28",
-    docs: [DOCS["mchp-ds40002061b"], DOCS["mchp-ds80000855c"], DOCS["mchp-ds40002198c"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
-  },
-  "atmega328p-au": {
-    maker: "Microchip",
-    package: "TQFP-32",
-    docs: [DOCS["mchp-ds40002061b"], DOCS["mchp-ds80000855c"], DOCS["mchp-ds40002198c"]],
-    specs: [],
-    modelled: [],
-    notModelled: [],
-  },
+// --- datasheet records -----------------------------------------------------------------------
+// DS40002061B (PDF page = printed page): the ATmega328P's numbers, the same for both packages
+// (23 programmable I/O lines in either; ADC6/ADC7 of the TQFP are analog only). §29 is the
+// −40 to 85 °C part these are.
+const AVR_DOCS: Datasheet["docs"] = [DOCS["mchp-ds40002061b"], DOCS["mchp-ds80000855c"], DOCS["mchp-ds40002198c"]]
+const ABS_MAX = { page: 308, at: "§29.1 Absolute Maximum Ratings" }
+
+function avrCharacteristics(chip: AvrProfile): Characteristic[] {
+  const memory = { page: 1, at: "Features" }
+  return [
+    { kind: "supply", value: { min: 1.8, max: 5.5 }, limit: { max: chip.electrical.vddMax }, cite: { page: 2, at: "Features, Operating Voltage" }, limitCite: ABS_MAX },
+    { kind: "clock", value: { max: 20e6 }, at: [{ supply: 4.5 }], cite: { page: 313, at: "Table 29-10" } },
+    { kind: "flash", value: { typ: chip.flashBytes }, cite: memory },
+    { kind: "ram", value: { typ: chip.ramEnd - 0xff }, cite: memory },
+    { kind: "eeprom", value: { typ: chip.eepromBytes }, cite: memory },
+    { kind: "ioPins", value: { typ: 23 }, cite: { page: 2, at: "Features, I/O and Packages" } },
+    { kind: "pinCurrent", limit: { max: chip.electrical.pinCurrentMax, sym: true }, per: "pin", cite: ABS_MAX },
+    { kind: "temperature", value: { min: -40, max: 85 }, limit: { min: -55, max: 125 }, cite: { page: 2, at: "Features, Temperature Range" }, limitCite: ABS_MAX },
+  ]
 }
+
+const claim = (what: string, test: string): Claim => ({ what, test: `tests/firmware/${test}.test.ts` })
+const AVR_MODELLED: Claim[] = [
+  claim("AVR core, full instruction set", "avr-core"),
+  { what: "Runs Arduino firmware from ELF", test: "tests/sim/avr-bench.test.ts" },
+  claim("Fuses select clock and start-up", "avr-soc"),
+  claim("Three timers with PWM", "avr-timers"),
+  claim("USART serial port", "avr-usart"),
+  claim("SPI master and slave", "avr-spi"),
+  claim("TWI master and slave", "avr-twi"),
+  claim("ADC and analog comparator", "avr-adc"),
+  claim("External and pin-change interrupts", "avr-extint"),
+  claim("Watchdog, EEPROM and sleep", "avr-system"),
+  claim("Silicon errata by revision", "avr-errata"),
+  { what: "Supply current follows the core", test: "tests/sim/core-supply-load.test.ts" },
+]
+const AVR_NOT_MODELLED: Claim[] = [
+  { what: "ISP serial downloading", cite: { page: 303, at: "§28.8 Serial Downloading" } },
+  { what: "High-voltage parallel programming", cite: { page: 296, at: "§28.7 Parallel Programming" } },
+  { what: "ADC INL, gain and offset", cite: { page: 319, at: "Table 29-15" } },
+  { what: "Internal RC ±10% tolerance", cite: { page: 313, at: "Table 29-9" } },
+]
+
+const RECORDS: Record<string, Datasheet> = Object.fromEntries(
+  defs.map((def) => [def.id, { maker: "Microchip", package: def.info!.Package, docs: AVR_DOCS, specs: [], characteristics: avrCharacteristics(ATMEGA328P), modelled: AVR_MODELLED, notModelled: AVR_NOT_MODELLED }]),
+)
 for (const def of defs) def.datasheet ??= RECORDS[def.id]
