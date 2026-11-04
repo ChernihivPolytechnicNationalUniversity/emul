@@ -88,6 +88,11 @@ const ICSP: [number, string, string?][] = [
   [5, "RST", "PC6"],
   [6, "GND"],
 ]
+/**
+ * ICSP's names, on the sides the pins' labels go: level over the near row, midway between the
+ * LEDs' names and the box, and under the far row, midway between the box and the board's end.
+ */
+const ICSP_NAME_Y = { even: 34.62, odd: 41.93 }
 
 function kindOf(label: string, mcu?: string): PinKind {
   if (label === "GND") return "gnd"
@@ -157,14 +162,18 @@ const named = (style: TextStyle, extra: Partial<TextStyle>): TextStyle => ({ ...
 /**
  * The layout of the board's top side (USB up), as the A000005 and its copies print it: the pin
  * names stand on end beside their pads, reading away from the USB, which leaves the middle to
- * the chip, the resonator, the RESET switch, the four LEDs and ICSP.
+ * the chip, the resonator, the RESET switch, the four LEDs and ICSP, its six names level over
+ * and under its rows.
  */
 /** Pad centre to the middle of its name. */
 const NAME_FROM_PAD_MM = 1.95
 /** ATmega328P-MUR (the schematic's part): 32 VQFN, a 5 mm body at 45°, pads under its edges. */
 const CHIP = { x: MID_X, y: 15.0, side: 5, pads: 8, pitch: 0.5 }
-/** Y1, the 16 MHz resonator (3.2 × 1.3 mm), lengthways beside the chip. */
-const Y1 = { x: 13.6, y: 19.9, w: 1.3, h: 3.2 }
+/**
+ * Y1, the 16 MHz resonator (3.2 × 1.3 mm), turned 45° to lie along the chip's lower-right edge,
+ * 0.5 mm off its pads and clear of the D5–D7 names; its frequency printed under it.
+ */
+const Y1 = { x: 12.15, y: 17.6, w: 1.3, h: 3.2, labelY: 20.6 }
 /** The RESET switch (SW1), a 6 × 3.5 mm SMD tact switch across the board under the chip. */
 const RESET_AT = { x: MID_X, y: 24.0 }
 const RESET_MM = { w: 6.0, h: 3.5 }
@@ -182,17 +191,17 @@ function turned(x: number, y: number, w: number, h: number, angle: number) {
 
 function boardArt(): BodyShape[] {
   const art = new Artwork(FRAME)
-  // Pin names, on end beside the pads; SDA/SCL beside A4/A5 as the copies print them.
+  // Pin names, on end beside the pads and level over and under ICSP's rows, all one size; SDA/SCL
+  // beside A4/A5 as the copies print them.
   const names = art.grouped()
   const upright = named(TABLE, { rotate: 90 })
   J2.forEach(([pin, label]) => names.text(label, ROW_X.j2 + NAME_FROM_PAD_MM, rowY(pin), upright))
   J1.forEach(([pin, label]) => names.text(label, ROW_X.j1 - NAME_FROM_PAD_MM, rowY(pin), upright))
+  ICSP.forEach(([pin, label]) => names.text(label, ICSP_X[Math.floor((pin - 1) / 2)], pin % 2 === 1 ? ICSP_NAME_Y.odd : ICSP_NAME_Y.even, TABLE))
   const extra = art.grouped()
   extra.text("SDA", ROW_X.j2 + NAME_FROM_PAD_MM + 1.25, rowY(8), named(TABLE, { rotate: 90, size: 0.32 })).text("SCL", ROW_X.j2 + NAME_FROM_PAD_MM + 1.25, rowY(7), named(TABLE, { rotate: 90, size: 0.32 }))
   // Pin 1 of each header: a square pad.
   for (const [px, py] of [[ROW_X.j2, rowY(1)], [ROW_X.j1, rowY(1)], [ICSP_X[0], ICSP_Y.odd]]) art.outline(px - 0.95, py - 0.95, px + 0.95, py + 0.95, 0)
-  // Mounting holes, 1.78 mm, in line with the rows a pitch past each end.
-  for (const x of [ROW_X.j2, ROW_X.j1]) for (const y of [rowY(15) - PITCH, rowY(1) + PITCH]) art.circle("none", x, y, 0.89)
   // Mini-B receptacle, overhanging the USB end: the shell and its mouth.
   art.rect("connector", MID_X - 3.85, -1.3, MID_X + 3.85, 7.0, 0.4)
   art.outline(MID_X - 2.6, -1.3, MID_X + 2.6, 1.2, 0.3)
@@ -213,8 +222,9 @@ function boardArt(): BodyShape[] {
   }
   art.circle("board", CHIP.x, CHIP.y - half * Math.SQRT2 + 1.0, 0.28)
   art.text("MEGA328P", CHIP.x, CHIP.y - 0.15, { size: 0.26, inverse: true }).text("MUR", CHIP.x, CHIP.y + 0.75, { size: 0.2, inverse: true })
-  // Y1.
-  art.rect("connector", Y1.x - Y1.w / 2, Y1.y - Y1.h / 2, Y1.x + Y1.w / 2, Y1.y + Y1.h / 2, 0.2)
+  // Y1, along the chip's edge, and its frequency.
+  art.polygon("connector", turned(Y1.x, Y1.y, Y1.w, Y1.h, turn), 0.2)
+  art.text("16 MHz", Y1.x, Y1.labelY, TABLE)
   // RESET switch body (the cap is the part) and its name under it.
   art.rect("connector", RESET_AT.x - RESET_MM.w / 2, RESET_AT.y - RESET_MM.h / 2, RESET_AT.x + RESET_MM.w / 2, RESET_AT.y + RESET_MM.h / 2, 0.3)
   art.text("RESET", RESET_AT.x, RESET_AT.y + RESET_MM.h / 2 + 1.0, TABLE)
