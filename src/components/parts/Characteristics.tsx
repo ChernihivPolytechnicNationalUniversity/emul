@@ -54,14 +54,15 @@ function GlyphIcon({ glyph }: { glyph: Glyph }) {
  * dot and a whisker up to it; the abs max hatched beyond its red tick. Several colours of one LED
  * share the scale, each in its own colour, a little apart.
  */
-function RangeBar({ cs, w: W }: { cs: Characteristic[]; w: number }) {
+function RangeBar({ cs, w: W, show }: { cs: Characteristic[]; w: number; show?: number }) {
   const vals = cs.flatMap((c) => [c.value?.min, c.value?.typ, c.value?.max, c.limit?.max, c.limit?.min].map((l) => num(l, 0)).filter((n): n is number => n !== undefined))
   const sym = cs.some((c) => c.value?.sym || c.limit?.sym)
   const top = Math.max(...vals.map(Math.abs), 1e-12) * 1.15
   const lo = sym ? -top : Math.min(0, ...vals)
   const hi = top
   const x = (n: number) => 4 + ((n - lo) / (hi - lo)) * (W - 8)
-  const limits = [...new Set(cs.flatMap((c) => (c.limit ? (c.limit.sym ? [num(c.limit.max, 0)!, -num(c.limit.max, 0)!] : [num(c.limit.max, 0), num(c.limit.min, 0)].filter((n): n is number => n !== undefined)) : [])))]
+  const drawn = show === undefined ? cs : [cs[show]]
+  const limits = [...new Set(drawn.flatMap((c) => (c.limit ? (c.limit.sym ? [num(c.limit.max, 0)!, -num(c.limit.max, 0)!] : [num(c.limit.max, 0), num(c.limit.min, 0)].filter((n): n is number => n !== undefined)) : [])))]
   const q = KINDS[cs[0].kind].quantity
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden>
@@ -72,10 +73,10 @@ function RangeBar({ cs, w: W }: { cs: Characteristic[]; w: number }) {
       </defs>
       <line x1={x(lo)} x2={x(hi)} y1={11} y2={11} className="stroke-muted-foreground/50" />
       {limits.map((l) => (l > 0 ? <rect key={l} x={x(l)} y={6} width={x(hi) - x(l)} height={10} fill="url(#abs-hatch)" /> : <rect key={l} x={x(lo)} y={6} width={x(l) - x(lo)} height={10} fill="url(#abs-hatch)" />))}
-      {cs.map((c, i) => {
+      {drawn.map((c, i) => {
         const v = c.value
         if (!v) return null
-        const y = 11 + (i - (cs.length - 1) / 2) * 4
+        const y = 11 + (i - (drawn.length - 1) / 2) * 4
         const ink = c.colour ? COLOURS[c.colour] : undefined
         const min = v.sym ? -num(v.max, 0)! : num(v.min, 0)
         const max = num(v.max, 0)
@@ -84,7 +85,7 @@ function RangeBar({ cs, w: W }: { cs: Characteristic[]; w: number }) {
         return (
           <g key={i}>
             {min !== undefined && max !== undefined && max > min && (
-              <rect x={x(min)} y={y - (cs.length > 1 ? 2 : 5)} width={Math.max(2, x(max) - x(min))} height={cs.length > 1 ? 4 : 10} rx={2} fill={ink ?? GREEN} fillOpacity={ink ? 0.35 : 0.18} stroke={ink ?? GREEN} strokeDasharray={dash}>
+              <rect x={x(min)} y={y - (drawn.length > 1 ? 2 : 5)} width={Math.max(2, x(max) - x(min))} height={drawn.length > 1 ? 4 : 10} rx={2} fill={ink ?? GREEN} fillOpacity={ink ? 0.35 : 0.18} stroke={ink ?? GREEN} strokeDasharray={dash}>
                 <title>{`${formatNumber(min, q)} … ${formatNumber(max, q)}`}</title>
               </rect>
             )}
@@ -253,23 +254,39 @@ function Row({ record, cs }: { record: Datasheet; cs: Characteristic[] }) {
             </span>
           ))}
         </span>
-        <span className={cn("text-right text-[12.5px] font-medium tabular-nums", c.set ? "min-w-0 font-mono text-[11.5px]" : "whitespace-nowrap")}>
-          {cs.length > 1
-            ? cs.map((g, i) => (
-                <span key={i} className="ml-1.5 first:ml-0">
-                  <span className="mr-0.5 inline-block size-2 rounded-full align-middle" style={{ background: g.colour ? COLOURS[g.colour] : undefined }} />
-                  {i < cs.length - 1 ? (formatCharacteristic(g).split(" ⚠ ")[0] ?? "").replace(/\s\S+$/, "") : formatCharacteristic(g).split(" ⚠ ")[0]}
-                </span>
-              ))
-            : value || <span className="text-red-600">⚠ {limit}</span>}
-        </span>
+        {cs.length === 1 && (
+          <span className={cn("text-right text-[12.5px] font-medium tabular-nums", c.set ? "min-w-0 font-mono text-[11.5px]" : "whitespace-nowrap")}>
+            {value || <span className="text-red-600">⚠ {limit}</span>}
+          </span>
+        )}
       </div>
-      <div className="flex items-end gap-2 pl-[22px]">
-        <div ref={frame} className="min-w-0 flex-1">
-          {w > 0 && <Visual cs={cs} w={w} />}
+      {cs.length === 1 ? (
+        <div className="flex items-end gap-2 pl-[22px]">
+          <div ref={frame} className="min-w-0 flex-1">
+            {w > 0 && <Visual cs={cs} w={w} />}
+          </div>
+          <Page record={record} c={c} />
         </div>
-        <Page record={record} c={c} />
-      </div>
+      ) : (
+        // One lane per colour on a shared scale, each with its own number.
+        <div className="pl-[22px]">
+          {cs.map((g, i) => {
+            const [v, lim] = formatCharacteristic(g).split(" ⚠ ")
+            return (
+              <div key={i} className="flex items-center gap-2">
+                <span className="inline-block size-2 shrink-0 rounded-full" style={{ background: g.colour ? COLOURS[g.colour] : undefined }} />
+                <div ref={i === 0 ? frame : undefined} className="min-w-0 flex-1">
+                  {w > 0 && <RangeBar cs={cs} w={w} show={i} />}
+                </div>
+                <span className="w-[52px] shrink-0 text-right text-[12px] font-medium tabular-nums">{v || <span className="text-red-600">⚠ {lim}</span>}</span>
+              </div>
+            )
+          })}
+          <div className="text-right">
+            <Page record={record} c={c} />
+          </div>
+        </div>
+      )}
     </li>
   )
 }
