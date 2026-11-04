@@ -1,7 +1,6 @@
 import { hasDatasheet } from "@/schematic/datasheets"
 import type { ComponentDef } from "@/schematic/types"
-import { Details, DocLinks, ModelClaims, Pinout, SpecList, SymbolPreview } from "./PartFacts"
-import { hasPinout } from "./pinout"
+import { Details, DocLinks, ModelClaims, SpecList, SymbolPreview } from "./PartFacts"
 import { CharacteristicList } from "./Characteristics"
 
 /** Old free-text notes that say what the model does and leaves out, and where it comes from: shown in the record's places until the record is written. */
@@ -29,11 +28,9 @@ export function PartTab({ def }: { def: ComponentDef }) {
   return (
     <div data-slot="part-tab" className="flex flex-col gap-3.5">
       {def.description && <p className="text-[12.5px] leading-normal text-muted-foreground">{def.description}</p>}
-      {/* A board by its photo, as in the palette; a chip by its package pins; anything else as the field draws it. Full width: the column is narrow. */}
+      {/* A board by its photo, as in the palette; anything else as the field draws it, the same drawing as its card. Full width: the column is narrow. */}
       {def.board ? (
         <img src={`${import.meta.env.BASE_URL}boards/${def.board.photo}`} alt="" className="h-36 w-full rounded-[10px] border bg-muted/40 object-contain" />
-      ) : hasPinout(def) ? (
-        <Pinout def={def} />
       ) : (
         <SymbolPreview def={def} fill height={120} maxHeight={220} />
       )}

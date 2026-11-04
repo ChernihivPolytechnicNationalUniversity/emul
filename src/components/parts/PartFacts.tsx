@@ -7,7 +7,6 @@ import type { Claim, ComponentDef, Datasheet, DocRecord, NoDatasheet, PlacedObje
 import { PartDrawing } from "@/components/field/GhostLayer"
 import { fieldDetail } from "@/components/field/detail"
 import { SimStore } from "@/sim/sim-store"
-import { packagePins } from "./pinout"
 
 // What a part is, as the hover card and the inspector's Part tab show it: the symbol as the field
 // draws it, the numbers with their datasheet page, what is modelled and what is not, the documents.
@@ -179,36 +178,6 @@ export function DocLinks({ docs, label }: { docs: readonly DocRecord[]; label?: 
       </ul>
       {checked && <p className="mt-1.5 text-right text-[11.5px] text-muted-foreground">checked {checked}</p>}
     </div>
-  )
-}
-
-/**
- * A chip's package pins as its datasheet draws a DIP: 1 at the top left, counting down the left
- * and back up the right. From the part's own pins, so it cannot disagree with the model. Only a
- * package with every pin numbered 1…n and few enough to read (a board's headers are not a package).
- */
-export function Pinout({ def }: { def: ComponentDef }) {
-  const byNumber = packagePins(def)
-  if (!byNumber) return null
-  const n = byNumber.size
-  const half = n / 2
-  const name = (k: number) => byNumber.get(k)!.label || byNumber.get(k)!.id
-  return (
-    <figure className="w-fit shrink-0 rounded-[10px] border px-2 py-2.5">
-      <div className="rounded-sm border-[1.4px] border-foreground/85 px-1.5 py-1 font-mono text-[11px] leading-5">
-        {Array.from({ length: half }, (_, i) => (
-          <div key={i} className="flex justify-between gap-4">
-            <span>
-              {i + 1} {name(i + 1)}
-            </span>
-            <span>
-              {name(n - i)} {n - i}
-            </span>
-          </div>
-        ))}
-      </div>
-      <figcaption className="mt-1.5 text-center text-[11px] text-muted-foreground">pinout</figcaption>
-    </figure>
   )
 }
 
