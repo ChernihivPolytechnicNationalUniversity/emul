@@ -125,7 +125,7 @@ export function QuickInsert({ at, bounds, onPlace, onTake, onPreview, onClose, o
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     // The key that opened the panel shuts it again.
-    if (opensQuickInsert(e, "text")) {
+    if (opensQuickInsert(e.nativeEvent, "text")) {
       e.preventDefault()
       e.stopPropagation()
       return dismiss()

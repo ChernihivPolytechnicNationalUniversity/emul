@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import type { BoardView, DebugController } from "@/debug/session"
 import { addressOf, scalarOf } from "@/debug/values"
 import { symbolize } from "@/debug/disasm"
+import { stopUnlessAppCommand } from "@/lib/keymap"
 import { cn } from "@/lib/utils"
 
 const ROWS = 32
@@ -111,7 +112,7 @@ export function MemoryView({ debug, boardId, view, at }: { debug: DebugControlle
             onChange={(e) => setEditing({ addr: at, text: e.target.value })}
             onBlur={() => !edit.busy && setEditing(null)}
             onKeyDown={(e) => {
-              e.stopPropagation()
+              stopUnlessAppCommand(e)
               if (e.key === "Enter") void commit(at, edit.text)
               else if (e.key === "Escape") setEditing(null)
             }}
@@ -151,7 +152,7 @@ export function MemoryView({ debug, boardId, view, at }: { debug: DebugControlle
           className="h-5 w-64 min-w-0 rounded-sm border bg-transparent px-1 outline-none focus:bg-muted"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDown={stopUnlessAppCommand}
           placeholder="0x20000000, &first, buf, GPIOA"
           aria-label="Address or expression"
         />

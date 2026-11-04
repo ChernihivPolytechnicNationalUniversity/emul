@@ -10,6 +10,8 @@ import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
 import { ChevronDownIcon, CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon, StarIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { KEYMAP, labelFor } from "@/lib/keymap"
+import { currentPlatform } from "@/lib/platform"
 import { chipById } from "@/mcu/chip"
 import { avrChipById } from "@/mcu/avr/chip"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -411,7 +413,7 @@ function TerminalPanel({ object, sim, onSend }: { object: PlacedObject; sim: Sim
           setLine("")
         }}
       >
-        <Input value={line} onChange={(e) => setLine(e.target.value)} placeholder="Type and press Enter" className="h-7 font-mono text-xs" disabled={!sim.live} />
+        <Input value={line} onChange={(e) => setLine(e.target.value)} placeholder={`Type and press ${currentPlatform() === "apple" ? "Return" : "Enter"}`} className="h-7 font-mono text-xs" disabled={!sim.live} />
         <Button type="submit" size="sm" variant="outline" className="h-7" disabled={!sim.live}>
           Send
         </Button>
@@ -592,7 +594,7 @@ function FirmwarePanel({ object, chip, sim, sections, onChange, onFirmware, onCo
       action={
         <ButtonGroup>
           {onCode && (
-            <Button variant="outline" size="xs" onClick={() => onCode(object.id)} title="Source code (⌘J)">
+            <Button variant="outline" size="xs" onClick={() => onCode(object.id)} title={`Source code (${labelFor(KEYMAP.code)})`}>
               <CodeIcon />
               Code…
             </Button>

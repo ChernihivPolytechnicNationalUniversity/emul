@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { catalogue } from "@/schematic/registry"
 import { searchParts, similarParts } from "@/components/palette/search"
 import { hitEntries } from "@/components/palette/items"
+import type { KeyPress } from "@/lib/keys"
 import {
   opensQuickInsert,
   panelPosition,
@@ -52,31 +53,44 @@ function session(recent: string[] = [], favourites: string[] = []) {
 }
 
 describe("the shortcuts that open Quick Insert", () => {
-  it("are A on the bench and Ctrl+K or ⌘K", () => {
-    expect(opensQuickInsert(key("a"), "field")).toBe(true)
-    expect(opensQuickInsert(key("A"), "field")).toBe(true)
-    expect(opensQuickInsert(key("k", { ctrlKey: true }), "field")).toBe(true)
-    expect(opensQuickInsert(key("k", { metaKey: true }), "field")).toBe(true)
+  // A press as the browser sends it: the key typed and the place it was typed on.
+  const press = (k: string, mods: Partial<Pick<KeyPress, "ctrlKey" | "metaKey" | "altKey" | "shiftKey">> = {}): KeyPress => ({ key: k, code: `Key${k.toUpperCase()}`, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods })
+
+  it("are A on the bench and the platform's own command key with K: Ctrl+K, ⌘K on a Mac", () => {
+    for (const platform of ["linux", "windows", "chromeos", "apple"] as const) {
+      expect(opensQuickInsert(press("a"), "field", platform), platform).toBe(true)
+      expect(opensQuickInsert(press("A"), "field", platform), platform).toBe(true)
+    }
+    for (const platform of ["linux", "windows", "chromeos"] as const) {
+      expect(opensQuickInsert(press("k", { ctrlKey: true }), "field", platform), platform).toBe(true)
+      expect(opensQuickInsert(press("k", { metaKey: true }), "field", platform), `${platform}: the Windows key is not the command key`).toBe(false)
+    }
+    expect(opensQuickInsert(press("k", { metaKey: true }), "field", "apple")).toBe(true)
+    expect(opensQuickInsert(press("k", { ctrlKey: true }), "field", "apple"), "a Mac's Control+K is not ⌘K").toBe(false)
+  })
+
+  it("read K on its place when the layout types another letter there", () => {
+    expect(opensQuickInsert({ ...press("л", { ctrlKey: true }), code: "KeyK" }, "field", "linux"), "Russian").toBe(true)
   })
 
   it("leave A to a text field, but Ctrl+K opens from one", () => {
-    expect(opensQuickInsert(key("a"), "text")).toBe(false)
-    expect(opensQuickInsert(key("k", { ctrlKey: true }), "text")).toBe(true)
+    expect(opensQuickInsert(press("a"), "text", "linux")).toBe(false)
+    expect(opensQuickInsert(press("k", { ctrlKey: true }), "text", "linux")).toBe(true)
   })
 
   it("leave both to the code editor, whose Ctrl+K starts its own chords", () => {
-    expect(opensQuickInsert(key("a"), "code")).toBe(false)
-    expect(opensQuickInsert(key("k", { ctrlKey: true }), "code")).toBe(false)
-    expect(opensQuickInsert(key("k", { metaKey: true }), "code")).toBe(false)
+    expect(opensQuickInsert(press("a"), "code", "linux")).toBe(false)
+    expect(opensQuickInsert(press("k", { ctrlKey: true }), "code", "linux")).toBe(false)
+    expect(opensQuickInsert(press("k", { metaKey: true }), "code", "apple")).toBe(false)
   })
 
   it("leave select-all and the other chords alone", () => {
-    expect(opensQuickInsert(key("a", { ctrlKey: true }), "field")).toBe(false)
-    expect(opensQuickInsert(key("a", { metaKey: true }), "field")).toBe(false)
-    expect(opensQuickInsert(key("A", { shiftKey: true }), "field")).toBe(false)
-    expect(opensQuickInsert(key("a", { altKey: true }), "field")).toBe(false)
-    expect(opensQuickInsert(key("k", { ctrlKey: true, shiftKey: true }), "field")).toBe(false)
-    expect(opensQuickInsert(key("k"), "field")).toBe(false)
+    expect(opensQuickInsert(press("a", { ctrlKey: true }), "field", "linux")).toBe(false)
+    expect(opensQuickInsert(press("a", { metaKey: true }), "field", "apple")).toBe(false)
+    expect(opensQuickInsert(press("A", { shiftKey: true }), "field", "linux")).toBe(false)
+    expect(opensQuickInsert(press("a", { altKey: true }), "field", "linux")).toBe(false)
+    expect(opensQuickInsert(press("k", { ctrlKey: true, shiftKey: true }), "field", "linux")).toBe(false)
+    expect(opensQuickInsert(press("k"), "field", "linux")).toBe(false)
   })
 })
 
