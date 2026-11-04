@@ -1,0 +1,8 @@
+{
+  "source": "tests/data/before-the-lattice/tolerance-new-contact-0.0101.emul",
+  "objects": [
+    "A (oscillator)",
+    "R (resistor)"
+  ],
+  "nets": []
+}

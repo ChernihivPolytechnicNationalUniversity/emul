@@ -351,6 +351,15 @@ export class PointGrid<T extends { x: number; y: number }> {
     }
   }
 
+  remove(p: T) {
+    const key = cellKey(Math.round(p.x), Math.round(p.y))
+    const cell = this.cells.get(key)
+    const at = cell?.indexOf(p) ?? -1
+    if (!cell || at < 0) return
+    cell.splice(at, 1)
+    if (!cell.length) this.cells.delete(key)
+  }
+
   at(x: number, y: number): T[] {
     const cx = Math.round(x)
     const cy = Math.round(y)

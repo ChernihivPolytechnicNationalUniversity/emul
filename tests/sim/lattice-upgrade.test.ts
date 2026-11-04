@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { onThisVersion } from "@/collab/elements"
+import * as Y from "yjs"
+import { guestRoom, hostRoom, join as joinRoom, onThisVersion, readRoom, ROOM_VERSION, roomVersion, split, type Room } from "@/collab/elements"
 import { parseProject, readProjectFile } from "@/project/project-store"
 import { setLibrary } from "@/schematic/registry"
 import { builder } from "@/schematic/builder"
@@ -9,10 +10,10 @@ import { examples } from "@/schematic/examples"
 import { GRID, objectPins, objectRect, type Orientation, type Point } from "@/schematic/geometry"
 import { migrated, SCHEMATIC_VERSION, upgraded } from "@/schematic/migrate"
 import { buildNets } from "@/schematic/nets"
-import { freeSpot, placementCheck } from "@/schematic/placement"
+import { placementCheck } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
 import type { HdlModule, PlacedObject, Rotation, Schematic } from "@/schematic/types"
-import { clipOfThisVersion, clipOnTheLattice, pastedInto, type Clip } from "@/schematic/use-schematic"
+import { clipboardText, clipFromClipboard, clipOfThisVersion, pasteLanding, pastedInto, type Clip } from "@/schematic/use-schematic"
 import { SimLoop } from "@/sim/loop"
 
 const ROOT = join(import.meta.dirname, "..", "..")
@@ -59,6 +60,14 @@ function before(o: PlacedObject, pinId: string): Point {
 }
 
 const INVERTER: HdlModule = { id: "hdl:inv", name: "inv", files: [], built: "inv", netlist: { top: "inv", language: "verilog", nets: 3, ports: [{ name: "a", dir: "input", bits: [1], offset: 0, upto: false }, { name: "y", dir: "output", bits: [2], offset: 0, upto: false }], cells: [["$_NOT_", 1, 2]], init: [] } as never }
+
+const WITH_ENABLE: HdlModule = { ...INVERTER, built: "inv-en", netlist: { ...INVERTER.netlist!, nets: 4, ports: [...INVERTER.netlist!.ports, { name: "en", dir: "input", bits: [3], offset: 0, upto: false }] } as never }
+
+const touchingAny = (doc: Schematic, id: string) => connected(doc).filter((g) => g.some((k) => k.startsWith(`${id}:`)))
+
+const overlap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+
+const emptyDoc = (): Schematic => ({ objects: [], wires: [], parts: {} })
 
 const OLD = join(ROOT, "tests", "data", "emul-1.42.0")
 
@@ -275,13 +284,11 @@ describe("a paste from an older εmul turns a part off a diagonal before it look
     const resistor = placedAs("resistor", upright(0), -1, 4, "R9")
     const doc: Schematic = { objects: [resistor], wires: [], parts: {} }
     const clip: Clip = { objects: [placedAs("npn", upright(45), 0, 0, "Q1")], wires: [], parts: {} }
-    const normal = clipOnTheLattice(clip)
-    expect.soft(normal.objects[0].rotation ?? 0, "turned before anything else").toBe(0)
-    const probes = normal.objects.map((o) => ({ ...o, id: `paste:${o.id}` }))
-    const spot = freeSpot({ objects: doc.objects, wires: [], routes: [], grid: GRID }, probes, { x: GRID, y: GRID })
-    const pasted = pastedInto(doc, clip, spot.x, spot.y, () => "Q2", () => "w")
+    const { clip: landing, at: spot } = pasteLanding({ objects: doc.objects, wires: [], routes: [], grid: GRID }, clip, { x: GRID, y: GRID })
+    expect.soft(landing.objects[0].rotation ?? 0, "turned before anything else").toBe(0)
+    const pasted = pastedInto(doc, landing, spot.x, spot.y, () => "Q2", () => "w")
     const q = pasted.objects.find((o) => o.id === "Q2")!
-    expect.soft([q.x, q.y, q.rotation ?? 0], "where the room was found").toEqual([probes[0].x + spot.x, probes[0].y + spot.y, 0])
+    expect.soft([q.x, q.y, q.rotation ?? 0], "where the room was found").toEqual([landing.objects[0].x + spot.x, landing.objects[0].y + spot.y, 0])
     expect.soft(placementCheck({ objects: pasted.objects, wires: [], routes: [], grid: GRID }, [q])(0, 0), "not refused where it landed").toBe(false)
     expect.soft(objectRect(q, GRID).w, "a right-angle box").toBe(objectRect({ ...q, rotation: undefined }, GRID).w)
   })
@@ -324,9 +331,9 @@ describe("a live room or a clip from before the lattice is upgraded on its way i
   it("a clip copied in an older tab carries no version and is upgraded before it is pasted; one carrying this version is pasted as it is", async () => {
     const stored = await rawOld("led-diamond.emul")
     const clip: Clip = { objects: stored.objects, wires: stored.wires, parts: stored.parts }
-    const pasted = pastedInto({ objects: [], wires: [], parts: {} }, clipOfThisVersion(clip, undefined), 0, 0, (id) => id, () => "w")
+    const pasted = pastedInto({ objects: [], wires: [], parts: {} }, clipOfThisVersion(clip, undefined).clip, 0, 0, (id) => id, () => "w")
     expect.soft(connected(pasted), "the LEDs pasted apart").toEqual([])
-    expect.soft(clipOfThisVersion(clip, SCHEMATIC_VERSION), "a clip of this version is untouched").toBe(clip)
+    expect.soft(clipOfThisVersion(clip, SCHEMATIC_VERSION).clip, "a clip of this version is untouched").toBe(clip)
   })
 })
 
@@ -364,12 +371,69 @@ describe("the upgrade's finer rules (phase 2 review)", () => {
     expect.soft(notes, "named").toEqual(["Q1 stood at 45°, which it cannot take now: turned to 90°."])
   })
 
-  it("a part with no clean square within reach is left nearest and the upgrade says the circuit could not be kept", () => {
+  it("a part with no clean square in the 64 nearest goes as far as it must, onto a spot clear of every part, keeps the circuit and says how far", () => {
     const r = placedAs("resistor", upright(45), 0, 0, "R1")
     const grounds: PlacedObject[] = []
     for (let x = -5; x <= 7; x++) for (let y = -5; y <= 7; y++) grounds.push(groundOn(`G${x}_${y}`, { x: c(x), y: c(y) }))
-    const { notes } = upgraded(old([r, ...grounds]))
-    expect.soft(notes.some((n) => n.includes("could not be kept") && n.includes("R1")), "said, naming R1").toBe(true)
+    const { doc, notes } = upgraded(old([r, ...grounds]))
+    const moved = doc.objects.find((o) => o.id === "R1")!
+    expect.soft(touchingAny(doc, "R1"), "R1's ends on no ground").toEqual([])
+    expect.soft(grounds.filter((g) => overlap(objectRect(g, GRID), objectRect(moved, GRID))).map((g) => g.id), "on no ground's body").toEqual([])
+    const away = Number(/^R1 moved (\d+) cells onto the grid/.exec(notes.join(" "))?.[1])
+    expect.soft(away, "said how far: past the ring of grounds").toBeGreaterThan(4)
+    expect.soft(notes.some((n) => n.includes("could not be kept")), "nothing left unkept").toBe(false)
+  })
+
+  it("old pins chained closer than the old tolerance stay one net, however the file orders them", () => {
+    const four = (step: number) =>
+      [0, 3, 1, 2].map((k): PlacedObject => ({ id: `R${k}`, def: "resistor", x: k * step, y: 0, rotation: 45, props: { ref: `R${k}` } }))
+    expect.soft(connected(upgraded(old(four(0.006))).doc), "0.006 px apart: both ends of all four joined, as before").toEqual([
+      ["R0:1", "R1:1", "R2:1", "R3:1"],
+      ["R0:2", "R1:2", "R2:2", "R3:2"],
+    ])
+    expect.soft(connected(upgraded(old(four(0.0099))).doc), "0.0099 px apart: joined").toEqual([
+      ["R0:1", "R1:1", "R2:1", "R3:1"],
+      ["R0:2", "R1:2", "R2:2", "R3:2"],
+    ])
+    expect.soft(connected(upgraded(old(four(0.0101))).doc), "0.0101 px apart: never touched, still apart").toEqual([])
+  })
+
+  it("a pin now on the grid meets no old pin within the old tolerance of it", () => {
+    const resistorAt = (x: number): PlacedObject => ({ id: "R", def: "resistor", x, y: c(1), props: { ref: "R" } })
+    const oscillator = placedAs("oscillator", upright(0), 0, 0, "A")
+    for (const off of [0.006, 0.0099]) {
+      const { doc, notes } = upgraded(old([oscillator, resistorAt(c(4) + off)]))
+      expect.soft(connected(doc), `${off} px off the grid: OUT keeps off R`).toEqual([])
+      expect.soft(notes, `${off} px: A moves and says so`).toEqual(["A moved 1 cell: its pins, now on the grid, would have touched another net's where it stood."])
+    }
+    const { doc, notes } = upgraded(old([oscillator, resistorAt(c(4) + 0.0101)]))
+    expect.soft(connected(doc), "0.0101 px off: apart").toEqual([])
+    expect.soft(notes, "0.0101 px off: A stays where it stood").toEqual([])
+  })
+
+  it("the search takes back an earlier part's square when a later part has nowhere else to go", () => {
+    const a = placedAs("resistor", upright(45), 0, 0, "A")
+    const b = placedAs("resistor", upright(45), 2, 2, "B")
+    const grounds: PlacedObject[] = []
+    for (let x = -1; x <= 6; x++) for (let y = -1; y <= 6; y++) if (!(x === 1 && y === 1) && !(x === 4 && y === 4)) grounds.push(groundOn(`G${x}_${y}`, { x: c(x), y: c(y) }))
+    const { doc, notes } = upgraded(old([a, b, ...grounds]))
+    expect.soft([...touchingAny(doc, "A"), ...touchingAny(doc, "B")], "A and B on no ground").toEqual([])
+    for (const [id, was] of [["A", a], ["B", b]] as const) {
+      const now = doc.objects.find((o) => o.id === id)!
+      expect.soft(Math.max(Math.abs(now.x - was.x), Math.abs(now.y - was.y)) / GRID, `${id} within the 64 nearest squares`).toBeLessThanOrEqual(4)
+    }
+    expect.soft(notes.some((n) => n.includes("could not be kept")), "nothing left unkept").toBe(false)
+  })
+
+  it("two parts after one square: the one with a near second choice yields it to the one without", () => {
+    const def = getDef("resistor")!
+    const half = ((def.width + def.height) * Math.SQRT1_2) / 2
+    const centredAt = (id: string, mx: number, my: number): PlacedObject => ({ id, def: "resistor", x: (mx - half) * GRID, y: (my - half) * GRID, rotation: 45, props: { ref: id } })
+    const { doc } = upgraded(old([centredAt("A", 11.9, 11.5), centredAt("B", 11.5, 11.5)]))
+    const square = (id: string) => [doc.objects.find((o) => o.id === id)!.x / GRID, doc.objects.find((o) => o.id === id)!.y / GRID]
+    expect.soft(square("B"), "B keeps the square round its old middle").toEqual([10, 10])
+    expect.soft(square("A"), "A takes its second, a cell to the right").toEqual([11, 10])
+    expect.soft(connected(doc), "and they do not meet").toEqual([])
   })
 })
 
@@ -381,5 +445,83 @@ describe("a part whose definition arrives after its pins were first asked for ge
     setLibrary([INVERTER])
     expect.soft(objectPins(u1, GRID).map((p) => p.pin.id).sort(), "known, all of them").toEqual(["GND", "VCC", "a", "y"])
     setLibrary([])
+  })
+
+  it("an HDL part whose module is rebuilt with another port shows the new port, standing where it stood", () => {
+    const u1: PlacedObject = { id: "U1", def: "hdl:inv", x: 0, y: 0, props: { ref: "U1" } }
+    setLibrary([INVERTER])
+    expect.soft(objectPins(u1, GRID).map((p) => p.pin.id).sort(), "the inverter's pins").toEqual(["GND", "VCC", "a", "y"])
+    setLibrary([WITH_ENABLE])
+    expect.soft(objectPins(u1, GRID).map((p) => p.pin.id).sort(), "the rebuilt module's pins").toEqual(["GND", "VCC", "a", "en", "y"])
+    setLibrary([])
+  })
+})
+
+const roomHolding = (doc?: Schematic, stamp?: string): Room => {
+  const ydoc = new Y.Doc()
+  const room: Room = { ydoc, elements: ydoc.getMap<string>("elements"), meta: ydoc.getMap<string>("meta") }
+  if (doc) for (const [k, v] of split(doc)) room.elements.set(k, v)
+  if (stamp) room.meta.set(ROOM_VERSION, stamp)
+  return room
+}
+
+const placements = (doc: Schematic) => doc.objects.map((o) => [o.id, o.x, o.y, o.rotation ?? 0]).sort()
+
+describe("a live room is entered through the upgrade, and an upgraded room is written back stamped (phase 2 verification)", () => {
+  it("a guest entering a room an older εmul filled gets it as the file opens, notes and all, and the room is stamped with it", async () => {
+    const file = await opened("npn-on-a-diagonal.emul")
+    const room = roomHolding(await rawOld("npn-on-a-diagonal.emul"))
+    const entered = guestRoom(room)!
+    expect.soft(entered.notes, "the file's notes").toEqual(file.notes)
+    expect.soft(placements(entered.doc), "the file's placements").toEqual(placements(file.doc))
+    expect.soft(room.meta.get(ROOM_VERSION), "stamped").toBe(roomVersion())
+    expect.soft(placements(joinRoom(new Map(room.elements.entries()))), "written back").toEqual(placements(file.doc))
+    const again = readRoom(room)
+    expect.soft(again.notes, "read again: nothing to say").toEqual([])
+    expect.soft(placements(again.doc), "nor anything moved").toEqual(placements(file.doc))
+  })
+
+  it("a host entering such a room gets the same; a host bringing a document to an empty room writes it stamped", async () => {
+    const file = await opened("npn-on-a-diagonal.emul")
+    const old = roomHolding(await rawOld("npn-on-a-diagonal.emul"))
+    const entered = hostRoom(old, emptyDoc())!
+    expect.soft(entered.notes, "the file's notes").toEqual(file.notes)
+    expect.soft(old.meta.get(ROOM_VERSION), "stamped").toBe(roomVersion())
+    const empty = roomHolding()
+    expect.soft(hostRoom(empty, file.doc), "an empty room has nothing to hand back").toBeNull()
+    expect.soft(empty.meta.get(ROOM_VERSION), "stamped").toBe(roomVersion())
+    expect.soft(placements(joinRoom(new Map(empty.elements.entries()))), "holding the host's document").toEqual(placements(file.doc))
+    expect.soft(placements(guestRoom(empty)!.doc), "which a guest reads unchanged").toEqual(placements(file.doc))
+  })
+
+  it("a room stamped with this version is read as it is, and an empty one turns a guest away", async () => {
+    const file = await opened("led-diamond.emul")
+    const room = roomHolding(file.doc, roomVersion())
+    const entered = guestRoom(room)!
+    expect.soft(entered.notes, "no notes").toEqual([])
+    expect.soft(placements(entered.doc), "unchanged").toEqual(placements(file.doc))
+    expect.soft(guestRoom(roomHolding()), "empty").toBeNull()
+  })
+})
+
+describe("the clipboard carries the version, and a clip from an older tab is upgraded with its notes (phase 2 verification)", () => {
+  it("a clip copied here comes back exactly as it went", async () => {
+    const { doc } = await opened("power-supply.emul")
+    const clip: Clip = { objects: doc.objects, wires: doc.wires, parts: doc.parts }
+    const back = clipFromClipboard(clipboardText(clip))!
+    expect.soft(back.notes, "nothing to say").toEqual([])
+    expect.soft(placements({ ...doc, ...back.clip }), "every part where it was").toEqual(placements(doc))
+  })
+
+  it("a clip from an older tab, with no version, is upgraded and says what moved", async () => {
+    const file = await opened("npn-on-a-diagonal.emul")
+    const stored = await rawOld("npn-on-a-diagonal.emul")
+    const back = clipFromClipboard(JSON.stringify({ emul: { objects: stored.objects, wires: stored.wires, parts: stored.parts } }))!
+    expect.soft(back.notes, "the file's notes").toEqual(file.notes)
+    expect.soft(placements({ ...file.doc, ...back.clip }), "the file's placements").toEqual(placements(file.doc))
+  })
+
+  it("text that is not an εmul clip is no clip", () => {
+    for (const text of [undefined, "", "R1 10k", "{\"emul\": 3}", JSON.stringify({ objects: [] })]) expect.soft(clipFromClipboard(text), JSON.stringify(text)).toBeNull()
   })
 })

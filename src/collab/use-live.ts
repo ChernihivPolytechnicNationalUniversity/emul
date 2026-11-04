@@ -3,8 +3,9 @@ import { HocuspocusProvider } from "@hocuspocus/provider"
 import * as Y from "yjs"
 import { COLLAB_PATH, ROOM_ELEMENTS, ROOM_META } from "emul-shared/room"
 import { useEvent } from "@/hooks/use-event"
+import { announceUpgrade } from "@/hooks/use-projects"
 import type { Point, Schematic } from "@/schematic/types"
-import { join, onThisVersion, ROOM_VERSION, roomVersion, split } from "./elements"
+import { guestRoom, hostRoom, join, pushTo } from "./elements"
 import { anonymousIdentity, withAnimal, type Identity } from "./identity"
 
 export type Move = { ids: string[]; dx: number; dy: number }
@@ -76,21 +77,6 @@ export function useLive(merge: (doc: Schematic) => void): Live {
   const current = () => {
     const s = session.current
     return s ? join(new Map(s.elements.entries())) : null
-  }
-
-  const push = (s: Session, doc: Schematic) => {
-    const next = split(doc)
-    s.ydoc.transact(() => {
-      for (const [k, v] of next) if (s.elements.get(k) !== v) s.elements.set(k, v)
-      for (const k of [...s.elements.keys()]) if (!next.has(k)) s.elements.delete(k)
-      if (s.meta.get(ROOM_VERSION) !== roomVersion()) s.meta.set(ROOM_VERSION, roomVersion())
-    })
-  }
-
-  const stored = (s: Session) => {
-    const { doc, upgraded } = onThisVersion(current()!, s.meta.get(ROOM_VERSION))
-    if (upgraded) push(s, doc)
-    return doc
   }
 
   const teardown = useEvent(() => {
@@ -179,24 +165,29 @@ export function useLive(merge: (doc: Schematic) => void): Live {
     setHost(true)
     setHostedRoom(id)
     s.meta.set("name", name)
-    if (s.elements.size === 0) push(s, doc)
-    else merge(stored(s))
+    const entered = hostRoom(s, doc)
+    if (entered) {
+      merge(entered.doc)
+      announceUpgrade(entered.notes)
+    }
     s.ready = true
   })
 
   const joinRoom = useEvent(async (id: string) => {
     const s = await connect(id)
-    if (s.elements.size === 0) {
+    const entered = guestRoom(s)
+    if (!entered) {
       leave()
       return null
     }
     s.ready = true
-    return { name: s.meta.get("name") ?? "Live bench", doc: stored(s) }
+    announceUpgrade(entered.notes)
+    return { name: s.meta.get("name") ?? "Live bench", doc: entered.doc }
   })
 
   const onChange = React.useCallback((doc: Schematic) => {
     const s = session.current
-    if (s?.ready) push(s, doc)
+    if (s?.ready) pushTo(s, doc)
   }, [])
 
   const pending = React.useRef<Record<string, unknown>>({})

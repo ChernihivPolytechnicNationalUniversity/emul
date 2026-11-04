@@ -5,6 +5,7 @@ import { normalizeFiles } from "@/project/files"
 import { normalizeDebug } from "@/debug/saved"
 import { intersects, objectRect, snap, type FlipAxis, type Point, type Rect, type Turn } from "./geometry"
 import { flipSelection, rotateSelection } from "./orient"
+import { freeSpot, type PlacementScene } from "./placement"
 import { getDef } from "./registry"
 import { migrated, SCHEMATIC_VERSION, upgradedFrom } from "./migrate"
 import {
@@ -84,10 +85,30 @@ export type Clip = Pick<Schematic, "objects" | "wires" | "parts">
 
 export const clipOnTheLattice = (clip: Clip): Clip => ({ ...clip, objects: clip.objects.map(migrated) })
 
-export function clipOfThisVersion(clip: Clip, version: number | undefined): Clip {
-  if (version !== undefined && version >= SCHEMATIC_VERSION) return clip
-  const { doc } = upgradedFrom({ objects: clip.objects, wires: clip.wires, parts: clip.parts }, version)
-  return { objects: doc.objects, wires: doc.wires, parts: doc.parts }
+export type ClipIn = { clip: Clip; notes: string[] }
+
+export function clipOfThisVersion(clip: Clip, version: number | undefined): ClipIn {
+  if (version !== undefined && version >= SCHEMATIC_VERSION) return { clip, notes: [] }
+  const { doc, notes } = upgradedFrom({ objects: clip.objects, wires: clip.wires, parts: clip.parts }, version)
+  return { clip: { objects: doc.objects, wires: doc.wires, parts: doc.parts }, notes }
+}
+
+export const clipboardText = (clip: Clip) => JSON.stringify({ emul: clip, version: SCHEMATIC_VERSION })
+
+export function clipFromClipboard(text: string | undefined): ClipIn | null {
+  let parsed: { emul?: Clip; version?: unknown } | null = null
+  try {
+    parsed = text ? (JSON.parse(text) as { emul?: Clip; version?: unknown }) : null
+  } catch {
+    return null
+  }
+  if (!parsed?.emul || !Array.isArray(parsed.emul.objects)) return null
+  return clipOfThisVersion(parsed.emul, typeof parsed.version === "number" ? parsed.version : undefined)
+}
+
+export function pasteLanding(scene: PlacementScene, saved: Clip, offset: Point): { clip: Clip; at: Point } {
+  const clip = clipOnTheLattice(saved)
+  return { clip, at: freeSpot(scene, clip.objects.map((o) => ({ ...o, id: `paste:${o.id}` })), offset) }
 }
 
 export function pastedInto(doc: Schematic, clip: Clip, dx: number, dy: number, idOf: (old: string) => string, newId: () => string): Schematic {

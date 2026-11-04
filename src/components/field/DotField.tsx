@@ -29,8 +29,8 @@ import { languageOf } from "emul-shared/hdl"
 import type { SourceFile } from "emul-shared/source"
 import { bytesToBase64 } from "@/lib/bytes"
 import { useEvent } from "@/hooks/use-event"
-import { clipOfThisVersion, clipOnTheLattice, useSchematic, type Clip } from "@/schematic/use-schematic"
-import { SCHEMATIC_VERSION } from "@/schematic/migrate"
+import { clipboardText, clipFromClipboard, pasteLanding, useSchematic, type Clip } from "@/schematic/use-schematic"
+import { announceUpgrade } from "@/hooks/use-projects"
 import { contactCheck, designatorRects, fieldRouter, freeSpot, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
 import { toast } from "sonner"
 import { DT } from "@/sim/speeds"
@@ -391,11 +391,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (landed.length) reveal(unionOf(landed.flatMap((o) => [objectRect(o, grid), ...designatorRects(o, grid)])), CLEAR_OF_CONTROLS_PX)
   }
   const pasteFree = useEvent((saved: Clip, dx: number, dy: number) => {
-    const c = clipOnTheLattice(saved)
-    const probes = c.objects.map((o) => ({ ...o, id: `paste:${o.id}` }))
-    const at = freeSpot(scene(), probes, { x: dx, y: dy })
+    const { clip: c, at } = pasteLanding(scene(), saved, { x: dx, y: dy })
     pasteClip(c, at.x, at.y)
-    revealPlaced(probes, snap(at.x, grid), snap(at.y, grid))
+    revealPlaced(c.objects, snap(at.x, grid), snap(at.y, grid))
   })
   const addFree = useEvent((defId: string, center: Point) => {
     const def = getDef(defId)
@@ -411,7 +409,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (!c) return
     setClip(c)
     pasted.current = 0
-    navigator.clipboard?.writeText(JSON.stringify({ emul: c, version: SCHEMATIC_VERSION })).catch(() => {})
+    navigator.clipboard?.writeText(clipboardText(c)).catch(() => {})
   }, [copySelected])
   const paste = React.useCallback(
     (c: Clip | null = clip) => {
@@ -1030,15 +1028,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const onPaste = useEvent((e: ClipboardEvent) => {
     if (inTextField(e)) return
     e.preventDefault()
-    const text = e.clipboardData?.getData("text/plain")
-    let external: Clip | null = null
-    try {
-      const parsed = text ? (JSON.parse(text) as { emul?: Clip; version?: number }) : null
-      if (parsed?.emul && Array.isArray(parsed.emul.objects)) external = clipOfThisVersion(parsed.emul, typeof parsed.version === "number" ? parsed.version : undefined)
-    } catch {
-      // Not ours; fall back to the local clip.
-    }
-    paste(external ?? undefined)
+    const external = clipFromClipboard(e.clipboardData?.getData("text/plain"))
+    if (external) announceUpgrade(external.notes)
+    paste(external?.clip)
   })
   React.useEffect(() => {
     window.addEventListener("keydown", onKey)

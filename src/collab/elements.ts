@@ -1,14 +1,15 @@
-import { SCHEMATIC_VERSION, upgradedFrom } from "@/schematic/migrate"
+import type * as Y from "yjs"
+import { SCHEMATIC_VERSION, upgradedFrom, type Upgrade } from "@/schematic/migrate"
 import type { HdlModule, PartState, PlacedObject, Schematic, Wire } from "@/schematic/types"
 
 export const ROOM_VERSION = "version"
 
 export const roomVersion = () => String(SCHEMATIC_VERSION)
 
-export function onThisVersion(stored: Schematic, stamp: string | undefined): { doc: Schematic; upgraded: boolean } {
+export function onThisVersion(stored: Schematic, stamp: string | undefined): Upgrade & { upgraded: boolean } {
   const version = Number(stamp) || undefined
-  if (version !== undefined && version >= SCHEMATIC_VERSION) return { doc: stored, upgraded: false }
-  return { doc: upgradedFrom(stored, version).doc, upgraded: true }
+  if (version !== undefined && version >= SCHEMATIC_VERSION) return { doc: stored, notes: [], upgraded: false }
+  return { ...upgradedFrom(stored, version), upgraded: true }
 }
 
 const FIRMWARE = ["firmware", "firmwareData", "firmwareBuild"] as const
@@ -86,3 +87,28 @@ export function join(elements: ReadonlyMap<string, string>): Schematic {
   if (library.length) doc.library = library.sort(byZ).map(unz)
   return doc
 }
+
+export type Room = { ydoc: Y.Doc; elements: Y.Map<string>; meta: Y.Map<string> }
+
+export function pushTo(room: Room, doc: Schematic) {
+  const next = split(doc)
+  room.ydoc.transact(() => {
+    for (const [k, v] of next) if (room.elements.get(k) !== v) room.elements.set(k, v)
+    for (const k of [...room.elements.keys()]) if (!next.has(k)) room.elements.delete(k)
+    if (room.meta.get(ROOM_VERSION) !== roomVersion()) room.meta.set(ROOM_VERSION, roomVersion())
+  })
+}
+
+export function readRoom(room: Room): Upgrade {
+  const { upgraded, ...read } = onThisVersion(join(new Map(room.elements.entries())), room.meta.get(ROOM_VERSION))
+  if (upgraded) pushTo(room, read.doc)
+  return read
+}
+
+export function hostRoom(room: Room, doc: Schematic): Upgrade | null {
+  if (room.elements.size) return readRoom(room)
+  pushTo(room, doc)
+  return null
+}
+
+export const guestRoom = (room: Room): Upgrade | null => (room.elements.size ? readRoom(room) : null)
