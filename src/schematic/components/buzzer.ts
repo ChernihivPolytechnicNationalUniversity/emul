@@ -111,19 +111,15 @@ function modelOf(preset: BuzzerPreset): ModelElement[] {
 }
 
 function describe(preset: BuzzerPreset): string {
-  const { minVolts, maxVolts, ratedVolts, ratedSpl } = preset
-  const resonance = quantity(preset.frequency, "Hz")
-  const ratedAt = quantity(preset.ratedAtFrequency ?? preset.frequency, "Hz")
-  const level = `${ratedSpl} ${levelUnit(preset)} at 10 cm`
-  const supply = `${minVolts}–${maxVolts} V`
   switch (preset.kind) {
     case "magnetic":
-      return `Passive magnetic buzzer: ${quantity(preset.coil ?? 0, "Ω")} coil, ${supply} (rated ${ratedVolts} V), resonance ${resonance}, ${level} on its rated square at ${ratedAt}. It sounds the square wave it is driven with, loudest at its resonance; on DC it only clicks. Select it while running for the tone and its level.`
+      return "Passive magnetic buzzer"
     case "piezo":
-      return `Passive piezo sounder: ${quantity(preset.capacitance ?? 0, "F")}, resonance ${resonance}, ${level} on a ${ratedVolts} Vp-p square at ${ratedAt}, ${maxVolts} V at most. Light enough for an MCU pin; silent on DC. Select it while running for the tone and its level.`
+      return "Passive piezo sounder"
     case "magnetic-active":
+      return "Active magnetic buzzer"
     case "piezo-active":
-      return `Active ${preset.kind === "magnetic-active" ? "magnetic buzzer" : "piezo buzzer"}: its own oscillator beeps ${resonance} on ${supply} DC, ${quantity(preset.ratedCurrent ?? 0, "A")} and ${level} at its rated ${ratedVolts} V, louder and drawing more as the supply rises. + on pin 1; it cannot play another pitch. Select it while running for its level.`
+      return "Active piezo buzzer"
   }
 }
 
@@ -133,7 +129,7 @@ function buzzerDef(preset: BuzzerPreset): ComponentDef {
     name: preset.name,
     description: describe(preset),
     category: "sound",
-    keywords: ["buzzer", "beeper", "sounder", "zummer", "transducer", preset.badge, ...BUZZER_KINDS[preset.kind].split(", "), ...(isActive(preset.kind) ? [] : ["speaker"])],
+    keywords: ["buzzer", "beeper", "sounder", "zummer", "transducer", preset.maker, preset.badge, ...BUZZER_KINDS[preset.kind].split(", "), ...(isActive(preset.kind) ? [] : ["speaker"])],
     icon: BuzzerIcon,
     prefix: "BZ",
     width: 4,
@@ -148,7 +144,7 @@ function buzzerDef(preset: BuzzerPreset): ComponentDef {
       { type: "text", x: 2, y: 1.15, text: preset.badge, size: 0.24, muted: true },
     ],
     model: modelOf(preset),
-    info: { Datasheet: `${preset.maker} ${preset.name}` },
+    // info Datasheet (in the datasheet record): `${preset.maker} ${preset.name}`
   }
 }
 

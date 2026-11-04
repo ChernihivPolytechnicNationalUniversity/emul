@@ -71,9 +71,8 @@ const model: Element[] = [
 export const chargeBoostModule: ComponentDef = {
   id: "lx-lcbst",
   name: "LX-LCBST charger + boost",
-  keywords: ["Li-ion", "lithium", "TP4056", "DW03", "MT3608", "module"],
-  description:
-    "TP4056 Li-ion charger (1 A from USB-C or IN+, trickle below 2.9 V, stops at C/10), DW03 protection (4.3 V, 2.4 V, 3.5 A, short) and an MT3608 boost to the output set by the trimmer (4.2–28 V).",
+  keywords: ["Li-ion", "lithium", "TP4056", "DW03", "MT3608", "module", "USB-C"],
+  description: "Li-ion charger and boost module",
   category: "power",
   icon: BatteryIcon,
   prefix: "A",
@@ -88,12 +87,19 @@ export const chargeBoostModule: ComponentDef = {
   hideIdle: true,
   pinsAreSockets: true,
   info: {
-    Charger: "TP4056, 1 A (R_PROG 1.2 kΩ), 4.2 V ±1 %, trickle 100 mA below 2.9 V, ends at 100 mA, recharges at 4.05 V",
-    Protection: "DW03: overcharge 4.3 V, over-discharge 2.4 V, overcurrent 3.5 A, short circuit 20 A, 40 mΩ",
-    Boost: "MT3608, 4.2–28 V by the trimmer, ~2 A from the cell (5 W)",
+    // Charger: "TP4056, 1 A (R_PROG 1.2 kΩ), 4.2 V ±1 %, trickle 100 mA below 2.9 V, ends at 100 mA, recharges at 4.05 V"
+    Charger: "TP4056, 1 A (1.2 kΩ)",
+    Float: "4.2 V ±1 %",
+    Trickle: "100 mA below 2.9 V",
+    "Charge end": "100 mA, restarts 4.05 V",
+    // Protection: "DW03: overcharge 4.3 V, over-discharge 2.4 V, overcurrent 3.5 A, short circuit 20 A, 40 mΩ"
+    Protection: "DW03, cell 2.4–4.3 V",
+    Overcurrent: "3.5 A, short 20 A",
+    // Boost: "MT3608, 4.2–28 V by the trimmer, ~2 A from the cell (5 W)"
+    Boost: "MT3608, 4.2–28 V, ~2 A",
     Input: "USB-C or IN+/IN−, 4.5–6.5 V",
     Size: "23.5 × 19 mm",
-    Source: "Datasheets: TP4056 (NanJing Top Power), DW03 (PJSEMI), MT3608 (Aerosemi)",
+    // Source (in the datasheet record): "Datasheets: TP4056 (NanJing Top Power), DW03 (PJSEMI), MT3608 (Aerosemi)"
   },
 }
 

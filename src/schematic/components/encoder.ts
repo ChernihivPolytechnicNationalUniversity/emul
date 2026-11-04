@@ -64,10 +64,9 @@ const ec11Pins: PinDef[] = [
 export const encoderEc11: ComponentDef = {
   id: "encoder-ec11",
   name: "Rotary encoder EC11E",
-  description:
-    "Incremental encoder with detents and a push switch: A and B close to C in quadrature, A first turning clockwise, half a cycle per detent (rest alternately both open, both closed). 10 mA 5 V rating; bounce 2 ms max when switched on. Pull A, B and D up yourself.",
+  description: "Rotary encoder with push switch",
   category: "input",
-  keywords: ["encoder", "rotary", "quadrature", "EC11", "ALPS", ...Object.keys(EC11E_PARTS)],
+  keywords: ["encoder", "rotary", "quadrature", "EC11", "ALPS", "incremental", "detent", ...Object.keys(EC11E_PARTS)],
   icon: EncoderIcon,
   prefix: "SW",
   width: W,
@@ -95,7 +94,7 @@ export const encoderEc11: ComponentDef = {
     { kind: "SW", a: "B", b: "C", part: "B", closed: "on", ron: "{rcontact}", limits: ENCODER_CONTACT },
     { kind: "SW", a: "D", b: "E", part: "PUSH", closed: "pressed", ron: "100 mΩ", limits: PUSH_CONTACT },
   ],
-  info: { Source: "ALPS EC11E catalogue (Update 2510); EC11B15242AE product page (output wave, sliding noise)" },
+  // info Source (in the datasheet record): "ALPS EC11E catalogue (Update 2510); EC11B15242AE product page (output wave, sliding noise)"
 }
 
 const KY_W = 8
@@ -107,8 +106,7 @@ const KY040_PULSES = 20
 export const ky040: ComponentDef = {
   id: "ky-040",
   name: "Encoder module KY-040",
-  description:
-    "Encoder board: 20 detents / 20 pulses (a full cycle per detent, at rest both open), 10 kΩ pull-ups on CLK and DT to +, SW straight to the switch with no pull-up fitted — enable the MCU's. No maker's schematic exists: built from the forum and Wokwi descriptions.",
+  description: "Rotary encoder breakout board",
   category: "input",
   keywords: ["encoder", "rotary", "KY-040", "KY040", "quadrature", "module"],
   icon: EncoderIcon,

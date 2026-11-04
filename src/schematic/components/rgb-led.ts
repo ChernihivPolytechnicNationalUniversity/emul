@@ -54,8 +54,8 @@ const model: Element[] = [
 export const rgbLed: ComponentDef = {
   id: "rgb-led",
   name: "RGB LED, common cathode",
-  description: `Kingbright ${PART_NUMBER}, a 5 mm full-colour lamp: Hyper Red AlGaInP, blue and green InGaN dies on leads 1, 3 and 4, the common cathode on lead 2. Each die follows the datasheet's I–V curve, burns on its own past its ratings (30, 30 and 25 mA DC derated above 25 °C, 185, 150 and 150 mA peak, 5 V reversed), and the package glows in the mix of the light the three emit.`,
-  keywords: [PART_NUMBER, "RGB", "full colour", "full color", "common cathode", "Kingbright"],
+  description: "Common-cathode 5 mm full-colour lamp",
+  keywords: [PART_NUMBER, "RGB", "full colour", "full color", "common cathode", "Kingbright", "5 mm"],
   category: "leds",
   icon: LedIcon,
   prefix: "LED",

@@ -107,10 +107,16 @@ function opampDef(p: OpampPreset): ComponentDef {
         notModelled: [{ what: "Input bias current and noise" }, { what: "Common-mode and supply rejection" }],
       } satisfies NoDatasheet,
     }),
-    info: {
-      ...(p.dip && { Package: `${p.dip.package}: this amplifier on pins ${p.dip.inp} (IN+), ${p.dip.inn} (IN−), ${p.dip.out} (OUT), supply ${p.dip.vcc} (V+) and ${p.dip.vee} (V−); ${p.dip.others}` }),
-      Source: p.source,
-    },
+    // Was one note: Package `${p.dip.package}: this amplifier on pins ${p.dip.inp} (IN+), ${p.dip.inn} (IN−), ${p.dip.out} (OUT), supply ${p.dip.vcc} (V+) and ${p.dip.vee} (V−); ${p.dip.others}`
+    // Source (in the datasheet record): p.source
+    info: p.dip
+      ? {
+          Package: p.dip.package,
+          "IN+/IN−/OUT": `pins ${p.dip.inp}/${p.dip.inn}/${p.dip.out}`,
+          "V+/V−": `pins ${p.dip.vcc}/${p.dip.vee}`,
+          "Other pins": p.dip.others,
+        }
+      : {},
   }
 }
 

@@ -116,7 +116,7 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string, id 
     id,
     name: pkg.name === "PDIP-28" ? chip.name : `${chip.name} ${pkg.name}`,
     description,
-    keywords: ["AVR", "ATmega", "Arduino", "328P"],
+    keywords: ["AVR", "ATmega", "Arduino", "328P", "Uno", "Nano"],
     category: "mcus",
     icon: ChipIcon,
     prefix: "DD",
@@ -133,12 +133,20 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string, id 
     mcuVref: "AREF",
     fields: avrFields(chip),
     info: {
-      MCU: `${chip.name}, AVR 8-bit, ${chip.flashBytes / 1024} KB Flash, ${(chip.ramEnd - 0xff) / 1024} KB SRAM, ${chip.eepromBytes} B EEPROM`,
+      // MCU: `${chip.name}, AVR 8-bit, ${chip.flashBytes / 1024} KB Flash, ${(chip.ramEnd - 0xff) / 1024} KB SRAM, ${chip.eepromBytes} B EEPROM`
+      "Flash/SRAM/EEPROM": `${chip.flashBytes / 1024} KB/${(chip.ramEnd - 0xff) / 1024} KB/${chip.eepromBytes} B`,
       Package: pkg.name,
-      "Absolute maximum": `VCC ${e.vddMax} V; I/O pins −0.5 V to VCC + ${e.pinAboveVcc} V, ${e.pinCurrentMax * 1e3} mA each, ${e.supplyCurrentMax * 1e3} mA through VCC/GND; RESET ${e.resetVoltageMax} V`,
-      Fuses: `as shipped: low ${hex(f.low)} (internal 8 MHz RC ÷ 8), high ${hex(f.high)}, extended ${hex(f.extended)}; an .elf with a .fuse section sets them, so do the fields here`,
-      Errata: `Silicon Errata DS80000855C, by revision: ${Object.entries(chip.errata).map(([id, revs]) => `${id} (Rev. ${revs.join("/")})`).join(", ")}`,
-      Source: pkg.source,
+      // "Absolute maximum": `VCC ${e.vddMax} V; I/O pins −0.5 V to VCC + ${e.pinAboveVcc} V, ${e.pinCurrentMax * 1e3} mA each, ${e.supplyCurrentMax * 1e3} mA through VCC/GND; RESET ${e.resetVoltageMax} V`
+      "Absolute maximum": `VCC ${e.vddMax} V`,
+      "RESET maximum": `${e.resetVoltageMax} V`,
+      "Pin voltage": `−0.5 V to VCC+${e.pinAboveVcc} V`,
+      "Pin current": `${e.pinCurrentMax * 1e3} mA, VCC/GND ${e.supplyCurrentMax * 1e3} mA`,
+      // Fuses: `as shipped: low ${hex(f.low)} (internal 8 MHz RC ÷ 8), high ${hex(f.high)}, extended ${hex(f.extended)}; an .elf with a .fuse section sets them, so do the fields here`
+      "Factory fuses (L/H/E)": `${hex(f.low)}/${hex(f.high)}/${hex(f.extended)}`,
+      "Factory clock": "8 MHz RC ÷ 8",
+      Fuses: "from the .elf, fields override",
+      // Errata (the revision field lists them too): `Silicon Errata DS80000855C, by revision: ${Object.entries(chip.errata).map(([id, revs]) => `${id} (Rev. ${revs.join("/")})`).join(", ")}`
+      // Source (in the datasheet record): pkg.source
     },
   }
 }
@@ -215,8 +223,8 @@ const TQFP32: Package = {
   ],
 }
 
-export const atmega328p = avrChip(ATMEGA328P, PDIP28, "8-bit AVR MCU, PDIP-28 — the Arduino Uno chip")
-export const atmega328pAu = avrChip(ATMEGA328P, TQFP32, "8-bit AVR MCU, TQFP-32 — the Arduino Nano chip, with the analog-only ADC6/ADC7", "atmega328p-au")
+export const atmega328p = avrChip(ATMEGA328P, PDIP28, "8-bit AVR MCU, PDIP-28")
+export const atmega328pAu = avrChip(ATMEGA328P, TQFP32, "8-bit AVR MCU, TQFP-32", "atmega328p-au")
 
 /** This file's parts, in palette order: the catalogue loads them from here. */
 export const defs: ComponentDef[] = [atmega328p, atmega328pAu]

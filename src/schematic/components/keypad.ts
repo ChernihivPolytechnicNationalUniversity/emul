@@ -62,10 +62,9 @@ const model: Element[] = LEGENDS.flatMap((row, r) =>
 export const keypad4x4: ComponentDef = {
   id: "keypad-4x4",
   name: "Keypad 4×4",
-  description:
-    "Matrix membrane keypad (Parallax #27899): 16 keys, each closing its row to its column — scan the rows, read the columns. No diodes: three keys at a rectangle's corners ghost the fourth. 24 V DC, 30 mA rating; contact resistance under 100 Ω.",
+  description: "16-key matrix membrane keypad",
   category: "input",
-  keywords: ["keypad", "keyboard", "matrix", "membrane", "4x4", "27899"],
+  keywords: ["keypad", "keyboard", "matrix", "membrane", "4x4", "27899", "Parallax"],
   icon: KeypadIcon,
   prefix: "SW",
   width: W,
@@ -80,7 +79,7 @@ export const keypad4x4: ComponentDef = {
   ],
   parts,
   model,
-  info: { Source: "Parallax #27899 4x4 Matrix Membrane Keypad, v1.2 (12/16/2011); Adafruit #3844 product page (contact resistance)" },
+  // info Source (in the datasheet record): "Parallax #27899 4x4 Matrix Membrane Keypad, v1.2 (12/16/2011); Adafruit #3844 product page (contact resistance)"
 }
 
 /** This file's parts, in palette order: the catalogue loads them from here. */

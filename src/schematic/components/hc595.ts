@@ -50,20 +50,17 @@ const model: Element[] = [
   ]),
 ]
 
-const FUNCTION =
-  "8-bit serial-in, parallel-out shift register with a 3-state output register, PDIP-16: SER shifts in on SRCLK, RCLK latches QA–QH, SRCLR clears the shift register, OE floats the outputs, QH' feeds the next chip."
+type Variant = { id: keyof typeof SHIFT_REGISTER_DEFS; supply: string; description: string; keywords: string[]; source: string }
 
-type Variant = { id: keyof typeof SHIFT_REGISTER_DEFS; supply: string; description: string; source: string }
-
-function shiftRegister({ id, supply, description, source }: Variant): ComponentDef {
+function shiftRegister({ id, supply, description, keywords }: Variant): ComponentDef {
   const part: ShiftRegisterPart = SHIFT_REGISTER_DEFS[id]
   const pins = pinsOf(supply)
   return {
     id,
     name: part,
-    description: `${FUNCTION} ${description}`,
+    description,
     category: "ics",
-    keywords: ["595", "shift register", "serial to parallel", "SIPO"],
+    keywords: ["595", "shift register", "serial to parallel", "SIPO", "PDIP-16", ...keywords],
     icon: ShiftRegisterIcon,
     prefix: "U",
     width: W,
@@ -78,22 +75,24 @@ function shiftRegister({ id, supply, description, source }: Variant): ComponentD
     ],
     parts: [],
     model,
-    info: { Package: "PDIP-16", Source: source },
+    // Source (in the datasheet record): the variant's `source`
+    info: { Package: "PDIP-16" },
   }
 }
 
 export const hc595 = shiftRegister({
   id: "hc595",
   supply: "2–6 V",
-  description:
-    "TI SN74HC595: 2–6 V with CMOS inputs (a high is 0.7 × VCC, so a 3.3 V MCU does not reliably drive one at 5 V), 17 ns at 4.5 V, ±6 mA rated drive (±35 mA absolute).",
+  description: "8-bit serial-in shift register",
+  keywords: ["SN74HC595", "TI"],
   source: "TI SN74HC595 (SCLS041J), Nexperia 74HC_HCT595 (rev. 12)",
 })
 
 export const hct595 = shiftRegister({
   id: "hct595",
   supply: "4.5–5.5 V",
-  description: "Nexperia 74HCT595: 5 V only, with TTL inputs (a high is 2 V) that a 3.3 V MCU drives, 25 ns, ±6 mA rated drive (±35 mA absolute).",
+  description: "8-bit shift register, TTL inputs",
+  keywords: ["Nexperia", "TTL"],
   source: "Nexperia 74HC_HCT595 (rev. 12)",
 })
 

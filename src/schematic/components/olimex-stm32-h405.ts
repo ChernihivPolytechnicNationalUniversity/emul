@@ -4,7 +4,7 @@ import { mcuModel } from "../mcu-model"
 import type { ComponentDef, Element, ModelElement, PartDef, PinDef, PinKind } from "../types"
 import { LED_COLORS } from "./basic"
 import { schottky1n5819 } from "./schottky-1n5819"
-import { AT, BOARD_MM, BOOT_BRIDGES, BRIDGE_PITCH, boardArt, extPad, FRAME, jtagPad, PLATE, USBP_E } from "./olimex-stm32-h405-art"
+import { AT, BOOT_BRIDGES, BRIDGE_PITCH, boardArt, extPad, FRAME, jtagPad, PLATE, USBP_E } from "./olimex-stm32-h405-art"
 import { DOCS } from "../datasheets/docs"
 import type { Datasheet } from "../types"
 
@@ -260,18 +260,63 @@ export const olimexStm32H405: ComponentDef = {
   mcuVdda: VDDA,
   mcuClocks: { hse: { hz: 8e6, kind: "crystal", startup: 2e-3 }, lse: { hz: 32768, kind: "crystal", startup: 2 } },
   info: {
-    MCU: "STM32F405RGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM (128 KB + 64 KB CCM); the schematic's RET6 label is wrong",
-    Board: `Rev. C, ${BOARD_MM.w} × ${BOARD_MM.h} mm, drawn to scale from Olimex's dimension drawing and UM photos. The board prints no pin names; εmul prints them in tables on the inner side of each header, as the Open746I-C does, which stretches the board: everything below EXT2 sits 3 cells lower, EXT1 with the LEDs, bridges and URL 7 cells lower, JTAG 2 cells right and its shroud widened for the names; inside each part, everything where Olimex put it. So the EXT headers stand 1.7 in apart here, not the board's 1 in (UM §6.3)`,
-    "Supply current": "The F405 draws DS8626's own tables, not one all-peripherals line: Table 20/21's base by HCLK (ART or code in RAM, or neither) with every peripheral clock off, plus Table 28's µA/MHz for each clock RCC enables on its bus (in Sleep only those LPENR keeps; Ethernet and the camera interface, which the F405 does not have, never), an estimated 10 % between Scale 1 and 2 (Table 14 note 1: the rows up to 144 MHz read as Scale 2 measurements), the ADCs' and DAC channels' analog parts, the compensation cell, HSI, LSI, LSE, the PLLs where the tables leave them out (their min–max midpoint), an estimated 532 µA for the HSE oscillator (DS8626 Rev 4 Table 31's figure at 25 MHz and CL 10 pF; Rev 5 dropped the row), flash program/erase (Table 39) for the share of time the flash is busy; Stop (Table 23), Standby (Table 24) and, with VDD gone, the cell on VBAT (Table 25) by the backup regulator and the LSE. Drawn as a current that holds at the VDD the board gives it. The blink at 168 MHz: 41.6 mA, the board 48.8 mA from 5 V, where the UM says about 40 mA without naming its firmware",
-    Decoupling: "C1 100 nF, C2 10 µF/16 V tantalum (2 Ω ESR, KEMET T491B's maximum; shorts at once past 1.32 × rated or 15 % reversed, and, on an assumed 30 s damage model, held over 16 V or reversed at all), C21 100 nF on VIN; C3, C24 22 µF and C8 10 µF X5R on 3.3 V at what DC bias leaves of them at 3.3 V (11.5 and 6.6 µF, the median of Murata's and TDK's curves), C4–C7, C10 100 nF; L1 to VDDA, the ADC's reference, as its DC resistance (0.2 Ω; no part number, so no rating and no failure), C11, C9, C22 there; C20/C23 2.2 µF on VCAP behind the core regulator's 160 mA inrush limit at Scale 1's 1.26 V (DS8626 Tables 14 and 19). The USB host is a modelled one: 5 V behind an assumed 0.5 A switch, USB 2.0's 120 µF of bulk, 0.25 Ω each in VBUS and GND (the 125 mV per conductor at 500 mA of §7.2.2). D1/D2: onsemi's typical 1N5819 at 25 °C, Fig. 7 forward (Is 3.28 µA, n 1.019, Rs 83 mΩ, 1 mV rms) and Fig. 9 reverse (4 % rms to 21 V)",
-    LEDs: "STAT green on PC12 (lit when low, 2 kΩ, through LED_E), PWR red (2 kΩ)",
-    Buttons: "BUT on PA0 (10 kΩ pull-up, 100 nF, 560 Ω, low when pressed), RESET",
-    Power: "USB VBUS through D1, or a JTAG debugger's 5 V (pin 19) through D2, or VIN directly, into the LM1117-ADJ (240 Ω / 390 Ω: 3.30 V, 5.2 mA through the divider, over the 5 mA minimum load; dropout 1.1 V at 100 mA to 1.2 V at 800 mA, current limit 1.2 A typical, 0.8 A guaranteed — the UM’s “up to 800 mA” —, destroyed open past 20 V in without taking the board with it; it heats at 61.6 °C/W (TI's SOT-223 figure, not this board's copper) and shuts down at 150 °C, the absolute maximum, back on at 135 °C with a 2 s time constant — TI gives no shutdown point, hysteresis or time constant, so those three are assumptions; TI LM1117 §7.1, §7.4, §7.5); or 3.3 V straight onto the rail",
-    USB: "D− PA11, D+ PA12 (22 Ω each); a plugged host's 15 kΩ pull-downs; VBUS sensed on PC4 through 15k/22k and USBP_E, not on PA9; no ID; PC11 low with VBUS present switches 1.5 kΩ onto D+ (Q3, Q4 BC817)",
-    JTAG: "20-pin ARM header: TRST PB4, TDI PA15, TMS/SWDIO PA13, TCK/SWCLK PA14, TDO/SWO PB3 (10 kΩ pull-ups each), RST, 3.3 V on 1–2, RTCK (11) and 17 10 kΩ to GND, 5 V in on 19",
-    Bridges: "On top, clickable: B0_H/B0_L and B1_H/B1_L (boot from flash, system memory or SRAM), USBP_E. On the bottom, in the inspector: VBAT, LED_E, R-T",
-    "Not modelled": "The USB device stack (no OTG FS core), ST's bootloader in system memory (the core idles there), the JTAG/SWD protocol (the debugger reaches the core directly), the crystals' load network (C12/C13 27 pF and R12 1 MΩ on Q1, C14/C15 10 pF on Q2: the oscillators are ideal 8 MHz and 32 768 Hz after their start-up times), the LM1117's loop (its load-transient response: the regulator is static, so the capacitors act when it cannot regulate — power-up, power-down, dropout, current limit), the capacitors' ESL and the ceramics' DC bias as a curve (each is taken at its rail's voltage), the bead's impedance above DC, the F405's VDDA share (its analog current is drawn from VDD; ≤ 6.4 mA, ≤ 1.3 mV across L1), the core regulator following VOS (1.14 V in Scale 2) and Standby (off, then its wake-up inrush), the I/O switching current into the pads' own capacitance (Table 27), U2/U3 and C16/C17 (not fitted on the board)",
-    Source: "Olimex STM32-H405 user manual rev B, Rev. C schematic and dimension drawing",
+    // MCU: STM32F405RGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM (128 KB + 64 KB CCM); the schematic's RET6 label is
+    //   wrong
+    // Board: Rev. C, 60.96 × 34.29 mm, drawn to scale from Olimex's dimension drawing and UM photos. The board prints no
+    //   pin names; εmul prints them in tables on the inner side of each header, as the Open746I-C does, which stretches the
+    //   board: everything below EXT2 sits 3 cells lower, EXT1 with the LEDs, bridges and URL 7 cells lower, JTAG 2 cells
+    //   right and its shroud widened for the names; inside each part, everything where Olimex put it. So the EXT headers
+    //   stand 1.7 in apart here, not the board's 1 in (UM §6.3)
+    Board: "Stretched to print pin names",
+    // Supply current: The F405 draws DS8626's own tables, not one all-peripherals line: Table 20/21's base by HCLK (ART or
+    //   code in RAM, or neither) with every peripheral clock off, plus Table 28's µA/MHz for each clock RCC enables on its
+    //   bus (in Sleep only those LPENR keeps; Ethernet and the camera interface, which the F405 does not have, never), an
+    //   estimated 10 % between Scale 1 and 2 (Table 14 note 1: the rows up to 144 MHz read as Scale 2 measurements), the
+    //   ADCs' and DAC channels' analog parts, the compensation cell, HSI, LSI, LSE, the PLLs where the tables leave them out
+    //   (their min–max midpoint), an estimated 532 µA for the HSE oscillator (DS8626 Rev 4 Table 31's figure at 25 MHz and
+    //   CL 10 pF; Rev 5 dropped the row), flash program/erase (Table 39) for the share of time the flash is busy; Stop
+    //   (Table 23), Standby (Table 24) and, with VDD gone, the cell on VBAT (Table 25) by the backup regulator and the LSE.
+    //   Drawn as a current that holds at the VDD the board gives it. The blink at 168 MHz: 41.6 mA, the board 48.8 mA from 5
+    //   V, where the UM says about 40 mA without naming its firmware
+    // Decoupling: C1 100 nF, C2 10 µF/16 V tantalum (2 Ω ESR, KEMET T491B's maximum; shorts at once past 1.32 × rated or
+    //   15 % reversed, and, on an assumed 30 s damage model, held over 16 V or reversed at all), C21 100 nF on VIN; C3, C24
+    //   22 µF and C8 10 µF X5R on 3.3 V at what DC bias leaves of them at 3.3 V (11.5 and 6.6 µF, the median of Murata's and
+    //   TDK's curves), C4–C7, C10 100 nF; L1 to VDDA, the ADC's reference, as its DC resistance (0.2 Ω; no part number, so
+    //   no rating and no failure), C11, C9, C22 there; C20/C23 2.2 µF on VCAP behind the core regulator's 160 mA inrush
+    //   limit at Scale 1's 1.26 V (DS8626 Tables 14 and 19). The USB host is a modelled one: 5 V behind an assumed 0.5 A
+    //   switch, USB 2.0's 120 µF of bulk, 0.25 Ω each in VBUS and GND (the 125 mV per conductor at 500 mA of §7.2.2). D1/D2:
+    //   onsemi's typical 1N5819 at 25 °C, Fig. 7 forward (Is 3.28 µA, n 1.019, Rs 83 mΩ, 1 mV rms) and Fig. 9 reverse (4 %
+    //   rms to 21 V)
+    // LEDs: STAT green on PC12 (lit when low, 2 kΩ, through LED_E), PWR red (2 kΩ)
+    LEDs: "STAT on PC12, active low",
+    // Buttons: BUT on PA0 (10 kΩ pull-up, 100 nF, 560 Ω, low when pressed), RESET
+    Buttons: "BUT on PA0, active low",
+    // Power: USB VBUS through D1, or a JTAG debugger's 5 V (pin 19) through D2, or VIN directly, into the LM1117-ADJ (240
+    //   Ω / 390 Ω: 3.30 V, 5.2 mA through the divider, over the 5 mA minimum load; dropout 1.1 V at 100 mA to 1.2 V at 800
+    //   mA, current limit 1.2 A typical, 0.8 A guaranteed — the UM’s “up to 800 mA” —, destroyed open past 20 V in without
+    //   taking the board with it; it heats at 61.6 °C/W (TI's SOT-223 figure, not this board's copper) and shuts down at 150
+    //   °C, the absolute maximum, back on at 135 °C with a 2 s time constant — TI gives no shutdown point, hysteresis or
+    //   time constant, so those three are assumptions; TI LM1117 §7.1, §7.4, §7.5); or 3.3 V straight onto the rail
+    Power: "LM1117 3.3V, USB or VIN",
+    // USB: D− PA11, D+ PA12 (22 Ω each); a plugged host's 15 kΩ pull-downs; VBUS sensed on PC4 through 15k/22k and USBP_E,
+    //   not on PA9; no ID; PC11 low with VBUS present switches 1.5 kΩ onto D+ (Q3, Q4 BC817)
+    USB: "PA11/PA12, VBUS sense PC4",
+    // JTAG: 20-pin ARM header: TRST PB4, TDI PA15, TMS/SWDIO PA13, TCK/SWCLK PA14, TDO/SWO PB3 (10 kΩ pull-ups each), RST,
+    //   3.3 V on 1–2, RTCK (11) and 17 10 kΩ to GND, 5 V in on 19
+    JTAG: "20-pin, SWD on PA13/PA14",
+    // Bridges: On top, clickable: B0_H/B0_L and B1_H/B1_L (boot from flash, system memory or SRAM), USBP_E. On the bottom,
+    //   in the inspector: VBAT, LED_E, R-T
+    Bridges: "Boot bridges clickable on top",
+    // Not modelled: The USB device stack (no OTG FS core), ST's bootloader in system memory (the core idles there), the
+    //   JTAG/SWD protocol (the debugger reaches the core directly), the crystals' load network (C12/C13 27 pF and R12 1 MΩ
+    //   on Q1, C14/C15 10 pF on Q2: the oscillators are ideal 8 MHz and 32 768 Hz after their start-up times), the LM1117's
+    //   loop (its load-transient response: the regulator is static, so the capacitors act when it cannot regulate —
+    //   power-up, power-down, dropout, current limit), the capacitors' ESL and the ceramics' DC bias as a curve (each is
+    //   taken at its rail's voltage), the bead's impedance above DC, the F405's VDDA share (its analog current is drawn from
+    //   VDD; ≤ 6.4 mA, ≤ 1.3 mV across L1), the core regulator following VOS (1.14 V in Scale 2) and Standby (off, then its
+    //   wake-up inrush), the I/O switching current into the pads' own capacitance (Table 27), U2/U3 and C16/C17 (not fitted
+    //   on the board)
+    // Source: Olimex STM32-H405 user manual rev B, Rev. C schematic and dimension drawing
   },
 }
 

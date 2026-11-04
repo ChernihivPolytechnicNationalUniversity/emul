@@ -272,16 +272,26 @@ export const stm32f4Discovery: ComponentDef = {
   // HSE works as a crystal or in bypass. X3 (LSE) is not fitted on any revision.
   mcuClocks: { hse: { hz: 8e6, kind: "any", startup: 2e-3 }, lse: null },
   info: {
-    MCU: "STM32F407VGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM (128 KB + 64 KB CCM)",
-    LEDs: "LD4 green PD12, LD3 orange PD13, LD5 red PD14, LD6 blue PD15 (active high); LD8 red on PD5 (OTG over-current)",
-    Buttons: "B1 USER on PA0 (high when pressed, no debounce capacitor), B2 RESET",
-    Audio: "CS43L22: I2C1 PB6/PB9 (0x4A), I2S3 PC7/PC10/PC12/PA4, RESET̅ PD4",
-    Accelerometer: "LIS302DL (rev A/B) or LIS3DSH (rev C–E): SPI1 PA5/PA6/PA7, CS PE3, INT PE0/PE1",
-    Microphone: "MP45DT02: CLK PB10, PDM PC3",
-    "USB OTG FS": "DM PA11, DP PA12, VBUS PA9, ID PA10, power EN̅ PC0, over-current PD5",
-    Modelled: "LIS302DL/LIS3DSH on SPI (Roll/Pitch below), CS43L22 on I²C and I²S to the bench speaker, MP45DT02 PDM microphone (Sound below)",
-    "Not modelled": "The accelerometers' click/free-fall engines, state machines and FIFO; the CS43L22's speaker path, tone/limiter and analog performance; the microphone's frequency response; USB OTG (STMPS2141, LD7, LD8 over-current); the ST-LINK (LD1 COM, SWD, its MCO as a separate source); MCK as a 256·Fs square (the codec takes 256·Fs while it is driven)",
-    Source: "ST UM1472 Rev 9, MB997 schematics B.2–G-01, rev-E board file",
+    // MCU: STM32F407VGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM (128 KB + 64 KB CCM)
+    // LEDs: LD4 green PD12, LD3 orange PD13, LD5 red PD14, LD6 blue PD15 (active high); LD8 red on PD5 (OTG over-current)
+    LEDs: "PD12–PD15, active high",
+    // Buttons: B1 USER on PA0 (high when pressed, no debounce capacitor), B2 RESET
+    Buttons: "B1 on PA0, active high",
+    // Audio: CS43L22: I2C1 PB6/PB9 (0x4A), I2S3 PC7/PC10/PC12/PA4, RESET̅ PD4
+    Audio: "CS43L22 on I2C1 and I2S3",
+    // Accelerometer: LIS302DL (rev A/B) or LIS3DSH (rev C–E): SPI1 PA5/PA6/PA7, CS PE3, INT PE0/PE1
+    Accelerometer: "LIS302DL/LIS3DSH on SPI1, CS PE3",
+    // Microphone: MP45DT02: CLK PB10, PDM PC3
+    Microphone: "MP45DT02, CLK PB10, PDM PC3",
+    // USB OTG FS: DM PA11, DP PA12, VBUS PA9, ID PA10, power EN̅ PC0, over-current PD5
+    "USB OTG FS": "PA11/PA12, VBUS PA9",
+    // Modelled: LIS302DL/LIS3DSH on SPI (Roll/Pitch below), CS43L22 on I²C and I²S to the bench speaker, MP45DT02 PDM
+    //   microphone (Sound below)
+    // Not modelled: The accelerometers' click/free-fall engines, state machines and FIFO; the CS43L22's speaker path,
+    //   tone/limiter and analog performance; the microphone's frequency response; USB OTG (STMPS2141, LD7, LD8
+    //   over-current); the ST-LINK (LD1 COM, SWD, its MCO as a separate source); MCK as a 256·Fs square (the codec takes
+    //   256·Fs while it is driven)
+    // Source: ST UM1472 Rev 9, MB997 schematics B.2–G-01, rev-E board file
   },
 }
 

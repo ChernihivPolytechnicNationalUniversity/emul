@@ -120,11 +120,18 @@ export const lcd7f: ComponentDef = {
   pinsAreSockets: true,
   panel: { part: "PANEL", width: 1024, height: 600, signals, pixelHz: [25e6, 75e6], power: V33 },
   info: {
-    Panel: "1024 × 600, 24-bit parallel RGB (DE mode; HS/VS/DE polarity not checked), pixel clock 25–75 MHz",
-    Touch: "GT911, I²C address 0x5D (0x14 with INT high at reset), 16-bit registers: 0x8140 product ID, 0x814E status, 0x814F… points",
-    Backlight: "PT4103 boost from the 3.3 V pin (~0.25 A), enabled by DISP; PWM trims the current on the real module, full here",
-    Connector: "40-pin 0.5 mm FFC as two rows of twenty (1–20 above 21–40), the same rows as the Open746I-C's P15: dock the module under the board or wire the lines",
-    Source: "Waveshare 7inch-Capacitive-Touch-LCD-F schematic (GT911 version)",
+    // Panel: 1024 × 600, 24-bit parallel RGB (DE mode; HS/VS/DE polarity not checked), pixel clock 25–75 MHz
+    Panel: "1024 × 600, 24-bit RGB",
+    // Touch: GT911, I²C address 0x5D (0x14 with INT high at reset), 16-bit registers: 0x8140 product ID, 0x814E status,
+    //   0x814F… points
+    Touch: "GT911 at I²C 0x5D",
+    // Backlight: PT4103 boost from the 3.3 V pin (~0.25 A), enabled by DISP; PWM trims the current on the real module,
+    //   full here
+    Backlight: "PT4103 boost, enabled by DISP",
+    // Connector: 40-pin 0.5 mm FFC as two rows of twenty (1–20 above 21–40), the same rows as the Open746I-C's P15: dock
+    //   the module under the board or wire the lines
+    Connector: "40-pin FFC, matches P15",
+    // Source: Waveshare 7inch-Capacitive-Touch-LCD-F schematic (GT911 version)
   },
 }
 

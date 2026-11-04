@@ -286,7 +286,7 @@ export const arduinoUno: ComponentDef = {
   id: "arduino-uno",
   name: "Arduino Uno R3",
   board: { vendor: "Arduino", mcu: "ATmega328P", mhz: 16, volts: 5, tags: [], photo: "arduino-uno.webp", core: "AVR", memory: "32 KB / 2 KB", onBoard: ["L LED", "USB serial", "ICSP"], alias: "UNO R3" },
-  description: "ATmega328P, 16 MHz, USB serial, 7–12 V jack",
+  description: "Arduino Uno board, ATmega328P",
   keywords: ["Arduino", "Uno", "UNO R3", "Rev3", "ATmega328P", "AVR", "A000066", "ATmega16U2"],
   category: "boards",
   icon: BoardIcon,
@@ -307,16 +307,27 @@ export const arduinoUno: ComponentDef = {
   defaults: { fuseLow: hex(UNO_FUSES.low), fuseHigh: hex(UNO_FUSES.high), fuseExtended: hex(UNO_FUSES.extended), lock: hex(UNO_FUSES.lock), revision: ATMEGA328P.revisions[ATMEGA328P.revisions.length - 1] },
   fields: avrFields(ATMEGA328P, UNO_FUSES, "Arduino"),
   info: {
-    MCU: "ATmega328P-PU (28 PDIP, in a socket), 16 MHz resonator (CSTCE16M0V53, ±0.5 %), 32 KB Flash (512 bytes of it Optiboot's boot section), 2 KB SRAM, 1 KB EEPROM",
-    Power:
-      "USB: 5 V through the MF-MSMF050 resettable fuse (trips past 0.5–1 A) and T1 (FDN340P), so +5V sits within millivolts of the port. Jack/VIN: through D1 (M7) and the NCP1117 (1 A, thermal shutdown); once VIN passes about 6.6 V the LMV358 comparator turns T1 off and the board runs from VIN alone. 3.3V: the LP2985 from +5V, 150 mA. 5V pin: in or out",
-    "USB serial": "ATmega16U2: its TXD → 1 kΩ → D0/RX, D1/TX → 1 kΩ → its RXD; the TX and RX LEDs light while the lines are low. Wire a terminal to the TX/RX pins by the USB-B",
-    "L LED": "on D13 through U5B, an LMV358 follower: D13 carries only the op amp's input current, unlike a Nano's",
-    ICSP: "1 MISO (D12), 2 +5V, 3 SCK (D13), 4 MOSI (D11), 5 RESET, 6 GND — the same nets as those header pins",
-    Fuses: "as Arduino programs them: low 0xFF, high 0xDE (BOOTRST, 256-word boot section), extended 0xFD (BOD 2.7 V), lock 0x0F",
-    "Not modelled":
-      "the boot loader (Optiboot): the boot section is empty, so a reset runs straight into the sketch; the ATmega16U2's own firmware and USB (DTR auto-reset when a port opens, the TX/RX LEDs' pulse stretch, ICSP1, JP2); the USB ESD varistors and the ferrite; L2, AVCC's 10 µH filter (159 kHz with C10, beyond the solver's step)",
-    Source: "Arduino UNO Rev3e schematic and Eagle files (A000066), A000066 datasheet, Arduino AVR boards.txt",
+    // MCU: ATmega328P-PU (28 PDIP, in a socket), 16 MHz resonator (CSTCE16M0V53, ±0.5 %), 32 KB Flash (512 bytes of it
+    //   Optiboot's boot section), 2 KB SRAM, 1 KB EEPROM
+    // Power: USB: 5 V through the MF-MSMF050 resettable fuse (trips past 0.5–1 A) and T1 (FDN340P), so +5V sits within
+    //   millivolts of the port. Jack/VIN: through D1 (M7) and the NCP1117 (1 A, thermal shutdown); once VIN passes about 6.6
+    //   V the LMV358 comparator turns T1 off and the board runs from VIN alone. 3.3V: the LP2985 from +5V, 150 mA. 5V pin:
+    //   in or out
+    Power: "USB or jack/VIN, auto-switched",
+    // USB serial: ATmega16U2: its TXD → 1 kΩ → D0/RX, D1/TX → 1 kΩ → its RXD; the TX and RX LEDs light while the lines are
+    //   low. Wire a terminal to the TX/RX pins by the USB-B
+    "USB serial": "ATmega16U2 on D0/D1",
+    // L LED: on D13 through U5B, an LMV358 follower: D13 carries only the op amp's input current, unlike a Nano's
+    "L LED": "D13 via op-amp buffer",
+    // ICSP: 1 MISO (D12), 2 +5V, 3 SCK (D13), 4 MOSI (D11), 5 RESET, 6 GND — the same nets as those header pins
+    ICSP: "Same nets as D11–D13",
+    // Fuses: as Arduino programs them: low 0xFF, high 0xDE (BOOTRST, 256-word boot section), extended 0xFD (BOD 2.7 V),
+    //   lock 0x0F
+    Fuses: "As Arduino programs them",
+    // Not modelled: the boot loader (Optiboot): the boot section is empty, so a reset runs straight into the sketch; the
+    //   ATmega16U2's own firmware and USB (DTR auto-reset when a port opens, the TX/RX LEDs' pulse stretch, ICSP1, JP2); the
+    //   USB ESD varistors and the ferrite; L2, AVCC's 10 µH filter (159 kHz with C10, beyond the solver's step)
+    // Source: Arduino UNO Rev3e schematic and Eagle files (A000066), A000066 datasheet, Arduino AVR boards.txt
   },
 }
 

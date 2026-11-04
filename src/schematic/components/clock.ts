@@ -17,7 +17,7 @@ import type { Datasheet } from "../types"
 export const crystal: ComponentDef = {
   id: "crystal",
   name: "Crystal",
-  description: "Quartz crystal for the MCU's HSE (OSC_IN/OSC_OUT) or LSE (OSC32_IN/OSC32_OUT). Starts in 2 ms; a 32.768 kHz watch crystal in 2 s.",
+  description: "Quartz crystal for MCU clocks",
   keywords: ["quartz", "XTAL", "HSE", "LSE", "32.768 kHz", "watch crystal"],
   category: "ics",
   icon: CrystalIcon,
@@ -58,9 +58,8 @@ export const RESONATOR_TOLERANCE = { initial: 0.5, temperature: 0.3, ageing: 0.2
 export const resonator: ComponentDef = {
   id: "resonator",
   name: "Ceramic resonator",
-  keywords: ["resonator", "ceramic", "XTAL", "Murata", "CSTCE16M0V53"],
-  description:
-    "Three-pin ceramic resonator with its load capacitors built in (Murata CSTCE16M0V53, Arduino Uno's 16 MHz): the outer pins across XTAL1/XTAL2 or OSC_IN/OSC_OUT, the middle one to ground. Coarser than quartz: ±0.5 % as made, ±0.3 % with temperature, ±0.2 % with age; the deviation sets where this part sits.",
+  keywords: ["resonator", "ceramic", "XTAL", "Murata", "CSTCE16M0V53", "16 MHz"],
+  description: "Three-pin ceramic resonator",
   category: "ics",
   icon: CrystalIcon,
   prefix: "Y",
@@ -86,17 +85,21 @@ export const resonator: ComponentDef = {
   // An open circuit at DC, like the crystal; the built-in 15 pF change nothing at the engine's step.
   model: [],
   info: {
-    Tolerance: `±${RESONATOR_TOLERANCE.initial} % initial, ±${RESONATOR_TOLERANCE.temperature} % over −20…80 °C, ±${RESONATOR_TOLERANCE.ageing} % ageing`,
-    Source: "Murata CSTCE16M0V53-R0 product data (murata.com)",
-    "Start-up": "0.5 ms: assumed, to be checked (Murata gives no figure)",
-    "Not modelled": "the frequency's own drift with temperature and age (set the deviation), the built-in capacitors and ESR",
+    // Tolerance: `±${RESONATOR_TOLERANCE.initial} % initial, ±${RESONATOR_TOLERANCE.temperature} % over −20…80 °C, ±${RESONATOR_TOLERANCE.ageing} % ageing`
+    Tolerance: `±${RESONATOR_TOLERANCE.initial} % initial`,
+    "Temperature drift": `±${RESONATOR_TOLERANCE.temperature} % over −20…80 °C`,
+    Ageing: `±${RESONATOR_TOLERANCE.ageing} %`,
+    // Source (in the datasheet record): "Murata CSTCE16M0V53-R0 product data (murata.com)"
+    // "Start-up": "0.5 ms: assumed, to be checked (Murata gives no figure)"
+    "Start-up": "0.5 ms, assumed (no figure)",
+    // "Not modelled" (in the datasheet record): "the frequency's own drift with temperature and age (set the deviation), the built-in capacitors and ESR"
   },
 }
 
 export const oscillator: ComponentDef = {
   id: "oscillator",
   name: "Clock oscillator",
-  description: "Canned oscillator module: a ready clock into OSC_IN for HSE bypass mode (or OSC32_IN for LSE bypass). Needs VCC.",
+  description: "Canned clock oscillator module",
   keywords: ["oscillator", "clock", "oscillator module", "HSE bypass"],
   category: "ics",
   icon: OscillatorIcon,

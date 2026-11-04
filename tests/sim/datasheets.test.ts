@@ -98,6 +98,30 @@ describe("datasheet records", () => {
     }
   })
 
+  it("describe each part in one sentence of five words at most", () => {
+    for (const def of allDefs()) {
+      const what = def.description?.trim()
+      if (!what) continue
+      expect.soft(what.split(/\s+/).length, `${def.id}: "${what}" is over ${CLAIM_WORDS} words`).toBeLessThanOrEqual(CLAIM_WORDS)
+      expect.soft(what, `${def.id}: "${what}" is more than one sentence`).not.toMatch(/[.;:!?]\s|—|\.$/)
+    }
+  })
+
+  it("keep each reference note to one sentence of five words at most, and the old model notes off parts with a record", () => {
+    const recordKeys = ["Modelled", "Not modelled", "Source", "Datasheet"]
+    for (const def of allDefs()) {
+      for (const [key, note] of Object.entries(def.info ?? {})) {
+        if (recordKeys.includes(key)) {
+          expect.soft(def.datasheet, `${def.id}: "${key}" belongs in its datasheet record now`).toBeUndefined()
+          if (key === "Source" || key === "Datasheet") continue
+        }
+        const what = note.trim()
+        expect.soft(what.split(/\s+/).length, `${def.id} ${key}: "${what}" is over ${CLAIM_WORDS} words`).toBeLessThanOrEqual(CLAIM_WORDS)
+        expect.soft(what, `${def.id} ${key}: "${what}" is more than one sentence`).not.toMatch(/[.;:!?]\s|—/)
+      }
+    }
+  })
+
   it("hold the on-board chips' not-modelled lists, one source for the card and the model", () => {
     const notModelled = (id: string) => (allDefs().find((d) => d.id === id)?.datasheet?.notModelled ?? []).map((c) => (c.part ? `${c.part}: ${c.what}` : c.what))
     // Checked once the board's record is written (a pending board has none to hold them yet).

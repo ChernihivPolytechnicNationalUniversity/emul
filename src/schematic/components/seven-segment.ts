@@ -206,13 +206,12 @@ function display({ id, name, polarity, digits, parts }: { id: string; name: stri
     }
   })
   if (digits === 1) model.push({ kind: "SHORT", nodes: ["COM3", "COM8"] })
-  const leadsText = digits === 1 ? "a–g, DP on 7 6 4 2 1 9 10 5, common on 3 and 8" : "a–g, DP on 11 7 4 2 1 10 5 3, digit commons 12 9 8 6"
   return {
     id,
     name,
-    description: `Kingbright 0.56" ${digits === 1 ? "single" : "four"}-digit display, common ${polarity} (${leadsText}). Each segment follows its sheet's I–V curve and burns open on its own past its DC rating (derated with the ambient), its peak rating (1/10 duty, 0.1 ms) or 5 V reversed.`,
+    description: `${digits === 1 ? "Single" : "Four"}-digit 7-segment display, common ${polarity}`,
     category: "leds",
-    keywords: ["7-segment", "seven segment", "7seg", "LED display", "Kingbright", `common ${polarity}`, ...parts],
+    keywords: ["7-segment", "seven segment", "7seg", "LED display", "Kingbright", '0.56"', `common ${polarity}`, ...parts],
     icon: SevenSegmentIcon,
     prefix: "DS",
     width,
@@ -232,7 +231,7 @@ function display({ id, name, polarity, digits, parts }: { id: string; name: stri
     ],
     parts: partsList,
     model,
-    info: { Source: "Kingbright sheets as listed in tests/data/kingbright-56-seven-segment/README.md" },
+    // info Source (in the datasheet record): "Kingbright sheets as listed in tests/data/kingbright-56-seven-segment/README.md"
   }
 }
 

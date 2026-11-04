@@ -371,7 +371,7 @@ function addressableDef(p: Product): ComponentDef {
     name: p.name,
     description: p.description,
     category: "leds",
-    keywords: [...p.parts.map((s) => s.part), ...searchWords(p)],
+    keywords: [...p.parts.map((s) => s.part), ...searchWords(p), ...(p.keywords ?? [])],
     icon: iconOf(p),
     prefix: p.shape.kind === "driver" ? "U" : "LED",
     // The number printed on the part: the table's keys tell revisions apart ("-2016", "-6P").

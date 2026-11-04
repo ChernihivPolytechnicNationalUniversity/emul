@@ -382,7 +382,7 @@ const mosK = (p: Record<string, string>) => {
 export const nmos: ComponentDef = {
   id: "nmos",
   name: "N-channel MOSFET",
-  description: "Enhancement mode, with its body diode. Set by threshold and Rds(on) off the datasheet; past its rated Vds it avalanches and survives a pulse up to its EAS.",
+  description: "N-channel enhancement MOSFET",
   keywords: ["MOSFET", "FET", "NMOS"],
   category: "semis",
   icon: NmosIcon,
@@ -403,7 +403,7 @@ export const nmos: ComponentDef = {
 export const pmos: ComponentDef = {
   id: "pmos",
   name: "P-channel MOSFET",
-  description: "Enhancement mode, with its body diode. Set by threshold and Rds(on) off the datasheet; past its rated Vds it avalanches and survives a pulse up to its EAS.",
+  description: "P-channel enhancement MOSFET",
   keywords: ["MOSFET", "FET", "PMOS"],
   category: "semis",
   icon: PmosIcon,
@@ -491,8 +491,7 @@ export const battery: ComponentDef = {
   id: "battery",
   name: "Battery",
   keywords: ["cell", "Li-ion", "alkaline", "NiMH", "accumulator"],
-  description:
-    "Real cells: the chemistry's discharge curve, an internal resistance that climbs towards empty, capacity lost at high drain and in the cold, diffusion (the voltage rests back up after a load), self-heating, wear and cell mismatch. The inspector shows the charge and the time left at the present load.",
+  description: "Battery of real cells",
   category: "power",
   icon: BatteryIcon,
   prefix: "BT",
@@ -546,7 +545,7 @@ export const battery: ComponentDef = {
 export const dcSource: ComponentDef = {
   id: "dc-source",
   name: "DC source",
-  description: "Ideal DC voltage source with an internal resistance: a bench supply. For real cells use the battery.",
+  description: "Bench DC voltage source",
   keywords: ["power supply", "bench supply", "voltage source", "DC"],
   category: "power",
   icon: DcSourceIcon,
@@ -581,7 +580,7 @@ export const dcSource: ComponentDef = {
 export const acSource: ComponentDef = {
   id: "ac-source",
   name: "AC source",
-  description: "Sine voltage source: RMS voltage, frequency and DC offset. Defaults to European mains.",
+  description: "Ideal AC voltage source",
   keywords: ["mains", "sine", "AC", "alternating current"],
   category: "power",
   icon: AcSourceIcon,
@@ -634,7 +633,7 @@ const pulseDuty = (p: Record<string, string>) => {
 export const pulseSource: ComponentDef = {
   id: "pulse-source",
   name: "Pulse source",
-  description: "Square wave between two levels at a set frequency and duty cycle, or pulse width, from an optional delay: a clock, a PWM output, a logic signal. Into an MCU input or a digital part (a servo, a display) at logic levels its edges arrive at their exact times, while nothing on the net loads or slows it.",
+  description: "Square-wave pulse source",
   keywords: ["square wave", "PWM", "function generator", "signal generator", "clock"],
   category: "power",
   icon: PulseSourceIcon,
@@ -684,7 +683,7 @@ export const pulseSource: ComponentDef = {
 export const transformer: ComponentDef = {
   id: "transformer",
   name: "Transformer",
-  description: "Transformer set by primary and secondary voltage, with the winding resistances and the magnetising inductance of the core. DC on the primary sees only the winding and burns it.",
+  description: "Single-phase power transformer",
   keywords: ["mains transformer", "step-down", "coil"],
   category: "power",
   icon: TransformerIcon,
@@ -734,7 +733,7 @@ export const transformer: ComponentDef = {
 export const junction: ComponentDef = {
   id: "junction",
   name: "Junction",
-  description: "Connects the wires drawn to it. Wires that merely cross do not touch.",
+  description: "Wire junction dot",
   keywords: ["node", "dot", "connection"],
   category: "basics",
   icon: JunctionIcon,

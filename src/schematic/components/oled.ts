@@ -49,9 +49,9 @@ function i2cModule(id: string, name: string, rows: 64 | 32): ComponentDef {
   return {
     id,
     name,
-    description: `SSD1306 OLED, 128 × ${rows}, on I²C at 0x3C. Dark until the firmware enables the charge pump (8Dh 14h) and turns the display on (AFh); the RAM holds noise until it is cleared. Board details (regulator, pull-ups, RC reset) from vendor and forum descriptions.`,
+    description: `128×${rows} I²C OLED display`,
     category: "displays",
-    keywords: ["OLED", "SSD1306", "I2C", "IIC", `128x${rows}`, rows === 64 ? "0.96" : "0.91", "display"],
+    keywords: ["OLED", "SSD1306", "I2C", "IIC", "0x3C", `128x${rows}`, rows === 64 ? "0.96" : "0.91", "display"],
     icon: OledIcon,
     prefix: "DS",
     width: w,
@@ -68,7 +68,7 @@ function i2cModule(id: string, name: string, rows: 64 | 32): ComponentDef {
       { kind: "R", a: "$vdd", b: "SDA", value: 10e3, label: "SDA pull-up" },
       { kind: "R", a: "$vdd", b: "SCL", value: 10e3, label: "SCL pull-up" },
     ],
-    info: { Source: "Solomon Systech SSD1306 Rev 1.1; board as vendor manuals and forums describe it (no maker's schematic)" },
+    // info Source (in the datasheet record): "Solomon Systech SSD1306 Rev 1.1; board as vendor manuals and forums describe it (no maker's schematic)"
   }
 }
 
@@ -82,8 +82,7 @@ const SPI_H = SPI_GLASS + 3.2
 export const oledSpi: ComponentDef = {
   id: "oled-ssd1306-spi",
   name: "OLED 0.96\" SPI (SSD1306)",
-  description:
-    "SSD1306 OLED, 128 × 64, 4-wire SPI: D0 clock (10 MHz max), D1 data, DC picks command or data with every eighth bit, CS selects. Pulse RES low (3 µs or more) before use — nothing on the board does it. Dark until the charge pump (8Dh 14h) and the display (AFh) are on.",
+  description: "128×64 SPI OLED display",
   category: "displays",
   keywords: ["OLED", "SSD1306", "SPI", "128x64", "0.96", "display", "7-pin"],
   icon: OledIcon,
@@ -104,7 +103,7 @@ export const oledSpi: ComponentDef = {
   body: body(SPI_W, SPI_H, SPI_GLASS),
   parts: [{ type: "screen", id: "GLASS", label: "Display", x: 1.6, y: 1.7, w: SPI_W - 3.2, h: SPI_GLASS }],
   model: [...supply, ...["D0", "D1", "RES", "DC", "CS"].map((node): ModelElement => ({ kind: "GPIO", node, vddNode: "$vdd", gndNode: "GND", clamp: INPUT_CLAMP }))],
-  info: { Source: "Solomon Systech SSD1306 Rev 1.1; board as vendor manuals and forums describe it (no maker's schematic)" },
+  // info Source (in the datasheet record): "Solomon Systech SSD1306 Rev 1.1; board as vendor manuals and forums describe it (no maker's schematic)"
 }
 
 export const oledModules: ComponentDef[] = [oledI2c, oledI2c32, oledSpi]

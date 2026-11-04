@@ -67,7 +67,7 @@ export function hdlDef(m: HdlModule): ComponentDef | null {
   return {
     id: m.id,
     name: m.name,
-    description: `${netlist.language === "vhdl" ? "VHDL" : "Verilog"} · ${netlist.top} · ${netlist.cells.length} cells`,
+    description: `${netlist.language === "vhdl" ? "VHDL" : "Verilog"} module ${netlist.top}, ${netlist.cells.length} cells`,
     category: HDL_CATEGORY,
     icon: HdlIcon,
     prefix: "U",

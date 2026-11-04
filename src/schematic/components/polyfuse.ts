@@ -31,9 +31,8 @@ const body: BodyShape[] = [
 export const polyfuse: ComponentDef = {
   id: "polyfuse",
   name: "Resettable fuse (PTC)",
-  keywords: ["fuse", "PTC", "polyfuse", "PolySwitch", "resettable", "MF-MSMF", "Bourns"],
-  description:
-    "Bourns MF-MSMF polyfuse, 1812 SMD (Arduino's USB fuse is the MF-MSMF050): conducts below Ihold, trips somewhere up to Itrip — sooner the harder it is pushed — and, tripped, lets through only what keeps 0.8 W in it. Take the power away and it cools and resets.",
+  keywords: ["fuse", "PTC", "polyfuse", "PolySwitch", "resettable", "MF-MSMF", "Bourns", "MF-MSMF050", "1812"],
+  description: "Resettable PTC polyfuse",
   category: "power",
   icon: PolyfuseIcon,
   prefix: "F",
@@ -65,13 +64,14 @@ export const polyfuse: ComponentDef = {
     },
   ],
   info: {
-    Source: "Bourns MF-MSMF series data sheet, electrical characteristics at 23 °C",
-    Model:
-      "heat is the running average of (I / Itrip′)², Itrip′ midway between Ihold and Itrip; it trips at 1, timed so the listed current trips it in exactly the listed maximum time; tripped, its resistance keeps the tripped dissipation in it; unpowered, it cools with the same time constant and resets at Ihold's heat",
-    Reset: "cools with the heating's time constant (≈17 s for the MF-MSMF050) and resets at Ihold's heat: assumed, to be checked (the data sheet gives no reset time)",
-    "Not modelled":
-      "the spread between Rmin and R1max (it starts at Rmin and returns to it after a trip), the resistance's rise as it warms below a trip, the ambient temperature's effect on Ihold",
+    // Source (in the datasheet record): "Bourns MF-MSMF series data sheet, electrical characteristics at 23 °C"
+    // Model: "heat is the running average of (I / Itrip′)², Itrip′ midway between Ihold and Itrip; it trips at 1, timed so the listed current trips it in exactly the listed maximum time; tripped, its resistance keeps the tripped dissipation in it; unpowered, it cools with the same time constant and resets at Ihold's heat"
+    Model: "running I² average trips it",
+    // Reset: "cools with the heating's time constant (≈17 s for the MF-MSMF050) and resets at Ihold's heat: assumed, to be checked (the data sheet gives no reset time)"
+    Reset: "≈17 s cooling, assumed",
+    // "Not modelled" (in the datasheet record): "the spread between Rmin and R1max (it starts at Rmin and returns to it after a trip), the resistance's rise as it warms below a trip, the ambient temperature's effect on Ihold"
   },
+
 }
 
 /** This file's parts, in palette order: the catalogue loads them from here. */

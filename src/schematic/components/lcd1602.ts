@@ -59,10 +59,9 @@ const parallelPins: PinDef[] = PARALLEL_PINS.map((p, k) => ({ id: p.id, label: p
 export const lcd1602: ComponentDef = {
   id: "lcd-1602",
   name: "LCD 1602 (HD44780)",
-  description:
-    "16 × 2 character LCD, HD44780-compatible controller, 8- or 4-bit parallel bus. Initialise it by instruction, wait out the busy flag (an instruction sent while busy is lost), and set V0 for VDD − V0 ≈ 4.2 V — at 5 V on V0's pot, with V0 on ground the unlit dots darken, and the module is blank on 3.3 V.",
+  description: "16×2 parallel character LCD",
   category: "displays",
-  keywords: ["LCD", "1602", "16x2", "HD44780", "character", "KS0066", "ST7066", "LCD1602"],
+  keywords: ["LCD", "1602", "16x2", "HD44780", "character", "KS0066", "ST7066", "LCD1602", "parallel", "4-bit", "8-bit"],
   icon: CharacterLcdIcon,
   prefix: "DS",
   width: W,
@@ -79,7 +78,7 @@ export const lcd1602: ComponentDef = {
     ...["RS", "RW", "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7"].map((node): Element => ({ kind: "R", a: "VDD", b: node, value: 5 / 125e-6, hidden: true, label: `${node} pull-up` })),
     ...backlight("A", "K"),
   ],
-  info: { Source: "Hitachi HD44780U ADE-207-272(Z); Sitronix ST7066U (clear display time); Vishay LCD-016M002B (doc 37217, 01-Oct-02); R8: forum.arduino.cc" },
+  // info Source (in the datasheet record): "Hitachi HD44780U ADE-207-272(Z); Sitronix ST7066U (clear display time); Vishay LCD-016M002B (doc 37217, 01-Oct-02); R8: forum.arduino.cc"
 }
 
 const I2C_W = 20
@@ -88,10 +87,9 @@ const I2C_H = 9
 export const lcd1602I2c: ComponentDef = {
   id: "lcd-1602-i2c",
   name: "LCD 1602 with I²C backpack",
-  description:
-    "The 16 × 2 module on a PCF8574 backpack: P0 RS, P1 R/W, P2 E, P3 backlight, P4–P7 D4–D7, so the controller runs in 4-bit mode. Address 0x27 (0x3F with a PCF8574AT), A0–A2 pads open; 4.7 kΩ pull-ups on SDA and SCL to VCC; 100 kHz. If the glass is blank or shows blocks, turn the contrast pot.",
+  description: "16×2 character LCD, I²C",
   category: "displays",
-  keywords: ["LCD", "1602", "16x2", "I2C", "IIC", "PCF8574", "backpack", "HD44780", "LCD1602", "0x27", "0x3F"],
+  keywords: ["LCD", "1602", "16x2", "I2C", "IIC", "PCF8574", "PCF8574AT", "backpack", "HD44780", "LCD1602", "0x27", "0x3F", "character"],
   icon: CharacterLcdIcon,
   prefix: "DS",
   width: I2C_W,
@@ -129,7 +127,7 @@ export const lcd1602I2c: ComponentDef = {
     ...backlight("$a", "$k"),
     { kind: "R", a: "$k", b: "GND", value: 1e9, live: "$bl", label: "Backlight transistor (8050)" },
   ],
-  info: { Source: "NXP PCF8574/74A Rev. 5; TI SCPS068K; backpack schematic as playembedded.org redraws it; module as LCD 1602" },
+  // info Source (in the datasheet record): "NXP PCF8574/74A Rev. 5; TI SCPS068K; backpack schematic as playembedded.org redraws it; module as LCD 1602"
 }
 
 export const lcdModules: ComponentDef[] = [lcd1602, lcd1602I2c]

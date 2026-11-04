@@ -14,8 +14,8 @@ const chipBody = (w: number, h: number, part: string, what: string, y: number): 
 export const tp4056Chip: ComponentDef = {
   id: "tp4056",
   name: "TP4056",
-  description: "1 A linear Li-ion charger, SOP-8. Charge current 1200 / R_PROG (1.2 kΩ = 1 A); trickle below 2.9 V, 4.2 V float, ends at C/10. CE high to run; TEMP to GND without an NTC.",
-  keywords: ["charger", "battery charger", "Li-ion", "lithium"],
+  description: "Linear Li-ion charger IC",
+  keywords: ["charger", "battery charger", "Li-ion", "lithium", "SOP-8"],
   category: "power",
   icon: ChipIcon,
   prefix: "U",
@@ -34,14 +34,15 @@ export const tp4056Chip: ComponentDef = {
   body: chipBody(9, 8, "TP4056", "Li-ion charger", 2),
   parts: [],
   model: tp4056({ vcc: "VCC", bat: "BAT", gnd: "GND", prog: "PROG", chrg: "CHRG", stdby: "STDBY", ce: "CE", temp: "TEMP" }),
-  info: { Package: "SOP-8 with exposed pad", Source: "TP4056 datasheet (NanJing Top Power)" },
+  // Source (in the datasheet record): "TP4056 datasheet (NanJing Top Power)"
+  info: { Package: "SOP-8 with exposed pad" },
 }
 
 export const dw03Chip: ComponentDef = {
   id: "dw03",
   name: "DW03",
-  description: "One-cell Li-ion protection with its MOSFETs inside, SOT-23-5: cell minus on GND, the pack's minus on VM. Overcharge 4.3 V, over-discharge 2.4 V, 3.5 A, short 20 A.",
-  keywords: ["battery protection", "protection", "Li-ion", "lithium"],
+  description: "Li-ion cell protection IC",
+  keywords: ["battery protection", "protection", "Li-ion", "lithium", "overcharge", "over-discharge", "SOT-23-5"],
   category: "power",
   icon: ChipIcon,
   prefix: "U",
@@ -55,15 +56,15 @@ export const dw03Chip: ComponentDef = {
   body: chipBody(8, 5, "DW03", "Li-ion protection", 1.8),
   parts: [],
   model: dw03({ vdd: "VDD", gnd: "GND", vm: "VM" }, true),
-  info: { Package: "SOT-23-5 (pin 1 NC)", "On resistance": "40 mΩ GND to VM", Source: "DW03 datasheet (PJSEMI)" },
+  // Source (in the datasheet record): "DW03 datasheet (PJSEMI)"
+  info: { Package: "SOT-23-5 (pin 1 NC)", "On resistance": "40 mΩ GND to VM" },
 }
 
 export const mt3608Chip: ComponentDef = {
   id: "mt3608",
   name: "MT3608",
-  keywords: ["boost", "step-up", "DC-DC", "converter"],
-  description:
-    "1.2 MHz boost, SOT-23-6: the inductor from the supply to SW, a Schottky from SW to the output, a divider from the output to FB (0.6 V). Simulated averaged over its switching; it finds the diode on SW. EN high to run.",
+  keywords: ["boost", "step-up", "DC-DC", "converter", "SOT-23-6"],
+  description: "Step-up DC-DC boost converter",
   category: "power",
   icon: ChipIcon,
   prefix: "U",
@@ -79,7 +80,8 @@ export const mt3608Chip: ComponentDef = {
   body: chipBody(9, 6, "MT3608", "boost converter", 2.2),
   parts: [],
   model: mt3608({ power: "SW", gnd: "GND", fb: "FB", vin: "IN", en: "EN" }),
-  info: { Package: "SOT-23-6 (pin 6 NC)", "Switch limit": "4 A peak, ~2 A average from the input", Output: "up to 28 V", Source: "MT3608 datasheet (Aerosemi)" },
+  // "Switch limit": "4 A peak, ~2 A average from the input"; Source (in the datasheet record): "MT3608 datasheet (Aerosemi)"
+  info: { Package: "SOT-23-6 (pin 6 NC)", "Switch limit": "4 A peak", "Average input": "~2 A", Output: "up to 28 V" },
 }
 
 /**
@@ -110,9 +112,8 @@ export const ncp1117Element = (nodes: { in: string; out: string; gnd: string }, 
 export const ncp1117Chip: ComponentDef = {
   id: "ncp1117",
   name: "NCP1117",
-  keywords: ["LDO", "regulator", "voltage regulator", "linear regulator", "1117"],
-  description:
-    "onsemi's 1 A low-dropout regulator, SOT-223, fixed 1.5–12 V (Arduino Uno's 5 V). About 1 V of dropout (0.95 V at 100 mA, 1.07 V at 800 mA), 1.5 A into a short, 6 mA of its own, 20 V at most on its input.",
+  keywords: ["LDO", "regulator", "voltage regulator", "linear regulator", "1117", "low-dropout", "onsemi", "SOT-223"],
+  description: "1 A low-dropout regulator",
   category: "power",
   icon: ChipIcon,
   prefix: "U",
@@ -131,11 +132,16 @@ export const ncp1117Chip: ComponentDef = {
     ncp1117Element({ in: "IN", out: "OUT", gnd: "GND" }, "{vout}"),
   ],
   info: {
-    Package: "SOT-223: 1 GND/ADJ, 2 OUT (and the tab), 3 IN",
-    Accuracy: "±1 % at 25 °C, ±2 % over line, load and temperature",
-    Source: "onsemi NCP1117/D: electrical characteristics, absolute maximum ratings, ordering information",
-    Thermal: "shuts down at 175 °C, junction at 25 °C + P · 160 °C/W; assumed, to be checked: back on at 160 °C, a 2 s time constant",
-    "Not modelled": "the safe-operating-area limit, the ambient temperature (25 °C), the ground current's rise with load, line and load regulation, ripple rejection, the adjustable part, reverse current from OUT to IN",
+    // Package: "SOT-223: 1 GND/ADJ, 2 OUT (and the tab), 3 IN"
+    Package: "SOT-223, tab is OUT",
+    // Accuracy: "±1 % at 25 °C, ±2 % over line, load and temperature"
+    Accuracy: "±1 % (±2 % overall)",
+    // Source (in the datasheet record): "onsemi NCP1117/D: electrical characteristics, absolute maximum ratings, ordering information"
+    // Thermal: "shuts down at 175 °C, junction at 25 °C + P · 160 °C/W; assumed, to be checked: back on at 160 °C, a 2 s time constant"
+    Thermal: "160 °C/W from 25 °C",
+    Shutdown: "at 175 °C",
+    "Restart (assumed)": "160 °C, 2 s τ",
+    // "Not modelled" (in the datasheet record): "the safe-operating-area limit, the ambient temperature (25 °C), the ground current's rise with load, line and load regulation, ripple rejection, the adjustable part, reverse current from OUT to IN"
   },
 }
 
@@ -172,9 +178,8 @@ export const LP2985_33_GQ = LP2985.iq / 4.3
 export const lp2985Chip: ComponentDef = {
   id: "lp2985",
   name: "LP2985",
-  keywords: ["LDO", "regulator", "voltage regulator", "linear regulator", "low noise"],
-  description:
-    "TI's 150 mA low-noise LDO with shutdown, SOT-23-5, fixed 1.8–5 V (Arduino Uno's 3.3 V). 180 mV of dropout at 150 mA, 375 mA into a short, 69 µA of its own; ON/OFF high to run, low for 1 µA. 16 V in, 18 V at most.",
+  keywords: ["LDO", "regulator", "voltage regulator", "linear regulator", "low noise", "low-dropout", "TI", "SOT-23-5"],
+  description: "Low-noise 150 mA LDO regulator",
   category: "power",
   icon: ChipIcon,
   prefix: "U",
@@ -195,11 +200,15 @@ export const lp2985Chip: ComponentDef = {
     lp2985Element({ in: "IN", out: "OUT", gnd: "GND", en: "EN" }, "{vout}", (p) => LP2985.iq / (Number(p.vout ?? "3.3") + 1)),
   ],
   info: {
-    Package: "SOT-23-5 (DBV): 1 IN, 2 GND, 3 ON/OFF, 4 BYPASS, 5 OUT",
+    // Package: "SOT-23-5 (DBV): 1 IN, 2 GND, 3 ON/OFF, 4 BYPASS, 5 OUT"
+    Package: "SOT-23-5 (DBV)",
     Accuracy: "±0.5 % (new chip)",
-    Source: "TI SLVS522S (May 2025), §5.1, 5.3, 5.5, the new chip's figures",
-    Thermal: "off at 170 °C, back at 150 °C, junction at 25 °C + P · 178.6 °C/W; assumed, to be checked: a 1 s time constant",
-    "Not modelled": "the ambient temperature (25 °C), the input's UVLO (2.2 V rising), the ground current's rise with load (765 µA at 150 mA), the bypass pin's noise, the legacy chip's figures",
+    // Source (in the datasheet record): "TI SLVS522S (May 2025), §5.1, 5.3, 5.5, the new chip's figures"
+    // Thermal: "off at 170 °C, back at 150 °C, junction at 25 °C + P · 178.6 °C/W; assumed, to be checked: a 1 s time constant"
+    Thermal: "178.6 °C/W from 25 °C",
+    Shutdown: "170 °C, back 150 °C",
+    "Time constant (assumed)": "1 s",
+    // "Not modelled" (in the datasheet record): "the ambient temperature (25 °C), the input's UVLO (2.2 V rising), the ground current's rise with load (765 µA at 150 mA), the bypass pin's noise, the legacy chip's figures"
   },
 }
 

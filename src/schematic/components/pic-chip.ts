@@ -115,12 +115,19 @@ export function picChip(chip: PicProfile, pkg: Package, description: string, id 
     mcuReset: "RA5",
     fields: picFields(),
     info: {
-      MCU: `${chip.name}, PIC16 mid-range 8-bit, ${chip.flashWords} words Flash, ${chip.gpr.reduce((n, [a, b]) => n + b - a + 1, 0) + 16} B RAM, ${chip.eepromBytes} B EEPROM${chip.grade < 20e6 ? `, up to ${chip.grade / 1e6} MHz` : ""}`,
+      // MCU: `${chip.name}, PIC16 mid-range 8-bit, ${chip.flashWords} words Flash, ${chip.gpr.reduce((n, [a, b]) => n + b - a + 1, 0) + 16} B RAM, ${chip.eepromBytes} B EEPROM${chip.grade < 20e6 ? `, up to ${chip.grade / 1e6} MHz` : ""}`
+      "Flash/RAM/EEPROM": `${chip.flashWords} words/${chip.gpr.reduce((n, [a, b]) => n + b - a + 1, 0) + 16} B/${chip.eepromBytes} B`,
+      ...(chip.grade < 20e6 ? { "Clock grade": `up to ${chip.grade / 1e6} MHz` } : {}),
       Supply: vddText,
       Package: pkg.name,
-      "Absolute maximum": `VDD ${e.vddAbsMax} V; I/O pins −0.3 V to VDD + ${e.pinAboveVdd} V, ${e.pinCurrentMax * 1e3} mA each, ${e.portsCurrentMax * 1e3} mA all ports; MCLR and RA4 ${e.mclrMax} V`,
-      Configuration: "the configuration word at 2007h comes from the HEX image (__CONFIG / #pragma config); the field here overrides it",
-      Source: pkg.source,
+      // "Absolute maximum": `VDD ${e.vddAbsMax} V; I/O pins −0.3 V to VDD + ${e.pinAboveVdd} V, ${e.pinCurrentMax * 1e3} mA each, ${e.portsCurrentMax * 1e3} mA all ports; MCLR and RA4 ${e.mclrMax} V`
+      "Absolute maximum": `VDD ${e.vddAbsMax} V`,
+      "MCLR/RA4 maximum": `${e.mclrMax} V`,
+      "Pin voltage": `−0.3 V to VDD+${e.pinAboveVdd} V`,
+      "Pin current": `${e.pinCurrentMax * 1e3} mA, ports ${e.portsCurrentMax * 1e3} mA`,
+      // Configuration: "the configuration word at 2007h comes from the HEX image (__CONFIG / #pragma config); the field here overrides it"
+      Configuration: "from HEX 2007h, field overrides",
+      // Source (in the datasheet record): pkg.source
     },
   }
 }
@@ -165,13 +172,8 @@ const PDIP18: Package = {
   ],
 }
 
-const DESCRIPTION: Record<string, string> = {
-  PIC16F627A: "8-bit PIC16 MCU, 1K words Flash, PDIP-18",
-  PIC16F628A: "8-bit PIC16 MCU, 2K words Flash, PDIP-18 — the classic hobby PIC",
-  PIC16F648A: "8-bit PIC16 MCU, 4K words Flash, PDIP-18",
-}
 export const picChips: ComponentDef[] = PIC_CHIPS.map((c) =>
-  picChip(c, PDIP18, DESCRIPTION[c.id] ?? `8-bit PIC16 MCU, ${c.flashWords / 1024}K words Flash, PDIP-18${c.revisionA ? "" : " — the original (non-A) silicon, DS40300C"}${c.grade < 20e6 ? `, ${c.grade / 1e6} MHz grade` : ""}${c.lowVoltage ? ", 2.0 V LF part" : ""}`),
+  picChip(c, PDIP18, `${c.lowVoltage ? "Low-voltage" : "8-bit"} PIC16 MCU, ${c.flashWords / 1024}K Flash`),
 )
 
 /** This file's parts, in palette order: the catalogue loads them from here. */

@@ -44,16 +44,21 @@ const PIN_NOTES: Record<string, string> = {
 
 type Group = { names: string[]; kind?: PinKind }
 
-function absoluteMaximum(e: ChipElectrical) {
+// Was one note: `VDD 4 V; FT pins VDD + 4 V, TTa pins (PA4, PA5) 4 V; 25 mA a pin, 3 mA on PC13, PC14, PC15, PI8;
+// injected −5 mA (TTa ±5 mA)` (without pad data: `VDD 4 V, I/O pins 4 V and 25 mA`); now a note each.
+function absoluteMaximum(e: ChipElectrical): Record<string, string> {
   const pads = e.pads
-  if (!pads) return `VDD ${e.vddMax} V, I/O pins ${e.pinVoltageMax} V and ${e.pinCurrentMax * 1e3} mA`
+  if (!pads) return { "Absolute maximum": `VDD ${e.vddMax} V`, "I/O pins": `${e.pinVoltageMax} V, ${e.pinCurrentMax * 1e3} mA` }
   const mA = (amps: number) => `${amps * 1e3} mA`
-  return [
-    `VDD ${e.vddMax} V`,
-    `FT pins VDD + ${pads.ft.aboveVdd} V, TTa pins (${pads.tta.pads.join(", ")}) ${pads.tta.voltageMax} V`,
-    `${mA(e.pinCurrentMax)} a pin, ${mA(pads.backupDomain.currentMax)} on ${pads.backupDomain.pads.join(", ")}`,
-    `injected −${mA(pads.injectedCurrentMax)} (TTa ±${mA(pads.injectedCurrentMax)})`,
-  ].join("; ")
+  const tta = pads.tta.pads.length > 0
+  return {
+    "Absolute maximum": `VDD ${e.vddMax} V`,
+    "FT pins": `VDD+${pads.ft.aboveVdd} V`,
+    ...(tta ? { "TTa pins": `${pads.tta.pads.join("/")} ${pads.tta.voltageMax} V` } : {}),
+    "Pin current": mA(e.pinCurrentMax),
+    "Backup-domain pins": `${pads.backupDomain.pads.join("/")} ${mA(pads.backupDomain.currentMax)}`,
+    "Injected current": `−${mA(pads.injectedCurrentMax)}${tta ? ` (TTa ±${mA(pads.injectedCurrentMax)})` : ""}`,
+  }
 }
 
 export function stm32Chip(chip: ChipProfile, pkg: Package, description: string): ComponentDef {
@@ -156,10 +161,11 @@ export function stm32Chip(chip: ChipProfile, pkg: Package, description: string):
     mcuReset: "NRST",
     mcuBoot0: has("BOOT0") ? "BOOT0" : undefined,
     info: {
-      MCU: `${chip.name}, ${chip.core.name}, ${kb(flash.size)} Flash, ${kb(ram)} SRAM`,
+      // MCU: `${chip.name}, ${chip.core.name}, ${kb(flash.size)} Flash, ${kb(ram)} SRAM`
+      MCU: `${chip.name}, ${kb(flash.size)}/${kb(ram)}`,
       Package: pkg.name,
-      "Absolute maximum": absoluteMaximum(e),
-      Source: pkg.source,
+      ...absoluteMaximum(e),
+      // Source (in the datasheet record): pkg.source
     },
   }
 }

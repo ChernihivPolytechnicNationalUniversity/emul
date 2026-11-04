@@ -15,8 +15,7 @@ const H = 6
 export const servoSg90: ComponentDef = {
   id: "servo-sg90",
   name: "Servo SG90",
-  description:
-    "TowerPro SG90 9 g micro servo: 20 ms (50 Hz) pulses, 1.5 ms the middle, ~1 ms all the way left (−90°), ~2 ms all the way right (+90°); 0.1 s/60° at 4.8 V; dead band 10 µs. Past ±90° the horn stalls on its stop and draws the stall current.",
+  description: "9 g micro hobby servo",
   category: "sound",
   keywords: ["servo", "SG90", "TowerPro", "Tower Pro", "micro servo", "PWM"],
   icon: ServoIcon,
@@ -40,7 +39,7 @@ export const servoSg90: ComponentDef = {
     { kind: "R", a: "VCC", b: "GND", value: 1e9, live: SERVO_SUPPLY_KEY, label: "Motor and electronics" },
     { kind: "GPIO", node: "SIG", vddNode: "VCC", gndNode: "GND" },
   ],
-  info: { Source: "TowerPro SG90 sheet (components101 / FriendlyWire copies); Rapid 37-1330 (Version 1, October 2013); currents: vendor spec sheet and RobotShop" },
+  // info Source (in the datasheet record): "TowerPro SG90 sheet (components101 / FriendlyWire copies); Rapid 37-1330 (Version 1, October 2013); currents: vendor spec sheet and RobotShop"
 }
 
 /** This file's parts, in palette order: the catalogue loads them from here. */

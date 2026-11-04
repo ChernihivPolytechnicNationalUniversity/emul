@@ -285,11 +285,14 @@ export const nucleoF429zi: ComponentDef = {
   // so HSE works in bypass only. X2 is the 32.768 kHz LSE crystal (UM1974 §6.7).
   mcuClocks: { hse: { hz: 8e6, kind: "clock", startup: 0 }, lse: { hz: 32768, kind: "crystal", startup: 2 } },
   info: {
-    MCU: "STM32F429ZIT6, Cortex-M4F 180 MHz, 2 MB Flash, 256 KB SRAM",
-    "Virtual COM port": "USART3, TX PD8, RX PD9 (via ST-LINK)",
-    "USB OTG FS": "DM PA11, DP PA12, VBUS PA9, ID PA10, PWR_EN PG6, OVRCR PG7",
-    "Ethernet RMII": "REF_CLK PA1, MDIO PA2, MDC PC1, CRS_DV PA7, RXD0 PC4, RXD1 PC5, TX_EN PG11, TXD0 PG13, TXD1 PB13",
-    Source: "ST UM1974, Table 16",
+    // MCU: STM32F429ZIT6, Cortex-M4F 180 MHz, 2 MB Flash, 256 KB SRAM
+    // Virtual COM port: USART3, TX PD8, RX PD9 (via ST-LINK)
+    "Virtual COM port": "USART3 on PD8/PD9",
+    // USB OTG FS: DM PA11, DP PA12, VBUS PA9, ID PA10, PWR_EN PG6, OVRCR PG7
+    "USB OTG FS": "PA11/PA12, VBUS PA9",
+    // Ethernet RMII: REF_CLK PA1, MDIO PA2, MDC PC1, CRS_DV PA7, RXD0 PC4, RXD1 PC5, TX_EN PG11, TXD0 PG13, TXD1 PB13
+    "Ethernet RMII": "RMII, UM1974 Table 16",
+    // Source: ST UM1974, Table 16
   },
 }
 

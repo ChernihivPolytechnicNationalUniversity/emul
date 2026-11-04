@@ -23,9 +23,8 @@ const PINS: PinDef[] = [
 export const ne555: ComponentDef = {
   id: "ne555",
   name: "NE555",
-  keywords: ["555", "555 timer", "timer", "NE555P", "astable", "monostable"],
-  description:
-    "Precision timer, PDIP-8 (TI NE555): timing from microseconds to hours, astable or monostable, the period and duty cycle set by the resistors and capacitor wired to it; CONT moves both thresholds (2/3 and 1/3 VCC). 4.5–16 V; the output sinks or sources up to 200 mA. No settings: select it while running to read frequency, period and duty.",
+  keywords: ["555", "555 timer", "timer", "NE555P", "astable", "monostable", "TI", "PDIP-8", "oscillator"],
+  description: "Precision 555 timer IC",
   category: "ics",
   icon: TimerIcon,
   prefix: "U",
@@ -59,7 +58,8 @@ export const ne555: ComponentDef = {
     { kind: "R", a: "$lo", b: "GND", value: NE555.divider, hidden: true },
     { kind: "D", anode: "GND", cathode: "VCC", vf: 0.7, hidden: true, limits: { current: 0.05, fail: "short" } },
   ],
-  info: { Package: "PDIP-8", Source: "TI NE555 datasheet SLFS022K (2026), typical characteristics at 25 °C" },
+  // Source (in the datasheet record): "TI NE555 datasheet SLFS022K (2026), typical characteristics at 25 °C"
+  info: { Package: "PDIP-8" },
 }
 
 /** This file's parts, in palette order: the catalogue loads them from here. */

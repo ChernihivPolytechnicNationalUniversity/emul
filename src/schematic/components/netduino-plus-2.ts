@@ -225,14 +225,23 @@ export const netduinoPlus2: ComponentDef = {
   // Y1 25.000 MHz crystal (C23/C24 18 pF, R13 390 Ω); no LSE (PC14 is the button, PC15 Ethernet power).
   mcuClocks: { hse: { hz: 25e6, kind: "crystal", startup: 2e-3 }, lse: null },
   info: {
-    MCU: "STM32F405RGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM; HSE 25 MHz",
-    LEDs: "LED blue on PA10 (high = on, pulled up: lit until firmware drives it low); PWR white (PC13 low turns it off); ACT green from the ENC28J60",
-    Button: "BTN: BOOT0, PB11 and PC14 together, high when pressed; held at reset it boots the ST bootloader. No reset button",
-    Power: "PB2 high switches the header 3V3/5V on; PC15 low powers the ENC28J60; PB1 low powers the microSD",
-    Ethernet: "ENC28J60 on SPI1: SCK PA5, MOSI PA7, MISO PB4, CS PC8, INT PA4, RESET PD2; clock from MCO1 on PA8",
-    microSD: "SPI3: SCK PC10, MISO PC11, MOSI PC12, CS PB0; card detect PB5 (low = inserted)",
-    "Not modelled": "microSD card, the ENC28J60's network side (no cable to another host: what it sends goes nowhere, nothing arrives), the MCO1 clock as a signal (the ENC28J60 is clocked whenever it is powered), the VIN/USB comparator (both sources feed +5V)",
-    Source: "Secret Labs CW0034 Rev A schematic; Arduino Uno R3 board file for the outline",
+    // MCU: STM32F405RGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM; HSE 25 MHz
+    // LEDs: LED blue on PA10 (high = on, pulled up: lit until firmware drives it low); PWR white (PC13 low turns it off);
+    //   ACT green from the ENC28J60
+    LEDs: "Blue on PA10, starts lit",
+    // Button: BTN: BOOT0, PB11 and PC14 together, high when pressed; held at reset it boots the ST bootloader. No reset
+    //   button
+    Button: "BOOT0, PB11, PC14, active high",
+    // Power: PB2 high switches the header 3V3/5V on; PC15 low powers the ENC28J60; PB1 low powers the microSD
+    Power: "PB2 high enables header power",
+    // Ethernet: ENC28J60 on SPI1: SCK PA5, MOSI PA7, MISO PB4, CS PC8, INT PA4, RESET PD2; clock from MCO1 on PA8
+    Ethernet: "ENC28J60 on SPI1, CS PC8",
+    // microSD: SPI3: SCK PC10, MISO PC11, MOSI PC12, CS PB0; card detect PB5 (low = inserted)
+    microSD: "SPI3, CS PB0, CD PB5",
+    // Not modelled: microSD card, the ENC28J60's network side (no cable to another host: what it sends goes nowhere,
+    //   nothing arrives), the MCO1 clock as a signal (the ENC28J60 is clocked whenever it is powered), the VIN/USB
+    //   comparator (both sources feed +5V)
+    // Source: Secret Labs CW0034 Rev A schematic; Arduino Uno R3 board file for the outline
   },
 }
 
