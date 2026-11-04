@@ -2,6 +2,7 @@ import { hasDatasheet } from "@/schematic/datasheets"
 import type { ComponentDef } from "@/schematic/types"
 import { Details, DocLinks, ModelClaims, Pinout, SpecList, SymbolPreview } from "./PartFacts"
 import { hasPinout } from "./pinout"
+import { CharacteristicList } from "./Characteristics"
 
 /** Old free-text notes that say what the model does and leaves out, and where it comes from: shown in the record's places until the record is written. */
 const NOTE_MODELLED = "Modelled"
@@ -36,7 +37,7 @@ export function PartTab({ def }: { def: ComponentDef }) {
       ) : (
         <SymbolPreview def={def} fill height={120} maxHeight={220} />
       )}
-      {sheet && <SpecList record={sheet} stacked />}
+      {sheet && (sheet.characteristics?.length ? <CharacteristicList record={sheet} /> : <SpecList record={sheet} stacked />)}
       {record ? <ModelClaims record={record} /> : pending && (pending.modelled.length > 0 || pending.notModelled.length > 0) && <ModelClaims record={{ none: "", ...pending }} />}
       {record && !sheet && "none" in record && <p className="text-xs text-muted-foreground">{record.none}</p>}
       {def.info && <Details info={def.info} skip={NOTES_SHOWN_ELSEWHERE} />}

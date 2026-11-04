@@ -72,13 +72,14 @@ const RECORDS: Record<string, Datasheet> = {
     maker: "Texas Instruments",
     package: "PDIP-8",
     docs: [DOCS["ti-slfs022k"]],
-    specs: [
-      { label: "Supply", value: "4.5–16 V (18 V abs max)", cite: { page: 4, at: "§5.3 Recommended Operating Conditions; §5.1" } },
-      { label: "Output current", value: "±200 mA (±225 mA abs max)", cite: { page: 4, at: "§5.3 Recommended Operating Conditions; §5.1" } },
-      { label: "Thresholds", value: "2/3 and 1/3 VCC: 3.3 V / 1.67 V at 5 V", cite: { page: 5, at: "§5.5 Electrical Characteristics" } },
-      { label: "Output high", value: "VCC − 1.7 V at 100 mA (13.3 V at 15 V)", cite: { page: 6, at: "§5.5 Electrical Characteristics" } },
-      { label: "Supply current", value: "3 mA at 5 V, 10 mA at 15 V (output low, no load)", cite: { page: 6, at: "§5.5 Electrical Characteristics" } },
-      { label: "Timing range", value: "10 µs to hours; < 1 mHz to 100 kHz", cite: { page: 10, at: "§6.1 Overview" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 4.5, max: 16 }, limit: { max: 18 }, cite: { page: 4, at: "§5.3" }, limitCite: { page: 4, at: "§5.1" } },
+      { kind: "outputCurrent", value: { max: 0.2, sym: true }, limit: { max: 0.225, sym: true }, cite: { page: 4, at: "§5.3" }, limitCite: { page: 4, at: "§5.1" } },
+      { kind: "threshold", value: { typ: { rail: "VCC", times: 2 / 3 } }, cite: { page: 5, at: "§5.5" } },
+      { kind: "trigger", value: { typ: { rail: "VCC", times: 1 / 3 } }, cite: { page: 5, at: "§5.5" } },
+      { kind: "outputHigh", value: { typ: { rail: "VCC", offset: -1.7 } }, at: [{ load: { amps: 0.1 } }], cite: { page: 6, at: "§5.5" } },
+      { kind: "supplyCurrent", value: { typ: 3e-3 }, at: [{ supply: 5 }, { state: "outputLow" }], cite: { page: 6, at: "§5.5" } },
     ],
     modelled: [
       { what: "Thresholds at 2/3, 1/3 VCC", cite: { page: 5, at: "§5.5 Electrical Characteristics" }, test: "tests/sim/ne555.test.ts" },

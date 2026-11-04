@@ -1,3 +1,4 @@
+import type { Characteristic } from "./characteristics"
 import type { OptLevel, SourceFile } from "emul-shared/source"
 import type { HdlNetlist } from "emul-shared/hdl"
 import type { BreakpointSpec } from "@/debug/protocol"
@@ -435,7 +436,10 @@ export type Datasheet = {
   maker: string
   package?: string
   docs: [DocRecord, ...DocRecord[]]
+  /** The free-text numbers of before: replaced, part by part, by `characteristics` (a test ratchets the rest down). */
   specs: Spec[]
+  /** The key numbers as typed characteristics (src/schematic/characteristics.ts): no text, one row each. */
+  characteristics?: Characteristic[]
   modelled: Claim[]
   notModelled: Claim[]
 }

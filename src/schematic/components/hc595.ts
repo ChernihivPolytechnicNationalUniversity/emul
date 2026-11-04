@@ -110,13 +110,15 @@ const RECORDS: Record<string, Datasheet> = {
     maker: "Texas Instruments",
     package: "PDIP-16",
     docs: [DOCS["ti-scls041j"], DOCS["nexperia-74hc595"]],
-    specs: [
-      { label: "Supply", value: "2–6 V (7 V abs max)", cite: { page: 4, at: "§6.3 Recommended Operating Conditions; §6.1" } },
-      { label: "Input high (VIH)", value: "3.15 V at 4.5 V, 4.2 V at 6 V", cite: { page: 4, at: "§6.3 Recommended Operating Conditions" } },
-      { label: "Output current", value: "±6 mA at 4.5 V (VOH ≥ 3.98 V)", cite: { page: 5, at: "§6.5 Electrical Characteristics" } },
-      { label: "Output current (abs max)", value: "±35 mA a pin, ±70 mA through VCC or GND", cite: { page: 4, at: "§6.1 Absolute Maximum Ratings" } },
-      { label: "Max clock", value: "25 MHz at 4.5 V (31 MHz at 25 °C)", cite: { page: 6, at: "§6.6 Timing Requirements" } },
-      { label: "Propagation delay", value: "17 ns typ, RCLK to QA–QH at 4.5 V", cite: { page: 8, at: "§6.7 Switching Characteristics" } },
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 2, max: 6 }, limit: { max: 7 }, cite: { page: 4, at: "§6.3" }, limitCite: { page: 4, at: "§6.1" } },
+      { kind: "inputHigh", value: { min: 3.15 }, at: [{ supply: 4.5 }], cite: { page: 4, at: "§6.3" } },
+      { kind: "outputHigh", value: { min: 3.98 }, at: [{ supply: 4.5 }, { load: { amps: 6e-3 } }], cite: { page: 5, at: "§6.5" } },
+      { kind: "outputCurrent", value: { max: 6e-3, sym: true }, limit: { max: 35e-3, sym: true }, per: "pin", at: [{ supply: 4.5 }], cite: { page: 5, at: "§6.5" }, limitCite: { page: 4, at: "§6.1" } },
+      { kind: "supplyCurrent", limit: { max: 70e-3, sym: true }, cite: { page: 4, at: "§6.1" } },
+      { kind: "clock", value: { max: 25e6 }, at: [{ supply: 4.5 }], cite: { page: 6, at: "§6.6" } },
+      { kind: "delay", value: { typ: 17e-9 }, at: [{ supply: 4.5 }, { path: ["RCLK", "QA"] }], cite: { page: 8, at: "§6.7" } },
     ],
     modelled: [
       { what: "Shift, latch, clear, 3-state logic", cite: { page: 12, at: "Table 8-1 Function Table" }, test: "tests/sim/hc595.test.ts" },

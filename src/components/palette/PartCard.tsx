@@ -8,6 +8,7 @@ import { ensureDefs, getDef, getDefsVersion, getMeta, subscribeDefs, type PartMe
 import type { BoardCard, ComponentDef } from "@/schematic/types"
 import { usePaletteActions } from "./palette-actions"
 import { SpecList, SymbolPreview } from "@/components/parts/PartFacts"
+import { CharacteristicList } from "@/components/parts/Characteristics"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FavouriteButton } from "./FavouriteButton"
 import { HOLD_MS, hideCard, holdCard, keepCard, leavePart, releaseCard, useCardAnchor } from "./part-card"
@@ -146,7 +147,7 @@ function CardBody() {
           )}
         </div>
       </div>
-      {sheet ? <SpecList record={sheet} limit={2} /> : meta.description && <p className="line-clamp-3 text-[12.5px] text-muted-foreground">{meta.description}</p>}
+      {sheet?.characteristics?.length ? <CharacteristicList record={sheet} limit={3} /> : sheet ? <SpecList record={sheet} limit={2} /> : meta.description && <p className="line-clamp-3 text-[12.5px] text-muted-foreground">{meta.description}</p>}
       <div className="flex items-center border-t pt-2.5">
         {doc ? (
           <a href={docUrl(doc)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-medium text-primary hover:underline">
