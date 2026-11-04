@@ -3,13 +3,17 @@ import { createPortal } from "react-dom"
 import { ExternalLinkIcon } from "lucide-react"
 import { docUrl, hasDatasheet } from "@/schematic/datasheets"
 import { familyOf, variantLabel } from "@/schematic/families"
-import { getDef, getDefsVersion, getMeta, subscribeDefs } from "@/schematic/registry"
+import { ensureDefs, getDef, getDefsVersion, getMeta, subscribeDefs, type PartMeta } from "@/schematic/registry"
+import type { BoardCard, ComponentDef } from "@/schematic/types"
+import { usePaletteActions } from "./palette-actions"
 import { SpecList, SymbolPreview } from "@/components/parts/PartFacts"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FavouriteButton } from "./FavouriteButton"
 import { HOLD_MS, hideCard, holdCard, keepCard, leavePart, releaseCard, useCardAnchor } from "./part-card"
 
 const WIDTH = 360
+/** A board's card is wide: its photo and its drawing on the bench side by side, its facts in two columns. */
+const BOARD_WIDTH = 560
 const GAP = 8
 const MARGIN = 8
 /** Variant chips the card shows before "+N". */
@@ -94,7 +98,8 @@ function CardBody() {
   // Beside the palette, level with the row; kept on screen, flipped up from the row's bottom near the foot.
   const room = window.innerHeight - MARGIN
   const top = Math.max(MARGIN, anchor.top + height > room ? anchor.bottom - height : anchor.top)
-  const left = Math.min(anchor.right + GAP, window.innerWidth - WIDTH - MARGIN)
+  const width = meta.board ? BOARD_WIDTH : WIDTH
+  const left = Math.min(anchor.right + GAP, window.innerWidth - width - MARGIN)
   const subtitle = def ? [sheet?.package, `${def.pins.length} pins`, def.prefix].filter(Boolean).join(" · ") : null
   const others = family ? family.variants.filter(([id]) => id !== anchor.id) : []
 
@@ -106,13 +111,15 @@ function CardBody() {
       onPointerEnter={keepCard}
       onPointerLeave={() => (anchor.held ? releaseCard() : leavePart())}
       className="fixed z-50 isolate flex flex-col gap-3 rounded-xl border bg-popover px-4 py-3.5 text-[13px] text-popover-foreground shadow-[0_16px_44px_rgba(0,0,0,.16)] animate-in fade-in-0 zoom-in-95 duration-100 motion-reduce:animate-none"
-      style={{ top, left, width: WIDTH }}
+      style={{ top, left, width }}
     >
       <HoldLine />
+      {meta.board ? (
+        <BoardContent meta={meta} board={meta.board} def={def} />
+      ) : (
+      <>
       <div className="flex gap-3.5">
-        {meta.board ? (
-          <img src={`${import.meta.env.BASE_URL}boards/${meta.board.photo}`} alt="" className="size-24 shrink-0 rounded-[10px] border bg-muted/40 object-contain" />
-        ) : def ? (
+        {def ? (
           <SymbolPreview def={def} size={96} />
         ) : (
           <Skeleton className="size-24 shrink-0 rounded-[10px]" />
@@ -122,7 +129,7 @@ function CardBody() {
             <span className="text-[17px] leading-tight font-semibold">{meta.name}</span>
             <FavouriteButton def={meta} className="ml-auto shrink-0" />
           </div>
-          <p className="mt-0.5 text-muted-foreground">{meta.board ? `${meta.board.vendor} · ${meta.board.mcu}` : (subtitle ?? <Skeleton className="h-4 w-32" />)}</p>
+          <p className="mt-0.5 text-muted-foreground">{subtitle ?? <Skeleton className="h-4 w-32" />}</p>
           {family && (
             <div className="mt-2 flex flex-wrap gap-1">
               <span className="inline-flex h-6 items-center rounded-full border border-foreground bg-foreground px-2.5 text-xs text-background">{variantLabel(anchor.id)}</span>
@@ -151,7 +158,106 @@ function CardBody() {
           <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-b-2 bg-background px-1 font-mono text-[10px] leading-none">↵</kbd>
         </span>
       </div>
+      </>
+      )}
     </div>,
     document.body,
+  )
+}
+
+const LABEL = "text-[11px] font-medium tracking-wide text-muted-foreground uppercase"
+
+/**
+ * A board's card, as students pick a board: the real thing and how it stands on the bench, the
+ * MCU and what else it carries, its manual and its chip's datasheet, and the chip on its own.
+ */
+function BoardContent({ meta, board, def }: { meta: PartMeta; board: BoardCard; def: ComponentDef | undefined }) {
+  const { activate } = usePaletteActions()
+  // The bare chip of the board's MCU, when the palette has it: its datasheet is the board's too.
+  const chipId = board.mcu.toLowerCase()
+  const chip = getMeta(chipId)
+  React.useEffect(() => {
+    if (chip) void ensureDefs([chipId])?.catch(() => {})
+  }, [chip, chipId])
+  const chipSheet = getDef(chipId)?.datasheet
+  const chipDoc = hasDatasheet(chipSheet) ? chipSheet.docs[0] : undefined
+  const sheet = hasDatasheet(def?.datasheet) ? def.datasheet : undefined
+  const manual = sheet?.docs[0]
+  const facts: [string, string | undefined][] = [
+    ["MCU", `${board.mcu} · ${board.core}`],
+    ["Clock", `${board.mhz} MHz`],
+    ["Flash / RAM", board.memory],
+    ["Logic", `${board.volts} V`],
+    ["On board", board.onBoard.join(" · ")],
+    ["Printed", board.printed],
+  ]
+  const link = "inline-flex items-center gap-1 font-medium text-primary hover:underline"
+  return (
+    <>
+      <div className="flex items-baseline gap-2">
+        <span className="text-[17px] leading-tight font-semibold">{meta.name}</span>
+        <span className="truncate text-muted-foreground">{[board.alias, board.vendor].filter(Boolean).join(" · ")}</span>
+        <FavouriteButton def={meta} className="ml-auto shrink-0 self-center" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <figure>
+          <figcaption className={LABEL}>Photo</figcaption>
+          <img src={`${import.meta.env.BASE_URL}boards/${board.photo}`} alt="" className="mt-1 h-40 w-full rounded-[10px] border bg-muted/40 object-contain" />
+        </figure>
+        <figure>
+          <figcaption className={LABEL}>On the bench</figcaption>
+          <div className="mt-1 flex h-40 items-center justify-center rounded-[10px] border bg-muted/40">{def ? <SymbolPreview def={def} size={156} className="border-0 bg-transparent" /> : <Skeleton className="size-36" />}</div>
+        </figure>
+      </div>
+      <dl className="grid grid-cols-[auto_1fr_auto_1fr] items-baseline gap-x-3 gap-y-1.5 text-[12.5px]">
+        {facts.flatMap(([k, v]) =>
+          v
+            ? [
+                <dt key={`${k}:k`} className="text-muted-foreground">
+                  {k}
+                </dt>,
+                <dd key={`${k}:v`} className="min-w-0">
+                  {v}
+                </dd>,
+              ]
+            : [],
+        )}
+      </dl>
+      {board.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {board.tags.map((t) => (
+            <span key={t} className="rounded-full bg-muted px-2 py-0.5 text-[11.5px] font-semibold">
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center gap-4 border-t pt-2.5">
+        {manual && (
+          <a href={docUrl(manual)} target="_blank" rel="noopener noreferrer" className={link} title={[manual.maker, manual.title].join(" · ")}>
+            {manual.id}
+            <ExternalLinkIcon className="size-3.5" />
+          </a>
+        )}
+        {chipDoc && (
+          <a href={docUrl(chipDoc)} target="_blank" rel="noopener noreferrer" className={link} title={[chipDoc.maker, chipDoc.title].join(" · ")}>
+            Datasheet
+            <ExternalLinkIcon className="size-3.5" />
+          </a>
+        )}
+        {chip && (
+          <button
+            type="button"
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+            onClick={(e) => {
+              hideCard()
+              activate(chip, e)
+            }}
+          >
+            Chip on its own: {chip.name} →
+          </button>
+        )}
+      </div>
+    </>
   )
 }

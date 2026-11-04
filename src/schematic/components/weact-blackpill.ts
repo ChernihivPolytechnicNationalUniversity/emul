@@ -293,7 +293,7 @@ function blackPill(chip: ChipProfile, id: string, mcu: string): ComponentDef {
     name: `WeAct Black Pill ${chip.name.slice(5, 9)}${chip.line === "f401" ? chip.name.slice(9, 11) : ""}`,
     description: chip.name.slice(0, 11),
     keywords: ["STM32", chip.name.slice(0, 11), "Black Pill", "WeAct", "Cortex-M4"],
-    board: { vendor: "WeAct Studio", mcu: chip.name.slice(0, 11), mhz: chip.line === "f411" ? 100 : 84, volts: 3.3, tags: ["USB-C"], photo: "weact-blackpill-f411.webp" },
+    board: { vendor: "WeAct Studio", mcu: chip.name.slice(0, 11), mhz: chip.line === "f411" ? 100 : 84, volts: 3.3, tags: ["USB-C"], photo: "weact-blackpill-f411.webp", core: "Cortex-M4F", memory: BLACKPILL_MEMORY[chip.name.slice(0, 11)], onBoard: ["LED", "user button", "USB-C"], alias: "Black Pill" },
     category: "boards",
     icon: BoardIcon,
     prefix: "U",
@@ -326,6 +326,9 @@ function blackPill(chip: ChipProfile, id: string, mcu: string): ComponentDef {
     },
   }
 }
+
+/** Flash / RAM of each Black Pill's MCU (its notes in `info`). */
+const BLACKPILL_MEMORY: Record<string, string> = { STM32F411CE: "512 KB / 128 KB", STM32F401CE: "512 KB / 96 KB", STM32F401CC: "256 KB / 64 KB" }
 
 export const weactBlackpillF411 = blackPill(STM32F411CE, "weact-blackpill-f411", "STM32F411CEU6, Cortex-M4F 100 MHz, 512 KB Flash, 128 KB SRAM; HSE 25 MHz, LSE 32.768 kHz")
 export const weactBlackpillF401cc = blackPill(STM32F401CC, "weact-blackpill-f401cc", "STM32F401CCU6, Cortex-M4F 84 MHz, 256 KB Flash, 64 KB SRAM; HSE 25 MHz, LSE 32.768 kHz")

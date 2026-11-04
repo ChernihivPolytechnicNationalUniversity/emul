@@ -700,7 +700,7 @@ const model: Element[] = [
 export const open746ic: ComponentDef = {
   id: "open746i-c",
   name: "Open746I-C",
-  board: { vendor: "Waveshare", mcu: "STM32F746IG", mhz: 216, volts: 3.3, tags: ["7\" LCD", "SDRAM"], photo: "open746i-c.webp" },
+  board: { vendor: "Waveshare", mcu: "STM32F746IG", mhz: 216, volts: 3.3, tags: ["7\" LCD", "SDRAM"], photo: "open746i-c.webp", core: "Cortex-M7", memory: "1 MB / 320 KB", onBoard: ['7" LCD + touch', "8 MB SDRAM", "4 LEDs", "joystick", "USB serial"], alias: "Open7XXI-C" },
   description: "STM32F746IG · Waveshare",
   keywords: ["STM32", "STM32F746IG", "STM32F7", "Cortex-M7", "Waveshare", "Open7XXI-C"],
   category: "boards",

@@ -534,6 +534,16 @@ export type BoardCard = {
   tags: string[]
   /** A photo of the real board in `public/boards/`: landscape, main USB on the left, background cut away, 192 × 128 WebP. */
   photo: string
+  /** The MCU's core, as its datasheet names it: "Cortex-M4F", "AVR". */
+  core: string
+  /** Flash / RAM of the MCU on the board, as "2 MB / 256 KB". */
+  memory: string
+  /** What the board carries besides the MCU, a word or two each (its notes in `info` say where). */
+  onBoard: string[]
+  /** The other name students know it by ("Nucleo-144"). */
+  alias?: string
+  /** The board's own ID printed on it ("MB1137"). */
+  printed?: string
 }
 
 /** LTDC output lines a parallel RGB panel takes. */

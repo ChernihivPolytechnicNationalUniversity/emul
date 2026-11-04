@@ -233,7 +233,7 @@ const model: Element[] = [
 export const stm32f4Discovery: ComponentDef = {
   id: "stm32f4-discovery",
   name: "STM32F4 Discovery",
-  board: { vendor: "STMicroelectronics", mcu: "STM32F407VG", mhz: 168, volts: 3.3, tags: ["audio", "accel"], photo: "stm32f4-discovery.webp" },
+  board: { vendor: "STMicroelectronics", mcu: "STM32F407VG", mhz: 168, volts: 3.3, tags: ["audio", "accel"], photo: "stm32f4-discovery.webp", core: "Cortex-M4F", memory: "1 MB / 192 KB", onBoard: ["4 LEDs", "user button", "audio DAC", "accelerometer", "microphone"], alias: "STM32F4DISCOVERY", printed: "MB997" },
   description: "STM32F407VG",
   keywords: ["STM32", "STM32F407VG", "STM32F4DISCOVERY", "STM32F407G-DISC1", "Discovery", "Disco", "MB997", "MB997A", "Cortex-M4"],
   category: "boards",

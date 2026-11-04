@@ -231,7 +231,7 @@ const solderBridge = (key: string, label: string) => ({ key, label, type: "selec
 export const olimexStm32H405: ComponentDef = {
   id: "olimex-stm32-h405",
   name: "Olimex STM32-H405",
-  board: { vendor: "Olimex", mcu: "STM32F405RG", mhz: 168, volts: 3.3, tags: [], photo: "olimex-stm32-h405.webp" },
+  board: { vendor: "Olimex", mcu: "STM32F405RG", mhz: 168, volts: 3.3, tags: [], photo: "olimex-stm32-h405.webp", core: "Cortex-M4F", memory: "1 MB / 192 KB", onBoard: ["LED", "user button", "USB", "JTAG"] },
   description: "STM32F405RG",
   keywords: ["STM32", "STM32F405RG", "Olimex", "H405", "Cortex-M4"],
   category: "boards",

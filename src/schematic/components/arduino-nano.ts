@@ -346,7 +346,7 @@ const hex = (v: number) => `0x${v.toString(16).toUpperCase().padStart(2, "0")}`
 export const arduinoNano: ComponentDef = {
   id: "arduino-nano",
   name: "Arduino Nano",
-  board: { vendor: "Arduino", mcu: "ATmega328P", mhz: 16, volts: 5, tags: ["breadboard"], photo: "arduino-nano.webp" },
+  board: { vendor: "Arduino", mcu: "ATmega328P", mhz: 16, volts: 5, tags: ["breadboard"], photo: "arduino-nano.webp", core: "AVR", memory: "32 KB / 2 KB", onBoard: ["USB serial", "ICSP"] },
   description: "ATmega328P, 16 MHz, USB serial",
   keywords: ["Arduino", "Nano", "ATmega328P", "AVR", "A000005", "FT232RL", "CH340"],
   category: "boards",

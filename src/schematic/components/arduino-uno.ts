@@ -285,7 +285,7 @@ const hex = (v: number) => `0x${v.toString(16).toUpperCase().padStart(2, "0")}`
 export const arduinoUno: ComponentDef = {
   id: "arduino-uno",
   name: "Arduino Uno R3",
-  board: { vendor: "Arduino", mcu: "ATmega328P", mhz: 16, volts: 5, tags: [], photo: "arduino-uno.webp" },
+  board: { vendor: "Arduino", mcu: "ATmega328P", mhz: 16, volts: 5, tags: [], photo: "arduino-uno.webp", core: "AVR", memory: "32 KB / 2 KB", onBoard: ["L LED", "USB serial", "ICSP"], alias: "UNO R3" },
   description: "ATmega328P, 16 MHz, USB serial, 7–12 V jack",
   keywords: ["Arduino", "Uno", "UNO R3", "Rev3", "ATmega328P", "AVR", "A000066", "ATmega16U2"],
   category: "boards",
