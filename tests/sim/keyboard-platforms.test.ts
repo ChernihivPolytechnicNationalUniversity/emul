@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import { alternatives, matches, matchesAny, shortcutLabel, type KeyPress, type Keys, type Shortcut } from "@/lib/keys"
 import { keymapFor, labelFor } from "@/lib/keymap"
 import { detectPlatform, type Platform, type PlatformHints } from "@/lib/platform"
+import { addsToSelection, opensContextMenu, primaryClick, wheelZooms } from "@/lib/pointer"
 
 type Browser = { name: string; hints: PlatformHints & { platform: string }; is: Platform }
 
@@ -145,5 +146,31 @@ describe("labels in each platform's own order and names", () => {
   it("put every modifier in Apple's order when a Mac shortcut has several", () => {
     expect.soft(shortcutLabel({ key: "z", mod: true, alt: true, shift: true }, "apple"), "Option, Shift, Command").toBe("⌥⇧⌘Z")
     expect.soft(shortcutLabel({ key: "z", mod: true, alt: true, shift: true }, "windows"), "Ctrl, Alt, Shift").toBe("Ctrl+Alt+Shift+Z")
+  })
+})
+
+describe("clicks and the wheel", () => {
+  const click = (button: number, mods: Partial<MouseEvent> = {}) => ({ button, ctrlKey: false, metaKey: false, shiftKey: false, ...mods })
+
+  it("open the context menu on a Mac's Control-click instead of selecting, and on a right click everywhere", () => {
+    expect.soft(opensContextMenu(click(0, { ctrlKey: true }), "apple"), "Control-click on a Mac").toBe(true)
+    expect.soft(primaryClick(click(0, { ctrlKey: true }), "apple"), "is not a primary click there").toBe(false)
+    expect.soft(primaryClick(click(0, { ctrlKey: true }), "windows"), "Ctrl+click is one on Windows").toBe(true)
+    for (const platform of PLATFORMS) expect.soft(opensContextMenu(click(2), platform), `right click on ${platform}`).toBe(true)
+  })
+
+  it("add to the selection with Command or Shift on a Mac, and with Ctrl or Shift elsewhere", () => {
+    expect.soft(addsToSelection(click(0, { metaKey: true }), "apple"), "Command-click").toBe(true)
+    expect.soft(addsToSelection(click(0, { ctrlKey: true }), "apple"), "not Control-click").toBe(false)
+    expect.soft(addsToSelection(click(0, { ctrlKey: true }), "windows"), "Ctrl+click").toBe(true)
+    expect.soft(addsToSelection(click(0, { metaKey: true }), "linux"), "not Super+click").toBe(false)
+    for (const platform of PLATFORMS) expect.soft(addsToSelection(click(0, { shiftKey: true }), platform), `Shift+click on ${platform}`).toBe(true)
+  })
+
+  it("zoom with Control or Command and the wheel on a Mac, where a pinch arrives as Control, and only with Ctrl elsewhere, as VS Code does", () => {
+    expect.soft(wheelZooms({ ctrlKey: true, metaKey: false }, "apple"), "pinch on a Mac").toBe(true)
+    expect.soft(wheelZooms({ ctrlKey: false, metaKey: true }, "apple"), "Command+wheel").toBe(true)
+    expect.soft(wheelZooms({ ctrlKey: false, metaKey: true }, "windows"), "Windows key+wheel").toBe(false)
+    expect.soft(wheelZooms({ ctrlKey: true, metaKey: false }, "linux"), "Ctrl+wheel").toBe(true)
   })
 })

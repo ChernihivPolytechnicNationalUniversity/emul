@@ -30,6 +30,7 @@ import type { SourceFile } from "emul-shared/source"
 import { bytesToBase64 } from "@/lib/bytes"
 import { composing, dispatch, keepsPageInPlace, matches, matchesAny, ownsKeys, typesAhead } from "@/lib/keys"
 import { KEYMAP, labelFor } from "@/lib/keymap"
+import { addsToSelection, primaryClick } from "@/lib/pointer"
 import { useEvent } from "@/hooks/use-event"
 import { useSchematic, type Clip } from "@/schematic/use-schematic"
 import { contactCheck, designatorRects, freeSpot, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
@@ -604,9 +605,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
 
   const onBodyPointerDown = useEvent((e: React.PointerEvent<SVGSVGElement>, id: string) => {
-    if (e.button !== 0 || spaceHeld) return
+    if (!primaryClick(e) || spaceHeld) return
     e.stopPropagation()
-    beginMove(e, id, e.shiftKey || e.ctrlKey || e.metaKey)
+    beginMove(e, id, addsToSelection(e))
     e.currentTarget.setPointerCapture(e.pointerId)
   })
   const onBodyPointerMove = useEvent((e: React.PointerEvent<SVGSVGElement>) => {
@@ -739,7 +740,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   }
 
   const onPinPointerDown = useEvent((e: React.PointerEvent<SVGElement>, object: string, pin: string) => {
-    if (e.button !== 0) return
+    if (!primaryClick(e)) return
     e.stopPropagation()
     if (measure.active) {
       const tip = probeAtPin({ object, pin })
@@ -792,7 +793,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const [bend] = React.useState(() => new BendDrag())
   React.useEffect(() => () => bend.cancel(), [bend])
   const onBendPointerDown = useEvent((e: React.PointerEvent<SVGGElement>, wire: string, index: number) => {
-    if (e.button !== 0) return
+    if (!primaryClick(e)) return
     e.stopPropagation()
     const content = contentRef.current
     const w = wireById.get(wire)
@@ -831,7 +832,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
 
   const onWirePointerDown = useEvent((e: React.PointerEvent<SVGPathElement>, id: string) => {
-    if (e.button !== 0) return
+    if (!primaryClick(e)) return
     e.stopPropagation()
     if (measure.active) {
       const tip = probeOnWire(id, e.clientX, e.clientY)
@@ -839,7 +840,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       return
     }
     if (pending?.mode === "click" && tapInto(id, e.clientX, e.clientY)) return
-    sch.selectWire(id, e.shiftKey || e.ctrlKey || e.metaKey)
+    sch.selectWire(id, addsToSelection(e))
     marquee.clear()
   })
   const onWirePointerEnter = useEvent((id: string) => {
@@ -895,17 +896,17 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (isPanStart(e)) startPan(e)
     // A click on bare field while probing is a miss, not a selection.
     else if (measure.active) return
-    else if (e.button === 0 && pending?.mode === "click") {
+    else if (primaryClick(e) && pending?.mode === "click") {
       if (!finishAt(e.clientX, e.clientY))
         setPending({
           ...pending,
           points: [...pending.points, snapPoint(toWorld(e.clientX, e.clientY))],
         })
-    } else if (e.button === 0) {
+    } else if (primaryClick(e)) {
       const onCanvas = detail.canvas ? objectAt(e.clientX, e.clientY) : null
       if (onCanvas) {
         e.currentTarget.setPointerCapture(e.pointerId)
-        beginMove(e, onCanvas, e.shiftKey || e.ctrlKey || e.metaKey)
+        beginMove(e, onCanvas, addsToSelection(e))
         return
       }
       // A finger on bare field pans, the way every map does; a tap clears the selection.
