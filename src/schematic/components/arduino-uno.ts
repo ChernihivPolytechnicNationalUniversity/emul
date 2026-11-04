@@ -7,6 +7,8 @@ import { LED_COLORS } from "./basic"
 import { RESONATOR_STARTUP } from "./clock"
 import { MF_MSMF } from "./polyfuse"
 import { LP2985_33_GQ, lp2985Element, ncp1117Element } from "./power-ics"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * Arduino UNO Rev3 (A000066), from the Rev3e schematic and Eagle files (UNO-TH_Rev3e, 06/03/19),
@@ -282,10 +284,11 @@ const hex = (v: number) => `0x${v.toString(16).toUpperCase().padStart(2, "0")}`
 
 export const arduinoUno: ComponentDef = {
   id: "arduino-uno",
-  name: "Arduino Uno",
-  description: "ATmega328P, 16 MHz, USB serial, 7–12 V jack",
+  name: "Arduino Uno R3",
+  board: { vendor: "Arduino", mcu: "ATmega328P", mhz: 16, volts: 5, tags: [], photo: "arduino-uno.webp", core: "AVR", memory: "32 KB / 2 KB", onBoard: ["L LED", "USB serial", "ICSP"], alias: "UNO R3" },
+  description: "Arduino Uno board, ATmega328P",
   keywords: ["Arduino", "Uno", "UNO R3", "Rev3", "ATmega328P", "AVR", "A000066", "ATmega16U2"],
-  category: "Boards",
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,
@@ -304,15 +307,62 @@ export const arduinoUno: ComponentDef = {
   defaults: { fuseLow: hex(UNO_FUSES.low), fuseHigh: hex(UNO_FUSES.high), fuseExtended: hex(UNO_FUSES.extended), lock: hex(UNO_FUSES.lock), revision: ATMEGA328P.revisions[ATMEGA328P.revisions.length - 1] },
   fields: avrFields(ATMEGA328P, UNO_FUSES, "Arduino"),
   info: {
-    MCU: "ATmega328P-PU (28 PDIP, in a socket), 16 MHz resonator (CSTCE16M0V53, ±0.5 %), 32 KB Flash (512 bytes of it Optiboot's boot section), 2 KB SRAM, 1 KB EEPROM",
-    Power:
-      "USB: 5 V through the MF-MSMF050 resettable fuse (trips past 0.5–1 A) and T1 (FDN340P), so +5V sits within millivolts of the port. Jack/VIN: through D1 (M7) and the NCP1117 (1 A, thermal shutdown); once VIN passes about 6.6 V the LMV358 comparator turns T1 off and the board runs from VIN alone. 3.3V: the LP2985 from +5V, 150 mA. 5V pin: in or out",
-    "USB serial": "ATmega16U2: its TXD → 1 kΩ → D0/RX, D1/TX → 1 kΩ → its RXD; the TX and RX LEDs light while the lines are low. Wire a terminal to the TX/RX pins by the USB-B",
-    "L LED": "on D13 through U5B, an LMV358 follower: D13 carries only the op amp's input current, unlike a Nano's",
-    ICSP: "1 MISO (D12), 2 +5V, 3 SCK (D13), 4 MOSI (D11), 5 RESET, 6 GND — the same nets as those header pins",
-    Fuses: "as Arduino programs them: low 0xFF, high 0xDE (BOOTRST, 256-word boot section), extended 0xFD (BOD 2.7 V), lock 0x0F",
-    "Not modelled":
-      "the boot loader (Optiboot): the boot section is empty, so a reset runs straight into the sketch; the ATmega16U2's own firmware and USB (DTR auto-reset when a port opens, the TX/RX LEDs' pulse stretch, ICSP1, JP2); the USB ESD varistors and the ferrite; L2, AVCC's 10 µH filter (159 kHz with C10, beyond the solver's step)",
-    Source: "Arduino UNO Rev3e schematic and Eagle files (A000066), A000066 datasheet, Arduino AVR boards.txt",
+    // MCU: ATmega328P-PU (28 PDIP, in a socket), 16 MHz resonator (CSTCE16M0V53, ±0.5 %), 32 KB Flash (512 bytes of it
+    //   Optiboot's boot section), 2 KB SRAM, 1 KB EEPROM
+    // Power: USB: 5 V through the MF-MSMF050 resettable fuse (trips past 0.5–1 A) and T1 (FDN340P), so +5V sits within
+    //   millivolts of the port. Jack/VIN: through D1 (M7) and the NCP1117 (1 A, thermal shutdown); once VIN passes about 6.6
+    //   V the LMV358 comparator turns T1 off and the board runs from VIN alone. 3.3V: the LP2985 from +5V, 150 mA. 5V pin:
+    //   in or out
+    Power: "USB or jack/VIN, auto-switched",
+    // USB serial: ATmega16U2: its TXD → 1 kΩ → D0/RX, D1/TX → 1 kΩ → its RXD; the TX and RX LEDs light while the lines are
+    //   low. Wire a terminal to the TX/RX pins by the USB-B
+    "USB serial": "ATmega16U2 on D0/D1",
+    // L LED: on D13 through U5B, an LMV358 follower: D13 carries only the op amp's input current, unlike a Nano's
+    "L LED": "D13 via op-amp buffer",
+    // ICSP: 1 MISO (D12), 2 +5V, 3 SCK (D13), 4 MOSI (D11), 5 RESET, 6 GND — the same nets as those header pins
+    ICSP: "Same nets as D11–D13",
+    // Fuses: as Arduino programs them: low 0xFF, high 0xDE (BOOTRST, 256-word boot section), extended 0xFD (BOD 2.7 V),
+    //   lock 0x0F
+    Fuses: "As Arduino programs them",
+    // Not modelled: the boot loader (Optiboot): the boot section is empty, so a reset runs straight into the sketch; the
+    //   ATmega16U2's own firmware and USB (DTR auto-reset when a port opens, the TX/RX LEDs' pulse stretch, ICSP1, JP2); the
+    //   USB ESD varistors and the ferrite; L2, AVCC's 10 µH filter (159 kHz with C10, beyond the solver's step)
+    // Source: Arduino UNO Rev3e schematic and Eagle files (A000066), A000066 datasheet, Arduino AVR boards.txt
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [arduinoUno]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "arduino-uno": {
+    maker: "Arduino",
+    docs: [DOCS["arduino-a000066-ds"], DOCS["arduino-uno-rev3e-sch"], DOCS["mchp-ds40002061b"], DOCS["onsemi-fdn340p"], DOCS["onsemi-ncp1117"], DOCS["ti-slvs522s"], DOCS["ti-slos263y"], DOCS["bourns-mf-msmf"]],
+    specs: [],
+    characteristics: [
+      { kind: "clock", value: { max: 16e6 }, cite: { page: 2, at: "Features" } },
+      { kind: "flash", value: { typ: 32768 }, cite: { page: 2, at: "Features" } },
+      { kind: "ram", value: { typ: 2048 }, cite: { page: 2, at: "Features" } },
+      { kind: "ioLevel", value: { typ: 5 }, limit: { max: 6 }, cite: { doc: "arduino-uno-rev3e-sch", page: 1 }, limitCite: { doc: "mchp-ds40002061b", page: 308, at: "§29.1 Absolute Maximum Ratings" } },
+      { kind: "input", value: { min: 6 }, limit: { max: 20 }, cite: { page: 5, at: "§2.2 VINMax" } },
+      { kind: "ioPins", value: { typ: 20 }, cite: { page: 4, at: "§1.1" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 5, at: "§2.1" } },
+    ],
+    modelled: [
+      { what: "Sketch runs at 16 MHz", test: "tests/sim/uno-bench.test.ts" },
+      { what: "USB through F1 and T1", cite: { doc: "arduino-uno-rev3e-sch", page: 1 }, test: "tests/sim/uno-bench.test.ts" },
+      { what: "Jack through D1 and NCP1117", cite: { doc: "arduino-uno-rev3e-sch", page: 1 }, test: "tests/sim/uno-bench.test.ts" },
+      { what: "VIN turns T1 off", cite: { doc: "arduino-uno-rev3e-sch", page: 1 }, test: "tests/sim/uno-bench.test.ts" },
+      { what: "F1 trips on overload", test: "tests/sim/uno-bench.test.ts" },
+      { what: "3.3V from the LP2985", test: "tests/sim/uno-bench.test.ts" },
+      { what: "USB serial through the 16U2", test: "tests/sim/uno-bench.test.ts" },
+      { what: "L LED buffered by U5B", test: "tests/sim/uno-bench.test.ts" },
+      { what: "RESET button holds the sketch", test: "tests/sim/uno-bench.test.ts" },
+      { what: "Sketches compile for the Uno", test: "tests/firmware/arduino-sketch.test.ts" },
+    ],
+    notModelled: [{ what: "No Optiboot boot loader" }, { what: "No ATmega16U2 firmware or USB" }, { what: "No DTR auto-reset" }, { what: "No USB varistors or ferrite" }, { what: "No L2 AVCC filter" }, { what: "No ICSP programming" }],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

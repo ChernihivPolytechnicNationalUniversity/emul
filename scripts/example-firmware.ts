@@ -14,6 +14,7 @@
  * ARM_GCC defaults to the 14.2 toolchain the firmware Makefiles use; AVR_GCC and ARDUINO_ROOT
  * to the worker's own (/opt/arduino).
  */
+import "./lib/all-parts"
 import { execFileSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"

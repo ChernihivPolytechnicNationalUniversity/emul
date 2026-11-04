@@ -524,13 +524,14 @@ export const PIXELS_WS2815: ChipSpec[] = [
     part: "WS2815",
     label: "WS2815 · 12 V, VCC from the die's regulator",
     input: { kind: "nrz", timing: T_2811, backup: true },
-    light: { kind: "pixel", current: rgb(15 * mA) },
+    // WS2815B V1.0 (2018-08-20, the 6-pin VCC part) p. 3: RGB channel constant current 10 mA, quiescent 2.1 mA.
+    light: { kind: "pixel", current: rgb(10 * mA) },
     quiescent: 2.1 * mA,
-    // VIH 0.7 × the die's rail; the electrical table is given at 4.5–5.5 V.
+    // p. 3: VIH 0.7 VDD beside VIL 0.3 VCC, the die's rail (0.7 × a 12 V VDD would be past p. 2's 5.3 V input).
     logic: { pin: "VDD", vih: { volts: 3.5 } },
     regulator: 5,
     supply: { min: 9.5, max: 13.5, abs: 13.5 },
-    source: "Worldsemi WS2815 V1.1 (2017-10-10): VDD +9.5…+13.5 V, 15 mA, Iq 2.1 mA, VCC \"suspended or a filter capacitor\" (the die's rail, modelled at 5 V, the electrical table's middle)",
+    source: "Worldsemi WS2815B V1.0 (2018-08-20, pin 1 VCC): VDD +9.5…+13.5 V, 10 mA, Iq 2.1 mA, VIH 0.7 × the die's rail, VCC \"suspended or connected with a filter capacitor\" (the die's rail, modelled at 5 V; its voltage is not given)",
   },
 ]
 
@@ -639,14 +640,18 @@ export const DRIVERS_3CH: ChipSpec[] = [
     label: "WS2811 (V1.1, 2017) · pin 7 NC",
     input: { kind: "nrz", timing: T_2811 },
     fields: GRB,
-    light: sink3(16.5 * mA, 12),
+    // V1.52 p. 2: VOUT 20 V.
+    light: sink3(16.5 * mA, 20),
     pwmHz: 2e3,
     quiescent: 0.6 * mA,
-    supply: { min: 3.5, max: 5.3, abs: 5.3 },
-    clamp: 5.2,
-    inputMax: 5.8,
+    // V1.52 p. 2, absolute maximum ratings: VDD +3.5~+5.5 V.
+    supply: { min: 3.5, max: 5.5, abs: 5.5 },
+    // Not given: 0.1 V under the maximum, so 5.5 V straight on VDD does not overheat it.
+    clamp: 5.4,
+    // V1.52 p. 2: VI VDD−0.7 ~ VDD+0.7 V, at the 5.5 V maximum (the "DIN withstands 9.5 V" of p. 1 is not taken).
+    inputMax: 6.2,
     source:
-      "Worldsemi WS2811 V1.1 (2017-10-09): VDD +3.5…+5.3 V with a built-in regulator (series resistor up to 24 V; clamp voltage not given, modelled at 5.2 V), outputs 16.5 mA, 12 V withstand, > 2 kHz; prints R-G-B in the table and GRB in the note (GRB modelled); quiescent current not given (0.6 mA)",
+      "Worldsemi WS2811 V1.52 (2026-07-28): VDD +3.5…+5.5 V with a built-in regulator (series resistor up to 24 V; clamp voltage not given, modelled at 5.4 V), outputs 16.5 mA, 20 V withstand, DIN VDD + 0.7 V; timing, > 2 kHz and the order from V1.1 (2017-10-09), which prints R-G-B in the table and GRB in the note (GRB modelled); quiescent current 0.6 mA",
   },
   {
     ...DRIVER,
@@ -780,9 +785,10 @@ export const DRIVERS_5CH_BACKUP: ChipSpec[] = [
     logic: { pin: "VDD", vih: { ratio: 0.55 } },
     supply: { min: 3.5, max: 5.8, abs: 5.8 },
     clamp: 5.6,
-    // "DIN/DOUT port withstands 24V" (the table's VDD+0.7 is the operating range)
-    inputMax: 24,
-    source: "Worldsemi WS2805 V1.6 (2026-07-14): VDD +3.5…+5.8 V, 20 V outputs, IOL 16 mA, VIH 0.55 VDD, 40-bit RGBW1W2, 4 kHz, DIN/DOUT withstand 24 V",
+    // V1.6 p. 3, absolute maximum ratings: DIN VDD−0.7 ~ VDD+0.7 V, at the 5.8 V maximum (p. 1's
+    // "DIN/DOUT withstands 24V" is a momentary short through an internal resistor, not taken).
+    inputMax: 6.5,
+    source: "Worldsemi WS2805 V1.6 (2026-07-14): VDD +3.5…+5.8 V, 20 V outputs, IOL 16 mA, VIH 0.55 VDD, 40-bit RGBW1W2, 4 kHz, DIN VDD + 0.7 V",
   },
   {
     ...DRIVER,

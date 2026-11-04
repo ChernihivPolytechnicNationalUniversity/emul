@@ -1,3 +1,5 @@
+import { LED_COLORS } from "../led-colors"
+import { BASIC_RECORDS } from "./basic-records"
 import {
   AcSourceIcon,
   BatteryIcon,
@@ -36,14 +38,6 @@ const TRACK_LIMITS = { current: wiperCurrent, fatal: false } as const
 /** A junction that overheats or avalanches melts through: the die fails short, not open. */
 const Q_LIMITS = { current: "{icmax}", voltage: "{vcemax}", power: "{pmax}", fail: "short" } as const
 
-/** LED colours: CSS colour and typical forward voltage. */
-export const LED_COLORS: Record<string, { css: string; vf: number; vr: number }> = {
-  red: { css: "#ef4444", vf: 1.9, vr: 15 },
-  green: { css: "#22c55e", vf: 2.1, vr: 15 },
-  blue: { css: "#3b82f6", vf: 3.0, vr: 5 },
-  yellow: { css: "#eab308", vf: 2.0, vr: 15 },
-  white: { css: "#f5f5f5", vf: 3.0, vr: 5 },
-}
 
 /**
  * Discrete components drawn as IEC schematic symbols.
@@ -80,7 +74,8 @@ const base = (d: Omit<ComponentDef, "width" | "height" | "parts" | "pins"> & Par
 export const resistor = base({
   id: "resistor",
   name: "Resistor",
-  category: "Passive",
+  keywords: ["resistance", "ohm"],
+  category: "basics",
   icon: ResistorIcon,
   prefix: "R",
   defaults: { value: "1 kΩ", power: "0.25" },
@@ -95,7 +90,8 @@ export const resistor = base({
 export const potentiometer = base({
   id: "potentiometer",
   name: "Potentiometer",
-  category: "Passive",
+  keywords: ["pot", "rheostat", "trimmer", "trimpot", "variable resistor", "knob"],
+  category: "basics",
   icon: PotentiometerIcon,
   prefix: "RV",
   defaults: { value: "10 kΩ", pos: "0.5", power: "0.25" },
@@ -122,7 +118,8 @@ export const potentiometer = base({
 export const capacitor = base({
   id: "capacitor",
   name: "Capacitor",
-  category: "Passive",
+  keywords: ["cap", "condenser", "farad"],
+  category: "basics",
   icon: CapacitorIcon,
   prefix: "C",
   defaults: { value: "100 nF", vmax: "50 V" },
@@ -162,7 +159,8 @@ const electrolyticEsr = (p: Record<string, string>) => {
 export const capacitorPolarized = base({
   id: "capacitor-polarized",
   name: "Electrolytic capacitor",
-  category: "Passive",
+  keywords: ["cap", "polarized", "polarised"],
+  category: "basics",
   icon: ElectrolyticCapacitorIcon,
   prefix: "C",
   defaults: { value: "10 µF", vmax: "16 V", vrev: "1.5 V" },
@@ -189,7 +187,8 @@ export const capacitorPolarized = base({
 export const inductor = base({
   id: "inductor",
   name: "Inductor",
-  category: "Passive",
+  keywords: ["coil", "choke", "henry"],
+  category: "basics",
   icon: InductorIcon,
   prefix: "L",
   defaults: { value: "10 µH", imax: "1 A" },
@@ -211,7 +210,8 @@ const DIODE_TRIANGLE: BodyShape = { type: "path", d: "M1.6 0.5 L2.4 1 L1.6 1.5 Z
 export const diode = base({
   id: "diode",
   name: "Diode",
-  category: "Semiconductors",
+  keywords: ["rectifier"],
+  category: "semis",
   icon: DiodeIcon,
   prefix: "D",
   defaults: { value: "1N4148", vf: "0.7", imax: "300 mA", ifsm: "4 A", vrev: "100 V" },
@@ -231,7 +231,8 @@ export const diode = base({
 export const zener = base({
   id: "zener",
   name: "Zener diode",
-  category: "Semiconductors",
+  keywords: ["Zener", "voltage reference", "stabilizer"],
+  category: "semis",
   icon: ZenerDiodeIcon,
   prefix: "D",
   defaults: { value: "5.1 V", power: "0.5" },
@@ -244,7 +245,8 @@ export const zener = base({
 export const led = base({
   id: "led",
   name: "LED",
-  category: "Semiconductors",
+  keywords: ["light", "light-emitting diode", "indicator", "lamp"],
+  category: "basics",
   icon: LedIcon,
   prefix: "LED",
   defaults: { value: "red", imax: "30 mA" },
@@ -286,7 +288,8 @@ const TRANSISTOR_BODY: BodyShape[] = [
 export const npn: ComponentDef = {
   id: "npn",
   name: "NPN transistor",
-  category: "Semiconductors",
+  keywords: ["BJT", "bipolar"],
+  category: "semis",
   icon: NpnIcon,
   prefix: "Q",
   defaults: { value: "BC547", beta: "200", rc: "5 Ω", icmax: "100 mA", vcemax: "45 V", pmax: "500 mW" },
@@ -309,7 +312,8 @@ export const npn: ComponentDef = {
 export const pnp: ComponentDef = {
   id: "pnp",
   name: "PNP transistor",
-  category: "Semiconductors",
+  keywords: ["BJT", "bipolar"],
+  category: "semis",
   icon: PnpIcon,
   prefix: "Q",
   defaults: { value: "BC557", beta: "200", rc: "5 Ω", icmax: "100 mA", vcemax: "45 V", pmax: "500 mW" },
@@ -378,8 +382,9 @@ const mosK = (p: Record<string, string>) => {
 export const nmos: ComponentDef = {
   id: "nmos",
   name: "N-channel MOSFET",
-  description: "Enhancement mode, with its body diode. Set by threshold and Rds(on) off the datasheet; past its rated Vds it avalanches and survives a pulse up to its EAS.",
-  category: "Semiconductors",
+  description: "N-channel enhancement MOSFET",
+  keywords: ["MOSFET", "FET", "NMOS"],
+  category: "semis",
   icon: NmosIcon,
   prefix: "Q",
   defaults: { value: "IRLZ44N", vth: "2 V", rdson: "22 mΩ", idmax: "47 A", vdsmax: "55 V", pmax: "110 W", eas: "210 mJ" },
@@ -398,8 +403,9 @@ export const nmos: ComponentDef = {
 export const pmos: ComponentDef = {
   id: "pmos",
   name: "P-channel MOSFET",
-  description: "Enhancement mode, with its body diode. Set by threshold and Rds(on) off the datasheet; past its rated Vds it avalanches and survives a pulse up to its EAS.",
-  category: "Semiconductors",
+  description: "P-channel enhancement MOSFET",
+  keywords: ["MOSFET", "FET", "PMOS"],
+  category: "semis",
   icon: PmosIcon,
   prefix: "Q",
   defaults: { value: "IRF9540N", vth: "3.7 V", rdson: "117 mΩ", idmax: "23 A", vdsmax: "100 V", pmax: "140 W", eas: "430 mJ" },
@@ -432,7 +438,8 @@ export const BOUNCE_FIELDS: PropField[] = [
 export const pushbutton = base({
   id: "pushbutton",
   name: "Pushbutton",
-  category: "Switches",
+  keywords: ["button", "tactile", "tact switch", "momentary", "key"],
+  category: "basics",
   icon: PushbuttonIcon,
   prefix: "SW",
   defaults: { value: "tactile", imax: "50 mA", rcontact: "100 mΩ", bounce: "off", tbounce: "5 ms" },
@@ -457,7 +464,8 @@ export const pushbutton = base({
 export const toggleSwitch = base({
   id: "switch",
   name: "Switch",
-  category: "Switches",
+  keywords: ["toggle", "slide switch", "SPST", "on/off"],
+  category: "basics",
   icon: SwitchIcon,
   prefix: "SW",
   defaults: { value: "SPST", imax: "3 A", rcontact: "10 mΩ", bounce: "off", tbounce: "10 ms" },
@@ -482,9 +490,9 @@ const batteryLabel = (p: Record<string, string>) => {
 export const battery: ComponentDef = {
   id: "battery",
   name: "Battery",
-  description:
-    "Real cells: the chemistry's discharge curve, an internal resistance that climbs towards empty, capacity lost at high drain and in the cold, diffusion (the voltage rests back up after a load), self-heating, wear and cell mismatch. The inspector shows the charge and the time left at the present load.",
-  category: "Power",
+  keywords: ["cell", "Li-ion", "alkaline", "NiMH", "accumulator"],
+  description: "Battery of real cells",
+  category: "power",
   icon: BatteryIcon,
   prefix: "BT",
   defaults: { chem: DEFAULT_CHEMISTRY.id, cells: "1", capacity: "2 Ah", soc: "100", temp: "25", cycles: "0", years: "0", spread: "0", rint: "", imax: "" },
@@ -537,8 +545,9 @@ export const battery: ComponentDef = {
 export const dcSource: ComponentDef = {
   id: "dc-source",
   name: "DC source",
-  description: "Ideal DC voltage source with an internal resistance: a bench supply. For real cells use the battery.",
-  category: "Power",
+  description: "Bench DC voltage source",
+  keywords: ["power supply", "bench supply", "voltage source", "DC"],
+  category: "power",
   icon: DcSourceIcon,
   prefix: "G",
   defaults: { value: "5 V", rint: "0.5 Ω", imax: "3 A" },
@@ -571,8 +580,9 @@ export const dcSource: ComponentDef = {
 export const acSource: ComponentDef = {
   id: "ac-source",
   name: "AC source",
-  description: "Sine voltage source: RMS voltage, frequency and DC offset. Defaults to European mains.",
-  category: "Power",
+  description: "Ideal AC voltage source",
+  keywords: ["mains", "sine", "AC", "alternating current"],
+  category: "power",
   icon: AcSourceIcon,
   prefix: "G",
   defaults: { value: "230 V", freq: "50 Hz", phase: "0", offset: "0 V", rint: "0.5 Ω", imax: "16 A" },
@@ -623,8 +633,9 @@ const pulseDuty = (p: Record<string, string>) => {
 export const pulseSource: ComponentDef = {
   id: "pulse-source",
   name: "Pulse source",
-  description: "Square wave between two levels at a set frequency and duty cycle, or pulse width, from an optional delay: a clock, a PWM output, a logic signal. Into an MCU input or a digital part (a servo, a display) at logic levels its edges arrive at their exact times, while nothing on the net loads or slows it.",
-  category: "Power",
+  description: "Square-wave pulse source",
+  keywords: ["square wave", "PWM", "function generator", "signal generator", "clock"],
+  category: "power",
   icon: PulseSourceIcon,
   prefix: "G",
   defaults: { high: "5 V", low: "0 V", freq: "1 kHz", duty: "50", rint: "1 Ω", imax: "1 A" },
@@ -672,8 +683,9 @@ export const pulseSource: ComponentDef = {
 export const transformer: ComponentDef = {
   id: "transformer",
   name: "Transformer",
-  description: "Transformer set by primary and secondary voltage, with the winding resistances and the magnetising inductance of the core. DC on the primary sees only the winding and burns it.",
-  category: "Power",
+  description: "Single-phase power transformer",
+  keywords: ["mains transformer", "step-down", "coil"],
+  category: "power",
   icon: TransformerIcon,
   prefix: "T",
   defaults: { value: "230 V", sec: "12 V", rs: "1 Ω", rp: "200 Ω", lm: "50 H", va: "10 VA" },
@@ -721,8 +733,9 @@ export const transformer: ComponentDef = {
 export const junction: ComponentDef = {
   id: "junction",
   name: "Junction",
-  description: "Connects the wires drawn to it. Wires that merely cross do not touch.",
-  category: "Wiring",
+  description: "Wire junction dot",
+  keywords: ["node", "dot", "connection"],
+  category: "basics",
   icon: JunctionIcon,
   width: 2,
   height: 2,
@@ -736,7 +749,8 @@ export const junction: ComponentDef = {
 export const ground: ComponentDef = {
   id: "ground",
   name: "Ground",
-  category: "Power",
+  keywords: ["GND", "0V", "earth"],
+  category: "basics",
   icon: GroundIcon,
   width: 2,
   height: 2,
@@ -749,7 +763,8 @@ export const ground: ComponentDef = {
 export const supply: ComponentDef = {
   id: "supply",
   name: "Power rail",
-  category: "Power",
+  keywords: ["VCC", "VDD", "5V", "3.3V", "+5V", "power", "rail", "supply"],
+  category: "basics",
   icon: SupplyIcon,
   defaults: { value: "+3V3", voltage: "3.3 V", imax: "1 A", rint: "15 mΩ" },
   fields: [
@@ -784,7 +799,8 @@ export const logicState: ComponentDef = {
   id: "logic-state",
   name: "Logic state",
   description: "Toggle 0/1 level source",
-  category: "Instruments",
+  keywords: ["logic level", "toggle", "high", "low", "digital input"],
+  category: "instruments",
   icon: LogicStateIcon,
   prefix: "LS",
   defaults: { vdd: "3.3 V", imax: "100 mA" },
@@ -819,7 +835,8 @@ export const serialTerminal: ComponentDef = {
   id: "serial-terminal",
   name: "Serial terminal",
   description: "UART console, 8N1",
-  category: "Instruments",
+  keywords: ["UART", "USART", "console", "serial monitor", "terminal", "COM port"],
+  category: "instruments",
   icon: TerminalIcon,
   prefix: "TERM",
   defaults: { baud: "115200", charset: "utf-8" },
@@ -882,3 +899,11 @@ export const basicComponents: ComponentDef[] = [
   logicState,
   serialTerminal,
 ]
+
+export { LED_COLORS }
+
+// What each everyday part models and leaves out (basic-records.ts): no datasheet sets them.
+for (const def of basicComponents) def.datasheet ??= BASIC_RECORDS[def.id]
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = basicComponents

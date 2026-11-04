@@ -8,7 +8,7 @@ import { join, split } from "./elements"
 import { anonymousIdentity, withAnimal, type Identity } from "./identity"
 
 export type Move = { ids: string[]; dx: number; dy: number }
-export type Peer = Identity & { clientId: number; cursor: Point | null; moving: Move | null; wire: Point[] | null }
+export type Peer = Identity & { clientId: number; cursor: Point | null; moving: Move | null; wire: Point[] | null; selected: string[] }
 export type LiveStatus = "off" | "connecting" | "live" | "offline"
 
 export type Live = {
@@ -25,6 +25,8 @@ export type Live = {
   onPointer: (point: Point | null) => void
   onMove: (move: Move | null) => void
   onWire: (points: Point[] | null) => void
+  /** What this client has selected: the others' field explorers show it. */
+  onSelect: (ids: string[]) => void
   linkFor: () => string | null
 }
 
@@ -138,6 +140,7 @@ export function useLive(merge: (doc: Schematic) => void): Live {
               cursor: (st.cursor as Point | null) ?? null,
               moving: (st.moving as Move | null) ?? null,
               wire: (st.wire as Point[] | null) ?? null,
+              selected: Array.isArray(st.selected) ? (st.selected as string[]) : [],
             }))
           setPeers(others)
           if (others.some((p) => p.animal === meRef.current.animal && p.clientId < own)) {
@@ -219,7 +222,9 @@ export function useLive(merge: (doc: Schematic) => void): Live {
     [share],
   )
 
+  const onSelect = React.useCallback((ids: string[]) => share("selected", ids.slice(0, MAX_IDS), true), [share])
+
   React.useEffect(() => () => teardown(), [teardown])
 
-  return { room, status, host, me, peers, link: room ? roomLink(room) : null, linkFor: () => (session.current ? roomLink(session.current.room) : null), start, join: joinRoom, leave, onChange, onPointer, onMove, onWire }
+  return { room, status, host, me, peers, link: room ? roomLink(room) : null, linkFor: () => (session.current ? roomLink(session.current.room) : null), start, join: joinRoom, leave, onChange, onPointer, onMove, onWire, onSelect }
 }

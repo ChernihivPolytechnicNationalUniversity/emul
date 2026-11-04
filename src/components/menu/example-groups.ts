@@ -2,8 +2,8 @@ import type { Target } from "emul-shared/source"
 import { buildTarget } from "@/project/board-build"
 import { prebuilt } from "@/project/prebuilt"
 import { examples, showcase, type Example } from "@/schematic/examples"
-import { GRID } from "@/schematic/geometry"
-import { getDef } from "@/schematic/registry"
+import { EXAMPLE_BOARDS } from "@/schematic/catalogue.gen"
+import { getMeta } from "@/schematic/registry"
 
 export type ExampleItem = { example: Example; /** Every board comes programmed: it opens running. */ ready: boolean }
 export type ExampleGroup = { title: string; items: ExampleItem[] }
@@ -19,12 +19,10 @@ const SECTIONS: { title: string; targets: readonly (Target | null)[] }[] = [
   { title: "Circuits", targets: [null] },
 ]
 
-/** The chip of the first board an example hands code to, read off the bench it builds. */
+/** The chip of the first board an example hands code to, as the catalogue has it: no example is built for the menu. */
 function targetOf(example: Example): Target | null {
-  const ref = example.projects?.[0]?.ref
-  if (!ref) return null
-  const board = example.build(GRID).objects.find((o) => o.props?.ref === ref)
-  return buildTarget(board && getDef(board.def)) ?? null
+  const board = EXAMPLE_BOARDS[example.id]
+  return buildTarget(board ? getMeta(board) : undefined) ?? null
 }
 
 const item = (example: Example): ExampleItem => ({

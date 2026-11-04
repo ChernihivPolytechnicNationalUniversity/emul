@@ -1,12 +1,14 @@
 import type { EepromSnapshot } from "@/sim/digital"
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs"
+import { PartTab } from "@/components/parts/PartTab"
+import { flipFavourite, useQuickLists } from "@/components/palette/recents"
 import type { HdlSnapshot } from "@/sim/hdl"
-import { HC595_OUTPUTS, type ShiftRegisterSnapshot } from "@/sim/hc595"
-import { BUZZER_KINDS, type BuzzerSnapshot } from "@/sim/buzzer"
-import { HC595_LINKS, isShiftRegisterDef } from "@/schematic/components/hc595"
-import { isBuzzerDef } from "@/schematic/components/buzzer"
+import { HC595_LINKS, HC595_OUTPUTS, shiftRegisterOfDef, type ShiftRegisterSnapshot } from "@/sim/hc595"
+import { BUZZER_KINDS, buzzerOfDef, type BuzzerSnapshot } from "@/sim/buzzer"
+import { productById } from "@/sim/addressable/products"
 import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
-import { ChevronDownIcon, CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
+import { ChevronDownIcon, CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon, StarIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { KEYMAP, labelFor } from "@/lib/keymap"
 import { currentPlatform } from "@/lib/platform"
@@ -22,10 +24,11 @@ import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
+import { familyOf, swapsFor } from "@/schematic/families"
 import { getDef, hdlModule } from "@/schematic/registry"
 import { isHdlDef, isModified } from "@/schematic/hdl"
 import type { FlipAxis } from "@/schematic/geometry"
-import type { Damage, PlacedObject, PropField } from "@/schematic/types"
+import type { ComponentDef, Damage, PlacedObject, PropField } from "@/schematic/types"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import type { SimReadout } from "@/sim/use-simulation"
 import { formatSI, SI_PREFIXES, UNIT_PREFIXES, joinValue, splitValue } from "@/sim/units"
@@ -44,7 +47,6 @@ function powerLabel(p: PowerStatus): string {
 import { LiveReadings } from "./LiveReadings"
 import { useSectionsOpen, type SectionsOpen } from "./collapsed-sections"
 import { AddressablePanel } from "./AddressablePanel"
-import { isAddressableDef } from "@/schematic/components/addressable"
 
 /** "PLL ← HSE 8 MHz clock", "HSI": the system clock source and what feeds the oscillator it hangs on. */
 function clockLabel(c: ClockStatus): string {
@@ -61,6 +63,8 @@ type InspectorProps = Omit<React.ComponentProps<typeof Card>, "onChange"> & {
   damage: Record<string, Damage>
   sim: SimReadout
   onChange: (id: string, patch: Record<string, string>) => void
+  /** Swap the part for another variant of its family. */
+  onVariant?: (id: string, defId: string) => void
   onFirmware: (id: string, name: string, bytes: Uint8Array) => boolean
   /** Text typed into a serial terminal. */
   onSerial?: (id: string, text: string) => void
@@ -91,40 +95,75 @@ function Section({ id, label, sections, open = true, action, children }: { id: s
   )
 }
 
-export function Inspector({ selected, damage, sim, onChange, onFirmware, onSerial, onCode, onHdl, onRotate, onFlip, onDelete, className, ...props }: InspectorProps) {
+type InspectorTab = "properties" | "part" | "readings"
+
+/** The palette's star, on the part in the inspector: pin what is on the bench to the top of the palette. */
+function PinStar({ defId, name }: { defId: string; name: string }) {
+  const { favourites } = useQuickLists()
+  const on = favourites.includes(defId)
+  return (
+    <Button variant="ghost" size="icon-sm" onClick={() => flipFavourite(defId)} aria-pressed={on} aria-label={on ? `Unpin ${name}` : `Pin ${name} to the palette`} title={on ? "Unpin from the palette" : "Pin to the top of the palette"}>
+      <StarIcon className={on ? "fill-amber-400 text-amber-500" : undefined} />
+    </Button>
+  )
+}
+
+/** Under the part's name, as on its datasheet: who makes it, in what package. */
+function maker(def: ComponentDef): string | undefined {
+  const record = def.datasheet
+  return record && "docs" in record ? [record.maker, record.package].filter(Boolean).join(" · ") : undefined
+}
+
+/** The tab stays as picked from one selected part to the next, for this page: comparing parts' datasheets is a walk across the bench. */
+function useInspectorTab() {
+  return React.useState<InspectorTab>("properties")
+}
+
+export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmware, onSerial, onCode, onHdl, onRotate, onFlip, onDelete, className, ...props }: InspectorProps) {
   const sections = useSectionsOpen()
+  const [tab, setTab] = useInspectorTab()
   if (selected.length === 0) return null
   const object = selected.length === 1 ? selected[0] : null
   const def = object && getDef(object.def)
+  const family = def ? familyOf(def.id) : undefined
+  // Only variants a swap leaves every wire on: the same pins in the same places.
+  const swaps = def ? swapsFor(def.id) : []
   const open = sections.isOpen("panel")
+  const readable = !!object && sim.live && !damage[object.id]?.fatal
 
   return (
-    <Card data-slot="inspector" className={cn("max-h-[calc(100%-1.5rem)] w-72 gap-4 overflow-y-auto py-4 shadow-md", !open && "py-3", className)} {...props}>
+    <Card data-slot="inspector" className={cn("max-h-[calc(100%-6.75rem)] w-72 gap-4 overflow-y-auto py-4 shadow-md", !open && "py-3", className)} {...props}>
       <CardHeader className="px-4">
-        <CardTitle className="text-sm">{def ? def.name : `${selected.length} components`}</CardTitle>
-        {open && def?.description && <CardDescription className="col-span-2">{def.description}</CardDescription>}
+        {/* The name keeps the width: star and fold beside it, the bench tools in their own row below. */}
+        <CardTitle className="truncate text-sm leading-7" title={def ? [object?.props?.ref, def.name].filter(Boolean).join(" · ") : `${selected.length} components`}>
+          {def ? [object?.props?.ref, def.name].filter(Boolean).join(" · ") : `${selected.length} components`}
+        </CardTitle>
+        {open && def && maker(def) && <CardDescription className="col-span-2 -mt-1 text-xs">{maker(def)}</CardDescription>}
         <CardAction className="row-span-1">
           <ButtonGroup>
+            {def && <PinStar defId={def.id} name={def.name} />}
             <Button variant="ghost" size="icon-sm" onClick={() => sections.setOpen("panel", !open)} aria-label={open ? "Collapse the inspector" : "Expand the inspector"} aria-expanded={open}>
               <ChevronDownIcon className={cn("transition-transform duration-200 ease-out motion-reduce:transition-none", open && "rotate-180")} />
             </Button>
-            <Button variant="ghost" size="icon-sm" onClick={() => onRotate(-45)} aria-label="Rotate 45° counter-clockwise">
-              <RotateCcwIcon />
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={() => onRotate(45)} aria-label="Rotate 45° clockwise">
-              <RotateCwIcon />
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={() => onFlip("horizontal")} aria-label="Mirror horizontally">
-              <FlipHorizontal2Icon />
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={() => onFlip("vertical")} aria-label="Mirror vertically">
-              <FlipVertical2Icon />
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={onDelete} aria-label="Delete" className="text-destructive">
-              <Trash2Icon />
-            </Button>
           </ButtonGroup>
         </CardAction>
+        <ButtonGroup className="col-span-2 -ml-2">
+          <Button variant="ghost" size="icon-sm" onClick={() => onRotate(-45)} aria-label="Rotate 45° counter-clockwise" title="Rotate 45° counter-clockwise">
+            <RotateCcwIcon />
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => onRotate(45)} aria-label="Rotate 45° clockwise" title="Rotate 45° clockwise">
+            <RotateCwIcon />
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => onFlip("horizontal")} aria-label="Mirror horizontally" title="Mirror horizontally">
+            <FlipHorizontal2Icon />
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => onFlip("vertical")} aria-label="Mirror vertically" title="Mirror vertically">
+            <FlipVertical2Icon />
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={onDelete} aria-label="Delete" title="Delete" className="ml-auto text-destructive">
+            <Trash2Icon />
+          </Button>
+        </ButtonGroup>
       </CardHeader>
       {open && object && def && (
         <CardContent className="flex flex-col gap-4 px-4">
@@ -142,6 +181,16 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
               </AlertDescription>
             </Alert>
           )}
+          <Tabs value={tab === "readings" && !readable ? "properties" : tab} onValueChange={(v) => setTab(v as InspectorTab)}>
+            <TabsList>
+              <TabsTab value="properties">Properties</TabsTab>
+              <TabsTab value="part">Part</TabsTab>
+              {/* Nothing to read until the simulation runs (or once the part is burnt): the tab says so and stays shut. */}
+              <TabsTab value="readings" disabled={!readable} title={readable ? undefined : damage[object.id]?.fatal ? "Burnt out: nothing to read" : "Run the simulation to read it"}>
+                Readings
+              </TabsTab>
+            </TabsList>
+            <TabsPanel value="properties" className="flex flex-col gap-4">
           {def.chip && (
             <FirmwarePanel object={object} chip={chipById(def.chip)?.name ?? avrChipById(def.chip)?.name ?? def.chip} sim={sim} sections={sections} onChange={onChange} onFirmware={onFirmware} onCode={onCode} />
           )}
@@ -155,17 +204,17 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
               <EepromPanel object={object} sim={sim} />
             </Section>
           )}
-          {isShiftRegisterDef(def.id) && (
+          {shiftRegisterOfDef(def.id) && (
             <Section id="outputs" label="Outputs" sections={sections}>
               <ShiftRegisterPanel object={object} sim={sim} />
             </Section>
           )}
-          {isBuzzerDef(def.id) && (
+          {buzzerOfDef(def.id) && (
             <Section id="sound" label="Sound" sections={sections}>
               <BuzzerPanel object={object} sim={sim} />
             </Section>
           )}
-          {isAddressableDef(def.id) && (
+          {productById(def.id) && (
             <Section id="leds" label="LEDs" sections={sections}>
               <AddressablePanel objectId={object.id} sim={sim} />
             </Section>
@@ -177,6 +226,13 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
           )}
           <Section id="properties" label="Properties" sections={sections}>
             <FieldGroup className="gap-4">
+              {family && onVariant && swaps.length > 1 && (
+                <PropEditor
+                  field={{ key: "variant", label: `Variant · ${family.name}`, type: "select", options: swaps.map(([value, label]) => ({ value, label })) }}
+                  value={def.id}
+                  onChange={(v) => onVariant(object.id, v)}
+                />
+              )}
               {def.prefix && (
                 <PropEditor
                   field={{ key: "ref", label: "Designator", type: "text", placeholder: `${def.prefix}1` }}
@@ -198,12 +254,18 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
               </Field>
             </FieldGroup>
           </Section>
-          {sim.live && !damage[object.id]?.fatal && (
-            // A board's readings are dozens of internal elements: there on request, not in the way.
-            <Section id={def.hideIdle ? "board-readings" : "readings"} label="Live readings" sections={sections} open={!def.hideIdle}>
-              <LiveReadings object={object} sim={sim} />
-            </Section>
-          )}
+            </TabsPanel>
+            <TabsPanel value="part">
+              <PartTab def={def} />
+            </TabsPanel>
+            <TabsPanel value="readings">
+              {sim.live && !damage[object.id]?.fatal ? (
+                <LiveReadings object={object} sim={sim} />
+              ) : (
+                <p className="text-xs text-muted-foreground">{damage[object.id]?.fatal ? "Burnt out: nothing to read." : "Run the simulation to read its voltages and currents."}</p>
+              )}
+            </TabsPanel>
+          </Tabs>
         </CardContent>
       )}
     </Card>

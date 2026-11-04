@@ -268,3 +268,10 @@
 [data-slot="field-drag-layer"][data-blocked]:has([data-slot="field-canvas"]) {
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--destructive) 55%, transparent));
 }
+
+/* A search on the field: what it did not find, and every wire, fade back (field explorer). */
+[data-slot="dot-field-content"][data-dim] [data-slot="wires"],
+[data-slot="dot-field-content"][data-dim] [data-slot="pins"],
+[data-slot="dot-field-content"][data-dim] [data-slot="field-text"] {
+  opacity: 0.22;
+}

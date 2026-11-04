@@ -10,6 +10,8 @@
 import { SevenSegmentIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef } from "../types"
 import { chromaticityColor } from "./rgb-led"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 type Knot = readonly [celsius: number, milliamps: number]
 
@@ -204,13 +206,12 @@ function display({ id, name, polarity, digits, parts }: { id: string; name: stri
     }
   })
   if (digits === 1) model.push({ kind: "SHORT", nodes: ["COM3", "COM8"] })
-  const leadsText = digits === 1 ? "a–g, DP on 7 6 4 2 1 9 10 5, common on 3 and 8" : "a–g, DP on 11 7 4 2 1 10 5 3, digit commons 12 9 8 6"
   return {
     id,
     name,
-    description: `Kingbright 0.56" ${digits === 1 ? "single" : "four"}-digit display, common ${polarity} (${leadsText}). Each segment follows its sheet's I–V curve and burns open on its own past its DC rating (derated with the ambient), its peak rating (1/10 duty, 0.1 ms) or 5 V reversed.`,
-    category: "Displays",
-    keywords: ["7-segment", "seven segment", "7seg", "LED display", "Kingbright", `common ${polarity}`, ...parts],
+    description: `${digits === 1 ? "Single" : "Four"}-digit 7-segment display, common ${polarity}`,
+    category: "leds",
+    keywords: ["7-segment", "seven segment", "7seg", "LED display", "Kingbright", '0.56"', `common ${polarity}`, ...parts],
     icon: SevenSegmentIcon,
     prefix: "DS",
     width,
@@ -230,7 +231,7 @@ function display({ id, name, polarity, digits, parts }: { id: string; name: stri
     ],
     parts: partsList,
     model,
-    info: { Source: "Kingbright sheets as listed in tests/data/kingbright-56-seven-segment/README.md" },
+    // info Source (in the datasheet record): "Kingbright sheets as listed in tests/data/kingbright-56-seven-segment/README.md"
   }
 }
 
@@ -243,3 +244,139 @@ export const sevenSegmentComponents: ComponentDef[] = [
   display({ id: "seven-segment-4-ca", name: "4-digit 7-segment display, common anode", polarity: "anode", digits: 4, parts: ["CA56-12EWA", "CA56-12SRWA"] }),
   display({ id: "seven-segment-4-cc", name: "4-digit 7-segment display, common cathode", polarity: "cathode", digits: 4, parts: ["CC56-12EWA", "CC56-12SRWA"] }),
 ]
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = sevenSegmentComponents
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "seven-segment-ca": {
+    maker: "Kingbright",
+    docs: [DOCS["kb-sa56-11ewa"], DOCS["kb-sa56-11srwa"], DOCS["kb-sa56-11gwa"], DOCS["kb-sa56-11sykwa"], DOCS["kb-sa56-11cgkwa"]],
+    specs: [],
+    characteristics: [
+      { kind: "forwardVoltage", value: { typ: 1.9, max: 2.3 }, at: [{ load: { amps: 10e-3 } }], colour: "red", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardCurrent", limit: { max: 30e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "peakCurrent", limit: { max: 160e-3 }, colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "dissipation", limit: { max: 75e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "reverseVoltage", limit: { max: 5 }, cite: { page: 2, at: "Abs Max" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 2, at: "Abs Max" } },
+    ],
+    modelled: [
+      { what: "I–V fit within 20 mV", cite: { page: 3, at: "Forward Current vs. Forward Voltage" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Typical VF within ±0.1 V", cite: { page: 2, at: "Electrical / Optical Characteristics" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Pinout per internal circuit diagram", cite: { page: 1, at: "Package Dimensions" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Burns open past DC/peak ratings", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Burns open 5 V reversed", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Other segments keep working", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "DC rating derated with ambient", cite: { page: 3, at: "Forward Current Derating Curve" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Colour from dominant wavelength", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+    ],
+    notModelled: [
+      { what: "Sheet's luminous intensity curves", cite: { page: 3, at: "Luminous Intensity vs. Forward Current" } },
+      { what: "Emission spectrum width", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Segment capacitance (15 pF)", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Reverse leakage (10 µA max)", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Self-heating and junction temperature", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { what: "Electrostatic discharge (8000 V HBM)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+    ],
+  },
+  "seven-segment-cc": {
+    maker: "Kingbright",
+    docs: [DOCS["kb-sc56-11ewa"], DOCS["kb-sc56-11srwa"], DOCS["kb-sc56-11gwa"], DOCS["kb-sc56-11sykwa"], DOCS["kb-sc56-11cgkwa"]],
+    specs: [],
+    characteristics: [
+      { kind: "forwardVoltage", value: { typ: 1.9, max: 2.3 }, at: [{ load: { amps: 10e-3 } }], colour: "red", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardCurrent", limit: { max: 30e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "peakCurrent", limit: { max: 160e-3 }, colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "dissipation", limit: { max: 75e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "reverseVoltage", limit: { max: 5 }, cite: { page: 2, at: "Abs Max" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 2, at: "Abs Max" } },
+    ],
+    modelled: [
+      { what: "I–V fit within 20 mV", cite: { page: 3, at: "Forward Current vs. Forward Voltage" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Typical VF within ±0.1 V", cite: { page: 2, at: "Electrical / Optical Characteristics" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Pinout per internal circuit diagram", cite: { page: 1, at: "Package Dimensions" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Burns open past DC/peak ratings", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Burns open 5 V reversed", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Other segments keep working", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "DC rating derated with ambient", cite: { page: 3, at: "Forward Current Derating Curve" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Colour from dominant wavelength", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+    ],
+    notModelled: [
+      { what: "Sheet's luminous intensity curves", cite: { page: 3, at: "Luminous Intensity vs. Forward Current" } },
+      { what: "Emission spectrum width", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Segment capacitance (15 pF)", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Reverse leakage (10 µA max)", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Self-heating and junction temperature", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { what: "Electrostatic discharge (8000 V HBM)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+    ],
+  },
+  "seven-segment-4-ca": {
+    maker: "Kingbright",
+    docs: [DOCS["kb-ca56-12ewa"], DOCS["kb-ca56-12srwa"]],
+    specs: [],
+    characteristics: [
+      { kind: "forwardVoltage", value: { typ: 1.9, max: 2.3 }, at: [{ load: { amps: 10e-3 } }], colour: "red", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardCurrent", limit: { max: 30e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "peakCurrent", limit: { max: 160e-3 }, colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "dissipation", limit: { max: 75e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "reverseVoltage", limit: { max: 5 }, cite: { page: 2, at: "Abs Max" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 2, at: "Abs Max" } },
+    ],
+    modelled: [
+      { what: "I–V fit within 20 mV", cite: { page: 3, at: "Forward Current vs. Forward Voltage" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Typical VF within ±0.1 V", cite: { page: 2, at: "Electrical / Optical Characteristics" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Pinout per internal circuit diagram", cite: { page: 1, at: "Package Dimensions" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Burns open past DC/peak ratings", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { what: "Burns open 5 V reversed", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { what: "Other segments keep working", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { what: "DC rating derated with ambient", cite: { page: 3, at: "Forward Current Derating Curve" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Colour from dominant wavelength", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Survives 1/4-duty multiplexed peaks" },
+    ],
+    notModelled: [
+      { what: "Sheet's luminous intensity curves", cite: { page: 3, at: "Luminous Intensity vs. Forward Current" } },
+      { what: "Emission spectrum width", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Segment capacitance (15 pF)", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Reverse leakage (10 µA max)", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Self-heating and junction temperature", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { what: "Electrostatic discharge (8000 V HBM)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+    ],
+  },
+  "seven-segment-4-cc": {
+    maker: "Kingbright",
+    docs: [DOCS["kb-cc56-12ewa"], DOCS["kb-cc56-12srwa"]],
+    specs: [],
+    characteristics: [
+      { kind: "forwardVoltage", value: { typ: 1.9, max: 2.3 }, at: [{ load: { amps: 10e-3 } }], colour: "red", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardCurrent", limit: { max: 30e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "peakCurrent", limit: { max: 160e-3 }, colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "dissipation", limit: { max: 75e-3 }, per: "segment", colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "reverseVoltage", limit: { max: 5 }, cite: { page: 2, at: "Abs Max" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 2, at: "Abs Max" } },
+    ],
+    modelled: [
+      { what: "I–V fit within 20 mV", cite: { page: 3, at: "Forward Current vs. Forward Voltage" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Typical VF within ±0.1 V", cite: { page: 2, at: "Electrical / Optical Characteristics" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Pinout per internal circuit diagram", cite: { page: 1, at: "Package Dimensions" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Burns open past DC/peak ratings", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { what: "Burns open 5 V reversed", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { what: "Other segments keep working", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { what: "DC rating derated with ambient", cite: { page: 3, at: "Forward Current Derating Curve" }, test: "tests/sim/seven-segment.test.ts" },
+      { what: "Colour from dominant wavelength", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Survives 1/4-duty multiplexed peaks", test: "tests/sim/seven-segment.test.ts" },
+      { what: "250 Hz four-digit multiplexing works", test: "tests/sim/nucleo-sevenseg.test.ts" },
+    ],
+    notModelled: [
+      { what: "Sheet's luminous intensity curves", cite: { page: 3, at: "Luminous Intensity vs. Forward Current" } },
+      { what: "Emission spectrum width", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Segment capacitance (15 pF)", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Reverse leakage (10 µA max)", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Self-heating and junction temperature", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+      { what: "Electrostatic discharge (8000 V HBM)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+    ],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

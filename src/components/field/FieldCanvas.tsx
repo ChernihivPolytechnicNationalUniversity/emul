@@ -16,11 +16,13 @@ type FieldCanvasProps = {
   raster: SymbolRaster
   selectedObjects?: ReadonlySet<string>
   selectedWires?: ReadonlySet<string>
+  /** A search is on: these objects stay bright, the rest of the field dims. */
+  lit?: ReadonlySet<string> | null
 }
 
 const NONE: ReadonlySet<string> = new Set()
 
-export function FieldCanvas({ objects, routes, view, grid, scale, colorOf, raster, selectedObjects = NONE, selectedWires = NONE }: FieldCanvasProps) {
+export function FieldCanvas({ objects, routes, view, grid, scale, colorOf, raster, selectedObjects = NONE, selectedWires = NONE, lit = null }: FieldCanvasProps) {
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const bucket = rasterBucket(scale)
   const theme = useThemeName()
@@ -39,8 +41,8 @@ export function FieldCanvas({ objects, routes, view, grid, scale, colorOf, raste
     if (!context) return
 
     context.clearRect(0, 0, width, height)
-    paintField(context, canvas, { objects, routes, view, grid, pixels, device, theme, colorOf, raster, selection: { objects: selectedObjects, wires: selectedWires } })
-  }, [objects, routes, view, grid, bucket, theme, colorOf, raster, selectedObjects, selectedWires])
+    paintField(context, canvas, { objects, routes, view, grid, pixels, device, theme, colorOf, raster, selection: { objects: selectedObjects, wires: selectedWires }, lit })
+  }, [objects, routes, view, grid, bucket, theme, colorOf, raster, selectedObjects, selectedWires, lit])
 
   if (view.w <= 0) return null
   return (

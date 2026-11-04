@@ -4,8 +4,12 @@ import { DotField, type DotFieldHandle, type FieldState } from "@/components/fie
 import { DEFAULT_TEXT_SCALE } from "@/components/field/text-scale"
 import { MenuBar } from "@/components/menu/MenuBar"
 import { GRID } from "@/schematic/geometry"
-import { ComponentsSidebar } from "@/components/palette/ComponentsSidebar"
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
+import { PaletteHost } from "@/components/palette/PaletteHost"
+import { clampWidth, PALETTE_SEARCH_EVENT, RAIL_PX, savedFolded, saveFolded, savedWidth } from "@/components/palette/dock-width"
+import { paletteModeOf, useSizeClass } from "@/hooks/use-size-class"
+import { PanelLeftIcon } from "lucide-react"
+import { notePlaced } from "@/components/palette/recents"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { exampleBySlug, showcase, type Example } from "@/schematic/examples"
@@ -29,7 +33,6 @@ import { ShareDialog } from "@/components/share/ShareDialog"
 
 /** Height of the menu bar; the sidebar is fixed, so it has to be told to start below it. */
 const MENU_H = 28
-const SIDEBAR_WIDTH = "16rem"
 
 const emptyState: FieldState = {
   hasSelection: false,
@@ -51,10 +54,37 @@ const emptyState: FieldState = {
 export default function App() {
   const field = React.useRef<DotFieldHandle>(null)
   const [state, setState] = React.useState<FieldState>(emptyState)
-  const [sidebarOpen, setSidebarOpen] = React.useState(true)
-  /** On a phone the palette is a sheet over the field, closed until asked for and closed again after a pick. */
-  const [paletteSheet, setPaletteSheet] = React.useState(false)
+  const sizeClass = useSizeClass()
+  const paletteMode = paletteModeOf(sizeClass)
+  /** Docked: unfolded rather than folded to its icon column; a sheet: shown. */
+  const [dockOpen, setDockOpen] = React.useState(() => !savedFolded())
+  const [sheetOpen, setSheetOpen] = React.useState(false)
+  const paletteOpen = paletteMode === "dock" ? dockOpen : sheetOpen
+  const setPaletteOpen = React.useCallback(
+    (open: boolean) => {
+      if (paletteMode !== "dock") return setSheetOpen(open)
+      setDockOpen(open)
+      saveFolded(!open)
+    },
+    [paletteMode],
+  )
+  const [paletteWidth, setPaletteWidth] = React.useState(savedWidth)
   const isMobile = useIsMobile()
+  /** A part taken from the palette, waiting for a click on the field. */
+  const [armed, setArmed] = React.useState<string | null>(null)
+  // "/" goes to the palette's search from anywhere outside a text field, as on most sites.
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || !t || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable || t.closest('[data-slot="code-panel"]')) return
+      e.preventDefault()
+      if (paletteMode === "rail") return void window.dispatchEvent(new Event(PALETTE_SEARCH_EVENT))
+      setPaletteOpen(true)
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[data-slot="palette-search"]')?.focus())
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [paletteMode, setPaletteOpen])
   const fileInput = React.useRef<HTMLInputElement>(null)
   /** Set while an example that came programmed is on its way to the field: it starts once loaded. */
   const autorun = React.useRef(false)
@@ -113,6 +143,15 @@ export default function App() {
     () => live.peers.flatMap((p) => (p.moving ? [{ key: p.clientId, color: p.color, ...p.moving }] : [])),
     [live.peers],
   )
+  const peerSelections = React.useMemo(
+    () => live.peers.filter((p) => p.selected.length).map((p) => ({ clientId: p.clientId, name: p.name, color: p.color, ids: p.selected })),
+    [live.peers],
+  )
+  /** On a phone: the palette sheet's Field tab, the field's problem count, a tap that lowers the sheet. */
+  const [fieldSlot, setFieldSlot] = React.useState<HTMLElement | null>(null)
+  const [problemCount, setProblemCount] = React.useState(0)
+  const [fieldPeek, setFieldPeek] = React.useState(0)
+  const onFieldPicked = React.useCallback(() => setFieldPeek((n) => n + 1), [])
   const [projectsOpen, setProjectsOpen] = React.useState(false)
   const [shareOpen, setShareOpen] = React.useState(false)
 
@@ -326,9 +365,9 @@ export default function App() {
         <MenuBar
           field={field}
           state={state}
-          sidebarOpen={isMobile ? paletteSheet : sidebarOpen}
-          onSidebarToggle={() => (isMobile ? setPaletteSheet((v) => !v) : setSidebarOpen((v) => !v))}
-          fieldInset={sidebarOpen && !isMobile ? SIDEBAR_WIDTH : "0px"}
+          sidebarOpen={paletteOpen}
+          onSidebarToggle={() => setPaletteOpen(!paletteOpen)}
+          fieldInset={paletteMode === "dock" ? (paletteOpen ? `${clampWidth(paletteWidth, sizeClass.width)}px` : `${RAIL_PX}px`) : paletteMode === "rail" ? `${RAIL_PX}px` : "0px"}
           project={projects.current?.name ?? null}
           recent={projects.list.filter((p) => p.id !== projects.current?.id).slice(0, 8)}
           onNew={newProject}
@@ -347,28 +386,33 @@ export default function App() {
           onExample={(example) => void loadExample(example)}
           style={{ height: isMobile ? MENU_H_TOUCH : MENU_H }}
         />
-        <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} openMobile={paletteSheet} onOpenMobileChange={setPaletteSheet} style={{ minHeight: 0, flex: 1, "--sidebar-width": SIDEBAR_WIDTH } as React.CSSProperties}>
-          <ComponentsSidebar
-            onPick={(item) => {
-              setPaletteSheet(false)
-              field.current?.addAtCenter(item.id)
+        <SidebarProvider open style={{ minHeight: 0, flex: 1 } as React.CSSProperties}>
+          <PaletteHost
+            mode={paletteMode}
+            widthClass={sizeClass.width}
+            open={paletteOpen}
+            onOpenChange={setPaletteOpen}
+            width={paletteWidth}
+            onWidthChange={setPaletteWidth}
+            field={{ slot: setFieldSlot, count: problemCount, peek: fieldPeek }}
+            sidebar={{
+              onPick: (item) => {
+                setArmed(null)
+                field.current?.addAtCenter(item.id)
+              },
+              armed,
+              onArm: (item) => setArmed((a) => (a === item.id ? null : item.id)),
+              onHdlNew: (language) => field.current?.newHdl(language),
+              onHdlImport: () => importHdl(),
+              onHdlOpen: (id) => field.current?.openHdl(id),
             }}
-            onHdlNew={(language) => {
-              setPaletteSheet(false)
-              field.current?.newHdl(language)
-            }}
-            onHdlImport={() => {
-              setPaletteSheet(false)
-              importHdl()
-            }}
-            onHdlOpen={(id) => {
-              setPaletteSheet(false)
-              field.current?.openHdl(id)
-            }}
-            style={{ top: MENU_H, height: `calc(100svh - ${MENU_H}px)` }}
           />
           <SidebarInset className="relative min-h-0 flex-1 overflow-hidden">
-            <SidebarTrigger className="absolute top-3 left-3 z-10" />
+            {paletteMode !== "bottom-sheet" && paletteMode !== "rail" && (
+              <Button variant="ghost" size="icon-sm" className="absolute top-3 left-3 z-10" onClick={() => setPaletteOpen(!paletteOpen)} aria-label={paletteOpen ? "Hide the parts" : "Show the parts"} aria-expanded={paletteOpen}>
+                <PanelLeftIcon />
+              </Button>
+            )}
             {projects.shared && (
               <div className="absolute top-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-3 rounded-md border bg-background/95 py-1 pr-1 pl-3 text-xs shadow-sm backdrop-blur-sm">
                 <span className="text-muted-foreground">
@@ -383,6 +427,15 @@ export default function App() {
               onMovePreview={live.onMove}
               onWirePreview={live.onWire}
               ghosts={ghosts}
+              armed={armed}
+              onArmedChange={setArmed}
+              onPlaced={notePlaced}
+              onHdlImport={importHdl}
+              peerSelections={peerSelections}
+              onSelectionShare={live.room ? live.onSelect : undefined}
+              fieldSlot={paletteMode === "bottom-sheet" ? fieldSlot : null}
+              onFieldPicked={onFieldPicked}
+              onProblemCount={setProblemCount}
               projectName={projects.current?.name}
             >
               <LiveCursors peers={live.peers} />

@@ -34,6 +34,15 @@ const BINDINGS = {
   ],
   zoomOut: { key: "-", mod: true, shift: "either", repeats: true },
   zoomReset: { key: "0", mod: true, shift: "either" },
+  // Shift and a digit on the digit's place, whatever the layout types there: read with digitPosition.
+  fitAll: { key: "1", shift: true },
+  zoomToSelection: [{ key: "2", shift: true }, { key: "f" }],
+  actualSize: { key: "0", shift: true },
+  // Quick Insert: the command key from anywhere but the code, "A" from the field alone.
+  addHere: [{ key: "k", mod: true }, { key: "a" }],
+  find: { key: "f", mod: true },
+  nextProblem: { key: "F8" },
+  previousProblem: { key: "F8", shift: true },
   save: { key: "s", mod: true },
   open: { key: "o", mod: true },
   projects: { key: "o", mod: true, shift: true },

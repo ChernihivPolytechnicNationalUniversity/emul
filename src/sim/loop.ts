@@ -3,7 +3,7 @@ import { partKey, pinKey, type ComponentDef, type Damage, type PartState, type S
 import { parsePad, type PadRef } from "@/mcu/stm32f429"
 import { rcFrequency } from "@/mcu/pic/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
-import { crystalStartup, RESONATOR_STARTUP } from "@/schematic/components/clock"
+import { crystalStartup, RESONATOR_STARTUP } from "@/schematic/clock-startup"
 import { parseValue } from "./units"
 import { DT } from "./speeds"
 import { Engine, R_PULL, switchClosed, type Failure, type PartReader, type PinReader, type ProbeReading, type Reading, type TraceChunk } from "./engine"

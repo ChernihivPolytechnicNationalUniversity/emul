@@ -10,6 +10,7 @@ import { migrated } from "./migrate"
 import {
   emptySchematic,
   partKey,
+  type ComponentDef,
   type PartState,
   type PinRef,
   type PlacedObject,
@@ -282,6 +283,19 @@ export function useSchematic(grid: number) {
     }))
   }, [setDoc])
 
+  /**
+   * Swap a part for another variant of its family. The variants share their pins, so the wires
+   * stay; props the new variant has no use for, or a choice it does not offer, are dropped.
+   */
+  const setVariant = React.useCallback((id: string, defId: string) => {
+    const next = getDef(defId)
+    if (!next) return
+    setDoc((d) => ({
+      ...d,
+      objects: d.objects.map((o) => (o.id === id && o.def !== defId ? { ...o, def: defId, props: keptProps(o.props, getDef(o.def), next) } : o)),
+    }))
+  }, [setDoc])
+
   /** Replace a board's firmware sources; typing is not an undo step (see `undo`). */
   const setProject = React.useCallback((id: string, files: SourceFile[], expected?: SourceFile[]) => {
     const replace = (o: PlacedObject) => o.id === id && (expected === undefined || o.project === expected)
@@ -453,6 +467,7 @@ export function useSchematic(grid: number) {
     rotate,
     flip,
     setProps,
+    setVariant,
     setProject,
     setBuild,
     setDebug,
@@ -471,4 +486,20 @@ export function useSchematic(grid: number) {
     copySelected,
     paste,
   }
+}
+
+/**
+ * The props a part keeps when it becomes `to`: its designator, its firmware if `to` runs one, a
+ * choice `to` offers too, and a value typed into a setting both variants start alike (a gain, not
+ * a part number). The rest falls back to `to`'s defaults.
+ */
+export function keptProps(props: Record<string, string> | undefined, from: ComponentDef | undefined, to: ComponentDef): Record<string, string> | undefined {
+  if (!props) return props
+  const kept: Record<string, string> = {}
+  for (const [key, value] of Object.entries(props)) {
+    const field = to.fields?.find((f) => f.key === key)
+    const same = field && (field.type === "select" ? field.options.some((o) => o.value === value) : from?.defaults?.[key] === to.defaults?.[key])
+    if (key === "ref" || (to.chip !== undefined && key.startsWith("firmware")) || same) kept[key] = value
+  }
+  return kept
 }

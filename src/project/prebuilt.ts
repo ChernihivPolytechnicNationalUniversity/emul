@@ -3,7 +3,7 @@ import { contentHash, type BuildRecord } from "@/debug/sources"
 import { bytesToBase64 } from "@/lib/bytes"
 import { buildOptions, buildTarget } from "@/project/board-build"
 import type { Example } from "@/schematic/examples"
-import { getDef } from "@/schematic/registry"
+import { getDef, withDefs } from "@/schematic/registry"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import manifest from "../../firmware/prebuilt/manifest.json"
 
@@ -51,7 +51,7 @@ export type ExampleBoard = { ref: string; board: PlacedObject; target: Target; o
  * builds those boards stand for. `errors` names the boards whose code would not load.
  */
 export async function exampleBench(example: Example, grid: number): Promise<{ doc: Schematic; boards: ExampleBoard[]; errors: string[] }> {
-  const doc = example.build(grid)
+  const doc = await withDefs(() => example.build(grid))
   const boards: ExampleBoard[] = []
   const errors: string[] = []
   for (const p of example.projects ?? []) {

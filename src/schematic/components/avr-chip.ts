@@ -1,6 +1,9 @@
 import { ATMEGA328P, type AvrProfile } from "@/mcu/avr/chip"
 import { ChipIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PinDef, PinKind, PropField } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Claim, Datasheet } from "../types"
+import type { Characteristic } from "../characteristics"
 
 /**
  * AVR parts as bare chips, drawn like the STM32 ones: an IC body with every package pin,
@@ -114,8 +117,8 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string, id 
     id,
     name: pkg.name === "PDIP-28" ? chip.name : `${chip.name} ${pkg.name}`,
     description,
-    keywords: ["AVR", "ATmega", "Arduino", "328P"],
-    category: "Chips",
+    keywords: ["AVR", "ATmega", "Arduino", "328P", "Uno", "Nano"],
+    category: "mcus",
     icon: ChipIcon,
     prefix: "DD",
     width: WIDTH,
@@ -131,12 +134,20 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string, id 
     mcuVref: "AREF",
     fields: avrFields(chip),
     info: {
-      MCU: `${chip.name}, AVR 8-bit, ${chip.flashBytes / 1024} KB Flash, ${(chip.ramEnd - 0xff) / 1024} KB SRAM, ${chip.eepromBytes} B EEPROM`,
+      // MCU: `${chip.name}, AVR 8-bit, ${chip.flashBytes / 1024} KB Flash, ${(chip.ramEnd - 0xff) / 1024} KB SRAM, ${chip.eepromBytes} B EEPROM`
+      "Flash/SRAM/EEPROM": `${chip.flashBytes / 1024} KB/${(chip.ramEnd - 0xff) / 1024} KB/${chip.eepromBytes} B`,
       Package: pkg.name,
-      "Absolute maximum": `VCC ${e.vddMax} V; I/O pins −0.5 V to VCC + ${e.pinAboveVcc} V, ${e.pinCurrentMax * 1e3} mA each, ${e.supplyCurrentMax * 1e3} mA through VCC/GND; RESET ${e.resetVoltageMax} V`,
-      Fuses: `as shipped: low ${hex(f.low)} (internal 8 MHz RC ÷ 8), high ${hex(f.high)}, extended ${hex(f.extended)}; an .elf with a .fuse section sets them, so do the fields here`,
-      Errata: `Silicon Errata DS80000855C, by revision: ${Object.entries(chip.errata).map(([id, revs]) => `${id} (Rev. ${revs.join("/")})`).join(", ")}`,
-      Source: pkg.source,
+      // "Absolute maximum": `VCC ${e.vddMax} V; I/O pins −0.5 V to VCC + ${e.pinAboveVcc} V, ${e.pinCurrentMax * 1e3} mA each, ${e.supplyCurrentMax * 1e3} mA through VCC/GND; RESET ${e.resetVoltageMax} V`
+      "Absolute maximum": `VCC ${e.vddMax} V`,
+      "RESET maximum": `${e.resetVoltageMax} V`,
+      "Pin voltage": `−0.5 V to VCC+${e.pinAboveVcc} V`,
+      "Pin current": `${e.pinCurrentMax * 1e3} mA, VCC/GND ${e.supplyCurrentMax * 1e3} mA`,
+      // Fuses: `as shipped: low ${hex(f.low)} (internal 8 MHz RC ÷ 8), high ${hex(f.high)}, extended ${hex(f.extended)}; an .elf with a .fuse section sets them, so do the fields here`
+      "Factory fuses (L/H/E)": `${hex(f.low)}/${hex(f.high)}/${hex(f.extended)}`,
+      "Factory clock": "8 MHz RC ÷ 8",
+      Fuses: "from the .elf, fields override",
+      // Errata (the revision field lists them too): `Silicon Errata DS80000855C, by revision: ${Object.entries(chip.errata).map(([id, revs]) => `${id} (Rev. ${revs.join("/")})`).join(", ")}`
+      // Source (in the datasheet record): pkg.source
     },
   }
 }
@@ -213,5 +224,56 @@ const TQFP32: Package = {
   ],
 }
 
-export const atmega328p = avrChip(ATMEGA328P, PDIP28, "8-bit AVR MCU, PDIP-28 — the Arduino Uno chip")
-export const atmega328pAu = avrChip(ATMEGA328P, TQFP32, "8-bit AVR MCU, TQFP-32 — the Arduino Nano chip, with the analog-only ADC6/ADC7", "atmega328p-au")
+export const atmega328p = avrChip(ATMEGA328P, PDIP28, "8-bit AVR MCU, PDIP-28")
+export const atmega328pAu = avrChip(ATMEGA328P, TQFP32, "8-bit AVR MCU, TQFP-32", "atmega328p-au")
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [atmega328p, atmega328pAu]
+
+// --- datasheet records -----------------------------------------------------------------------
+// DS40002061B (PDF page = printed page): the ATmega328P's numbers, the same for both packages
+// (23 programmable I/O lines in either; ADC6/ADC7 of the TQFP are analog only). §29 is the
+// −40 to 85 °C part these are.
+const AVR_DOCS: Datasheet["docs"] = [DOCS["mchp-ds40002061b"], DOCS["mchp-ds80000855c"], DOCS["mchp-ds40002198c"]]
+const ABS_MAX = { page: 308, at: "§29.1 Absolute Maximum Ratings" }
+
+function avrCharacteristics(chip: AvrProfile): Characteristic[] {
+  const memory = { page: 1, at: "Features" }
+  return [
+    { kind: "supply", value: { min: 1.8, max: 5.5 }, limit: { max: chip.electrical.vddMax }, cite: { page: 2, at: "Features, Operating Voltage" }, limitCite: ABS_MAX },
+    { kind: "clock", value: { max: 20e6 }, at: [{ supply: 4.5 }], cite: { page: 313, at: "Table 29-10" } },
+    { kind: "flash", value: { typ: chip.flashBytes }, cite: memory },
+    { kind: "ram", value: { typ: chip.ramEnd - 0xff }, cite: memory },
+    { kind: "eeprom", value: { typ: chip.eepromBytes }, cite: memory },
+    { kind: "ioPins", value: { typ: 23 }, cite: { page: 2, at: "Features, I/O and Packages" } },
+    { kind: "pinCurrent", limit: { max: chip.electrical.pinCurrentMax, sym: true }, per: "pin", cite: ABS_MAX },
+    { kind: "temperature", value: { min: -40, max: 85 }, limit: { min: -55, max: 125 }, cite: { page: 2, at: "Features, Temperature Range" }, limitCite: ABS_MAX },
+  ]
+}
+
+const claim = (what: string, test: string): Claim => ({ what, test: `tests/firmware/${test}.test.ts` })
+const AVR_MODELLED: Claim[] = [
+  claim("AVR core, full instruction set", "avr-core"),
+  { what: "Runs Arduino firmware from ELF", test: "tests/sim/avr-bench.test.ts" },
+  claim("Fuses select clock and start-up", "avr-soc"),
+  claim("Three timers with PWM", "avr-timers"),
+  claim("USART serial port", "avr-usart"),
+  claim("SPI master and slave", "avr-spi"),
+  claim("TWI master and slave", "avr-twi"),
+  claim("ADC and analog comparator", "avr-adc"),
+  claim("External and pin-change interrupts", "avr-extint"),
+  claim("Watchdog, EEPROM and sleep", "avr-system"),
+  claim("Silicon errata by revision", "avr-errata"),
+  { what: "Supply current follows the core", test: "tests/sim/core-supply-load.test.ts" },
+]
+const AVR_NOT_MODELLED: Claim[] = [
+  { what: "ISP serial downloading", cite: { page: 303, at: "§28.8 Serial Downloading" } },
+  { what: "High-voltage parallel programming", cite: { page: 296, at: "§28.7 Parallel Programming" } },
+  { what: "ADC INL, gain and offset", cite: { page: 319, at: "Table 29-15" } },
+  { what: "Internal RC ±10% tolerance", cite: { page: 313, at: "Table 29-9" } },
+]
+
+const RECORDS: Record<string, Datasheet> = Object.fromEntries(
+  defs.map((def) => [def.id, { maker: "Microchip", package: def.info!.Package, docs: AVR_DOCS, specs: [], characteristics: avrCharacteristics(ATMEGA328P), modelled: AVR_MODELLED, notModelled: AVR_NOT_MODELLED }]),
+)
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

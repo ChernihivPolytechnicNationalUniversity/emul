@@ -1,6 +1,9 @@
-import { PIC_CHIPS, type PicProfile } from "@/mcu/pic/chip"
+import { PIC_CHIPS, vddMin, type PicProfile } from "@/mcu/pic/chip"
 import { ChipIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PinDef, PinKind, PropField } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Claim, Datasheet } from "../types"
+import type { Characteristic } from "../characteristics"
 
 /**
  * PIC16F62x parts as bare chips, drawn like the AVR ones: an IC body with every package pin, names
@@ -98,7 +101,7 @@ export function picChip(chip: PicProfile, pkg: Package, description: string, id 
     name: pkg.name === "PDIP-18" ? chip.name : `${chip.name} ${pkg.name}`,
     description,
     keywords: ["PIC", "PIC16", "Microchip", "16F628", "16F627", "16F648"],
-    category: "Chips",
+    category: "mcus",
     icon: ChipIcon,
     prefix: "DD",
     width: WIDTH,
@@ -113,14 +116,26 @@ export function picChip(chip: PicProfile, pkg: Package, description: string, id 
     mcuReset: "RA5",
     fields: picFields(),
     info: {
-      MCU: `${chip.name}, PIC16 mid-range 8-bit, ${chip.flashWords} words Flash, ${chip.gpr.reduce((n, [a, b]) => n + b - a + 1, 0) + 16} B RAM, ${chip.eepromBytes} B EEPROM${chip.grade < 20e6 ? `, up to ${chip.grade / 1e6} MHz` : ""}`,
+      // MCU: `${chip.name}, PIC16 mid-range 8-bit, ${chip.flashWords} words Flash, ${ramBytes(chip)} B RAM, ${chip.eepromBytes} B EEPROM${chip.grade < 20e6 ? `, up to ${chip.grade / 1e6} MHz` : ""}`
+      "Flash/RAM/EEPROM": `${chip.flashWords} words/${ramBytes(chip)} B/${chip.eepromBytes} B`,
+      ...(chip.grade < 20e6 ? { "Clock grade": `up to ${chip.grade / 1e6} MHz` } : {}),
       Supply: vddText,
       Package: pkg.name,
-      "Absolute maximum": `VDD ${e.vddAbsMax} V; I/O pins −0.3 V to VDD + ${e.pinAboveVdd} V, ${e.pinCurrentMax * 1e3} mA each, ${e.portsCurrentMax * 1e3} mA all ports; MCLR and RA4 ${e.mclrMax} V`,
-      Configuration: "the configuration word at 2007h comes from the HEX image (__CONFIG / #pragma config); the field here overrides it",
-      Source: pkg.source,
+      // "Absolute maximum": `VDD ${e.vddAbsMax} V; I/O pins −0.3 V to VDD + ${e.pinAboveVdd} V, ${e.pinCurrentMax * 1e3} mA each, ${e.portsCurrentMax * 1e3} mA all ports; MCLR and RA4 ${e.mclrMax} V`
+      "Absolute maximum": `VDD ${e.vddAbsMax} V`,
+      "MCLR/RA4 maximum": `${e.mclrMax} V`,
+      "Pin voltage": `−0.3 V to VDD+${e.pinAboveVdd} V`,
+      "Pin current": `${e.pinCurrentMax * 1e3} mA, ports ${e.portsCurrentMax * 1e3} mA`,
+      // Configuration: "the configuration word at 2007h comes from the HEX image (__CONFIG / #pragma config); the field here overrides it"
+      Configuration: "from HEX 2007h, field overrides",
+      // Source (in the datasheet record): pkg.source
     },
   }
+}
+
+/** Data RAM: the GPR ranges, which already hold the 16 common bytes at 70h–7Fh (Table 4-1): 224 or 256 B (device table). */
+function ramBytes(chip: PicProfile): number {
+  return chip.gpr.reduce((n, [a, b]) => n + b - a + 1, 0)
 }
 
 /** The configuration word (hex); empty keeps what the image's 2007h holds (erased: 3FFFh). */
@@ -163,11 +178,112 @@ const PDIP18: Package = {
   ],
 }
 
-const DESCRIPTION: Record<string, string> = {
-  PIC16F627A: "8-bit PIC16 MCU, 1K words Flash, PDIP-18",
-  PIC16F628A: "8-bit PIC16 MCU, 2K words Flash, PDIP-18 — the classic hobby PIC",
-  PIC16F648A: "8-bit PIC16 MCU, 4K words Flash, PDIP-18",
-}
 export const picChips: ComponentDef[] = PIC_CHIPS.map((c) =>
-  picChip(c, PDIP18, DESCRIPTION[c.id] ?? `8-bit PIC16 MCU, ${c.flashWords / 1024}K words Flash, PDIP-18${c.revisionA ? "" : " — the original (non-A) silicon, DS40300C"}${c.grade < 20e6 ? `, ${c.grade / 1e6} MHz grade` : ""}${c.lowVoltage ? ", 2.0 V LF part" : ""}`),
+  picChip(c, PDIP18, `${c.lowVoltage ? "Low-voltage" : "8-bit"} PIC16 MCU, ${c.flashWords / 1024}K Flash`),
 )
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = picChips
+
+// --- datasheet records -----------------------------------------------------------------------
+// The numbers come from each part's own sheet: DS40044G for the A parts, DS40300C for the original
+// PIC16F627/628 (PDF page indices). Program memory is 14-bit words, given here in bytes (words × 14 / 8).
+// Temperature: the industrial grade (I, −40 to 85 °C).
+
+type Page = { page: number; at: string }
+type PicSheet = {
+  doc?: string
+  supply: Page
+  absMax: Page
+  memory: Page
+  /** The V–F graph for a 20 MHz part, the ordering grade for a 4 MHz one. */
+  clock20: Page
+  clock4?: Page
+  grades: Page
+  comparator: Page
+  intosc: Page
+  drive: Page
+}
+const SHEET_A: PicSheet = {
+  supply: { page: 137, at: "§17.1 D001" },
+  absMax: { page: 135, at: "§17.0 Absolute Maximum Ratings" },
+  memory: { page: 3, at: "Device table" },
+  clock20: { page: 136, at: "Figures 17-1, 17-2" },
+  grades: { page: 179, at: "Product Identification System" },
+  comparator: { page: 142, at: "Table 17-2 D300, D303" },
+  intosc: { page: 145, at: "Table 17-5 F13" },
+  drive: { page: 140, at: "§17.4 D090" },
+}
+const SHEET_ORIGINAL: PicSheet = {
+  doc: "mchp-ds40300c",
+  supply: { page: 132, at: "§17.1 D001" },
+  absMax: { page: 129, at: "§17.0 Absolute Maximum Ratings" },
+  memory: { page: 3, at: "Device table" },
+  clock20: { page: 130, at: "Figure 17-2" },
+  clock4: { page: 169, at: "Product Identification System, Frequency Range" },
+  grades: { page: 169, at: "Product Identification System" },
+  comparator: { page: 135, at: "Table 17-1 D300, 300" },
+  intosc: { page: 138, at: "Table 17-4 INTRC" },
+  drive: { page: 134, at: "§17.2 D090" },
+}
+
+function picCharacteristics(chip: PicProfile, s: PicSheet): Characteristic[] {
+  const e = chip.electrical
+  const cite = (p: Page) => (s.doc ? { doc: s.doc, ...p } : p)
+  return [
+    { kind: "supply", value: { min: vddMin(chip), max: e.vddMax }, limit: { max: e.vddAbsMax }, cite: cite(s.supply), limitCite: cite(s.absMax) },
+    chip.grade < 20e6
+      ? { kind: "clock", value: { max: chip.grade }, cite: cite(s.clock4 ?? s.grades) }
+      : { kind: "clock", value: { max: chip.grade }, at: [{ supply: 4.5 }], cite: cite(s.clock20) },
+    { kind: "flash", value: { typ: (chip.flashWords * 14) / 8 }, cite: cite(s.memory) },
+    { kind: "ram", value: { typ: ramBytes(chip) }, cite: cite(s.memory) },
+    { kind: "eeprom", value: { typ: chip.eepromBytes }, cite: cite(s.memory) },
+    { kind: "ioPins", value: { typ: 16 }, cite: cite(s.memory) },
+    { kind: "pinCurrent", limit: { max: e.pinCurrentMax, sym: true }, per: "pin", cite: cite(s.absMax) },
+    { kind: "temperature", value: { min: -40, max: 85 }, limit: { min: -40, max: 125 }, cite: cite(s.grades), limitCite: cite(s.absMax) },
+  ]
+}
+
+const claim = (what: string, test: string): Claim => ({ what, test: `tests/firmware/${test}.test.ts` })
+const PIC_MODELLED: Claim[] = [
+  claim("PIC16 core, 35 instructions", "pic-flags"),
+  { what: "Runs real HEX firmware", test: "tests/sim/pic-bench.test.ts" },
+  claim("Timer0, Timer1, Timer2 and CCP", "pic-timers"),
+  claim("USART asynchronous and synchronous", "pic-usart"),
+  claim("Comparators and voltage reference", "pic-analog"),
+  claim("Data EEPROM write timing", "pic-eeprom"),
+  claim("ICSP Program/Verify mode", "pic-icsp"),
+  claim("Clock limits by supply reported", "pic-clock"),
+  claim("Resets, watchdog and Sleep", "pic-soc"),
+]
+const MODELLED_A: Claim[] = [...PIC_MODELLED, { what: "Supply current follows the core", test: "tests/sim/core-supply-load.test.ts" }]
+const MODELLED_ORIGINAL: Claim[] = [...PIC_MODELLED, claim("Original silicon errata", "pic-original")]
+
+function picNotModelled(s: PicSheet): Claim[] {
+  const cite = (p: Page) => (s.doc ? { doc: s.doc, ...p } : p)
+  return [
+    { what: "Comparator offset and response time", cite: cite(s.comparator) },
+    { what: "INTOSC frequency tolerance", cite: cite(s.intosc) },
+    { what: "Source drive weaker than sink", cite: cite(s.drive) },
+  ]
+}
+
+const RECORDS: Record<string, Datasheet> = Object.fromEntries(
+  PIC_CHIPS.map((chip) => {
+    const sheet = chip.revisionA ? SHEET_A : SHEET_ORIGINAL
+    const docs: Datasheet["docs"] = chip.revisionA
+      ? [DOCS["mchp-ds40044g"], DOCS["mchp-ds33023a"], DOCS["mchp-ds31029a"], DOCS["mchp-ds80151n"], DOCS["mchp-ds41196g"]]
+      : [DOCS["mchp-ds40044g"], DOCS["mchp-ds40300c"], DOCS["mchp-ds33023a"], DOCS["mchp-ds31029a"], DOCS["mchp-ds30034d"], DOCS["mchp-ds80073f"]]
+    const record: Datasheet = {
+      maker: "Microchip",
+      package: PDIP18.name,
+      docs,
+      specs: [],
+      characteristics: picCharacteristics(chip, sheet),
+      modelled: chip.revisionA ? MODELLED_A : MODELLED_ORIGINAL,
+      notModelled: picNotModelled(sheet),
+    }
+    return [chip.id.toLowerCase(), record]
+  }),
+)
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

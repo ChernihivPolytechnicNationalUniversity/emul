@@ -1,10 +1,10 @@
 import { portPins, type HdlLanguage, type HdlNetlist, type HdlPort } from "emul-shared/hdl"
 import type { SourceFile } from "emul-shared/source"
+import { HDL_CATEGORY } from "./categories"
 import { HdlIcon } from "./icons"
 import type { ComponentDef, Element, HdlModule, PinDef } from "./types"
 
 export const HDL_PREFIX = "hdl:"
-export const HDL_CATEGORY = "HDL"
 
 const ABS_MAX = 7
 const PIN_CURRENT = 25e-3
@@ -67,7 +67,7 @@ export function hdlDef(m: HdlModule): ComponentDef | null {
   return {
     id: m.id,
     name: m.name,
-    description: `${netlist.language === "vhdl" ? "VHDL" : "Verilog"} · ${netlist.top} · ${netlist.cells.length} cells`,
+    description: `${netlist.language === "vhdl" ? "VHDL" : "Verilog"} module ${netlist.top}, ${netlist.cells.length} cells`,
     category: HDL_CATEGORY,
     icon: HdlIcon,
     prefix: "U",

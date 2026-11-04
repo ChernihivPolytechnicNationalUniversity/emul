@@ -1,7 +1,9 @@
-import { HC595_INPUTS, HC595_OUTPUTS, SHIFT_REGISTER_DEFS, shiftRegisterOfDef, type ShiftRegisterPart } from "@/sim/hc595"
+import { HC595_INPUTS, HC595_LINKS, HC595_OUTPUTS, SHIFT_REGISTER_DEFS, shiftRegisterOfDef, type ShiftRegisterPart } from "@/sim/hc595"
 import { ShiftRegisterIcon } from "../icons"
 import { pinNumbers } from "../pin-numbers"
 import type { ComponentDef, Element, PinDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const W = 8
 const H = 14
@@ -34,7 +36,6 @@ const CLAMP = { current: 0.02, tau: 1, fail: "short" } as const
 
 const OUTPUT_LIMITS = { voltage: 7, current: 0.035, tau: 1, fail: "open" } as const
 
-export const HC595_LINKS = { vcc: 0, gnd: 1 } as const
 
 const model: Element[] = [
   { kind: "R", a: "VCC", b: "$vcc", value: 0.05, hidden: true, limits: { current: 0.5, tau: 1, fail: "open", fatal: false } },
@@ -49,20 +50,17 @@ const model: Element[] = [
   ]),
 ]
 
-const FUNCTION =
-  "8-bit serial-in, parallel-out shift register with a 3-state output register, PDIP-16: SER shifts in on SRCLK, RCLK latches QA–QH, SRCLR clears the shift register, OE floats the outputs, QH' feeds the next chip."
+type Variant = { id: keyof typeof SHIFT_REGISTER_DEFS; supply: string; description: string; keywords: string[]; source: string }
 
-type Variant = { id: keyof typeof SHIFT_REGISTER_DEFS; supply: string; description: string; source: string }
-
-function shiftRegister({ id, supply, description, source }: Variant): ComponentDef {
+function shiftRegister({ id, supply, description, keywords }: Variant): ComponentDef {
   const part: ShiftRegisterPart = SHIFT_REGISTER_DEFS[id]
   const pins = pinsOf(supply)
   return {
     id,
     name: part,
-    description: `${FUNCTION} ${description}`,
-    category: "Logic ICs",
-    keywords: ["595", "shift register", "serial to parallel", "SIPO"],
+    description,
+    category: "ics",
+    keywords: ["595", "shift register", "serial to parallel", "SIPO", "PDIP-16", ...keywords],
     icon: ShiftRegisterIcon,
     prefix: "U",
     width: W,
@@ -77,23 +75,105 @@ function shiftRegister({ id, supply, description, source }: Variant): ComponentD
     ],
     parts: [],
     model,
-    info: { Package: "PDIP-16", Source: source },
+    // Source (in the datasheet record): the variant's `source`
+    info: { Package: "PDIP-16" },
   }
 }
 
 export const hc595 = shiftRegister({
   id: "hc595",
   supply: "2–6 V",
-  description:
-    "TI SN74HC595: 2–6 V with CMOS inputs (a high is 0.7 × VCC, so a 3.3 V MCU does not reliably drive one at 5 V), 17 ns at 4.5 V, ±6 mA rated drive (±35 mA absolute).",
+  description: "8-bit serial-in shift register",
+  keywords: ["SN74HC595", "TI"],
   source: "TI SN74HC595 (SCLS041J), Nexperia 74HC_HCT595 (rev. 12)",
 })
 
 export const hct595 = shiftRegister({
   id: "hct595",
   supply: "4.5–5.5 V",
-  description: "Nexperia 74HCT595: 5 V only, with TTL inputs (a high is 2 V) that a 3.3 V MCU drives, 25 ns, ±6 mA rated drive (±35 mA absolute).",
+  description: "8-bit shift register, TTL inputs",
+  keywords: ["Nexperia", "TTL"],
   source: "Nexperia 74HC_HCT595 (rev. 12)",
 })
 
 export const isShiftRegisterDef = (defId: string) => shiftRegisterOfDef(defId) !== undefined
+
+export { HC595_LINKS }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [hc595, hct595]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "hc595": {
+    maker: "Texas Instruments",
+    package: "PDIP-16",
+    docs: [DOCS["ti-scls041j"], DOCS["nexperia-74hc595"]],
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 2, max: 6 }, limit: { max: 7 }, cite: { page: 4, at: "§6.3" }, limitCite: { page: 4, at: "§6.1" } },
+      { kind: "inputHigh", value: { min: 3.15 }, at: [{ supply: 4.5 }], cite: { page: 4, at: "§6.3" } },
+      { kind: "outputHigh", value: { min: 3.98 }, at: [{ supply: 4.5 }, { load: { amps: 6e-3 } }], cite: { page: 5, at: "§6.5" } },
+      { kind: "outputCurrent", value: { max: 6e-3, sym: true }, limit: { max: 35e-3, sym: true }, per: "pin", at: [{ supply: 4.5 }], cite: { page: 5, at: "§6.5" }, limitCite: { page: 4, at: "§6.1" } },
+      { kind: "supplyCurrent", limit: { max: 70e-3, sym: true }, cite: { page: 4, at: "§6.1" } },
+      { kind: "clock", value: { max: 25e6 }, at: [{ supply: 4.5 }], cite: { page: 6, at: "§6.6" } },
+      { kind: "delay", value: { typ: 17e-9 }, at: [{ supply: 4.5 }, { path: ["RCLK", "QA"] }], cite: { page: 8, at: "§6.7" } },
+    ],
+    modelled: [
+      { what: "Shift, latch, clear, 3-state logic", cite: { page: 12, at: "Table 8-1 Function Table" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Storage lags with tied clocks", cite: { page: 6, at: "§6.6 note 1" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Typical propagation delay after clock", cite: { page: 8, at: "§6.7 Switching Characteristics" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Timing violations checked and reported", cite: { page: 6, at: "§6.6 Timing Requirements" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Inputs switch at typical levels", cite: { doc: "nexperia-74hc595", page: 7, at: "Table 6 Static characteristics" }, test: "tests/sim/hc595.test.ts" },
+      { what: "VOH and VOL near typical", cite: { page: 5, at: "§6.5 Electrical Characteristics" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Outputs burn past 35 mA", cite: { page: 4, at: "§6.1 Absolute Maximum Ratings" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Dies above 7 V supply", cite: { page: 4, at: "§6.1 Absolute Maximum Ratings" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Clamps burn past 20 mA", cite: { page: 4, at: "§6.1 Absolute Maximum Ratings" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Phantom power through clamps", cite: { page: 4, at: "§6.1 Absolute Maximum Ratings" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Warns outside 2–6 V supply", cite: { page: 4, at: "§6.3 Recommended Operating Conditions" }, test: "tests/sim/hc595.test.ts" },
+    ],
+    notModelled: [
+      { what: "VCC/GND current only reported", cite: { page: 4, at: "§6.1 Absolute Maximum Ratings" } },
+      { what: "Quiescent and dynamic supply current", cite: { page: 8, at: "§6.8 Operating Characteristics" } },
+      { what: "Transition times and load delays", cite: { page: 8, at: "§6.7 Switching Characteristics" } },
+      { what: "Slow edges never double-clock", cite: { page: 4, at: "§6.3 note 2" } },
+      { what: "Typical 25 °C timing only", cite: { page: 6, at: "§6.6 Timing Requirements" } },
+      { what: "Input capacitance and leakage", cite: { page: 5, at: "§6.5 Electrical Characteristics" } },
+    ],
+  },
+  "hct595": {
+    maker: "Nexperia",
+    package: "PDIP-16",
+    docs: [DOCS["nexperia-74hc595"]],
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 4.5, max: 5.5 }, limit: { max: 7 }, cite: { page: 7, at: "Table 5" }, limitCite: { page: 6, at: "Table 4" } },
+      { kind: "inputHigh", value: { min: 2 }, cite: { page: 8, at: "Table 6" } },
+      { kind: "inputLow", value: { max: 0.8 }, cite: { page: 8, at: "Table 6" } },
+      { kind: "outputHigh", value: { min: 3.7 }, at: [{ supply: 4.5 }, { load: { amps: 6e-3 } }], cite: { page: 8, at: "Table 6" } },
+      { kind: "outputCurrent", value: { max: 6e-3, sym: true }, limit: { max: 35e-3, sym: true }, per: "pin", at: [{ supply: 4.5 }], cite: { page: 8, at: "Table 6" }, limitCite: { page: 6, at: "Table 4" } },
+      { kind: "supplyCurrent", limit: { max: 70e-3, sym: true }, cite: { page: 6, at: "Table 4" } },
+      { kind: "clock", value: { min: 30e6, typ: 52e6 }, at: [{ temp: 25 }], cite: { page: 11, at: "Table 7" } },
+      { kind: "delay", value: { typ: 24e-9 }, at: [{ path: ["RCLK", "QA"] }], cite: { page: 11, at: "Table 7" } },
+    ],
+    modelled: [
+      { what: "Function-table logic, QH' always driven", cite: { page: 5, at: "Table 3 Function table" }, test: "tests/sim/hc595.test.ts" },
+      { what: "TTL input levels, typical thresholds", cite: { page: 8, at: "Table 6 Static characteristics" }, test: "tests/sim/hc595.test.ts" },
+      { what: "3.3 V MCU drives it", cite: { page: 8, at: "Table 6 Static characteristics" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Timing checked against the table", cite: { page: 11, at: "Table 7 Dynamic characteristics" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Warns outside 4.5–5.5 V supply", cite: { page: 7, at: "Table 5 Recommended operating conditions" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Outputs burn past 35 mA", cite: { page: 6, at: "Table 4 Limiting values" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Dies above 7 V supply", cite: { page: 6, at: "Table 4 Limiting values" }, test: "tests/sim/hc595.test.ts" },
+      { what: "Clamps burn past 20 mA", cite: { page: 6, at: "Table 4 Limiting values" }, test: "tests/sim/hc595.test.ts" },
+    ],
+    notModelled: [
+      { what: "TTL-level ΔICC supply current", cite: { page: 9, at: "Table 6 Static characteristics" } },
+      { what: "Quiescent and dynamic supply current", cite: { page: 11, at: "Table 7 Dynamic characteristics" } },
+      { what: "VCC/GND current only reported", cite: { page: 6, at: "Table 4 Limiting values" } },
+      { what: "Transition times and load delays", cite: { page: 11, at: "Table 7 Dynamic characteristics" } },
+      { what: "Typical 25 °C timing only", cite: { page: 11, at: "Table 7 Dynamic characteristics" } },
+    ],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

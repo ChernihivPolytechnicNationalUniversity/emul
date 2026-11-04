@@ -1,4 +1,8 @@
 import { expect } from "vitest"
+import { loadAllDefs } from "@/schematic/registry"
+
+// Tests read the whole catalogue at once; a page loads parts as they are wanted (src/schematic/registry.ts).
+await loadAllDefs()
 
 expect.extend({
   toBeNear(received: number, want: number, tol: number) {

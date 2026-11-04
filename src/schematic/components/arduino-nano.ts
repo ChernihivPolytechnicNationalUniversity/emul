@@ -6,6 +6,8 @@ import { avrFields, avrMcuModel, AVR_ALT } from "./avr-chip"
 import { LED_COLORS } from "./basic"
 import { crystalStartup } from "./clock"
 import { PITCH } from "./open746i-c-art"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * Arduino Nano 3.x (A000005), from the Arduino schematic "NanoV3.3" (23/01/19), the A000005
@@ -354,9 +356,10 @@ const hex = (v: number) => `0x${v.toString(16).toUpperCase().padStart(2, "0")}`
 export const arduinoNano: ComponentDef = {
   id: "arduino-nano",
   name: "Arduino Nano",
-  description: "ATmega328P, 16 MHz, USB serial",
+  board: { vendor: "Arduino", mcu: "ATmega328P", mhz: 16, volts: 5, tags: ["breadboard"], photo: "arduino-nano.webp", core: "AVR", memory: "32 KB / 2 KB", onBoard: ["USB serial", "ICSP"] },
+  description: "Arduino Nano board, ATmega328P",
   keywords: ["Arduino", "Nano", "ATmega328P", "AVR", "A000005", "FT232RL", "CH340"],
-  category: "Boards",
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,
@@ -375,12 +378,59 @@ export const arduinoNano: ComponentDef = {
   defaults: { fuseLow: hex(NANO_FUSES.low), fuseHigh: hex(NANO_FUSES.high), fuseExtended: hex(NANO_FUSES.extended), lock: hex(NANO_FUSES.lock), revision: ATMEGA328P.revisions[ATMEGA328P.revisions.length - 1] },
   fields: avrFields(ATMEGA328P, NANO_FUSES, "Arduino"),
   info: {
-    MCU: "ATmega328P (32 VQFN, numbered as the TQFP-32), 16 MHz resonator, 32 KB Flash (2 KB of it the boot section), 2 KB SRAM, 1 KB EEPROM",
-    Power: "USB: 5 V through the 500 mA polyfuse and a Schottky, so +5V sits near 4.7 V. VIN: 7–12 V through the LM1117-5.0 (800 mA). 5V pin: in or out. 3V3: the FT232RL's 3V3OUT, 50 mA",
-    "USB serial": "FT232RL: its TXD → 1 kΩ → D0/RX, D1/TX → 1 kΩ → its RXD; the TX and RX LEDs light while the lines are low. Wire a terminal to the TX/RX pins by the USB connector",
-    ICSP: "J4: 1 MISO (D12), 2 +5V, 3 SCK (D13), 4 MOSI (D11), 5 RESET, 6 GND — the same nets as those header pins",
-    Fuses: "as Arduino programs them: low 0xFF, high 0xDA (BOOTRST, 1024-word boot section), extended 0xFD (BOD 2.7 V), lock 0x0F. A sketch uploaded through the boot loader cannot change them, so an image's .fuse section is ignored here",
-    "Not modelled": "the boot loader: the boot section is empty, so a reset runs through its erased words straight into the sketch (no upload delay, no LED flicker on D13); the USB side of the FT232RL (DTR auto-reset when a port opens, the drivers); the CBUS LEDs' pulse stretch",
-    Source: "Arduino Nano V3.3 schematic (A000005-schematics.pdf), A000005 datasheet",
+    // MCU: ATmega328P (32 VQFN, numbered as the TQFP-32), 16 MHz resonator, 32 KB Flash (2 KB of it the boot section), 2
+    //   KB SRAM, 1 KB EEPROM
+    // Power: USB: 5 V through the 500 mA polyfuse and a Schottky, so +5V sits near 4.7 V. VIN: 7–12 V through the
+    //   LM1117-5.0 (800 mA). 5V pin: in or out. 3V3: the FT232RL's 3V3OUT, 50 mA
+    Power: "USB or VIN 7–12 V",
+    // USB serial: FT232RL: its TXD → 1 kΩ → D0/RX, D1/TX → 1 kΩ → its RXD; the TX and RX LEDs light while the lines are
+    //   low. Wire a terminal to the TX/RX pins by the USB connector
+    "USB serial": "FT232RL on D0/D1",
+    // ICSP: J4: 1 MISO (D12), 2 +5V, 3 SCK (D13), 4 MOSI (D11), 5 RESET, 6 GND — the same nets as those header pins
+    ICSP: "J4, same nets as D11–D13",
+    // Fuses: as Arduino programs them: low 0xFF, high 0xDA (BOOTRST, 1024-word boot section), extended 0xFD (BOD 2.7 V),
+    //   lock 0x0F. A sketch uploaded through the boot loader cannot change them, so an image's .fuse section is ignored here
+    Fuses: "As Arduino programs them",
+    // Not modelled: the boot loader: the boot section is empty, so a reset runs through its erased words straight into the
+    //   sketch (no upload delay, no LED flicker on D13); the USB side of the FT232RL (DTR auto-reset when a port opens, the
+    //   drivers); the CBUS LEDs' pulse stretch
+    // Source: Arduino Nano V3.3 schematic (A000005-schematics.pdf), A000005 datasheet
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [arduinoNano]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "arduino-nano": {
+    maker: "Arduino",
+    docs: [DOCS["arduino-a000005-ds"], DOCS["arduino-a000005-sch"], DOCS["arduino-a000005-pinout"], DOCS["mchp-ds40002061b"], DOCS["ti-snos412q"], DOCS["ftdi-ds-ft232r"], DOCS["vishay-ss1p3l"], DOCS["bourns-mf-msmf"]],
+    specs: [],
+    characteristics: [
+      { kind: "clock", value: { max: 16e6 }, cite: { page: 2, at: "Features" } },
+      { kind: "flash", value: { typ: 32768 }, cite: { page: 2, at: "Features" } },
+      { kind: "ram", value: { typ: 2048 }, cite: { page: 2, at: "Features" } },
+      { kind: "ioLevel", value: { typ: 5 }, limit: { max: 6 }, cite: { page: 7, at: "§3.2" }, limitCite: { doc: "mchp-ds40002061b", page: 308, at: "§29.1 Absolute Maximum Ratings" } },
+      { kind: "input", value: { min: 7, max: 15 }, cite: { page: 2, at: "Features, Power" } },
+      { kind: "ioPins", value: { typ: 20 }, cite: { page: 2, at: "Features, I/O" } },
+      { kind: "pinCurrent", value: { max: 20e-3 }, limit: { max: 40e-3 }, per: "pin", cite: { doc: "arduino-a000005-pinout", page: 1 }, limitCite: { doc: "mchp-ds40002061b", page: 308, at: "§29.1 Absolute Maximum Ratings" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 5, at: "§2.1" } },
+    ],
+    modelled: [
+      { what: "Sketch runs at 16 MHz", test: "tests/sim/nano-bench.test.ts" },
+      { what: "USB through polyfuse and Schottky", cite: { doc: "arduino-a000005-sch", page: 1 }, test: "tests/sim/nano-bench.test.ts" },
+      { what: "VIN through the LM1117", cite: { doc: "arduino-a000005-sch", page: 1 }, test: "tests/sim/nano-bench.test.ts" },
+      { what: "FT232RL USB serial on D0/D1", cite: { doc: "arduino-a000005-sch", page: 1 }, test: "tests/sim/nano-bench.test.ts" },
+      { what: "3V3 from FT232RL 3V3OUT", cite: { doc: "arduino-a000005-sch", page: 1 }, test: "tests/sim/nano-bench.test.ts" },
+      { what: "L, PWR, TX, RX LEDs", test: "tests/sim/nano-bench.test.ts" },
+      { what: "RESET button restarts the sketch", test: "tests/sim/nano-bench.test.ts" },
+      { what: "Fuses as Arduino programs them", test: "tests/sim/nano-bench.test.ts" },
+      { what: "Shorted AREF is reported", cite: { doc: "mchp-ds40002061b", at: "§24.5.2" }, test: "tests/sim/nano-bench.test.ts" },
+      { what: "Built-in examples and libraries run", test: "tests/sim/nano-popular.test.ts" },
+    ],
+    notModelled: [{ what: "No boot loader" }, { what: "No FT232RL USB side" }, { what: "No DTR auto-reset" }, { what: "The CBUS LEDs' pulse stretch" }, { what: "No ICSP programming" }],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

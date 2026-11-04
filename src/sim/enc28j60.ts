@@ -35,22 +35,38 @@ export type Enc28j60Snapshot = {
 
 /** What this model does not do. Kept current: the inspector shows it. */
 export const NOT_MODELLED: string[] = [
-  "Collisions, deferral, backoff, late collisions and jabber ([DS] §9.1): the medium is always free, so MACLCON1/MACLCON2/MACON4/MABBIPG/MAIPG are stored but have no effect and TSV collision/defer bits are always 0",
-  "Flow control: half-duplex jamming (EFLOCON.FCEN) and full-duplex pause frames, sent or obeyed ([DS] §10); RXPAUS does not stop the transmitter",
-  "Half-duplex internal loopback (PHCON2.HDLDIS = 0) and full-duplex PLOOPBK loopback ([DS] §9, PHCON1): unreliable on silicon ([ERR] issues 9, 10), not looped here",
-  "Built-in self-test controller ([DS] §15): EBST* registers are storage only, BISTST never completes",
-  "Receive timing: a frame is written in one go, so ESTAT.RXBUSY and PHSTAT2.RXSTAT stay 0, and DMA checksum during a receive cannot abort it ([ERR] issue 17)",
-  "DMA and transmit sharing the buffer port: a DMA started during a transmit does not wait for it ([DS] §13.1)",
-  "ESTAT.BUFER is never set (no buffer underrun/overrun source is modelled)",
-  "LED blink fast/slow modes (LxCFG = 1010/1011): the rates are not in [DS] (Register 2-2); shown lit",
-  "LEDB auto-polarity detection at reset ([DS] §2.6, [ERR] issue 16): taken as configured (prop ledb, default 'source' as on the Netduino Plus 2, where R15 is the errata's workaround)",
-  "Link establishment time and link pulses: the link is up as soon as the PHY is ready and a cable is plugged (setLink); PHSTAT1.JBSTAT and PHSTAT2.COLSTAT/PLRITY stay 0",
-  "PHY power-down PHCON1.PPWRSV and PHCON2.TXDIS only drop the link; analog PHY, magnetics, RBIAS ([ERR] issue 8) and TPIN polarity ([ERR] issue 7) are not modelled",
-  "CLKOUT (pin 3 is not connected on the Netduino Plus 2): ECOCON is storage only ([DS] §2.3, [ERR] issue 4)",
-  "MIISCAN of PHIR clears PLNKIF/PGIF only when MIRD is read, not every 10.24 µs",
-  "Errata behaviours that need collisions or randomness: transmit-abort stall ([ERR] issue 12), link pulse collisions (13), LATECOL (15), PKTIF unreliability (6, PKTIF here always equals EPKTCNT ≠ 0), ERXST ≠ 0000h corrupting the write pointer (5) and even ERXRDPT corrupting the buffer (14) — 5 and 14 are reported as warnings instead",
-  "SPI timing other than the 20 MHz SCK limit (CS setup/hold, the 210 ns MAC/MII CS hold of Table 16-6) is not checked",
-  "Supply current and the 3.1–3.6 V supply range (Table 16-1): power is on or off",
+  // Collisions, deferral, backoff, late collisions and jabber ([DS] §9.1): the medium is always free, so MACLCON1/MACLCON2/MACON4/MABBIPG/MAIPG are stored but have no effect and TSV collision/defer bits are always 0
+  "No collisions, medium always free",
+  // Flow control: half-duplex jamming (EFLOCON.FCEN) and full-duplex pause frames, sent or obeyed ([DS] §10); RXPAUS does not stop the transmitter
+  "No flow control or pause",
+  // Half-duplex internal loopback (PHCON2.HDLDIS = 0) and full-duplex PLOOPBK loopback ([DS] §9, PHCON1): unreliable on silicon ([ERR] issues 9, 10), not looped here
+  "No internal loopback",
+  // Built-in self-test controller ([DS] §15): EBST* registers are storage only, BISTST never completes
+  "Built-in self-test never completes",
+  // Receive timing: a frame is written in one go, so ESTAT.RXBUSY and PHSTAT2.RXSTAT stay 0, and DMA checksum during a receive cannot abort it ([ERR] issue 17)
+  "Frames received in one go",
+  // DMA and transmit sharing the buffer port: a DMA started during a transmit does not wait for it ([DS] §13.1)
+  "DMA ignores running transmit",
+  // ESTAT.BUFER is never set (no buffer underrun/overrun source is modelled)
+  "ESTAT.BUFER never set",
+  // LED blink fast/slow modes (LxCFG = 1010/1011): the rates are not in [DS] (Register 2-2); shown lit
+  "Blinking LEDs shown lit",
+  // LEDB auto-polarity detection at reset ([DS] §2.6, [ERR] issue 16): taken as configured (prop ledb, default 'source' as on the Netduino Plus 2, where R15 is the errata's workaround)
+  "LEDB polarity taken as configured",
+  // Link establishment time and link pulses: the link is up as soon as the PHY is ready and a cable is plugged (setLink); PHSTAT1.JBSTAT and PHSTAT2.COLSTAT/PLRITY stay 0
+  "Link up instantly when plugged",
+  // PHY power-down PHCON1.PPWRSV and PHCON2.TXDIS only drop the link; analog PHY, magnetics, RBIAS ([ERR] issue 8) and TPIN polarity ([ERR] issue 7) are not modelled
+  "No analog PHY or magnetics",
+  // CLKOUT (pin 3 is not connected on the Netduino Plus 2): ECOCON is storage only ([DS] §2.3, [ERR] issue 4)
+  "No CLKOUT output",
+  // MIISCAN of PHIR clears PLNKIF/PGIF only when MIRD is read, not every 10.24 µs
+  "MIISCAN clears on MIRD read",
+  // Errata behaviours that need collisions or randomness: transmit-abort stall ([ERR] issue 12), link pulse collisions (13), LATECOL (15), PKTIF unreliability (6, PKTIF here always equals EPKTCNT ≠ 0), ERXST ≠ 0000h corrupting the write pointer (5) and even ERXRDPT corrupting the buffer (14) — 5 and 14 are reported as warnings instead
+  "Random errata not reproduced",
+  // SPI timing other than the 20 MHz SCK limit (CS setup/hold, the 210 ns MAC/MII CS hold of Table 16-6) is not checked
+  "SPI timing beyond SCK unchecked",
+  // Supply current and the 3.1–3.6 V supply range (Table 16-1): power is on or off
+  "Power is on or off",
 ]
 
 // --- Data sheet numbers ----------------------------------------------------------------------

@@ -32,9 +32,9 @@ const CHIPS = [
 describe.each(CHIPS)("bare $id ($pkg)", ({ id, name, pkg, io, at, vdd, vss, ports }) => {
   const def = getDef(id)!
 
-  it("is in the palette's Chips with its own core", () => {
+  it("is in the palette's Microcontrollers with its own core", () => {
     expect(def).toBeDefined()
-    expect(def.category).toBe("Chips")
+    expect(def.category).toBe("mcus")
     expect(def.chip).toBe(id)
     expect(def.name).toBe(name)
     expect(def.info?.Package).toBe(pkg)

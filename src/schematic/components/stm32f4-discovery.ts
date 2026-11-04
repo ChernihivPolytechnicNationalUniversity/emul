@@ -4,6 +4,11 @@ import { mcuModel } from "../mcu-model"
 import { boardArt } from "./stm32f4-discovery-art"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind } from "../types"
 import { LED_COLORS } from "./basic"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
+import { NOT_MODELLED as CS43L22 } from "@/sim/cs43l22"
+import { NOT_MODELLED as LIS } from "@/sim/lis-accel"
+import { NOT_MODELLED as MP45DT02 } from "@/sim/mp45dt02"
 
 /**
  * STM32F4-Discovery (MB997, STM32F407VGT6). Sources (docs/stm32f4-discovery/board-checklist.md):
@@ -227,9 +232,11 @@ const model: Element[] = [
 
 export const stm32f4Discovery: ComponentDef = {
   id: "stm32f4-discovery",
-  name: "STM32F4-Discovery",
+  name: "STM32F4 Discovery",
+  board: { vendor: "STMicroelectronics", mcu: "STM32F407VG", mhz: 168, volts: 3.3, tags: ["audio", "accel"], photo: "stm32f4-discovery.webp", core: "Cortex-M4F", memory: "1 MB / 192 KB", onBoard: ["4 LEDs", "user button", "audio DAC", "accelerometer", "microphone"], alias: "STM32F4DISCOVERY", printed: "MB997" },
   description: "STM32F407VG",
-  category: "Boards",
+  keywords: ["STM32", "STM32F407VG", "STM32F4DISCOVERY", "STM32F407G-DISC1", "Discovery", "Disco", "MB997", "MB997A", "Cortex-M4"],
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,
@@ -265,15 +272,59 @@ export const stm32f4Discovery: ComponentDef = {
   // HSE works as a crystal or in bypass. X3 (LSE) is not fitted on any revision.
   mcuClocks: { hse: { hz: 8e6, kind: "any", startup: 2e-3 }, lse: null },
   info: {
-    MCU: "STM32F407VGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM (128 KB + 64 KB CCM)",
-    LEDs: "LD4 green PD12, LD3 orange PD13, LD5 red PD14, LD6 blue PD15 (active high); LD8 red on PD5 (OTG over-current)",
-    Buttons: "B1 USER on PA0 (high when pressed, no debounce capacitor), B2 RESET",
-    Audio: "CS43L22: I2C1 PB6/PB9 (0x4A), I2S3 PC7/PC10/PC12/PA4, RESET̅ PD4",
-    Accelerometer: "LIS302DL (rev A/B) or LIS3DSH (rev C–E): SPI1 PA5/PA6/PA7, CS PE3, INT PE0/PE1",
-    Microphone: "MP45DT02: CLK PB10, PDM PC3",
-    "USB OTG FS": "DM PA11, DP PA12, VBUS PA9, ID PA10, power EN̅ PC0, over-current PD5",
-    Modelled: "LIS302DL/LIS3DSH on SPI (Roll/Pitch below), CS43L22 on I²C and I²S to the bench speaker, MP45DT02 PDM microphone (Sound below)",
-    "Not modelled": "The accelerometers' click/free-fall engines, state machines and FIFO; the CS43L22's speaker path, tone/limiter and analog performance; the microphone's frequency response; USB OTG (STMPS2141, LD7, LD8 over-current); the ST-LINK (LD1 COM, SWD, its MCO as a separate source); MCK as a 256·Fs square (the codec takes 256·Fs while it is driven)",
-    Source: "ST UM1472 Rev 9, MB997 schematics B.2–G-01, rev-E board file",
+    // MCU: STM32F407VGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM (128 KB + 64 KB CCM)
+    // LEDs: LD4 green PD12, LD3 orange PD13, LD5 red PD14, LD6 blue PD15 (active high); LD8 red on PD5 (OTG over-current)
+    LEDs: "PD12–PD15, active high",
+    // Buttons: B1 USER on PA0 (high when pressed, no debounce capacitor), B2 RESET
+    Buttons: "B1 on PA0, active high",
+    // Audio: CS43L22: I2C1 PB6/PB9 (0x4A), I2S3 PC7/PC10/PC12/PA4, RESET̅ PD4
+    Audio: "CS43L22 on I2C1 and I2S3",
+    // Accelerometer: LIS302DL (rev A/B) or LIS3DSH (rev C–E): SPI1 PA5/PA6/PA7, CS PE3, INT PE0/PE1
+    Accelerometer: "LIS302DL/LIS3DSH on SPI1, CS PE3",
+    // Microphone: MP45DT02: CLK PB10, PDM PC3
+    Microphone: "MP45DT02, CLK PB10, PDM PC3",
+    // USB OTG FS: DM PA11, DP PA12, VBUS PA9, ID PA10, power EN̅ PC0, over-current PD5
+    "USB OTG FS": "PA11/PA12, VBUS PA9",
+    // Modelled: LIS302DL/LIS3DSH on SPI (Roll/Pitch below), CS43L22 on I²C and I²S to the bench speaker, MP45DT02 PDM
+    //   microphone (Sound below)
+    // Not modelled: The accelerometers' click/free-fall engines, state machines and FIFO; the CS43L22's speaker path,
+    //   tone/limiter and analog performance; the microphone's frequency response; USB OTG (STMPS2141, LD7, LD8
+    //   over-current); the ST-LINK (LD1 COM, SWD, its MCO as a separate source); MCK as a 256·Fs square (the codec takes
+    //   256·Fs while it is driven)
+    // Source: ST UM1472 Rev 9, MB997 schematics B.2–G-01, rev-E board file
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [stm32f4Discovery]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "stm32f4-discovery": {
+    maker: "STMicroelectronics",
+    docs: [DOCS["st-um1472"], DOCS["st-mb997-sch"], DOCS["st-ds8626"], DOCS["cirrus-cs43l22"], DOCS["st-lis302dl"], DOCS["st-lis3dsh"], DOCS["st-mp45dt02"]],
+    specs: [],
+    characteristics: [
+      { kind: "clock", value: { max: 168e6 }, cite: { doc: "st-ds8626", page: 16, at: "Table 2" } },
+      { kind: "flash", value: { typ: 1048576 }, cite: { page: 6, at: "§1 Features" } },
+      { kind: "ram", value: { typ: 196608 }, cite: { page: 6, at: "§1 Features" } },
+      { kind: "ioLevel", value: { typ: 3.3 }, limit: { max: 4 }, cite: { page: 6, at: "§1 Features, LD2" }, limitCite: { doc: "st-ds8626", page: 80, at: "Table 11" } },
+      { kind: "input", value: { typ: 5 }, cite: { page: 21, at: "§7.4" } },
+      { kind: "ioPins", value: { typ: 82 }, cite: { doc: "st-ds8626", page: 16, at: "Table 2" } },
+      { kind: "outputCurrent", value: { max: 0.1 }, cite: { page: 21, at: "§7.4" } },
+    ],
+    modelled: [
+      { what: "168 MHz from HSE PLL", test: "tests/sim/discovery-running-light.test.ts" },
+      { what: "Four user LEDs LD3–LD6", test: "tests/sim/discovery-running-light.test.ts" },
+      { what: "User button B1 on PA0", test: "tests/sim/discovery.test.ts" },
+      { what: "5V, 3V, JP1 power path", cite: { page: 21, at: "§7.4" }, test: "tests/sim/discovery.test.ts" },
+      { what: "BOOT0 and codec reset held", test: "tests/sim/discovery.test.ts" },
+      { what: "LIS302DL/LIS3DSH accelerometer on SPI", test: "tests/sim/discovery-tilt.test.ts" },
+      { what: "CS43L22 audio DAC on I²S", test: "tests/sim/discovery-audio.test.ts" },
+      { what: "MP45DT02 PDM microphone", test: "tests/sim/discovery-audio.test.ts" },
+    ],
+    notModelled: [{ what: "No accelerometer engines or FIFO" }, { what: "No codec speaker, tone, limiter" }, { what: "Flat microphone frequency response" }, { what: "No USB OTG or over-current" }, { what: "No ST-LINK or its MCO" }, { what: "No 256·Fs MCK waveform" }, ...LIS.map((what) => ({ part: "LIS302DL/LIS3DSH", what })), ...CS43L22.map((what) => ({ part: "CS43L22", what })), ...MP45DT02.map((what) => ({ part: "MP45DT02", what }))],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

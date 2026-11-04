@@ -87,6 +87,16 @@ export function digitPosition(e: KeyPress): string | undefined {
   return DIGIT_POSITION.exec(e.code)?.[1]
 }
 
+/**
+ * A digit shortcut matched by the digit's place, not by what the layout types there: Shift+1 is "!"
+ * on a US keyboard and "1" on a French one, and both are the key under the 1.
+ */
+export function matchesDigitPlace(e: KeyPress, keys: Keys): Shortcut | undefined {
+  const digit = digitPosition(e)
+  if (digit === undefined) return undefined
+  return alternatives(keys).find((s) => s.key === digit && !s.mod && !s.alt && (s.shift === "either" || e.shiftKey === !!s.shift))
+}
+
 const TEXT_INPUT_TYPES: ReadonlySet<string> = new Set(["text", "search", "url", "tel", "email", "password", "number", "date", "datetime-local", "month", "week", "time"])
 const KEY_OWNERS = '[data-slot="code-panel"], [role="dialog"], [role="alertdialog"]'
 const TYPEAHEAD = '[role="menu"], [role="listbox"]'

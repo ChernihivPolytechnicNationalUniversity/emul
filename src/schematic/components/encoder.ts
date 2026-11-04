@@ -17,6 +17,8 @@
 import { EncoderIcon } from "../icons"
 import type { ComponentDef, PartDef, PinDef } from "../types"
 import { BOUNCE_FIELDS } from "./basic"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /** 360°/s, the ALPS measuring speed: a quarter-cycle takes a quarter of 360° / pulses. */
 const quarterAt360 = (pulses: number) => 1 / (4 * pulses)
@@ -61,11 +63,10 @@ const ec11Pins: PinDef[] = [
 
 export const encoderEc11: ComponentDef = {
   id: "encoder-ec11",
-  name: "Rotary encoder (ALPS EC11E)",
-  description:
-    "Incremental encoder with detents and a push switch: A and B close to C in quadrature, A first turning clockwise, half a cycle per detent (rest alternately both open, both closed). 10 mA 5 V rating; bounce 2 ms max when switched on. Pull A, B and D up yourself.",
-  category: "Switches",
-  keywords: ["encoder", "rotary", "quadrature", "EC11", "ALPS", ...Object.keys(EC11E_PARTS)],
+  name: "Rotary encoder EC11E",
+  description: "Rotary encoder with push switch",
+  category: "input",
+  keywords: ["encoder", "rotary", "quadrature", "EC11", "ALPS", "incremental", "detent", ...Object.keys(EC11E_PARTS)],
   icon: EncoderIcon,
   prefix: "SW",
   width: W,
@@ -93,7 +94,7 @@ export const encoderEc11: ComponentDef = {
     { kind: "SW", a: "B", b: "C", part: "B", closed: "on", ron: "{rcontact}", limits: ENCODER_CONTACT },
     { kind: "SW", a: "D", b: "E", part: "PUSH", closed: "pressed", ron: "100 mΩ", limits: PUSH_CONTACT },
   ],
-  info: { Source: "ALPS EC11E catalogue (Update 2510); EC11B15242AE product page (output wave, sliding noise)" },
+  // info Source (in the datasheet record): "ALPS EC11E catalogue (Update 2510); EC11B15242AE product page (output wave, sliding noise)"
 }
 
 const KY_W = 8
@@ -104,10 +105,9 @@ const KY040_PULSES = 20
 
 export const ky040: ComponentDef = {
   id: "ky-040",
-  name: "Rotary encoder module KY-040",
-  description:
-    "Encoder board: 20 detents / 20 pulses (a full cycle per detent, at rest both open), 10 kΩ pull-ups on CLK and DT to +, SW straight to the switch with no pull-up fitted — enable the MCU's. No maker's schematic exists: built from the forum and Wokwi descriptions.",
-  category: "Switches",
+  name: "Encoder module KY-040",
+  description: "Rotary encoder breakout board",
+  category: "input",
   keywords: ["encoder", "rotary", "KY-040", "KY040", "quadrature", "module"],
   icon: EncoderIcon,
   prefix: "SW",
@@ -140,7 +140,70 @@ export const ky040: ComponentDef = {
     { kind: "R", a: "VCC", b: "CLK", value: "10 kΩ", label: "R2 CLK pull-up" },
     { kind: "R", a: "VCC", b: "DT", value: "10 kΩ", label: "R3 DT pull-up" },
   ],
-  info: { Source: "Community descriptions (Wokwi KY-040 docs, DroneBot Workshop forum); no manufacturer schematic" },
+  // info Source (in the datasheet record): "Community descriptions (Wokwi KY-040 docs, DroneBot Workshop forum); no manufacturer schematic"
+  datasheet: {
+    basis: "generic",
+    none: "A no-name breakout board: no maker documents it, so its encoder and pull-ups follow community descriptions.",
+    // The contact resistance bound and the bounce default come from the EC11's data.
+    sources: [DOCS["alps-ec11e"]],
+    modelled: [
+      { what: "Full cycle per detent", test: "tests/sim/encoder.test.ts" },
+      { what: "10 kΩ CLK/DT pull-ups", test: "tests/sim/encoder.test.ts" },
+      { what: "SW floats, no pull-up", test: "tests/sim/encoder.test.ts" },
+      { what: "CLK leads turning clockwise", test: "tests/sim/nano-popular.test.ts" },
+      { what: "Push switch to GND", test: "tests/sim/nucleo-encoder.test.ts" },
+      { what: "Optional bounce, 2 ms settling" },
+    ],
+    notModelled: [
+      { what: "Encoder's maker and part unknown" },
+      { what: "Chattering or sliding-noise waveforms" },
+      { what: "Closed contact is fixed resistance" },
+      { what: "Detent torque and push force" },
+      { what: "Wear and contact life" },
+    ],
+  },
 }
 
 export const encoderComponents: ComponentDef[] = [encoderEc11, ky040]
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = encoderComponents
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "encoder-ec11": {
+    maker: "ALPS Alpine",
+    docs: [DOCS["alps-ec11e"]],
+    specs: [],
+    characteristics: [
+      { kind: "contactRating", value: { min: 1e-3, max: 10e-3 }, at: [{ supply: 5 }], cite: { page: 2, at: "List of Varieties" } },
+      { kind: "detents", set: [18, 30, 36], cite: { page: 7, at: "Product List" } },
+      { kind: "contactResistance", value: { max: 0.1 }, cite: { page: 2, at: "List of Varieties" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 2, at: "List of Varieties" } },
+    ],
+    modelled: [
+      { what: "A, B quadrature to C", test: "tests/sim/encoder.test.ts" },
+      { what: "A leads turning clockwise", test: "tests/sim/encoder.test.ts" },
+      { what: "Detents and pulses per part", cite: { page: 7, at: "Product List" }, test: "tests/sim/encoder.test.ts" },
+      { what: "Half a cycle per detent", cite: { page: 7, at: "Product List" }, test: "tests/sim/encoder.test.ts" },
+      { what: "Rests alternately open and closed", cite: { page: 7, at: "Product List" }, test: "tests/sim/encoder.test.ts" },
+      { what: "Quarter-cycle is 1/(4×pulses) s", test: "tests/sim/encoder.test.ts" },
+      { what: "Optional bounce, 2 ms settling", test: "tests/sim/encoder.test.ts" },
+      { what: "Push switch D–E, 100 mΩ", cite: { page: 2, at: "List of Varieties" }, test: "tests/sim/nucleo-encoder.test.ts" },
+      { what: "Over 10 mA reads >100%", cite: { page: 2, at: "List of Varieties" } },
+      { what: "Contact does not break", cite: { page: 2, at: "List of Varieties" } },
+      { what: "Closed contact is 2.14 kΩ" },
+    ],
+    notModelled: [
+      { what: "1 mA minimum current ignored", cite: { page: 2, at: "List of Varieties" } },
+      { what: "Every detent at 360°/s", cite: { page: 40, at: "Pulse count process" } },
+      { what: "Chattering or sliding-noise waveforms" },
+      { what: "Closed contact is fixed resistance" },
+      { what: "Detent torque and push force", cite: { page: 2, at: "List of Varieties" } },
+      { what: "Wear (15,000 turns, 20,000 presses)", cite: { page: 2, at: "List of Varieties" } },
+      { what: "Insulation resistance and voltage proof", cite: { page: 2, at: "List of Varieties" } },
+    ],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]
