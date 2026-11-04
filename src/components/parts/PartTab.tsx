@@ -35,7 +35,7 @@ export function PartTab({ def }: { def: ComponentDef }) {
         <SymbolPreview def={def} fill height={120} maxHeight={220} />
       )}
       {sheet && (sheet.characteristics?.length ? <CharacteristicList record={sheet} /> : <SpecList record={sheet} stacked />)}
-      {record ? <ModelClaims record={record} /> : pending && (pending.modelled.length > 0 || pending.notModelled.length > 0) && <ModelClaims record={{ none: "", ...pending }} />}
+      {record ? <ModelClaims record={record} /> : pending && (pending.modelled.length > 0 || pending.notModelled.length > 0) && <ModelClaims record={{ basis: "generic", none: "", ...pending }} />}
       {record && !sheet && "none" in record && <p className="text-xs text-muted-foreground">{record.none}</p>}
       {def.info && <Details info={def.info} skip={NOTES_SHOWN_ELSEWHERE} />}
       {sheet && <DocLinks docs={sheet.docs} />}

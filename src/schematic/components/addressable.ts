@@ -648,6 +648,7 @@ for (const def of defs) {
 /** Parts whose datasheet could not be found: the model's numbers come from its sister parts' sheets. */
 const NO_SHEET: Record<string, NoDatasheet> = {
   ws2815: {
+    basis: "generic",
     none: "No WS2815 datasheet (the V1.1 of 2017 the model was built from) could be found at Worldsemi, its distributors or the web archive; only WS2815B sheets are published.",
     modelled: [
       { what: "24-bit GRB words, MSB first", test: TESTS.chain },
@@ -659,6 +660,7 @@ const NO_SHEET: Record<string, NoDatasheet> = {
     sources: [DOCS["ws-ws2815b-v1"]],
   },
   "ws2815b-4pin": {
+    basis: "generic",
     none: "No datasheet for the 4-pin WS2815B-V1-4P or WS2815B-RGBW-4P could be found at Worldsemi, its distributors or the web archive.",
     modelled: [
       { what: "24-bit GRB words, MSB first", test: TESTS.chain },

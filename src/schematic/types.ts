@@ -429,7 +429,10 @@ export type Claim = { what: string; part?: string; cite?: Cite; test?: string }
  * terms, TI's non-commercial ones), an archived copy beside it, and the day the link was seen to
  * serve it. `rev` is the revision that URL serves, which may be newer than the one first read.
  */
-export type DocRecord = { key: string; maker: string; id: string; title: string; rev?: string; url: string; archive?: string; checked: string; note?: string }
+/** What a document is: the card links a part's datasheet (a board's user manual); a test holds each category to the kinds it needs. */
+export type DocKind = "datasheet" | "catalogue" | "referenceManual" | "coreManual" | "errata" | "programmingSpec" | "userManual" | "schematic" | "pinout" | "appNote" | "productPage"
+
+export type DocRecord = { key: string; kind: DocKind; maker: string; id: string; title: string; rev?: string; url: string; archive?: string; checked: string; note?: string }
 
 /** A part with a datasheet: its maker, the documents (first the one the numbers come from), the numbers, what is modelled and what is not. */
 export type Datasheet = {
@@ -446,6 +449,8 @@ export type Datasheet = {
 
 /** A part that is not one product (an ideal source, a ground, a generic resistor): why there is no datasheet, and still what is modelled. */
 export type NoDatasheet = {
+  /** Why there is no one datasheet: an ideal element, a measuring tool, or a generic part drawn from real ones (its `sources`). */
+  basis: "ideal" | "tool" | "generic"
   none: string
   modelled: Claim[]
   notModelled: Claim[]

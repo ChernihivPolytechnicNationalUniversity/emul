@@ -142,6 +142,7 @@ export const ky040: ComponentDef = {
   ],
   // info Source (in the datasheet record): "Community descriptions (Wokwi KY-040 docs, DroneBot Workshop forum); no manufacturer schematic"
   datasheet: {
+    basis: "generic",
     none: "A no-name breakout board: no maker documents it, so its encoder and pull-ups follow community descriptions.",
     // The contact resistance bound and the bounce default come from the EC11's data.
     sources: [DOCS["alps-ec11e"]],

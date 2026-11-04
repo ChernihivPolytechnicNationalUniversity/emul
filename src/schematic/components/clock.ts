@@ -40,6 +40,7 @@ export const crystal: ComponentDef = {
   // An open circuit at DC: nothing for the analog engine to solve.
   model: [],
   datasheet: {
+    basis: "generic",
     none: "A generic crystal: its frequency is set in the inspector, not taken from one product's datasheet.",
     // Start-up times from the MCU's datasheet (DS9405 Tables 33 and 35), not the crystal's.
     sources: [DOCS["st-ds9405"]],
@@ -128,6 +129,7 @@ export const oscillator: ComponentDef = {
   // A few milliamps from VCC; the 3.3 V part is dead past its absolute maximum supply.
   model: [{ kind: "R", a: "VCC", b: "GND", value: 1e3, limits: { voltage: "{vmax}", fail: "short" } }],
   datasheet: {
+    basis: "generic",
     none: "A generic oscillator module: its frequency and supply rating are set in the inspector, not taken from one product's datasheet.",
     modelled: [{ what: "HSE or LSE bypass clock" }, { what: "Runs at marked frequency" }, { what: "A few milliamps from VCC" }, { what: "Dead past its supply rating" }],
     notModelled: [{ what: "OUT waveform invisible to analog" }, { what: "Frequency tolerance and jitter" }],

@@ -102,6 +102,7 @@ function opampDef(p: OpampPreset): ComponentDef {
     model: modelOf(p),
     ...(generic && {
       datasheet: {
+        basis: "ideal",
         none: "An idealised op amp, close to the textbook's: every figure is set in the inspector. The named op amps beside it are real parts off their datasheets.",
         modelled: [{ what: "Gain and gain-bandwidth as set", test: "tests/sim/opamp.test.ts" }, { what: "Slew and offset as set", test: "tests/sim/opamp.test.ts" }, { what: "Rail swing and current limit", test: "tests/sim/opamp.test.ts" }],
         notModelled: [{ what: "Input bias current and noise" }, { what: "Common-mode and supply rejection" }],
