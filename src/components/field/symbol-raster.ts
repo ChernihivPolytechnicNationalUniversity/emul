@@ -1,4 +1,4 @@
-import { objectRect, objectSize, orientPin, placedText, type Orientation, type Point, type Rect } from "@/schematic/geometry"
+import { bodyCentre, drawnBody, objectRect, objectSize, orientPin, placedText, type Orientation, type Point, type Rect } from "@/schematic/geometry"
 import type { BodyShape, ComponentDef, PlacedObject } from "@/schematic/types"
 import { paintShape, SOON_BADGE, soonBadge, textBoost, textColor, textFont } from "./body-paint"
 import type { FieldPalette } from "./field-palette"
@@ -92,11 +92,12 @@ export class SymbolRaster {
     context.save()
     const unrotatedWidth = def.width * grid
     const unrotatedHeight = def.height * grid
-    context.translate((worldWidth * scale) / 2, (worldHeight * scale) / 2)
+    const centre = bodyCentre(def, orientation)
+    context.translate(centre.x * grid * scale, centre.y * grid * scale)
     turnInto(context, orientation)
     context.scale(scale, scale)
     context.translate(-unrotatedWidth / 2, -unrotatedHeight / 2)
-    this.paintBody(context, def, grid, scale, palette)
+    this.paintBody(context, def, orientation, grid, scale, palette)
     context.restore()
 
     context.save()
@@ -107,7 +108,7 @@ export class SymbolRaster {
     return { image: canvas, originX: MARGIN_PX, originY: MARGIN_PX, scale, width, height }
   }
 
-  private paintBody(context: CanvasRenderingContext2D, def: ComponentDef, grid: number, scale: number, palette: FieldPalette) {
+  private paintBody(context: CanvasRenderingContext2D, def: ComponentDef, orientation: Orientation, grid: number, scale: number, palette: FieldPalette) {
     const { hollow } = selectionOutline(def)
     if (hollow) {
       const backdrop = new Path2D()
@@ -115,7 +116,7 @@ export class SymbolRaster {
       context.fillStyle = palette.text.inverse
       context.fill(backdrop)
     }
-    for (const shape of def.body) paintShape(context, shape, grid, scale, palette)
+    for (const shape of drawnBody(def, orientation)) paintShape(context, shape, grid, scale, palette)
   }
 
   private paintPinMarks(context: CanvasRenderingContext2D, def: ComponentDef, orientation: Orientation, grid: number, palette: FieldPalette) {
@@ -291,7 +292,8 @@ export class TextRaster {
     context.restore()
 
     context.save()
-    context.translate((box.w * grid * scale) / 2, (box.h * grid * scale) / 2)
+    const centre = bodyCentre(def, orientation)
+    context.translate(centre.x * grid * scale, centre.y * grid * scale)
     turnInto(context, orientation)
     context.scale(scale, scale)
     context.translate((-def.width * grid) / 2, (-def.height * grid) / 2)

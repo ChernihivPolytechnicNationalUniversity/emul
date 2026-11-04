@@ -1,4 +1,4 @@
-import { objectRect, orientationOf, toPath, trimRouteEnds, type Rect, type RoutedWire } from "@/schematic/geometry"
+import { bodyCentre, objectRect, orientationOf, stretchedLeads, toPath, trimRouteEnds, type Rect, type RoutedWire } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import type { ComponentDef, PlacedObject } from "@/schematic/types"
 import { wireColorVar, type WireColorKey } from "@/schematic/wire-colors"
@@ -28,14 +28,20 @@ function casingPath(route: RoutedWire, radius: number, trim: number) {
   return path
 }
 
-const outlinePaths = new WeakMap<ComponentDef, { strokes: Path2D; hollow: Path2D | null }>()
+type OutlinePaths = { strokes: Path2D; hollow: Path2D | null }
 
-function outlinePathsOf(def: ComponentDef) {
-  const cached = outlinePaths.get(def)
-  if (cached) return cached
+const outlinePaths = new WeakMap<ComponentDef, { upright?: OutlinePaths; diagonal?: OutlinePaths }>()
+
+function outlinePathsOf(def: ComponentDef, object: PlacedObject) {
+  const stretch = stretchedLeads(def, orientationOf(object))
+  const cached = outlinePaths.get(def) ?? {}
+  outlinePaths.set(def, cached)
+  const slot = stretch ? "diagonal" : "upright"
+  const found = cached[slot]
+  if (found) return found
   const outline = selectionOutline(def)
-  const paths = { strokes: new Path2D(outline.strokes), hollow: outline.hollow ? new Path2D(outline.hollow) : null }
-  outlinePaths.set(def, paths)
+  const paths = { strokes: new Path2D(stretch ? `${outline.strokes} ${stretch}` : outline.strokes), hollow: outline.hollow ? new Path2D(outline.hollow) : null }
+  cached[slot] = paths
   return paths
 }
 
@@ -55,7 +61,7 @@ function paintSelection(context: CanvasRenderingContext2D, host: Element, object
       if (!selection.objects.has(object.id)) continue
       const def = getDef(object.def)
       if (!def) continue
-      const { strokes, hollow } = outlinePathsOf(def)
+      const { strokes, hollow } = outlinePathsOf(def, object)
       withObjectFrame(context, object, def, grid, () => {
         context.lineWidth = screenPx(margin * 2) / grid
         context.stroke(strokes)
@@ -66,9 +72,9 @@ function paintSelection(context: CanvasRenderingContext2D, host: Element, object
 }
 
 function withObjectFrame(context: CanvasRenderingContext2D, object: PlacedObject, def: ComponentDef, grid: number, paint: () => void) {
-  const rect = objectRect(object, grid)
+  const centre = bodyCentre(def, orientationOf(object))
   context.save()
-  context.translate(rect.x + rect.w / 2, rect.y + rect.h / 2)
+  context.translate(object.x + centre.x * grid, object.y + centre.y * grid)
   context.rotate(((object.rotation ?? 0) * Math.PI) / 180)
   if (object.mirror) context.scale(-1, 1)
   context.scale(grid, grid)

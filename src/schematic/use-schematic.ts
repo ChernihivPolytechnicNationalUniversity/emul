@@ -3,7 +3,7 @@ import { isOptLevel, type SourceFile } from "emul-shared/source"
 import { isNetlist } from "emul-shared/hdl"
 import { normalizeFiles } from "@/project/files"
 import { normalizeDebug } from "@/debug/saved"
-import { intersects, objectRect, snap, type FlipAxis, type Point, type Rect } from "./geometry"
+import { intersects, objectRect, snap, type FlipAxis, type Point, type Rect, type Turn } from "./geometry"
 import { flipSelection, rotateSelection } from "./orient"
 import { getDef } from "./registry"
 import { migrated } from "./migrate"
@@ -321,9 +321,8 @@ export function useSchematic(grid: number) {
     )
   }, [setDoc])
 
-  /** Rotate objects by ±45° around their centers, keeping the centre on the grid. */
   const rotate = React.useCallback(
-    (ids: ReadonlySet<string>, delta: 45 | -45) => setDoc((d) => rotateSelection(d, ids, delta, grid)),
+    (ids: ReadonlySet<string>, turn: Turn) => setDoc((d) => rotateSelection(d, ids, turn, grid)),
     [grid, setDoc],
   )
 
@@ -408,7 +407,8 @@ export function useSchematic(grid: number) {
         const objects = [...d.objects]
         for (const o of clip.objects) {
           const prefix = getDef(o.def)?.prefix
-          const next: PlacedObject = { ...o, id: ids.get(o.id)!, x: o.x + sdx, y: o.y + sdy }
+          const upright = migrated(o)
+          const next: PlacedObject = { ...upright, id: ids.get(o.id)!, x: upright.x + sdx, y: upright.y + sdy }
           if (prefix) next.props = { ...o.props, ref: nextRef(objects, prefix) }
           objects.push(next)
         }

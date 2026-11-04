@@ -1,0 +1,16 @@
+{
+  "source": "tests/data/emul-1.42.0/npn-on-a-diagonal.emul",
+  "objects": [
+    "ground@7,10 (ground)",
+    "Q1 (npn)",
+    "R1 (resistor)",
+    "R2 (resistor)",
+    "supply@13,-4 (supply)"
+  ],
+  "nets": [
+    ["ground@7,10.GND","Q1.E"],
+    ["Q1.B","R1.2"],
+    ["Q1.C","R2.2"],
+    ["R1.1","R2.1","supply@13,-4.V"]
+  ]
+}

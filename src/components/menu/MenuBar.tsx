@@ -236,12 +236,12 @@ export function MenuBar({
               <MenubarShortcut>⌘D</MenubarShortcut>
             </MenubarItem>
             <MenubarSeparator />
-            <MenubarItem onClick={act((f) => f.rotate(45))} disabled={!state.hasObjects}>
-              Rotate 45° clockwise
+            <MenubarItem onClick={act((f) => f.rotate(1))} disabled={!state.hasObjects}>
+              Rotate clockwise
               <MenubarShortcut>R</MenubarShortcut>
             </MenubarItem>
-            <MenubarItem onClick={act((f) => f.rotate(-45))} disabled={!state.hasObjects}>
-              Rotate 45° counter-clockwise
+            <MenubarItem onClick={act((f) => f.rotate(-1))} disabled={!state.hasObjects}>
+              Rotate counter-clockwise
               <MenubarShortcut>⇧R</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={act((f) => f.flip("horizontal"))} disabled={!state.hasObjects}>

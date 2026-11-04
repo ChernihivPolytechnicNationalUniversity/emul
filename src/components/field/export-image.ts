@@ -1,5 +1,5 @@
 import { pinContacts } from "@/schematic/contacts"
-import { objectRect, objectSize, orientationOf, orientOffset, placedText, routeBox, type Rect, type RoutedWire } from "@/schematic/geometry"
+import { bodyCentre, objectRect, orientationOf, orientOffset, placedText, routeBox, type Rect, type RoutedWire } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
@@ -42,9 +42,9 @@ function paintLabels(context: CanvasRenderingContext2D, host: Element, objects: 
     const props: Record<string, string> = { ...def.defaults, ...object.props }
     if (def.derive) Object.assign(props, def.derive(props))
     const orientation = orientationOf(object)
-    const box = objectSize(def, orientation.rotation)
-    const cx = object.x + (box.w * grid) / 2
-    const cy = object.y + (box.h * grid) / 2
+    const centre = bodyCentre(def, orientation)
+    const cx = object.x + centre.x * grid
+    const cy = object.y + centre.y * grid
     for (const shape of def.body) {
       if (shape.type !== "text" || fixedText(shape.text)) continue
       const text = shape.text.replace(/\{(\w+)\}/g, (_, k: string) => props[k] ?? "")

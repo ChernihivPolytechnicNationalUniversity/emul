@@ -1,7 +1,7 @@
 import * as React from "react"
 import { FlameIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { objectSize, orientationOf, placedText, type Orientation } from "@/schematic/geometry"
+import { bodyCentre, drawnBody, orientationOf, placedText, type Orientation } from "@/schematic/geometry"
 import { getDef, partInitial } from "@/schematic/registry"
 import { partKey, type BodyShape, type ComponentDef, type Damage, type Fill, type PartDef, type PartState, type PlacedObject } from "@/schematic/types"
 import { LED_COLORS } from "@/schematic/components/basic"
@@ -99,11 +99,9 @@ export const ComponentView = React.memo(function ComponentView({
   const levelText = placedText("middle", 0, orientation).angle
   const partText = (x: number, y: number) => uprightAt(x, y, levelText, orientation)
   const damage: Damage | undefined = live.damage
-  // The SVG keeps the unrotated size and is rotated around its center; offset it so the
-  // rotated box lands exactly on the object's (rotated) bounds.
-  const box = objectSize(def, rotation)
-  const left = object.x + (box.w * grid - w) / 2
-  const top = object.y + (box.h * grid - h) / 2
+  const centre = bodyCentre(def, orientation)
+  const left = object.x + centre.x * grid - w / 2
+  const top = object.y + centre.y * grid - h / 2
 
   return (
     <svg
@@ -123,7 +121,7 @@ export const ComponentView = React.memo(function ComponentView({
       {damage && <title>{`${props.ref ?? def.name} burnt: ${damage.reason}`}</title>}
       <g className={cn("body", damage && "opacity-50 saturate-0")}>
         <HollowBackdrop def={def} grid={grid} />
-        {def.body.map((s, i) => (
+        {drawnBody(def, orientation).map((s, i) => (
           <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} boost={detail.textBoost} growth={growth.get(s)} sheeted={sheeted} props={props} orientation={orientation} />
         ))}
       </g>

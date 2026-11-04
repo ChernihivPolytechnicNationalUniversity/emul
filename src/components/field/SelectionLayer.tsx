@@ -1,5 +1,5 @@
 import * as React from "react"
-import { toPath, type RoutedWire } from "@/schematic/geometry"
+import { orientationOf, stretchedLeads, toPath, type RoutedWire } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject } from "@/schematic/types"
 import { placementOf, SELECTION_BANDS, selectionOutline, type Outline } from "./selection-geometry"
@@ -23,7 +23,9 @@ function platesOf(objects: readonly PlacedObject[], selected: ReadonlySet<string
     if (!def) continue
     const { left, top, w, h, rotation, mirror } = placementOf(object, def, grid)
     const reflect = mirror ? ` translate(${w} 0) scale(-1 1)` : ""
-    plates.push({ id: object.id, outline: selectionOutline(def), transform: `translate(${left} ${top}) rotate(${rotation} ${w / 2} ${h / 2})${reflect} scale(${grid})` })
+    const outline = selectionOutline(def)
+    const stretch = stretchedLeads(def, orientationOf(object))
+    plates.push({ id: object.id, outline: stretch ? { ...outline, strokes: `${outline.strokes} ${stretch}` } : outline, transform: `translate(${left} ${top}) rotate(${rotation} ${w / 2} ${h / 2})${reflect} scale(${grid})` })
   }
   return plates
 }

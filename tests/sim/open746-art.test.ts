@@ -637,9 +637,10 @@ describe("the POWER JMP: the module's 2 × 2 header with both caps fitted, as it
     expect(near("POWER JMP").x).toBeGreaterThan(vref.x)
   })
 
-  it("stands where the module's photo prints it: the label columns at 13.0 and 15.6 mm, the header's right and bottom edges at 16.85 and 17.7 mm (module20.png, 20 px/mm)", () => {
+  it("stands where the module's photo prints it, moved no more than the quarter cell that puts VBAT and VREF+ on the half-cell lattice: the label columns at 13.0 and 15.6 mm, the header's right and bottom edges at 16.85 and 17.7 mm (module20.png, 20 px/mm)", () => {
     const PHOTO = { vbatX: 13.0, vrefX: 15.6, right: 16.85, bottom: 17.7 }
-    const TOLERANCE_MM = 0.35
+    const TOLERANCE_MM = 0.35 + 2.54 / 4
+    for (const id of ["VBAT", "VREF+"]) expect.soft([pin(id).x * 2, pin(id).y * 2].every(Number.isInteger), `${id} on the half-cell lattice`).toBe(true)
     expect(Math.abs(toModuleMm(vbat).x - PHOTO.vbatX)).toBeLessThanOrEqual(TOLERANCE_MM)
     expect(Math.abs(toModuleMm(vref).x - PHOTO.vrefX)).toBeLessThanOrEqual(TOLERANCE_MM)
     const header = solids.find((b) => b.fill === "connector" && pointInPolygon(pin("VREF+"), b.points))!

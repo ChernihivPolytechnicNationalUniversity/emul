@@ -1,4 +1,4 @@
-import { objectSize } from "@/schematic/geometry"
+import { bodyCentre, orientationOf } from "@/schematic/geometry"
 import type { BodyShape, ComponentDef, PlacedObject } from "@/schematic/types"
 
 export const SELECTION_BANDS = [
@@ -47,11 +47,11 @@ export function selectionOutline(def: ComponentDef): Outline {
 }
 
 export function placementOf(object: PlacedObject, def: ComponentDef, grid: number) {
-  const rotation = object.rotation ?? 0
-  const box = objectSize(def, rotation)
+  const orientation = orientationOf(object)
+  const centre = bodyCentre(def, orientation)
   const w = def.width * grid
   const h = def.height * grid
-  const left = object.x + (box.w * grid - w) / 2
-  const top = object.y + (box.h * grid - h) / 2
-  return { left, top, w, h, rotation, mirror: object.mirror ?? false }
+  const left = object.x + centre.x * grid - w / 2
+  const top = object.y + centre.y * grid - h / 2
+  return { left, top, w, h, rotation: orientation.rotation, mirror: orientation.mirror }
 }

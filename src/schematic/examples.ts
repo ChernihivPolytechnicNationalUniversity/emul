@@ -48,12 +48,10 @@ const powerSupply: Example = {
     const mains = place("ac-source", 0, 4)
     const t = place("transformer", 4, 4)
     const diode = { value: "1N4007", vf: "0.7", imax: "1 A", vrev: "1000 V" }
-    // The bridge is drawn the usual way, as a diamond: the four diodes sit on 45° and their
-    // stubs meet on the grid at ~ (13,6) and (21,6), + (17,2) and − (17,10).
-    const d1 = place("diode", 13, 2, diode, 315)
-    const d2 = place("diode", 17, 2, diode, 225)
-    const d3 = place("diode", 13, 6, diode, 225)
-    const d4 = place("diode", 17, 6, diode, 315)
+    const d1 = place("diode", 14, 3, diode, 315)
+    const d2 = place("diode", 17, 3, diode, 225)
+    const d3 = place("diode", 14, 6, diode, 225)
+    place("diode", 17, 6, diode, 315)
     const c = place("capacitor-polarized", 26, 2, { value: "1000 µF", vmax: "25 V" }, 90)
     const load = place("resistor", 30, 2, { value: "1 kΩ", power: "0.5" }, 90)
     const r = place("resistor", 34, 2, { value: "1 kΩ", power: "0.25" }, 90)
@@ -64,21 +62,17 @@ const powerSupply: Example = {
     wire(mains, "-", t, "P2")
     // Secondary into the two ~ corners; the far one takes the usual detour under the bridge.
     wire(t, "S1", d1, "1")
-    wire(d1, "1", d3, "2")
     wire(t, "S2", d2, "1", [
       [10, 16],
       [24, 16],
       [24, 6],
     ])
-    wire(d2, "1", d4, "2")
     // + corner out to the filter and the load.
-    wire(d1, "2", d2, "2")
-    wire(d2, "2", c, "1")
+    wire(d1, "2", c, "1")
     wire(c, "1", load, "1")
     wire(load, "1", r, "1")
     // R2 and the LED are butted pin to pin: touching pins conduct, so no wire is drawn here.
     // − corner down to ground, and the returns along it.
-    wire(d3, "1", d4, "1")
     wire(d3, "1", gnd, "GND")
     wire(c, "2", gnd, "GND")
     wire(load, "2", c, "2")
@@ -132,10 +126,9 @@ const bridge: Example = {
     const { doc, place, wire } = builder(grid)
     // Designators follow the sketch rather than the order the parts are placed in.
     const r = (ref: string, value: string) => ({ ref, value, power: "0.25" })
-    // The diamond: four arms on 45°, meeting at (13,6) left, (21,6) right, (17,2) top, (17,10) bottom.
-    const r1 = place("resistor", 13, 2, r("R1", "1 kΩ"), 315)
-    const r2 = place("resistor", 17, 2, r("R2", "2.2 kΩ"), 225)
-    const r6 = place("resistor", 13, 6, r("R6", "3.3 kΩ"), 225)
+    const r1 = place("resistor", 14, 3, r("R1", "1 kΩ"), 315)
+    place("resistor", 17, 3, r("R2", "2.2 kΩ"), 225)
+    const r6 = place("resistor", 14, 6, r("R6", "3.3 kΩ"), 225)
     const r7 = place("resistor", 17, 6, r("R7", "680 Ω"), 315)
     const r3 = place("resistor", 15, 5, r("R3", "4.7 kΩ"))
     const r4 = place("resistor", 4, 1, r("R4", "1.5 kΩ"), 90)
@@ -145,16 +138,12 @@ const bridge: Example = {
     // A is the top rail: the supply, R4 and the top corner of the bridge are one node.
     wire(v, "V", r4, "1")
     wire(r4, "1", r1, "2", [[5, 0], [17, 0]])
-    wire(r1, "2", r2, "2")
     // Left corner.
     wire(r4, "2", r1, "1")
-    wire(r1, "1", r6, "2")
-    wire(r1, "1", r3, "1", [[13, 6]])
+    wire(r1, "1", r3, "1")
     // Right corner.
-    wire(r2, "1", r7, "2")
-    wire(r3, "2", r7, "2", [[21, 6]])
+    wire(r3, "2", r7, "2")
     // Bottom corner out through R5 to B, which is ground.
-    wire(r6, "1", r7, "1")
     wire(r6, "1", r5, "2", [[17, 12]])
     wire(r5, "1", g, "GND", [[5, 12]])
     return doc

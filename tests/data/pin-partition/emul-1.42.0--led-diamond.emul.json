@@ -1,0 +1,10 @@
+{
+  "source": "tests/data/emul-1.42.0/led-diamond.emul",
+  "objects": [
+    "LED1 (led)",
+    "LED2 (led)",
+    "LED3 (led)",
+    "LED4 (led)"
+  ],
+  "nets": []
+}

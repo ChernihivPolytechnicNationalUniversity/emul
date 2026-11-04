@@ -1,6 +1,6 @@
-import { flipped, objectRect, objectSize, orientationOf, snap, type FlipAxis, type Point } from "./geometry"
+import { flipped, nextRotation, objectRect, objectSize, orientationOf, snap, type FlipAxis, type Point, type Turn } from "./geometry"
 import { getDef } from "./registry"
-import type { PlacedObject, Rotation, Schematic, Wire } from "./types"
+import type { PlacedObject, Schematic, Wire } from "./types"
 
 function reoriented(object: PlacedObject, axis: FlipAxis): PlacedObject {
   const { rotation, mirror } = flipped(orientationOf(object), axis)
@@ -52,19 +52,19 @@ export function flipSelection(doc: Schematic, ids: ReadonlySet<string>, axis: Fl
   }
 }
 
-export function rotateSelection(doc: Schematic, ids: ReadonlySet<string>, delta: 45 | -45, grid: number): Schematic {
+const turningCell = ({ w, h }: { w: number; h: number }) => ({ x: Math.floor(w / 2), y: Math.floor(h / 2) })
+
+export function rotateSelection(doc: Schematic, ids: ReadonlySet<string>, turn: Turn, grid: number): Schematic {
   const turned = new Set<string>()
   const objects = doc.objects.map((o) => {
     if (!ids.has(o.id)) return o
     const def = getDef(o.def)
     if (!def) return o
     turned.add(o.id)
-    const rotation = (((o.rotation ?? 0) + delta + 360) % 360) as Rotation
-    const before = objectSize(def, o.rotation)
-    const after = objectSize(def, rotation)
-    const cx = o.x + (before.w * grid) / 2
-    const cy = o.y + (before.h * grid) / 2
-    return { ...o, rotation, x: snap(cx - (after.w * grid) / 2, grid), y: snap(cy - (after.h * grid) / 2, grid) }
+    const rotation = nextRotation(def, o.rotation ?? 0, turn)
+    const before = turningCell(objectSize(def, o.rotation))
+    const after = turningCell(objectSize(def, rotation))
+    return { ...o, rotation, x: o.x + (before.x - after.x) * grid, y: o.y + (before.y - after.y) * grid }
   })
   return { ...doc, objects, wires: doc.wires.map((w) => (bentInto(w, turned) ? unbent(w) : w)) }
 }

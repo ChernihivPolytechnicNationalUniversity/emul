@@ -72,7 +72,7 @@ describe("routing", () => {
     expect.soft(r.pts[1].x - r.pts[0].x, "stub is one cell out of the pin").toBe(GRID)
   })
 
-  it("keeps a pin on a diagonal in place and lands its stub on the grid", () => {
+  it("a pin on a diagonal is a corner of its part's square, on the grid, and its stub lands on the grid too", () => {
     const { doc, place, wire } = builder(GRID)
     const r1 = place("resistor", 0, 0, {}, 45)
     const r2 = place("resistor", 12, 6)
@@ -81,7 +81,7 @@ describe("routing", () => {
     const stub = r.pts[1]
     expect.soft(stub.x % GRID, "stub end snapped to the grid in x").toBe(0)
     expect.soft(stub.y % GRID, "stub end snapped to the grid in y").toBe(0)
-    expect.soft((r.pts[0].x % GRID) + (r.pts[0].y % GRID) > 0, "pin itself is off the grid").toBe(true)
+    expect.soft([r.pts[0].x % GRID, r.pts[0].y % GRID], "the pin itself is on the grid").toEqual([0, 0])
     expect.soft(r.pts.slice(1).every((p, i, a) => i === 0 || p.x === a[i - 1].x || p.y === a[i - 1].y), "everything after the stub is orthogonal").toBe(true)
   })
 

@@ -1,7 +1,7 @@
 import { bodyBounds } from "./body"
 import { getDef, getPin } from "./registry"
 import { SpatialIndex } from "./spatial"
-import type { ComponentDef, PinDef, PinRef, PlacedObject, Point, Rotation, Side, Wire } from "./types"
+import type { BodyShape, ComponentDef, PinDef, PinRef, PlacedObject, Point, Rotation, Side, Wire } from "./types"
 
 export type { Point }
 
@@ -91,26 +91,110 @@ export function unorientOffset(v: Point, { rotation, mirror }: Orientation): Poi
   return { x: mirror ? -x : x, y }
 }
 
-/** Size in cells of the rotated bounding box. On a diagonal it is the axis-aligned hull. */
+export const isDiagonal = (rotation: Rotation) => rotation % 90 !== 0
+
+const DIAGONAL_ROUNDING_CELLS = 0.15
+
+const diagonalSquares = new WeakMap<ComponentDef, number | null>()
+
+const facesAwayFrom = (pin: PinDef, other: PinDef) => {
+  const d = DIR[pin.side]
+  const span = Math.hypot(pin.x - other.x, pin.y - other.y)
+  return span > 0 && d.x === (pin.x - other.x) / span && d.y === (pin.y - other.y) / span
+}
+
+function measureDiagonalSquare(def: ComponentDef): number | null {
+  if (def.pins.length !== 2) return null
+  const [a, b] = def.pins
+  if (a.x !== b.x && a.y !== b.y) return null
+  if (!facesAwayFrom(a, b) || !facesAwayFrom(b, a)) return null
+  const span = Math.hypot(b.x - a.x, b.y - a.y)
+  const side = Math.round(span / Math.SQRT2)
+  return side > 0 && Math.abs(side / 2 - span / (2 * Math.SQRT2)) < DIAGONAL_ROUNDING_CELLS ? side : null
+}
+
+export function diagonalSquare(def: ComponentDef): number | null {
+  const cached = diagonalSquares.get(def)
+  if (cached !== undefined) return cached
+  const side = measureDiagonalSquare(def)
+  diagonalSquares.set(def, side)
+  return side
+}
+
+export const standsOnItsDiagonal = (def: ComponentDef, rotation: Rotation) => isDiagonal(rotation) && diagonalSquare(def) !== null
+
+const ROTATIONS: readonly Rotation[] = [0, 45, 90, 135, 180, 225, 270, 315]
+
+export const rotationAllowed = (def: ComponentDef, rotation: Rotation) => !isDiagonal(rotation) || diagonalSquare(def) !== null
+
+export const allowedRotations = (def: ComponentDef): readonly Rotation[] => ROTATIONS.filter((rotation) => rotationAllowed(def, rotation))
+
+export type Turn = 1 | -1
+
+export function nextRotation(def: ComponentDef, rotation: Rotation, turn: Turn): Rotation {
+  for (let step = 1; step <= ROTATIONS.length; step++) {
+    const next = ROTATIONS[(ROTATIONS.indexOf(rotation) + turn * step + ROTATIONS.length * step) % ROTATIONS.length]
+    if (rotationAllowed(def, next)) return next
+  }
+  return rotation
+}
+
 export function objectSize(def: ComponentDef, rot: Rotation = 0) {
+  const square = isDiagonal(rot) ? diagonalSquare(def) : null
+  if (square !== null) return { w: square, h: square }
   const i = rot / 45
   const c = Math.abs(COS[i])
   const s = Math.abs(SIN[i])
   return { w: def.width * c + def.height * s, h: def.width * s + def.height * c }
 }
 
-/**
- * Pin cell coordinates and direction in the rotated frame (origin = rotated box top-left).
- * The pin is rotated about the component's centre, exactly as the rendered SVG is, so the
- * dot a wire attaches to always sits where the symbol draws it — off the grid on a diagonal.
- */
-export function orientPin(pin: PinDef, def: ComponentDef, orientation: Orientation = UPRIGHT): PlacedPin {
+export function bodyCentre(def: ComponentDef, orientation: Orientation): Point {
   const box = objectSize(def, orientation.rotation)
-  const at = orientOffset({ x: pin.x - def.width / 2, y: pin.y - def.height / 2 }, orientation)
+  const middle = { x: box.w / 2, y: box.h / 2 }
+  if (!standsOnItsDiagonal(def, orientation.rotation)) return middle
+  const [a, b] = def.pins
+  const shift = orientOffset({ x: def.width / 2 - (a.x + b.x) / 2, y: def.height / 2 - (a.y + b.y) / 2 }, orientation)
+  return { x: middle.x + shift.x, y: middle.y + shift.y }
+}
+
+export function framePoint(def: ComponentDef, orientation: Orientation, p: Point): Point {
+  const centre = bodyCentre(def, orientation)
+  const at = orientOffset({ x: p.x - def.width / 2, y: p.y - def.height / 2 }, orientation)
+  return { x: centre.x + at.x, y: centre.y + at.y }
+}
+
+const leadExtensions = new WeakMap<ComponentDef, string>()
+
+export function stretchedLeads(def: ComponentDef, orientation: Orientation): string {
+  if (!standsOnItsDiagonal(def, orientation.rotation)) return ""
+  const cached = leadExtensions.get(def)
+  if (cached !== undefined) return cached
+  const [a, b] = def.pins
+  const reach = (diagonalSquare(def)! * Math.SQRT2 - Math.hypot(b.x - a.x, b.y - a.y)) / 2
+  const path = def.pins.map((pin) => `M${pin.x} ${pin.y}L${pin.x + DIR[pin.side].x * reach} ${pin.y + DIR[pin.side].y * reach}`).join("")
+  leadExtensions.set(def, path)
+  return path
+}
+
+const bodiesOnTheDiagonal = new WeakMap<ComponentDef, readonly BodyShape[]>()
+
+export function drawnBody(def: ComponentDef, orientation: Orientation): readonly BodyShape[] {
+  const stretch = stretchedLeads(def, orientation)
+  if (!stretch) return def.body
+  const cached = bodiesOnTheDiagonal.get(def)
+  if (cached) return cached
+  const body: readonly BodyShape[] = [...def.body, { type: "path", d: stretch }]
+  bodiesOnTheDiagonal.set(def, body)
+  return body
+}
+
+export function orientPin(pin: PinDef, def: ComponentDef, orientation: Orientation = UPRIGHT): PlacedPin {
+  const at = framePoint(def, orientation, pin)
+  const corner = standsOnItsDiagonal(def, orientation.rotation)
   return {
     ...pin,
-    x: at.x + box.w / 2,
-    y: at.y + box.h / 2,
+    x: corner ? Math.round(at.x) + 0 : at.x,
+    y: corner ? Math.round(at.y) + 0 : at.y,
     side: orientSide(pin.side, orientation),
     labelAt: orientSide(pin.labelAt, orientation),
   }
@@ -458,19 +542,18 @@ function measureOwnBody(obj: PlacedObject, grid: number): Rect | null {
   const def = getDef(obj.def)
   if (!def) return null
   const orientation = orientationOf(obj)
-  const box = objectSize(def, orientation.rotation)
   const b = bodyBounds(def)
   const corners = [
     { x: b.x, y: b.y },
     { x: b.x + b.w, y: b.y },
     { x: b.x + b.w, y: b.y + b.h },
     { x: b.x, y: b.y + b.h },
-  ].map((p) => orientOffset({ x: p.x - def.width / 2, y: p.y - def.height / 2 }, orientation))
+  ].map((p) => framePoint(def, orientation, p))
   const xs = corners.map((p) => p.x)
   const ys = corners.map((p) => p.y)
   const x = Math.min(...xs)
   const y = Math.min(...ys)
-  return { x: obj.x + (x + box.w / 2) * grid, y: obj.y + (y + box.h / 2) * grid, w: (Math.max(...xs) - x) * grid, h: (Math.max(...ys) - y) * grid }
+  return { x: obj.x + x * grid, y: obj.y + y * grid, w: (Math.max(...xs) - x) * grid, h: (Math.max(...ys) - y) * grid }
 }
 
 export function ownBodies(objects: ReadonlyMap<string, PlacedObject>, grid: number, from: string, to: string): Rect[] {

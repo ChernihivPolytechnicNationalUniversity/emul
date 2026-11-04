@@ -4,7 +4,7 @@ import { examples } from "@/schematic/examples"
 import { flipSelection, rotateSelection } from "@/schematic/orient"
 import { footprint } from "@/schematic/placement"
 import { getDef, registry } from "@/schematic/registry"
-import type { PlacedObject, Rotation } from "@/schematic/types"
+import type { PlacedObject, Rotation, Schematic } from "@/schematic/types"
 
 const ROTATIONS: Rotation[] = [0, 45, 90, 135, 180, 225, 270, 315]
 const ORIENTATIONS: Orientation[] = ROTATIONS.flatMap((rotation) => [{ rotation, mirror: false }, { rotation, mirror: true }])
@@ -118,14 +118,14 @@ describe("a selection mirrors as one block, the way schematic editors mirror a b
     expect(after.mirror).toBe(true)
   })
 
-  it("the whole circuit mirrors about one line, every wire still on its pins; a diagonal part within half a cell of it", () => {
-    const diagonal = (key: string) => (bridge.objects.find((o) => key.startsWith(`${o.id}:`))!.rotation ?? 0) % 90 !== 0
+  it("the whole circuit mirrors about one line, every wire still on its pins, the parts on their diagonals exactly too", () => {
+    expect.soft(bridge.objects.some((o) => (o.rotation ?? 0) % 90 !== 0), "the bridge has diagonal parts").toBe(true)
     for (const axis of ["horizontal", "vertical"] as const) {
       const before = pinsOf(bridge)
       const after = pinsOf(flipSelection(bridge, everything, axis, GRID))
       const sum = (key: string) => (axis === "horizontal" ? after.get(key)!.x + before.get(key)!.x : after.get(key)!.y + before.get(key)!.y)
-      const line = sum([...before.keys()].find((key) => !diagonal(key))!)
-      for (const key of before.keys()) expect(Math.abs(sum(key) - line), `${axis} ${key}`).toBeLessThanOrEqual(diagonal(key) ? GRID / 2 + 1e-6 : 1e-6)
+      const line = sum([...before.keys()][0])
+      for (const key of before.keys()) expect.soft(Math.abs(sum(key) - line), `${axis} ${key}`).toBeLessThanOrEqual(1e-6)
     }
   })
 
@@ -142,6 +142,13 @@ describe("a selection mirrors as one block, the way schematic editors mirror a b
     expect(back.objects.every((o) => o.mirror === undefined)).toBe(true)
   })
 })
+
+function halfTurned(doc: Schematic, ids: ReadonlySet<string>): Schematic {
+  const start = doc.objects.find((o) => ids.has(o.id))!.rotation ?? 0
+  let after = rotateSelection(doc, ids, 1, GRID)
+  while ((after.objects.find((o) => ids.has(o.id))!.rotation ?? 0) !== (start + 180) % 360) after = rotateSelection(after, ids, 1, GRID)
+  return after
+}
 
 describe("a part turned or mirrored in place keeps its wires out of its own body", () => {
   const crossesBody = (p: Point, q: Point, r: { x: number; y: number; w: number; h: number }) => {
@@ -160,7 +167,7 @@ describe("a part turned or mirrored in place keeps its wires out of its own body
     const r5 = doc.objects.find((o) => o.props?.ref === "R5")!
     const into = (w: (typeof doc.wires)[number]) => w.from.object === r5.id || w.to.object === r5.id
     expect(doc.wires.filter(into).some((w) => w.points)).toBe(true)
-    for (const after of [flipSelection(doc, new Set([r5.id]), "horizontal", GRID), rotateSelection(doc, new Set([r5.id]), 45, GRID)]) {
+    for (const after of [flipSelection(doc, new Set([r5.id]), "horizontal", GRID), rotateSelection(doc, new Set([r5.id]), 1, GRID)]) {
       expect(after.wires.filter(into).every((w) => !w.points)).toBe(true)
       expect(after.wires.filter((w) => !into(w))).toEqual(doc.wires.filter((w) => !into(w)))
     }
@@ -183,7 +190,7 @@ describe("a part turned or mirrored in place keeps its wires out of its own body
         for (const [how, after] of [
           ["mirrored", flipSelection(doc, ids, "horizontal", GRID)],
           ["flipped", flipSelection(doc, ids, "vertical", GRID)],
-          ["half-turned", rotateSelection(rotateSelection(rotateSelection(rotateSelection(doc, ids, 45, GRID), ids, 45, GRID), ids, 45, GRID), ids, 45, GRID)],
+          ["half-turned", halfTurned(doc, ids)],
         ] as const) {
           const moved = after.objects.find((o) => o.id === part.id)!
           const wires = after.wires.filter((w) => w.from.object === part.id || w.to.object === part.id)

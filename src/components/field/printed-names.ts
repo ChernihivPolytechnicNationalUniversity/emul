@@ -1,4 +1,4 @@
-import { objectSize, orientationOf, orientOffset, placedText, type Orientation, type Point, type Rect } from "@/schematic/geometry"
+import { framePoint, orientationOf, placedText, type Orientation, type Point, type Rect } from "@/schematic/geometry"
 import { blocksOf, boxMeetsPolygon, homeOf, isPrintedName, printedGrowth } from "@/schematic/printed-text"
 import { getDef } from "@/schematic/registry"
 import type { BodyShape, ComponentDef, PlacedObject } from "@/schematic/types"
@@ -36,11 +36,7 @@ function perOrientation<T>(compute: (def: ComponentDef, orientation: Orientation
 }
 
 function orientedIn(def: ComponentDef, orientation: Orientation) {
-  const box = objectSize(def, orientation.rotation)
-  return (p: Point): Point => {
-    const at = orientOffset({ x: p.x - def.width / 2, y: p.y - def.height / 2 }, orientation)
-    return { x: at.x + box.w / 2, y: at.y + box.h / 2 }
-  }
+  return (p: Point): Point => framePoint(def, orientation, p)
 }
 
 export const printedNameLayout = perOrientation((def, orientation): readonly PlacedName[] => {

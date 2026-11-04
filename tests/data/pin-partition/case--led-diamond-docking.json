@@ -6,5 +6,8 @@
     "LED3 (led)",
     "LED4 (led)"
   ],
-  "nets": []
+  "nets": [
+    ["LED1.1","LED3.1"],
+    ["LED2.2","LED4.2"]
+  ]
 }

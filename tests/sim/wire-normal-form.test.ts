@@ -393,11 +393,11 @@ describe("today's examples, every wire routed and frozen, then normalised", () =
       expect.soft(got, `${name}: the same circuit as the frozen drawing before normalising`).toEqual(raw)
       expect.soft(got, `${name}: the frozen partition, with exactly the merges phase 0 recorded`).toEqual(withMerges(fixture.nets, OVERLAPS_THE_MIGRATION_MUST_REROUTE[name] ?? []))
     }
-    expect.soft(skipped, "documents left for phase 2's lattice").toEqual(OFF_LATTICE)
+    expect.soft(skipped, "documents whose diagonal pins leave by today's 45° stubs, frozen in phase 3").toEqual(DIAGONAL_STUBS)
   })
 })
 
-const OFF_LATTICE = ["power-supply", "system-exam", "bridge"]
+const DIAGONAL_STUBS = ["power-supply", "system-exam", "bridge", "emul-1.42.0--power-supply.emul", "emul-1.42.0--resistor-bridge.emul"]
 
 function frozen(doc: Schematic) {
   const routes = fieldRouter().routeAll(doc.objects, doc.wires, GRID)

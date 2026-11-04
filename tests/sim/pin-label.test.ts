@@ -15,16 +15,15 @@ import {
   type Box,
   type PinLabel,
 } from "@/components/field/pin-label"
-import { flipped, orientPin, UPRIGHT, type Orientation, type Point } from "@/schematic/geometry"
+import { allowedRotations, flipped, orientPin, UPRIGHT, type Orientation, type Point } from "@/schematic/geometry"
 import { getDef, registry } from "@/schematic/registry"
-import type { ComponentDef, Rotation } from "@/schematic/types"
+import type { ComponentDef } from "@/schematic/types"
 import { edgeHeaderBoard } from "../lib/edge-board"
 
 const def = (id: string) => getDef(id)!
 const board = edgeHeaderBoard()
 
-const ROTATIONS: Rotation[] = [0, 45, 90, 135, 180, 225, 270, 315]
-const ORIENTATIONS: Orientation[] = ROTATIONS.flatMap((rotation) => [{ rotation, mirror: false }, { rotation, mirror: true }])
+const orientationsOf = (d: ComponentDef): Orientation[] => allowedRotations(d).flatMap((rotation) => [{ rotation, mirror: false }, { rotation, mirror: true }])
 const SIZES = [PIN_LABEL_CELLS, 0.6, MAX_PIN_LABEL_CELLS]
 const BOARD_PINS = 40
 
@@ -177,18 +176,18 @@ describe("names that would run into each other turn to run along their pins", ()
 
   it("no name is ever drawn upside down, in any orientation of any part", () => {
     for (const d of registry)
-      for (const orientation of ORIENTATIONS)
+      for (const orientation of orientationsOf(d))
         for (const label of pinLabels(d, orientation)) {
           expect(label.angle, `${d.id} ${label.id}`).toBeGreaterThanOrEqual(-90)
           expect(label.angle, `${d.id} ${label.id}`).toBeLessThan(90)
         }
   })
 
-  it("no two names of a part overlap in any orientation; on a board or a chip, not even at the largest size", () => {
+  it("no two names of a part overlap in any orientation it allows; on a board or a chip, not even at the largest size", () => {
     const clashes: string[] = []
     const dense = (d: ComponentDef) => d.pins.length >= BOARD_PINS
     for (const d of [...registry, board]) {
-      for (const orientation of ORIENTATIONS) {
+      for (const orientation of orientationsOf(d)) {
         const labels = pinLabels(d, orientation)
         for (const size of dense(d) ? SIZES : SIZES.filter((size) => size < MAX_PIN_LABEL_CELLS)) {
           const boxes = labels.map((label) => footprint(d, label, orientation, size))

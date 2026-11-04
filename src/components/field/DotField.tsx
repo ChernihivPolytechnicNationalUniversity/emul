@@ -15,7 +15,7 @@ import {
 import { Inspector } from "@/components/inspector/Inspector"
 import { WirePalette } from "@/components/inspector/WirePalette"
 import { PALETTE_DRAG_TYPE, paletteGroups } from "@/components/palette/items"
-import { bendsOnRoute, GRID as FIELD_GRID, nudgeRoutes, objectPins, objectRect, resolvePin, routeBox, snap, touches, unionOf, type FlipAxis, type Point } from "@/schematic/geometry"
+import { bendsOnRoute, GRID as FIELD_GRID, nudgeRoutes, objectPins, objectRect, resolvePin, routeBox, snap, touches, unionOf, type FlipAxis, type Point, type Turn } from "@/schematic/geometry"
 import { SpatialIndex } from "@/schematic/spatial"
 import { fieldDetail } from "./detail"
 import { savedTextScale, saveTextScale } from "./text-scale"
@@ -96,7 +96,7 @@ export type DotFieldHandle = {
   selectAll: () => void
   deselectAll: () => void
   deleteSelected: () => void
-  rotate: (delta: 45 | -45) => void
+  rotate: (turn: Turn) => void
   flip: (axis: FlipAxis) => void
   zoomIn: () => void
   zoomOut: () => void
@@ -512,7 +512,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       selectAll: sch.selectAll,
       deselectAll: sch.deselectAll,
       deleteSelected: sch.removeSelected,
-      rotate: (delta) => sch.rotate(sch.selectedObjects, delta),
+      rotate: (turn) => sch.rotate(sch.selectedObjects, turn),
       flip: (axis) => sch.flip(sch.selectedObjects, axis),
       zoomIn,
       zoomOut,
@@ -1009,7 +1009,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     } else if (!mod && !e.altKey && key === "l") {
       setLogicOpen((o) => !o)
     } else if (!mod && !e.altKey && key === "r") {
-      if (sch.selectedObjects.size) sch.rotate(sch.selectedObjects, e.shiftKey ? -45 : 45)
+      if (sch.selectedObjects.size) sch.rotate(sch.selectedObjects, e.shiftKey ? -1 : 1)
     } else if (!mod && !e.altKey && (key === "x" || key === "y")) {
       if (sch.selectedObjects.size) sch.flip(sch.selectedObjects, key === "x" ? "horizontal" : "vertical")
     }
@@ -1372,12 +1372,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           <ContextMenuShortcut>⌘D</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem disabled={!hasObjects} onClick={() => sch.rotate(sch.selectedObjects, 45)}>
-          Rotate 45° clockwise
+        <ContextMenuItem disabled={!hasObjects} onClick={() => sch.rotate(sch.selectedObjects, 1)}>
+          Rotate clockwise
           <ContextMenuShortcut>R</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem disabled={!hasObjects} onClick={() => sch.rotate(sch.selectedObjects, -45)}>
-          Rotate 45° counter-clockwise
+        <ContextMenuItem disabled={!hasObjects} onClick={() => sch.rotate(sch.selectedObjects, -1)}>
+          Rotate counter-clockwise
           <ContextMenuShortcut>⇧R</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasObjects} onClick={() => sch.flip(sch.selectedObjects, "horizontal")}>

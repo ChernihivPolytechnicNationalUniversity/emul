@@ -22,7 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider"
 import { getDef, hdlModule } from "@/schematic/registry"
 import { isHdlDef, isModified } from "@/schematic/hdl"
-import type { FlipAxis } from "@/schematic/geometry"
+import type { FlipAxis, Turn } from "@/schematic/geometry"
 import type { Damage, PlacedObject, PropField } from "@/schematic/types"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import type { SimReadout } from "@/sim/use-simulation"
@@ -65,7 +65,7 @@ type InspectorProps = Omit<React.ComponentProps<typeof Card>, "onChange"> & {
   /** Open the code panel on this board or chip. */
   onCode?: (id: string) => void
   onHdl?: (defId: string) => void
-  onRotate: (delta: 45 | -45) => void
+  onRotate: (turn: Turn) => void
   onFlip: (axis: FlipAxis) => void
   onDelete: () => void
 }
@@ -106,10 +106,10 @@ export function Inspector({ selected, damage, sim, onChange, onFirmware, onSeria
             <Button variant="ghost" size="icon-sm" onClick={() => sections.setOpen("panel", !open)} aria-label={open ? "Collapse the inspector" : "Expand the inspector"} aria-expanded={open}>
               <ChevronDownIcon className={cn("transition-transform duration-200 ease-out motion-reduce:transition-none", open && "rotate-180")} />
             </Button>
-            <Button variant="ghost" size="icon-sm" onClick={() => onRotate(-45)} aria-label="Rotate 45° counter-clockwise">
+            <Button variant="ghost" size="icon-sm" onClick={() => onRotate(-1)} aria-label="Rotate counter-clockwise">
               <RotateCcwIcon />
             </Button>
-            <Button variant="ghost" size="icon-sm" onClick={() => onRotate(45)} aria-label="Rotate 45° clockwise">
+            <Button variant="ghost" size="icon-sm" onClick={() => onRotate(1)} aria-label="Rotate clockwise">
               <RotateCwIcon />
             </Button>
             <Button variant="ghost" size="icon-sm" onClick={() => onFlip("horizontal")} aria-label="Mirror horizontally">
