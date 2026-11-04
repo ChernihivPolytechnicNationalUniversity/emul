@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs"
 import vm from "node:vm"
 import { describe, expect, it } from "vitest"
-import { alternatives, matches, matchesAny, type KeyPress, type Keys, type Shortcut } from "@/lib/keys"
-import { keymapFor } from "@/lib/keymap"
+import { alternatives, matches, matchesAny, shortcutLabel, type KeyPress, type Keys, type Shortcut } from "@/lib/keys"
+import { keymapFor, labelFor } from "@/lib/keymap"
 import { detectPlatform, type Platform, type PlatformHints } from "@/lib/platform"
 
 type Browser = { name: string; hints: PlatformHints & { platform: string }; is: Platform }
@@ -117,6 +117,7 @@ describe("each platform's own keys", () => {
       expect.soft(matchesAny(letter("y", { ctrlKey: true }), redo, platform), `Ctrl+Y on ${platform}`).toBeTruthy()
       expect.soft(matchesAny(letter("Z", { ctrlKey: true, shiftKey: true }), redo, platform), `Ctrl+Shift+Z on ${platform}`).toBeTruthy()
     }
+    expect.soft(PLATFORMS.map((p) => labelFor(keymapFor(p).redo, p)), "printed").toEqual(["⇧⌘Z", "Ctrl+Y", "Ctrl+Shift+Z", "Ctrl+Shift+Z"])
   })
 
   it("delete on the field with the delete key a Mac has (Backspace) and with Fn+Delete, and leave Command-Delete to text", () => {
@@ -124,6 +125,25 @@ describe("each platform's own keys", () => {
     expect.soft(matchesAny(named("Backspace"), mac, "apple"), "delete").toBeTruthy()
     expect.soft(matchesAny(named("Delete"), mac, "apple"), "Fn+Delete, forward delete").toBeTruthy()
     expect.soft(matchesAny(named("Backspace", { metaKey: true }), mac, "apple"), "⌘⌫").toBeFalsy()
+    expect.soft(PLATFORMS.map((p) => labelFor(keymapFor(p).remove, p)), "printed").toEqual(["⌫", "Del", "Del", "Backspace"])
   })
 
+})
+
+describe("labels in each platform's own order and names", () => {
+  it("print ⌃⌥⇧⌘ glyphs without separators on a Mac, and Ctrl, Alt, Shift joined by + elsewhere", () => {
+    const labels = (platform: Platform) => {
+      const keymap = keymapFor(platform)
+      return [keymap.undo, keymap.deselect, keymap.zoomIn, keymap.zoomOut, keymap.zoomReset, keymap.stepInstruction, keymap.restart, keymap.rotateBack, keymap.code, keymap.projects].map((k) => labelFor(k, platform))
+    }
+    expect.soft(labels("apple"), "macOS and iPadOS").toEqual(["⌘Z", "⎋", "⌘+", "⌘−", "⌘0", "⌥F11", "⇧⌘F5", "⇧R", "⌘J", "⇧⌘O"])
+    expect.soft(labels("windows"), "Windows").toEqual(["Ctrl+Z", "Esc", "Ctrl++", "Ctrl+−", "Ctrl+0", "Alt+F11", "Ctrl+Shift+F5", "Shift+R", "Ctrl+J", "Ctrl+Shift+O"])
+    expect.soft(labels("linux"), "Linux").toEqual(labels("windows"))
+    expect.soft(labels("chromeos"), "ChromeOS").toEqual(labels("windows"))
+  })
+
+  it("put every modifier in Apple's order when a Mac shortcut has several", () => {
+    expect.soft(shortcutLabel({ key: "z", mod: true, alt: true, shift: true }, "apple"), "Option, Shift, Command").toBe("⌥⇧⌘Z")
+    expect.soft(shortcutLabel({ key: "z", mod: true, alt: true, shift: true }, "windows"), "Ctrl, Alt, Shift").toBe("Ctrl+Alt+Shift+Z")
+  })
 })

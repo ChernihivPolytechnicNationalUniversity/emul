@@ -138,15 +138,19 @@ export function closeMenusAfterCommands(target: Pick<Window, "addEventListener" 
   return () => target.removeEventListener("keydown", close)
 }
 
-const KEY_NAMES: Readonly<Record<string, string>> = { "-": "−", Delete: "Del", Escape: "Esc", Backspace: "⌫" }
-
-export function isApplePlatform(platform = globalThis.navigator?.platform ?? ""): boolean {
-  return /Mac|iPhone|iPad|iPod/.test(platform)
+const KEY_NAMES: Readonly<Record<"apple" | "words", Readonly<Record<string, string>>>> = {
+  apple: { "-": "−", Delete: "⌦", Escape: "⎋", Backspace: "⌫", Enter: "↩" },
+  words: { "-": "−", Delete: "Del", Escape: "Esc" },
 }
 
-export function shortcutLabel(shortcut: Shortcut, apple = isApplePlatform()): string {
-  const key = KEY_NAMES[shortcut.key] ?? shortcut.key.toUpperCase()
+export function keyName(key: string, platform: Platform = currentPlatform()): string {
+  const named = KEY_NAMES[platform === "apple" ? "apple" : "words"][key]
+  return named ?? (key.length === 1 ? key.toUpperCase() : key)
+}
+
+export function shortcutLabel(shortcut: Shortcut, platform: Platform = currentPlatform()): string {
+  const key = keyName(shortcut.key, platform)
   const shift = shortcut.shift === true
-  if (apple) return `${shortcut.alt ? "⌥" : ""}${shift ? "⇧" : ""}${shortcut.mod ? "⌘" : ""}${key}`
+  if (platform === "apple") return `${shortcut.alt ? "⌥" : ""}${shift ? "⇧" : ""}${shortcut.mod ? "⌘" : ""}${key}`
   return [shortcut.mod && "Ctrl", shortcut.alt && "Alt", shift && "Shift", key].filter(Boolean).join("+")
 }

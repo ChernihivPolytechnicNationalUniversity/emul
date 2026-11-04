@@ -249,13 +249,14 @@ describe("Backspace never takes the page back", () => {
 
 describe("labels come from the same shortcuts", () => {
   it("print Apple's symbols on a Mac and words elsewhere", () => {
-    expect.soft(shortcutLabel(alternatives(KEYMAP.redo)[0], true), "Mac redo").toBe("⇧⌘Z")
-    expect.soft(shortcutLabel(alternatives(KEYMAP.redo)[0], false), "Windows redo").toBe("Ctrl+Shift+Z")
-    expect.soft(shortcutLabel(KEYMAP.zoomOut, false), "zoom out").toBe("Ctrl+−")
-    expect.soft(shortcutLabel(KEYMAP.stepInstruction, true), "Mac Option+F11").toBe("⌥F11")
-    expect.soft(shortcutLabel(KEYMAP.stepInstruction, false), "Alt+F11").toBe("Alt+F11")
-    expect.soft(shortcutLabel(KEYMAP.rotateBack, true), "Shift+R on a Mac").toBe("⇧R")
-    expect.soft(labelFor(KEYMAP.remove), "a list of shortcuts is labelled by its first").toBe("Del")
+    const redoByZ = alternatives(KEYMAP.redo).find((s) => s.key === "z")!
+    expect.soft(shortcutLabel(redoByZ, "apple"), "Mac redo").toBe("⇧⌘Z")
+    expect.soft(shortcutLabel(redoByZ, "linux"), "Linux redo").toBe("Ctrl+Shift+Z")
+    expect.soft(shortcutLabel(KEYMAP.zoomOut, "windows"), "zoom out").toBe("Ctrl+−")
+    expect.soft(shortcutLabel(KEYMAP.stepInstruction, "apple"), "Mac Option+F11").toBe("⌥F11")
+    expect.soft(shortcutLabel(KEYMAP.stepInstruction, "windows"), "Alt+F11").toBe("Alt+F11")
+    expect.soft(shortcutLabel(KEYMAP.rotateBack, "apple"), "Shift+R on a Mac").toBe("⇧R")
+    expect.soft(labelFor(KEYMAP.remove, "linux"), "a list of shortcuts is labelled by its first").toBe("Del")
   })
 })
 

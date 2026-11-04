@@ -59,5 +59,4 @@ export function keymapFor(platform: Platform): Keymap {
 
 export const KEYMAP = keymapFor(currentPlatform())
 
-export const labelFor = (keys: Keys) => shortcutLabel(alternatives(keys)[0])
-
+export const labelFor = (keys: Keys, platform: Platform = currentPlatform()) => shortcutLabel(alternatives(keys)[0], platform)
