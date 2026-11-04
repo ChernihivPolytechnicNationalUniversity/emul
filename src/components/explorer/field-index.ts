@@ -91,13 +91,16 @@ const sameNumber = (a: number, b: number) => a === b || Math.abs(a - b) <= Math.
 /** A word typed into the search: lower case, and as a number when it is a value. */
 type Token = { text: string; number: number; designator: boolean }
 
+// The number is read before lower-casing: "M" is mega and "m" milli, so "1M" must not become 1 mΩ.
 const tokenize = (query: string): Token[] =>
   query
     .trim()
-    .toLowerCase()
     .split(/\s+/)
     .filter(Boolean)
-    .map((text) => ({ text, number: /^[-+.\d]/.test(text) ? valueNumber(text) : NaN, designator: /^[a-z]+\d+$/.test(text) }))
+    .map((word) => {
+      const text = word.toLowerCase()
+      return { text, number: /^[-+.\d]/.test(word) ? valueNumber(word) : NaN, designator: /^[a-z]+\d+$/.test(text) }
+    })
 
 const SCORE = { REF: 100, REF_PREFIX: 80, PIN: 70, PIN_PREFIX: 45, NAME_WORD: 50, NAME: 30, VALUE: 40 } as const
 

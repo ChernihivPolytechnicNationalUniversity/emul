@@ -82,6 +82,14 @@ describe("the field's search", () => {
     for (const q of ["4k7", "4.7k", "4700", "4.7kΩ"]) expect(ids(searchField(doc.objects, q)), q).toEqual([r2.id])
   })
 
+  it("reads M as mega and m as milli, the case kept until the number is read", () => {
+    const b = builder(GRID)
+    const big = b.place("resistor", 0, 0, { value: "1.5 MΩ" })
+    const tiny = b.place("resistor", 0, 4, { value: "1.5 mΩ" })
+    for (const q of ["1M5", "1.5M", "1.5MΩ", "0.0015G"]) expect(ids(searchField(b.doc.objects, q)), q).toEqual([big.id])
+    for (const q of ["1m5", "1.5m", "1.5mΩ"]) expect(ids(searchField(b.doc.objects, q)), q).toEqual([tiny.id])
+  })
+
   it("finds a part by its name", () => {
     const { doc, timer, led } = bench()
     expect(ids(searchField(doc.objects, "ne555"))).toContain(timer.id)
