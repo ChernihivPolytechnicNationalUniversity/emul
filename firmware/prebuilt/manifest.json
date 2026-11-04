@@ -1,4 +1,52 @@
 {
+  "blackpill-blink": {
+    "U1": {
+      "target": "stm32f411ce",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "a9648cc4"
+      },
+      "sources": "d90dc40a6f0e926b095823c24d2bdec4352bec0772d0646e6e96020702c02d97",
+      "toolchain": "c69ea334fc555d2da2d68b4462f4cb1c45252ae8917b7d71c8a7990f26598a39",
+      "elf": "blackpill-blink.U1.elf",
+      "bytes": 873164
+    }
+  },
+  "blackpill-f401cc-blink": {
+    "U1": {
+      "target": "stm32f401cc",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "9941881a"
+      },
+      "sources": "18ec588e09f1595dde9e47292bd096695d177a5822515010a0e3fd34fc9b65be",
+      "toolchain": "d48327c3dd405a5b5ef4a23d54f9093ff040ca8116d0831ecc3612d21d983a71",
+      "elf": "blackpill-f401cc-blink.U1.elf",
+      "bytes": 869436
+    }
+  },
+  "blackpill-f401ce-blink": {
+    "U1": {
+      "target": "stm32f401ce",
+      "options": {
+        "opt": "-O0"
+      },
+      "files": {
+        "Core/Inc/main.h": "d44defe7",
+        "Core/Src/main.c": "9941881a"
+      },
+      "sources": "18ec588e09f1595dde9e47292bd096695d177a5822515010a0e3fd34fc9b65be",
+      "toolchain": "96dce12634d0754c5d3d7a597a58bf68c8f3dd23e89aa1c2583a991bf9c4b817",
+      "elf": "blackpill-f401ce-blink.U1.elf",
+      "bytes": 869696
+    }
+  },
   "discovery-audio": {
     "U1": {
       "target": "stm32f407vg",
@@ -10,9 +58,9 @@
         "Core/Src/main.c": "7db5a109"
       },
       "sources": "d369ac77ad5d80b474043a4d7ca47de1526c7738243715dabdc85f2001ea979d",
-      "toolchain": "5abb6bceeff782bff23c5f7108b50c91927b5d8761b0c0c38d2f51999fab4528",
+      "toolchain": "acad6d20673dc1e68deafe012110d3d02445b1db756c67fd5359064da60de075",
       "elf": "discovery-audio.U1.elf",
-      "bytes": 1369352
+      "bytes": 1369376
     }
   },
   "discovery-running-light": {
@@ -26,9 +74,9 @@
         "Core/Src/main.c": "269cce8f"
       },
       "sources": "ae89ffe7d58bc4bca04ceb05c8965e313e670b9641cfcf982f8545b796d8ee49",
-      "toolchain": "5abb6bceeff782bff23c5f7108b50c91927b5d8761b0c0c38d2f51999fab4528",
+      "toolchain": "acad6d20673dc1e68deafe012110d3d02445b1db756c67fd5359064da60de075",
       "elf": "discovery-running-light.U1.elf",
-      "bytes": 1233048
+      "bytes": 1233068
     }
   },
   "discovery-tilt": {
@@ -42,9 +90,9 @@
         "Core/Src/main.c": "4ce89dc8"
       },
       "sources": "2443de22f6e3720f931b05953d4d1fb1117f0331b8a4fdeb97b6a9214ac55cc6",
-      "toolchain": "5abb6bceeff782bff23c5f7108b50c91927b5d8761b0c0c38d2f51999fab4528",
+      "toolchain": "acad6d20673dc1e68deafe012110d3d02445b1db756c67fd5359064da60de075",
       "elf": "discovery-tilt.U1.elf",
-      "bytes": 1282680
+      "bytes": 1282700
     }
   },
   "h405-blink": {
@@ -58,9 +106,9 @@
         "Core/Src/main.c": "8259927a"
       },
       "sources": "087342b91149b90b6b145d13d6f951420b97f519b9ad6b6ba1907f746fd0ff58",
-      "toolchain": "1bbbc1e7262be1dd5f02d7b5597d37d33eebe4e698f86fc82b9f54c946daa319",
+      "toolchain": "c50e0909c25ea12bded3af482789f3c56e35e355708fa57cba5c6d208e9adf18",
       "elf": "h405-blink.U1.elf",
-      "bytes": 1154488
+      "bytes": 1154504
     }
   },
   "lab1-f746": {
@@ -79,9 +127,9 @@
         "Core/Src/stm32f7xx_it.c": "81903933"
       },
       "sources": "f7f15ef9936a0e62da350eecb35444d0e3d88135217362fa10b96f76e638bac8",
-      "toolchain": "78b83cde03275b8f1cf0c82378b53570116dd081e8ebc9eb29b40dd296912ff7",
+      "toolchain": "87a2995e65f87d1ce45fe1a396790f25411dde0d03fe47a98821c2eb802ebd5c",
       "elf": "lab1-f746.DD1.elf",
-      "bytes": 1447388
+      "bytes": 1447192
     }
   },
   "lab1-open746i-c": {
@@ -100,9 +148,9 @@
         "Core/Src/stm32f7xx_it.c": "81903933"
       },
       "sources": "f7f15ef9936a0e62da350eecb35444d0e3d88135217362fa10b96f76e638bac8",
-      "toolchain": "78b83cde03275b8f1cf0c82378b53570116dd081e8ebc9eb29b40dd296912ff7",
+      "toolchain": "87a2995e65f87d1ce45fe1a396790f25411dde0d03fe47a98821c2eb802ebd5c",
       "elf": "lab1-open746i-c.U1.elf",
-      "bytes": 1447388
+      "bytes": 1447192
     }
   },
   "lab1-running-light": {
@@ -125,9 +173,9 @@
         "Core/Src/tim.c": "abbbafe3"
       },
       "sources": "0ec8e41399f14b86fa874f2f674a0c00cef94e5a953cf32737383b1a6872227c",
-      "toolchain": "78b83cde03275b8f1cf0c82378b53570116dd081e8ebc9eb29b40dd296912ff7",
+      "toolchain": "87a2995e65f87d1ce45fe1a396790f25411dde0d03fe47a98821c2eb802ebd5c",
       "elf": "lab1-running-light.U1.elf",
-      "bytes": 1571528
+      "bytes": 1571252
     }
   },
   "nano-dimmer": {
@@ -135,13 +183,14 @@
       "target": "atmega328p",
       "options": {
         "opt": "-Os",
-        "fcpu": 16000000
+        "fcpu": 16000000,
+        "arduino": "nano"
       },
       "files": {
         "Dimmer.ino": "d4b17f89"
       },
       "sources": "988a1284b491120357b2d274946935c197f82c1733bdddd322f2c1ace89b6f12",
-      "toolchain": "8ec58b663536421285626edba171cbea48bfbfd5382e51bc89fec528e8fce3b5",
+      "toolchain": "cb3a258799307a1de493c33fcaa04c8d6e5e822025ab07a8e25a85d29b633faf",
       "elf": "nano-dimmer.U1.elf",
       "bytes": 71324
     }
@@ -158,9 +207,9 @@
         "Core/Src/main.c": "8ea57f82"
       },
       "sources": "930b6af71cc379cfb30dd38b85d9eaa13f0146d58e89d9f16c9b922dcb644025",
-      "toolchain": "1bbbc1e7262be1dd5f02d7b5597d37d33eebe4e698f86fc82b9f54c946daa319",
+      "toolchain": "c50e0909c25ea12bded3af482789f3c56e35e355708fa57cba5c6d208e9adf18",
       "elf": "netduino-blink.U1.elf",
-      "bytes": 1191764
+      "bytes": 1191784
     }
   },
   "nucleo-74hc595": {
@@ -174,9 +223,9 @@
         "Core/Src/main.c": "db67a46a"
       },
       "sources": "e49ec4b66c7c3f5007335ec39fc881a60823e7df7b13d1cb04c89c1a0082bcd9",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-74hc595.U1.elf",
-      "bytes": 1368016
+      "bytes": 1367820
     }
   },
   "nucleo-7seg": {
@@ -190,9 +239,9 @@
         "Core/Src/main.c": "9c2333d6"
       },
       "sources": "c5de8e2fce030a95785feb0871ac420c1f64e76c08f449347212acfa34294d85",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-7seg.U1.elf",
-      "bytes": 1424528
+      "bytes": 1424316
     }
   },
   "nucleo-adc": {
@@ -206,9 +255,9 @@
         "Core/Src/main.c": "93e140a8"
       },
       "sources": "9e8a3dc44f66228a21969546e02c9a0ea17db73cdfbecdaabaf4a0b8aa0b9a92",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-adc.U1.elf",
-      "bytes": 1495272
+      "bytes": 1494976
     }
   },
   "nucleo-blink": {
@@ -222,9 +271,9 @@
         "Core/Src/main.c": "184926ed"
       },
       "sources": "9c8a5535619839aae9912d32c3359c9ab286029e4113e3852039f8066327846b",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-blink.U1.elf",
-      "bytes": 1334864
+      "bytes": 1334692
     }
   },
   "nucleo-encoder": {
@@ -238,9 +287,9 @@
         "Core/Src/main.c": "c701943b"
       },
       "sources": "03f738351b30a9dc69bb18ae86d2b17f091a8efe119ca5ce6046f6ecfea75364",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-encoder.U1.elf",
-      "bytes": 1488736
+      "bytes": 1488516
     }
   },
   "nucleo-i2c": {
@@ -254,9 +303,9 @@
         "Core/Src/main.c": "b41b1186"
       },
       "sources": "275f3bb44bad63038b7af8c12217e8f9aa90a0836f03f8f2e861e150db30a044",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-i2c.U1.elf",
-      "bytes": 1413656
+      "bytes": 1413464
     }
   },
   "nucleo-keypad": {
@@ -270,9 +319,9 @@
         "Core/Src/main.c": "61588d61"
       },
       "sources": "9e1e1e664057e192a38734570a22fe151aa0c39133d7215ddfcdeddb0d92cf49",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-keypad.U1.elf",
-      "bytes": 1386704
+      "bytes": 1386504
     }
   },
   "nucleo-lcd-i2c": {
@@ -286,9 +335,9 @@
         "Core/Src/main.c": "abac8938"
       },
       "sources": "c34c2f36b3c45b340e8f3dc0417dc21b4ca6f77cd55cf1b1a5abb9f612af649b",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-lcd-i2c.U1.elf",
-      "bytes": 1394552
+      "bytes": 1394360
     }
   },
   "nucleo-melody": {
@@ -302,9 +351,9 @@
         "Core/Src/main.c": "6afdec88"
       },
       "sources": "32894d12e919919fee200e8bb1be32a2ef814948c07ba46636a50eca0925b995",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-melody.U1.elf",
-      "bytes": 1401512
+      "bytes": 1401316
     }
   },
   "nucleo-oled": {
@@ -318,9 +367,9 @@
         "Core/Src/main.c": "55c3c474"
       },
       "sources": "6b89d3f0881403857594e3861e9b106b81668c17007e593488d064312ffcfa76",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-oled.U1.elf",
-      "bytes": 1410716
+      "bytes": 1410524
     }
   },
   "nucleo-pwm": {
@@ -334,9 +383,9 @@
         "Core/Src/main.c": "ddec8596"
       },
       "sources": "b38ffacc00c3fd307b19948a119ba5100791f49095d5dbebd494a2f6fb4afd97",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-pwm.U1.elf",
-      "bytes": 1430560
+      "bytes": 1430348
     }
   },
   "nucleo-serial": {
@@ -350,9 +399,9 @@
         "Core/Src/main.c": "4ef4b309"
       },
       "sources": "b7a45b7115206b989734478542339e44fc790aec4c0e907a3eb4297a5359439d",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-serial.U1.elf",
-      "bytes": 1434460
+      "bytes": 1434248
     }
   },
   "nucleo-servo": {
@@ -366,9 +415,9 @@
         "Core/Src/main.c": "c0643d18"
       },
       "sources": "33391ce8ec0775e85845b1cb10540e9e46f20b91f0bf857dcdf2e4f3b398593e",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-servo.U1.elf",
-      "bytes": 1401428
+      "bytes": 1401232
     }
   },
   "nucleo-spi": {
@@ -382,9 +431,9 @@
         "Core/Src/main.c": "2fcb1b46"
       },
       "sources": "30928afee5433bdbbbce845444bffb27515bf16738091ae822c8d100309d1e9d",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-spi.U1.elf",
-      "bytes": 1367936
+      "bytes": 1367740
     },
     "U2": {
       "target": "stm32f429zi",
@@ -396,9 +445,9 @@
         "Core/Src/main.c": "a6cb772c"
       },
       "sources": "73bc95940458714545cdc3ab659c729d2f41047831726c904d8ca27b619f0e6e",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-spi.U2.elf",
-      "bytes": 1367808
+      "bytes": 1367612
     }
   },
   "nucleo-square": {
@@ -412,9 +461,9 @@
         "Core/Src/main.c": "8f6a3a4a"
       },
       "sources": "8ebbf3677b3613e377b86a396b261a5b164837d5b64cf085a0dc2334262e367a",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-square.U1.elf",
-      "bytes": 1334084
+      "bytes": 1333912
     }
   },
   "nucleo-ws2812": {
@@ -428,9 +477,9 @@
         "Core/Src/main.c": "223a80aa"
       },
       "sources": "b673a59a47150c5dfb5a873b6d9220a26b88bd53c861c90515a6d3fb0d281a37",
-      "toolchain": "c792644af175f217d38abb3f98f957244c5332a2d113261d8731821c518aa38f",
+      "toolchain": "cf4308d6daf226d331740b913f8694530d83d47321024ce0cc4e9b7897524378",
       "elf": "nucleo-ws2812.U1.elf",
-      "bytes": 1418276
+      "bytes": 1418064
     }
   },
   "open746-cube": {
@@ -464,9 +513,9 @@
         "texture.c": "1062d62c"
       },
       "sources": "85bffba0decd6d5a38f44503c1300d9c8bbdb6a8f84a78be724f566bd4a61b75",
-      "toolchain": "78b83cde03275b8f1cf0c82378b53570116dd081e8ebc9eb29b40dd296912ff7",
+      "toolchain": "87a2995e65f87d1ce45fe1a396790f25411dde0d03fe47a98821c2eb802ebd5c",
       "elf": "open746-cube.U1.elf",
-      "bytes": 1905284
+      "bytes": 1904820
     }
   },
   "open746-lcd": {
@@ -506,9 +555,9 @@
         "Src/retarget.c": "c7431070"
       },
       "sources": "3f9cc08ce390740326bd41492cd2a98cef588f66d84a0990b363ebd5b8b5d342",
-      "toolchain": "78b83cde03275b8f1cf0c82378b53570116dd081e8ebc9eb29b40dd296912ff7",
+      "toolchain": "87a2995e65f87d1ce45fe1a396790f25411dde0d03fe47a98821c2eb802ebd5c",
       "elf": "open746-lcd.U1.elf",
-      "bytes": 1717808
+      "bytes": 1717340
     }
   },
   "open746-touch": {
@@ -547,9 +596,9 @@
         "Src/retarget.c": "c7431070"
       },
       "sources": "4060ad5b0d6981c9d54a905f6c09070af9c1ea0d43d8f5b705276efcada72ad8",
-      "toolchain": "78b83cde03275b8f1cf0c82378b53570116dd081e8ebc9eb29b40dd296912ff7",
+      "toolchain": "87a2995e65f87d1ce45fe1a396790f25411dde0d03fe47a98821c2eb802ebd5c",
       "elf": "open746-touch.U1.elf",
-      "bytes": 1741392
+      "bytes": 1740984
     }
   }
 }

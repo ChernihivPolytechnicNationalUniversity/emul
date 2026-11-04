@@ -34,6 +34,9 @@ RUN /toolchain/stage-st.sh /opt/st \
   && /toolchain/build-hal.sh stm32f746ig /targets /opt/st /opt/hal 2>/dev/null \
   && /toolchain/build-hal.sh stm32f407vg /targets /opt/st /opt/hal 2>/dev/null \
   && /toolchain/build-hal.sh stm32f405rg /targets /opt/st /opt/hal 2>/dev/null \
+  && /toolchain/build-hal.sh stm32f411ce /targets /opt/st /opt/hal 2>/dev/null \
+  && /toolchain/build-hal.sh stm32f401cc /targets /opt/st /opt/hal 2>/dev/null \
+  && /toolchain/build-hal.sh stm32f401ce /targets /opt/st /opt/hal 2>/dev/null \
   && /toolchain/stage-arduino.sh /opt/arduino
 
 FROM node:22-bookworm-slim

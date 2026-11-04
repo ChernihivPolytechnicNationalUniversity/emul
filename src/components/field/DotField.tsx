@@ -44,6 +44,7 @@ import { LOGIC_SPANS, DEFAULT_DECODER, type DecoderConfig } from "@/components/l
 import { LogicStore } from "@/components/logic/logic-store"
 import type { EditorHandle } from "@/components/code/Editor"
 import { PanelLoading } from "@/components/code/PanelLoading"
+import { Button } from "@/components/ui/button"
 
 /** Monaco is a few megabytes; it loads the first time the code panel opens, not with the page. */
 const CodePanel = React.lazy(() => import("@/components/code/CodePanel").then((m) => ({ default: m.CodePanel })))
@@ -151,6 +152,8 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
 }
 
 const EMPTY_IDS: ReadonlySet<string> = new Set()
+/** How far a finger may wander and still have tapped, px. */
+const TAP_SLOP = 8
 
 const CLEAR_OF_CONTROLS_PX = 80
 
@@ -173,7 +176,7 @@ function pinAt(clientX: number, clientY: number): PinRef | null {
 }
 
 export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, projectName, children, ...props }: DotFieldProps) {
-  const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, toWorld, isPanStart, startPan, movePan, endPan } = useViewport(grid)
+  const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, toWorld, isPanStart, startPan, movePan, endPan, setOnPinchStart } = useViewport(grid)
   const marquee = useSelection(toWorld, worldPerPixel, grid)
   const { boxRef: marqueeRef } = marquee
   const sch = useSchematic(grid)
@@ -862,6 +865,26 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   const clearWireColors = useEvent(() => sch.setWireColors(sch.doc.wires.map((w) => [w.id, undefined] as const)))
 
+  /** Where a finger came down on bare field: lifted there without travelling, it was a tap. */
+  const tap = React.useRef<Point | null>(null)
+  // A second finger turns whatever the first one started into a pinch: nothing it began lands.
+  const cancelGesture = useEvent(() => {
+    if (drag.active) {
+      drag.clearAndFinish()
+      onMovePreview?.(null)
+      if (lifted.size) setLifted(EMPTY_IDS)
+    }
+    if (bend.active) {
+      bend.cancel()
+      onWirePreview?.(null)
+    }
+    if (pending?.mode === "drag") setPending(null)
+    marquee.clear()
+    forgetHover()
+    tap.current = null
+  })
+  React.useEffect(() => setOnPinchStart(cancelGesture), [setOnPinchStart, cancelGesture])
+
   // --- field pointer handling: pan or marquee --------------------------------
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isPanStart(e)) startPan(e)
@@ -878,6 +901,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       if (onCanvas) {
         e.currentTarget.setPointerCapture(e.pointerId)
         beginMove(e, onCanvas, e.shiftKey || e.ctrlKey || e.metaKey)
+        return
+      }
+      // A finger on bare field pans, the way every map does; a tap clears the selection.
+      if (e.pointerType === "touch") {
+        tap.current = { x: e.clientX, y: e.clientY }
+        startPan(e)
         return
       }
       sch.deselectAll()
@@ -903,6 +932,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     marquee.move(e)
   }
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const tapped = tap.current && Math.hypot(e.clientX - tap.current.x, e.clientY - tap.current.y) < TAP_SLOP
+    tap.current = null
+    if (tapped && e.type === "pointerup") {
+      sch.deselectAll()
+      setHoveredWire(null)
+    }
     if (endPan(e)) return
     if (drag.active) {
       endMove()
@@ -1074,7 +1109,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   ]
 
   return (
-    <div className="flex h-full w-full overflow-hidden">
+    <div className="relative flex h-full w-full overflow-hidden">
     <ContextMenu>
       <ContextMenuTrigger data-slot="dot-field" className={cn("flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background", className)} {...props}>
         <div data-slot="dot-field-stage" className="relative min-h-0 flex-1 overflow-hidden">
@@ -1082,6 +1117,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             ref={containerRef}
             data-slot="dot-field-viewport"
             className={cn("absolute inset-0 touch-none select-none", cursor)}
+            onPointerDownCapture={(e) => {
+              // A long press opens the field menu without a contextmenu event on iOS: add there.
+              if (e.pointerType === "touch") menuPoint.current = toWorld(e.clientX, e.clientY)
+            }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -1177,12 +1216,13 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           </div>
 
           <ProbeReadout
-            className="absolute bottom-16 left-4"
+            className="absolute bottom-16 left-4 max-md:bottom-24"
             tips={tips}
             reading={probeReading}
             sim={sim}
             onClear={measure.clear}
             onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
           />
           <SimControls
             className="absolute bottom-4 left-4"
@@ -1198,6 +1238,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             }}
             onSpeedChange={setSpeed}
             onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
           />
           {selectedWireList.length > 0 && selectedObjectList.length === 0 && (
             <WirePalette
@@ -1206,10 +1247,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               overridden={anyOverridden}
               onPick={paintSelected}
               onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
             />
           )}
+          {/* On a phone the inspector spans the top beside the palette button, at most half the field high. */}
           <Inspector
-            className="absolute top-3 right-3"
+            className="absolute top-3 right-3 max-md:left-14 max-md:w-auto max-md:max-h-[45%]"
             selected={selectedObjectList}
             damage={sim.damage}
             sim={sim}
@@ -1225,8 +1268,22 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onFlip={(axis) => sch.flip(sch.selectedObjects, axis)}
             onDelete={sch.removeSelected}
             onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           />
+          {/* A phone has no Escape: a wire left hanging in click mode needs a way out. */}
+          {pending?.mode === "click" && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="absolute bottom-16 left-1/2 -translate-x-1/2 shadow-md md:hidden"
+              onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+              onClick={() => setPending(null)}
+            >
+              Cancel wire
+            </Button>
+          )}
           <ScaleBar className="absolute right-4 bottom-14" scale={scale} grid={grid} />
           <ZoomControls className="absolute right-4 bottom-4" scale={scale} onZoomIn={zoomIn} onZoomOut={zoomOut} onReset={reset} />
           {hover && <FieldReadout target={hover.target} x={hover.x} y={hover.y} objects={sch.doc.objects} wires={sch.doc.wires} sim={sim} />}
@@ -1246,6 +1303,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onRelease={measure.release}
             onClose={() => setScopeOpen(false)}
             onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           />
         )}
@@ -1264,6 +1322,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onRelease={measure.release}
             onClose={() => setLogicOpen(false)}
             onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           />
         )}

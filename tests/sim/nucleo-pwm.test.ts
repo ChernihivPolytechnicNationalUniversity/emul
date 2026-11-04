@@ -26,10 +26,11 @@ describe("Nucleo timers and PWM", () => {
       if (sample) sample(loop.snapshot()!)
     }
   }
-  const ld1 = () => loop.snapshot()!.parts[partKey(u.id, "LD1")]!.level
-  const ext = () => loop.snapshot()!.parts[partKey(led.id, "LED")]!.level
-  // LD1: 3.3 V through 510 Ω into a green LED ≈ 2.4 mA at 100 % → level 0.3; at 10 % duty a tenth of it.
-  const full = (3.3 - 2.1) / 510 / 8e-3
+  // The current the eye averages (light is linear in it for these AlGaInP dies; the drawn brightness is its Stevens power).
+  const ld1 = () => loop.snapshot()!.parts[partKey(u.id, "LD1")]!.amps!
+  const ext = () => loop.snapshot()!.parts[partKey(led.id, "LED")]!.amps!
+  // LD1: 3.3 V through 510 Ω into a green LED ≈ 2.4 mA at 100 %; at 10 % duty a tenth of it.
+  const full = (3.3 - 2.1) / 510
 
   beforeAll(() => {
     loop.setDoc(doc)
@@ -47,8 +48,8 @@ describe("Nucleo timers and PWM", () => {
   })
 
   it("dims LD1 to 10 % and the external LED to 30 %", () => {
-    expect.soft(ld1(), "LD1").toBeNear(full * 0.1, 0.02)
-    expect.soft(ext(), "external LED (TIM1, 330 Ω)").toBeNear(((3.3 - 2.1) / 330 / 8e-3) * 0.3, 0.03)
+    expect.soft(ld1(), "LD1").toBeNear(full * 0.1, 0.16e-3)
+    expect.soft(ext(), "external LED (TIM1, 330 Ω)").toBeNear(((3.3 - 2.1) / 330) * 0.3, 0.24e-3)
   })
 
   it("drives D6 rail to rail (a 20 kHz PWM)", () => {
@@ -58,7 +59,7 @@ describe("Nucleo timers and PWM", () => {
 
   it.each([20, 30, 40, 50])("follows the duty ramp on LD1 at %i %", (duty) => {
     run(0.1)
-    expect(ld1()).toBeNear((full * duty) / 100, 0.03)
+    expect(ld1()).toBeNear((full * duty) / 100, 0.24e-3)
   })
 
   // LD2 (blue, 330 Ω) is toggled at 200 Hz by the TIM2 interrupt: a 100 Hz square the eye sees as half brightness.

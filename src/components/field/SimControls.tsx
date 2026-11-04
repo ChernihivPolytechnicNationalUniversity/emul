@@ -54,12 +54,12 @@ export function SimControls({ sim, speed, started, probing, onProbeToggle, onTog
   // reads the achieved speed, not the wish, and says so.
   const lagging = sim.running && sim.rate !== null && sim.rate < speed * LAGGING
   return (
-    <div data-slot="sim-controls" className={cn("flex items-center gap-2", className)} {...props}>
+    <div data-slot="sim-controls" className={cn("flex items-center gap-2 max-md:flex-col-reverse max-md:items-start max-md:gap-1", className)} {...props}>
       <ButtonGroup>
         <Tooltip>
           <TooltipTrigger render={<Button variant={sim.running ? "secondary" : "default"} size="sm" onClick={onToggle} />}>
             {sim.running ? <PauseIcon /> : <PlayIcon />}
-            {sim.running ? "Pause" : "Run"}
+            <span className="max-md:sr-only">{sim.running ? "Pause" : "Run"}</span>
           </TooltipTrigger>
           <TooltipContent>{sim.running ? "Pause simulation" : "Run electrical simulation"}</TooltipContent>
         </Tooltip>

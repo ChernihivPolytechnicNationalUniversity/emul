@@ -26,10 +26,14 @@ export function ZoomControls({
       className={cn("flex items-center gap-2", className)}
       {...props}
     >
-      <Badge variant="secondary" className="tabular-nums">
+      <Badge variant="secondary" className="tabular-nums max-md:hidden">
         {Math.round(scale * 100)}%
       </Badge>
-      <ButtonGroup>
+      {/* A phone zooms with a pinch: the steps would only crowd the run controls, so the view reset stands alone. */}
+      <Button variant="outline" size="icon" className="md:hidden" onClick={onReset} aria-label="Reset view">
+        <MaximizeIcon />
+      </Button>
+      <ButtonGroup className="max-md:hidden">
         <Tooltip>
           <TooltipTrigger render={<Button variant="outline" size="icon" onClick={onZoomOut} />}>
             <MinusIcon />

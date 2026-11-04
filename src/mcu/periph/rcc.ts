@@ -97,14 +97,23 @@ export class Rcc extends RegBlock {
 
   /** PLLSAI and DCKCFGR (TIMPRE, PLLSAIDIVR): F42x/F43x and F7 only (RM0090 Table 34 vs Table 35). */
   readonly pllsai: boolean
+  /** F401/F411 (RM0368 Rev 6, RM0383 Rev 4 §6.3.21): no PLLSAI, but DCKCFGR with TIMPRE alone. */
+  readonly timpreOnly: boolean
+  /** F411 (RM0383 §6.3.20): PLLI2S has its own input divider PLLI2SM[5:0]; the F401 shares PLLCFGR.PLLM (RM0368 §6.3.20, bits 5:0 reserved). */
+  readonly plli2sm: boolean
 
-  constructor(lptim?: LptimProfile, resets: Partial<Record<string, number>> = {}, pllsai = true) {
-    const regs = REGS.filter((d) => pllsai || (d.name !== "PLLSAICFGR" && d.name !== "DCKCFGR"))
+  constructor(lptim?: LptimProfile, resets: Partial<Record<string, number>> = {}, pllsai = true, timpreOnly = false, plli2sm = false) {
+    const regs = REGS.filter((d) => pllsai || d.name !== "PLLSAICFGR")
+      .filter((d) => pllsai || timpreOnly || d.name !== "DCKCFGR")
+      .map((d) => (d.name === "DCKCFGR" && timpreOnly ? { ...d, rw: 1 << 24 } : d))
+      .map((d) => (d.name === "PLLI2SCFGR" && timpreOnly ? { ...d, rw: plli2sm ? 0x70007fff : 0x70007fc0 } : d))
       .map((d) => (d.name === "CR" && !pllsai ? { ...d, rw: d.rw! & ~CR_PLLSAION } : d))
       .map((d) => (resets[d.name] === undefined ? d : { ...d, reset: resets[d.name] }))
     super("RCC", RCC_BASE, 0x400, lptim ? [...regs, { name: "DCKCFGR2", offset: lptim.clockSelectOffset, rw: 0x1fffffff }] : regs)
     this.lptim = lptim
     this.pllsai = pllsai
+    this.timpreOnly = timpreOnly
+    this.plli2sm = plli2sm
   }
 
   apbClockOn(apb: 1 | 2, bit: number): boolean {
@@ -333,6 +342,21 @@ export class Rcc extends RegBlock {
     return (this.get(reg) & (1 << bit)) !== 0
   }
 
+  pllVcoHz(): number {
+    const cfg = this.regs[1]
+    const m = cfg & 0x3f
+    const src = cfg & (1 << 22) ? this.hseHz() : HSI_HZ
+    return m === 0 ? 0 : (src / m) * ((cfg >>> 6) & 0x1ff)
+  }
+
+  plli2sVcoHz(): number {
+    const cfg = this.regs[1]
+    const i2s = this.regs[0x84 >>> 2]
+    const m = this.plli2sm ? i2s & 0x3f : cfg & 0x3f
+    const src = cfg & (1 << 22) ? this.hseHz() : HSI_HZ
+    return m === 0 ? 0 : (src / m) * ((i2s >>> 6) & 0x1ff)
+  }
+
   pllOutput(): { p: number; q: number } {
     const cfg = this.get("PLLCFGR")
     const m = cfg & 0x3f
@@ -373,9 +397,9 @@ export class Rcc extends RegBlock {
     if (this.regs[2] & CFGR_I2SSRC) return null
     if (!(this.regs[0] & CR_PLLI2SRDY)) return 0
     const cfg = this.get("PLLCFGR")
-    const m = cfg & 0x3f
-    const src = cfg & (1 << 22) ? this.hseHz() : HSI_HZ
     const i2s = this.get("PLLI2SCFGR")
+    const m = this.plli2sm ? i2s & 0x3f : cfg & 0x3f
+    const src = cfg & (1 << 22) ? this.hseHz() : HSI_HZ
     const n = (i2s >>> 6) & 0x1ff
     const r = (i2s >>> 28) & 7
     if (m === 0 || r < 2) return 0
@@ -403,7 +427,7 @@ export class Rcc extends RegBlock {
     const apbDiv = (v: number) => (v < 4 ? 1 : 2 ** (v - 3))
     const ppre1 = apbDiv((cfgr >>> 10) & 7)
     const ppre2 = apbDiv((cfgr >>> 13) & 7)
-    const timpre = this.pllsai && (this.get("DCKCFGR") & (1 << 24)) !== 0
+    const timpre = (this.pllsai || this.timpreOnly) && (this.get("DCKCFGR") & (1 << 24)) !== 0
     const timclk = (pclk: number, div: number) => (timpre ? (div <= 4 ? hclk : pclk * 4) : div === 1 ? pclk : pclk * 2)
     return {
       sysclk,

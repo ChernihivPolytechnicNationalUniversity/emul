@@ -3,7 +3,7 @@ import { partKey, pinKey, type ComponentDef, type Damage, type PartState, type S
 import { parsePad, type PadRef } from "@/mcu/stm32f429"
 import { rcFrequency } from "@/mcu/pic/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
-import { crystalStartup } from "@/schematic/components/clock"
+import { crystalStartup, RESONATOR_STARTUP } from "@/schematic/components/clock"
 import { parseValue } from "./units"
 import { DT } from "./speeds"
 import { Engine, R_PULL, switchClosed, type Failure, type PartReader, type PinReader, type ProbeReading, type Reading, type TraceChunk } from "./engine"
@@ -17,6 +17,7 @@ import { PanelInstance } from "./display"
 import { isAdcPad } from "@/mcu/periph/adc"
 import { makeCore, PAD_KEYS, RemoteCore, type CoreHost, type CoreStatus, type CoreTransport, type PanelWiring } from "./core-host"
 import { NO_READBACK, PadRelease, releaseKind, Surroundings } from "./readback"
+import { ledLight } from "./led-light"
 import type { BreakpointSpec, CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 
 /**
@@ -41,6 +42,7 @@ const LOCKSTEP_LEAD = 1e-6
 const NRST_LOW = 0.3 * 3.3
 /** VBAT keeps the backup domain above this (the datasheet's 1.65 V minimum). */
 const VBAT_MIN = 1.65
+const VBAT_LOAD_RESOLUTION = 0.01
 /** BOOT0 counts as high above this (a TTL-ish threshold on the 3.3 V part). */
 const BOOT_HIGH = 0.5 * 3.3
 /** Below this on its VCC an oscillator module puts out nothing. */
@@ -168,20 +170,23 @@ export type McuStatus = CoreStatus & {
   reference: string | null
 }
 
-const VREF_MIN_VOLTS = 1.7
 const VREF_UNDER_VDDA_MAX_VOLTS = 1.2
 const VREF_OVER_VDDA_TOLERANCE_VOLTS = 0.01
 
 export type ReferenceWiring = { grounded: boolean; wired: boolean }
+export type ReferenceRules = { minVolts: number; minSource: string; vddaSource: string }
 
-export function referenceProblem(volts: number, vdda: number, { grounded, wired }: ReferenceWiring): string | null {
+export const DS10916_REFERENCE: ReferenceRules = { minVolts: 1.7, minSource: "DS10916 Tables 63 and 74", vddaSource: "DS10916 Table 63" }
+export const DS8626_REFERENCE: ReferenceRules = { minVolts: 1.8, minSource: "DS8626 Table 67", vddaSource: "DS8626 Table 67 and Table 14 note 4" }
+
+export function referenceProblem(volts: number, vdda: number, { grounded, wired }: ReferenceWiring, rules: ReferenceRules = DS10916_REFERENCE): string | null {
   const at = (v: number) => `${v.toFixed(2)} V`
   if (grounded) return "VREF+ grounded: no ADC/DAC reference"
-  if (!wired && volts < VREF_MIN_VOLTS) return "VREF+ floating: no ADC/DAC reference"
-  if (volts < VREF_MIN_VOLTS) return `VREF+ at ${at(volts)}: under the ${VREF_MIN_VOLTS} V the ADC and DAC need (DS10916 Tables 63 and 74)`
+  if (!wired && volts < rules.minVolts) return "VREF+ floating: no ADC/DAC reference"
+  if (volts < rules.minVolts) return `VREF+ at ${at(volts)}: under the ${rules.minVolts} V the ADC and DAC need (${rules.minSource})`
   if (!(vdda > 0)) return null
-  if (volts > vdda + VREF_OVER_VDDA_TOLERANCE_VOLTS) return `VREF+ at ${at(volts)}: above VDDA (${at(vdda)}), which DS10916 Table 63 does not allow`
-  if (vdda - volts >= VREF_UNDER_VDDA_MAX_VOLTS) return `VREF+ at ${at(volts)}: ${VREF_UNDER_VDDA_MAX_VOLTS} V or more under VDDA (${at(vdda)}), outside DS10916 Table 63`
+  if (volts > vdda + VREF_OVER_VDDA_TOLERANCE_VOLTS) return `VREF+ at ${at(volts)}: above VDDA (${at(vdda)}), which ${rules.vddaSource} does not allow`
+  if (vdda - volts >= VREF_UNDER_VDDA_MAX_VOLTS) return `VREF+ at ${at(volts)}: ${VREF_UNDER_VDDA_MAX_VOLTS} V or more under VDDA (${at(vdda)}), outside ${rules.vddaSource}`
   return null
 }
 
@@ -278,6 +283,9 @@ class McuInstance {
   boot0Net: number | undefined = undefined
   /** Net of VBAT (undefined: unsolved or absent, treated as VDD: nothing survives an outage). */
   vbatNet: number | undefined = undefined
+  vddaNet: number | undefined = undefined
+  vbatOhms: number | null = null
+  vddDown = true
   vrefNet: number | undefined = undefined
   vrefWired = false
   vref: number | undefined = undefined
@@ -311,7 +319,8 @@ class McuInstance {
 
   status(): McuStatus {
     const wiring = { grounded: this.vrefNet === GROUND, wired: this.vrefWired }
-    const reference = this.vref === undefined || this.vrefNet === undefined ? null : this.mcu.referenceProblem ? this.mcu.referenceProblem(this.vref, wiring) : referenceProblem(this.vref, this.vdda, wiring)
+    const rules = "line" in this.mcu.chip && this.mcu.chip.line === "f40x" ? DS8626_REFERENCE : DS10916_REFERENCE
+    const reference = this.vref === undefined || this.vrefNet === undefined ? null : this.mcu.referenceProblem ? this.mcu.referenceProblem(this.vref, wiring) : referenceProblem(this.vref, this.vdda, wiring, rules)
     return { ...this.mcu.status(), firmware: this.name, powered: this.powered, reference }
   }
 
@@ -348,9 +357,6 @@ const SERIES_OHMS = 1000
 const QUIET_STEPS = 500
 /** Time constant of the achieved-speed average, wall-clock seconds. */
 const RATE_TAU = 0.5
-/** Diode current that counts as fully lit. */
-export const LED_FULL = 8e-3
-export const LED_ON_LEVEL = 0.05
 
 /** A voltage measurement between two pins; a null `b` measures against ground. */
 export type Probe = { id: string; a: string; b: string | null }
@@ -697,15 +703,17 @@ export class SimLoop {
     const oscOut = pinNet.get(pinKey(object, outPin.id))
     if (oscIn === undefined || oscIn === GROUND) return { source: null }
     for (const obj of this.doc.objects) {
-      if (obj.def !== "crystal" && obj.def !== "oscillator") continue
+      if (obj.def !== "crystal" && obj.def !== "resonator" && obj.def !== "oscillator") continue
       const props = { ...getDef(obj.def)?.defaults, ...obj.props }
-      const hz = parseValue(props.value ?? "")
+      const deviation = obj.def === "resonator" ? Number.parseFloat(props.deviation ?? "0") : 0
+      const hz = parseValue(props.value ?? "") * (1 + (Number.isFinite(deviation) ? deviation : 0) / 100)
       if (!(hz > 0)) continue
-      if (obj.def === "crystal") {
+      if (obj.def === "crystal" || obj.def === "resonator") {
+        // A resonator's outer pins are 1 and 3; its middle pin is the built-in capacitors' ground.
         const a = pinNet.get(pinKey(obj.id, "1"))
-        const b = pinNet.get(pinKey(obj.id, "2"))
+        const b = pinNet.get(pinKey(obj.id, obj.def === "resonator" ? "3" : "2"))
         if (oscOut !== undefined && oscOut !== GROUND && ((a === oscIn && b === oscOut) || (a === oscOut && b === oscIn)))
-          return { source: { hz, kind: "crystal", startup: crystalStartup(hz) } }
+          return { source: { hz, kind: "crystal", startup: obj.def === "resonator" ? RESONATOR_STARTUP : crystalStartup(hz) } }
       } else if (pinNet.get(pinKey(obj.id, "OUT")) === oscIn) {
         return { source: { hz, kind: "clock", startup: 0 }, vccNet: pinNet.get(pinKey(obj.id, "VCC")) ?? GROUND }
       }
@@ -757,7 +765,8 @@ export class SimLoop {
       inst.powerNet = def?.mcuPower ? netOf(def.mcuPower) : undefined
       inst.resetNet = def?.mcuReset ? netOf(def.mcuReset) : undefined
       inst.boot0Net = def?.mcuBoot0 ? netOf(def.mcuBoot0) : undefined
-      inst.vbatNet = def?.mcuVbat ? engine.net.pinNet.get(pinKey(inst.object, def.mcuVbat)) : undefined
+      inst.vbatNet = def?.mcuVbat ? netOf(def.mcuVbat) : undefined
+      inst.vddaNet = def?.mcuVdda ? netOf(def.mcuVdda) : undefined
       const vrefPin = def?.mcuVref ? pinKey(inst.object, def.mcuVref) : undefined
       inst.vrefNet = vrefPin ? engine.net.pinNet.get(vrefPin) : undefined
       inst.vrefWired = inst.vrefNet !== undefined && [...engine.net.pinNet].some(([key, net]) => net === inst.vrefNet && key !== vrefPin)
@@ -1451,9 +1460,10 @@ export class SimLoop {
     }
     const inst = this.mcus.get(object)
     // A board's own chips (not its MCU's pads) answer below, as any digital part does.
-    if (inst?.mcu.loaded && (node === "$idd" || inst.pads.has(node) || !this.digitalParts.has(object))) {
+    if (inst?.mcu.loaded && (node === "$idd" || node === "$vbat" || inst.pads.has(node) || !this.digitalParts.has(object))) {
       // The supply load follows the power mode: the resistance that draws the mode's current.
       if (node === "$idd") return () => (inst.mcu.loaded ? inst.mcu.chip.electrical.vdd / inst.idd : null)
+      if (node === "$vbat") return () => inst.vbatOhms
       const pad = inst.pads.get(node)
       if (!pad) return () => null
       // The drive is recomputed only when the core's pads changed (its version counts every
@@ -1488,6 +1498,15 @@ export class SimLoop {
       }
     }
     return () => null
+  }
+
+  private backupDomainOhms(inst: McuInstance): number | null {
+    const engine = this.engine
+    if (!engine || !inst.mcu.loaded || !inst.vddDown || inst.vbatNet === undefined || inst.vbatNet === GROUND) return null
+    const vbat = Math.round(engine.v[inst.vbatNet] / VBAT_LOAD_RESOLUTION) * VBAT_LOAD_RESOLUTION
+    if (!(vbat > VBAT_MIN)) return null
+    const amps = inst.mcu.backupDomainCurrent?.(vbat) ?? 0
+    return amps > 0 ? vbat / amps : null
   }
 
   /** After a solver step, feed the node voltages back into the MCU input registers. */
@@ -2043,6 +2062,7 @@ export class SimLoop {
         const vbatUp = inst.vbatNet !== undefined && inst.vbatNet !== GROUND && engine.v[inst.vbatNet] > VBAT_MIN
         // An AVR has its own power-on threshold (VPOT) and brown-out detector, handled in its model.
         const outage = vdd < (inst.mcu.chip.family === "avr" || inst.mcu.chip.family === "pic" ? inst.mcu.porThreshold : Math.max(VDD_POR, inst.mcu.porThreshold))
+        inst.vddDown = outage
         if (outage || nrst < NRST_LOW) {
           if (inst.powered) {
             inst.powered = false
@@ -2073,7 +2093,7 @@ export class SimLoop {
           inst.base = engine.time
         }
         if (Number.isFinite(vdd)) {
-          inst.vdda = vdd
+          inst.vdda = inst.vddaNet === undefined ? vdd : inst.vddaNet === GROUND ? 0 : engine.v[inst.vddaNet]
           inst.mcu.setSupply(vdd)
         }
         // A part that reads its reset pin itself (a PIC's MCLR/VPP) gets the voltage on it.
@@ -2122,6 +2142,11 @@ export class SimLoop {
       let refresh = this.padsDirty
       this.padsDirty = false
       for (const inst of mcus) {
+        if (inst.vbatNet !== undefined) {
+          const vbatOhms = this.backupDomainOhms(inst)
+          if (vbatOhms !== inst.vbatOhms) refresh = true
+          inst.vbatOhms = vbatOhms
+        }
         const live = !inst.burnt && inst.powered
         if (live !== inst.padsLive) refresh = true
         inst.padsLive = live
@@ -2170,19 +2195,13 @@ export class SimLoop {
             had.also = [...(had.also ?? []), { element: f.damage.element, fail: f.damage.fail, reason: f.damage.reason }]
             if (f.damage.fatal) {
               had.fatal = true
-              this.digitalParts.get(f.object)?.burn?.()
+              this.burnOut(f.object, f.damage.reason)
             }
             this.onFailure?.(f)
             continue
           }
           this.damage[f.object] = f.damage
-          if (f.damage.fatal) this.digitalParts.get(f.object)?.burn?.()
-          // A burnt MCU is dead silicon: the core stops and its pads leave the circuit.
-          const inst = this.mcus.get(f.object)
-          if (inst?.mcu.loaded) {
-            inst.burnt = true
-            inst.mcu.halt(`burnt out: ${f.damage.reason}`)
-          }
+          if (f.damage.fatal) this.burnOut(f.object, f.damage.reason)
           this.onFailure?.(f)
         }
         this.rebuild(true)
@@ -2194,6 +2213,14 @@ export class SimLoop {
       if (this.debugStops(mcus)) return i + 1
     }
     return steps
+  }
+
+  private burnOut(object: string, reason: string) {
+    this.digitalParts.get(object)?.burn?.()
+    const inst = this.mcus.get(object)
+    if (!inst?.mcu.loaded) return
+    inst.burnt = true
+    inst.mcu.halt(`burnt out: ${reason}`)
   }
 
   /**
@@ -2298,8 +2325,8 @@ export class SimLoop {
       // A bench frozen by the debugger shows the current as it stands: the pins stay where the
       // stopped code left them for as long as the eye cares to look.
       const i = paused && !this.running ? engine.diodeI[index] : engine.diodeAvg[index]
-      const level = Math.min(1, Math.max(0, i) / LED_FULL)
-      parts[partKey(el.object, el.part)] = { on: level > LED_ON_LEVEL, level, amps: i }
+      const light = ledLight(i, el.vf ?? 0.7)
+      parts[partKey(el.object, el.part)] = { on: light.on, level: light.level, amps: i }
     })
     for (const part of this.digitalParts.values()) {
       const lit = part.parts?.()

@@ -111,7 +111,7 @@ export function ValueTree({ env, before, roots, radix, expanded, onToggle, onPic
           </span>
         )}
         {(canSet || (depth === 0 && root.actions)) && !edit && (
-          <span className="ml-auto flex shrink-0 items-center opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+          <span className="ml-auto flex shrink-0 items-center opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100">
             {canSet && (
               <Button variant="ghost" size="icon-xs" aria-label={`Set ${name}`} title="Set the value (or double-click it)" onClick={start}>
                 <PencilIcon />

@@ -181,6 +181,7 @@ export type PartDef =
       y: number
       /** Cable comes from this side of the connector. */
       side: Side
+      plug?: "usb-b"
       /** State before the user touches it (a board ships plugged in). */
       initial?: PartState
     }
@@ -269,11 +270,16 @@ export type Value = number | string | ((props: Record<string, string>) => number
  * the rest of the part keeps working on its own (the other half of a potentiometer).
  */
 /** `slow`: fails only by heating, never at once past 20 × its rating (a supply whose protection rides out a µs inrush). */
-export type Limits = { power?: Value; current?: Value; voltage?: Value; reverse?: Value; surge?: Value; tau?: Value; fail?: "open" | "short"; fatal?: boolean; aboveSupply?: Value; slow?: boolean }
+export type Limits = { power?: Value; current?: Value; voltage?: Value; reverse?: Value; surge?: Value; tau?: Value; fail?: "open" | "short"; fatal?: boolean; aboveSupply?: Value; slow?: boolean; overstress?: { seconds: Value; surgeVoltage?: Value; reverseSurge?: Value } }
 
 export type Element =
   /** `live` names a pin-reader key the simulation loop answers with the resistance to use right now (an MCU's supply load by power mode). */
-  | { kind: "R"; a: NodeRef; b: NodeRef; value: Value; live?: string; limits?: Limits; hidden?: boolean; supply?: boolean }
+  /**
+   * With `ptc`, a resettable fuse: it heats with I² toward `trip` (between Ihold and Itrip) with the
+   * time constant that trips it in `within` seconds at `at` amps; tripped, its resistance keeps `pd`
+   * watts in it; unpowered, it cools the same way and resets back at Ihold's heat.
+   */
+  | { kind: "R"; a: NodeRef; b: NodeRef; value: Value; live?: string; limits?: Limits; hidden?: boolean; supply?: boolean; ptc?: { hold: Value; trip: Value; at: Value; within: Value; pd: Value } }
   | { kind: "C"; a: NodeRef; b: NodeRef; value: Value; limits?: Limits; hidden?: boolean; euler?: boolean }
   | { kind: "L"; a: NodeRef; b: NodeRef; value: Value; limits?: Limits; hidden?: boolean }
   /**
@@ -367,11 +373,24 @@ export type Element =
    * higher, follows `in − dropout` below that, folds back to `imax` into an overload, and
    * blocks when something else holds `out` higher. Draws no quiescent current.
    */
-  | { kind: "REG"; in: NodeRef; out: NodeRef; gnd: NodeRef; value: Value; dropout?: Value; imax?: Value; limits?: Limits }
+  /**
+   * With `en`, the output is on once EN − GND rises past `enOn` and stays on until it falls below `enOff`.
+   * `rdrop` adds to the dropout with the load: dropout + rdrop · I.
+   * `gq` / `gqOff` are the regulator's own draw from IN to GND, in siemens, while on and while shut down.
+   * `thermal`: its junction heads for 25 °C + P · `rja` with time constant `tau`; off at `tsd` °C, back on at `tsdOff`.
+   */
+  | { kind: "REG"; in: NodeRef; out: NodeRef; gnd: NodeRef; value: Value; dropout?: Value; rdrop?: Value; imax?: Value; en?: NodeRef; enOn?: Value; enOff?: Value; gq?: Value; gqOff?: Value; thermal?: { rja: Value; tsd: Value; tsdOff: Value; tau: Value }; limits?: Limits }
   | { kind: "CHG"; in: NodeRef; bat: NodeRef; gnd: NodeRef; prog: NodeRef; chrg?: NodeRef; stdby?: NodeRef; ce?: NodeRef; temp?: NodeRef; value?: Value; limits?: Limits }
   | { kind: "PROT"; vdd: NodeRef; vss: NodeRef; cs: NodeRef; od: NodeRef; oc: NodeRef; chip: ProtChip; limits?: Limits }
   | { kind: "BOOST"; in: NodeRef; out?: NodeRef; gnd: NodeRef; fb: NodeRef; vcc?: NodeRef; en?: NodeRef; vref?: Value; eff?: Value; ilim?: Value; uvlo?: Value; iq?: Value; limits?: Limits }
   | { kind: "TMR"; vcc: NodeRef; gnd: NodeRef; trig: NodeRef; thres: NodeRef; ctrl: NodeRef; lo: NodeRef; reset: NodeRef; out: NodeRef; dis: NodeRef; limits?: Limits }
+  /**
+   * Operational amplifier, one amplifier of a package with its own supply pins: `part` is a
+   * preset id from `OPAMP_PRESETS` (`src/sim/opamp.ts`), whose datasheet figures the values given
+   * override — open-loop `gain` (V/V), `gbw` (Hz), `slew` (V/s), `vos` (V), the output's swing
+   * short of each `rail` (V) and its current limit `isc` (A). `limits.voltage` rates V+ − V−.
+   */
+  | { kind: "OPAMP"; inp: NodeRef; inn: NodeRef; out: NodeRef; vcc: NodeRef; vee: NodeRef; part: string; gain?: Value; gbw?: Value; slew?: Value; vos?: Value; rail?: Value; isc?: Value; limits?: Limits }
   /** Nodes that are the same conductor inside the component (a ground rail). */
   | { kind: "SHORT"; nodes: NodeRef[] }
 
@@ -436,6 +455,7 @@ export type ComponentDef = {
    */
   mcuVbat?: string
   mcuVref?: string
+  mcuVdda?: string
   /**
    * Clock sources a board carries for its MCU (null: the pins are free). A bare chip omits this
    * and gets its HSE/LSE from crystals or oscillators wired to its OSC pins on the field.

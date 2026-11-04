@@ -3,14 +3,33 @@ import { pinContacts } from "@/schematic/contacts"
 import { getDef } from "@/schematic/registry"
 import { pinKey, type Damage, type Element, type Limits, type NodeRef, type PlacedObject, type ProtChip, type Schematic, type Value } from "@/schematic/types"
 import { chemistryById, defaultResistance, type Chemistry } from "./battery"
+import { JUNCTION_VT as VT, saturationCurrent } from "./junction"
+import { opampSpec, type OpampSpec } from "./opamp"
 import { parseValue } from "./units"
 
 /** Net index; GROUND is the reference node and has no matrix row. */
 export const GROUND = -1
 
-export type ResolvedLimits = { power?: number; current?: number; voltage?: number; reverse?: number; surge?: number; tau: number; fail: "open" | "short"; fatal: boolean; aboveSupply?: number; slow?: boolean }
+export type ResolvedLimits = { power?: number; current?: number; voltage?: number; reverse?: number; surge?: number; tau: number; fail: "open" | "short"; fatal: boolean; aboveSupply?: number; slow?: boolean; overstress?: { seconds: number; surgeVoltage?: number; reverseSurge?: number } }
 
 export const DEFAULT_TAU = 0.035
+
+/** A regulator's thermal shutdown: junction-to-ambient °C/W, off and back-on temperatures (°C), the junction's time constant (s). */
+export type RegThermal = { rja: number; tsd: number; tsdOff: number; tau: number }
+
+export type Ptc = { trip: number; tau: number; pd: number; reset: number }
+
+/**
+ * A resettable fuse's heat model from its data sheet row: it trips where its heat, the running
+ * average of (I / trip)², reaches 1, `trip` midway between Ihold (never trips) and Itrip (always
+ * does); the time constant makes it trip in exactly `within` seconds at `at` amps; it resets at
+ * Ihold's heat, (Ihold / trip)².
+ */
+export function ptcModel(hold: number, trip: number, at: number, within: number, pd: number): Ptc | undefined {
+  if (![hold, trip, at, within, pd].every((n) => Number.isFinite(n) && n > 0) || trip <= hold || at <= trip) return undefined
+  const it = (hold + trip) / 2
+  return { trip: it, tau: within / -Math.log1p(-((it * it) / (at * at))), pd, reset: (hold * hold) / (it * it) }
+}
 
 /** Common to every solved element: owner object, model element index, display ref, ratings. `hidden` keeps it out of the inspector. */
 type Base = { id: string; object: string; element: number; ref: string; limits?: ResolvedLimits; hidden?: boolean }
@@ -18,7 +37,8 @@ type Base = { id: string; object: string; element: number; ref: string; limits?:
 /** `keys` are the node keys ("objectId:pinId") of the terminals, in the order listed per kind. */
 export type Resolved =
   /** An R with `live` takes its value from the pin reader on every step (see `Element`). */
-  | (Base & { kind: "R" | "C" | "L"; a: number; b: number; value: number; live?: string; euler?: boolean; keys: [string, string] })
+  /** `ptc`: a resettable fuse's trip current, thermal time constant (s), tripped dissipation (W) and reset heat (of the trip's). */
+  | (Base & { kind: "R" | "C" | "L"; a: number; b: number; value: number; live?: string; euler?: boolean; ptc?: Ptc; keys: [string, string] })
   /** `amplitude` is 0 for a DC source. */
   | (Base & { kind: "V"; plus: number; minus: number; value: number; amplitude: number; frequency: number; phase: number; shape: "sine" | "pulse"; duty: number; delay: number; index: number; keys: [string, string] })
   /**
@@ -45,7 +65,7 @@ export type Resolved =
     })
   /** `index` is the extra unknown (secondary current) like a source's. */
   | (Base & { kind: "XFMR"; p1: number; p2: number; s1: number; s2: number; ratio: number; index: number; keys: [string, string, string, string] })
-  | (Base & { kind: "D"; anode: number; anodePin?: number; cathode: number; is: number; n: number; zener?: number; part?: string; keys: [string, string] })
+  | (Base & { kind: "D"; anode: number; anodePin?: number; cathode: number; is: number; n: number; zener?: number; part?: string; keys: [string, string]; vf?: number })
   /** With `rc`, `c` is an internal node behind the collector resistance and `cPin` the pin's net; readings report pin to pin. */
   | (Base & { kind: "Q"; polarity: 1 | -1; b: number; c: number; e: number; beta: number; cPin: number; keys: [string, string, string] })
   | (Base & { kind: "M"; polarity: 1 | -1; g: number; d: number; s: number; vth: number; k: number; lambda: number; keys: [string, string, string] })
@@ -54,11 +74,13 @@ export type Resolved =
   /** MCU pad; what it drives is read live from the pin reader on every step. `vddNet` is the rail it switches to, when it has one. */
   | (Base & { kind: "GPIO"; node: number; nodeKey: string; vdd: number; vddNet: number | undefined; gndNet: number | undefined; ohms: number; ohmsAt: number; pull: number; keys: string[] })
   /** `index` is the extra unknown (through current, in → out) like a source's. */
-  | (Base & { kind: "REG"; in: number; out: number; gnd: number; value: number; dropout: number; imax: number; index: number; keys: [string, string] })
+  | (Base & { kind: "REG"; in: number; out: number; gnd: number; value: number; dropout: number; rdrop: number; imax: number; en?: number; enOn: number; enOff: number; gq: number; gqOff: number; thermal?: RegThermal; index: number; keys: [string, string, string] })
   | (Base & { kind: "CHG"; in: number; bat: number; gnd: number; progNet: number; chrg: number | undefined; stdby: number | undefined; ce: number | undefined; temp: number | undefined; value: number; index: number; prog: number; keys: string[] })
   | (Base & { kind: "PROT"; vdd: number; vss: number; cs: number; od: number; oc: number; spec: ProtSpec; keys: string[] })
   | (Base & { kind: "BOOST"; in: number; out: number; gnd: number; fb: number; vcc: number | undefined; en: number | undefined; vref: number; eff: number; ilim: number; uvlo: number; iq: number; index: number; keys: string[] })
   | (Base & { kind: "TMR"; vcc: number; gnd: number; trig: number; thres: number; ctrl: number; lo: number; reset: number; out: number; dis: number; keys: string[] })
+  /** `index` is the extra unknown, the output's target voltage. Keys in the order IN+, IN−, OUT, V+, V−. */
+  | (Base & { kind: "OPAMP"; inp: number; inn: number; out: number; vcc: number; vee: number; spec: OpampSpec; index: number; keys: string[] })
 
 export type ProtSpec = {
   overcharge: number
@@ -102,7 +124,6 @@ export type Netlist = {
   contacts: ReadonlyMap<string, string>
 }
 
-const VT = 0.025852
 /** Contact resistance of a switch that does not state its own. */
 const SW_RON = 0.05
 /**
@@ -117,10 +138,7 @@ const ZENER_IZT = 5e-3
 const ESD_DIODE_VF = 0.7
 const ESD_DIODE_N = 1
 
-/** Shockley saturation current so that the diode drops `vf` at 10 mA with emission coefficient n. */
-export function saturationCurrent(vf: number, n: number) {
-  return 0.01 / (Math.exp(vf / (n * VT)) - 1)
-}
+export { saturationCurrent }
 
 /**
  * Breakdown is modelled as a mirrored junction, so it conducts ~0.7 V past its offset. The
@@ -172,7 +190,9 @@ function resolveLimits(l: Limits | undefined, props: Record<string, string>): Re
     const n = resolveValue(v, props)
     return Number.isFinite(n) && n > 0 ? n : undefined
   }
-  const out = { power: num(l.power), current: num(l.current), voltage: num(l.voltage), reverse: num(l.reverse), surge: num(l.surge), tau: num(l.tau) ?? DEFAULT_TAU, fail: l.fail ?? "open", fatal: l.fatal ?? true, aboveSupply: num(l.aboveSupply), slow: l.slow }
+  const seconds = l.overstress ? num(l.overstress.seconds) : undefined
+  const overstress = l.overstress && seconds !== undefined ? { seconds, surgeVoltage: num(l.overstress.surgeVoltage), reverseSurge: num(l.overstress.reverseSurge) } : undefined
+  const out = { power: num(l.power), current: num(l.current), voltage: num(l.voltage), reverse: num(l.reverse), surge: num(l.surge), tau: num(l.tau) ?? DEFAULT_TAU, fail: l.fail ?? "open", fatal: l.fatal ?? true, aboveSupply: num(l.aboveSupply), slow: l.slow, overstress }
   // Every rating left blank (a battery without a stated max current): the element is unrated.
   if (out.power === undefined && out.current === undefined && out.voltage === undefined && out.reverse === undefined && out.aboveSupply === undefined) return undefined
   return out
@@ -205,6 +225,8 @@ function shortPair(el: Element): [NodeRef, NodeRef] | null {
       return [el.vdd, el.vss]
     case "TMR":
       return [el.vcc, el.gnd]
+    case "OPAMP":
+      return [el.vcc, el.vee]
     // A pad's blown protection diode ties it to the rail it clamped to; without a rail node
     // there is nothing to short to and the driver is simply gone.
     case "GPIO":
@@ -231,6 +253,7 @@ function damaged(el: Element, index: number, dmg: Damage | undefined): Element |
   }
   if (!dmg.fatal) return el
   if (el.kind === "R" && el.supply) return { kind: "R", a: el.a, b: el.b, value: 0.01 }
+  if (el.kind === "GPIO" && el.clamp) return el
   return null
 }
 
@@ -324,6 +347,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         touch(obj, el.in)
         touch(obj, el.out)
         touch(obj, el.gnd)
+        if (el.en) touch(obj, el.en)
         break
       case "CHG":
         for (const ref of [el.in, el.bat, el.gnd, el.prog, el.chrg, el.stdby, el.ce, el.temp]) if (ref) touch(obj, ref)
@@ -336,6 +360,9 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         break
       case "TMR":
         for (const ref of [el.vcc, el.gnd, el.trig, el.thres, el.ctrl, el.lo, el.reset, el.out, el.dis]) touch(obj, ref)
+        break
+      case "OPAMP":
+        for (const ref of [el.inp, el.inn, el.out, el.vcc, el.vee]) touch(obj, ref)
         break
     }
   }
@@ -394,7 +421,18 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
       case "L": {
         const value = resolveValue(el.value, props)
         if (Number.isFinite(value) && value > 0)
-          elements.push({ ...base, kind: el.kind, a: netOf(obj, el.a), b: netOf(obj, el.b), value, live: el.kind === "R" ? el.live : undefined, euler: el.kind === "C" ? el.euler : undefined, hidden: el.hidden, keys: [node(obj, el.a), node(obj, el.b)] })
+          elements.push({
+            ...base,
+            kind: el.kind,
+            a: netOf(obj, el.a),
+            b: netOf(obj, el.b),
+            value,
+            live: el.kind === "R" ? el.live : undefined,
+            euler: el.kind === "C" ? el.euler : undefined,
+            ptc: el.kind === "R" && el.ptc ? ptcModel(...([el.ptc.hold, el.ptc.trip, el.ptc.at, el.ptc.within, el.ptc.pd].map((v) => resolveValue(v, props)) as [number, number, number, number, number])) : undefined,
+            hidden: el.hidden,
+            keys: [node(obj, el.a), node(obj, el.b)],
+          })
         break
       }
       case "V": {
@@ -470,7 +508,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
           anodeKey = `${node(obj, el.anode)}$rs`
           nodeNet.set(anodeKey, anode)
         }
-        elements.push({ ...base, kind: "D", anode, anodePin, cathode: netOf(obj, el.cathode), is, n, zener: zener && Number.isFinite(zener) ? zenerOffset(zener, is, n) : undefined, part: el.part, hidden: el.hidden, keys: [anodeKey, node(obj, el.cathode)] })
+        elements.push({ ...base, kind: "D", anode, anodePin, cathode: netOf(obj, el.cathode), is, n, zener: zener && Number.isFinite(zener) ? zenerOffset(zener, is, n) : undefined, part: el.part, vf: Number.isFinite(vf) && vf > 0 ? vf : 0.7, hidden: el.hidden, keys: [anodeKey, node(obj, el.cathode)] })
         if (withRs) elements.push({ ...base, id: `${base.id}$rs`, kind: "R", a: anodePin, b: anode, value: rs, hidden: true, limits: undefined, keys: [node(obj, el.anode), anodeKey] })
         break
       }
@@ -514,7 +552,8 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         const ohms = el.drive ? resolveValue(el.drive.ohms, props) : NaN
         const at = el.drive?.at !== undefined ? resolveValue(el.drive.at, props) : NaN
         const pull = el.pull === undefined ? NaN : resolveValue(el.pull, props)
-        elements.push({
+        const dieDead = damage[obj.id]?.fatal === true
+        if (!dieDead) elements.push({
           ...base,
           kind: "GPIO",
           node: netOf(obj, el.node),
@@ -533,7 +572,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
           elements.push({ ...base, id: `${base.id}$cio`, kind: "C", a: netOf(obj, el.node), b: ground, value: el.capacitance, euler: true, hidden: true, limits: undefined, keys: [pin, groundKey] })
         const injection = el.clamp ? resolveValue(el.clamp.injection, props) : NaN
         if (el.clamp && Number.isFinite(injection) && injection > 0) {
-          const clampDiode = { ...base, kind: "D" as const, is: saturationCurrent(ESD_DIODE_VF, ESD_DIODE_N), n: ESD_DIODE_N, hidden: true, limits: { current: injection, tau: DEFAULT_TAU, fail: "short" as const, fatal: true } }
+          const clampDiode = { ...base, kind: "D" as const, is: saturationCurrent(ESD_DIODE_VF, ESD_DIODE_N), n: ESD_DIODE_N, hidden: true, limits: dieDead ? undefined : { current: injection, tau: DEFAULT_TAU, fail: "short" as const, fatal: true } }
           elements.push({ ...clampDiode, id: `${base.id}$clamp-vss`, anode: ground, cathode: netOf(obj, el.node), keys: [groundKey, pin] })
           if (el.clamp.rail) elements.push({ ...clampDiode, id: `${base.id}$clamp-vdd`, anode: netOf(obj, el.node), cathode: netOf(obj, el.clamp.rail), keys: [pin, node(obj, el.clamp.rail)] })
         }
@@ -543,8 +582,19 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         const value = resolveValue(el.value, props)
         const dropout = el.dropout === undefined ? 0 : resolveValue(el.dropout, props)
         const imax = el.imax === undefined ? Infinity : resolveValue(el.imax, props)
+        const enOn = el.enOn === undefined ? 0 : resolveValue(el.enOn, props)
+        const enOff = el.enOff === undefined ? enOn : resolveValue(el.enOff, props)
+        const positive = (v: Value | undefined) => {
+          const n = v === undefined ? 0 : resolveValue(v, props)
+          return Number.isFinite(n) && n > 0 ? n : 0
+        }
+        const gq = positive(el.gq)
+        const rdrop = positive(el.rdrop)
+        const gqOff = el.gqOff === undefined ? gq : positive(el.gqOff)
+        const t = el.thermal && { rja: positive(el.thermal.rja), tsd: positive(el.thermal.tsd), tsdOff: positive(el.thermal.tsdOff), tau: positive(el.thermal.tau) }
+        const thermal = t && t.rja > 0 && t.tau > 0 && t.tsd > t.tsdOff ? t : undefined
         if (Number.isFinite(value) && value > 0)
-          elements.push({ ...base, kind: "REG", in: netOf(obj, el.in), out: netOf(obj, el.out), gnd: netOf(obj, el.gnd), value, dropout: Number.isFinite(dropout) ? Math.max(0, dropout) : 0, imax: imax > 0 ? imax : Infinity, index: sources++, keys: [node(obj, el.in), node(obj, el.out)] })
+          elements.push({ ...base, kind: "REG", in: netOf(obj, el.in), out: netOf(obj, el.out), gnd: netOf(obj, el.gnd), value, dropout: Number.isFinite(dropout) ? Math.max(0, dropout) : 0, rdrop, imax: imax > 0 ? imax : Infinity, en: el.en ? netOf(obj, el.en) : undefined, enOn, enOff: Math.min(enOn, enOff), gq, gqOff, thermal, index: sources++, keys: [node(obj, el.in), node(obj, el.out), node(obj, el.gnd)] })
         break
       }
       case "CHG": {
@@ -634,6 +684,22 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
           keys: [el.vcc, el.gnd, el.out, el.dis, el.trig, el.thres, el.reset].map((ref) => node(obj, ref)),
         })
         break
+      case "OPAMP": {
+        const num = (v: Value | undefined) => (v === undefined ? undefined : resolveValue(v, props))
+        elements.push({
+          ...base,
+          kind: "OPAMP",
+          inp: netOf(obj, el.inp),
+          inn: netOf(obj, el.inn),
+          out: netOf(obj, el.out),
+          vcc: netOf(obj, el.vcc),
+          vee: netOf(obj, el.vee),
+          spec: opampSpec(el.part, { gain: num(el.gain), gbw: num(el.gbw), slew: num(el.slew), vos: num(el.vos), rail: num(el.rail), isc: num(el.isc) }),
+          index: sources++,
+          keys: [el.inp, el.inn, el.out, el.vcc, el.vee].map((ref) => node(obj, ref)),
+        })
+        break
+      }
     }
   }
 

@@ -50,6 +50,10 @@ export class Artwork {
     return new Artwork(this.frame, { x: this.dx + by.x, y: this.dy + by.y }, this.shared, this.nextGroup(), this.clip)
   }
 
+  shifted(by: Mm): Artwork {
+    return new Artwork(this.frame, { x: this.dx + by.x, y: this.dy + by.y }, this.shared, this.group, this.clip)
+  }
+
   grouped(): Artwork {
     return this.moved({ x: 0, y: 0 })
   }

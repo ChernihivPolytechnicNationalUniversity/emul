@@ -5,7 +5,7 @@ import { objectSize, orientationOf, placedText, type Orientation } from "@/schem
 import { getDef, partInitial } from "@/schematic/registry"
 import { partKey, type BodyShape, type ComponentDef, type Damage, type Fill, type PartDef, type PartState, type PlacedObject } from "@/schematic/types"
 import { LED_COLORS } from "@/schematic/components/basic"
-import { grownAt, isPrintedName, printedGrowth } from "@/schematic/printed-text"
+import { grownAt, isPrintedName, printedGrowth, TYPE_B_PLUG_MM, usbDrawing, usbLabelBelow } from "@/schematic/printed-text"
 import { ambientOf, rgbLedGlow } from "@/schematic/components/rgb-led"
 import type { DisplayFrame } from "@/sim/use-simulation"
 import { screenCanvas, type Screen } from "@/sim/screen"
@@ -460,6 +460,26 @@ function DisplayPanel({ part, g, level, display, mirror, onChange }: { part: Ext
   )
 }
 
+const PLUG_TURN: Record<"left" | "right" | "top" | "bottom", number> = { left: 0, right: 180, top: 90, bottom: -90 }
+const PLUG_BODY_OPACITY = 0.78
+
+function TypeBPlug({ cx, cy, side, g, cableCells }: { cx: number; cy: number; side: "left" | "right" | "top" | "bottom"; g: (v: number) => number; cableCells: number }) {
+  const mm = (v: number) => g(v / 2.54)
+  const { shell, overmold, cable } = TYPE_B_PLUG_MM
+  const shellEnd = cx - mm(shell.exposed)
+  const moldEnd = shellEnd - mm(overmold.length)
+  const half = mm(overmold.width / 2)
+  return (
+    <g transform={PLUG_TURN[side] ? `rotate(${PLUG_TURN[side]} ${cx} ${cy})` : undefined}>
+      <rect x={shellEnd} y={cy - mm(shell.width / 2)} width={cx - shellEnd} height={mm(shell.width)} className="fill-secondary stroke-border" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+      <g opacity={PLUG_BODY_OPACITY}>
+        <line x1={moldEnd + mm(1)} y1={cy} x2={moldEnd - g(cableCells)} y2={cy} className="stroke-foreground" strokeWidth={mm(cable)} strokeLinecap="round" />
+        <rect x={moldEnd} y={cy - half} width={shellEnd - moldEnd} height={half * 2} rx={mm(overmold.corner)} className="fill-foreground stroke-none" />
+      </g>
+    </g>
+  )
+}
+
 /**
  * A passive LCD or OLED: the dots its model reports, each coloured between the glass and the
  * ink by how strongly it is driven, character cells set apart by a dot-wide gap.
@@ -669,7 +689,7 @@ function SoundArcs({ cx, cy, g, level }: { cx: number; cy: number; g: (v: number
   )
 }
 
-function Part({
+export function Part({
   part,
   g,
   state,
@@ -814,11 +834,13 @@ function Part({
   if (part.type === "usb") {
     // Connector body with the cable plugged in (or not). The cable leaves toward `side`.
     const dir = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] }[part.side]
-    const w = g(2.4)
-    const h = g(1.2)
+    const drawing = usbDrawing(part)
     const plugged = !!state.on
-    const cx2 = cx + dir[0] * g(1.9)
-    const cy2 = cy + dir[1] * g(1.4)
+    const cx2 = cx + dir[0] * g(drawing.boot.alongX)
+    const cy2 = cy + dir[1] * g(drawing.boot.alongY)
+    const across = g(drawing.boot.across)
+    const labelY = cy + g(usbLabelBelow(drawing))
+    const reach = Math.max(g(1.2), across / 2)
     return (
       <g
         className="cursor-pointer"
@@ -829,35 +851,42 @@ function Part({
         }}
       >
         <title>{`${title}: click to ${plugged ? "unplug" : "plug in"}`}</title>
-        <rect x={cx - w / 2} y={cy - h / 2} width={w} height={h} rx={g(0.15)} className="fill-neutral-300 stroke-foreground/50 dark:fill-neutral-600" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-        <rect x={cx - w / 2 + g(0.3)} y={cy - h / 2 + g(0.3)} width={w - g(0.6)} height={h - g(0.6)} className="fill-neutral-500 stroke-none dark:fill-neutral-800" />
-        {plugged && (
+        {drawing.receptacle && (
           <>
-            <rect x={cx - g(0.9)} y={cy - g(0.45)} width={g(1.8)} height={g(0.9)} rx={g(0.1)} className="fill-neutral-700 stroke-none dark:fill-neutral-300" />
+            <rect x={cx - g(drawing.receptacle.w) / 2} y={cy - g(drawing.receptacle.h) / 2} width={g(drawing.receptacle.w)} height={g(drawing.receptacle.h)} rx={g(0.15)} className="fill-neutral-300 stroke-foreground/50 dark:fill-neutral-600" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+            <rect x={cx - g(drawing.receptacle.w) / 2 + g(0.3)} y={cy - g(drawing.receptacle.h) / 2 + g(0.3)} width={g(drawing.receptacle.w) - g(0.6)} height={g(drawing.receptacle.h) - g(0.6)} className="fill-neutral-500 stroke-none dark:fill-neutral-800" />
+            {plugged && <rect x={cx - g(0.9)} y={cy - g(0.45)} width={g(1.8)} height={g(0.9)} rx={g(0.1)} className="fill-neutral-700 stroke-none dark:fill-neutral-300" />}
+          </>
+        )}
+        {plugged && !drawing.receptacle && <TypeBPlug cx={cx} cy={cy} side={part.side} g={g} cableCells={drawing.cable.length} />}
+        {plugged && drawing.receptacle && (
+          <>
             <rect
-              x={Math.min(cx, cx2) - (dir[1] ? g(0.9) : 0)}
-              y={Math.min(cy, cy2) - (dir[0] ? g(0.9) : 0)}
-              width={dir[0] ? Math.abs(cx2 - cx) : g(1.8)}
-              height={dir[1] ? Math.abs(cy2 - cy) : g(1.8)}
+              x={Math.min(cx, cx2) - (dir[1] ? across / 2 : 0)}
+              y={Math.min(cy, cy2) - (dir[0] ? across / 2 : 0)}
+              width={dir[0] ? Math.abs(cx2 - cx) : across}
+              height={dir[1] ? Math.abs(cy2 - cy) : across}
               rx={g(0.3)}
               className="fill-neutral-700 stroke-none dark:fill-neutral-300"
             />
             <line
               x1={cx2}
               y1={cy2}
-              x2={cx2 + dir[0] * g(6)}
-              y2={cy2 + dir[1] * g(6)}
+              x2={cx2 + dir[0] * g(drawing.cable.length)}
+              y2={cy2 + dir[1] * g(drawing.cable.length)}
               className="stroke-neutral-700 dark:stroke-neutral-300"
-              strokeWidth={g(0.3)}
+              strokeWidth={g(drawing.cable.width)}
               strokeLinecap="round"
             />
           </>
         )}
-        <text x={cx} y={cy + h / 2 + g(0.45)} fontSize={g(0.3 * textScale)} textAnchor="middle" transform={partText(cx, cy + h / 2 + g(0.45))} className={cn("stroke-none font-mono", plugged ? "fill-foreground" : "fill-muted-foreground")}>
-          {plugged ? "USB" : "USB (unplugged)"}
-        </text>
+        {(!plugged || drawing.receptacle) && (
+          <text x={cx} y={labelY} fontSize={g(0.3 * textScale)} textAnchor="middle" transform={partText(cx, labelY)} className={cn("stroke-none font-mono", plugged ? "fill-foreground" : "fill-muted-foreground")}>
+            {plugged ? "USB" : "USB (unplugged)"}
+          </text>
+        )}
         {/* generous hit area */}
-        <rect x={cx - w} y={cy - h} width={w * 2} height={h * 2} className="fill-transparent stroke-none" />
+        <rect x={cx - reach * 2} y={cy - reach} width={reach * 4} height={reach * 2} className="fill-transparent stroke-none" />
       </g>
     )
   }

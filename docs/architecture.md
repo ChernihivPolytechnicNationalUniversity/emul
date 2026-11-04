@@ -2,7 +2,7 @@
 
 ## Layout
 
-- `src/mcu/` — the emulator: `cpu.ts`, `decode.ts`, `jit.ts` (blocks compiled to JavaScript), `scs.ts` (NVIC/SysTick/SCB), `mpu.ts` (the MPU and the unprivileged PPB rule, checked in front of the bus only while they can refuse something), `bus.ts`, `periph/*`, `chip.ts` (profiles), `stm32f429.ts` (the SoC class `Stm32`), `debugger.ts` (breakpoints and stepping, beside the core), `core-worker.ts` (one core in a worker of its own)
+- `src/mcu/` — the emulator: `cpu.ts`, `decode.ts`, `jit.ts` (blocks compiled to JavaScript), `scs.ts` (NVIC/SysTick/SCB), `mpu.ts` (the MPU and the unprivileged PPB rule, checked in front of the bus only while they can refuse something), `bus.ts`, `periph/*`, `chip.ts` (profiles), `supply.ts` (the supply-current tables a profile may carry: base by HCLK, per-peripheral µA/MHz, low-power and VBAT rows), `stm32f429.ts` (the SoC class `Stm32`), `debugger.ts` (breakpoints and stepping, beside the core), `core-worker.ts` (one core in a worker of its own)
 - `src/sim/` — analog engine (`engine.ts`), netlist, the co-simulation loop (`loop.ts`) and its worker, `core-host.ts` (a core in this thread or in a worker, over a SharedArrayBuffer), digital parts (`digital.ts`)
 - `src/schematic/` — component definitions (`components/*`), examples, geometry, `mcu-model.ts`; wiring in `nets.ts` (the net map), `wiring.ts` (connect, tap), `wire-colors.ts` (palette, shortcuts, the automatic rule)
 - `src/debug/` — the debugger's reading of an image: `dwarf/*` (DWARF 2–5: units, line programs, range and location lists, call frame information, expressions, macros), `lines.ts` (the line table, shared by the core and the editor), `info.ts`, `unwind.ts`, `values.ts` and `eval.ts` (values and C expressions over a stop's memory), `disasm.ts`, `sources.ts` (where a file the image names comes from); `session.ts` is the UI's controller for the whole bench
@@ -260,6 +260,53 @@ and a longer one is held against Pmax. A coil let go without a flyback diode is 
 killing the part on its Vds rating. A buzzer coil's kick lasts L·I / (V(BR) − Vdd) ≈ 2 µs, inside
 one step: the step's share of it is what the solver sees.
 
+## Op amps
+
+Every preset in `OPAMP_PRESETS` (`src/sim/opamp.ts`) is one datasheet's typical figures at 25 °C
+and a palette entry of its own, `opamp-<preset id>` (`src/schematic/components/opamp.ts`): the
+generic "Op amp", an ideal amplifier with rails whose figures the inspector sets, and the LM358,
+LM741, TL072, MCP6002 and LMV358, which have no settings. A symbol is one amplifier with its supply pins
+drawn on it, the way a schematic draws a dual's two halves; the inspector names the package pins.
+
+The `OPAMP` element is a single-pole macro-model with an unknown of its own beside the node
+voltages: the output's target T. Its row is the input stage. Linear, it is T integrated by backward
+Euler, (1 + leak)·T − k·(V(IN+) − V(IN−)) − leak·(V(V+) + V(V−)) / 2 = held + k·VOS with
+k = 2π · GBW · dt and leak = k / gain: the target moves 2π · GBW volts a second per volt of drive
+and settles at the open-loop gain times it, around mid-supply. Otherwise the row fixes it: slewing
+(held ± SR · dt) or at a rail (V+ less the unloaded swing, V− plus it). The output stage drives T
+through the output resistance, or past the short-circuit current holds that current; what it
+sources comes from V+ and what it sinks goes to V−, beside the quiescent current from V+ to V− and
+the bias currents (from V+ out of a PNP input, into an NPN or JFET one and on to V−). Both are
+piecewise linear, and a Newton iteration moves either only to a region next to the one it solved
+in: at a saturated guess the linear target is the open-loop gain on a stale drive, and a
+negative-feedback loop thrown from rail to rail on it never converges. With T an unknown, a step
+starts from the output stage where the last one left it rather than from the target that stale
+drive would put it at.
+
+Backward Euler is what makes a negative-feedback loop solvable at 20 µs a step — a follower's
+closed-loop pole is a few hundred nanoseconds — but it damps a growing mode as surely: an op amp
+with positive feedback (a Schmitt trigger, an astable) would settle on its unstable equilibrium and
+stay. So after each solve, an op amp left linear has its loop measured through the factors
+(`opampFeedback`: a unit in its target's row moves the drive at its inputs and the target, and
+their ratio is the circuit's own feedback, whatever the row's gain). Past one over a whole step, it
+tips over (`OA_TIP_*`) the way its drive pointed as the span began, and the span is solved again
+with it slewing. A tipping op amp that reaches its rail is held there (`OA_HELD_*`) while its loop
+would still tip, and the margin of a held one — its drive towards that rail — is an event like a
+555's comparator (`findTimerEvent`): the step is solved up to the crossing and refined there,
+committed, and the rest solved with the op amp tipping the other way, in the controlled sub-steps
+a 555's switch gets. An astable whose half-period is 5.49 steps keeps it within 0.2 %. A free op
+amp at a rail with no positive feedback, a clipping amplifier or an open-loop comparator, simply
+moves between its regions. The latch is left out of the switch mask: holding changes no stamp, and
+a step that starts with the mask changed restarts every capacitor the last sub-step's matrix makes
+look stiff, the timing capacitor of an astable among them.
+
+The inspector reads the region (linear, slewing, saturated, current limited, held there by its
+positive feedback), IN+ − IN−, a supply outside the specified range and inputs outside the
+common-mode range or past the absolute maximum. The supply past its absolute maximum or the
+package past its dissipation (a thermal time constant of 1 s) destroys the die, which shorts its
+rails; a hidden substrate diode from V− to V+ burns on a reversed supply, and the MCP6002's input
+diodes to VSS past the 2 mA its sheet allows.
+
 ## The linear solve
 
 Each Newton iteration factors the MNA matrix and substitutes through it (`src/sim/sparse-lu.ts`). The matrix is
@@ -273,6 +320,15 @@ walks only that pattern in that order. The order is redone when a stamp lands ou
 reused pivot falls under the threshold against its column, a stricter test than ngspice's `spFactor`, which
 reuses the order until a pivot is exactly zero; KLU's guide recommends a check of this kind after `klu_refactor`.
 On the examples the order is redone one to seven times in two simulated seconds.
+
+A linear circuit keeps its factorization from step to step while nothing that is stamped into the
+matrix changes. What can change is keyed in one number: every switch, arc, live resistance, tripped
+polyfuse, battery step, controller and regulator state, pulse level and every pad's state and drive
+step, folded into two 32-bit lanes (FNV-1a and a multiply-xorshift) and joined into 53 bits. A live
+resistance goes in as its float's 64 bits, not rounded to whole ohms. The pads' share is rehashed only
+when a pad's state or drive step was written. A base-31 sum, which this replaced, took
+`(pad low, 1 Ω)` and `(pad high, 32 Ω)` for one circuit and solved the second on the first's factors
+(`tests/sim/engine-lu-key.test.ts`).
 
 The dense factorization this replaced cost O(n³) every step. On the metronome (53 unknowns, 115 elements) a 20 µs
 step took 113 µs in Node, 46 of them in the factorization; it now takes about 45. Measured in headless

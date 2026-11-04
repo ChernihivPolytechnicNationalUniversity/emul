@@ -40,7 +40,11 @@ export class Pwr extends RegBlock {
   /** Over-/under-drive (ODEN, ODSWEN, UDEN, MRUDS, LPUDS, ADCDC1): F42x and F7 only (RM0090 §5.1.4 vs §5.1.3). */
   readonly overdrive: boolean
 
-  constructor(map: "v1" | "v2" = "v1", pvdLevels: PvdLevels | null = null, vdd = 3.3, overdrive = true) {
+  /** F411 / F401 (RM0383 Rev 4, RM0368 Rev 6 §5.4.1): their own CR layout, see the CR definition. */
+  readonly f411: boolean
+
+  constructor(map: "v1" | "v2" = "v1", pvdLevels: PvdLevels | null = null, vdd = 3.3, overdrive = true, small: "f411" | "f401" | null = null) {
+    const f411 = small !== null
     super(
       "PWR",
       0x40007000,
@@ -48,7 +52,14 @@ export class Pwr extends RegBlock {
       map === "v1"
         ? [
             // F40x: reset 0x0000 4000, one VOS bit, bits 31:15 and 13:10 reserved (RM0090 §5.4.1, Table 32).
-            overdrive ? { name: "CR", offset: 0x00, reset: 0x0000c000 } : { name: "CR", offset: 0x00, reset: 0x00004000, rw: 0x000043ff },
+            // F411: reset 0x0000 8000 (VOS = 10, scale 2), FISSR 21, FMSSR 20, VOS[15:14], ADCDC1 13, MRLVDS 11,
+            // LPLVDS 10, bits 31:22, 19:16 and 12 reserved (RM0383 Rev 4 §5.4.1). F401: the same without FISSR/FMSSR
+            // (RM0368 Rev 6 §5.4.1, bits 31:16 reserved).
+            f411
+              ? { name: "CR", offset: 0x00, reset: 0x00008000, rw: small === "f401" ? 0x0000efff : 0x0030efff }
+              : overdrive
+              ? { name: "CR", offset: 0x00, reset: 0x0000c000 }
+              : { name: "CR", offset: 0x00, reset: 0x00004000, rw: 0x000043ff },
             { name: "CSR", offset: 0x04, reset: 0, rw: 0x00000300 },
           ]
         : [
@@ -60,6 +71,7 @@ export class Pwr extends RegBlock {
     )
     this.map = map
     this.overdrive = overdrive
+    this.f411 = f411
     this.pvdLevels = pvdLevels
     this.vdd = vdd
   }
@@ -120,6 +132,14 @@ export class Pwr extends RegBlock {
         if (this.map === "v1" && written & (1 << 2)) csr &= ~1
         if (written & (1 << 3)) csr &= ~2
         this.regs[1] = csr >>> 0
+        if (this.f411) {
+          const turnedOn = next & ~old
+          // RM0383 §5.4.1: low-voltage regulator modes in deep sleep, flash in power-down while running, ADCDC1 (AN4073).
+          if (turnedOn & (1 << 11)) this.onUnsupported("PWR MRLVDS: main regulator low voltage in Stop")
+          if (turnedOn & (1 << 10)) this.onUnsupported("PWR LPLVDS: low-power regulator low voltage in Stop")
+          if (turnedOn & (3 << 20)) this.onUnsupported("PWR FMSSR/FISSR: flash stopped while the system runs")
+          if (turnedOn & (1 << 13)) this.onUnsupported("PWR ADCDC1")
+        }
         this.updatePvd(next)
         return next & ~0xc
       }
@@ -172,12 +192,15 @@ export class Pwr extends RegBlock {
 // --- SYSCFG (RM0090 §9) -------------------------------------------------------------------
 
 export class Syscfg extends RegBlock {
-  constructor(line: "f40x" | "f42x" | "f7" = "f42x") {
+  constructor(line: "f40x" | "f401" | "f411" | "f42x" | "f7" = "f42x") {
     const f40x = line === "f40x"
+    // F401: the same MEMRMP/PMC as the F411 (RM0368 Rev 6 §7.2.1, §7.2.2).
+    const f411 = line === "f411" || line === "f401"
     super("SYSCFG", 0x40013800, 0x400, [
       // F40x: MEM_MODE[1:0] only, PMC MII_RMII_SEL only (RM0090 §9.2.1, §9.2.2).
-      f40x ? { name: "MEMRMP", offset: 0x00, rw: 0x3 } : { name: "MEMRMP", offset: 0x00 },
-      f40x ? { name: "PMC", offset: 0x04, rw: 0x00800000 } : { name: "PMC", offset: 0x04 },
+      // F411: MEM_MODE[1:0] only, PMC ADC1DC2 (bit 16) only (RM0383 Rev 4 §7.2.1, §7.2.2).
+      f40x || f411 ? { name: "MEMRMP", offset: 0x00, rw: 0x3 } : { name: "MEMRMP", offset: 0x00 },
+      f40x ? { name: "PMC", offset: 0x04, rw: 0x00800000 } : f411 ? { name: "PMC", offset: 0x04, rw: 0x00010000 } : { name: "PMC", offset: 0x04 },
       { name: "EXTICR1", offset: 0x08, rw: 0xffff },
       { name: "EXTICR2", offset: 0x0c, rw: 0xffff },
       { name: "EXTICR3", offset: 0x10, rw: 0xffff },

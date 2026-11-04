@@ -27,6 +27,8 @@ export const UNIT_PREFIXES: Record<string, readonly SiPrefix[]> = {
   Hz: ["", "k", "M"],
   Ah: ["m", ""],
   VA: ["", "k"],
+  dB: [""],
+  "V/µs": [""],
 }
 
 /** Normalise the spellings the parser accepts to the one prefix shown in menus. */

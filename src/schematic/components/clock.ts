@@ -39,6 +39,52 @@ export const crystal: ComponentDef = {
   model: [],
 }
 
+/**
+ * Murata CSTCE16M0V53-R0 (product page): 16.000 MHz, ±0.50 % initial tolerance, ±0.3 % over
+ * −20…80 °C, ±0.2 % ageing, ESR 40 Ω, the load capacitors built in (15 pF) on the middle pin.
+ */
+export const RESONATOR_TOLERANCE = { initial: 0.5, temperature: 0.3, ageing: 0.2 }
+
+/** Assumed until checked: a ceramic resonator is up in 0.5 ms, a quarter of a MHz crystal's 2 ms (Murata gives no figure). */
+export const RESONATOR_STARTUP = 0.5e-3
+
+export const resonator: ComponentDef = {
+  id: "resonator",
+  name: "Ceramic resonator",
+  description:
+    "Three-pin ceramic resonator with its load capacitors built in (Murata CSTCE16M0V53, Arduino Uno's 16 MHz): the outer pins across XTAL1/XTAL2 or OSC_IN/OSC_OUT, the middle one to ground. Coarser than quartz: ±0.5 % as made, ±0.3 % with temperature, ±0.2 % with age; the deviation sets where this part sits.",
+  category: "Clock",
+  icon: CrystalIcon,
+  prefix: "Y",
+  defaults: { value: "16 MHz", deviation: "0" },
+  fields: [
+    { key: "value", label: "Frequency", type: "quantity", unit: "Hz" },
+    { key: "deviation", label: "Deviation (%)", type: "text", placeholder: "±1 % at worst" },
+  ],
+  width: 4,
+  height: 3,
+  parts: [],
+  pins: [
+    { id: "1", label: "", x: 0, y: 1, side: "left", labelAt: "top", kind: "digital", note: "Input or output (pin 1)" },
+    { id: "3", label: "", x: 4, y: 1, side: "right", labelAt: "top", kind: "digital", note: "Output or input (pin 3)" },
+    { id: "2", label: "", x: 2, y: 3, side: "bottom", labelAt: "right", kind: "gnd", note: "The built-in capacitors' common, to ground (pin 2)" },
+  ],
+  body: [
+    { type: "path", d: "M0 1 H1.3 M2.7 1 H4 M1.3 0.4 V1.6 M2.7 0.4 V1.6 M1 1 V2.2 H3 V1 M2 2.2 V3" },
+    { type: "rect", x: 1.6, y: 0.3, w: 0.8, h: 1.4, fill: "none" },
+    { type: "text", x: 2, y: 0.05, text: "{ref}", size: 0.35 },
+    { type: "text", x: 3.1, y: 2.6, text: "{value}", size: 0.3, muted: true, anchor: "start" },
+  ],
+  // An open circuit at DC, like the crystal; the built-in 15 pF change nothing at the engine's step.
+  model: [],
+  info: {
+    Tolerance: `±${RESONATOR_TOLERANCE.initial} % initial, ±${RESONATOR_TOLERANCE.temperature} % over −20…80 °C, ±${RESONATOR_TOLERANCE.ageing} % ageing`,
+    Source: "Murata CSTCE16M0V53-R0 product data (murata.com)",
+    "Start-up": "0.5 ms: assumed, to be checked (Murata gives no figure)",
+    "Not modelled": "the frequency's own drift with temperature and age (set the deviation), the built-in capacitors and ESR",
+  },
+}
+
 export const oscillator: ComponentDef = {
   id: "oscillator",
   name: "Clock oscillator",

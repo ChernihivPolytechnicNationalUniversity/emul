@@ -1,6 +1,7 @@
 import { chipById, type ChipProfile, type PadClasses } from "@/mcu/chip"
 import { parsePad } from "@/mcu/pads"
-import type { ComponentDef, Element, ModelElement, NodeRef } from "./types"
+import { resetRunAmps } from "@/mcu/supply"
+import type { ComponentDef, ModelElement, NodeRef } from "./types"
 
 /**
  * Electrical model of an MCU on a component, generated from its chip profile: the supply
@@ -13,14 +14,16 @@ import type { ComponentDef, Element, ModelElement, NodeRef } from "./types"
  * maximum blows its protection diode onto the rail, and the die behind it goes with it. The
  * simulation loop then stops the core.
  */
-export function mcuModel(chip: ChipProfile, at: { vdd: NodeRef; gnd: NodeRef; pads: NodeRef[]; nrst?: NodeRef; boot0?: NodeRef }): Element[] {
+export function mcuModel(chip: ChipProfile, at: { vdd: NodeRef; gnd: NodeRef; pads: NodeRef[]; nrst?: NodeRef; boot0?: NodeRef; vbat?: NodeRef; vcap?: NodeRef }): ModelElement[] {
   const e = chip.electrical
   const pin = { voltage: e.pinVoltageMax, current: e.pinCurrentMax, fail: "short" } as const
-  const out: Element[] = [
+  const out: ModelElement[] = [
     // Supply current as a load the loop sets by power mode (run at HSI until firmware says
     // otherwise); over-voltage destroys the part.
-    { kind: "R", a: at.vdd, b: at.gnd, value: e.vdd / (e.idd.run[0] + e.idd.run[1] * 16), live: "$idd", supply: true, limits: { voltage: e.vddMax, fail: "short" } },
+    { kind: "R", a: at.vdd, b: at.gnd, value: e.vdd / (e.supply ? resetRunAmps(e.supply) : e.idd.run[0] + e.idd.run[1] * 16), live: "$idd", supply: true, limits: { voltage: e.vddMax, fail: "short" } },
   ]
+  if (at.vbat && e.supply) out.push({ kind: "R", a: at.vbat, b: at.gnd, value: BACKUP_DOMAIN_IDLE_OHMS, live: "$vbat", hidden: true })
+  if (at.vcap && e.coreRegulator) out.push({ kind: "REG", in: at.vdd, out: at.vcap, gnd: at.gnd, value: e.coreRegulator.volts, imax: e.coreRegulator.inrushAmps, label: "Core regulator (VCAP)" })
   // NRST idles high on the internal pull-up; a button or the supervisor pulls it low.
   if (at.nrst) out.push({ kind: "R", a: at.nrst, b: at.vdd, value: e.nrstPullUp, limits: pin })
   if (at.boot0 && e.boot0PullDown) out.push({ kind: "R", a: at.boot0, b: at.gnd, value: e.boot0PullDown, limits: { ...pin, voltage: e.bootVoltageMax ?? pin.voltage } })
@@ -29,6 +32,7 @@ export function mcuModel(chip: ChipProfile, at: { vdd: NodeRef; gnd: NodeRef; pa
   return out
 }
 
+const BACKUP_DOMAIN_IDLE_OHMS = 1e12
 const BACKUP_DOMAIN_SUPPLY = "$backup-domain"
 const BACKUP_DOMAIN_SWITCH = "$backup-domain-switch"
 
@@ -39,9 +43,10 @@ function classify(el: Pad, pad: string, classes: PadClasses): Pad {
   if (classes.tta.pads.includes(pad))
     return { ...el, clamp: { injection: classes.injectedCurrentMax, rail: el.vddNode }, limits: { current: el.limits?.current, voltage: classes.tta.voltageMax, fail } }
   const backup = classes.backupDomain.pads.includes(pad)
+  const switched = backup && classes.backupDomain.switchOhms !== undefined
   return {
     ...el,
-    vddNode: backup ? BACKUP_DOMAIN_SUPPLY : el.vddNode,
+    vddNode: switched ? BACKUP_DOMAIN_SUPPLY : el.vddNode,
     pull: classes.otgId.pads.includes(pad) ? classes.otgId.pullOhms : undefined,
     clamp: { injection: classes.injectedCurrentMax },
     limits: { current: backup ? classes.backupDomain.currentMax : el.limits?.current, aboveSupply: classes.ft.aboveVdd, fail },
@@ -57,13 +62,13 @@ export function withPadClasses(def: ComponentDef): ComponentDef {
     if (el.kind !== "GPIO") return el
     const pad = padOf(el.node)
     if (!pad || !parsePad(pad)) return el
-    if (classes.backupDomain.pads.includes(pad)) backupFeed ??= el.vddNode
+    if (classes.backupDomain.pads.includes(pad) && classes.backupDomain.switchOhms !== undefined) backupFeed ??= el.vddNode
     return classify(el, pad, classes)
   })
   if (backupFeed)
     model.push(
-      { kind: "V", plus: backupFeed, minus: BACKUP_DOMAIN_SWITCH, value: classes.backupDomain.switchDrop },
-      { kind: "R", a: BACKUP_DOMAIN_SWITCH, b: BACKUP_DOMAIN_SUPPLY, value: classes.backupDomain.switchOhms, label: "Backup-domain power switch", limits: { current: classes.backupDomain.currentMax, fail: "short" } },
+      { kind: "V", plus: backupFeed, minus: BACKUP_DOMAIN_SWITCH, value: classes.backupDomain.switchDrop ?? 0 },
+      { kind: "R", a: BACKUP_DOMAIN_SWITCH, b: BACKUP_DOMAIN_SUPPLY, value: classes.backupDomain.switchOhms!, label: "Backup-domain power switch", limits: { current: classes.backupDomain.currentMax, fail: "short" } },
     )
   return { ...def, model }
 }

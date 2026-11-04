@@ -63,7 +63,7 @@ export const discoveryAudio: Example = {
 export const h405Blink: Example = {
   id: "h405-blink",
   name: "STM32-H405 blink",
-  description: "Olimex STM32-H405: the STAT LED blinks every 500 ms, every 100 ms while BUT is held.",
+  description: "Olimex STM32-H405: the STAT LED toggles every 500 ms, every 100 ms while BUT is held.",
   icon: CpuIcon,
   projects: [{ ref: "U1", load: async () => template("stm32f405rg") }],
   build(grid) {
@@ -87,6 +87,48 @@ export const netduinoBlink: Example = {
   build(grid) {
     const { doc, place } = builder(grid)
     place("netduino-plus-2", 0, 0)
+    return doc
+  },
+}
+
+/** The WeAct Black Pill running its starting project: 100 MHz from the 25 MHz crystal, C13 (PC13) blinks, faster while KEY (PA0) is held. */
+export const blackpillBlink: Example = {
+  id: "blackpill-blink",
+  name: "Black Pill blink",
+  description: "WeAct Black Pill F411: the C13 LED blinks every 500 ms, every 100 ms while KEY is held.",
+  icon: CpuIcon,
+  projects: [{ ref: "U1", load: async () => template("stm32f411ce") }],
+  build(grid) {
+    const { doc, place } = builder(grid)
+    place("weact-blackpill-f411", 0, 0)
+    return doc
+  },
+}
+
+/** The WeAct Black Pill with an STM32F401CCU6 running its starting project: 84 MHz from the 25 MHz crystal, C13 blinks, faster while KEY is held. */
+export const blackpillF401ccBlink: Example = {
+  id: "blackpill-f401cc-blink",
+  name: "Black Pill F401CC blink",
+  description: "WeAct Black Pill F401CC: the C13 LED blinks every 500 ms, every 100 ms while KEY is held.",
+  icon: CpuIcon,
+  projects: [{ ref: "U1", load: async () => template("stm32f401cc") }],
+  build(grid) {
+    const { doc, place } = builder(grid)
+    place("weact-blackpill-f401cc", 0, 0)
+    return doc
+  },
+}
+
+/** The WeAct Black Pill with an STM32F401CEU6 running its starting project. */
+export const blackpillF401ceBlink: Example = {
+  id: "blackpill-f401ce-blink",
+  name: "Black Pill F401CE blink",
+  description: "WeAct Black Pill F401CE: the C13 LED blinks every 500 ms, every 100 ms while KEY is held.",
+  icon: CpuIcon,
+  projects: [{ ref: "U1", load: async () => template("stm32f401ce") }],
+  build(grid) {
+    const { doc, place } = builder(grid)
+    place("weact-blackpill-f401ce", 0, 0)
     return doc
   },
 }

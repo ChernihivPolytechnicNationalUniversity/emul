@@ -5,7 +5,9 @@
  * definition, and #line marks so the compiler's messages point into the .ino files.
  */
 import { describe, expect, it } from "vitest"
-import { functionDefinitions, sketchToCpp } from "../../backend/worker/src/arduino"
+import { arduinoDefines, functionDefinitions, sketchToCpp, variantDir } from "../../backend/worker/src/arduino"
+import { buildOptions } from "../../src/project/board-build"
+import { getDef } from "../../src/schematic/registry"
 
 describe("Arduino sketch to C++", () => {
   it("prototypes the functions, before the first one, and keeps the lines with #line", () => {
@@ -40,5 +42,26 @@ describe("Arduino sketch to C++", () => {
     expect(cpp.indexOf('"a_helpers.ino"')).toBeLessThan(cpp.indexOf('"b_more.ino"'))
     // Every tab's functions are declared before any is defined.
     for (const p of ["void help();", "void more();", "void setup();"]) expect(cpp.indexOf(p)).toBeLessThan(cpp.indexOf("void setup() {"))
+  })
+})
+
+// ArduinoCore-avr 1.8.6 boards.txt: uno.build.board=AVR_UNO, uno.build.variant=standard;
+// nano.build.board=AVR_NANO, nano.build.variant=eightanaloginputs (the standard pins plus A6/A7).
+describe("the board a sketch is built for", () => {
+  it("defines ARDUINO_AVR_<board> as boards.txt does", () => {
+    expect(arduinoDefines("uno")).toEqual(["-DARDUINO=10819", "-DARDUINO_AVR_UNO", "-DARDUINO_ARCH_AVR"])
+    expect(arduinoDefines("nano")).toEqual(["-DARDUINO=10819", "-DARDUINO_AVR_NANO", "-DARDUINO_ARCH_AVR"])
+  })
+
+  it("takes the board's variant folder", () => {
+    expect(variantDir("/opt/arduino", "uno")).toBe("/opt/arduino/core/variants/standard")
+    expect(variantDir("/opt/arduino", "nano")).toBe("/opt/arduino/core/variants/eightanaloginputs")
+  })
+
+  it("is the board the Compile button sends for", () => {
+    for (const [id, arduino] of [["arduino-uno", "uno"], ["arduino-nano", "nano"]] as const) {
+      const def = getDef(id)!
+      expect(buildOptions({ id: "b", def: id, x: 0, y: 0, props: {} } as never, def, "atmega328p").arduino, id).toBe(arduino)
+    }
   })
 })

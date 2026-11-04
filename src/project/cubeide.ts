@@ -17,6 +17,11 @@ const CUBEIDE: Record<Stm32Target, { fpu: string; clockMHz: number }> = {
   // DS8626 Table 14: 168 MHz.
   stm32f407vg: { fpu: "fpv4-sp-d16", clockMHz: 168 },
   stm32f405rg: { fpu: "fpv4-sp-d16", clockMHz: 168 },
+  // DS10314: 100 MHz.
+  stm32f411ce: { fpu: "fpv4-sp-d16", clockMHz: 100 },
+  // DS9716 / DS10086: 84 MHz.
+  stm32f401cc: { fpu: "fpv4-sp-d16", clockMHz: 84 },
+  stm32f401ce: { fpu: "fpv4-sp-d16", clockMHz: 84 },
 }
 
 const OPTIMIZATION: Record<OptLevel, string | null> = { "-O0": null, "-Og": "og", "-O1": "o1", "-O2": "o2", "-O3": "o3", "-Os": "os" }

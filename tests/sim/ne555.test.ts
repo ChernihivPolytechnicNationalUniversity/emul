@@ -4,7 +4,9 @@ import { GRID } from "@/schematic/geometry"
 import { partKey, pinKey, type PlacedObject, type Schematic } from "@/schematic/types"
 import { Engine } from "@/sim/engine"
 import { buildNetlist, GROUND } from "@/sim/netlist"
-import { LED_FULL, LED_ON_LEVEL, SimLoop } from "@/sim/loop"
+import { SimLoop } from "@/sim/loop"
+import { ledVisibleAmps } from "@/sim/led-light"
+import { LED_COLORS } from "@/schematic/components/basic"
 import { ne555Flasher } from "@/schematic/timers"
 import { DT } from "@/sim/speeds"
 import { sustainedReaches } from "../lib/eye"
@@ -585,7 +587,7 @@ describe("the NE555 flasher example", () => {
       longestBoth = Math.max(longestBoth, bothFor)
     }
     const dimmest = Math.min(...peak)
-    const onShare = (LED_ON_LEVEL * LED_FULL) / dimmest
+    const onShare = ledVisibleAmps(LED_COLORS.red.vf) / dimmest
     const overlap = sustainedReaches(1 - onShare) - sustainedReaches(onShare)
     expect.soft(seen.has("true,false") && seen.has("false,true"), "each LED on alone").toBe(true)
     expect.soft(longestBoth, "both lit only while the eye's response to one edge fades and to the other builds").toBeLessThan(overlap + 0.005)

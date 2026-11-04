@@ -14,6 +14,7 @@ const SECTIONS: { title: string; targets: readonly (Target | null)[] }[] = [
   { title: "STM32 · F746 stand", targets: ["stm32f746ig"] },
   { title: "STM32 · F4-Discovery", targets: ["stm32f407vg"] },
   { title: "STM32 · F405 boards", targets: ["stm32f405rg"] },
+  { title: "STM32 · Black Pill (F411, F401)", targets: ["stm32f411ce", "stm32f401cc", "stm32f401ce"] },
   { title: "Arduino · Nano", targets: ["atmega328p"] },
   { title: "Circuits", targets: [null] },
 ]

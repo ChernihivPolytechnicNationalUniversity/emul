@@ -134,7 +134,8 @@ export function Editor({ ref, objectId, files, docs, active, target, diagnostics
   React.useEffect(() => {
     const el = host.current
     if (!el) return
-    const ed = monaco.editor.create(el, { ...OPTIONS, model: null, theme: "vs" })
+    // A phone's width is all code: no minimap beside it.
+    const ed = monaco.editor.create(el, { ...OPTIONS, model: null, theme: "vs", minimap: { ...OPTIONS.minimap, enabled: window.innerWidth >= 768 } })
     editor.current = ed
     marks.current = ed.createDecorationsCollection()
     const line = () => ed.getPosition()?.lineNumber ?? 1

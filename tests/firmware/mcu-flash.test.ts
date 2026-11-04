@@ -75,12 +75,16 @@ describe("flash and boot on the F429", () => {
   })
 
   it("boot 5: the log is full, the sector is erased", () => {
-    // The erase is one stalled instruction: the longest 10 µs step on the way to phase 3 is it.
     let stall = 0
+    let frozenSince = mcu.time
+    let pc = mcu.cpu.pc
     while (word("phase") < 3 && mcu.running && mcu.time < 2) {
-      const t = mcu.time
       mcu.run(1e-5)
-      stall = Math.max(stall, mcu.time - t)
+      if (mcu.cpu.pc !== pc) {
+        pc = mcu.cpu.pc
+        frozenSince = mcu.time
+      }
+      stall = Math.max(stall, mcu.time - frozenSince)
     }
     expect.soft(stall * 1e3, "sector 4 (64 KB) erase stalled the core (ms)").toBeNear(550, 1)
     runUntilPhase(9, 0.05)
