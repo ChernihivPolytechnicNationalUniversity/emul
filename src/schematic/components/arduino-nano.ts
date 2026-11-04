@@ -86,6 +86,11 @@ const ICSP: [number, string, string?][] = [
   [5, "RST", "PC6"],
   [6, "GND"],
 ]
+/**
+ * ICSP's names, on the sides the pins' labels go: level over the near row, midway between the
+ * LEDs' names and the box, and under the far row, midway between the box and the board's end.
+ */
+const ICSP_NAME_Y = { even: 34.62, odd: 41.93 }
 
 function kindOf(label: string, mcu?: string): PinKind {
   if (label === "GND") return "gnd"
@@ -155,7 +160,8 @@ const named = (style: TextStyle, extra: Partial<TextStyle>): TextStyle => ({ ...
 /**
  * The layout of the board's top side (USB up), as the A000005 and its copies print it: the pin
  * names stand on end beside their pads, reading away from the USB, which leaves the middle to
- * the chip, the resonator, the RESET switch, the four LEDs and ICSP.
+ * the chip, the resonator, the RESET switch, the four LEDs and ICSP, its six names level over
+ * and under its rows.
  */
 /** Pad centre to the middle of its name. */
 const NAME_FROM_PAD_MM = 1.95
@@ -183,11 +189,13 @@ function turned(x: number, y: number, w: number, h: number, angle: number) {
 
 function boardArt(): BodyShape[] {
   const art = new Artwork(FRAME)
-  // Pin names, on end beside the pads; SDA/SCL beside A4/A5 as the copies print them.
+  // Pin names, on end beside the pads and level over and under ICSP's rows, all one size; SDA/SCL
+  // beside A4/A5 as the copies print them.
   const names = art.grouped()
   const upright = named(TABLE, { rotate: 90 })
   J2.forEach(([pin, label]) => names.text(label, ROW_X.j2 + NAME_FROM_PAD_MM, rowY(pin), upright))
   J1.forEach(([pin, label]) => names.text(label, ROW_X.j1 - NAME_FROM_PAD_MM, rowY(pin), upright))
+  ICSP.forEach(([pin, label]) => names.text(label, ICSP_X[Math.floor((pin - 1) / 2)], pin % 2 === 1 ? ICSP_NAME_Y.odd : ICSP_NAME_Y.even, TABLE))
   const extra = art.grouped()
   extra.text("SDA", ROW_X.j2 + NAME_FROM_PAD_MM + 1.25, rowY(8), named(TABLE, { rotate: 90, size: 0.32 })).text("SCL", ROW_X.j2 + NAME_FROM_PAD_MM + 1.25, rowY(7), named(TABLE, { rotate: 90, size: 0.32 }))
   // Pin 1 of each header: a square pad.
