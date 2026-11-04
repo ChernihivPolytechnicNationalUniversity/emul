@@ -4,20 +4,21 @@ import type { BodyShape } from "../types"
 /**
  * The Netduino Plus 2 (Rev A) top side, headers along the top and bottom as on an Uno, in
  * millimetres from the board's top-left corner, drawn the way the Open746I-C is: the socket
- * headers with the names printed in their boxes, the connectors, the chips that matter, the
- * crystal, the button and the LEDs, the board's own marks — no passives or small transistors.
+ * headers with the names printed in their boxes, the connectors, the chips, the crystal, the button
+ * and the LEDs, the board's own marks and, quieter, every small SMD part — and, as there, no
+ * mounting holes. The sockets and the boxes round their names have its rounded corners, one box
+ * to a header with no rules between the names.
  *
- * Sources: the outline, the header pads and the mounting holes are the Arduino Uno R3's (the board
- * file the headers already came from); everything else is measured on Adafruit's top view of the
- * board (product 1104, photo 1104-05), mapped to board millimetres through the three mounting
- * holes and checked on all 32 header sockets (0.4 px RMS, about 0.03 mm, at 13.2 px/mm). The tops
- * of tall parts stand out of the board's plane in that photo, 0.18 % further from its centre per
- * millimetre of height, and are brought back to it. The netduino plus 2 mark is traced from the
- * same photo's silkscreen.
+ * Sources: the outline and the header pads are the Arduino Uno R3's (the board file the headers
+ * already came from); everything else is measured on Adafruit's top view of the board (product
+ * 1104, photo 1104-05), mapped to board millimetres through the board's three mounting holes and
+ * checked on all 32 header sockets (0.4 px RMS, about 0.03 mm, at 13.2 px/mm). The tops of tall
+ * parts stand out of the board's plane in that photo, 0.18 % further from its centre per
+ * millimetre of height, and are brought back to it. The netduino plus 2 mark is set in type where
+ * the photo has it.
  *
  * Off the board on purpose: the Uno's D8–SCL header stands 0.4 pitch off the 0.1" grid of the
- * other three, so it is drawn 0.4 pitch to the left, where its pins are rounded to, and the hole
- * beside SC moves with it.
+ * other three, so it is drawn 0.4 pitch to the left, where its pins are rounded to.
  *
  * What emul does not model is under a "soon" badge, in boxes clear of every working pin and part:
  * the network side of the RJ45 (the ENC28J60 runs; nothing is on the wire) and the microSD card.
@@ -38,7 +39,7 @@ export const OUTLINE: readonly Mm[] = [
 
 /** Header pad rows (y down) and each header's first pad (x), from the Uno R3 board file. */
 export const HEADER = { top: 2.54, bottom: 50.8, high: 18.796, low: 45.72, power: 27.94, analog: 50.8 }
-/** The D8–SCL header, and the hole beside SC, drawn 0.4 pitch left: onto the cells its pins are on. */
+/** The D8–SCL header drawn 0.4 pitch left: onto the cells its pins are on. */
 export const HIGH_SHIFT = -0.4 * PITCH
 
 /** What the silkscreen prints in each header's boxes, left to right ("" for the empty AREF and NC boxes). */
@@ -49,38 +50,120 @@ export const SILK = {
   analog: ["0", "1", "2", "3", "4", "5"],
 } as const
 
-/** Mounting holes (3.2 mm, plated): the Uno's, less the bottom-left one the microSD socket takes. */
-export const HOLES: readonly Mm[] = [{ x: 15.24 + HIGH_SHIFT, y: 2.54 }, { x: 66.04, y: 17.78 }, { x: 66.04, y: 45.72 }]
-const HOLE_R = 1.6
-const RING_R = 1.75
-
 export const SOON = {
   rj45: { from: { x: -2.6, y: 6.1 }, to: { x: 15.2, y: 21.2 }, label: "RJ45 · network side" },
   sd: { from: { x: 11.3, y: 34.9 }, to: { x: 25.7, y: 51.2 }, label: "MicroSD card" },
 } as const
 
-/** The netduino plus 2 mark, traced from the top silkscreen in board millimetres; [x, y, x, y, …]. Holes wound the other way. */
-const NETDUINO_LOGO: number[][] = [
-  [55.64, 12.75, 55.7, 12.85, 55.72, 15.08, 55.65, 15.53, 55.49, 15.85, 55.34, 16.02, 55.13, 16.19, 54.76, 16.33, 54.23, 16.33, 54.06, 16.3, 53.83, 16.19, 53.64, 16.05, 53.47, 15.87, 53.35, 15.67, 53.21, 15.14, 53.3, 14.75, 53.5, 14.39, 53.72, 14.18, 53.95, 14.03, 54.16, 13.96, 54.48, 13.91, 54.92, 13.98, 55.04, 14.08, 55.07, 14.15, 55.08, 14.43, 55.06, 14.49, 54.97, 14.51, 54.69, 14.38, 54.54, 14.36, 54.31, 14.38, 54.14, 14.45, 53.89, 14.65, 53.79, 14.81, 53.75, 14.92, 53.73, 15.18, 53.76, 15.4, 53.91, 15.64, 54.1, 15.78, 54.32, 15.88, 54.7, 15.88, 55.05, 15.68, 55.19, 15.41, 55.26, 15.09, 55.29, 12.87, 55.32, 12.78, 55.39, 12.74],
-  [58.66, 13.03, 58.77, 13.08, 58.88, 13.2, 58.91, 13.3, 58.9, 13.43, 58.81, 13.56, 58.62, 13.65, 58.37, 13.58, 58.27, 13.35, 58.32, 13.18, 58.54, 13.03],
-  [52.18, 13.31, 52.27, 13.37, 52.33, 13.56, 52.3, 13.84, 52.35, 13.9, 53.01, 13.93, 53.08, 13.97, 53.12, 14.03, 53.13, 14.24, 53.06, 14.33, 52.38, 14.36, 52.32, 14.38, 52.3, 14.48, 52.32, 15.78, 52.38, 15.85, 52.47, 15.88, 52.96, 15.88, 53.08, 15.92, 53.13, 16.01, 53.13, 16.24, 53.1, 16.31, 53.04, 16.36, 52.49, 16.37, 52.19, 16.29, 52.02, 16.16, 51.89, 15.95, 51.85, 15.74, 51.84, 13.93, 51.85, 13.4, 51.88, 13.35, 51.95, 13.3],
-  [56.33, 13.91, 56.41, 14.01, 56.45, 15.53, 56.68, 15.8, 56.95, 15.89, 57.14, 15.88, 57.29, 15.82, 57.44, 15.68, 57.52, 15.52, 57.57, 13.97, 57.63, 13.92, 57.88, 13.91, 57.96, 13.92, 58, 13.97, 58.02, 15.5, 57.95, 15.73, 57.8, 15.99, 57.36, 16.35, 56.93, 16.36, 56.64, 16.31, 56.42, 16.2, 56.27, 16.08, 56.16, 15.97, 56.03, 15.74, 55.94, 15.3, 55.94, 14.34, 55.98, 14.02, 56.03, 13.94, 56.1, 13.91],
-  [58.69, 13.92, 58.8, 13.98, 58.83, 15.09, 58.84, 15.15, 58.91, 15.17, 58.94, 15.22, 58.93, 15.29, 58.85, 15.35, 58.82, 15.43, 58.83, 16.28, 58.78, 16.35, 58.68, 16.4, 58.4, 16.35, 58.33, 16.28, 58.34, 14.18, 58.37, 13.99, 58.45, 13.92],
-  [60.41, 13.94, 60.64, 14.03, 60.92, 14.21, 61.05, 14.36, 61.15, 14.55, 61.23, 14.93, 61.23, 15.34, 61.23, 16.23, 61.21, 16.31, 61.16, 16.36, 60.87, 16.37, 60.76, 16.3, 60.72, 14.78, 60.56, 14.53, 60.43, 14.43, 60.22, 14.35, 59.9, 14.45, 59.79, 14.55, 59.65, 14.73, 59.62, 16.3, 59.55, 16.35, 59.42, 16.37, 59.23, 16.36, 59.15, 16.3, 59.14, 15, 59.23, 14.54, 59.39, 14.3, 59.54, 14.15, 59.73, 14.02, 60.01, 13.92],
-  [62.98, 13.95, 63.24, 14.04, 63.47, 14.18, 63.62, 14.33, 63.76, 14.51, 63.85, 14.75, 63.92, 15.19, 63.87, 15.49, 63.79, 15.69, 63.62, 15.96, 63.48, 16.09, 63.27, 16.23, 63.1, 16.3, 62.63, 16.39, 62.29, 16.31, 62.03, 16.18, 61.82, 16.01, 61.59, 15.73, 61.48, 15.4, 61.45, 15.19, 61.47, 14.89, 61.69, 14.42, 61.83, 14.26, 62.03, 14.1, 62.37, 13.95],
-  [48.1, 13.9, 48.38, 14.01, 48.72, 14.26, 48.87, 14.5, 48.97, 14.99, 48.97, 16.22, 48.94, 16.29, 48.88, 16.33, 48.62, 16.34, 48.51, 16.27, 48.48, 15.8, 48.49, 14.99, 48.45, 14.73, 48.38, 14.59, 48.19, 14.41, 47.94, 14.37, 47.74, 14.39, 47.55, 14.5, 47.38, 14.74, 47.35, 16.25, 47.28, 16.32, 47.16, 16.34, 46.99, 16.32, 46.92, 16.26, 46.9, 15, 46.98, 14.55, 47.09, 14.34, 47.34, 14.1, 47.49, 14, 47.78, 13.91],
-  [50.68, 13.92, 51.02, 14.04, 51.47, 14.4, 51.57, 14.65, 51.54, 14.8, 51.4, 14.9, 50.89, 15.14, 50.51, 15.37, 50.21, 15.48, 50.11, 15.46, 50.01, 15.34, 49.94, 15.2, 49.95, 15.11, 50.85, 14.62, 50.89, 14.59, 50.88, 14.53, 50.74, 14.43, 50.49, 14.35, 50.38, 14.35, 50, 14.49, 49.76, 14.74, 49.68, 14.96, 49.69, 15.28, 49.72, 15.41, 49.87, 15.64, 50.21, 15.85, 50.45, 15.9, 50.75, 15.83, 50.91, 15.74, 51.21, 15.41, 51.45, 15.45, 51.54, 15.51, 51.53, 15.68, 51.29, 16.02, 50.92, 16.27, 50.6, 16.36, 50.22, 16.35, 49.94, 16.27, 49.72, 16.15, 49.41, 15.81, 49.3, 15.63, 49.2, 15.32, 49.21, 14.92, 49.28, 14.67, 49.43, 14.41, 49.8, 14.09, 49.95, 14, 50.21, 13.92],
-  [62.36, 14.46, 62.15, 14.59, 61.97, 14.9, 61.92, 15.1, 61.93, 15.25, 62.04, 15.54, 62.2, 15.73, 62.48, 15.87, 62.82, 15.89, 63.1, 15.79, 63.33, 15.56, 63.43, 15.3, 63.44, 14.98, 63.31, 14.71, 63.1, 14.5, 62.83, 14.39, 62.57, 14.39],
-  [62.23, 16.88, 62.31, 16.91, 62.34, 16.99, 62.32, 17.08, 62.17, 17.2, 62.16, 17.78, 62.12, 17.87, 62.04, 17.91, 61.96, 17.89, 61.91, 17.78, 61.91, 17.2, 61.69, 17.04, 61.72, 16.95, 61.89, 16.87],
-  [62.65, 16.95, 62.8, 17.24, 62.84, 17.22, 63.03, 16.93, 63.1, 16.91, 63.15, 16.95, 63.17, 17.73, 63.15, 17.84, 63.1, 17.89, 63, 17.88, 62.89, 17.75, 62.68, 17.77, 62.57, 17.89, 62.47, 17.85, 62.45, 17.74, 62.45, 17.07, 62.47, 16.95, 62.53, 16.91],
-  [60.42, 16.92, 60.65, 16.97, 60.91, 17.1, 61.13, 17.29, 61.33, 17.55, 61.43, 17.78, 61.46, 18.06, 61.45, 18.38, 61.42, 18.53, 61.33, 18.72, 61.07, 19.06, 60.62, 19.4, 60.5, 19.53, 60.02, 19.86, 59.82, 20.03, 59.8, 20.09, 59.88, 20.11, 61.37, 20.14, 61.45, 20.19, 61.48, 20.27, 61.49, 20.49, 61.43, 20.55, 60.56, 20.56, 60.35, 20.59, 60.14, 20.56, 59.31, 20.55, 59.08, 20.49, 59.02, 20.43, 59.05, 20.12, 59.1, 20.03, 60.75, 18.72, 60.88, 18.55, 60.99, 18.34, 61, 18.02, 60.89, 17.73, 60.62, 17.47, 60.3, 17.37, 60.06, 17.4, 59.78, 17.53, 59.7, 17.69, 59.59, 17.77, 59.47, 18.07, 59.41, 18.13, 59.19, 18.18, 59.04, 18.09, 59.02, 17.94, 59.08, 17.69, 59.15, 17.54, 59.34, 17.3, 59.76, 17.02, 59.98, 16.94, 60.15, 16.92],
-  [52.49, 16.94, 52.57, 17.04, 52.58, 18.19, 52.57, 20.44, 52.51, 20.53, 52.32, 20.56, 52.16, 20.49, 52.12, 20.34, 52.11, 19.15, 52.08, 18.97, 52.12, 18.38, 52.13, 17.04, 52.17, 16.98, 52.3, 16.93],
-  [53.2, 18.11, 53.27, 18.2, 53.29, 19.52, 53.36, 19.78, 53.57, 20.02, 53.89, 20.08, 54.06, 20.05, 54.18, 19.99, 54.28, 19.88, 54.39, 19.67, 54.42, 18.18, 54.47, 18.13, 54.56, 18.11, 54.75, 18.12, 54.82, 18.17, 54.89, 18.52, 54.85, 19.73, 54.82, 19.9, 54.52, 20.33, 54.53, 20.39, 54.64, 20.43, 54.61, 20.48, 54.36, 20.49, 53.74, 20.61, 53.53, 20.5, 53.34, 20.45, 52.99, 20.14, 52.88, 19.93, 52.79, 19.52, 52.8, 18.25, 52.83, 18.14, 52.9, 18.1],
-  [50.78, 18.11, 51.08, 18.18, 51.52, 18.44, 51.73, 18.76, 51.84, 19.02, 51.87, 19.4, 51.84, 19.61, 51.74, 19.89, 51.61, 20.08, 51.4, 20.29, 51.21, 20.41, 50.87, 20.54, 50.57, 20.54, 50.23, 20.5, 50.09, 20.42, 50.04, 20.35, 50.04, 20.09, 50.1, 19.97, 50.19, 19.95, 50.51, 20.09, 50.66, 20.11, 50.85, 20.09, 51, 20.03, 51.19, 19.89, 51.31, 19.72, 51.42, 19.3, 51.28, 18.92, 51.12, 18.74, 50.91, 18.61, 50.63, 18.57, 50.42, 18.58, 50.12, 18.75, 49.92, 19.05, 49.89, 19.3, 49.87, 21.67, 49.83, 21.73, 49.75, 21.76, 49.5, 21.76, 49.41, 21.67, 49.39, 21.39, 49.39, 19.26, 49.45, 18.92, 49.55, 18.71, 49.72, 18.48, 49.88, 18.34, 50.18, 18.21, 50.57, 18.11],
-  [56.92, 18.13, 57.07, 18.15, 57.13, 18.19, 57.16, 18.27, 57.15, 18.46, 57.07, 18.55, 55.73, 18.56, 55.62, 18.63, 55.57, 18.77, 55.61, 18.89, 55.73, 18.99, 56.71, 19.23, 56.97, 19.36, 57.11, 19.55, 57.16, 19.66, 57.15, 20.1, 57.02, 20.36, 57.04, 20.4, 57.18, 20.42, 57.18, 20.46, 56.31, 20.58, 55.23, 20.57, 55.16, 20.54, 55.08, 20.47, 55.07, 20.41, 55.13, 20.18, 55.2, 20.1, 56.54, 20.08, 56.65, 20.04, 56.71, 19.95, 56.69, 19.81, 56.59, 19.7, 55.5, 19.42, 55.31, 19.3, 55.17, 19.13, 55.11, 18.85, 55.16, 18.49, 55.33, 18.27, 55.6, 18.13],
+/** Corner radii as the Open746I-C draws them: its socket housings', and its pin boxes' and name tables'. */
+export const SOCKET_CORNER = 0.3
+export const BOX_CORNER = 0.6
+
+/**
+ * The netduino plus 2 mark, set in the field's sans (Geist) so it stays smooth at any zoom: sized so
+ * "netduino" is as wide as the board's (46.9–63.9 mm, 3.9 em of Geist), each line on the board's
+ * baseline for it and starting where its first letter does. The field sets type on its middle,
+ * 0.273 em over the baseline, and Geist's n and p stand 0.07 em in from where a line starts. The ™
+ * is the type's own. The two lines are one label: they grow together, from the middle of the mark.
+ */
+const MARK_SIZE = 1.72
+const markLine = (text: string, left: number, baseline: number) => ({ text, x: left - 0.07 * MARK_SIZE * PITCH, y: baseline - 0.273 * MARK_SIZE * PITCH })
+export const MARK = { lines: [markLine("netduino", 46.9, 16.35), markLine("plus 2™", 49.39, 20.55)], centre: { x: 55.9, y: 17.25 } }
+
+/** Package bodies (mm): length between the terminals, width; the terminals' share of the length. */
+const TWO_TERMINAL = { "0402": { l: 1.0, w: 0.5 }, "0603": { l: 1.6, w: 0.8 }, "0805": { l: 2.0, w: 1.25 }, "1206": { l: 3.2, w: 1.6 } } as const
+const TERMINAL_SHARE = 0.22
+/** SOT-23, SOT-23-5 and SC-70-6 (SOT-363): body along the lead rows and across them, lead tip to lead tip, pitch, lead width. */
+const SOT = {
+  sot23: { along: 2.9, across: 1.3, reach: 2.4, pitch: 0.95, lead: 0.4 },
+  "sot23-5": { along: 2.9, across: 1.6, reach: 2.8, pitch: 0.95, lead: 0.4 },
+  sot363: { along: 2.0, across: 1.25, reach: 2.1, pitch: 0.65, lead: 0.3 },
+} as const
+
+/**
+ * Every small SMD part on the top side, measured on the original of Adafruit's top view (4049 ×
+ * 3114 px, 44.7 px/mm; the copy above is it scaled to 1200 px wide and cropped 11 px at the top):
+ * each part's terminals or leads found in the photo, its centre between them. Drawn in the quiet
+ * zone fill, a step below the connectors, so the parts that work stand out.
+ *
+ * Two-terminal parts: [package, centre x, centre y, "h" (terminals left and right) or "v"].
+ */
+export const PASSIVES: readonly [keyof typeof TWO_TERMINAL, number, number, "h" | "v"][] = [
+  // By ACT: the ENC28J60's LED and magnetics resistors.
+  ["0603", 5.25, 2.58, "h"], ["0603", 7.51, 2.58, "h"], ["0603", 9.74, 2.58, "h"], ["0603", 5.25, 4.07, "h"], ["0603", 7.51, 4.07, "h"], ["0603", 9.74, 4.07, "h"],
+  // Round the Pulse magnetics and the ENC28J60 (the 1206 over the magnetics 0.25 mm lower, clear of the names' boxes).
+  ["1206", 21.4, 8.3, "h"], ["0603", 29.75, 11.13, "h"], ["0603", 29.75, 12.38, "h"], ["0603", 29.75, 13.61, "h"], ["0603", 29.75, 14.95, "h"],
+  ["0603", 30.0, 18.14, "h"], ["0603", 30.0, 19.53, "h"], ["0603", 30.0, 20.72, "h"], ["0603", 31.88, 16.49, "v"], ["0402", 34.64, 8.11, "h"],
+  ["1206", 44.26, 11.07, "v"], ["1206", 44.26, 15.83, "v"], ["0603", 35.3, 18.73, "h"], ["0603", 37.35, 18.73, "h"], ["0603", 40.25, 18.73, "h"], ["0603", 42.43, 18.73, "h"],
+  ["1206", 45.6, 20.6, "h"], ["1206", 45.6, 22.94, "h"], ["0805", 36.3, 22.6, "h"], ["0402", 39.79, 22.62, "h"], ["0402", 39.79, 24.03, "h"], ["0603", 41.45, 22.03, "v"],
+  ["0603", 57.73, 10.8, "v"],
+  // USB and power in: the fuse (F), the ferrites, PWR's resistor, the regulators' capacitors.
+  ["1206", 3.29, 22.93, "h"], ["0603", 6.54, 26.06, "v"], ["0603", 6.54, 29.22, "v"], ["0603", 6.54, 31.0, "v"], ["0603", 7.05, 32.54, "h"], ["0603", 7.05, 33.51, "h"], ["0603", 7.05, 34.5, "h"],
+  ["0603", 10.98, 32.62, "v"], ["1206", 12.66, 29.46, "v"], ["0603", 13.48, 33.74, "h"], ["0603", 4.19, 36.0, "v"], ["0603", 5.45, 36.0, "v"], ["0603", 6.75, 36.0, "v"],
+  ["1206", 15.49, 24.92, "h"], ["1206", 19.64, 24.86, "h"], ["0603", 16.92, 33.81, "h"],
+  // Left of and under the STM32F405.
+  ["0603", 35.03, 25.28, "v"], ["1206", 28.7, 25.73, "h"], ["1206", 28.7, 28.17, "h"], ["0603", 27.22, 33.78, "h"], ["0603", 29.24, 33.78, "h"], ["1206", 28.9, 35.87, "h"], ["1206", 28.9, 38.27, "h"],
+  ["0603", 34.38, 34.72, "v"], ["0603", 34.41, 37.46, "h"], ["0402", 30.76, 41.48, "h"], ["0402", 33.48, 41.48, "h"],
+  ["0603", 40.23, 38.29, "h"], ["0603", 44.95, 38.3, "h"], ["0603", 44.64, 39.27, "h"], ["0603", 37.05, 43.3, "h"], ["0603", 40.52, 43.3, "h"], ["0603", 54.0, 43.79, "h"],
+  // Right of it.
+  ["0603", 48.92, 26.32, "v"], ["0805", 50.63, 30.91, "h"], ["0603", 49.07, 34.03, "v"], ["1206", 51.25, 37.57, "h"], ["1206", 62.92, 38.12, "h"],
 ]
 
-const pairs = (flat: number[]): Mm[] => Array.from({ length: flat.length / 2 }, (_, i) => ({ x: flat[i * 2], y: flat[i * 2 + 1] }))
+/**
+ * Transistors and small regulators: [package, centre x, centre y, "v" (leads left and right) or
+ * "h" (leads above and below), leads on the first side, leads on the second, in pitches from the
+ * middle].
+ */
+export const LEADED: readonly (readonly [keyof typeof SOT, number, number, "h" | "v", readonly number[], readonly number[]])[] = [
+  ["sot23", 11.0, 25.95, "v", [0], [-1, 1]],
+  ["sot23", 32.75, 38.9, "v", [-1, 1], [0]],
+  ["sot23-5", 9.4, 37.5, "h", [-1, 1], [-1, 0, 1]],
+  ["sot23-5", 28.42, 31.24, "v", [-1, 1], [-1, 0, 1]],
+  ...([[32.7, 24.63], [33.1, 28.03], [27.5, 40.7], [53.47, 33.62], [56.74, 33.79], [56.75, 37.54], [45.34, 43.62], [50.27, 43.8]] as const).map(
+    ([x, y]) => ["sot363", x, y, "v", [-1, 0, 1], [-1, 0, 1]] as const,
+  ),
+]
+
+/** The SS15 Schottky (SMA) by the DC jack, its cathode band to the right; the shielded inductor left of the STM32F405; the "100R10" part right of it. */
+export const LARGER = {
+  ss15: { x: 4.05, y: 38.63 },
+  inductor: { x: 32.6, y: 31.6, size: 3.3 },
+  r100: { x: 63.3, y: 34.45, l: 7.2, w: 3.4 },
+} as const
+
+function smdParts(a: Artwork) {
+  for (const [pkg, x, y, axis] of PASSIVES) {
+    const { l, w } = TWO_TERMINAL[pkg]
+    const [hx, hy] = axis === "h" ? [l / 2, w / 2] : [w / 2, l / 2]
+    a.rect("zone", x - hx, y - hy, x + hx, y + hy, 0.08)
+    const cap = l / 2 - l * TERMINAL_SHARE
+    for (const s of [-1, 1]) a.line(axis === "h" ? [{ x: x + s * cap, y: y - hy }, { x: x + s * cap, y: y + hy }] : [{ x: x - hx, y: y + s * cap }, { x: x + hx, y: y + s * cap }])
+  }
+  // Leads stop a hair short of their body: shapes that only touch stay apart once rounded to the field's grid.
+  const gap = 0.05
+  for (const [pkg, x, y, axis, first, second] of LEADED) {
+    const { along, across, reach, pitch, lead } = SOT[pkg]
+    const [bx, by] = axis === "v" ? [across / 2, along / 2] : [along / 2, across / 2]
+    a.rect("zone", x - bx, y - by, x + bx, y + by, 0.1)
+    for (const [side, offsets] of [[-1, first], [1, second]] as const)
+      for (const k of offsets) {
+        const at = k * pitch
+        if (axis === "v") a.rect("zone", side < 0 ? x - reach / 2 : x + bx + gap, y + at - lead / 2, side < 0 ? x - bx - gap : x + reach / 2, y + at + lead / 2)
+        else a.rect("zone", x + at - lead / 2, side < 0 ? y - reach / 2 : y + by + gap, x + at + lead / 2, side < 0 ? y - by - gap : y + reach / 2)
+      }
+  }
+  // SS15: the body, a lead out of each end, the cathode band.
+  const d = LARGER.ss15
+  a.rect("zone", d.x - 2.15, d.y - 1.3, d.x + 2.15, d.y + 1.3, 0.15)
+  a.rect("zone", d.x - 2.6, d.y - 0.75, d.x - 2.15 - gap, d.y + 0.75).rect("zone", d.x + 2.15 + gap, d.y - 0.75, d.x + 2.6, d.y + 0.75)
+  a.line([{ x: d.x + 1.45, y: d.y - 1.3 }, { x: d.x + 1.45, y: d.y + 1.3 }])
+  const ind = LARGER.inductor
+  a.rect("zone", ind.x - ind.size / 2, ind.y - ind.size / 2, ind.x + ind.size / 2, ind.y + ind.size / 2, 0.35)
+  const r = LARGER.r100
+  a.rect("zone", r.x - r.l / 2, r.y - r.w / 2, r.x + r.l / 2, r.y + r.w / 2, 0.2)
+  for (const s of [-1, 1]) a.line([{ x: r.x + s * (r.l / 2 - 0.6), y: r.y - r.w / 2 }, { x: r.x + s * (r.l / 2 - 0.6), y: r.y + r.w / 2 }])
+}
+
 const rows = (from: number, count: number) => Array.from({ length: count }, (_, i) => from + i * PITCH)
 
 const NAME: TextStyle = { size: 0.55, mono: true }
@@ -117,21 +200,21 @@ function arc(c: Mm, r: number, from = 0, to = 360, steps = 32): Mm[] {
   })
 }
 
-/** A socket header: its housing over the row, the printed boxes on the board side, the names in them. */
+/**
+ * A socket header: its housing over the row; on the board side one rounded outline round all its
+ * names, stepping out where a name needs more room, and no rules between the names; the names in it.
+ */
 function socketRow(art: Artwork, names: readonly string[], firstX: number, rowY: number, side: "top" | "bottom", boxEdge: (i: number) => number) {
   const xs = rows(firstX, names.length)
   const half = PITCH / 2
-  art.rect("connector", xs[0] - half, rowY - half, xs[xs.length - 1] + half, rowY + half, 0.15)
+  const last = xs.length - 1
+  art.rect("connector", xs[0] - half, rowY - half, xs[last] + half, rowY + half, SOCKET_CORNER)
   const base = side === "top" ? rowY + half : rowY - half
-  const deeper = (a: number, b: number) => (side === "top" ? Math.max(a, b) : Math.min(a, b))
-  // Each box: its left side from the housing out (as deep as the deeper of it and the box before),
-  // its far edge, and the last box's right side.
-  xs.forEach((x, i) => {
-    const far = boxEdge(i)
-    art.line([{ x: x - half, y: base }, { x: x - half, y: i === 0 ? far : deeper(far, boxEdge(i - 1)) }])
-    art.line([{ x: x - half, y: far }, { x: x + half, y: far }])
-    if (i === xs.length - 1) art.line([{ x: x + half, y: base }, { x: x + half, y: far }])
-  })
+  const far = xs.map((_, i) => boxEdge(i))
+  const outline: Mm[] = [{ x: xs[0] - half, y: base }, { x: xs[last] + half, y: base }, { x: xs[last] + half, y: far[last] }]
+  for (let i = last; i > 0; i--) if (far[i] !== far[i - 1]) outline.push({ x: xs[i] - half, y: far[i] }, { x: xs[i] - half, y: far[i - 1] })
+  outline.push({ x: xs[0] - half, y: far[0] })
+  art.polygon("none", outline, BOX_CORNER)
   const at = side === "top" ? NAME_TOP : NAME_BOTTOM
   const anchor = side === "top" ? "end" : "start"
   const group = art.grouped()
@@ -156,19 +239,17 @@ function polarity(a: Artwork, y: number) {
 export function boardArt(): BodyShape[] {
   const art = new Artwork(FRAME)
 
-  // --- The four socket headers (blue on the board), their boxes and names as printed.
-  const TOP_BOX = HEADER.top + 3.75
-  const GND_BOX = HEADER.top + 4.95
-  socketRow(art.moved({ x: HIGH_SHIFT, y: 0 }), SILK.high, HEADER.high, HEADER.top, "top", (i) => (SILK.high[i] === "GND" ? GND_BOX : TOP_BOX))
+  // --- The four socket headers (blue on the board), the box round their names and the names as
+  // printed. The boxes along the top are one depth, room for GND's name (on the board GND's alone
+  // runs deeper).
+  const TOP_BOX = HEADER.top + 4.71
+  socketRow(art.moved({ x: HIGH_SHIFT, y: 0 }), SILK.high, HEADER.high, HEADER.top, "top", () => TOP_BOX)
   socketRow(art, SILK.low, HEADER.low, HEADER.top, "top", () => TOP_BOX)
   socketRow(art, SILK.power, HEADER.power, HEADER.bottom, "bottom", (i) => (i < 3 ? 42.6 : 45.75))
   socketRow(art, SILK.analog, HEADER.analog, HEADER.bottom, "bottom", () => 47.0)
-  art.text("Digital I/O", 44.1, 7.5, caption(0.65))
+  art.text("Digital I/O", 44.1, 8.35, caption(0.6))
   art.text("Power", 38.9, 44.75, caption(0.5))
   art.text("Analog In", 57.15, 45.75, caption(0.66))
-
-  // --- The mounting holes' plated rings (the plate has the holes).
-  for (const h of HOLES) art.circle("connector", h.x, h.y, RING_R).polygon("connector", arc(h, HOLE_R))
 
   // --- ACT (the ENC28J60's LEDB) and the Pulse HX1198NL magnetics, 16 leads at 1.27 mm.
   art.text("ACT", 2.65, 1.5, caption(0.4))
@@ -182,10 +263,11 @@ export function boardArt(): BodyShape[] {
   art.rect("chip", enc.x - 5.1, enc.y - 2.65, enc.x + 5.1, enc.y + 2.65, 0.2)
   art.circle("board", enc.x + 4.35, enc.y - 1.9, 0.3)
   art.text("ENC28J60", enc.x - 0.4, enc.y + 0.1, { size: 0.42, inverse: true })
-  art.text("LED", 59.9, 7.7, caption(0.5))
+  art.text("LED", 59.9, 8.25, caption(0.5))
 
   // --- The netduino plus 2 mark.
-  for (const outline of NETDUINO_LOGO) art.polygon("mark", pairs(outline))
+  const mark = art.grouped()
+  for (const line of MARK.lines) mark.text(line.text, line.x, line.y, caption(MARK_SIZE, { anchor: "start", growsFrom: MARK.centre }))
 
   // --- U1 STM32F405RGT6 (LQFP64, 10 mm body, 12 mm over the leads, pin 1 at the bottom left).
   const mcu = { x: 41.875, y: 31.25 }
@@ -219,12 +301,15 @@ export function boardArt(): BodyShape[] {
   art.text("BTN", 60.25, 26.4, caption(0.53))
 
   // --- The MiniJTAG header (2 × 5 at 1.27 mm) in its printed box.
-  art.outline(63.25, 22.6, 66.9, 29.5, 0.1)
+  art.outline(63.25, 22.6, 66.9, 29.5, BOX_CORNER)
   for (const x of [64.5, 65.9]) for (let i = 0; i < 5; i++) art.circle("connector", x, 23.55 + i * 1.27, 0.42)
 
-  // --- The board's own marks.
-  art.text("www.netduino.com", 54.4, 40.85, caption(0.9))
-  art.text("REV.A", 66.0, 43.05, caption(0.45))
+  // --- The small SMD parts, quiet.
+  smdParts(art)
+
+  // --- The board's own marks (the URL and REV.A a little lower than printed, clear of the 0603 above the URL).
+  art.text("www.netduino.com", 54.4, 41.1, caption(0.9))
+  art.text("REV.A", 66.0, 43.35, caption(0.45))
 
   // --- What emul does not model, each under its soon badge.
   const rj45 = soon(SOON.rj45, (a) => {
@@ -236,9 +321,8 @@ export function boardArt(): BodyShape[] {
     a.rect("zone", 13.2, 49.4, 23.8, 51.1, 0.2)
   })
 
-  // The plate: the Uno outline with its holes cut through (wound the other way).
+  // The plate: the Uno outline.
   const plate = new Artwork(FRAME)
   plate.polygon("board", OUTLINE, 0.25)
-  for (const h of HOLES) plate.polygon("board", arc(h, HOLE_R).reverse())
   return [...plate.shapes(), ...art.shapes(), rj45, sd]
 }

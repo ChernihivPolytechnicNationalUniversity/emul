@@ -8,7 +8,7 @@ import { BOARD_MM, boardArt, FRAME, HEADER } from "./netduino-plus-2-art"
 /**
  * Netduino Plus 2, Rev A (Secret Labs CW0034, STM32F405RGT6). Sources (docs/netduino-plus-2/
  * board-checklist.md): the Rev A schematic, the archived spec page, the Arduino Uno R3 board file
- * for the outline, header pads and holes (Netduino publishes no drawing of its own), and a top
+ * for the outline and header pads (Netduino publishes no drawing of its own), and a top
  * view of the board for everything else; the board drawn to scale in netduino-plus-2-art.ts.
  *
  * Scale: 1 cell = 2.54 mm. The board is 68.58 × 53.34 mm, headers along the top (digital) and
