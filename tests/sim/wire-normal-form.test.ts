@@ -322,6 +322,34 @@ function untouchedBy(edit: Edit, before: readonly WireSegment[]): WireSegment[] 
   return before.filter((s) => !removed.has(s) && !points.some((p) => on(s, p)) && !edit.added.some((t) => overlaps(s, t)))
 }
 
+describe("what the graph may keep across a document handed to it again (findings 3.L15)", () => {
+  const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
+  const shifted = (p: Point): Point => ({ x: p.x + 3 * GRID, y: p.y + GRID })
+  const wires: WireSegment[] = [{ id: "a", a: at(0, 0), b: at(4, 0) }, { id: "b", a: at(4, 0), b: at(4, 3) }]
+  const pins: WirePin[] = [{ key: "R1:2", at: at(0, 0), out: { x: 1, y: 0 } }, { key: "R2:1", at: at(4, 3), out: { x: 0, y: -1 } }]
+  const tokenOf = (view: ReturnType<WireGraph["of"]>, key: string) => view.token(view.netOfPin(key)!)
+
+  it("the whole drawing moved keeps its nets; moved with a wire recoloured or a pin facing another way, the net is derived again", () => {
+    const moved = { wires: wires.map((s) => ({ ...s, a: shifted(s.a), b: shifted(s.b) })), pins: pins.map((p) => ({ ...p, at: shifted(p.at) })) }
+    const graph = new WireGraph()
+    const first = tokenOf(graph.of(wires, pins), "R1:2")
+    expect.soft(tokenOf(graph.of(moved.wires, moved.pins), "R1:2"), "moved: the same net").toBe(first)
+    const plain = new WireGraph()
+    const kept = tokenOf(plain.of(wires, pins), "R1:2")
+    expect.soft(tokenOf(plain.of(moved.wires.map((s) => (s.id === "b" ? { ...s, color: "red" as const } : s)), moved.pins), "R1:2"), "moved and recoloured: a net derived again").not.toBe(kept)
+    const turned = new WireGraph()
+    const before = tokenOf(turned.of(wires, pins), "R1:2")
+    expect.soft(tokenOf(turned.of(moved.wires, moved.pins.map((p) => (p.key === "R1:2" ? { ...p, out: { x: -1, y: 0 } } : p))), "R1:2"), "moved with a pin facing back: a net derived again").not.toBe(before)
+  })
+
+  it("a pin handed again in its place but facing another way is the new pin", () => {
+    const graph = new WireGraph()
+    graph.of(wires, pins)
+    const view = graph.of(wires, pins.map((p) => (p.key === "R1:2" ? { ...p, out: { x: 0, y: 1 } } : p)))
+    expect.soft(view.pin("R1:2")!.out, "facing down now").toEqual({ x: 0, y: 1 })
+  })
+})
+
 describe("random edit sequences against the brute-force reference (junctions.md principle 5)", () => {
   it("after every edit: N1–N4 hold, local equals global, a fixed point, the circuit of the raw drawing, the graph rebuilt or updated agrees, and nothing outside the edit moved", () => {
     const SEQUENCES = 120

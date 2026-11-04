@@ -8,6 +8,8 @@ import { GRID, objectPins } from "@/schematic/geometry"
 import { legacyUpgraded, SCHEMATIC_VERSION } from "@/schematic/migrate"
 import type { LegacySchematic, PlacedObject, Schematic } from "@/schematic/types"
 import { clipboardText, clipFromClipboard, clipOfThisVersion, pastedInto, type Clip } from "@/schematic/use-schematic"
+import { inNormalForm, withSegments } from "@/schematic/wire-edits"
+import { normalFormViolations } from "../lib/wire-reference"
 import type { WireSegment } from "@/schematic/wires/segment"
 import { pinPartition } from "../lib/pin-partition"
 
@@ -178,6 +180,14 @@ describe("the clipboard carries the version, its wires as segments, and nothing 
     expect.soft(clipFromClipboard(text), "refused").toBeNull()
   })
 
+  it("a clip of this version is brought into normal form, and one that cannot be is refused rather than pasted (findings 3.L14)", () => {
+    const clip = (segments: WireSegment[]) => JSON.stringify({ emul: { objects: [], wires: [], segments, parts: {} }, version: SCHEMATIC_VERSION })
+    const overlapping = clipFromClipboard(clip([{ id: "a", a: { x: 0, y: 0 }, b: { x: 4 * GRID, y: 0 } }, { id: "b", a: { x: 2 * GRID, y: 0 }, b: { x: 6 * GRID, y: 0 } }]))
+    expect.soft(overlapping?.clip.wires.map((s) => [s.a.x, s.b.x]), "two overlapping wires merged into one").toEqual([[0, 6 * GRID]])
+    expect.soft(clipFromClipboard(clip([{ id: "d", a: { x: 0, y: 0 }, b: { x: GRID, y: GRID } }])), "a diagonal wire: no clip").toBeNull()
+    expect.soft(clipFromClipboard(clip([{ id: "d", a: { x: 0, y: 0 }, b: { x: GRID, y: 0 } }, { id: "d", a: { x: 0, y: GRID }, b: { x: GRID, y: GRID } }])), "two wires with one id: no clip").toBeNull()
+  })
+
   it("text that is not an εmul clip is no clip", () => {
     for (const text of [undefined, "", "R1 10k", "{\"emul\": 3}", JSON.stringify({ objects: [] })]) expect.soft(clipFromClipboard(text), JSON.stringify(text)).toBeNull()
   })
@@ -204,5 +214,51 @@ describe("a paste brings its segments along and joins where its pins land (desig
     expect.soft(pinPartition(pasted), "R1 2 to R2 1 by the pasted wire, R2 2 onto the bus").toEqual([["R1.2", "R2.1"]])
     const split = pasted.wires.filter((s) => s.a.x === crossing.a.x && s.b.x === crossing.a.x)
     expect.soft(split.length, "the bus split where R2's pin landed").toBe(2)
+  })
+})
+
+describe("found by phase 3's reviews", () => {
+  it("a room this version has written stays its own, emptied or not: the old shelf is not read again, nor an old tab's later edits (findings 3.R3)", async () => {
+    const room = roomAnOlderTabFilled(await rawOld("power-supply.emul"))
+    expect.soft(guestRoom(room)!.doc.objects.length, "the first entry upgrades the old shelf").toBeGreaterThan(0)
+    pushTo(room, { objects: [], wires: [], parts: {} })
+    room.ydoc.getMap<string>(shelfName(SCHEMATIC_VERSION - 1)).set("o:old-tab-edit", JSON.stringify({ id: "old-tab-edit", def: "resistor", x: 0, y: 0, z: 99 }))
+    expect.soft(readRoom(room).doc.objects, "emptied on purpose, it stays empty").toEqual([])
+    expect.soft(hostRoom(room, { objects: [], wires: [], parts: {} }), "a host finds nothing to take back").toBeNull()
+  })
+
+  it("two tabs splitting one wire at once end up with one normal drawing, the same in both (findings 3.R4)", () => {
+    const rail: WireSegment = { id: "rail", a: { x: 0, y: 0 }, b: { x: 10 * GRID, y: 0 } }
+    const base: Schematic = { objects: [], wires: [rail], parts: {} }
+    const left = emptyRoom()
+    const right = emptyRoom()
+    pushTo(left, base)
+    Y.applyUpdate(right.ydoc, Y.encodeStateAsUpdate(left.ydoc))
+    const branch = (id: string, x: number) => withSegments(base, [{ id, a: { x: x * GRID, y: 0 }, b: { x: x * GRID, y: 4 * GRID } }], [], [], () => `${id}-piece`)
+    pushTo(left, branch("a", 3))
+    pushTo(right, branch("b", 7))
+    Y.applyUpdate(left.ydoc, Y.encodeStateAsUpdate(right.ydoc))
+    Y.applyUpdate(right.ydoc, Y.encodeStateAsUpdate(left.ydoc))
+    const merged = joinRoom(new Map(left.elements.entries()))
+    expect.soft(normalFormViolations(merged.wires, []).length, "the raw merge overlaps itself").toBeGreaterThan(0)
+    const fromLeft = inNormalForm(merged)
+    const fromRight = inNormalForm(joinRoom(new Map(right.elements.entries())))
+    expect.soft(normalFormViolations(fromLeft.wires, []), "normal").toEqual([])
+    expect.soft(fromRight.wires, "the same drawing, ids and all, in both tabs").toEqual(fromLeft.wires)
+    expect.soft(inNormalForm(fromLeft), "and already normal stays as it is").toBe(fromLeft)
+  })
+
+  it("a room keeps a part's firmware, project, debugger settings and part state, and the wires in their order, through the shelf (findings 3.R12, 3.L13)", () => {
+    const doc: Schematic = {
+      objects: [{ id: "U1", def: "nucleo-f429zi", x: 0, y: 0, props: { ref: "U1", firmware: "app.elf", firmwareData: "AAAA", firmwareBuild: "debug" }, project: { files: [] } as never, debug: { breakpoints: [] } as never }],
+      wires: [
+        { id: "w", a: { x: 0, y: 0 }, b: { x: GRID, y: 0 }, color: "red" },
+        { id: "a", a: { x: 0, y: 2 * GRID }, b: { x: GRID, y: 2 * GRID } },
+      ],
+      parts: { "U1:USER": { on: true } },
+    }
+    const room = emptyRoom()
+    pushTo(room, doc)
+    expect.soft(joinRoom(new Map(room.elements.entries())), "the document as it went").toEqual(doc)
   })
 })

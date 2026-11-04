@@ -29,7 +29,7 @@ import type { SourceFile } from "emul-shared/source"
 import { bytesToBase64 } from "@/lib/bytes"
 import { useEvent } from "@/hooks/use-event"
 import { clipboardText, clipFromClipboard, pasteLanding, useSchematic, type Clip } from "@/schematic/use-schematic"
-import { nearestOn, travellingWires } from "@/schematic/wire-edits"
+import { nearestOn, NO_WIRE_LAID, travellingWires } from "@/schematic/wire-edits"
 import { announceUpgrade } from "@/hooks/use-projects"
 import { contactCheck, designatorRects, freeSpot, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
 import { toast } from "sonner"
@@ -58,6 +58,7 @@ import { FieldReadout, type RunEnds, ProbeReadout, type HoverTarget } from "./Re
 import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
 import { FieldCanvas } from "./FieldCanvas"
+import { wireMarks } from "./wire-marks"
 import { exportPng } from "./export-image"
 import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
@@ -356,6 +357,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     },
     [runById, nets, autoColor],
   )
+  const staticMarks = React.useMemo(() => wireMarks(staticRoutes, wiring.dots, wiring.dangling, wiring.corners, colorOf, true), [staticRoutes, wiring.dots, wiring.dangling, wiring.corners, colorOf])
+  const liftedMarks = React.useMemo(() => wireMarks(liftedRoutes, wiring.dots, wiring.dangling, wiring.corners, colorOf, false), [liftedRoutes, wiring.dots, wiring.dangling, wiring.corners, colorOf])
   const pinNetColor = React.useCallback(
     (key: string) => {
       const net = nets.netOfPin(key)
@@ -465,7 +468,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const exportImage = useEvent(async () => {
     const host = containerRef.current
     if (!host) return null
-    return exportPng({ host, theme, objects: docObjects, routes, grid, colorOf, symbols: symbolRaster, texts: textRaster, textScale })
+    return exportPng({ host, theme, objects: docObjects, routes, grid, colorOf, symbols: symbolRaster, texts: textRaster, textScale, marks: wireMarks(routes, wiring.dots, wiring.dangling, wiring.corners, colorOf, true) })
   })
 
   const { load } = sch
@@ -727,7 +730,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     autoNetColor([...kindsAt(from), ...(to ? kindsAt(to) : [])])
 
   const finishWire = (target: PinRef) => {
-    if (pending) sch.addWire(pending.from, target, pending.points, pending.chosen ? pending.color : undefined)
+    if (pending && !sch.addWire(pending.from, target, pending.points, pending.chosen ? pending.color : undefined)) toast.error(NO_WIRE_LAID.title, { description: NO_WIRE_LAID.why })
     setPending(null)
   }
 
@@ -740,7 +743,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       const d = Math.hypot(p.x - at.x, p.y - at.y)
       return d < best.d ? { s, d } : best
     }, { s: run.segments[0], d: Infinity })
-    sch.tapWire(nearest.s.id, at, pending.from, pending.points, pending.chosen ? pending.color : undefined)
+    if (!sch.tapWire(nearest.s.id, at, pending.from, pending.points, pending.chosen ? pending.color : undefined)) toast.error(NO_WIRE_LAID.title, { description: NO_WIRE_LAID.why })
     setPending(null)
     return true
   }
@@ -1121,9 +1124,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               </div>
               {detail.canvas ? (
                 <>
-                  <FieldCanvas objects={staticObjects} routes={staticRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} />
+                  <FieldCanvas objects={staticObjects} routes={staticRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} marks={staticMarks} />
                   <div ref={dragLayerRef} data-slot="field-drag-layer" className="pointer-events-none absolute top-0 left-0">
-                    {lifted.size > 0 && <FieldCanvas objects={liftedObjects} routes={liftedRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} />}
+                    {lifted.size > 0 && <FieldCanvas objects={liftedObjects} routes={liftedRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} marks={liftedMarks} />}
                   </div>
                 </>
               ) : (

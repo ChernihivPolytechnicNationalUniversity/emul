@@ -76,23 +76,30 @@ export class Conductors {
     return { wires, points }
   }
 
+  private bucketsMeeting(around: Box): number[] {
+    return Conductors.spanned({ x: around.x, y: around.y }, { x: around.x + around.w, y: around.y + around.h })
+  }
+
   foreign(own: ReadonlySet<string>, around: Box, bodies: readonly Box[]): Foreign {
     const lattice = new Foreign(around)
     const within = (p: Point) => p.x >= around.x && p.x <= around.x + around.w && p.y >= around.y && p.y <= around.y + around.h
-    for (const list of this.fixed.values())
-      for (const f of list) if (!own.has(f.net) && within(f.at)) lattice.pin(f.at, f.socket)
-    for (const laid of this.byLaid.values())
-      for (const s of laid) {
-        if (own.has(s.net)) continue
-        lattice.end(s.a)
-        lattice.end(s.b)
-        const horizontal = s.a.y === s.b.y
-        const lo = horizontal ? Math.max(Math.min(s.a.x, s.b.x), around.x) : Math.max(Math.min(s.a.y, s.b.y), around.y)
-        const hi = horizontal ? Math.min(Math.max(s.a.x, s.b.x), around.x + around.w) : Math.min(Math.max(s.a.y, s.b.y), around.y + around.h)
-        const fixed = horizontal ? s.a.y : s.a.x
-        if (horizontal ? fixed < around.y || fixed > around.y + around.h : fixed < around.x || fixed > around.x + around.w) continue
-        for (let v = Math.ceil(lo / (GRID / 2)) * (GRID / 2); v <= hi; v += GRID / 2) lattice.run(horizontal ? { x: v, y: fixed } : { x: fixed, y: v }, horizontal)
-      }
+    const buckets = this.bucketsMeeting(around)
+    const met = new Set<{ a: Point; b: Point; net: string }>()
+    for (const b of buckets) {
+      for (const f of this.fixed.get(b) ?? []) if (!own.has(f.net) && within(f.at)) lattice.pin(f.at, f.socket)
+      for (const s of this.segments.get(b) ?? []) met.add(s)
+    }
+    for (const s of met) {
+      if (own.has(s.net)) continue
+      lattice.end(s.a)
+      lattice.end(s.b)
+      const horizontal = s.a.y === s.b.y
+      const lo = horizontal ? Math.max(Math.min(s.a.x, s.b.x), around.x) : Math.max(Math.min(s.a.y, s.b.y), around.y)
+      const hi = horizontal ? Math.min(Math.max(s.a.x, s.b.x), around.x + around.w) : Math.min(Math.max(s.a.y, s.b.y), around.y + around.h)
+      const fixed = horizontal ? s.a.y : s.a.x
+      if (horizontal ? fixed < around.y || fixed > around.y + around.h : fixed < around.x || fixed > around.x + around.w) continue
+      for (let v = Math.ceil(lo / (GRID / 2)) * (GRID / 2); v <= hi; v += GRID / 2) lattice.run(horizontal ? { x: v, y: fixed } : { x: fixed, y: v }, horizontal)
+    }
     for (const body of bodies) lattice.body(body)
     return lattice
   }

@@ -50,6 +50,7 @@ export function split(doc: Schematic): Map<string, string> {
 
 type Ordered<T> = T & { z: number }
 const byZ = <T>(a: Ordered<T>, b: Ordered<T>) => a.z - b.z
+const byZThenId = (a: Ordered<WireSegment>, b: Ordered<WireSegment>) => a.z - b.z || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 const unz = <T>(o: Ordered<T>): T => {
   const copy: Partial<Ordered<T>> = { ...o }
   delete copy.z
@@ -87,7 +88,7 @@ export function join(elements: ReadonlyMap<string, string>): Schematic {
       const object = unz(o)
       return { ...object, ...x, props: { ...object.props, ...firmware } }
     }),
-    wires: wires.sort(byZ).map(unz),
+    wires: wires.sort(byZThenId).map(unz),
     parts,
   }
   if (library.length) doc.library = library.sort(byZ).map(unz)
@@ -118,8 +119,10 @@ function olderShelf(room: Room): { elements: Y.Map<string>; stamp: string | unde
   return legacy.size ? { elements: legacy, stamp: room.meta.get(ROOM_VERSION) } : null
 }
 
+const shelvedHere = (room: Room) => room.elements.size > 0 || formatOf(room) >= SCHEMATIC_VERSION
+
 export function readRoom(room: Room): Upgrade {
-  if (room.elements.size) return { doc: join(new Map(room.elements.entries())), notes: [] }
+  if (shelvedHere(room)) return { doc: join(new Map(room.elements.entries())), notes: [] }
   const older = olderShelf(room)
   if (!older) return { doc: join(new Map()), notes: [] }
   const { upgraded: _upgraded, ...read } = onThisVersion(join(new Map(older.elements.entries())) as unknown as SavedSchematic, older.stamp)
@@ -127,7 +130,7 @@ export function readRoom(room: Room): Upgrade {
   return read
 }
 
-const holdsAnything = (room: Room) => room.elements.size > 0 || olderShelf(room) !== null
+const holdsAnything = (room: Room) => room.elements.size > 0 || (!shelvedHere(room) && olderShelf(room) !== null)
 
 export function hostRoom(room: Room, doc: Schematic): Upgrade | null {
   if (holdsAnything(room)) return readRoom(room)

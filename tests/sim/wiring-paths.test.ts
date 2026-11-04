@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { circuitOf } from "@/schematic/circuit"
 import { examples } from "@/schematic/examples"
-import { GRID, type Point } from "@/schematic/geometry"
-import type { Schematic } from "@/schematic/types"
+import { GRID, objectPins, type Point } from "@/schematic/geometry"
+import type { PlacedObject, Schematic } from "@/schematic/types"
 import { moved, recoloured, removed, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
 
@@ -62,6 +62,33 @@ describe("the wiring kept up to date across edits is the wiring built afresh (de
       const fresh = wiringOf(new WireGraph(), doc)
       expect.soft(shape(known), `${id} step ${step} (action ${action})`).toEqual(shape(fresh))
       expect.soft(fresh.circuit, `${id} step ${step}: the store's circuit is the one the solver builds from the document`).toEqual(circuitOf(doc))
+    }
+  })
+})
+
+describe("the kept-up turns at pins are derived from the pins, not carried along (findings 3.L16)", () => {
+  const buttedAtARightAngle = (): Schematic => {
+    const a: PlacedObject = { id: "A", def: "resistor", x: 0, y: 0, props: { ref: "A" } }
+    const probe: PlacedObject = { id: "C", def: "resistor", x: 0, y: 0, rotation: 90, props: { ref: "C" } }
+    const meet = objectPins(a, GRID).find((p) => p.pin.id === "2")!.point
+    const top = objectPins(probe, GRID).map((p) => p.point).sort((p, q) => p.y - q.y)[0]
+    return { objects: [a, { ...probe, x: meet.x - top.x, y: meet.y - top.y }], wires: [], parts: {} }
+  }
+  const documents: [string, () => Schematic][] = [
+    ...["system-exam", "nucleo-serial", "open746-touch"].map((id): [string, () => Schematic] => [id, () => ({ ...examples.find((e) => e.id === id)!.build(GRID) })]),
+    ["two resistors butted at a right angle", buttedAtARightAngle],
+  ]
+  it.each(documents)("%s: a hundred and twenty moves of the whole sheet leave every lead and corner where a fresh derivation puts it", (id, build) => {
+    const rng = random(id.length * 31 + 5)
+    let doc: Schematic = build()
+    const graph = new WireGraph()
+    let known = wiringOf(graph, doc)
+    const turns = (w: Wiring) => ({ leads: w.routes.flatMap((r) => (r.leads ? [`${r.id}: ${JSON.stringify(r.leads)}`] : [])), corners: w.corners.map((c) => JSON.stringify(c)).sort() })
+    expect.soft(turns(known).leads.length + turns(known).corners.length, `${id}: turns to keep up`).toBeGreaterThan(0)
+    for (let step = 0; step < 120; step++) {
+      doc = moved(doc, new Map(doc.objects.map((o) => [o.id, { x: o.x, y: o.y }])), rng.int(-5, 5) * GRID || GRID, rng.int(-5, 5) * GRID, () => `t${step}`, known)
+      known = wiringOf(graph, doc)
+      expect.soft(turns(known), `${id} step ${step}`).toEqual(turns(wiringOf(new WireGraph(), doc)))
     }
   })
 })

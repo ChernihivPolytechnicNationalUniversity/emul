@@ -48,6 +48,14 @@ export async function readProjectFile(file: Blob): Promise<ReadProject | null> {
   return readProjectBytes(new Uint8Array(await file.arrayBuffer()))
 }
 
+export async function openedFile(file: Blob, name: string): Promise<ReadProject | { failure: string }> {
+  try {
+    return (await readProjectFile(file)) ?? { failure: `${name}: not an .emul project or a zipped STM32 project.` }
+  } catch (e) {
+    return { failure: `${name} could not be brought up to this version of εmul: ${e instanceof Error ? e.message : String(e)}` }
+  }
+}
+
 async function readProjectBytes(raw: Uint8Array): Promise<ReadProject | null> {
   let parsed: unknown
   try {

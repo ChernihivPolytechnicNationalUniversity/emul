@@ -16,6 +16,25 @@ export const samePoint = (p: Point, q: Point) => p.x === q.x && p.y === q.y
 
 export const onLattice = (p: Point) => Number.isInteger(p.x / HALF_CELL) && Number.isInteger(p.y / HALF_CELL)
 
+export function seededIds(texts: Iterable<string>, taken: ReadonlySet<string> = new Set()): () => string {
+  let h = 0x811c9dc5
+  const mix = (code: number) => {
+    h ^= code
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  for (const text of texts) {
+    for (let i = 0; i < text.length; i++) mix(text.charCodeAt(i))
+    mix(0)
+  }
+  const seed = h.toString(36)
+  let piece = 0
+  return () => {
+    let id = `${seed}.${piece++}`
+    while (taken.has(id)) id = `${seed}.${piece++}`
+    return id
+  }
+}
+
 export const isHorizontal = (s: WireSegment) => s.a.y === s.b.y
 
 export const isOrthogonal = (s: WireSegment) => (s.a.x === s.b.x) !== (s.a.y === s.b.y)

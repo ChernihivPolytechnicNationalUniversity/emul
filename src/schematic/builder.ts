@@ -8,7 +8,7 @@ type Built = { doc: Schematic; hubs: PlacedObject[]; connections: LegacyWire[]; 
 const built = new WeakMap<Schematic, Built>()
 
 const fingerprint = (state: Built) =>
-  `${state.doc.objects.map((o) => `${o.id}|${o.def}|${o.x}|${o.y}|${o.rotation ?? 0}|${o.mirror ? 1 : 0}`).join(";")}#${state.hubs.map((o) => `${o.x},${o.y}`).join(";")}#${state.connections.map((w) => `${w.id}|${w.from.object}:${w.from.pin}|${w.to.object}:${w.to.pin}`).join(",")}`
+  `${state.doc.objects.map((o) => `${o.id}|${o.def}|${o.x}|${o.y}|${o.rotation ?? 0}|${o.mirror ? 1 : 0}|${o.props?.ref ?? ""}|${o.props?.value ?? ""}`).join(";")}#${state.hubs.map((o) => `${o.x},${o.y}`).join(";")}#${state.connections.map((w) => `${w.id}|${w.from.object}:${w.from.pin}|${w.to.object}:${w.to.pin}|${(w.points ?? []).map((p) => `${p.x},${p.y}`).join(" ")}|${w.color ?? ""}`).join(",")}#${(state.doc.library ?? []).map((m) => `${m.id}:${m.built}`).join(",")}`
 
 function frozen(state: Built): readonly WireSegment[] {
   const key = fingerprint(state)

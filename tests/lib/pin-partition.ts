@@ -103,6 +103,29 @@ export function joiningContactsOfNcPads(frozen: Partition, objects: readonly Pla
   return canonical(groups.values())
 }
 
+export function netsJoinedThroughNcPads(frozen: Partition, objects: readonly PlacedObject[]): string[][] {
+  const names = stableNames(objects)
+  const groupOf = new Map<string, number>()
+  frozen.forEach((group, i) => group.forEach((key) => groupOf.set(key, i)))
+  const at = new Map<string, { key: string; nc: boolean }[]>()
+  for (const o of objects) {
+    if (isJunctionObject(o)) continue
+    for (const p of wirePins([o])) {
+      const point = `${p.at.x},${p.at.y}`
+      at.set(point, [...(at.get(point) ?? []), { key: `${names.get(o.id)}.${p.key.slice(p.key.indexOf(":") + 1)}`, nc: p.kind === "nc" }])
+    }
+  }
+  const nc = new Set([...at.values()].flat().filter((p) => p.nc).map((p) => p.key))
+  const real = (i: number) => frozen[i].some((key) => !nc.has(key))
+  const joined: string[][] = []
+  for (const pins of at.values()) {
+    if (!pins.some((p) => p.nc)) continue
+    const nets = new Set(pins.flatMap((p) => (groupOf.has(p.key) ? (real(groupOf.get(p.key)!) ? [`net ${groupOf.get(p.key)}`] : []) : p.nc ? [] : [`pin ${p.key}`])))
+    if (nets.size > 1) joined.push(pins.map((p) => p.key).sort())
+  }
+  return joined
+}
+
 export const pinPartition = (doc: Schematic): Partition => renamed(doc.objects, partitionOf(wireNets(doc.wires, wirePins(doc.objects))))
 
 export function legacyPinPartition(doc: LegacySchematic, grid: number): Partition {

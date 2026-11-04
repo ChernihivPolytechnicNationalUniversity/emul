@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest"
 import type { HdlNetlist } from "emul-shared/hdl"
-import { circuitOf, flowGraph, runsOf } from "@/schematic/circuit"
+import { circuitOf, flowGraph, runsOf, type Circuit, type FlowGraph } from "@/schematic/circuit"
+import { moved, wiringOf, withSegments } from "@/schematic/wire-edits"
+import { examples } from "@/schematic/examples"
+import { WireGraph } from "@/schematic/wires/graph"
+import { buildNetlist } from "@/sim/netlist"
+import { FlowGate, TopologyGate } from "@/sim/topology"
 import { GRID, objectPins } from "@/schematic/geometry"
 import { getDef, setLibrary } from "@/schematic/registry"
 import type { HdlModule, PlacedObject, Schematic } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
-import { wireCurrents } from "@/sim/flow"
+import { FlowSolver, wireCurrents } from "@/sim/flow"
 import counter from "./hdl/counter.json"
 
 const c = (x: number, y: number) => ({ x: x * GRID, y: y * GRID })
@@ -56,7 +61,7 @@ describe("the circuit handed to the solver (design.md §2)", () => {
     const circuit = circuitOf(doc)
     expect.soft(circuit.nets, "R1 2 to R2 1 by the wire, R2 2 to R3 1 by contact").toEqual([["R1:2", "R2:1"], ["R2:2", "R3:1"]])
     expect.soft([...circuit.wired].sort(), "the two pins the wire ends on").toEqual(["R1:2", "R2:1"])
-    expect.soft(circuit.flow.pins["R1:2"], "each pin sits on its point").toBe(`${a.x},${a.y}`)
+    expect.soft([circuit.flow.pins["R1:2"], circuit.flow.pins["R2:1"]].sort(), "each pin sits on its end of the run").toEqual([circuit.flow.runs[0].a, circuit.flow.runs[0].b].sort())
   })
 
   it("an HDL part's pins come from the document's own library, whatever library was set last", () => {
@@ -96,5 +101,85 @@ describe("current along the wires (design.md §9)", () => {
     const f = flow([["r1", "A", "B"]], { "P1:1": "A", "P2:1": "B" })
     const amps = wireCurrents(f, new Map(), new Set(), () => 1)
     expect.soft(amps.get("r1"), "left at zero").toBe(0)
+  })
+})
+
+describe("found by phase 3's reviews", () => {
+  const resistor = (id: string, x: number, y: number): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: y * GRID, props: { ref: id } })
+  const pinAt = (o: PlacedObject, id: string) => objectPins(o, GRID).find((p) => p.pin.id === id)!.point
+
+  it("the field's wiring takes an HDL part's pins from the document's own library too, whatever library was set last (findings 3.R1)", () => {
+    const m: HdlModule = { id: "hdl:cnt", name: "cnt", files: [], netlist: counter as unknown as HdlNetlist, built: "w4" }
+    setLibrary([m])
+    const part: PlacedObject = { id: "U1", def: m.id, x: 0, y: 0, props: { ref: "U1" } }
+    const clk = objectPins(part, GRID).find((p) => p.pin.id === "clk")!.point
+    setLibrary([])
+    const r = resistor("R1", 0, 0)
+    const placed: PlacedObject = { ...r, x: clk.x - pinAt(r, "2").x, y: clk.y - pinAt(r, "2").y }
+    const doc: Schematic = { objects: [part, placed], wires: [], parts: {}, library: [m] }
+    expect.soft(wiringOf(new WireGraph(), doc).circuit.nets, "the clock pin meets R1 2 by contact").toEqual([["R1:2", "U1:clk"]])
+  })
+
+  it("a pad wired to nothing but a wire is still a pad the solver drives (findings 3.R12)", () => {
+    const chip: PlacedObject = { id: "U1", def: "pic16f628a", x: 0, y: 0, props: { ref: "U1" } }
+    const pad = pinAt(chip, "RB0")
+    const bare: Schematic = { objects: [chip], wires: [], parts: {} }
+    const wired: Schematic = { ...bare, wires: [{ id: "w", a: pad, b: { x: pad.x + 3 * GRID, y: pad.y } }] }
+    const pads = (doc: Schematic) => buildNetlist(doc).elements.filter((e) => e.kind === "GPIO" && e.keys.includes("U1:RB0")).length
+    expect.soft(pads(bare), "an unwired pad is left out").toBe(0)
+    expect.soft(pads(wired), "a wired one is in").toBe(1)
+  })
+
+  it("the flow sent to the solver changes when the run graph does though the circuit does not (findings 3.R12)", () => {
+    const gate = new FlowGate()
+    const first: FlowGraph = { runs: [{ id: "r", a: "p:R1:2", b: "p:R2:1" }], pins: { "R1:2": "p:R1:2", "R2:1": "p:R2:1" } }
+    expect.soft(gate.latest(first), "the first is sent").toBe(first)
+    expect.soft(gate.latest({ runs: [{ id: "r", a: "p:R1:2", b: "p:R2:1" }], pins: { "R1:2": "p:R1:2", "R2:1": "p:R2:1" } }), "the same again is not").toBe(first)
+    const looped: FlowGraph = { runs: [...first.runs, { id: "s", a: "p:R1:2", b: "p:R2:1" }], pins: first.pins }
+    expect.soft(gate.latest(looped), "a second run between the same pins is").toBe(looped)
+  })
+
+  it("the gates send again when only a pin's place in the flow changes, or only which pins a wire ends on (findings 3.L15)", () => {
+    const flows = new FlowGate()
+    const first: FlowGraph = { runs: [{ id: "r", a: "p:R1:2", b: "p:R2:1" }], pins: { "R1:2": "p:R1:2", "R2:1": "p:R2:1" } }
+    flows.latest(first)
+    const moved: FlowGraph = { runs: first.runs, pins: { "R1:2": "p:R1:2", "R2:1": "p:R1:2" } }
+    expect.soft(flows.latest(moved), "a pin on another vertex").toBe(moved)
+    const r = (id: string): PlacedObject => ({ id, def: "resistor", x: 0, y: 0, props: { ref: id } })
+    const objects = [r("R1"), r("R2")]
+    const topology = new TopologyGate()
+    const wiredOne: Circuit = { objects, nets: [["R1:2", "R2:1"]], wired: ["R1:2"], flow: first }
+    topology.latest(wiredOne)
+    const wiredBoth: Circuit = { ...wiredOne, wired: ["R1:2", "R2:1"] }
+    expect.soft(topology.latest(wiredBoth), "a pin a wire now ends on").toBe(wiredBoth)
+  })
+
+  it("wiring moved without changing what it connects leaves the flow the solver has as it was; a new branch does not (findings 3.L6)", () => {
+    const doc = examples.find((e) => e.id === "power-supply")!.build(GRID)
+    const shifted: Schematic = { ...doc, objects: doc.objects.map((o) => ({ ...o, x: o.x + 3 * GRID, y: o.y + GRID })), wires: doc.wires.map((s) => ({ ...s, a: { x: s.a.x + 3 * GRID, y: s.a.y + GRID }, b: { x: s.b.x + 3 * GRID, y: s.b.y + GRID } })) }
+    const gate = new FlowGate()
+    const first = gate.latest(circuitOf(doc).flow)
+    expect.soft(gate.latest(circuitOf(shifted).flow), "the whole sheet moved: nothing to send").toBe(first)
+    const graph = new WireGraph()
+    expect.soft(gate.latest(wiringOf(graph, doc).circuit.flow), "the store's wiring: the same flow").toBe(first)
+    const whole = moved(doc, new Map(doc.objects.map((o) => [o.id, { x: o.x, y: o.y }])), 3 * GRID, GRID)
+    expect.soft(gate.latest(wiringOf(graph, whole).circuit.flow), "moved whole in the store, its looks shifted: nothing to send").toBe(first)
+    const branched = withSegments(doc, [{ id: "branch", a: doc.wires[0].a, b: { x: doc.wires[0].a.x, y: doc.wires[0].a.y - 5 * GRID } }])
+    expect.soft(gate.latest(wiringOf(graph, branched).circuit.flow), "a branch is sent").not.toBe(first)
+  })
+
+  it("the currents the solver builds once per terminal equal the ones solved for every terminal afresh (findings 3.L6)", () => {
+    const doc = examples.find((e) => e.id === "power-supply")!.build(GRID)
+    const circuit = circuitOf(doc)
+    const net = buildNetlist(circuit)
+    const solver = new FlowSolver(circuit.flow, net.pinNet, net.groundKeys)
+    const keys = Object.keys(circuit.flow.pins).filter((key) => net.pinNet.has(key))
+    expect.soft(keys.length, "terminals to try").toBeGreaterThan(5)
+    for (const key of keys) {
+      const afresh = [...wireCurrents(circuit.flow, net.pinNet, net.groundKeys, (k) => (k === key ? 1 : 0))].filter(([, amps]) => Math.abs(amps) > 1e-12)
+      const once = [...solver.unit(key)].filter(([, amps]) => Math.abs(amps) > 1e-12)
+      expect.soft(once.map(([id]) => id).sort(), `${key}: the runs it drives`).toEqual(afresh.map(([id]) => id).sort())
+      for (const [id, amps] of afresh) expect.soft(solver.unit(key).get(id), `${key} → ${id}`).toBeNear(amps, 1e-9)
+    }
   })
 })

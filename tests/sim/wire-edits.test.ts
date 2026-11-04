@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { GRID, objectPins, type Point } from "@/schematic/geometry"
-import type { PlacedObject, Schematic } from "@/schematic/types"
-import { clipOf, connectPins, moved, recoloured, removed, reoriented, travellingWires } from "@/schematic/wire-edits"
+import type { HdlModule, PlacedObject, Schematic } from "@/schematic/types"
+import type { HdlNetlist } from "emul-shared/hdl"
+import { withLibrary } from "@/schematic/registry"
+import { normalise } from "@/schematic/wires/normal-form"
+import counter from "./hdl/counter.json"
+import counter2 from "./hdl/counter2.json"
+import { clipOf, connectPins, moved, nearestOn, placedObject, recoloured, removed, reoriented, tapWireAt, travellingWires, wiringOf, withModule } from "@/schematic/wire-edits"
+import { WireGraph } from "@/schematic/wires/graph"
 import { danglingEnds, junctionsOf, wireNets } from "@/schematic/wires/graph"
 import { wirePins } from "@/schematic/migrate-wires"
 import { normalFormViolations } from "../lib/wire-reference"
@@ -144,5 +150,129 @@ describe("copying (design.md §6.6)", () => {
     expect.soft(clip.wires.map((s) => s.id), "the wire between them").toEqual(["between"])
     expect.soft(Object.keys(clip.parts), "their state").toEqual(["R1:X"])
     expect.soft(clipOf(doc, new Set()), "nothing picked").toBeNull()
+  })
+})
+
+describe("found by phase 3's reviews", () => {
+  it("a part placed with a pin on a wire joins it there: the wire splits at the pin (findings 3.R2)", () => {
+    const g = (id: string, x: number): PlacedObject => ({ id, def: "ground", x: c(x), y: 0 })
+    const a = g("A", 0)
+    const b = g("B", 10)
+    const rail = seg("rail", pinAt(a, "GND"), pinAt(b, "GND"))
+    const doc: Schematic = { objects: [a, b], wires: [rail], parts: {} }
+    const placed = placedObject(doc, g("C", 5), newId)
+    expect.soft(placed.wires.length, "split in two at the new pin").toBe(2)
+    expect.soft(normalFormViolations(placed.wires, wirePins(placed.objects)), "normal form").toEqual([])
+    expect.soft(view(placed).netOfPin("C:GND"), "on the rail's net").toBe(view(placed).netOfPin("A:GND"))
+  })
+
+  it("a module rebuilt without a pin a spine ran through lets the spine merge back into one wire (findings 3.R1)", () => {
+    const wide: HdlModule = { id: "hdl:cnt", name: "cnt", files: [], netlist: counter as unknown as HdlNetlist, built: "w4" }
+    const narrow: HdlModule = { ...wide, netlist: counter2 as unknown as HdlNetlist, built: "w2" }
+    const part: PlacedObject = { id: "U1", def: wide.id, x: 0, y: 0, props: { ref: "U1" } }
+    const q3 = withLibrary([wide], () => pinAt(part, "carry"))
+    const through = [seg("spine", { x: q3.x, y: q3.y - c(0.5) }, { x: q3.x, y: q3.y + c(0.5) })]
+    const cut = withLibrary([wide], () => normalise(through, wirePins([part]), undefined, newId))
+    expect.soft(cut.length, "the pin cuts a wire through it in two").toBe(2)
+    const rebuilt = withModule({ objects: [part], wires: [...cut], parts: {}, library: [wide] }, narrow, newId)
+    expect.soft(rebuilt.wires.length, "one wire where the pin was").toBe(1)
+    expect.soft(withLibrary(rebuilt.library, () => normalFormViolations(rebuilt.wires, wirePins(rebuilt.objects))), "normal form").toEqual([])
+  })
+
+  it("the same document read under a rebuilt module sees the module's new pin, not the view kept from before (findings 3.R1)", () => {
+    const narrow: HdlModule = { id: "hdl:cnt", name: "cnt", files: [], netlist: counter2 as unknown as HdlNetlist, built: "w2" }
+    const wide: HdlModule = { ...narrow, netlist: counter as unknown as HdlNetlist, built: "w4" }
+    const part: PlacedObject = { id: "U1", def: wide.id, x: 0, y: 0, props: { ref: "U1" } }
+    const carry = withLibrary([wide], () => pinAt(part, "carry"))
+    const doc: Schematic = { objects: [part], wires: [seg("w", carry, { x: carry.x + c(3), y: carry.y })], parts: {} }
+    const carried = new Set([part.id])
+    expect.soft(withLibrary([narrow], () => [...travellingWires(doc, carried)]), "no pin at the wire's end before the rebuild").toEqual([])
+    expect.soft(withLibrary([wide], () => [...travellingWires(doc, carried)]), "the new pin carries its wire").toEqual(["w"])
+  })
+
+  it("recolouring a wire keeps its place in the drawing, so a crossing keeps which wire breaks the other (findings 3.R8)", () => {
+    const h = seg("h", { x: 0, y: c(1) }, { x: c(2), y: c(1) })
+    const v = seg("v", { x: c(1), y: 0 }, { x: c(1), y: c(2) })
+    const doc: Schematic = { objects: [], wires: [h, v], parts: {} }
+    const red = recoloured(doc, [["h", "red"]], newId)
+    expect.soft(red.wires.map((s) => `${s.id}:${s.color ?? ""}`), "h first still").toEqual(["h:red", "v:"])
+    expect.soft(recoloured(red, [["h", undefined]], newId).wires.map((s) => s.id), "and back").toEqual(["h", "v"])
+  })
+
+  it("until phase 6's slip, a wire to an outer header pin another net's wire already passes is refused and the document left as it was (design.md §13.9; findings 3.L3)", () => {
+    const board: PlacedObject = { id: "U1", def: "nucleo-f429zi", x: 0, y: 0, props: { ref: "U1" } }
+    const inner = pinAt(board, "CN8-6")
+    const outer = pinAt(board, "CN8-5")
+    const r4: PlacedObject = { id: "R4", def: "resistor", x: inner.x - c(18), y: inner.y - c(1), props: { ref: "R4" } }
+    const r1: PlacedObject = { id: "R1", def: "resistor", x: outer.x - c(12), y: outer.y + c(4), props: { ref: "R1" } }
+    const passing = connectPins({ objects: [board, r4, r1], wires: [], parts: {} }, { object: "U1", pin: "CN8-6" }, { object: "R4", pin: "2" }, [], undefined, newId)
+    expect.soft(passing.wires.some((s) => s.a.y === outer.y && s.b.y === outer.y && Math.min(s.a.x, s.b.x) < outer.x && Math.max(s.a.x, s.b.x) > outer.x), "the inner pin's wire passes the outer pin").toBe(true)
+    expect.soft(connectPins(passing, { object: "U1", pin: "CN8-5" }, { object: "R1", pin: "2" }, [], undefined, newId), "refused: the same document").toBe(passing)
+  })
+
+  it("connecting and tapping with the store's wiring lay what they lay without it, and a wiring of another document is not taken for it (findings 3.L9)", () => {
+    const { doc } = spineThroughR1()
+    const r4 = resistor("R4", 0, 6)
+    const withR4: Schematic = { ...doc, objects: [...doc.objects, r4] }
+    const ids = () => {
+      let n = 0
+      return () => `k${n++}`
+    }
+    const known = wiringOf(new WireGraph(), withR4)
+    const stale = wiringOf(new WireGraph(), { ...withR4, wires: [] })
+    const plain = connectPins(withR4, { object: "R4", pin: "2" }, { object: "R2", pin: "2" }, [], undefined, ids())
+    expect.soft(plain.wires.length, "a wire laid").toBeGreaterThan(withR4.wires.length)
+    expect.soft(connectPins(withR4, { object: "R4", pin: "2" }, { object: "R2", pin: "2" }, [], undefined, ids(), known).wires, "the same with the store's wiring").toEqual(plain.wires)
+    expect.soft(connectPins(withR4, { object: "R4", pin: "2" }, { object: "R2", pin: "2" }, [], undefined, ids(), stale).wires, "the same with a wiring of another document").toEqual(plain.wires)
+    const tapped = tapWireAt(withR4, "a", withR4.wires[0].a, { object: "R4", pin: "2" }, [], undefined, ids())
+    expect.soft(tapWireAt(withR4, "a", withR4.wires[0].a, { object: "R4", pin: "2" }, [], undefined, ids(), known).wires, "a tap the same with the store's wiring").toEqual(tapped.wires)
+  })
+
+  it("wiring carried by a move keeps its place in the drawing, so a crossing keeps which wire breaks the other (findings 3.L13)", () => {
+    const r1 = resistor("R1", 0, 4)
+    const r2 = resistor("R2", 10, 4)
+    const a = pinAt(r1, "2")
+    const b = pinAt(r2, "1")
+    const h = seg("h", a, b)
+    const v = seg("v", { x: a.x + c(3), y: a.y - c(2) }, { x: a.x + c(3), y: a.y + c(2) })
+    const doc: Schematic = { objects: [r1, r2, resistor("R3", 0, 20)], wires: [h, v], parts: {} }
+    const carried = moved(doc, new Map([r1, r2].map((o) => [o.id, { x: o.x, y: o.y }])), c(1), 0, newId)
+    expect.soft(carried.wires.map((s) => s.id), "h, moved along, still first").toEqual(["h", "v"])
+    expect.soft(carried.wires[0].a.x, "and moved").toBe(a.x + c(1))
+  })
+
+  it("a run between two carried pins travels though its net goes on to a part left behind (findings 3.L15)", () => {
+    const r1 = resistor("R1", 0, 0)
+    const r2 = resistor("R2", 8, 0)
+    const r3 = resistor("R3", 16, 0)
+    const join = pinAt(r2, "1")
+    const below = { x: join.x, y: join.y + c(3) }
+    const under = { x: pinAt(r3, "1").x, y: below.y }
+    const doc: Schematic = { objects: [r1, r2, r3], wires: [seg("between", pinAt(r1, "2"), join), seg("down", join, below), seg("across", below, under), seg("up", under, pinAt(r3, "1"))], parts: {} }
+    expect.soft([...travellingWires(doc, new Set(["R1", "R2"]))].sort(), "the wire between them goes, the run on to R3 stays").toEqual(["between"])
+  })
+
+  it("a tap lands on the wire tapped, at its end when the pointer is past it (findings 3.L15)", () => {
+    const s = seg("s", { x: 0, y: 0 }, { x: c(4), y: 0 })
+    expect.soft(nearestOn(s, { x: c(10), y: c(1) }), "past the far end").toEqual({ x: c(4), y: 0 })
+    expect.soft(nearestOn(s, { x: -c(3), y: 0 }), "before the near end").toEqual({ x: 0, y: 0 })
+    expect.soft(nearestOn(s, { x: c(2.2), y: c(5) }), "along it, on the grid").toEqual({ x: c(2), y: 0 })
+  })
+
+  it("a part moved off a spine its pin cut lets the spine merge back into one wire (findings 3.L15)", () => {
+    const { doc, r1 } = spineThroughR1()
+    const after = moved(doc, new Map([[r1.id, { x: r1.x, y: r1.y }]]), c(4), 0, newId)
+    expect.soft(after.wires.length, "one wire").toBe(1)
+    expect.soft(normalFormViolations(after.wires, wirePins(after.objects)), "normal form").toEqual([])
+  })
+
+  it("a net carried whole travels whole, a branch that ends in the open included (findings 3.R12)", () => {
+    const r1 = resistor("R1", 0, 0)
+    const r2 = resistor("R2", 10, 0)
+    const a = pinAt(r1, "2")
+    const b = pinAt(r2, "1")
+    const mid = { x: a.x + c(3), y: a.y }
+    const doc: Schematic = { objects: [r1, r2], wires: [seg("l", a, mid), seg("r", mid, b), seg("branch", mid, { x: mid.x, y: mid.y + c(3) })], parts: {} }
+    expect.soft([...travellingWires(doc, new Set([r1.id, r2.id]))].sort(), "the branch goes along").toEqual(["branch", "l", "r"])
   })
 })

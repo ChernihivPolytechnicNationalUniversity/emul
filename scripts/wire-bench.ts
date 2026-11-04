@@ -1,5 +1,8 @@
 import { builder, connect, connections, legacyOf } from "@/schematic/builder"
-import { lab1Board } from "@/schematic/examples"
+import { examples, lab1Board } from "@/schematic/examples"
+import { circuitOf } from "@/schematic/circuit"
+import { buildNetlist } from "@/sim/netlist"
+import { FlowSolver } from "@/sim/flow"
 import { GRID } from "@/schematic/geometry"
 import { wiresAsSegments } from "@/schematic/migrate-wires"
 import { getDef } from "@/schematic/registry"
@@ -193,9 +196,29 @@ const crowded = (() => {
   return legacyOf(doc)
 })()
 const frozen = time(() => wiresAsSegments(crowded), 3)
+const SUPPLIES = 100
+const supplies = (() => {
+  const one = examples.find((e) => e.id === "power-supply")!.build(GRID)
+  const doc: Schematic = { objects: [], wires: [], parts: {} }
+  for (let tile = 0; tile < SUPPLIES; tile++) {
+    const dx = (tile % 10) * 60 * GRID
+    const dy = Math.floor(tile / 10) * 40 * GRID
+    for (const o of one.objects) doc.objects.push({ ...o, id: `${o.id}-${tile}`, x: o.x + dx, y: o.y + dy })
+    for (const w of one.wires) doc.wires.push({ ...w, id: `${w.id}-${tile}`, a: { x: w.a.x + dx, y: w.a.y + dy }, b: { x: w.b.x + dx, y: w.b.y + dy } })
+  }
+  return doc
+})()
+const suppliesCircuit = circuitOf(supplies)
+const suppliesNet = buildNetlist(suppliesCircuit)
+const terminals = Object.keys(suppliesCircuit.flow.pins).filter((key) => suppliesNet.pinNet.has(key))
+const flowBuilt = time(() => {
+  const solver = new FlowSolver(suppliesCircuit.flow, suppliesNet.pinNet, suppliesNet.groundKeys)
+  for (const key of terminals) solver.unit(key)
+}, 3)
 console.log(`  an old file's ${CHAIN} resistors chained on their diagonals, moved onto the lattice: ${ms(lattice)}; a drag's placement check set up on ${BOARDS} boards: ${ms(dragStart)}`)
 console.log(`  ${FENCED} diagonal resistors fenced in by ${FENCE * FENCE} grounds, each taken out to a clear spot: ${ms(fencedIn)}`)
 console.log(`  an old file's ${2 * STRIP_WIRES} wires crowding into the Open746I-C's strips, frozen and laid clear of each other's nets: ${ms(frozen)}`)
+console.log(`  the wire currents per terminal for ${SUPPLIES} power supplies (${supplies.objects.length} parts, ${suppliesCircuit.flow.runs.length} runs, ${terminals.length} terminals): ${ms(flowBuilt)}`)
 
 console.log("")
 const large = results[results.length - 1]
@@ -212,5 +235,6 @@ check(`an old file's ${CHAIN}-part diagonal chain moved onto the lattice`, latti
 check(`a drag's placement check set up on ${BOARDS} boards`, dragStart, 30)
 check(`${FENCED} parts fenced in by ${FENCE * FENCE} grounds taken out to clear spots`, fencedIn, 300)
 check(`an old file's ${2 * STRIP_WIRES} crowded wires frozen`, frozen, 600)
-console.log(`\n${13 - failed}/13 checks passed`)
+check(`the wire currents per terminal for ${SUPPLIES} power supplies`, flowBuilt, 150)
+console.log(`\n${14 - failed}/14 checks passed`)
 if (failed) process.exitCode = 1

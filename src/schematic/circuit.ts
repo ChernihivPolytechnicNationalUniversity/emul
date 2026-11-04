@@ -73,10 +73,28 @@ function backwards(points: readonly Point[]): boolean {
   return points.length > 2 && before(points[points.length - 2], points[1])
 }
 
+export function flowVertices(runs: readonly Run[], pins: readonly WirePin[]): { runs: FlowRun[]; pins: (readonly [string, string])[] } {
+  const names = new Map<string, string>()
+  const offer = (at: Point, name: string) => {
+    const key = pointKey(at)
+    const was = names.get(key)
+    if (was === undefined || name < was) names.set(key, name)
+  }
+  for (const p of pins) offer(p.at, `p:${p.key}`)
+  for (const r of runs) {
+    offer(r.points[0], `r:${r.id}:a`)
+    offer(r.points[r.points.length - 1], `r:${r.id}:b`)
+  }
+  const nameAt = (at: Point) => names.get(pointKey(at))!
+  return {
+    runs: runs.map((r) => ({ id: r.id, a: nameAt(r.points[0]), b: nameAt(r.points[r.points.length - 1]) })),
+    pins: pins.map((p) => [p.key, nameAt(p.at)] as const),
+  }
+}
+
 export function flowGraph(runs: readonly Run[], pins: readonly WirePin[]): FlowGraph {
-  const pinVertex: Record<string, string> = {}
-  for (const p of pins) pinVertex[p.key] = pointKey(p.at)
-  return { runs: runs.map((r) => ({ id: r.id, a: pointKey(r.points[0]), b: pointKey(r.points[r.points.length - 1]) })), pins: pinVertex }
+  const vertices = flowVertices(runs, pins)
+  return { runs: vertices.runs, pins: Object.fromEntries(vertices.pins) }
 }
 
 export function circuitOf(doc: Pick<Schematic, "objects" | "wires" | "library">): Circuit {

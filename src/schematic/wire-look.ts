@@ -8,7 +8,11 @@ export type Leads = { start?: Point; end?: Point }
 
 export type PinCorner = { at: Point; a: Point; b: Point }
 
-export function turnsAtPins(runs: readonly Run[], pins: readonly WirePin[]): { leads: Map<string, Leads>; corners: PinCorner[] } {
+export type TurnPins = { leads: Map<string, { start?: string; end?: string }>; corners: (readonly [string, string])[] }
+
+export const leadEnd = (pin: WirePin): Point => ({ x: pin.at.x - pin.out!.x * LEAD_CELLS * GRID, y: pin.at.y - pin.out!.y * LEAD_CELLS * GRID })
+
+export function turnsAtPins(runs: readonly Run[], pins: readonly WirePin[]): { leads: Map<string, Leads>; corners: PinCorner[]; pins: TurnPins } {
   const pinsAt = new Map<string, WirePin[]>()
   for (const p of pins) {
     const key = pointKey(p.at)
@@ -18,36 +22,39 @@ export function turnsAtPins(runs: readonly Run[], pins: readonly WirePin[]): { l
   }
   const endsAt = new Map<string, number>()
   for (const run of runs) for (const s of run.segments) for (const p of [s.a, s.b]) endsAt.set(pointKey(p), (endsAt.get(pointKey(p)) ?? 0) + 1)
-  const inward = (pin: WirePin): Point => ({ x: pin.at.x - pin.out!.x * LEAD_CELLS * GRID, y: pin.at.y - pin.out!.y * LEAD_CELLS * GRID })
-  const leadAt = (at: Point, next: Point): Point | undefined => {
+  const leadAt = (at: Point, next: Point): WirePin | undefined => {
     const key = pointKey(at)
     const here = pinsAt.get(key)
     if (here?.length !== 1 || endsAt.get(key) !== 1) return undefined
     const pin = here[0]
-    if (!pin.out) return undefined
+    if (!pin.out || pin.socket) return undefined
     const d = { x: Math.sign(next.x - at.x), y: Math.sign(next.y - at.y) }
     if (d.x * pin.out.x + d.y * pin.out.y !== 0) return undefined
-    return inward(pin)
+    return pin
   }
   const leads = new Map<string, Leads>()
+  const turned: TurnPins = { leads: new Map(), corners: [] }
   for (const run of runs) {
     const pts = run.points
     if (pts.length < 2) continue
     const start = leadAt(pts[0], pts[1])
     const end = leadAt(pts[pts.length - 1], pts[pts.length - 2])
-    if (start || end) leads.set(run.id, { ...(start && { start }), ...(end && { end }) })
+    if (!start && !end) continue
+    leads.set(run.id, { ...(start && { start: leadEnd(start) }), ...(end && { end: leadEnd(end) }) })
+    turned.leads.set(run.id, { ...(start && { start: start.key }), ...(end && { end: end.key }) })
   }
   const corners: PinCorner[] = []
   for (const [key, here] of pinsAt) {
     if (here.length !== 2 || endsAt.has(key)) continue
-    const [p, q] = here
-    if (!p.out || !q.out || p.out.x * q.out.x + p.out.y * q.out.y !== 0) continue
-    corners.push({ at: p.at, a: inward(p), b: inward(q) })
+    const [p, q] = here[0].key < here[1].key ? here : [here[1], here[0]]
+    if (!p.out || !q.out || p.socket || q.socket || p.out.x * q.out.x + p.out.y * q.out.y !== 0) continue
+    corners.push({ at: p.at, a: leadEnd(p), b: leadEnd(q) })
+    turned.corners.push([p.key, q.key])
   }
-  return { leads, corners }
+  return { leads, corners, pins: turned }
 }
 
-const towards = (from: Point, to: Point, by: number): Point => {
+export const towards = (from: Point, to: Point, by: number): Point => {
   const len = Math.hypot(to.x - from.x, to.y - from.y)
   return len ? { x: from.x + ((to.x - from.x) / len) * by, y: from.y + ((to.y - from.y) / len) * by } : from
 }

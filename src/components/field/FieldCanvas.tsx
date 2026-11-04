@@ -3,6 +3,7 @@ import type { Rect, RoutedWire } from "@/schematic/geometry"
 import type { PlacedObject } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
 import { paintField } from "./field-paint"
+import type { WireMarks } from "./wire-marks"
 import { useThemeName } from "./field-palette"
 import { deviceScale, MAX_CANVAS_PX, rasterBucket, type SymbolRaster } from "./symbol-raster"
 
@@ -16,11 +17,12 @@ type FieldCanvasProps = {
   raster: SymbolRaster
   selectedObjects?: ReadonlySet<string>
   selectedWires?: ReadonlySet<string>
+  marks?: WireMarks
 }
 
 const NONE: ReadonlySet<string> = new Set()
 
-export function FieldCanvas({ objects, routes, view, grid, scale, colorOf, raster, selectedObjects = NONE, selectedWires = NONE }: FieldCanvasProps) {
+export function FieldCanvas({ objects, routes, view, grid, scale, colorOf, raster, selectedObjects = NONE, selectedWires = NONE, marks }: FieldCanvasProps) {
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const bucket = rasterBucket(scale)
   const theme = useThemeName()
@@ -39,8 +41,8 @@ export function FieldCanvas({ objects, routes, view, grid, scale, colorOf, raste
     if (!context) return
 
     context.clearRect(0, 0, width, height)
-    paintField(context, canvas, { objects, routes, view, grid, pixels, device, theme, colorOf, raster, selection: { objects: selectedObjects, wires: selectedWires } })
-  }, [objects, routes, view, grid, bucket, theme, colorOf, raster, selectedObjects, selectedWires])
+    paintField(context, canvas, { objects, routes, view, grid, pixels, device, theme, colorOf, raster, selection: { objects: selectedObjects, wires: selectedWires }, marks })
+  }, [objects, routes, view, grid, bucket, theme, colorOf, raster, selectedObjects, selectedWires, marks])
 
   if (view.w <= 0) return null
   return (

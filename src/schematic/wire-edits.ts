@@ -1,16 +1,16 @@
-import { runsOf, type Circuit, type FlowRun, type Run } from "./circuit"
+import { flowVertices, runsOf, type Circuit, type FlowRun, type Run } from "./circuit"
 import { frozenCandidates, JUNCTION, laidAgain, wirePins } from "./freeze"
 import { GRID, objectIndex, objectPins, objectRect, ownBodies, routeObstacles, snap, unionOf, type Point, type RoutedWire } from "./geometry"
 import type { NetMap } from "./nets"
-import { turnsAtPins, type PinCorner } from "./wire-look"
+import { leadEnd, turnsAtPins, type PinCorner, type TurnPins } from "./wire-look"
 import { fieldRouter } from "./placement"
-import { getDef } from "./registry"
-import type { ComponentDef, LegacyWire, PartState, PinRef, PlacedObject, Schematic } from "./types"
+import { getDef, getLibraryVersion, withLibrary } from "./registry"
+import type { ComponentDef, HdlModule, LegacyWire, PartState, PinRef, PlacedObject, Schematic } from "./types"
 import type { WireColorKey } from "./wire-colors"
 import { clearOf, Conductors } from "./wires/conductors"
 import { WireGraph, type WireNets } from "./wires/graph"
-import { commitEdit } from "./wires/normal-form"
-import { contains, pointKey, samePoint, type WirePin, type WireSegment } from "./wires/segment"
+import { commitEdit, normalise, normaliseEdit } from "./wires/normal-form"
+import { contains, pointKey, samePoint, seededIds, type WirePin, type WireSegment } from "./wires/segment"
 
 const pinCache = new WeakMap<PlacedObject, { def: ComponentDef | undefined; pins: readonly WirePin[] }>()
 
@@ -25,14 +25,15 @@ export function pinsOf(objects: readonly PlacedObject[]): WirePin[] {
   return out
 }
 
-const graphs = new WeakMap<readonly WireSegment[], { pins: readonly PlacedObject[]; view: WireNets }>()
+const graphs = new WeakMap<readonly WireSegment[], { pins: readonly PlacedObject[]; definitions: number; view: WireNets }>()
 
 export function viewOf(doc: Pick<Schematic, "objects" | "wires">, graph?: WireGraph): WireNets {
   if (graph) return graph.of(doc.wires, pinsOf(doc.objects))
   const known = graphs.get(doc.wires)
-  if (known && known.pins === doc.objects) return known.view
+  const definitions = getLibraryVersion()
+  if (known && known.pins === doc.objects && known.definitions === definitions) return known.view
   const view = new WireGraph().of(doc.wires, pinsOf(doc.objects))
-  graphs.set(doc.wires, { pins: doc.objects, view })
+  graphs.set(doc.wires, { pins: doc.objects, definitions, view })
   return view
 }
 
@@ -53,14 +54,13 @@ function conductorsOf(doc: Schematic, view: WireNets, pins: readonly WirePin[]):
   return conductors
 }
 
-function laid(doc: Schematic, wire: LegacyWire, own: ReadonlySet<string>, objects: readonly PlacedObject[]): Point[] | null {
+function laid(doc: Schematic, wire: LegacyWire, own: ReadonlySet<string>, objects: readonly PlacedObject[], view: WireNets, pins: readonly WirePin[]): Point[] | null {
   const byId = objectIndex(objects)
   const route = fieldRouter().routeAll(objects, [wire], GRID)[0]
   const fromPin = objectPins(byId.get(wire.from.object)!, GRID).find((p) => p.pin.id === wire.from.pin)
   const toPin = objectPins(byId.get(wire.to.object)!, GRID).find((p) => p.pin.id === wire.to.pin)
   if (!route || !fromPin || !toPin) return null
-  const view = viewOf(doc)
-  const conductors = conductorsOf(doc, view, pinsOf(doc.objects))
+  const conductors = conductorsOf(doc, view, pins)
   const bodies = [...routeObstacles(objects, GRID, wire.from.object, wire.to.object), ...ownBodies(byId, GRID, wire.from.object, wire.to.object)]
   const candidates = frozenCandidates(route.pts, bodies)
   const clean = candidates.find((c) => clearOf(conductors, own, c))
@@ -84,11 +84,14 @@ export function withSegments(doc: Schematic, add: readonly WireSegment[], remove
   return { ...doc, wires }
 }
 
-export function connectPins(doc: Schematic, from: PinRef, to: PinRef, points: readonly Point[] = [], color?: WireColorKey, newId: NewId = randomId): Schematic {
+export const NO_WIRE_LAID = { title: "No wire laid", why: "Every way to that pin would touch another net's wire or pin." }
+
+export function connectPins(doc: Schematic, from: PinRef, to: PinRef, points: readonly Point[] = [], color?: WireColorKey, newId: NewId = randomId, known?: Wiring): Schematic {
   if (from.object === to.object && from.pin === to.pin) return doc
-  const view = viewOf(doc)
+  const wiring = knownFor(doc, known)
+  const view = wiring?.view ?? viewOf(doc)
   const own = new Set([netOrSelf(view, `${from.object}:${from.pin}`), netOrSelf(view, `${to.object}:${to.pin}`)])
-  const pts = laid(doc, { id: "wire", from, to, points: [...points] }, own, doc.objects)
+  const pts = laid(doc, { id: "wire", from, to, points: [...points] }, own, doc.objects, view, wiring?.pins ?? pinsOf(doc.objects))
   if (!pts) return doc
   return withSegments(doc, segmentsAlong(pts, color, newId), [], [], newId)
 }
@@ -101,30 +104,32 @@ export function nearestOn(s: WireSegment, at: Point): Point {
   return horizontal ? { x: along, y: s.a.y } : { x: s.a.x, y: along }
 }
 
-export function tapWireAt(doc: Schematic, segmentId: string, at: Point, from: PinRef, points: readonly Point[] = [], color?: WireColorKey, newId: NewId = randomId): Schematic {
+export function tapWireAt(doc: Schematic, segmentId: string, at: Point, from: PinRef, points: readonly Point[] = [], color?: WireColorKey, newId: NewId = randomId, known?: Wiring): Schematic {
   const tapped = doc.wires.find((s) => s.id === segmentId)
   if (!tapped) return doc
-  const view = viewOf(doc)
+  const wiring = knownFor(doc, known)
+  const view = wiring?.view ?? viewOf(doc)
   const fromKey = `${from.object}:${from.pin}`
   const point = nearestOn(tapped, at)
   const hub: PlacedObject = { id: "tap", def: JUNCTION, x: point.x - GRID, y: point.y - GRID }
   const own = new Set([netOrSelf(view, fromKey), view.netOfSegment(tapped.id) ?? `wire:${tapped.id}`])
-  const pts = laid(doc, { id: "wire", from, to: { object: hub.id, pin: "J" }, points: [...points] }, own, [...doc.objects, hub])
+  const pts = laid(doc, { id: "wire", from, to: { object: hub.id, pin: "J" }, points: [...points] }, own, [...doc.objects, hub], view, wiring?.pins ?? pinsOf(doc.objects))
   if (!pts) return doc
   return withSegments(doc, segmentsAlong(pts, color ?? tapped.color, newId), [], [point], newId)
 }
 
 export function recoloured(doc: Schematic, entries: Iterable<readonly [string, WireColorKey | undefined]>, newId: NewId = randomId): Schematic {
   const next = new Map(entries)
-  const remove: WireSegment[] = []
-  const add: WireSegment[] = []
-  for (const s of doc.wires) {
-    if (!next.has(s.id) || s.color === next.get(s.id)) continue
+  const changed: WireSegment[] = []
+  const wires = doc.wires.map((s) => {
+    if (!next.has(s.id) || s.color === next.get(s.id)) return s
     const color = next.get(s.id)
-    remove.push(s)
-    add.push(color ? { id: s.id, a: s.a, b: s.b, color } : { id: s.id, a: s.a, b: s.b })
-  }
-  return withSegments(doc, add, remove, [], newId)
+    const painted: WireSegment = color ? { id: s.id, a: s.a, b: s.b, color } : { id: s.id, a: s.a, b: s.b }
+    changed.push(painted)
+    return painted
+  })
+  if (!changed.length) return doc
+  return { ...doc, wires: [...normaliseEdit(wires, pinsOf(doc.objects), { segments: changed }, newId).wires] }
 }
 
 const pinPoints = (objects: readonly PlacedObject[]) => objects.flatMap((o) => objectPins(o, GRID).map((p) => p.point))
@@ -137,6 +142,27 @@ export function removed(doc: Schematic, objectIds: ReadonlySet<string>, segmentI
     parts: Object.fromEntries(Object.entries(doc.parts).filter(([k]) => !objectIds.has(k.split(":")[0]))),
   }
   return withSegments(remaining, [], doc.wires.filter((s) => segmentIds.has(s.id)), pinPoints(gone), newId)
+}
+
+export function placedObject(doc: Schematic, object: PlacedObject, newId: NewId = randomId): Schematic {
+  return withSegments({ ...doc, objects: [...doc.objects, object] }, [], [], pinPoints([object]), newId)
+}
+
+export function withModule(doc: Schematic, module: HdlModule, newId: NewId = randomId): Schematic {
+  const modules = doc.library ?? []
+  const i = modules.findIndex((m) => m.id === module.id)
+  const library = i < 0 ? [...modules, module] : modules.map((m, k) => (k === i ? module : m))
+  const next: Schematic = { ...doc, library }
+  const instances = doc.objects.filter((o) => o.def === module.id)
+  if (!instances.length) return next
+  const before = withLibrary(doc.library, () => pinPoints(instances))
+  return withLibrary(library, () => withSegments(next, [], [], [...before, ...pinPoints(instances)], newId))
+}
+
+export function inNormalForm(doc: Schematic): Schematic {
+  const ids = doc.wires.map((s) => s.id)
+  const wires = normalise(doc.wires, pinsOf(doc.objects), undefined, seededIds(ids, new Set(ids)))
+  return wires === doc.wires ? doc : { ...doc, wires: [...wires] }
 }
 
 const knownFor = (doc: Pick<Schematic, "objects" | "wires">, known?: Wiring) => (known && known.source.objects === doc.objects && known.source.wires === doc.wires ? known : undefined)
@@ -242,6 +268,7 @@ type NetLook = {
   group: readonly string[] | null
   contacts: readonly (readonly [string, string])[]
   corners: readonly PinCorner[]
+  turned: TurnPins
 }
 
 const looks = new WeakMap<object, { look: NetLook; at: Point }>()
@@ -259,18 +286,15 @@ function shiftedLook(look: NetLook, d: Point, view: WireNets): NetLook {
   }
   const routeOf = new Map<string, RoutedWire>()
   for (const [id, route] of look.routeOf) {
-    const leads = route.leads && { ...(route.leads.start && { start: by(route.leads.start) }), ...(route.leads.end && { end: by(route.leads.end) }) }
+    const pins = look.turned.leads.get(id)
+    const leads = pins && { ...(pins.start && { start: leadEnd(view.pin(pins.start)!) }), ...(pins.end && { end: leadEnd(view.pin(pins.end)!) }) }
     routeOf.set(id, leads ? { id, pts: route.pts.map(by), owner: [], leads } : { id, pts: route.pts.map(by), owner: [] })
   }
-  const flowOf = new Map<string, FlowRun>()
-  for (const [id, run] of runs) flowOf.set(id, { id, a: pointKey(run.points[0]), b: pointKey(run.points[run.points.length - 1]) })
   return {
     ...look,
     runOf,
     routeOf,
-    flowOf,
-    pinVertex: look.pinVertex.map(([key]) => [key, pointKey(view.pin(key)!.at)] as const),
-    corners: look.corners.map((c) => ({ at: by(c.at), a: by(c.a), b: by(c.b) })),
+    corners: look.turned.corners.map(([p, q]) => ({ at: view.pin(p)!.at, a: leadEnd(view.pin(p)!), b: leadEnd(view.pin(q)!) })),
   }
 }
 
@@ -290,13 +314,13 @@ function lookOf(view: WireNets, net: string): NetLook {
   const turns = turnsAtPins(runs, pins)
   const runOf = new Map<string, Run>()
   const routeOf = new Map<string, RoutedWire>()
-  const flowOf = new Map<string, FlowRun>()
   for (const run of runs) {
     for (const t of run.segments) runOf.set(t.id, run)
     const leads = turns.leads.get(run.id)
     routeOf.set(run.id, leads ? { id: run.id, pts: [...run.points], owner: [], leads } : { id: run.id, pts: [...run.points], owner: [] })
-    flowOf.set(run.id, { id: run.id, a: pointKey(run.points[0]), b: pointKey(run.points[run.points.length - 1]) })
   }
+  const vertices = flowVertices(runs, pins)
+  const flowOf = new Map(vertices.runs.map((r) => [r.id, r]))
   const ends = new Set(segments.flatMap((t) => [pointKey(t.a), pointKey(t.b)]))
   const firstAt = new Map<string, string>()
   const contacts: (readonly [string, string])[] = []
@@ -314,11 +338,12 @@ function lookOf(view: WireNets, net: string): NetLook {
     routeOf,
     flowOf,
     runIds: runs.map((r) => r.id),
-    pinVertex: runs.length ? pins.map((pin) => [pin.key, pointKey(pin.at)] as const) : [],
+    pinVertex: runs.length ? vertices.pins : [],
     wired: pins.filter((pin) => ends.has(pointKey(pin.at))).map((pin) => pin.key),
     group: pins.length > 1 ? pins.map((pin) => pin.key).sort() : null,
     contacts,
     corners: turns.corners,
+    turned: turns.pins,
   }
   if (token) looks.set(token, { look, at })
   return look
@@ -326,7 +351,9 @@ function lookOf(view: WireNets, net: string): NetLook {
 
 const EMPTY_IDS: readonly string[] = []
 
-export function wiringOf(graph: WireGraph, doc: Pick<Schematic, "objects" | "wires" | "library">): Wiring {
+export const wiringOf = (graph: WireGraph, doc: Pick<Schematic, "objects" | "wires" | "library">): Wiring => withLibrary(doc.library, () => derivedWiring(graph, doc))
+
+function derivedWiring(graph: WireGraph, doc: Pick<Schematic, "objects" | "wires" | "library">): Wiring {
   const pins = pinsOf(doc.objects)
   const edit = committed.get(doc.wires)
   const view = edit ? graph.ofEdit(doc.wires, pins, edit) : graph.of(doc.wires, pins)

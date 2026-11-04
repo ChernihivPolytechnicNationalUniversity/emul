@@ -1,11 +1,12 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 import { toPath, trimRouteEnds, type Point, type RoutedWire } from "@/schematic/geometry"
-import { runPath, type PinCorner } from "@/schematic/wire-look"
+import { runPath, towards, type PinCorner } from "@/schematic/wire-look"
 import type { SpatialIndex } from "@/schematic/spatial"
 import type { PlacedObject } from "@/schematic/types"
 import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
-import { CASING_PX, casingTrim, SELECTED_WIRE_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
+import { CASING_PX, casingTrim, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
+import { wireMarks } from "./wire-marks"
 import { pendingPoints, type PendingWire } from "./pending-wire"
 import type { WireFlow } from "./wire-flow"
 
@@ -16,10 +17,6 @@ const HIT_PX = 14
 const HANDLE_CELLS = 0.15
 const HANDLE_MIN_PX = 2.5
 const HANDLE_MAX_PX = 4
-const DOT_CELLS = 0.2
-const DOT_MIN_PX = 1.5 * WIRE_PX
-const DOT_MAX_PX = 2.5 * WIRE_PX
-const OPEN_END_CELLS = 0.14
 
 type WireLayerProps = {
   routes: readonly RoutedWire[]
@@ -67,34 +64,17 @@ export const WireLayer = React.memo(function WireLayer({
   }, [flow, scale])
   const radius = wireCornerRadius(grid)
   const px = 1 / scale
-  const dotR = Math.min(Math.max(DOT_CELLS * grid * scale, DOT_MIN_PX), DOT_MAX_PX) * px
-  const endOf = React.useMemo(() => {
-    const m = new Map<string, string>()
-    for (const r of routes) for (const p of [r.pts[0], r.pts[r.pts.length - 1]]) if (p) m.set(`${p.x},${p.y}`, r.id)
-    return m
-  }, [routes])
-  const marks = React.useMemo(
-    () => ({
-      dots: dots.flatMap((p) => {
-        const id = endOf.get(`${p.x},${p.y}`)
-        return id ? [{ p, id }] : []
-      }),
-      open: dangling.flatMap((p) => {
-        const id = endOf.get(`${p.x},${p.y}`)
-        return id ? [{ p, id }] : []
-      }),
-    }),
-    [dots, dangling, endOf],
-  )
+  const dotR = dotRadius(grid, scale)
+  const marks = React.useMemo(() => wireMarks(routes, dots, dangling, corners, colorOf, true), [routes, dots, dangling, corners, colorOf])
 
   const groups = React.useMemo(() => groupByNet(routes, netOfWire), [routes, netOfWire])
   const paths = React.useMemo(() => new Map(routes.map((r) => [r.id, runPath(r.pts, radius, r.leads)])), [routes, radius])
   const patches = React.useMemo(
     () => [
-      ...routes.flatMap((r) => [r.leads?.start && toPath([r.leads.start, r.pts[0]]), r.leads?.end && toPath([r.leads.end, r.pts[r.pts.length - 1]])].filter((d): d is string => !!d)),
+      ...routes.flatMap((r) => [r.leads?.start && toPath([r.leads.start, towards(r.pts[0], r.leads.start, -WIRE_PX * px)]), r.leads?.end && toPath([r.leads.end, towards(r.pts[r.pts.length - 1], r.leads.end, -WIRE_PX * px)])].filter((d): d is string => !!d)),
       ...corners.map((c) => toPath([c.a, c.at, c.b])),
     ],
-    [routes, corners],
+    [routes, corners, px],
   )
   const pathOf = (id: string) => paths.get(id) ?? ""
   const trim = casingTrim(grid)
@@ -184,14 +164,14 @@ export const WireLayer = React.memo(function WireLayer({
         </g>
       ))}
       <g data-slot="wire-marks" pointerEvents="none">
-        {marks.dots.map(({ p, id }) => (
-          <g key={`dot:${p.x},${p.y}`} data-junction={`${p.x},${p.y}`}>
-            <circle cx={p.x} cy={p.y} r={dotR + CASING_PX * px} fill="var(--background)" />
-            <circle cx={p.x} cy={p.y} r={dotR} fill={wireColorVar(colorOf(id))} />
+        {marks.dots.map(({ at, color }) => (
+          <g key={`dot:${at.x},${at.y}`} data-junction={`${at.x},${at.y}`}>
+            <circle cx={at.x} cy={at.y} r={dotR + CASING_PX * px} fill="var(--background)" />
+            {color ? <circle cx={at.x} cy={at.y} r={dotR} fill={wireColorVar(color)} /> : <circle cx={at.x} cy={at.y} r={dotR} className="fill-foreground" />}
           </g>
         ))}
-        {marks.open.map(({ p, id }) => (
-          <circle key={`open:${p.x},${p.y}`} data-dangling={`${p.x},${p.y}`} cx={p.x} cy={p.y} r={OPEN_END_CELLS * grid} fill="var(--background)" stroke={wireColorVar(colorOf(id))} strokeWidth={WIRE_PX} vectorEffect="non-scaling-stroke" />
+        {marks.open.map(({ at, color }) => (
+          <circle key={`open:${at.x},${at.y}`} data-dangling={`${at.x},${at.y}`} cx={at.x} cy={at.y} r={OPEN_END_CELLS * grid} fill="var(--background)" stroke={wireColorVar(color)} strokeWidth={WIRE_PX} vectorEffect="non-scaling-stroke" />
         ))}
       </g>
     </svg>

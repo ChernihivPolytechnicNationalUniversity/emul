@@ -1,6 +1,6 @@
-import { bodyCrossings, DIR, facingOf, GRID, objectPins, ownBodies, resolvePinIn, routeObstacles, routeWire, unionOf, type Facing, type Point, type Rect } from "./geometry"
+import { bodyCrossings, DIR, GRID, objectPins, ownBodies, routeObstacles, unionOf, type Direction, type Point, type Rect } from "./geometry"
 import { getDef } from "./registry"
-import type { LegacyWire, PlacedObject, Side } from "./types"
+import type { LegacyWire, PlacedObject } from "./types"
 import { clearPath, type Box } from "./wires/clear-path"
 import { clearOf, type Conductors } from "./wires/conductors"
 import { onLattice, type WirePin } from "./wires/segment"
@@ -65,7 +65,7 @@ function orthogonal(pts: readonly Point[]): Point[] {
   return corners(out)
 }
 
-const hasDiagonal = (pts: readonly Point[]) => pts.some((p, i) => i > 0 && diagonal(pts[i - 1], p))
+export const hasDiagonal = (pts: readonly Point[]) => pts.some((p, i) => i > 0 && diagonal(pts[i - 1], p))
 
 export function frozenCandidates(route: readonly Point[], bodies: Rect[]): Point[][] {
   if (!hasDiagonal(route)) return [corners(route)]
@@ -75,13 +75,11 @@ export function frozenCandidates(route: readonly Point[], bodies: Rect[]): Point
   return bodyCrossings(slide, bodies) <= bodyCrossings(step, bodies) ? [slide, step] : [step]
 }
 
-const OUTWARD: Readonly<Record<Side, Readonly<Point>>> = { left: DIR.left, right: DIR.right, top: DIR.top, bottom: DIR.bottom }
-
 export function wirePins(objects: readonly PlacedObject[]): WirePin[] {
   return objects.flatMap((o) => {
     if (isJunction(o)) return []
     const socket = !!getDef(o.def)?.pinsAreSockets
-    return objectPins(o, GRID).flatMap((p) => (onLattice(p.point) ? [{ key: p.key, at: p.point, socket, kind: p.pin.kind, ...(p.pin.side in OUTWARD && { out: OUTWARD[p.pin.side as Side] }) }] : []))
+    return objectPins(o, GRID).flatMap((p) => (onLattice(p.point) ? [{ key: p.key, at: p.point, socket, kind: p.pin.kind, ...(p.pin.side in DIR && { out: DIR[p.pin.side as Direction] }) }] : []))
   })
 }
 
@@ -89,26 +87,21 @@ export type Lay = { wire: LegacyWire; own: ReadonlySet<string>; from: Point; to:
 
 const grown = (r: Rect, by: number): Box => ({ x: r.x - by, y: r.y - by, w: r.w + 2 * by, h: r.h + 2 * by })
 
-const turned = (facing: Facing) => facing !== "any" && facing.includes("-")
+const WINDOW_CELLS = [6, 24, 96]
 
-function routedAgain(l: Lay, byId: ReadonlyMap<string, PlacedObject>, objects: readonly PlacedObject[]): Point[] | null {
-  const a = resolvePinIn(byId, l.wire.from, GRID)
-  const b = resolvePinIn(byId, l.wire.to, GRID)
-  if (!a || !b) return null
-  const fa = facingOf(a.pin)
-  const fb = facingOf(b.pin)
-  const own = ownBodies(byId, GRID, l.fromObject, l.toObject)
-  const pts = routeWire(a.point, turned(fa) ? "any" : fa, turned(fa) ? 0 : (a.pin.stub ?? 1), b.point, turned(fb) ? "any" : fb, turned(fb) ? 0 : (b.pin.stub ?? 1), GRID, l.wire.points ?? [], routeObstacles(objects, GRID, l.fromObject, l.toObject), own).pts
-  return orthogonal(pts)
+const clipped = (r: Box, to: Box): Box => {
+  const x = Math.max(r.x, to.x)
+  const y = Math.max(r.y, to.y)
+  return { x, y, w: Math.min(r.x + r.w, to.x + to.w) - x, h: Math.min(r.y + r.h, to.y + to.h) - y }
 }
 
 export function laidAgain(l: Lay, byId: ReadonlyMap<string, PlacedObject>, objects: readonly PlacedObject[], conductors: Conductors, extent: Rect): Point[] | null {
   const clear = (pts: readonly Point[] | null): pts is Point[] => clearOf(conductors, l.own, pts)
-  const again = routedAgain(l, byId, objects)
-  if (clear(again)) return again
   const bodies = [...routeObstacles(objects, GRID, l.fromObject, l.toObject), ...ownBodies(byId, GRID, l.fromObject, l.toObject)]
   const span = { x: Math.min(l.from.x, l.to.x), y: Math.min(l.from.y, l.to.y), w: Math.abs(l.from.x - l.to.x), h: Math.abs(l.from.y - l.to.y) }
-  for (const around of [grown(span, 6 * GRID), grown(unionOf([span, extent]), 4 * GRID)]) {
+  const whole = grown(unionOf([span, extent]), 4 * GRID)
+  const windows = WINDOW_CELLS.map((cells) => clipped(grown(span, cells * GRID), whole)).filter((w, i, all) => i === 0 || w.w > all[i - 1].w || w.h > all[i - 1].h)
+  for (const around of windows) {
     const path = clearPath(l.from, l.to, conductors.foreign(l.own, around, bodies), GRID)
     if (clear(path)) return path
   }

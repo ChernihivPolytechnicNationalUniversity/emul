@@ -2,6 +2,8 @@ import { GRID, orientationOf, orientPin, pinPoint, type Point } from "./geometry
 import { partsOnTheLattice, uprightOnTheLattice } from "./migrate-lattice"
 import { BOARD_IN_1_28, RENUMBERED_SINCE_1_28 } from "./migrate-open746i-c"
 import { wiresAsSegments } from "./migrate-wires"
+import { inNormalForm } from "./wire-edits"
+import { seededIds } from "./wires/segment"
 import { getDef, getPin, withLibrary } from "./registry"
 import { partKey, type ComponentDef, type LegacySchematic, type LegacyWire, type PinRef, type PlacedObject, type Schematic } from "./types"
 
@@ -25,7 +27,9 @@ export type Upgrade = { doc: Schematic; notes: string[] }
 
 type LegacyUpgrade = { doc: LegacySchematic; notes: string[] }
 
-const legacySteps: ((doc: LegacySchematic) => LegacyUpgrade)[] = [open746HeadersAsOnTheBoard, (doc) => partsOnTheLattice(doc)]
+const wireIdsOf = (doc: LegacySchematic) => doc.wires.map((w) => w.id)
+
+const legacySteps: ((doc: LegacySchematic) => LegacyUpgrade)[] = [open746HeadersAsOnTheBoard, (doc) => partsOnTheLattice(doc, seededIds(wireIdsOf(doc), new Set(wireIdsOf(doc))))]
 
 export const SCHEMATIC_VERSION = legacySteps.length + 2
 
@@ -54,7 +58,7 @@ export function legacyUpgraded(doc: SavedSchematic | LegacySchematic): LegacyUpg
 }
 
 export function upgraded(doc: SavedSchematic | Schematic): Upgrade {
-  if (versionOf(doc) >= SCHEMATIC_VERSION) return { doc: doc as Schematic, notes: [] }
+  if (versionOf(doc) >= SCHEMATIC_VERSION) return { doc: withLibrary(doc.library, () => inNormalForm(doc as Schematic)), notes: [] }
   const legacy = legacyUpgraded(doc as SavedSchematic)
   const frozen = withLibrary(doc.library, () => wiresAsSegments(legacy.doc))
   return { doc: stamped(frozen.doc), notes: [...legacy.notes, ...frozen.notes] }

@@ -4,6 +4,7 @@ import { getDef } from "@/schematic/registry"
 import type { PlacedObject } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
 import { cssColor, paintField } from "./field-paint"
+import type { WireMarks } from "./wire-marks"
 import { readFieldPalette } from "./field-palette"
 import { MAX_PIN_LABEL_CELLS, PIN_LABEL_CELLS } from "./pin-label"
 import { monoAdvanceEm, namesUnderDocked } from "./printed-names"
@@ -24,6 +25,7 @@ type ExportImage = {
   symbols: SymbolRaster
   texts: TextRaster
   textScale: number
+  marks?: WireMarks
 }
 
 const ALIGN = { start: "left", middle: "center", end: "right" } as const
@@ -73,7 +75,7 @@ function bounds(objects: readonly PlacedObject[], routes: readonly RoutedWire[],
   return { x, y, w, h }
 }
 
-export async function exportPng({ host, theme, objects, routes, grid, colorOf, symbols, texts, textScale }: ExportImage): Promise<Blob | null> {
+export async function exportPng({ host, theme, objects, routes, grid, colorOf, symbols, texts, textScale, marks }: ExportImage): Promise<Blob | null> {
   const view = bounds(objects, routes, grid)
   if (!view) return null
   await document.fonts?.ready
@@ -87,7 +89,7 @@ export async function exportPng({ host, theme, objects, routes, grid, colorOf, s
 
   context.fillStyle = cssColor(host, "var(--background)")
   context.fillRect(0, 0, canvas.width, canvas.height)
-  paintField(context, host, { objects, routes, view, grid, pixels, device: pixels, theme, colorOf, raster: symbols })
+  paintField(context, host, { objects, routes, view, grid, pixels, device: pixels, theme, colorOf, raster: symbols, marks })
 
   texts.setPalette(readFieldPalette(host, theme))
   const sheetText = { boost: textScale, pinSize: Math.min(MAX_PIN_LABEL_CELLS, PIN_LABEL_CELLS * textScale) }

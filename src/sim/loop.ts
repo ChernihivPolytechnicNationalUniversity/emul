@@ -8,7 +8,7 @@ import { crystalStartup, RESONATOR_STARTUP } from "@/schematic/components/clock"
 import { parseValue } from "./units"
 import { DT } from "./speeds"
 import { Engine, R_PULL, switchClosed, type Failure, type PartReader, type PinReader, type ProbeReading, type Reading, type TraceChunk } from "./engine"
-import { wireCurrents } from "./flow"
+import { FlowSolver } from "./flow"
 import { buildNetlist, GROUND, type GpioState, type Resolved } from "./netlist"
 import { UartDecoder, uartFrameEdges, uartFrameSeconds, type Edge } from "./serial"
 import { bounceFlips, bounceSeed } from "./bounce"
@@ -486,6 +486,7 @@ export class SimLoop {
    * 50 ms of a 1 kHz square wave would alias to whatever phase it happens to land on.
    */
   private flow: { id: string; slots: Int32Array; coefs: Float64Array }[] = []
+  private flowSolver: FlowSolver | null = null
   private flowSigned = new Float64Array(0)
   private flowAbs = new Float64Array(0)
   private flowSpeedAmps = new Float64Array(0)
@@ -1964,10 +1965,11 @@ export class SimLoop {
     const { net } = engine
     const { index, keys } = engine.terminalSlots
     const perWire = new Map<string, { slots: number[]; coefs: number[] }>()
+    const solver = new FlowSolver(this.doc.flow, net.pinNet, net.groundKeys)
+    this.flowSolver = solver
     for (const key of keys) {
       const slot = index.get(key)!
-      const unit = wireCurrents(this.doc.flow, net.pinNet, net.groundKeys, (k) => (k === key ? 1 : 0))
-      for (const [id, amps] of unit) {
+      for (const [id, amps] of solver.unit(key)) {
         if (amps === 0) continue
         let f = perWire.get(id)
         if (!f) {
@@ -2354,7 +2356,7 @@ export class SimLoop {
       this.flowSeconds = 0
     } else {
       // No steps since the last snapshot (paused): report the instantaneous distribution.
-      for (const [id, amps] of wireCurrents(this.doc.flow, net.pinNet, net.groundKeys, (k) => terminals.get(k) ?? 0)) {
+      for (const [id, amps] of (this.flowSolver ?? new FlowSolver(this.doc.flow, net.pinNet, net.groundKeys)).currents((k) => terminals.get(k) ?? 0)) {
         wireCurrent[id] = amps
         wireCurrentAbs[id] = Math.abs(amps)
       }

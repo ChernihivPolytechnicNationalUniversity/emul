@@ -6,7 +6,7 @@ import { normalizeDebug } from "@/debug/saved"
 import { GRID, intersects, objectPins, objectRect, snap, type FlipAxis, type Point, type Rect, type Turn } from "./geometry"
 import { flipSelection, rotateSelection } from "./orient"
 import { freeSpot, type PlacementScene } from "./placement"
-import { getDef } from "./registry"
+import { getDef, withLibrary } from "./registry"
 import { migrated, SCHEMATIC_VERSION, upgradedFrom, type SavedSchematic } from "./migrate"
 import {
   emptySchematic,
@@ -20,7 +20,7 @@ import {
 } from "./types"
 import { isHdlDef } from "./hdl"
 import type { WireColorKey } from "./wire-colors"
-import { clipOf, connectPins, moved, recoloured, removed, reoriented, tapWireAt, wiringOf, withSegments } from "./wire-edits"
+import { clipOf, connectPins, moved, inNormalForm, placedObject, recoloured, removed, reoriented, tapWireAt, wiringOf, withModule, withSegments } from "./wire-edits"
 import { WireGraph } from "./wires/graph"
 import type { WireSegment } from "./wires/segment"
 
@@ -88,7 +88,13 @@ type SavedClip = { objects: PlacedObject[]; wires?: unknown[]; segments?: WireSe
 export function clipOfThisVersion(saved: SavedClip, version: number | undefined): ClipIn | null {
   const parts = saved.parts ?? {}
   if (version !== undefined && version > SCHEMATIC_VERSION) return null
-  if (version === SCHEMATIC_VERSION) return { clip: { objects: saved.objects, wires: saved.segments ?? [], parts }, notes: [] }
+  if (version === SCHEMATIC_VERSION) {
+    try {
+      return { clip: inNormalForm({ objects: saved.objects, wires: saved.segments ?? [], parts }), notes: [] }
+    } catch {
+      return null
+    }
+  }
   const { doc, notes } = upgradedFrom({ objects: saved.objects, wires: saved.wires ?? [], parts } as SavedSchematic, version)
   return { clip: { objects: doc.objects, wires: doc.wires, parts: doc.parts }, notes }
 }
@@ -205,7 +211,7 @@ export function useSchematic(grid: number) {
       }
       setDoc((d) => {
         if (def.prefix) obj.props = { ref: nextRef(d.objects, def.prefix) }
-        return { ...d, objects: [...d.objects, obj] }
+        return placedObject(d, obj)
       })
       setSelectedObjects(new Set([obj.id]))
       setSelectedWires(new Set())
@@ -237,7 +243,8 @@ export function useSchematic(grid: number) {
         () => {
           const { library, ...rest } = next
           const modules = checkedLibrary(library)
-          return { ...rest, objects: next.objects.map(checked), ...(modules && { library: modules }) }
+          const doc: Schematic = { ...rest, objects: next.objects.map(checked), ...(modules && { library: modules }) }
+          return withLibrary(doc.library, () => inNormalForm(doc))
         },
         { silent: true },
       )
@@ -338,14 +345,7 @@ export function useSchematic(grid: number) {
   }, [setDoc])
 
   const setModule = React.useCallback((module: HdlModule) => {
-    setDoc(
-      (d) => {
-        const library = d.library ?? []
-        const i = library.findIndex((m) => m.id === module.id)
-        return { ...d, library: i < 0 ? [...library, module] : library.map((m, k) => (k === i ? module : m)) }
-      },
-      { silent: true },
-    )
+    setDoc((d) => withModule(d, module), { silent: true })
   }, [setDoc])
 
   const removeModule = React.useCallback((id: string) => {
@@ -370,12 +370,15 @@ export function useSchematic(grid: number) {
     [grid, setDoc],
   )
 
-  /** Connect two pins, optionally through bend points. Duplicate and self connections are ignored. */
   const addWire = React.useCallback(
-    (from: PinRef, to: PinRef, points: Point[] = [], color?: WireColorKey) => {
-      setDoc((d) => connectPins(d, from, to, points, color))
+    (from: PinRef, to: PinRef, points: Point[] = [], color?: WireColorKey): boolean => {
+      if (from.object === to.object && from.pin === to.pin) return true
+      const next = connectPins(doc, from, to, points, color, undefined, wiring)
+      if (next === doc) return false
+      setDoc((d) => (d === doc ? next : connectPins(d, from, to, points, color)))
+      return true
     },
-    [setDoc],
+    [doc, wiring, setDoc],
   )
 
   const setWireColors = React.useCallback(
@@ -388,11 +391,14 @@ export function useSchematic(grid: number) {
   )
 
   const tapWire = React.useCallback(
-    (segmentId: string, at: Point, from: PinRef, points: Point[] = [], color?: WireColorKey) => {
-      setDoc((d) => tapWireAt(d, segmentId, at, from, points, color))
+    (segmentId: string, at: Point, from: PinRef, points: Point[] = [], color?: WireColorKey): boolean => {
+      const next = tapWireAt(doc, segmentId, at, from, points, color, undefined, wiring)
+      if (next === doc) return false
+      setDoc((d) => (d === doc ? next : tapWireAt(d, segmentId, at, from, points, color)))
       setSelectedWires(new Set())
+      return true
     },
-    [setDoc],
+    [doc, wiring, setDoc],
   )
 
   const setPart = React.useCallback(

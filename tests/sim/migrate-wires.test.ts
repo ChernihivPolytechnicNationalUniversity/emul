@@ -1,19 +1,22 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { readProjectFile } from "@/project/project-store"
-import { builder, connect, connections, legacyOf } from "@/schematic/builder"
+import { openedFile, projectFile, readProjectFile } from "@/project/project-store"
+import { builder, connect, connections, legacyOf, rewire } from "@/schematic/builder"
 import { examples, lab1Board } from "@/schematic/examples"
 import { GRID, objectPins, type Point } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import { legacyUpgraded, SCHEMATIC_VERSION, upgraded, versionOf } from "@/schematic/migrate"
-import { frozenCandidates, wiresAsSegments, wirePins } from "@/schematic/migrate-wires"
+import { corners, frozenCandidates, wiresAsSegments, wirePins } from "@/schematic/migrate-wires"
+import { laidAgain } from "@/schematic/freeze"
+import { Conductors } from "@/schematic/wires/conductors"
+import { fieldRouter } from "@/schematic/placement"
 import type { LegacySchematic, LegacyWire, PlacedObject, Schematic } from "@/schematic/types"
 import { junctionsOf, wireNets } from "@/schematic/wires/graph"
 import { buildNetlist, GROUND, type Netlist } from "@/sim/netlist"
 import { SimLoop } from "@/sim/loop"
 import { legacyCircuit } from "../lib/legacy-circuit"
-import { joiningContactsOfNcPads, legacyPinPartition, pinPartition } from "../lib/pin-partition"
+import { joiningContactsOfNcPads, legacyPinPartition, netsJoinedThroughNcPads, pinPartition } from "../lib/pin-partition"
 import { partitionDocuments, readFixture } from "../lib/partition-documents"
 import { normalFormViolations } from "../lib/wire-reference"
 
@@ -47,6 +50,7 @@ describe("every example, case and saved file keeps its circuit through the freez
       if (!fixture) continue
       expect.soft(normalFormViolations(doc.wires, wirePins(doc.objects)), `${name}: normal form`).toEqual([])
       expect.soft(pinPartition(doc), `${name}: the frozen circuit, NC pads' contacts joined (design.md §1.2)`).toEqual(joiningContactsOfNcPads(fixture.nets, doc.objects))
+      expect.soft(netsJoinedThroughNcPads(fixture.nets, doc.objects), `${name}: no two of the frozen nets joined through a pad marked not connected (findings 3.L2)`).toEqual([])
       expect.soft(doc.objects.some((o) => o.def === "junction"), `${name}: no junction parts left`).toBe(false)
     }
   })
@@ -56,7 +60,7 @@ describe("every example, case and saved file keeps its circuit through the freez
     const doc: Schematic = { ...built }
     const legacy = legacyOf(built)
     const hubs = new Set(legacy.objects.filter((o) => o.def === "junction").map((o) => o.id))
-    expect(netlistShape(buildNetlist(doc))).toEqual(netlistShape(buildNetlist(legacyCircuit(legacy)), hubs))
+    expect.soft(netlistShape(buildNetlist(doc)), `${example.id}: the solver's elements on the same nets`).toEqual(netlistShape(buildNetlist(legacyCircuit(legacy)), hubs))
   })
 
   it("the power supply, the system exam, the bridge and the op-amp amplifier simulate to the same readings, reading by reading", () => {
@@ -148,6 +152,12 @@ describe("a wire at a diagonal pin: the first straight piece slides onto the pin
     return { r1, r2, pin: pin.point }
   }
 
+  it("a wire with a 45° stub at each end keeps the run between them on the row it was drawn on (design.md §13.14; findings 3.L15)", () => {
+    const route = [c(0, 0), c(1, 1), c(4, 1), c(5, 2), c(5, 3)]
+    const first = frozenCandidates(route, [])[0].map((p) => [p.x / GRID, p.y / GRID])
+    expect.soft(first, "onto the pin, then along row 1 as drawn").toEqual([[0, 0], [0, 1], [5, 1], [5, 3]])
+  })
+
   it("where the piece after the stub ends at the far pin, nothing can slide: the stub becomes a one-cell step", () => {
     const route = [c(0, 0), c(1, 1), c(5, 1)]
     expect.soft(frozenCandidates(route, []).map(cells), "only the step").toEqual([[[0, 0], [0, 1], [5, 1]]])
@@ -172,6 +182,21 @@ describe("a wire at a diagonal pin: the first straight piece slides onto the pin
     expect.soft(legacyPinPartition({ ...doc, objects: [...doc.objects, blocker] }, GRID), "before: the ground on nothing").toEqual([["R1.2", "R2.1"]])
     expect.soft(pinPartition(fenced.doc), "after: still on nothing").toEqual([["R1.2", "R2.1"]])
   })
+
+  it("a wire every straightening of which would touch another net is laid again, and the note says it was the straightening (findings 3.L17)", () => {
+    const { r1, r2 } = diagonalBeside(5, 3)
+    const doc: LegacySchematic = { objects: [r1, r2], wires: [{ id: "w", from: { object: "R1", pin: "2" }, to: { object: "R2", pin: "1" } }], parts: {} }
+    const route = fieldRouter().routeAll(doc.objects, doc.wires, GRID)[0].pts
+    const ground: PlacedObject = { id: "G", def: "ground", x: 0, y: 0 }
+    const gnd = objectPins(ground, GRID)[0].point
+    const ends = [route[0], route[route.length - 1]]
+    const corners = [...new Map(frozenCandidates(route, []).flatMap((c) => c.slice(1, -1)).filter((p) => !ends.some((e) => e.x === p.x && e.y === p.y)).map((p) => [`${p.x},${p.y}`, p])).values()]
+    const blockers = corners.map((p, i): PlacedObject => ({ ...ground, id: `G${i}`, x: p.x - gnd.x, y: p.y - gnd.y, props: { ref: `G${i}` } }))
+    expect.soft(blockers.length, "corners to block").toBeGreaterThan(0)
+    const fenced = wiresAsSegments({ ...doc, objects: [...doc.objects, ...blockers] })
+    expect.soft(pinPartition(fenced.doc), "still joined, the grounds on nothing").toEqual([["R1.2", "R2.1"]])
+    expect.soft(fenced.notes, "said").toEqual(["The wire between R1 2 and R2 1, straightened where it left a pin at 45°, would have touched another net's wire or pin; it is laid again so the circuit stays as it was."])
+  })
 })
 
 describe("wires that ran over another net are laid again (design.md §10 item 4)", () => {
@@ -187,6 +212,19 @@ describe("wires that ran over another net are laid again (design.md §10 item 4)
       { id: "b", from: { object: "B1", pin: "2" }, to: { object: "B2", pin: "1" }, points: bendB.map(([x, y]) => c(x, y)) },
     ],
     parts: {},
+  })
+
+  it("a wire walled in by another net is sought a way round in growing windows, up to 96 cells beyond its ends (findings 3.L11)", () => {
+    const wall = (half: number) => {
+      const conductors = new Conductors()
+      for (let k = -half; k < half; k++) conductors.lay(k + half, "other", [c(5, k / 2), c(5, (k + 1) / 2)])
+      return conductors
+    }
+    const lay = { wire: { id: "w", from: { object: "A", pin: "1" }, to: { object: "B", pin: "1" } }, own: new Set(["mine"]), from: c(0, 0), to: c(10, 0), fromObject: "A", toObject: "B", candidates: [[c(0, 0), c(10, 0)]] }
+    const extent = { x: c(-150, 0).x, y: c(0, -150).y, w: c(310, 0).x, h: c(0, 300).y }
+    const round = laidAgain(lay, new Map(), [], wall(16), extent)
+    expect.soft(round && Math.max(...round.map((p) => Math.abs(p.y))) > c(0, 8).y, `round the 8-cell wall: ${JSON.stringify(round)}`).toBe(true)
+    expect.soft(laidAgain(lay, new Map(), [], wall(200), extent), "a wall of 100 cells either way is beyond the search: the wire stays and is named").toBeNull()
   })
 
   it("two nets drawn along one corridor: the first keeps its route, the second is laid apart and named", () => {
@@ -255,6 +293,27 @@ describe("wires that ran over another net are laid again (design.md §10 item 4)
     const { doc: after, notes } = wiresAsSegments(doc)
     expect.soft(pinPartition(after), "after: joined by a wire of their own").toEqual([["R1.2", "R2.2"]])
     expect.soft(notes, "said").toEqual(["R1 2 was joined to R2 2 through U1 gone, which is not in the file any more; a wire joins them directly now."])
+    const direct = wiresAsSegments({ ...doc, wires: [...doc.wires, { id: "c", from: { object: "R1", pin: "2" }, to: { object: "R2", pin: "2" } }] })
+    expect.soft(direct.notes, "joined by a wire of their own already: nothing added, nothing to say (findings 3.L15)").toEqual([])
+    expect.soft(direct.doc.wires.every((w) => w.id === "c" || w.id.startsWith("c~")), "only that wire").toBe(true)
+  })
+
+  it("a junction no wire reaches goes without moving a wire that ran over it (findings 3.R10)", () => {
+    const r1: PlacedObject = { id: "R1", def: "resistor", x: 0, y: 0, props: { ref: "R1" } }
+    const r2: PlacedObject = { id: "R2", def: "resistor", x: c(12, 0).x, y: 0, props: { ref: "R2" } }
+    const a = objectPins(r1, GRID).find((p) => p.pin.id === "2")!.point
+    const at = { x: a.x + c(3, 0).x, y: a.y }
+    const hub: PlacedObject = { id: "J", def: "junction", x: at.x - GRID, y: at.y - GRID }
+    const doc: LegacySchematic = { objects: [r1, r2, hub], wires: [{ id: "w", from: { object: "R1", pin: "2" }, to: { object: "R2", pin: "1" }, points: [at] }], parts: {} }
+    expect.soft(corners(fieldRouter().routeAll(doc.objects, doc.wires, GRID)[0].pts).some((p, i, list) => i > 0 && list[i - 1].y === at.y && p.y === at.y && Math.min(list[i - 1].x, p.x) <= at.x && at.x <= Math.max(list[i - 1].x, p.x)), "the field drew the wire through the junction's point").toBe(true)
+    const withHub = wiresAsSegments(doc)
+    expect.soft(withHub.notes, "nothing to say").toEqual([])
+    expect.soft(withHub.routes.get("w"), "the wire where the field drew it, not laid again").toEqual(corners(fieldRouter().routeAll(doc.objects, doc.wires, GRID)[0].pts))
+  })
+
+  it("a file whose NC pads touch, wired, keeps its circuit with nothing to say about it (findings 3.R12)", async () => {
+    const read = await readProjectFile(new Blob([readFileSync(join(ROOT, "before-the-segments", "nc-coinciding-pads-wired.emul"))]))
+    expect.soft(read!.notes.filter((n) => !n.includes("laid again")), "no circuit lost").toEqual([])
   })
 
   it("junction parts go: their wires end where the junction stood, and the point is a dot", () => {
@@ -297,7 +356,38 @@ describe("documents drawn in code go through the same freeze (design.md §10)", 
       g.y += fenced.y + (dy * GRID) / 2 - at.y
     }
     wire(r1, "2", r2, "1")
-    expect(() => doc.wires).toThrow(/R1 2 and R2 1 could not be laid clear of another net/)
+    expect.soft(() => doc.wires, "refused, naming the wire").toThrow(/R1 2 and R2 1 could not be laid clear of another net/)
+  })
+
+  it("a wire changed after the first read is frozen again: its bends and colour show (findings 3.R9)", () => {
+    const { doc, place, wire } = builder(GRID)
+    const r1 = place("resistor", 0, 0)
+    const r2 = place("resistor", 0, 10)
+    wire(r1, "2", r2, "2")
+    const first = doc.wires
+    rewire(doc, (w) => ({ ...w, color: "blue", points: [{ x: 10 * GRID, y: GRID }, { x: 10 * GRID, y: 11 * GRID }] }))
+    const second = doc.wires
+    expect.soft(second, "a new freeze").not.toBe(first)
+    expect.soft(second.every((s) => s.color === "blue"), "blue").toBe(true)
+    expect.soft(second.some((s) => s.a.x === 10 * GRID && s.b.x === 10 * GRID), "through the bends").toBe(true)
+  })
+
+  it("a part moved, turned or mirrored after the first read is wired again to where its pins are now (findings 3.L15)", () => {
+    const { doc, place, wire } = builder(GRID)
+    const r1 = place("resistor", 0, 0)
+    const r2 = place("resistor", 0, 10)
+    wire(r1, "2", r2, "2")
+    const endsOnPin = () => {
+      const pin = objectPins(doc.objects[1], GRID).find((p) => p.pin.id === "2")!.point
+      return doc.wires.some((s) => (s.a.x === pin.x && s.a.y === pin.y) || (s.b.x === pin.x && s.b.y === pin.y))
+    }
+    expect.soft(endsOnPin(), "drawn").toBe(true)
+    doc.objects[1] = { ...doc.objects[1], x: doc.objects[1].x + 3 * GRID }
+    expect.soft(endsOnPin(), "moved").toBe(true)
+    doc.objects[1] = { ...doc.objects[1], rotation: 90 }
+    expect.soft(endsOnPin(), "turned").toBe(true)
+    doc.objects[1] = { ...doc.objects[1], mirror: true }
+    expect.soft(endsOnPin(), "mirrored").toBe(true)
   })
 
   it("a wire to a junction made with node() ends on its point, which is a dot", () => {
@@ -310,5 +400,81 @@ describe("documents drawn in code go through the same freeze (design.md §10)", 
     expect.soft(doc.objects.some((o) => o.def === "junction"), "no junction part in the document").toBe(false)
     expect.soft(junctionsOf(wireNets(doc.wires, wirePins(doc.objects))), "one dot, where the node stands").toEqual([{ x: 10 * GRID, y: 7 * GRID }])
     expect.soft(pinPartition(doc), "the three pins on one net").toEqual([["R1.2", "R2.2", "R3.2"]])
+  })
+})
+
+describe("every old file still opens, and the same way in every tab (findings 3.L5, 3.L14)", () => {
+  const open = async (name: string) => (await readProjectFile(new Blob([readFileSync(join(ROOT, "before-the-segments", `${name}.emul`))])))!
+
+  it("a part whose pin sat on a pad marked not connected that another net's wire uses moves off it, says so and keeps its circuit (findings 3.L2)", async () => {
+    const read = await open("nc-touched-and-wired")
+    const r1 = read.doc.objects.find((o) => o.id === "R1")!
+    expect.soft(read.notes, "said").toEqual([expect.stringMatching(/^R1 moved 1 cell: its pin 1 sat on U1 CN8-1, a pad marked not connected that another net's wire uses/)])
+    const net = buildNetlist(read.doc).pinNet
+    expect.soft(net.get("R1:1"), "R1 1 left out of R2's net, as it was").not.toBe(net.get("R2:1"))
+    const board = read.doc.objects.find((o) => o.id === "U1")!
+    expect.soft(objectPins(r1, GRID).some((p) => objectPins(board, GRID).some((q) => q.point.x === p.point.x && q.point.y === p.point.y)), "on no pad of the board").toBe(false)
+  })
+
+  it("a part moved off such a pad keeps the contact its other pin made, by a wire (findings 3.L2)", () => {
+    const board: PlacedObject = { id: "U1", def: "nucleo-f429zi", x: 0, y: 0, props: { ref: "U1" } }
+    const pad = objectPins(board, GRID).find((p) => p.pin.id === "CN8-1")!.point
+    const probe: PlacedObject = { id: "R1", def: "resistor", x: 0, y: 0, props: { ref: "R1" } }
+    const one = objectPins(probe, GRID).find((p) => p.pin.id === "1")!.point
+    const r1: PlacedObject = { ...probe, x: pad.x - one.x, y: pad.y - one.y }
+    const two = objectPins(r1, GRID).find((p) => p.pin.id === "2")!.point
+    const groundProbe: PlacedObject = { id: "G1", def: "ground", x: 0, y: 0 }
+    const gnd = objectPins(groundProbe, GRID)[0].point
+    const ground: PlacedObject = { ...groundProbe, x: two.x - gnd.x, y: two.y - gnd.y }
+    const r2: PlacedObject = { id: "R2", def: "resistor", x: pad.x - 20 * GRID, y: pad.y + 6 * GRID, props: { ref: "R2" } }
+    const old = { objects: [board, r1, ground, r2], wires: [{ id: "w", from: { object: "U1", pin: "CN8-1" }, to: { object: "R2", pin: "1" } }], parts: {}, version: 3 } as unknown as LegacySchematic
+    const { doc, notes } = upgraded(old)
+    const net = buildNetlist(doc).pinNet
+    expect.soft(net.get("R1:2"), "R1 2 still on the ground it touched").toBe(net.get(`G1:${objectPins(groundProbe, GRID)[0].pin.id}`))
+    expect.soft(net.get("R1:1"), "and off R2's net").not.toBe(net.get("R2:1"))
+    expect.soft(notes.some((n) => n.startsWith("R1 2 and ") && n.endsWith("touched where they stood before; a wire joins them now.")), `told: ${JSON.stringify(notes)}`).toBe(true)
+  })
+
+  it("a part saved off the grid moves onto it, the least it can, says so and keeps its circuit", async () => {
+    const read = await open("part-off-the-lattice")
+    const r1 = read.doc.objects.find((o) => o.id === "R1")!
+    expect.soft([r1.x, r1.y], "back a quarter of a cell, onto the grid").toEqual([0, 0])
+    expect.soft(read.notes, "said").toEqual(["R1 moved a quarter of a cell: it stood off the grid, where no wire can end on its pins."])
+    expect.soft(normalFormViolations(read.doc.wires, wirePins(read.doc.objects)), "normal").toEqual([])
+  })
+
+  it("wires whose ids clash with the pieces the freeze names, or with each other, open with every id distinct and nothing to say", async () => {
+    for (const name of ["wire-ids-with-a-tilde", "duplicate-wire-ids"]) {
+      const read = await open(name)
+      const ids = read.doc.wires.map((s) => s.id)
+      expect.soft(new Set(ids).size, `${name}: distinct ids`).toBe(ids.length)
+      expect.soft(read.notes, `${name}: no wire laid again, none lost`).toEqual([])
+    }
+  })
+
+  it("a file this version cannot read says why; one stamped now but out of normal form opens in it", async () => {
+    const r = (id: string, x: number): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: 0, props: { ref: id } })
+    const diagonal: Schematic = { objects: [r("R1", 0)], wires: [{ id: "d", a: { x: 0, y: 0 }, b: { x: GRID, y: GRID } }], parts: {} }
+    const refused = await openedFile(await projectFile("diagonal", diagonal), "diagonal.emul")
+    expect.soft("failure" in refused && refused.failure, "the reason, with the wire").toMatch(/^diagonal\.emul could not be brought up to this version of εmul: .*\bd\b/)
+    expect.soft(await openedFile(new Blob(["not a project"]), "notes.txt"), "not a project").toEqual({ failure: "notes.txt: not an .emul project or a zipped STM32 project." })
+    const overlapping: Schematic = { objects: [], wires: [{ id: "a", a: { x: 0, y: 0 }, b: { x: 4 * GRID, y: 0 } }, { id: "b", a: { x: 2 * GRID, y: 0 }, b: { x: 6 * GRID, y: 0 } }], parts: {} }
+    const opened = await openedFile(await projectFile("overlapping", overlapping), "overlapping.emul")
+    expect.soft("doc" in opened && opened.doc.wires.map((s) => [s.a.x, s.b.x]), "one wire").toEqual([[0, 6 * GRID]])
+  })
+
+  it("two tabs freezing the same old document write the same segments under the same ids", () => {
+    for (const id of ["power-supply", "bridge", "opamp-amplifier"]) {
+      const legacy = { ...legacyOf(examples.find((e) => e.id === id)!.build(GRID)), version: 2 } as LegacySchematic
+      const once = upgraded(JSON.parse(JSON.stringify(legacy)))
+      const again = upgraded(JSON.parse(JSON.stringify(legacy)))
+      expect.soft(again.doc.wires, `${id}: the same segments`).toEqual(once.doc.wires)
+      expect.soft(again.doc.objects, `${id}: the same parts`).toEqual(once.doc.objects)
+    }
+    const oscillator = (id: string, x: number, rotation?: 180): PlacedObject => ({ id, def: "oscillator", x: x * GRID, y: 0, props: { ref: id }, ...(rotation && { rotation }) })
+    const touching = { objects: [oscillator("G1", 0), oscillator("G2", 4, 180)], wires: [], parts: {}, version: 2 } as unknown as LegacySchematic
+    const first = upgraded(JSON.parse(JSON.stringify(touching)))
+    expect.soft(first.notes.some((n) => n.includes("a wire joins them now")), "the lattice step adds a wire here").toBe(true)
+    expect.soft(upgraded(JSON.parse(JSON.stringify(touching))).doc.wires, "and names it the same in both tabs").toEqual(first.doc.wires)
   })
 })

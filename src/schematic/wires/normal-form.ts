@@ -358,7 +358,20 @@ export function commitEdit(previous: readonly WireSegment[], pins: readonly Wire
   const add = edit.add ?? []
   const remove = edit.remove ?? []
   const gone = new Set(remove)
-  const raw = (gone.size ? previous.filter((s) => !gone.has(s)) : previous).concat(add)
+  const replacing = new Map(add.map((s) => [s.id, s]))
+  const inPlace = new Set<WireSegment>()
+  const raw: WireSegment[] = []
+  for (const s of previous) {
+    if (!gone.has(s)) raw.push(s)
+    else {
+      const next = replacing.get(s.id)
+      if (next && !inPlace.has(next)) {
+        raw.push(next)
+        inPlace.add(next)
+      }
+    }
+  }
+  for (const s of add) if (!inPlace.has(s)) raw.push(s)
   const result = normaliseEdit(raw, pins, { segments: [...add, ...remove], points: edit.points }, newId)
   const replaced = new Set(result.removed)
   const fresh = new Set(add)

@@ -7,7 +7,7 @@ import { boxCorners, KNOCKOUT_OPACITY, labelKnockout, labelOrigin, OVERBAR_WEIGH
 import { printedNames } from "./printed-names"
 import { grownAt, printedGrowth } from "@/schematic/printed-text"
 
-const PIN_MARK_CELLS = 0.16
+export const PIN_MARK_CELLS = 0.16
 const MARGIN_PX = 4
 const MAX_SYMBOL_PX = 4096
 

@@ -15,7 +15,7 @@ import { HDL_ACCEPT, readHdlFiles } from "@/components/hdl/files"
 import { useEvent } from "@/hooks/use-event"
 import { MENU_H_TOUCH, useIsMobile } from "@/hooks/use-mobile"
 import { announceUpgrade, useProjects } from "@/hooks/use-projects"
-import { fileName, nameFromFile, projectFile, readProjectFile, shareLink } from "@/project/project-store"
+import { fileName, nameFromFile, openedFile, projectFile, shareLink } from "@/project/project-store"
 import { cubeBench, importNotes, readCubeProject, unsupportedChip, type ProjectEntry } from "@/project/cubemx"
 import { dropEntries, filesEntries, isProjectDrop, isZip, pickFolder } from "@/project/entries"
 import { downloadBlob } from "@/lib/download"
@@ -258,9 +258,9 @@ export default function App() {
 
   const openFile = async (file: File) => {
     if (isZip(file)) return openCubeProject(filesEntries([file]))
-    const read = await readProjectFile(file)
-    if (!read) {
-      toast.error("Cannot open file", { description: `${file.name}: not an .emul project or a zipped STM32 project.` })
+    const read = await openedFile(file, file.name)
+    if ("failure" in read) {
+      toast.error("Cannot open file", { description: read.failure })
       return
     }
     await projects.create(read.name ?? nameFromFile(file.name), read.doc)

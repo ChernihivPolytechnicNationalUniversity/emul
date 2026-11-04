@@ -1,13 +1,13 @@
-import { bodyCentre, objectRect, orientationOf, stretchedLeads, toPath, trimRouteEnds, type Rect, type RoutedWire } from "@/schematic/geometry"
+import { bodyCentre, objectRect, orientationOf, stretchedLeads, toPath, trimRouteEnds, type Point, type Rect, type RoutedWire } from "@/schematic/geometry"
 import { runPath } from "@/schematic/wire-look"
 import { getDef } from "@/schematic/registry"
 import type { ComponentDef, PlacedObject } from "@/schematic/types"
 import { wireColorVar, type WireColorKey } from "@/schematic/wire-colors"
 import { readFieldPalette } from "./field-palette"
 import { SELECTION_BANDS, selectionOutline } from "./selection-geometry"
-import type { SymbolRaster } from "./symbol-raster"
-import { CASING_PX, casingTrim, SELECTED_WIRE_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
-
+import { PIN_MARK_CELLS, type SymbolRaster } from "./symbol-raster"
+import { CASING_PX, casingTrim, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
+import type { WireMarks } from "./wire-marks"
 
 const wirePaths = new WeakMap<RoutedWire, Path2D>()
 
@@ -101,9 +101,72 @@ export type FieldPaint = {
   colorOf: (wireId: string) => WireColorKey
   raster: SymbolRaster
   selection?: Selection
+  marks?: WireMarks
 }
 
-export function paintField(context: CanvasRenderingContext2D, host: Element, { objects, routes, view, grid, pixels, device, theme, colorOf, raster, selection }: FieldPaint) {
+export type MarkPaint = { radius: number; screenPx: (px: number) => number; pixels: number; device: number; grid: number; casing: string; ink: string; colorFor: (key: WireColorKey) => string; colorOf: (wireId: string) => WireColorKey }
+
+export function paintMarks(context: CanvasRenderingContext2D, routes: readonly RoutedWire[], marks: WireMarks, wire: MarkPaint) {
+  const { radius, screenPx, pixels, device, grid, casing, ink, colorFor, colorOf } = wire
+  const turning = routes.filter((r) => r.leads)
+  const patch = (from: Point, to: Point) => {
+    context.beginPath()
+    context.moveTo(from.x, from.y)
+    context.lineTo(to.x, to.y)
+    context.stroke()
+  }
+  context.lineCap = "butt"
+  context.lineWidth = screenPx(WIRE_PX + CASING_PX)
+  context.strokeStyle = casing
+  const pinMark = grid * PIN_MARK_CELLS + screenPx(1)
+  const hiddenUpTo = (lead: Point, pin: Point) => {
+    patch(lead, pin)
+    context.fillStyle = casing
+    context.fillRect(pin.x - pinMark, pin.y - pinMark, pinMark * 2, pinMark * 2)
+  }
+  for (const r of turning) {
+    if (r.leads?.start) hiddenUpTo(r.leads.start, r.pts[0])
+    if (r.leads?.end) hiddenUpTo(r.leads.end, r.pts[r.pts.length - 1])
+  }
+  for (const c of marks.corners) {
+    hiddenUpTo(c.a, c.at)
+    hiddenUpTo(c.b, c.at)
+  }
+  context.lineCap = "round"
+  context.lineWidth = screenPx(WIRE_PX)
+  for (const r of turning) {
+    context.strokeStyle = colorFor(colorOf(r.id))
+    context.stroke(wirePath(r, radius))
+  }
+  context.strokeStyle = ink
+  for (const c of marks.corners) {
+    context.beginPath()
+    context.moveTo(c.a.x, c.a.y)
+    context.quadraticCurveTo(c.at.x, c.at.y, c.b.x, c.b.y)
+    context.stroke()
+  }
+  const dot = dotRadius(grid, pixels / device)
+  for (const { at, color } of marks.dots) {
+    context.fillStyle = casing
+    context.beginPath()
+    context.arc(at.x, at.y, dot + screenPx(CASING_PX), 0, Math.PI * 2)
+    context.fill()
+    context.fillStyle = color ? colorFor(color) : ink
+    context.beginPath()
+    context.arc(at.x, at.y, dot, 0, Math.PI * 2)
+    context.fill()
+  }
+  for (const { at, color } of marks.open) {
+    context.fillStyle = casing
+    context.strokeStyle = colorFor(color)
+    context.beginPath()
+    context.arc(at.x, at.y, OPEN_END_CELLS * grid, 0, Math.PI * 2)
+    context.fill()
+    context.stroke()
+  }
+}
+
+export function paintField(context: CanvasRenderingContext2D, host: Element, { objects, routes, view, grid, pixels, device, theme, colorOf, raster, selection, marks }: FieldPaint) {
   raster.setPalette(readFieldPalette(host, theme))
   context.save()
   context.setTransform(pixels, 0, 0, pixels, -view.x * pixels, -view.y * pixels)
@@ -149,5 +212,11 @@ export function paintField(context: CanvasRenderingContext2D, host: Element, { o
       symbol.width,
       symbol.height,
     )
+  }
+  if (marks && (marks.dots.length || marks.open.length || marks.corners.length || routes.some((r) => r.leads))) {
+    context.save()
+    context.setTransform(pixels, 0, 0, pixels, -view.x * pixels, -view.y * pixels)
+    paintMarks(context, routes, marks, { radius, screenPx, pixels, device, grid, casing, ink: cssColor(host, "var(--foreground)"), colorFor, colorOf })
+    context.restore()
   }
 }
