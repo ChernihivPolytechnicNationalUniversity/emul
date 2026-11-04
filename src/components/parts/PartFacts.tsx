@@ -124,9 +124,9 @@ function Claims({ title, claims, record, tone }: { title: string; claims: Claim[
       </p>
       <ul className="mt-1 space-y-0.5 text-[12.5px] leading-normal">
         {claims.map((c) => (
-          <li key={c.what}>
+          <li key={`${c.part ?? ""}${c.what}`}>
+            {c.part && <span className="mr-1 text-muted-foreground">{c.part}</span>}
             {c.what} {hasDatasheet(record) && <CiteLink record={record} cite={c.cite} />}
-            {c.test && <span className="ml-1 font-mono text-[10.5px] text-muted-foreground/70">{c.test}</span>}
           </li>
         ))}
       </ul>

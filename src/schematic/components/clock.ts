@@ -41,8 +41,10 @@ export const crystal: ComponentDef = {
   model: [],
   datasheet: {
     none: "A generic crystal: its frequency is set in the inspector, not taken from one product's datasheet.",
-    modelled: [{ what: "The RCC sees HSE or LSE ready after the start-up time the MCU's datasheet gives (ST DS9405 Tables 33 and 35): 2 ms for a MHz crystal, 2 s for 32.768 kHz" }, { what: "The clock tree runs at the frequency written on it" }],
-    notModelled: [{ what: "The oscillation itself: the analog engine steps at 20 µs and never sees the waveform" }, { what: "Load capacitors, drive level and frequency tolerance" }],
+    // Start-up times from the MCU's datasheet (DS9405 Tables 33 and 35), not the crystal's.
+    sources: [DOCS["st-ds9405"]],
+    modelled: [{ what: "HSE/LSE ready after start-up time" }, { what: "2 ms for MHz crystals" }, { what: "2 s for 32.768 kHz" }, { what: "Clock runs at marked frequency" }],
+    notModelled: [{ what: "Oscillation waveform" }, { what: "Analog engine steps 20 µs" }, { what: "Load caps, drive level, tolerance" }],
   },
 }
 
@@ -124,8 +126,8 @@ export const oscillator: ComponentDef = {
   model: [{ kind: "R", a: "VCC", b: "GND", value: 1e3, limits: { voltage: "{vmax}", fail: "short" } }],
   datasheet: {
     none: "A generic oscillator module: its frequency and supply rating are set in the inspector, not taken from one product's datasheet.",
-    modelled: [{ what: "A ready clock into OSC_IN for HSE bypass (or OSC32_IN for LSE), at the frequency written on it" }, { what: "A few milliamps from VCC; dead past its supply rating" }],
-    notModelled: [{ what: "The output waveform: OUT drives nothing the analog engine follows" }, { what: "Frequency tolerance and jitter" }],
+    modelled: [{ what: "HSE or LSE bypass clock" }, { what: "Runs at marked frequency" }, { what: "A few milliamps from VCC" }, { what: "Dead past its supply rating" }],
+    notModelled: [{ what: "OUT waveform invisible to analog" }, { what: "Frequency tolerance and jitter" }],
   },
 }
 
@@ -142,7 +144,7 @@ const RECORDS: Record<string, Datasheet> = {
     docs: [DOCS["murata-cstce16m0v53"]],
     specs: [],
     modelled: [],
-    notModelled: [{ what: "The frequency's own drift with temperature and age (set the deviation), the built-in capacitors and ESR" }],
+    notModelled: [{ what: "Drift with temperature and age" }, { what: "Deviation is set by hand" }, { what: "Built-in capacitors and ESR" }],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

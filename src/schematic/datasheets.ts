@@ -14,3 +14,6 @@ export const hasDatasheet = (record: Datasheet | NoDatasheet | undefined): recor
 export function citedDoc(record: Datasheet, cite: Cite | undefined): DocRecord {
   return record.docs.find((d) => d.key === cite?.doc) ?? record.docs[0]
 }
+
+/** A claim is read at a glance: one sentence, this many words at most. */
+export const CLAIM_WORDS = 5

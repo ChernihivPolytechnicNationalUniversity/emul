@@ -759,7 +759,7 @@ const RECORDS: Record<string, Datasheet> = {
     docs: [DOCS["waveshare-open746i-c-sch"], DOCS["waveshare-core746i-sch"], DOCS["st-ds10916"], DOCS["st-rm0385"], DOCS["silabs-cp2102"], DOCS["mchp-mic2025"]],
     specs: [],
     modelled: [],
-    notModelled: [{ what: "JTAG/SWD (no debugger; no pull resistors on the module), the 4.3\" LCD header P14 (RGB as P15, XPT2046 touch on PF7/PF8/PF9 with CS PF6, PENIRQ PD7 and BUSY PD11, backlight PA3), the MIC2025's switch from 5 V to the module's USB (its enable polarity, -1 or -2, is not printed), RTS following the PC's terminal (held high, as the bench found it), the fast fall the census found on PA13 and PB3 (the pin lab saw no resistive pull-down on either: pulled up, both read VDD), the PC's 15 kΩ on D−/D+ behind the module USB, PDR_ON's 3-pad solder jumper COMP.J2 (its bridged side is not printed), the module's decoupling" }],
+    notModelled: [{ what: "No JTAG/SWD debugger" }, { what: "No 4.3\" LCD header P14" }, { what: "No MIC2025 module USB switch" }, { what: "RTS held high" }, { what: "No fast fall on PA13/PB3" }, { what: "No PC USB pull-downs" }, { what: "No PDR_ON jumper COMP.J2" }, { what: "No module decoupling" }],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

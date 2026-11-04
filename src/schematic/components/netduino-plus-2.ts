@@ -247,7 +247,7 @@ const RECORDS: Record<string, Datasheet> = {
     docs: [DOCS["secretlabs-cw0034"], DOCS["mchp-ds39662e"], DOCS["mchp-ds80349c"], DOCS["onsemi-mc33269"], DOCS["st-st1s12"], DOCS["st-ds8626"]],
     specs: [],
     modelled: [],
-    notModelled: [{ what: "MicroSD card, the ENC28J60's network side (no cable to another host: what it sends goes nowhere, nothing arrives), the MCO1 clock as a signal (the ENC28J60 is clocked whenever it is powered), the VIN/USB comparator (both sources feed +5V)" }, ...ENC28J60.map((what) => ({ what: `ENC28J60: ${what}` }))],
+    notModelled: [{ what: "No microSD card" }, { what: "Ethernet reaches no other host" }, { what: "No MCO1 clock signal" }, { what: "No VIN/USB comparator" }, ...ENC28J60.map((what) => ({ part: "ENC28J60", what }))],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

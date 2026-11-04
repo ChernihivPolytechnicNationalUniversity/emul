@@ -331,7 +331,7 @@ const RECORDS: Record<string, Datasheet> = {
     docs: [DOCS["arduino-a000066-ds"], DOCS["arduino-uno-rev3e-sch"], DOCS["mchp-ds40002061b"], DOCS["onsemi-fdn340p"], DOCS["onsemi-ncp1117"], DOCS["ti-slvs522s"], DOCS["ti-slos263y"], DOCS["bourns-mf-msmf"], DOCS["murata-cstce16m0v53"]],
     specs: [],
     modelled: [],
-    notModelled: [{ what: "The boot loader (Optiboot): the boot section is empty, so a reset runs straight into the sketch" }, { what: "The ATmega16U2's own firmware and USB (DTR auto-reset when a port opens, the TX/RX LEDs' pulse stretch, ICSP1, JP2)" }, { what: "The USB ESD varistors and the ferrite" }, { what: "L2, AVCC's 10 µH filter (159 kHz with C10, beyond the solver's step)" }],
+    notModelled: [{ what: "No Optiboot boot loader" }, { what: "No ATmega16U2 firmware or USB" }, { what: "No DTR auto-reset" }, { what: "No USB varistors or ferrite" }, { what: "No L2 AVCC filter" }],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

@@ -417,8 +417,11 @@ export type Cite = { /** A DocRecord key; the record's first document when absen
 /** A number the card and the Part tab show, with where the datasheet gives it. */
 export type Spec = { label: string; value: string; cite: Cite }
 
-/** Something the model does or leaves out; a modelled claim names the test that holds it to the datasheet. */
-export type Claim = { what: string; cite?: Cite; test?: string }
+/**
+ * Something the model does or leaves out, in one sentence of at most five words (CLAIM_WORDS);
+ * `part`: the chip on a board it is about. A modelled claim names the test that holds it to the datasheet.
+ */
+export type Claim = { what: string; part?: string; cite?: Cite; test?: string }
 
 /**
  * A document parts cite (src/schematic/datasheets/docs.ts): the maker's copy, never ours (makers'

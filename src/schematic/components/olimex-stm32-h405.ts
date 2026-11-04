@@ -286,7 +286,7 @@ const RECORDS: Record<string, Datasheet> = {
     docs: [DOCS["olimex-h405-um"], DOCS["olimex-h405-sch"], DOCS["st-ds8626"], DOCS["onsemi-1n5819"], DOCS["ti-snos412q"], DOCS["kemet-t491"]],
     specs: [],
     modelled: [],
-    notModelled: [{ what: "The USB device stack (no OTG FS core), ST's bootloader in system memory (the core idles there), the JTAG/SWD protocol (the debugger reaches the core directly), the crystals' load network (C12/C13 27 pF and R12 1 MΩ on Q1, C14/C15 10 pF on Q2: the oscillators are ideal 8 MHz and 32 768 Hz after their start-up times), the LM1117's loop (its load-transient response: the regulator is static, so the capacitors act when it cannot regulate — power-up, power-down, dropout, current limit), the capacitors' ESL and the ceramics' DC bias as a curve (each is taken at its rail's voltage), the bead's impedance above DC, the F405's VDDA share (its analog current is drawn from VDD; ≤ 6.4 mA, ≤ 1.3 mV across L1), the core regulator following VOS (1.14 V in Scale 2) and Standby (off, then its wake-up inrush), the I/O switching current into the pads' own capacitance (Table 27), U2/U3 and C16/C17 (not fitted on the board)" }],
+    notModelled: [{ what: "No USB or ST bootloader" }, { what: "No JTAG/SWD protocol" }, { what: "Ideal crystals, no load network" }, { what: "LM1117 regulator is static" }, { what: "No ESL or DC-bias curve" }, { what: "Bead impedance only at DC" }, { what: "VDDA current drawn from VDD" }, { what: "Core regulator ignores VOS, Standby" }, { what: "No pad switching current" }, { what: "U2/U3, C16/C17 not fitted" }],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

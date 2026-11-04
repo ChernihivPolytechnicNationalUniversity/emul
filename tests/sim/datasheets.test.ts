@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { allDefs } from "@/schematic/registry"
-import { hasDatasheet } from "@/schematic/datasheets"
+import { CLAIM_WORDS, hasDatasheet } from "@/schematic/datasheets"
 import { DOCS } from "@/schematic/datasheets/docs"
 import { NOT_MODELLED as LIS } from "@/sim/lis-accel"
 import { NOT_MODELLED as CS43L22 } from "@/sim/cs43l22"
@@ -86,8 +86,20 @@ describe("datasheet records", () => {
     }
   })
 
+  it("say each claim in one sentence of five words at most", () => {
+    for (const def of allDefs()) {
+      const record = def.datasheet
+      if (!record) continue
+      for (const c of [...record.modelled, ...record.notModelled]) {
+        const what = c.what.trim()
+        expect.soft(what.split(/\s+/).length, `${def.id}: "${what}" is over ${CLAIM_WORDS} words`).toBeLessThanOrEqual(CLAIM_WORDS)
+        expect.soft(what, `${def.id}: "${what}" is more than one sentence`).not.toMatch(/[.;:!?]\s|—/)
+      }
+    }
+  })
+
   it("hold the on-board chips' not-modelled lists, one source for the card and the model", () => {
-    const notModelled = (id: string) => (allDefs().find((d) => d.id === id)?.datasheet?.notModelled ?? []).map((c) => c.what)
+    const notModelled = (id: string) => (allDefs().find((d) => d.id === id)?.datasheet?.notModelled ?? []).map((c) => (c.part ? `${c.part}: ${c.what}` : c.what))
     // Checked once the board's record is written (a pending board has none to hold them yet).
     const boards: [string, string[]][] = [
       ["stm32f4-discovery", [...LIS.map((w) => `LIS302DL/LIS3DSH: ${w}`), ...CS43L22.map((w) => `CS43L22: ${w}`), ...MP45DT02.map((w) => `MP45DT02: ${w}`)]],

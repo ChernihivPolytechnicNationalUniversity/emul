@@ -345,21 +345,21 @@ const RECORDS: Record<string, Datasheet> = {
     docs: [DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS["st-ds10314"], DOCS["st-rm0383"]],
     specs: [],
     modelled: [],
-    notModelled: [{ what: "USB (the device stack and the ROM DFU bootloader), the W25Qxx SPI flash footprint U3 (not fitted), the SWD wire protocol (P3's pins work as PA13/PA14; the built-in debugger reaches the core directly), the SB1 solder bridge across D4" }],
+    notModelled: [{ what: "No USB or DFU bootloader" }, { what: "U3 SPI flash not fitted" }, { what: "No SWD wire protocol" }, { what: "No SB1 solder bridge" }],
   },
   "weact-blackpill-f401ce": {
     maker: "WeAct Studio",
     docs: [DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS["st-ds10086"], DOCS["st-rm0383"]],
     specs: [],
     modelled: [],
-    notModelled: [{ what: "USB (the device stack and the ROM DFU bootloader), the W25Qxx SPI flash footprint U3 (not fitted), the SWD wire protocol (P3's pins work as PA13/PA14; the built-in debugger reaches the core directly), the SB1 solder bridge across D4" }],
+    notModelled: [{ what: "No USB or DFU bootloader" }, { what: "U3 SPI flash not fitted" }, { what: "No SWD wire protocol" }, { what: "No SB1 solder bridge" }],
   },
   "weact-blackpill-f401cc": {
     maker: "WeAct Studio",
     docs: [DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS["st-ds9716"], DOCS["st-rm0383"]],
     specs: [],
     modelled: [],
-    notModelled: [{ what: "USB (the device stack and the ROM DFU bootloader), the W25Qxx SPI flash footprint U3 (not fitted), the SWD wire protocol (P3's pins work as PA13/PA14; the built-in debugger reaches the core directly), the SB1 solder bridge across D4" }],
+    notModelled: [{ what: "No USB or DFU bootloader" }, { what: "U3 SPI flash not fitted" }, { what: "No SWD wire protocol" }, { what: "No SB1 solder bridge" }],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]
