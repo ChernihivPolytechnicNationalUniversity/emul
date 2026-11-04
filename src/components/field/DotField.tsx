@@ -7,15 +7,13 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuShortcut,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { Inspector } from "@/components/inspector/Inspector"
 import { WirePalette } from "@/components/inspector/WirePalette"
-import { paletteGroups } from "@/components/palette/items"
 import { paletteDrag } from "@/components/palette/palette-actions"
+import { QuickInsert } from "@/components/palette/QuickInsert"
+import { opensQuickInsert, type KeyTarget, type Rect as ScreenRect } from "@/components/palette/quick-insert"
 import { bendsOnRoute, GRID as FIELD_GRID, nudgeRoutes, objectPins, objectRect, resolvePin, routeBox, Router, snap, touches, unionOf, type FlipAxis, type Point } from "@/schematic/geometry"
 import { SpatialIndex } from "@/schematic/spatial"
 import { fieldDetail } from "./detail"
@@ -154,8 +152,13 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
   onArmedChange?: (defId: string | null) => void
   /** A part placed from the palette, by a click, a drop or the keyboard. */
   onPlaced?: (defId: string) => void
+  /** Pick .vhd / .v files to import: a search for HDL in Quick Insert offers it. */
+  onHdlImport?: () => void
   projectName?: string
 }
+
+/** A point on screen, px from the window's corner: an event's clientX and clientY. */
+type ScreenPoint = { x: number; y: number }
 
 const EMPTY_IDS: ReadonlySet<string> = new Set()
 /** How far a finger may wander and still have tapped, px. */
@@ -181,7 +184,7 @@ function pinAt(clientX: number, clientY: number): PinRef | null {
   return target?.kind === "pin" ? target.ref : null
 }
 
-export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, armed = null, onArmedChange, onPlaced, projectName, children, ...props }: DotFieldProps) {
+export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, armed = null, onArmedChange, onPlaced, onHdlImport, projectName, children, ...props }: DotFieldProps) {
   const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, toWorld, isPanStart, startPan, movePan, endPan, setOnPinchStart } = useViewport(grid)
   const marquee = useSelection(toWorld, worldPerPixel, grid)
   const { boxRef: marqueeRef } = marquee
@@ -492,8 +495,36 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     [onStateChange, hasSelection, hasObjects, isEmpty, sch.canUndo, sch.canRedo, clip, simRunning, started, speed, textScale, measure.active, scopeOpen, logicOpen, codeOpen],
   )
 
-  /** World point under the last right-click, used by the "Add" submenu. */
+  /** World point under the last right-click (or long press), where "Add here…" puts a part. */
   const menuPoint = React.useRef<Point>({ x: 0, y: 0 })
+  /** The same point on screen, where Quick Insert opens from the menu. */
+  const menuClient = React.useRef<ScreenPoint>({ x: 0, y: 0 })
+  /** The pointer's last screen point over the field; null once it has left. "A" opens Quick Insert there. */
+  const pointerClient = React.useRef<ScreenPoint | null>(null)
+
+  // --- quick insert ----------------------------------------------------------
+  /** Quick Insert, open: the world point the part goes to, the screen point and bench box the panel stands by. */
+  const [quick, setQuick] = React.useState<{ world: Point; client: ScreenPoint; bounds: ScreenRect } | null>(null)
+  /** The part Enter would place from Quick Insert: its ghost stands at the point. */
+  const [quickPreview, setQuickPreview] = React.useState<string | null>(null)
+  const closeQuick = React.useCallback(() => setQuick(null), [])
+  /** Open Quick Insert at a screen point: the pointer's, else the middle of the bench. */
+  const openQuick = useEvent((client?: ScreenPoint) => {
+    const r = containerRef.current?.getBoundingClientRect()
+    if (!r) return
+    const at = client ?? pointerClient.current ?? { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+    onArmedChange?.(null)
+    setQuick({ world: toWorld(at.x, at.y), client: at, bounds: { left: r.left, top: r.top, right: r.right, bottom: r.bottom } })
+  })
+  /** A part from Quick Insert: centred on its point (or the nearest free spot), selected, so R and X act on it next. */
+  const insertAt = useEvent((defId: string, at: Point) =>
+    afterDefs([defId], () => {
+      const added = addFree(defId, at)
+      if (!added) return
+      sch.selectObject(added.id)
+      placed(defId)
+    }, cannotLoad),
+  )
 
   const viewCenter = React.useCallback((): Point => {
     const el = containerRef.current
@@ -506,6 +537,16 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const host = containerRef.current
     if (!host) return null
     return exportPng({ host, theme, objects: docObjects, routes, grid, colorOf, symbols: symbolRaster, texts: textRaster, textScale })
+  })
+
+  const newHdl = useEvent((language: HdlLanguage) => {
+    const taken = new Set((sch.doc.library ?? []).map((m) => m.name))
+    let n = 1
+    while (taken.has(`${language === "vhdl" ? "counter" : "counter_v"}${n > 1 ? n : ""}`)) n++
+    const name = `${language === "vhdl" ? "counter" : "counter_v"}${n > 1 ? n : ""}`
+    const id = newModuleId()
+    sch.setModule({ id, name, files: [TEMPLATES[language](name)] })
+    setHdlId(id)
   })
 
   const { load } = sch
@@ -577,15 +618,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         if (board) setCodeBoardId(board.id)
         setCodeOpen(true)
       },
-      newHdl: (language) => {
-        const taken = new Set((sch.doc.library ?? []).map((m) => m.name))
-        let n = 1
-        while (taken.has(`${language === "vhdl" ? "counter" : "counter_v"}${n > 1 ? n : ""}`)) n++
-        const name = `${language === "vhdl" ? "counter" : "counter_v"}${n > 1 ? n : ""}`
-        const id = newModuleId()
-        sch.setModule({ id, name, files: [TEMPLATES[language](name)] })
-        setHdlId(id)
-      },
+      newHdl,
       importHdl: (files) => {
         const hdl = files.filter((f) => languageOf(f.path))
         if (!hdl.length) return
@@ -596,7 +629,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       },
       openHdl: (id) => setHdlId(id),
     }),
-    [addFreeLoaded, inOrder, placed, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle, exportImage],
+    [addFreeLoaded, inOrder, placed, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle, exportImage, newHdl],
   )
 
   // --- moving objects -------------------------------------------------------
@@ -962,6 +995,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    pointerClient.current = { x: e.clientX, y: e.clientY }
     onPointerWorld?.(toWorld(e.clientX, e.clientY))
     if (armed && e.pointerType !== "touch") setArmedAt(toWorld(e.clientX, e.clientY))
     if (movePan(e)) return
@@ -1006,13 +1040,36 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
 
   // --- keyboard --------------------------------------------------------------
+  /** A card over the field (inspector, scope, analyser) keeps its keys from the field's shortcuts, all but Ctrl+K: Quick Insert opens from anywhere. */
+  const keepKeys = (e: React.KeyboardEvent) => {
+    if (!opensQuickInsert(e, "text")) e.stopPropagation()
+  }
   /** Keys typed into a text field are the field's; buttons (a just-clicked palette entry) are fine. */
   // Monaco types through an EditContext on a plain div, so the code panel counts as a text field too.
   const inTextField = (e: Event) => {
     const t = e.target as HTMLElement | null
     return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable || !!t.closest?.('[data-slot="code-panel"]'))
   }
+  /** Where a key was typed, for the shortcuts a text field or the code editor keeps for itself. */
+  const keyTarget = (e: Event): KeyTarget => {
+    const t = e.target as HTMLElement | null
+    if (t?.closest?.('[data-slot="code-panel"], .monaco-editor')) return "code"
+    return inTextField(e) ? "text" : "field"
+  }
   const onKey = useEvent((e: KeyboardEvent) => {
+    if (!e.repeat && opensQuickInsert(e, keyTarget(e))) {
+      // Open already: Ctrl+K closes it, "A" is a letter for its box and never shuts it.
+      if (quick) {
+        e.preventDefault()
+        if (e.ctrlKey || e.metaKey) closeQuick()
+        else document.querySelector<HTMLInputElement>('[data-slot="quick-insert-search"]')?.focus()
+        return
+      }
+      // Nothing opens over a wire being drawn, a probe or a drag under way.
+      if (pending || measure.active || drag.active || paletteDrag.active) return
+      e.preventDefault()
+      return openQuick()
+    }
     if (inTextField(e)) return
     const mod = e.ctrlKey || e.metaKey
     const key = e.key.toLowerCase()
@@ -1156,7 +1213,16 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   return (
     <div className="relative flex h-full w-full overflow-hidden">
     <ContextMenu>
-      <ContextMenuTrigger data-slot="dot-field" className={cn("flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background", className)} {...props}>
+      <ContextMenuTrigger
+        data-slot="dot-field"
+        className={cn("flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background", className)}
+        // Any right-click that opens the field's menu, on the bench or on a card over it (the inspector), sets where "Add here…" puts a part.
+        onContextMenuCapture={(e: React.MouseEvent) => {
+          menuPoint.current = toWorld(e.clientX, e.clientY)
+          menuClient.current = { x: e.clientX, y: e.clientY }
+        }}
+        {...props}
+      >
         <div data-slot="dot-field-stage" className="relative min-h-0 flex-1 overflow-hidden">
           {armed && (
             <div
@@ -1181,19 +1247,21 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             className={cn("absolute inset-0 touch-none select-none", cursor)}
             onPointerDownCapture={(e) => {
               // A long press opens the field menu without a contextmenu event on iOS: add there.
-              if (e.pointerType === "touch") menuPoint.current = toWorld(e.clientX, e.clientY)
+              if (e.pointerType !== "touch") return
+              menuPoint.current = toWorld(e.clientX, e.clientY)
+              menuClient.current = { x: e.clientX, y: e.clientY }
             }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
             onPointerLeave={() => {
+              pointerClient.current = null
               setArmedAt(null)
               forgetHover()
               onPointerWorld?.(null)
             }}
             onContextMenu={(e) => {
-              menuPoint.current = toWorld(e.clientX, e.clientY)
               if (armed) {
                 e.preventDefault()
                 onArmedChange?.(null)
@@ -1269,6 +1337,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               />
               <PendingWireLayer objects={docObjects} index={index} pending={pending} grid={grid} scale={scale} part="marks" />
               {armed && armedAt && <PlacementGhost defId={armed} at={armedAt} grid={grid} scale={scale} detail={detail} sim={simStore} colorOf={colorOf} raster={symbolRaster} />}
+              {quick && quickPreview && <PlacementGhost defId={quickPreview} at={quick.world} grid={grid} scale={scale} detail={detail} sim={simStore} colorOf={colorOf} raster={symbolRaster} />}
               {ghosts && ghosts.length > 0 && (
                 <GhostLayer ghosts={ghosts} objects={docObjects} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} />
               )}
@@ -1337,7 +1406,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onDelete={sch.removeSelected}
             onPointerDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
+            onKeyDown={keepKeys}
           />
           {/* A phone has no Escape: a wire left hanging in click mode needs a way out. */}
           {pending?.mode === "click" && (
@@ -1372,7 +1441,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onClose={() => setScopeOpen(false)}
             onPointerDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
+            onKeyDown={keepKeys}
           />
         )}
         {logicOpen && (
@@ -1391,28 +1460,16 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onClose={() => setLogicOpen(false)}
             onPointerDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
+            onKeyDown={keepKeys}
           />
         )}
       </ContextMenuTrigger>
 
       <ContextMenuContent className="w-64">
-        <ContextMenuSub>
-          <ContextMenuSubTrigger>Add component</ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-48">
-            {paletteGroups.map((g, gi) => (
-              <React.Fragment key={g.id}>
-                {gi > 0 && <ContextMenuSeparator />}
-                {g.items.map((def) => (
-                  <ContextMenuItem key={def.id} onClick={() => addFreeLoaded(def.id, menuPoint.current)}>
-                    <def.icon />
-                    {def.name}
-                  </ContextMenuItem>
-                ))}
-              </React.Fragment>
-            ))}
-          </ContextMenuSubContent>
-        </ContextMenuSub>
+        <ContextMenuItem onClick={() => openQuick(menuClient.current)}>
+          Add here…
+          <ContextMenuShortcut>A</ContextMenuShortcut>
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!sch.canUndo} onClick={sch.undo}>
           Undo
@@ -1505,6 +1562,24 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+      {quick && (
+        <QuickInsert
+          at={quick.client}
+          bounds={quick.bounds}
+          onPlace={(def, more) => {
+            insertAt(def.id, quick.world)
+            if (!more) closeQuick()
+          }}
+          onTake={(def) => {
+            onArmedChange?.(def?.id ?? null)
+            if (def) closeQuick()
+          }}
+          onPreview={setQuickPreview}
+          onClose={closeQuick}
+          onHdlNew={newHdl}
+          onHdlImport={onHdlImport}
+        />
+      )}
       {codeOpen && (
         <React.Suspense fallback={<PanelLoading className="w-160" />}>
           <CodePanel

@@ -420,6 +420,7 @@ export default function App() {
               armed={armed}
               onArmedChange={setArmed}
               onPlaced={notePlaced}
+              onHdlImport={importHdl}
               projectName={projects.current?.name}
             >
               <LiveCursors peers={live.peers} />
