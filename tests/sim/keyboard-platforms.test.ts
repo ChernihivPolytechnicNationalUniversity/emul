@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import vm from "node:vm"
 import { describe, expect, it } from "vitest"
 import { alternatives, matches, matchesAny, shortcutLabel, type KeyPress, type Keys, type Shortcut } from "@/lib/keys"
-import { keymapFor, labelFor } from "@/lib/keymap"
+import { keymapFor, labelFor, stopUnlessAppCommand } from "@/lib/keymap"
 import { detectPlatform, type Platform, type PlatformHints } from "@/lib/platform"
 import { addsToSelection, opensContextMenu, primaryClick, wheelZooms } from "@/lib/pointer"
 
@@ -129,6 +129,29 @@ describe("each platform's own keys", () => {
     expect.soft(PLATFORMS.map((p) => labelFor(keymapFor(p).remove, p)), "printed").toEqual(["⌫", "Del", "Del", "Backspace"])
   })
 
+  it("delete a file with Command-Delete on a Mac as Finder does, Alt+Backspace on ChromeOS, and Delete everywhere", () => {
+    expect.soft(matchesAny(named("Backspace", { metaKey: true }), keymapFor("apple").deleteFile, "apple"), "⌘⌫ on a Mac").toBeTruthy()
+    expect.soft(matchesAny(named("Backspace", { altKey: true }), keymapFor("chromeos").deleteFile, "chromeos"), "Alt+Backspace on ChromeOS").toBeTruthy()
+    for (const platform of PLATFORMS) expect.soft(matchesAny(named("Delete"), keymapFor(platform).deleteFile, platform), `Delete on ${platform}`).toBeTruthy()
+    expect.soft(matchesAny(named("Backspace", { ctrlKey: true }), keymapFor("windows").deleteFile, "windows"), "Ctrl+Backspace deletes a word, not a file").toBeFalsy()
+    expect.soft(PLATFORMS.map((p) => labelFor(keymapFor(p).deleteFile, p)), "printed").toEqual(["⌘⌫", "Del", "Del", "Alt+Backspace"])
+    expect.soft(PLATFORMS.map((p) => labelFor(keymapFor(p).renameFile, p)), "rename stays F2").toEqual(["F2", "F2", "F2", "F2"])
+  })
+})
+
+describe("panels that keep keys to themselves", () => {
+  it("still let save, open and the projects list through to emul, so the browser's Save Page and Open File never answer them", () => {
+    const stopped = (mods: Partial<KeyPress>, key = "s") => {
+      let stops = 0
+      stopUnlessAppCommand({ nativeEvent: { key, code: `Key${key.toUpperCase()}`, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods }, stopPropagation: () => void stops++ })
+      return stops > 0
+    }
+    expect.soft(stopped({ ctrlKey: true }), "Ctrl+S").toBe(false)
+    expect.soft(stopped({ ctrlKey: true }, "o"), "Ctrl+O").toBe(false)
+    expect.soft(stopped({ ctrlKey: true, shiftKey: true }, "O"), "Ctrl+Shift+O").toBe(false)
+    expect.soft(stopped({}, "m"), "a letter stays in the panel").toBe(true)
+    expect.soft(stopped({ ctrlKey: true }, "z"), "so does the panel's own undo").toBe(true)
+  })
 })
 
 describe("labels in each platform's own order and names", () => {

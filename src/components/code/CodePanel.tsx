@@ -15,8 +15,8 @@ import { cubeIdeProject } from "@/project/cubeide"
 import { stSite } from "@/project/st-site"
 import { downloadBlob } from "@/lib/download"
 import { writeZip } from "@/lib/zip"
-import { dispatch } from "@/lib/keys"
-import { KEYMAP } from "@/lib/keymap"
+import { commandHeld, dispatch, matchesAny } from "@/lib/keys"
+import { KEYMAP, stopUnlessAppCommand } from "@/lib/keymap"
 import { chipById } from "@/mcu/chip"
 import { getDef } from "@/schematic/registry"
 import type { BoardDebug, PlacedObject } from "@/schematic/types"
@@ -124,6 +124,7 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
     focused: () => !!editor.current?.focused(),
     undo: () => editor.current?.undo(),
     redo: () => editor.current?.redo(),
+    line: () => editor.current?.line(),
     goTo: (path, line, col) => editor.current?.goTo(path, line, col),
   }))
   const [tabs, setTabs] = React.useState<Record<string, TabState>>({})
@@ -346,12 +347,19 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
       }
     }
   }
+  const debugKeyOf = (e: React.KeyboardEvent): DebugKey | null => {
+    if (matchesAny(e.nativeEvent, KEYMAP.runToCursor)) return "runToCursor"
+    if (e.key === "F5") return e.shiftKey && commandHeld(e) ? "restart" : "continue"
+    if (e.key === "F10") return "stepOver"
+    if (e.key === "F11") return e.shiftKey ? "stepOut" : e.altKey ? "stepInstruction" : "stepInto"
+    return null
+  }
   const onPanelKey = (e: React.KeyboardEvent) => {
-    e.stopPropagation()
-    const k: DebugKey | null = e.key === "F5" ? (e.shiftKey && (e.ctrlKey || e.metaKey) ? "restart" : "continue") : e.key === "F10" ? "stepOver" : e.key === "F11" ? (e.shiftKey ? "stepOut" : e.altKey ? "stepInstruction" : "stepInto") : null
+    stopUnlessAppCommand(e)
+    const k = debugKeyOf(e)
     if (k) {
       e.preventDefault()
-      if (!e.repeat || DEBUG_SHORTCUTS[k].repeats) act(k)
+      if (!e.repeat || DEBUG_SHORTCUTS[k].repeats) act(k, k === "runToCursor" ? editor.current?.line() : undefined)
     }
     dispatch(e.nativeEvent, [{ keys: KEYMAP.disassembly, run: () => openFile(active === DISASM ? (tabOfFrame(frame) ?? first ?? DISASM) : DISASM) }])
   }

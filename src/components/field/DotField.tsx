@@ -29,7 +29,7 @@ import { languageOf } from "emul-shared/hdl"
 import type { SourceFile } from "emul-shared/source"
 import { bytesToBase64 } from "@/lib/bytes"
 import { composing, dispatch, keepsPageInPlace, matches, matchesAny, ownsKeys, typesAhead } from "@/lib/keys"
-import { KEYMAP, labelFor } from "@/lib/keymap"
+import { KEYMAP, labelFor, stopUnlessAppCommand } from "@/lib/keymap"
 import { addsToSelection, primaryClick } from "@/lib/pointer"
 import { useEvent } from "@/hooks/use-event"
 import { useSchematic, type Clip } from "@/schematic/use-schematic"
@@ -1265,7 +1265,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onDelete={sch.removeSelected}
             onPointerDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
+            onKeyDown={stopUnlessAppCommand}
           />
           {/* A phone has no Escape: a wire left hanging in click mode needs a way out. */}
           {pending?.mode === "click" && (
@@ -1300,7 +1300,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onClose={() => setScopeOpen(false)}
             onPointerDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
+            onKeyDown={stopUnlessAppCommand}
           />
         )}
         {logicOpen && (
@@ -1319,7 +1319,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onClose={() => setLogicOpen(false)}
             onPointerDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
+            onKeyDown={stopUnlessAppCommand}
           />
         )}
       </ContextMenuTrigger>

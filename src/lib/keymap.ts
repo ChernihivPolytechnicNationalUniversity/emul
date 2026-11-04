@@ -1,4 +1,4 @@
-import { alternatives, shortcutLabel, type Keys, type Shortcut } from "./keys"
+import { alternatives, matchesAny, shortcutLabel, type KeyPress, type Keys, type Shortcut } from "./keys"
 import { currentPlatform, type Platform } from "./platform"
 
 type PerPlatform = { readonly default: Keys } & { readonly [P in Platform]?: Keys }
@@ -46,6 +46,8 @@ const BINDINGS = {
   stepInto: { key: "F11", repeats: true },
   stepOut: { key: "F11", shift: true, repeats: true },
   stepInstruction: { key: "F11", alt: true, repeats: true },
+  renameFile: { key: "F2" },
+  deleteFile: { default: DELETE, apple: [{ key: "Backspace", mod: true }, DELETE], chromeos: [{ key: "Backspace", alt: true }, DELETE] },
 } as const satisfies Record<string, Entry>
 
 type Bindings = typeof BINDINGS
@@ -58,5 +60,13 @@ export function keymapFor(platform: Platform): Keymap {
 }
 
 export const KEYMAP = keymapFor(currentPlatform())
+
+const APP_COMMANDS = [KEYMAP.save, KEYMAP.open, KEYMAP.projects]
+
+export const isAppCommand = (e: KeyPress) => APP_COMMANDS.some((keys) => matchesAny(e, keys))
+
+export function stopUnlessAppCommand(e: { nativeEvent: KeyPress; stopPropagation: () => void }) {
+  if (!isAppCommand(e.nativeEvent)) e.stopPropagation()
+}
 
 export const labelFor = (keys: Keys, platform: Platform = currentPlatform()) => shortcutLabel(alternatives(keys)[0], platform)

@@ -5,7 +5,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 import { useIsMobile } from "@/hooks/use-mobile"
-import { dispatch } from "@/lib/keys"
+import { dispatch, ownsKeys } from "@/lib/keys"
 import { KEYMAP } from "@/lib/keymap"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -109,6 +109,7 @@ function SidebarProvider({
   // Adds a keyboard shortcut to toggle the sidebar.
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (ownsKeys(event.target)) return
       dispatch(event, [{ keys: KEYMAP.sidebar, run: toggleSidebar }])
     }
 

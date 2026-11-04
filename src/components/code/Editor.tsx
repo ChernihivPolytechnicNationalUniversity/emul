@@ -14,6 +14,7 @@ export type EditorHandle = {
   focused: () => boolean
   undo: () => void
   redo: () => void
+  line: () => number | undefined
   /** Put the cursor on a place in a file the panel has just made active (or is about to). */
   goTo: (path: string, line: number, col: number) => void
 }
@@ -106,6 +107,7 @@ export function Editor({ ref, objectId, files, docs, active, target, diagnostics
     focused: () => !!editor.current?.hasTextFocus(),
     undo: () => editor.current?.trigger("menu", "undo", null),
     redo: () => editor.current?.trigger("menu", "redo", null),
+    line: () => editor.current?.getPosition()?.lineNumber,
     goTo: (path, line, col) => {
       const ed = editor.current
       const model = ed?.getModel()
