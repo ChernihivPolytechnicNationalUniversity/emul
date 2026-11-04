@@ -15,17 +15,30 @@ import { packagePins } from "./pinout"
 /** Nothing runs in a preview: no readings, no glow. */
 const idle = new SimStore()
 
-/** The part's own symbol as the field draws it at this size (body, labels, pins), fitted into a square. */
-export function SymbolPreview({ def, size, className }: { def: ComponentDef; size: number; className?: string }) {
-  const object = React.useMemo<PlacedObject>(() => ({ id: "preview", def: def.id, x: 0, y: 0, props: { ...def.defaults } }), [def])
+/**
+ * The part's own symbol as the field draws it (body, labels, pins), fitted into a box of `size`
+ * (or `width` × `height`). With `turn`, a part that fits the box better on its side (a tall board
+ * in a wide box) is drawn turned a quarter, as it can be placed. A faint outline keeps a white
+ * board's edge visible on a light ground at a small scale, where its own 1-cell line is a hairline.
+ */
+export function SymbolPreview({ def, size, width = size, height = size, turn, className }: { def: ComponentDef; size?: number; width?: number; height?: number; turn?: boolean; className?: string }) {
+  const w = width ?? 96
+  const h = height ?? 96
+  const upright = React.useMemo(() => objectRect({ id: "preview", def: def.id, x: 0, y: 0 }, GRID), [def])
+  const fit = (bw: number, bh: number) => Math.min(w / (bw + 2 * GRID), h / (bh + 2 * GRID))
+  const quarter = !!turn && fit(upright.h, upright.w) > fit(upright.w, upright.h) * 1.15
+  const object = React.useMemo<PlacedObject>(() => ({ id: "preview", def: def.id, x: 0, y: 0, rotation: quarter ? 90 : 0, props: { ...def.defaults } }), [def, quarter])
   const box = objectRect(object, GRID)
   const view = { x: box.x - GRID, y: box.y - GRID, w: box.w + 2 * GRID, h: box.h + 2 * GRID }
-  const scale = Math.min(size / view.w, size / view.h)
+  const scale = Math.min(w / view.w, h / view.h)
   // A preview is never a crowd of parts: always the drawn detail, never the zoomed-out canvas.
   const detail = React.useMemo(() => ({ ...fieldDetail(GRID, scale, 1), canvas: false }), [scale])
   return (
-    <div className={cn("relative shrink-0 overflow-hidden rounded-[10px] border bg-muted/40", className)} style={{ width: size, height: size }} aria-hidden>
-      <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${(size - view.w * scale) / 2}px, ${(size - view.h * scale) / 2}px) scale(${scale}) translate(${-view.x}px, ${-view.y}px)` }}>
+    <div className={cn("relative shrink-0 overflow-hidden rounded-[10px] border bg-muted/40", className)} style={{ width: w, height: h }} aria-hidden>
+      <div
+        className="absolute top-0 left-0 origin-top-left drop-shadow-[0_0_0.6px_rgba(0,0,0,.55)] dark:drop-shadow-[0_0_0.6px_rgba(255,255,255,.5)]"
+        style={{ transform: `translate(${(w - view.w * scale) / 2}px, ${(h - view.h * scale) / 2}px) scale(${scale}) translate(${-view.x}px, ${-view.y}px)` }}
+      >
         <PartDrawing object={object} grid={GRID} detail={detail} sim={idle} />
       </div>
     </div>

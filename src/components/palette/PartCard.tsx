@@ -14,6 +14,8 @@ import { HOLD_MS, hideCard, holdCard, keepCard, leavePart, releaseCard, useCardA
 const WIDTH = 360
 /** A board's card is wide: its photo and its drawing on the bench side by side, its facts in two columns. */
 const BOARD_WIDTH = 560
+/** The bench drawing's width: half the board card's inner width, beside the photo. */
+const BENCH_W = (BOARD_WIDTH - 2 * 16 - 12) / 2
 const GAP = 8
 const MARGIN = 8
 /** Variant chips the card shows before "+N". */
@@ -206,7 +208,7 @@ function BoardContent({ meta, board, def }: { meta: PartMeta; board: BoardCard; 
         </figure>
         <figure>
           <figcaption className={LABEL}>On the bench</figcaption>
-          <div className="mt-1 flex h-40 items-center justify-center rounded-[10px] border bg-muted/40">{def ? <SymbolPreview def={def} size={156} className="border-0 bg-transparent" /> : <Skeleton className="size-36" />}</div>
+          {def ? <SymbolPreview def={def} width={BENCH_W} height={160} turn className="mt-1" /> : <Skeleton className="mt-1 h-40 w-full rounded-[10px]" />}
         </figure>
       </div>
       <dl className="grid grid-cols-[auto_1fr_auto_1fr] items-baseline gap-x-3 gap-y-1.5 text-[12.5px]">
