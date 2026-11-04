@@ -9,6 +9,8 @@
 import { KeypadIcon } from "../icons"
 import type { ComponentDef, Element, PartDef, PinDef } from "../types"
 import { BOUNCE_FIELDS } from "./basic"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const LEGENDS = [
   ["1", "2", "3", "A"],
@@ -60,10 +62,9 @@ const model: Element[] = LEGENDS.flatMap((row, r) =>
 export const keypad4x4: ComponentDef = {
   id: "keypad-4x4",
   name: "Keypad 4×4",
-  description:
-    "Matrix membrane keypad (Parallax #27899): 16 keys, each closing its row to its column — scan the rows, read the columns. No diodes: three keys at a rectangle's corners ghost the fourth. 24 V DC, 30 mA rating; contact resistance under 100 Ω.",
-  category: "Switches",
-  keywords: ["keypad", "keyboard", "matrix", "membrane", "4x4", "27899"],
+  description: "16-key matrix membrane keypad",
+  category: "input",
+  keywords: ["keypad", "keyboard", "matrix", "membrane", "4x4", "27899", "Parallax"],
   icon: KeypadIcon,
   prefix: "SW",
   width: W,
@@ -78,5 +79,42 @@ export const keypad4x4: ComponentDef = {
   ],
   parts,
   model,
-  info: { Source: "Parallax #27899 4x4 Matrix Membrane Keypad, v1.2 (12/16/2011); Adafruit #3844 product page (contact resistance)" },
+  // info Source (in the datasheet record): "Parallax #27899 4x4 Matrix Membrane Keypad, v1.2 (12/16/2011); Adafruit #3844 product page (contact resistance)"
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [keypad4x4]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "keypad-4x4": {
+    maker: "Parallax",
+    docs: [DOCS["parallax-27899"], DOCS["adafruit-3844"]],
+    specs: [],
+    characteristics: [
+      { kind: "contactRating", limit: { max: 30e-3 }, at: [{ supply: 24 }], cite: { page: 1, at: "Key Specifications" } },
+      { kind: "contactResistance", value: { max: 100 }, cite: { doc: "adafruit-3844", at: "Technical Details" } },
+      { kind: "actuation", value: { min: 1.569, max: 1.765 }, cite: { doc: "adafruit-3844", at: "Technical Details" } },
+      { kind: "temperature", value: { min: 0, max: 50 }, cite: { page: 1, at: "Key Specifications" } },
+    ],
+    modelled: [
+      { what: "Key closes row to column", cite: { page: 2, at: "Figure 1" }, test: "tests/sim/keypad.test.ts" },
+      { what: "Pins 1–4 columns, 5–8 rows", cite: { page: 2, at: "How it Works" }, test: "tests/sim/keypad.test.ts" },
+      { what: "No diodes, so keys ghost", test: "tests/sim/keypad.test.ts" },
+      { what: "Three rectangle corners ghost fourth", test: "tests/sim/keypad.test.ts" },
+      { what: "Contact 100 Ω by default", cite: { doc: "adafruit-3844", at: "Technical Details" }, test: "tests/sim/keypad.test.ts" },
+      { what: "Editable contact resistance", cite: { doc: "adafruit-3844", at: "Technical Details" }, test: "tests/sim/keypad.test.ts" },
+      { what: "Over 30 mA reads >100%", cite: { page: 1, at: "Key Specifications" }, test: "tests/sim/keypad.test.ts" },
+      { what: "Key does not break", cite: { page: 1, at: "Key Specifications" }, test: "tests/sim/keypad.test.ts" },
+    ],
+    notModelled: [
+      { what: "No maker bounce time" },
+      { what: "Optional 5 ms is retailer's" },
+      { what: "No 24 V key limit", cite: { page: 1, at: "Key Specifications" } },
+      { what: "Actuation force and travel", cite: { doc: "adafruit-3844", at: "Technical Details" } },
+      { what: "0–50 °C range not checked", cite: { page: 1, at: "Key Specifications" } },
+    ],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

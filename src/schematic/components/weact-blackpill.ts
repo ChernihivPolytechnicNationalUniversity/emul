@@ -4,6 +4,8 @@ import { mcuModel } from "../mcu-model"
 import type { ComponentDef, Element, PartDef, PinDef, PinKind } from "../types"
 import { LED_COLORS } from "./basic"
 import { boardArt } from "./weact-blackpill-art"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * WeAct Studio Black Pill, MiniF4x1Cx V3.1, with an STM32F411CEU6, F401CCU6 or F401CEU6: one PCB for all three
@@ -283,14 +285,16 @@ function rows(chip: ChipProfile): { p1: Row[]; p2: Row[] } {
   return { p1: P1.map(tc), p2: P2.map(tc) }
 }
 
-function blackPill(chip: ChipProfile, id: string, mcu: string): ComponentDef {
+function blackPill(chip: ChipProfile, id: string): ComponentDef {
   const { p1, p2 } = rows(chip)
   const pins: PinDef[] = [...header("P1", p1), ...header("P2", p2), ...P3]
   return {
     id,
     name: `WeAct Black Pill ${chip.name.slice(5, 9)}${chip.line === "f401" ? chip.name.slice(9, 11) : ""}`,
     description: chip.name.slice(0, 11),
-    category: "Boards",
+    keywords: ["STM32", chip.name.slice(0, 11), "Black Pill", "WeAct", "Cortex-M4"],
+    board: { vendor: "WeAct Studio", mcu: chip.name.slice(0, 11), mhz: chip.line === "f411" ? 100 : 84, volts: 3.3, tags: ["USB-C"], photo: "weact-blackpill-f411.webp", core: "Cortex-M4F", memory: BLACKPILL_MEMORY[chip.name.slice(0, 11)], onBoard: ["LED", "user button", "USB-C"], alias: "Black Pill" },
+    category: "boards",
     icon: BoardIcon,
     prefix: "U",
     width: WIDTH,
@@ -312,17 +316,69 @@ function blackPill(chip: ChipProfile, id: string, mcu: string): ComponentDef {
       lse: { hz: 32768, kind: "crystal", startup: 2 },
     },
     info: {
-      MCU: mcu,
-      LEDs: "C13 blue on PC13 (lit when low, 1.5 kΩ), PWR red",
-      Buttons: "KEY on PA0 (330 Ω to GND, no pull-up: enable the internal one; low when pressed), NRST, BOOT0 (to 3V3, 10 kΩ pull-down)",
-      USB: "USB-C: D− PA11, D+ PA12, CC1/CC2 5.1 kΩ; VBUS → D4 → 5V → ME6231A33 → 3V3",
-      "Not modelled":
-        "USB (the device stack and the ROM DFU bootloader), the W25Qxx SPI flash footprint U3 (not fitted), the SWD wire protocol (P3's pins work as PA13/PA14; the built-in debugger reaches the core directly), the SB1 solder bridge across D4",
-      Source: "WeAct MiniF4x1Cx V3.1 schematic and board-shape drawing",
+      // MCU: per board, the note kept above each blackPill() call below
+      // LEDs: C13 blue on PC13 (lit when low, 1.5 kΩ), PWR red
+      LEDs: "PC13, lit when low",
+      // Buttons: KEY on PA0 (330 Ω to GND, no pull-up: enable the internal one; low when pressed), NRST, BOOT0 (to 3V3, 10
+      //   kΩ pull-down)
+      Buttons: "KEY on PA0, needs pull-up",
+      // USB: USB-C: D− PA11, D+ PA12, CC1/CC2 5.1 kΩ; VBUS → D4 → 5V → ME6231A33 → 3V3
+      USB: "USB-C, D− PA11, D+ PA12",
+      // Not modelled: USB (the device stack and the ROM DFU bootloader), the W25Qxx SPI flash footprint U3 (not fitted), the
+      //   SWD wire protocol (P3's pins work as PA13/PA14; the built-in debugger reaches the core directly), the SB1 solder
+      //   bridge across D4
+      // Source: WeAct MiniF4x1Cx V3.1 schematic and board-shape drawing
     },
   }
 }
 
-export const weactBlackpillF411 = blackPill(STM32F411CE, "weact-blackpill-f411", "STM32F411CEU6, Cortex-M4F 100 MHz, 512 KB Flash, 128 KB SRAM; HSE 25 MHz, LSE 32.768 kHz")
-export const weactBlackpillF401cc = blackPill(STM32F401CC, "weact-blackpill-f401cc", "STM32F401CCU6, Cortex-M4F 84 MHz, 256 KB Flash, 64 KB SRAM; HSE 25 MHz, LSE 32.768 kHz")
-export const weactBlackpillF401ce = blackPill(STM32F401CE, "weact-blackpill-f401ce", "STM32F401CEU6, Cortex-M4F 84 MHz, 512 KB Flash, 96 KB SRAM; HSE 25 MHz, LSE 32.768 kHz")
+/** Flash / RAM of each Black Pill's MCU. */
+const BLACKPILL_MEMORY: Record<string, string> = { STM32F411CE: "512 KB / 128 KB", STM32F401CE: "512 KB / 96 KB", STM32F401CC: "256 KB / 64 KB" }
+
+// MCU: STM32F411CEU6, Cortex-M4F 100 MHz, 512 KB Flash, 128 KB SRAM; HSE 25 MHz, LSE 32.768 kHz
+export const weactBlackpillF411 = blackPill(STM32F411CE, "weact-blackpill-f411")
+// MCU: STM32F401CCU6, Cortex-M4F 84 MHz, 256 KB Flash, 64 KB SRAM; HSE 25 MHz, LSE 32.768 kHz
+export const weactBlackpillF401cc = blackPill(STM32F401CC, "weact-blackpill-f401cc")
+// MCU: STM32F401CEU6, Cortex-M4F 84 MHz, 512 KB Flash, 96 KB SRAM; HSE 25 MHz, LSE 32.768 kHz
+export const weactBlackpillF401ce = blackPill(STM32F401CE, "weact-blackpill-f401ce")
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [weactBlackpillF411, weactBlackpillF401ce, weactBlackpillF401cc]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+/** The MCU's numbers, from its datasheet: Table 2 (features and peripheral counts) and Table 11 (voltage characteristics). */
+type McuSheet = { doc: string; mhz: number; flash: number; ram: number; table2: { memory: number; counts: number }; table11: number }
+
+/** One record per board: the same V3.1 PCB, its own MCU's datasheet for the chip's numbers. */
+const record = (m: McuSheet): Datasheet => ({
+  maker: "WeAct Studio",
+  docs: [DOCS["weact-minif4x1-readme"], DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS[m.doc]],
+  specs: [],
+  characteristics: [
+    { kind: "clock", value: { max: m.mhz * 1e6 }, cite: { doc: m.doc, page: m.table2.counts, at: "Table 2" } },
+    { kind: "flash", value: { typ: m.flash * 1024 }, cite: { doc: m.doc, page: m.table2.memory, at: "Table 2" } },
+    { kind: "ram", value: { typ: m.ram * 1024 }, cite: { doc: m.doc, page: m.table2.memory, at: "Table 2" } },
+    { kind: "ioLevel", value: { typ: 3.3 }, limit: { max: 4 }, cite: { doc: "weact-minif4x1-v31", page: 1, at: "5V -> 3.3V Power conversion" }, limitCite: { doc: m.doc, page: m.table11, at: "Table 11" } },
+    { kind: "input", value: { typ: 5 }, cite: { doc: "weact-minif4x1-v31", page: 1, at: "Type-C interface" } },
+    { kind: "ioPins", value: { typ: 36 }, cite: { doc: m.doc, page: m.table2.counts, at: "Table 2" } },
+  ],
+  modelled: [
+    { what: "Runs from 25 MHz HSE", cite: { doc: "weact-minif4x1-v31", page: 1, at: "Y2" }, test: "tests/sim/blackpill-blink.test.ts" },
+    { what: "C13 LED blinks from firmware", test: "tests/sim/blackpill-blink.test.ts" },
+    { what: "KEY user button on PA0", test: "tests/sim/blackpill.test.ts" },
+    { what: "USB-C powers 3V3 through ME6231", cite: { doc: "weact-minif4x1-v31", page: 1, at: "5V -> 3.3V Power conversion" }, test: "tests/sim/blackpill.test.ts" },
+    { what: "Unplugging USB drops 3V3", test: "tests/sim/blackpill.test.ts" },
+    { what: "SWD pins on P3", test: "tests/sim/blackpill.test.ts" },
+    { what: "BOOT1 held low by R3", test: "tests/sim/blackpill.test.ts" },
+    { what: "PC13 burns past 3 mA", test: "tests/sim/blackpill-blink.test.ts" },
+  ],
+  notModelled: [{ what: "No USB or DFU bootloader" }, { what: "U3 SPI flash not fitted" }, { what: "No SWD wire protocol" }, { what: "No SB1 solder bridge" }],
+})
+
+const RECORDS: Record<string, Datasheet> = {
+  "weact-blackpill-f411": record({ doc: "st-ds10314", mhz: 100, flash: 512, ram: 128, table2: { memory: 13, counts: 13 }, table11: 61 }),
+  "weact-blackpill-f401ce": record({ doc: "st-ds10086", mhz: 84, flash: 512, ram: 96, table2: { memory: 10, counts: 11 }, table11: 58 }),
+  "weact-blackpill-f401cc": record({ doc: "st-ds9716", mhz: 84, flash: 256, ram: 64, table2: { memory: 11, counts: 11 }, table11: 57 }),
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

@@ -3,6 +3,9 @@ import { BoardIcon } from "../icons"
 import { mcuModel } from "../mcu-model"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind } from "../types"
 import { LED_COLORS } from "./basic"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
+import { NOT_MODELLED as ENC28J60 } from "@/sim/enc28j60"
 import { BOARD_MM, boardArt, FRAME, HEADER } from "./netduino-plus-2-art"
 
 /**
@@ -172,8 +175,10 @@ const model: Element[] = [
 export const netduinoPlus2: ComponentDef = {
   id: "netduino-plus-2",
   name: "Netduino Plus 2",
+  board: { vendor: "Secret Labs", mcu: "STM32F405RG", mhz: 168, volts: 3.3, tags: ["Ethernet"], photo: "netduino-plus-2.webp", core: "Cortex-M4F", memory: "1 MB / 192 KB", onBoard: ["Ethernet", "microSD", "LED", "button"] },
   description: "STM32F405RG",
-  category: "Boards",
+  keywords: ["STM32", "STM32F405RG", "Netduino", "Ethernet", "ENC28J60", "Cortex-M4"],
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,
@@ -191,13 +196,56 @@ export const netduinoPlus2: ComponentDef = {
   // Y1 25.000 MHz crystal (C23/C24 18 pF, R13 390 Ω); no LSE (PC14 is the button, PC15 Ethernet power).
   mcuClocks: { hse: { hz: 25e6, kind: "crystal", startup: 2e-3 }, lse: null },
   info: {
-    MCU: "STM32F405RGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM; HSE 25 MHz",
-    LEDs: "LED blue on PA10 (high = on, pulled up: lit until firmware drives it low); PWR white (PC13 low turns it off); ACT green from the ENC28J60",
-    Button: "BTN: BOOT0, PB11 and PC14 together, high when pressed; held at reset it boots the ST bootloader. No reset button",
-    Power: "PB2 high switches the header 3V3/5V on; PC15 low powers the ENC28J60; PB1 low powers the microSD",
-    Ethernet: "ENC28J60 on SPI1: SCK PA5, MOSI PA7, MISO PB4, CS PC8, INT PA4, RESET PD2; clock from MCO1 on PA8",
-    microSD: "SPI3: SCK PC10, MISO PC11, MOSI PC12, CS PB0; card detect PB5 (low = inserted)",
-    "Not modelled": "microSD card, the ENC28J60's network side (no cable to another host: what it sends goes nowhere, nothing arrives), the MCO1 clock as a signal (the ENC28J60 is clocked whenever it is powered), the VIN/USB comparator (both sources feed +5V), the MiniJTAG header",
-    Source: "Secret Labs CW0034 Rev A schematic; Arduino Uno R3 board file for the outline",
+    // MCU: STM32F405RGT6, Cortex-M4F 168 MHz, 1 MB Flash, 192 KB SRAM; HSE 25 MHz
+    // LEDs: LED blue on PA10 (high = on, pulled up: lit until firmware drives it low); PWR white (PC13 low turns it off);
+    //   ACT green from the ENC28J60
+    LEDs: "Blue on PA10, starts lit",
+    // Button: BTN: BOOT0, PB11 and PC14 together, high when pressed; held at reset it boots the ST bootloader. No reset
+    //   button
+    Button: "BOOT0, PB11, PC14, active high",
+    // Power: PB2 high switches the header 3V3/5V on; PC15 low powers the ENC28J60; PB1 low powers the microSD
+    Power: "PB2 high enables header power",
+    // Ethernet: ENC28J60 on SPI1: SCK PA5, MOSI PA7, MISO PB4, CS PC8, INT PA4, RESET PD2; clock from MCO1 on PA8
+    Ethernet: "ENC28J60 on SPI1, CS PC8",
+    // microSD: SPI3: SCK PC10, MISO PC11, MOSI PC12, CS PB0; card detect PB5 (low = inserted)
+    microSD: "SPI3, CS PB0, CD PB5",
+    // Not modelled: microSD card, the ENC28J60's network side (no cable to another host: what it sends goes nowhere,
+    //   nothing arrives), the MCO1 clock as a signal (the ENC28J60 is clocked whenever it is powered), the VIN/USB
+    //   comparator (both sources feed +5V), the MiniJTAG header
+    // Source: Secret Labs CW0034 Rev A schematic; Arduino Uno R3 board file for the outline
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [netduinoPlus2]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "netduino-plus-2": {
+    maker: "Secret Labs",
+    docs: [DOCS["wildernesslabs-netduino-about"], DOCS["secretlabs-cw0034"], DOCS["mchp-ds39662e"], DOCS["mchp-ds80349c"], DOCS["onsemi-mc33269"], DOCS["st-st1s12"], DOCS["st-ds8626"]],
+    specs: [],
+    characteristics: [
+      { kind: "clock", value: { max: 168e6 }, cite: { doc: "st-ds8626", page: 16, at: "Table 2" } },
+      { kind: "flash", value: { typ: 1048576 }, cite: { doc: "st-ds8626", page: 15, at: "Table 2" } },
+      { kind: "ram", value: { typ: 196608 }, cite: { doc: "st-ds8626", page: 15, at: "Table 2" } },
+      { kind: "ioLevel", value: { typ: 3.3 }, limit: { max: 4 }, cite: { doc: "secretlabs-cw0034", page: 1, at: "5V to 3.3V buck" }, limitCite: { doc: "st-ds8626", page: 80, at: "Table 11" } },
+      { kind: "input", value: { min: 7.5, max: 9 }, cite: { doc: "secretlabs-cw0034", page: 1, at: "Power Connector" } },
+      { kind: "ioPins", value: { typ: 20 }, cite: { doc: "secretlabs-cw0034", page: 1, at: "Digital and analog headers" } },
+      { kind: "outputCurrent", value: { max: 0.5 }, at: [{ temp: 70 }], cite: { doc: "secretlabs-cw0034", page: 1, at: "Header Power Switches" } },
+    ],
+    modelled: [
+      { what: "168 MHz from the crystal", test: "tests/sim/f405-boards-firmware.test.ts" },
+      { what: "Blue LED blinks from firmware", test: "tests/sim/f405-boards-firmware.test.ts" },
+      { what: "User button read by firmware", test: "tests/sim/f405-boards-firmware.test.ts" },
+      { what: "Header rails switched by PB2", cite: { doc: "secretlabs-cw0034", page: 1, at: "Header Power Switches" }, test: "tests/sim/netduino-plus-2.test.ts" },
+      { what: "Ethernet controller answers on SPI", test: "tests/sim/f405-boards-firmware.test.ts" },
+      { what: "RESET through the buffer", test: "tests/sim/netduino-plus-2.test.ts" },
+      { what: "BOOT0 low, button raises it", cite: { doc: "secretlabs-cw0034", page: 1, at: "BOOT0" }, test: "tests/sim/netduino-plus-2.test.ts" },
+      { what: "D0–D13 and A0–A5 mapped", test: "tests/sim/netduino-plus-2.test.ts" },
+    ],
+    notModelled: [{ what: "No microSD card" }, { what: "Ethernet reaches no other host" }, { what: "No MCO1 clock signal" }, { what: "No VIN/USB comparator" }, { what: "No USB device or bootloader" }, { what: "MiniJTAG header does nothing" }, ...ENC28J60.map((what) => ({ part: "ENC28J60", what }))],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

@@ -1,8 +1,10 @@
+import type { Characteristic } from "./characteristics"
 import type { OptLevel, SourceFile } from "emul-shared/source"
 import type { HdlNetlist } from "emul-shared/hdl"
 import type { BreakpointSpec } from "@/debug/protocol"
 import type { MemoryRegion } from "@/mcu/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
+import type { Category } from "./categories"
 import type { Icon } from "./icons"
 import type { WireColorKey } from "./wire-colors"
 
@@ -410,12 +412,64 @@ export type PropField =
 
 export type ModelElement = Element & { label?: string }
 
+/** Where in a document a statement is: a page (the PDF's page, which url#page=N opens), and or a section, table or figure. */
+export type Cite = { /** A DocRecord key; the record's first document when absent. */ doc?: string; page?: number; at?: string }
+
+/** A number the card and the Part tab show, with where the datasheet gives it. */
+export type Spec = { label: string; value: string; cite: Cite }
+
+/**
+ * Something the model does or leaves out, in one sentence of at most five words (CLAIM_WORDS);
+ * `part`: the chip on a board it is about. A modelled claim names the test that holds it to the datasheet.
+ */
+export type Claim = { what: string; part?: string; cite?: Cite; test?: string }
+
+/**
+ * A document parts cite (src/schematic/datasheets/docs.ts): the maker's copy, never ours (makers'
+ * terms, TI's non-commercial ones), an archived copy beside it, and the day the link was seen to
+ * serve it. `rev` is the revision that URL serves, which may be newer than the one first read.
+ */
+/** What a document is: the card links a part's datasheet (a board's user manual); a test holds each category to the kinds it needs. */
+export type DocKind = "datasheet" | "catalogue" | "referenceManual" | "coreManual" | "errata" | "programmingSpec" | "userManual" | "schematic" | "pinout" | "appNote" | "productPage"
+
+export type DocRecord = { key: string; kind: DocKind; maker: string; id: string; title: string; rev?: string; url: string; archive?: string; checked: string; note?: string }
+
+/** A part with a datasheet: its maker, the documents (first the one the numbers come from), the numbers, what is modelled and what is not. */
+export type Datasheet = {
+  maker: string
+  package?: string
+  docs: [DocRecord, ...DocRecord[]]
+  /** The free-text numbers of before: replaced, part by part, by `characteristics` (a test ratchets the rest down). */
+  specs: Spec[]
+  /** The key numbers as typed characteristics (src/schematic/characteristics.ts): no text, one row each. */
+  characteristics?: Characteristic[]
+  modelled: Claim[]
+  notModelled: Claim[]
+}
+
+/** A part that is not one product (an ideal source, a ground, a generic resistor): why there is no datasheet, and still what is modelled. */
+export type NoDatasheet = {
+  /** Why there is no one datasheet: an ideal element, a measuring tool, or a generic part drawn from real ones (its `sources`). */
+  basis: "ideal" | "tool" | "generic"
+  none: string
+  modelled: Claim[]
+  notModelled: Claim[]
+  /** Datasheets of real parts the model's defaults and behaviour were taken from (a resistor's overload from Vishay's and Yageo's). */
+  sources?: DocRecord[]
+}
+
+/** A part as the generated catalogue lists it (catalogue.gen.ts): the icon by name, the file its definition loads from. */
+export type CatalogueEntry = Pick<ComponentDef, "id" | "name" | "description" | "category" | "keywords" | "width" | "height" | "prefix" | "chip" | "board"> & {
+  icon: string
+  file: string
+}
+
 export type ComponentDef = {
   id: string
   name: string
   description?: string
-  /** Palette group. */
-  category: string
+  /** Palette group: one of the closed list in categories.ts. */
+  category: Category
   /** More names the palette search finds the component by (the part numbers it can be). */
   keywords?: string[]
   icon: Icon
@@ -470,8 +524,38 @@ export type ComponentDef = {
   meter?: MeterSpec
   /** An RGB panel fed by an MCU's LCD controller: which pins carry which signal, and what it accepts. */
   panel?: PanelSpec
-  /** Free-form reference data shown in the inspector later. */
+  /** Reference data the inspector's Part tab lists under Details: what a board carries, where its LEDs sit. */
   info?: Record<string, string>
+  /** Where the part's numbers come from and what the model leaves out: the hover card and the Part tab read it (src/schematic/datasheets.ts). */
+  datasheet?: Datasheet | NoDatasheet
+  /** A ready-to-run board's palette tile; every part in the "boards" group has one. */
+  board?: BoardCard
+}
+
+/** What a board's palette tile says about it, so that a student knows which board it is. */
+export type BoardCard = {
+  /** Who makes it. */
+  vendor: string
+  /** The MCU as its datasheet names it: also one of the part's keywords. */
+  mcu: string
+  /** The MCU's top clock on this board. */
+  mhz: number
+  /** I/O logic level. */
+  volts: 3.3 | 5
+  /** What sets it apart, a word or two each. */
+  tags: string[]
+  /** A photo of the real board in `public/boards/`: landscape, main USB on the left, background cut away, 192 × 128 WebP. */
+  photo: string
+  /** The MCU's core, as its datasheet names it: "Cortex-M4F", "AVR". */
+  core: string
+  /** Flash / RAM of the MCU on the board, as "2 MB / 256 KB". */
+  memory: string
+  /** What the board carries besides the MCU, a word or two each (its notes in `info` say where). */
+  onBoard: string[]
+  /** The other name students know it by ("Nucleo-144"). */
+  alias?: string
+  /** The board's own ID printed on it ("MB1137"). */
+  printed?: string
 }
 
 /** LTDC output lines a parallel RGB panel takes. */

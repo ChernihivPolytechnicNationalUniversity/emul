@@ -6,6 +6,8 @@
  */
 import { PolyfuseIcon } from "../icons"
 import type { BodyShape, ComponentDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 type Row = { vmax: number; imax: number; hold: number; trip: number; rmin: number; r1max: number; at: number; within: number; pd: number }
 
@@ -29,9 +31,9 @@ const body: BodyShape[] = [
 export const polyfuse: ComponentDef = {
   id: "polyfuse",
   name: "Resettable fuse (PTC)",
-  description:
-    "Bourns MF-MSMF polyfuse, 1812 SMD (Arduino's USB fuse is the MF-MSMF050): conducts below Ihold, trips somewhere up to Itrip — sooner the harder it is pushed — and, tripped, lets through only what keeps 0.8 W in it. Take the power away and it cools and resets.",
-  category: "Passive",
+  keywords: ["fuse", "PTC", "polyfuse", "PolySwitch", "resettable", "MF-MSMF", "Bourns", "MF-MSMF050", "1812"],
+  description: "Resettable PTC polyfuse",
+  category: "power",
   icon: PolyfuseIcon,
   prefix: "F",
   defaults: { model: "MF-MSMF050" },
@@ -62,11 +64,60 @@ export const polyfuse: ComponentDef = {
     },
   ],
   info: {
-    Source: "Bourns MF-MSMF series data sheet, electrical characteristics at 23 °C",
-    Model:
-      "heat is the running average of (I / Itrip′)², Itrip′ midway between Ihold and Itrip; it trips at 1, timed so the listed current trips it in exactly the listed maximum time; tripped, its resistance keeps the tripped dissipation in it; unpowered, it cools with the same time constant and resets at Ihold's heat",
-    Reset: "cools with the heating's time constant (≈17 s for the MF-MSMF050) and resets at Ihold's heat: assumed, to be checked (the data sheet gives no reset time)",
-    "Not modelled":
-      "the spread between Rmin and R1max (it starts at Rmin and returns to it after a trip), the resistance's rise as it warms below a trip, the ambient temperature's effect on Ihold",
+    // Source (in the datasheet record): "Bourns MF-MSMF series data sheet, electrical characteristics at 23 °C"
+    // Model: "heat is the running average of (I / Itrip′)², Itrip′ midway between Ihold and Itrip; it trips at 1, timed so the listed current trips it in exactly the listed maximum time; tripped, its resistance keeps the tripped dissipation in it; unpowered, it cools with the same time constant and resets at Ihold's heat"
+    Model: "running I² average trips it",
+    // Reset: "cools with the heating's time constant (≈17 s for the MF-MSMF050) and resets at Ihold's heat: assumed, to be checked (the data sheet gives no reset time)"
+    Reset: "≈17 s cooling, assumed",
+    // "Not modelled" (in the datasheet record): "the spread between Rmin and R1max (it starts at Rmin and returns to it after a trip), the resistance's rise as it warms below a trip, the ambient temperature's effect on Ihold"
+  },
+
+}
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [polyfuse]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "polyfuse": {
+    maker: "Bourns",
+    docs: [DOCS["bourns-mf-msmf"]],
+    specs: [],
+    characteristics: [
+      { kind: "input", limit: { max: 15 }, cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "peakCurrent", limit: { max: 100 }, cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "hold", value: { typ: 0.5 }, at: [{ temp: 23 }], cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "trip", value: { typ: 1 }, at: [{ temp: 23 }], cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "onResistance", value: { min: 0.15, max: 1 }, cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "tripTime", value: { max: 0.15 }, at: [{ load: { amps: 8 } }], cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "dissipation", value: { typ: 0.8 }, cite: { page: 1, at: "Electrical Characteristics" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 3, at: "Environmental Characteristics" } },
+    ],
+    modelled: [
+      { what: "Six ratings from the table", cite: { page: 1, at: "Electrical Characteristics" } },
+      { what: "MF-MSMF010 to 050", cite: { page: 1, at: "Electrical Characteristics" } },
+      { what: "Starts at Rmin", cite: { page: 1, at: "Electrical Characteristics" }, test: "tests/sim/polyfuse.test.ts" },
+      { what: "Heats with I² and trips", cite: { page: 1, at: "Electrical Characteristics" }, test: "tests/sim/polyfuse.test.ts" },
+      { what: "Trips within listed maximum time", cite: { page: 1, at: "Electrical Characteristics" }, test: "tests/sim/polyfuse.test.ts" },
+      { what: "Holds Ihold without tripping", cite: { page: 3, at: "Test Procedures and Requirements, Hold Current" }, test: "tests/sim/polyfuse.test.ts" },
+      { what: "Trips slowly at Itrip", cite: { page: 3, at: "Test Procedures and Requirements, Hold Current" }, test: "tests/sim/polyfuse.test.ts" },
+      { what: "Tripped, dissipates 0.8 W", cite: { page: 1, at: "Electrical Characteristics" }, test: "tests/sim/polyfuse.test.ts" },
+      { what: "Stays tripped while powered", test: "tests/sim/polyfuse.test.ts" },
+      { what: "Resets once unpowered and cool", test: "tests/sim/polyfuse.test.ts" },
+      { what: "Reset time assumed, not given", test: "tests/sim/polyfuse.test.ts" },
+      { what: "Tripping above Vmax destroys it", cite: { page: 1, at: "Electrical Characteristics" }, test: "tests/sim/polyfuse.test.ts" },
+    ],
+    notModelled: [
+      { what: "Rmin to R1max spread", cite: { page: 1, at: "Electrical Characteristics" } },
+      { what: "Returns to Rmin after trip", cite: { page: 1, at: "Electrical Characteristics" } },
+      { what: "Resistance rise before tripping" },
+      { what: "Ambient temperature effect on Ihold", cite: { page: 9, at: "Thermal Derating Table" } },
+      { what: "Typical time-to-trip curves", cite: { page: 7, at: "Typical Time to Trip at 23 °C" } },
+      { what: "Timing from table's maximum only", cite: { page: 7, at: "Typical Time to Trip at 23 °C" } },
+      { what: "MF-MSMF075 and up", cite: { page: 1, at: "Electrical Characteristics" } },
+      { what: "Other /33X and /60X variants", cite: { page: 1, at: "Electrical Characteristics" } },
+    ],
   },
 }
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

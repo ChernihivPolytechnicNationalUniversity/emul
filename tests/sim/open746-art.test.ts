@@ -13,7 +13,7 @@ import { examples } from "@/schematic/examples"
 import { objectPins, routeAll, UPRIGHT, type Point } from "@/schematic/geometry"
 import { pinContacts } from "@/schematic/contacts"
 import { blocksOf, boxesMeet, boxInside, boxMeetsPolygon, homeOf, isPrintedName, marksOf, MAX_PRINTED_GROWTH, partBox, pointInPolygon, printedBox, printedGrowth, ruleCrossesBox, rulesOf, switchContacts, type Box } from "@/schematic/printed-text"
-import { getDef, registry } from "@/schematic/registry"
+import { getDef, allDefs } from "@/schematic/registry"
 import type { BodyShape, Element, Fill, PartDef, PlacedObject } from "@/schematic/types"
 
 const board = getDef("open746i-c")!
@@ -512,7 +512,7 @@ describe("every mark on the board is something real, and the same thing is drawn
 
 describe("the board speaks the field's visual language", () => {
   it("it paints with the roles the other parts paint with, and no colour of its own", () => {
-    const others = new Set(registry.filter((def) => def.id !== board.id).flatMap((def) => [...fillsOf(def.body)]))
+    const others = new Set(allDefs().filter((def) => def.id !== board.id).flatMap((def) => [...fillsOf(def.body)]))
     expect([...fillsOf(board.body)].filter((fill) => !others.has(fill))).toEqual([])
     expect(flat(board.body).filter((s) => s.type === "art" && !s.fill && !s.muted)).toEqual([])
   })

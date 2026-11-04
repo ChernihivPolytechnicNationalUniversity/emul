@@ -1,5 +1,7 @@
 import { DisplayIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PanelSignal, PinDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * Waveshare 7inch Capacitive Touch LCD (F): a 1024 × 600 panel on a 24-bit parallel RGB
@@ -101,7 +103,8 @@ export const lcd7f: ComponentDef = {
   id: "lcd7-f",
   name: "7inch LCD (F)",
   description: "1024×600 RGB, GT911 touch",
-  category: "Displays",
+  keywords: ["LCD", "TFT", "display", "touch", "touchscreen", "GT911", "1024x600", "RGB", "Waveshare"],
+  category: "displays",
   icon: DisplayIcon,
   prefix: "LCD",
   width: W,
@@ -117,10 +120,59 @@ export const lcd7f: ComponentDef = {
   pinsAreSockets: true,
   panel: { part: "PANEL", width: 1024, height: 600, signals, pixelHz: [25e6, 75e6], power: V33 },
   info: {
-    Panel: "1024 × 600, 24-bit parallel RGB (DE mode; HS/VS/DE polarity not checked), pixel clock 25–75 MHz",
-    Touch: "GT911, I²C address 0x5D (0x14 with INT high at reset), 16-bit registers: 0x8140 product ID, 0x814E status, 0x814F… points",
-    Backlight: "PT4103 boost from the 3.3 V pin (~0.25 A), enabled by DISP; PWM trims the current on the real module, full here",
-    Connector: "40-pin 0.5 mm FFC as two rows of twenty (1–20 above 21–40), the same rows as the Open746I-C's P15: dock the module under the board or wire the lines",
-    Source: "Waveshare 7inch-Capacitive-Touch-LCD-F schematic (GT911 version)",
+    // Panel: 1024 × 600, 24-bit parallel RGB (DE mode; HS/VS/DE polarity not checked), pixel clock 25–75 MHz
+    Panel: "1024 × 600, 24-bit RGB",
+    // Touch: GT911, I²C address 0x5D (0x14 with INT high at reset), 16-bit registers: 0x8140 product ID, 0x814E status,
+    //   0x814F… points
+    Touch: "GT911 at I²C 0x5D",
+    // Backlight: PT4103 boost from the 3.3 V pin (~0.25 A), enabled by DISP; PWM trims the current on the real module,
+    //   full here
+    Backlight: "PT4103 boost, enabled by DISP",
+    // Connector: 40-pin 0.5 mm FFC as two rows of twenty (1–20 above 21–40), the same rows as the Open746I-C's P15: dock
+    //   the module under the board or wire the lines
+    Connector: "40-pin FFC, matches P15",
+    // Source: Waveshare 7inch-Capacitive-Touch-LCD-F schematic (GT911 version)
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [lcd7f]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "lcd7-f": {
+    maker: "Waveshare",
+    docs: [DOCS["waveshare-fy07024di26a67"], DOCS["goodix-gt911"], DOCS["waveshare-lcd7f-sch"]],
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { typ: 3.3 }, cite: { doc: "waveshare-lcd7f-sch", page: 1, at: "JP1 LCD_INF" } },
+      { kind: "input", value: { min: 3.3, max: 5 }, cite: { doc: "waveshare-lcd7f-sch", page: 1, at: "U1 PT4103 Vin" } },
+      { kind: "forwardVoltage", value: { typ: 9, approx: true }, cite: { doc: "waveshare-lcd7f-sch", page: 1, at: "VLED+" } },
+      { kind: "output", value: { typ: 10.7, approx: true }, cite: { doc: "waveshare-lcd7f-sch", page: 1, at: "U2 MP1541 AVDD_LCD" } },
+      { kind: "frequency", value: { min: 45e6, typ: 51.2e6, max: 57e6 }, cite: { doc: "waveshare-fy07024di26a67", page: 7, at: "§7.4.1 Dot Clock" } },
+      { kind: "address", set: [0x5d, 0x14], cite: { doc: "goodix-gt911", page: 10, at: "§6.1 address timing (0xBA/0xBB, 0x28/0x29)" } },
+    ],
+    modelled: [
+      { what: "1024×600 picture from LTDC", test: "tests/sim/lcd.test.ts" },
+      { what: "24-bit RGB on the FFC", cite: { doc: "waveshare-lcd7f-sch", page: 1, at: "JP1 LCD_INF" }, test: "tests/sim/lcd.test.ts" },
+      { what: "GT911 at 0x5D after reset", cite: { doc: "goodix-gt911", page: 10, at: "§6.1" }, test: "tests/sim/lcd.test.ts" },
+      { what: "Touches reported every 10 ms", test: "tests/sim/lcd.test.ts" },
+      { what: "~0.35 A from 3.3 V", test: "tests/sim/lcd.test.ts" },
+      { what: "Dark when the supply goes", test: "tests/sim/lcd.test.ts" },
+      { what: "DISP enables the backlight", cite: { doc: "waveshare-lcd7f-sch", page: 1, at: "U1 PT4103 EN" } },
+      { what: "10 kΩ touch pull-ups", cite: { doc: "waveshare-lcd7f-sch", page: 1, at: "Touch header" } },
+      { what: "Flags out-of-range pixel clock" },
+    ],
+    notModelled: [
+      { what: "PWM dimming, always full", cite: { doc: "waveshare-lcd7f-sch", page: 1, at: "U1 PT4103 FB" } },
+      { what: "Accepts clocks outside 45–57 MHz", cite: { doc: "waveshare-fy07024di26a67", page: 7, at: "§7.4.1 Dot Clock" } },
+      { what: "HS, VS, DE polarity unchecked" },
+      { what: "AVDD, VGH, VGL lumped together", cite: { doc: "waveshare-lcd7f-sch", page: 1, at: "U2 MP1541" } },
+      { what: "GT911 configuration has no effect" },
+      { what: "Older GT811 touch version" },
+      { what: "Dithering and scan-direction straps", cite: { doc: "waveshare-lcd7f-sch", page: 1, at: "J1 AT070TN90_V1" } },
+    ],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

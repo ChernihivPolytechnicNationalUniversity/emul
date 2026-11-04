@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { DEBUG_SHORTCUTS } from "@/components/code/debug-shortcuts"
-import { alternatives, closeMenusAfterCommands, dispatch, editsText, holdBrowserNavigationKeys, keepsPageInPlace, matches, ownsKeys, shortcutLabel, typesAhead, type KeyPress, type Keys } from "@/lib/keys"
+import { alternatives, closeMenusAfterCommands, dispatch, editsText, holdBrowserNavigationKeys, keepsPageInPlace, matches, matchesDigitPlace, ownsKeys, shortcutLabel, typesAhead, type KeyPress, type Keys } from "@/lib/keys"
 import { KEYMAP, keymapFor, labelFor } from "@/lib/keymap"
 import type { Platform } from "@/lib/platform"
 import { wireColorFor } from "@/schematic/wire-colors"
@@ -146,6 +146,38 @@ describe("wire colours", () => {
     expect.soft(wireColorFor(press("ь", "KeyM")), "ЙЦУКЕН: Ь on M").toBe("magenta")
     expect.soft(wireColorFor(press("c", "KeyI")), "Dvorak: C on US I").toBe("cyan")
     expect.soft(wireColorFor(press("j", "KeyC")), "Dvorak: J on US C").toBeUndefined()
+  })
+})
+
+describe("the field's view keys on the digits' places", () => {
+  it("read Shift and a digit by the key's place, whatever the layout types there", () => {
+    expect.soft(matchesDigitPlace(press("!", "Digit1", { shiftKey: true }), KEYMAP.fitAll), "US: Shift+1 types !").toBeTruthy()
+    expect.soft(matchesDigitPlace(press("1", "Digit1", { shiftKey: true }), KEYMAP.fitAll), "AZERTY: Shift+& types 1").toBeTruthy()
+    expect.soft(matchesDigitPlace(press("\"", "Digit2", { shiftKey: true }), KEYMAP.zoomToSelection), "Russian: Shift+2 types \"").toBeTruthy()
+    expect.soft(matchesDigitPlace(press(")", "Digit0", { shiftKey: true }), KEYMAP.actualSize), "US: Shift+0 types )").toBeTruthy()
+  })
+
+  it("leave the plain digits, the command key, Alt and AltGr to their own shortcuts", () => {
+    expect.soft(matchesDigitPlace(press("1", "Digit1"), KEYMAP.fitAll), "a plain 1").toBeFalsy()
+    expect.soft(matchesDigitPlace(press("&", "Digit1"), KEYMAP.fitAll), "AZERTY's plain &").toBeFalsy()
+    expect.soft(matchesDigitPlace(ctrl("!", "Digit1", { shiftKey: true }), KEYMAP.fitAll), "Ctrl+Shift+1").toBeFalsy()
+    expect.soft(matchesDigitPlace(press("!", "Digit1", { shiftKey: true, altKey: true }), KEYMAP.fitAll), "Alt+Shift+1").toBeFalsy()
+    expect.soft(matchesDigitPlace(press("¹", "Digit1", { shiftKey: true, altGraph: true }), KEYMAP.fitAll), "AltGr+Shift+1").toBeFalsy()
+    expect.soft(matchesDigitPlace(press("!", "Digit1", { shiftKey: true }), KEYMAP.zoomToSelection), "Shift+1 is not Shift+2").toBeFalsy()
+  })
+
+  it("leave F as a letter: zoom to the selection on F, find on the command key's F", () => {
+    expect.soft(hits(press("f", "KeyF"), KEYMAP.zoomToSelection), "F").toBe(true)
+    expect.soft(hits(press("а", "KeyF"), KEYMAP.zoomToSelection), "Russian а on F's place").toBe(true)
+    expect.soft(hits(ctrl("f", "KeyF"), KEYMAP.find), "Ctrl+F").toBe(true)
+    expect.soft(hits(ctrl("f", "KeyF"), KEYMAP.zoomToSelection), "Ctrl+F is not F").toBe(false)
+    expect.soft(hits(press("f", "KeyF", { metaKey: true }), MAC.find, "apple"), "⌘F on a Mac").toBe(true)
+  })
+
+  it("print in the platform's own words", () => {
+    const labels = (p: Platform) => [keymapFor(p).fitAll, keymapFor(p).zoomToSelection, keymapFor(p).find, keymapFor(p).nextProblem, keymapFor(p).previousProblem, keymapFor(p).addHere].map((k) => labelFor(k, p))
+    expect.soft(labels("apple")).toEqual(["⇧1", "⇧2", "⌘F", "F8", "⇧F8", "⌘K"])
+    expect.soft(labels("windows")).toEqual(["Shift+1", "Shift+2", "Ctrl+F", "F8", "Shift+F8", "Ctrl+K"])
   })
 })
 

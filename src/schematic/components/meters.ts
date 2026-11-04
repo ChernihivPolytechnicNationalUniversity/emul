@@ -6,6 +6,7 @@
  */
 import { AmmeterIcon, VoltmeterIcon } from "../icons"
 import type { ComponentDef } from "../types"
+import { BASIC_RECORDS } from "./basic-records"
 
 const W = 4
 const H = 3
@@ -32,8 +33,9 @@ const pins = (): ComponentDef["pins"] => [
 export const voltmeter: ComponentDef = {
   id: "voltmeter",
   name: "Voltmeter",
-  description: "DC/AC voltmeter across two points; 10 MΩ input, reads RMS in an AC circuit. Past its range the input divider burns and the meter reads nothing.",
-  category: "Instruments",
+  description: "DC and AC voltmeter",
+  keywords: ["meter", "multimeter", "DMM", "voltage"],
+  category: "instruments",
   icon: VoltmeterIcon,
   prefix: "PV",
   defaults: { vmax: "600 V" },
@@ -54,8 +56,9 @@ export const voltmeter: ComponentDef = {
 export const ammeter: ComponentDef = {
   id: "ammeter",
   name: "Ammeter",
-  description: "DC/AC ammeter in series; 0.01 Ω burden, reads RMS in an AC circuit. Its fuse blows past the rated current and the circuit opens.",
-  category: "Instruments",
+  description: "DC and AC ammeter",
+  keywords: ["meter", "multimeter", "DMM", "current"],
+  category: "instruments",
   icon: AmmeterIcon,
   prefix: "PA",
   defaults: { imax: "10 A" },
@@ -70,3 +73,9 @@ export const ammeter: ComponentDef = {
 }
 
 export const meterComponents: ComponentDef[] = [voltmeter, ammeter]
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = meterComponents
+
+// What the meters model and leave out: no one meter's datasheet sets them (basic-records.ts).
+for (const def of defs) def.datasheet ??= BASIC_RECORDS[def.id]

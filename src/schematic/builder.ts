@@ -1,4 +1,4 @@
-import { getDef } from "./registry"
+import { getMeta } from "./registry"
 import { emptySchematic, type PlacedObject, type Rotation, type Schematic, type Wire } from "./types"
 
 /** Small DSL over the document: place components by cell, wire them by pin. */
@@ -6,7 +6,7 @@ export function builder(grid: number) {
   const doc: Schematic = emptySchematic()
   const counts = new Map<string, number>()
   const place = (def: string, x: number, y: number, props: Record<string, string> = {}, rotation?: Rotation) => {
-    const d = getDef(def)
+    const d = getMeta(def)
     const obj: PlacedObject = { id: crypto.randomUUID(), def, x: x * grid, y: y * grid, props }
     if (rotation) obj.rotation = rotation
     if (d?.prefix && !props.ref) {

@@ -15,22 +15,38 @@ export type LisPins = { cs: string; sck: string; mosi: string; miso: string; int
 
 /** What the part does not do, for the UI to surface. */
 export const NOT_MODELLED: string[] = [
-  "I2C mode (CS high selects I2C; the board drives CS from PE3 for SPI)",
-  "3-wire SPI (SIM=1): the register bit is stored, but read data is not driven onto SDI/MOSI, and MISO stays released",
-  "SPI timing: the 10 MHz SCK limit and the setup/hold times of DS302 Table 5 / DS3DSH Table 5 are not checked",
-  "Supply range, current draw, absolute maximum ratings, ESD and shock limits",
-  "Zero-g offset, sensitivity tolerance, temperature drift and noise: the part is ideal",
-  "Self-test settling (99 % after 3/ODR on the LIS302DL): the force applies from the next sample",
-  "LIS302DL high-pass filter (FDS, HP_FF_WU1/2, HP_coeff, HP_FILTER_RESET): the registers are stored, data is unfiltered",
-  "LIS302DL free-fall/wake-up generators FF_WU_1/2 (CFG, THS, DURATION, SRC): registers stored, never trigger; INT codes 001/010/011 stay inactive",
-  "LIS302DL click/double-click engine (CLICK_*): registers stored, never triggers; INT code 111 stays inactive",
-  "LIS302DL turn-on/BOOT duration: BOOT reloads nothing and self-clears at once",
-  "LIS3DSH state machines SM1/SM2 (ST1_x/ST2_x programs, TIMx, THRSx, MASKx, SETTx, PRx, TCx, OUTSx, PEAKx, DES2, LC, VFC_x, CS_x): registers stored only; the op-code set is not in the datasheet",
-  "LIS3DSH FIFO (FIFO_CTRL modes, watermark, FIFO_SRC, P1_* interrupts): always bypass, FIFO_SRC reads EMPTY",
-  "LIS3DSH OFF_X/Y/Z offset correction (LSB weight undocumented): stored, not applied",
-  "LIS3DSH anti-aliasing filter bandwidth (BW2:1): stored, not applied",
-  "LIS3DSH temperature sensor OUT_T (zero point undocumented): reads 0",
-  "LIS3DSH INT2 sources (SM interrupts, P2_BOOT): INT2 never asserts",
+  // I2C mode (CS high selects I2C; the board drives CS from PE3 for SPI)
+  "No I2C mode",
+  // 3-wire SPI (SIM=1): the register bit is stored, but read data is not driven onto SDI/MOSI, and MISO stays released
+  "No 3-wire SPI reads",
+  // SPI timing: the 10 MHz SCK limit and the setup/hold times of DS302 Table 5 / DS3DSH Table 5 are not checked
+  "SPI timing not checked",
+  // Supply range, current draw, absolute maximum ratings, ESD and shock limits
+  "No supply, ESD, shock limits",
+  // Zero-g offset, sensitivity tolerance, temperature drift and noise: the part is ideal
+  "Ideal offset, sensitivity and noise",
+  // Self-test settling (99 % after 3/ODR on the LIS302DL): the force applies from the next sample
+  "Self-test applies without settling",
+  // LIS302DL high-pass filter (FDS, HP_FF_WU1/2, HP_coeff, HP_FILTER_RESET): the registers are stored, data is unfiltered
+  "LIS302DL high-pass filter not applied",
+  // LIS302DL free-fall/wake-up generators FF_WU_1/2 (CFG, THS, DURATION, SRC): registers stored, never trigger; INT codes 001/010/011 stay inactive
+  "LIS302DL free-fall never triggers",
+  // LIS302DL click/double-click engine (CLICK_*): registers stored, never triggers; INT code 111 stays inactive
+  "LIS302DL click never triggers",
+  // LIS302DL turn-on/BOOT duration: BOOT reloads nothing and self-clears at once
+  "LIS302DL BOOT reloads nothing",
+  // LIS3DSH state machines SM1/SM2 (ST1_x/ST2_x programs, TIMx, THRSx, MASKx, SETTx, PRx, TCx, OUTSx, PEAKx, DES2, LC, VFC_x, CS_x): registers stored only; the op-code set is not in the datasheet
+  "LIS3DSH state machines never run",
+  // LIS3DSH FIFO (FIFO_CTRL modes, watermark, FIFO_SRC, P1_* interrupts): always bypass, FIFO_SRC reads EMPTY
+  "LIS3DSH FIFO always bypassed",
+  // LIS3DSH OFF_X/Y/Z offset correction (LSB weight undocumented): stored, not applied
+  "LIS3DSH offset registers not applied",
+  // LIS3DSH anti-aliasing filter bandwidth (BW2:1): stored, not applied
+  "LIS3DSH anti-alias filter not applied",
+  // LIS3DSH temperature sensor OUT_T (zero point undocumented): reads 0
+  "LIS3DSH temperature reads 0",
+  // LIS3DSH INT2 sources (SM interrupts, P2_BOOT): INT2 never asserts
+  "LIS3DSH INT2 never asserts",
 ]
 
 type Kind = "r" | "w" | "rw"

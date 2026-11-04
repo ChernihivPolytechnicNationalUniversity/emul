@@ -94,9 +94,14 @@ export type FieldPaint = {
   colorOf: (wireId: string) => WireColorKey
   raster: SymbolRaster
   selection?: Selection
+  /** A search is on: these objects are drawn at full strength, the rest of the field faint. */
+  lit?: ReadonlySet<string> | null
 }
 
-export function paintField(context: CanvasRenderingContext2D, host: Element, { objects, routes, view, grid, pixels, device, theme, colorOf, raster, selection }: FieldPaint) {
+/** How strong what a search did not find is drawn. */
+const DIMMED = 0.22
+
+export function paintField(context: CanvasRenderingContext2D, host: Element, { objects, routes, view, grid, pixels, device, theme, colorOf, raster, selection, lit }: FieldPaint) {
   raster.setPalette(readFieldPalette(host, theme))
   context.save()
   context.setTransform(pixels, 0, 0, pixels, -view.x * pixels, -view.y * pixels)
@@ -117,6 +122,7 @@ export function paintField(context: CanvasRenderingContext2D, host: Element, { o
   context.lineCap = "round"
   context.lineJoin = "round"
   if (selection && (selection.objects.size || selection.wires.size)) paintSelection(context, host, objects, routes, selection, grid, screenPx)
+  if (lit) context.globalAlpha = DIMMED
   context.lineCap = "butt"
   context.lineWidth = screenPx(WIRE_PX + CASING_PX)
   context.strokeStyle = casing
@@ -135,6 +141,7 @@ export function paintField(context: CanvasRenderingContext2D, host: Element, { o
     const symbol = raster.get(def, orientationOf(object), grid, pixels)
     if (!symbol) continue
     const rect = objectRect(object, grid)
+    context.globalAlpha = lit && !lit.has(object.id) ? DIMMED : 1
     context.drawImage(
       symbol.image,
       (rect.x - view.x) * pixels - symbol.originX,
@@ -143,4 +150,5 @@ export function paintField(context: CanvasRenderingContext2D, host: Element, { o
       symbol.height,
     )
   }
+  context.globalAlpha = 1
 }

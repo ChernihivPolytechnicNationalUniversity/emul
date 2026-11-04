@@ -82,8 +82,7 @@ export const OPAMP_PRESETS: OpampPreset[] = [
   {
     id: GENERIC_OPAMP,
     part: "",
-    description:
-      "An op amp close to the textbook's ideal: 120 dB of gain, 10 MHz, 10 V/µs, no offset or bias current, the output from rail to rail and limited to 40 mA. Every figure can be changed in the inspector; the named parts beside it are real ones off their datasheets.",
+    description: "Near-ideal adjustable op amp",
     keywords: ["op amp", "opamp", "operational amplifier", "ideal", "amplifier", "comparator"],
     spec: {
       gain: 1e6,
@@ -108,9 +107,8 @@ export const OPAMP_PRESETS: OpampPreset[] = [
   {
     id: "lm358",
     part: "LM358",
-    description:
-      "TI's LM358, the single-supply dual op amp: 3–30 V, inputs and output down to the negative rail, the output 1.5 V short of the positive one; 0.7 MHz, 0.3 V/µs, sources 30 mA and sinks 20 mA. One symbol is one of its two amplifiers.",
-    keywords: ["LM358", "LM358N", "LM358P", "op amp", "operational amplifier", "single supply"],
+    description: "Single-supply dual op amp",
+    keywords: ["LM358", "LM358N", "LM358P", "op amp", "operational amplifier", "single supply", "TI", "dual"],
     spec: {
       // Table 5.7 at VS = 5 V unless noted; the gain at VS = 15 V, VO = 1–11 V, RL ≥ 2 kΩ.
       gain: 100e3,
@@ -139,15 +137,15 @@ export const OPAMP_PRESETS: OpampPreset[] = [
     vsAbs: 32,
     // PDIP: RθJA 80.9 °C/W, TJ 150 °C.
     pmax: 1.55,
-    dip: { package: "PDIP-8", out: 1, inn: 2, inp: 3, vee: 4, vcc: 8, others: "5 IN+ B, 6 IN− B, 7 OUT B" },
+    // dip.others was "5 IN+ B, 6 IN− B, 7 OUT B"
+    dip: { package: "PDIP-8", out: 1, inn: 2, inp: 3, vee: 4, vcc: 8, others: "amplifier B on 5–7" },
     source: "TI LMx58 datasheet SLOS068AB (October 2024), §5.1, 5.3, 5.4, 5.7",
   },
   {
     id: "lm741",
     part: "LM741",
-    description:
-      "TI's LM741C, the classic single op amp on a split supply (±5 to ±18 V): 1 MHz, 0.5 V/µs, ±14 V out of ±15 V into 10 kΩ, 25 mA into a short, 80 nA of bias current into its 2 MΩ inputs.",
-    keywords: ["LM741", "UA741", "µA741", "741", "op amp", "operational amplifier"],
+    description: "Classic split-supply op amp",
+    keywords: ["LM741", "LM741C", "UA741", "µA741", "741", "op amp", "operational amplifier", "TI"],
     spec: {
       // Table 6.7, LM741C at VS = ±15 V.
       gain: 200e3,
@@ -171,15 +169,15 @@ export const OPAMP_PRESETS: OpampPreset[] = [
     vsAbs: 36,
     pmax: 0.5,
     rin: 2e6,
-    dip: { package: "PDIP-8", out: 6, inn: 2, inp: 3, vee: 4, vcc: 7, others: "1 and 5 offset null, 8 NC" },
+    // dip.others was "1 and 5 offset null, 8 NC"
+    dip: { package: "PDIP-8", out: 6, inn: 2, inp: 3, vee: 4, vcc: 7, others: "1/5 offset null, 8 NC" },
     source: "TI LM741 datasheet SNOSC25D (October 2015), §6.1 and 6.7 (LM741C)",
   },
   {
     id: "tl072",
     part: "TL072",
-    description:
-      "TI's TL072, the JFET-input dual op amp of audio and filter circuits: ±5 to ±20 V, 3 MHz, 20 V/µs, 65 pA of bias current, ±13.5 V out of ±15 V into 10 kΩ. One symbol is one of its two amplifiers.",
-    keywords: ["TL072", "TL071", "TL074", "TL072CP", "JFET", "op amp", "operational amplifier"],
+    description: "JFET-input dual op amp",
+    keywords: ["TL072", "TL071", "TL074", "TL072CP", "JFET", "op amp", "operational amplifier", "TI", "audio", "dual"],
     spec: {
       // Table 5.8 (DC) and 5.9 (AC), TL07xC at VS = ±15 V.
       gain: 200e3,
@@ -202,15 +200,15 @@ export const OPAMP_PRESETS: OpampPreset[] = [
     vsAbs: 42,
     // PDIP: RθJA 85 °C/W, TJ 150 °C.
     pmax: 1.47,
-    dip: { package: "PDIP-8", out: 1, inn: 2, inp: 3, vee: 4, vcc: 8, others: "5 IN+ B, 6 IN− B, 7 OUT B" },
+    // dip.others was "5 IN+ B, 6 IN− B, 7 OUT B"
+    dip: { package: "PDIP-8", out: 1, inn: 2, inp: 3, vee: 4, vcc: 8, others: "amplifier B on 5–7" },
     source: "TI TL07x datasheet SLOS080W (July 2025), §5.1, 5.3, 5.5, 5.8, 5.9",
   },
   {
     id: "mcp6002",
     part: "MCP6002",
-    description:
-      "Microchip's MCP6002, a CMOS dual op amp for 1.8–6 V with inputs and output from rail to rail: 1 MHz, 0.6 V/µs, 100 µA, 23 mA into a short at 5.5 V (6 mA at 1.8 V), 7 V absolute maximum. One symbol is one of its two amplifiers.",
-    keywords: ["MCP6002", "MCP6001", "MCP6004", "rail-to-rail", "CMOS", "op amp", "operational amplifier", "3.3 V"],
+    description: "Rail-to-rail CMOS dual op amp",
+    keywords: ["MCP6002", "MCP6001", "MCP6004", "rail-to-rail", "CMOS", "op amp", "operational amplifier", "3.3 V", "Microchip", "dual"],
     spec: {
       // DC and AC tables at VDD = 5.5 V; the gain 112 dB.
       gain: 398e3,
@@ -240,15 +238,15 @@ export const OPAMP_PRESETS: OpampPreset[] = [
     // PDIP: θJA 85 °C/W, TJ 150 °C.
     pmax: 1.47,
     clamp: 2e-3,
-    dip: { package: "PDIP-8", out: 1, inn: 2, inp: 3, vee: 4, vcc: 8, others: "5 VINB+, 6 VINB−, 7 VOUTB" },
+    // dip.others was "5 VINB+, 6 VINB−, 7 VOUTB"
+    dip: { package: "PDIP-8", out: 1, inn: 2, inp: 3, vee: 4, vcc: 8, others: "amplifier B on 5–7" },
     source: "Microchip MCP6001/1R/1U/2/4 datasheet DS20001733L (2020), §1.0 and 4.1",
   },
   {
     id: "lmv358",
     part: "LMV358",
-    description:
-      "TI's LMV358, a low-voltage dual op amp for 2.7–5.5 V with the output from rail to rail and inputs down to 0.2 V below ground: 1 MHz, 1 V/µs, 40 mA into a short, about 100 µA an amplifier. Arduino Uno's comparator and LED buffer. One symbol is one of its two amplifiers.",
-    keywords: ["LMV358", "LMV358I", "LMV321", "LMV324", "rail-to-rail", "low voltage", "op amp", "operational amplifier", "comparator"],
+    description: "Low-voltage rail-to-rail dual op amp",
+    keywords: ["LMV358", "LMV358I", "LMV321", "LMV324", "rail-to-rail", "low voltage", "op amp", "operational amplifier", "comparator", "TI", "dual"],
     spec: {
       // Table 6.8 at VCC = 5 V: AVD 100 V/mV into 2 kΩ, VIO 1.7 mV, IIB 15 nA.
       gain: 100e3,
@@ -282,7 +280,8 @@ export const OPAMP_PRESETS: OpampPreset[] = [
     vsAbs: 5.5,
     // VSSOP (DGK): RθJA 201.2 °C/W, TJ 150 °C.
     pmax: 0.62,
-    dip: { package: "VSSOP-8", out: 1, inn: 2, inp: 3, vee: 4, vcc: 8, others: "5 2IN+, 6 2IN−, 7 2OUT" },
+    // dip.others was "5 2IN+, 6 2IN−, 7 2OUT"
+    dip: { package: "VSSOP-8", out: 1, inn: 2, inp: 3, vee: 4, vcc: 8, others: "amplifier B on 5–7" },
     source: "TI LMV3xx datasheet SLOS263Y (August 2023), §6.1, 6.3, 6.4, 6.7, 6.8",
   },
 ]

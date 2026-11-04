@@ -152,12 +152,12 @@ describe("a project saved on emul 1.28.0 keeps its Open746I-C wiring now that P1
     expect(versionOf(after)).toBe(SCHEMATIC_VERSION)
   })
 
-  it("what the app stores is stamped, so a project upgraded once is never upgraded again", () => {
+  it("what the app stores is stamped, so a project upgraded once is never upgraded again", async () => {
     const old = doc([open746()], [{ id: "w1", from: { object: "U1", pin: "P4-5" }, to: { object: "U1", pin: "P4-9" } }])
-    const first = parseProject(JSON.stringify(old))!
+    const first = (await parseProject(JSON.stringify(old)))!
     expect(first.doc.wires[0].from.pin).not.toBe("P4-5")
     expect(first.notes.length).toBe(1)
-    const again = parseProject(schematicText(first.doc))!
+    const again = (await parseProject(schematicText(first.doc)))!
     expect(again.doc.wires).toEqual(first.doc.wires)
     expect(again.notes).toEqual([])
     expect(JSON.parse(schematicText(doc([]))).version).toBe(SCHEMATIC_VERSION)

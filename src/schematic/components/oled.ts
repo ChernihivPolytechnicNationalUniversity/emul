@@ -11,6 +11,8 @@
 import { OLED_SUPPLY_KEY } from "@/sim/ssd1306"
 import { OledIcon } from "../icons"
 import type { ComponentDef, ModelElement, PinDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * SDA, SCL and the SPI inputs: Table 11-1 rates Vin to VDD + 0.3 V, where the pins' ESD diodes
@@ -47,9 +49,9 @@ function i2cModule(id: string, name: string, rows: 64 | 32): ComponentDef {
   return {
     id,
     name,
-    description: `SSD1306 OLED, 128 × ${rows}, on I²C at 0x3C. Dark until the firmware enables the charge pump (8Dh 14h) and turns the display on (AFh); the RAM holds noise until it is cleared. Board details (regulator, pull-ups, RC reset) from vendor and forum descriptions.`,
-    category: "Displays",
-    keywords: ["OLED", "SSD1306", "I2C", "IIC", `128x${rows}`, rows === 64 ? "0.96" : "0.91", "display"],
+    description: `128×${rows} I²C OLED display`,
+    category: "displays",
+    keywords: ["OLED", "SSD1306", "I2C", "IIC", "0x3C", `128x${rows}`, rows === 64 ? "0.96" : "0.91", "display"],
     icon: OledIcon,
     prefix: "DS",
     width: w,
@@ -66,12 +68,12 @@ function i2cModule(id: string, name: string, rows: 64 | 32): ComponentDef {
       { kind: "R", a: "$vdd", b: "SDA", value: 10e3, label: "SDA pull-up" },
       { kind: "R", a: "$vdd", b: "SCL", value: 10e3, label: "SCL pull-up" },
     ],
-    info: { Source: "Solomon Systech SSD1306 Rev 1.1; board as vendor manuals and forums describe it (no maker's schematic)" },
+    // info Source (in the datasheet record): "Solomon Systech SSD1306 Rev 1.1; board as vendor manuals and forums describe it (no maker's schematic)"
   }
 }
 
-export const oledI2c = i2cModule("oled-ssd1306-i2c", "OLED 0.96\" 128×64 I²C (SSD1306)", 64)
-export const oledI2c32 = i2cModule("oled-ssd1306-i2c-32", "OLED 0.91\" 128×32 I²C (SSD1306)", 32)
+export const oledI2c = i2cModule("oled-ssd1306-i2c", "OLED 0.96\" I²C (SSD1306)", 64)
+export const oledI2c32 = i2cModule("oled-ssd1306-i2c-32", "OLED 0.91\" I²C (SSD1306)", 32)
 
 const SPI_W = 14
 const SPI_GLASS = 4.8
@@ -79,10 +81,9 @@ const SPI_H = SPI_GLASS + 3.2
 
 export const oledSpi: ComponentDef = {
   id: "oled-ssd1306-spi",
-  name: "OLED 0.96\" 128×64 SPI (SSD1306)",
-  description:
-    "SSD1306 OLED, 128 × 64, 4-wire SPI: D0 clock (10 MHz max), D1 data, DC picks command or data with every eighth bit, CS selects. Pulse RES low (3 µs or more) before use — nothing on the board does it. Dark until the charge pump (8Dh 14h) and the display (AFh) are on.",
-  category: "Displays",
+  name: "OLED 0.96\" SPI (SSD1306)",
+  description: "128×64 SPI OLED display",
+  category: "displays",
   keywords: ["OLED", "SSD1306", "SPI", "128x64", "0.96", "display", "7-pin"],
   icon: OledIcon,
   prefix: "DS",
@@ -102,7 +103,120 @@ export const oledSpi: ComponentDef = {
   body: body(SPI_W, SPI_H, SPI_GLASS),
   parts: [{ type: "screen", id: "GLASS", label: "Display", x: 1.6, y: 1.7, w: SPI_W - 3.2, h: SPI_GLASS }],
   model: [...supply, ...["D0", "D1", "RES", "DC", "CS"].map((node): ModelElement => ({ kind: "GPIO", node, vddNode: "$vdd", gndNode: "GND", clamp: INPUT_CLAMP }))],
-  info: { Source: "Solomon Systech SSD1306 Rev 1.1; board as vendor manuals and forums describe it (no maker's schematic)" },
+  // info Source (in the datasheet record): "Solomon Systech SSD1306 Rev 1.1; board as vendor manuals and forums describe it (no maker's schematic)"
 }
 
 export const oledModules: ComponentDef[] = [oledI2c, oledI2c32, oledSpi]
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = oledModules
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "oled-ssd1306-i2c": {
+    maker: "Solomon Systech",
+    docs: [DOCS["solomon-ssd1306"]],
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 1.65, max: 3.3 }, limit: { min: -0.3, max: 4 }, cite: { page: 48, at: "Table 12-1" }, limitCite: { page: 47, at: "Table 11-1" } },
+      { kind: "pinVoltage", limit: { min: { rail: "GND", offset: -0.3 }, max: { rail: "VDD", offset: 0.3 } }, cite: { page: 47, at: "Table 11-1" } },
+      { kind: "busClock", value: { max: 400e3 }, cite: { page: 54, at: "Table 13-6" } },
+      { kind: "address", set: [0x3c, 0x3d], cite: { page: 19, at: "§8.1.5" } },
+      { kind: "segmentCurrent", value: { typ: 100e-6 }, per: "segment", cite: { page: 48, at: "Table 12-1" } },
+    ],
+    modelled: [
+      { what: "Full command table, multi-byte included", cite: { page: 28, at: "Table 9-1" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Page, horizontal, vertical addressing", cite: { page: 34, at: "§10.1.3" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Offset, start line, scan direction", cite: { page: 38, at: "Table 10-1" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "DAh 02h interlaces 64-row glass", cite: { page: 40, at: "Table 10-3" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Dark until 8Dh 14h", cite: { page: 62, at: "Charge Pump Regulator" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Brightness and current track contrast", cite: { page: 48, at: "Table 12-1" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "IDD, ICC and segment current", cite: { page: 48, at: "Table 12-1" }, test: "tests/sim/nucleo-oled.test.ts" },
+      { what: "Continuous scroll at frame rate", cite: { page: 44, at: "§10.2.1" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "I²C at 0x3C or 0x3D", cite: { page: 20, at: "§8.1.5.2" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Control byte Co and D/C#", cite: { page: 20, at: "§8.1.5.2" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "SCL checked against 2.5 µs", cite: { page: 54, at: "Table 13-6" }, test: "tests/sim/nucleo-oled.test.ts" },
+      { what: "400 kHz firmware runs unwarned", cite: { page: 54, at: "Table 13-6" }, test: "tests/sim/nucleo-oled.test.ts" },
+    ],
+    notModelled: [
+      { what: "6800/8080 parallel, 3-wire SPI", cite: { page: 15, at: "Table 8-1" } },
+      { what: "I²C set-up, hold, start/stop timing", cite: { page: 54, at: "Table 13-6" } },
+      { what: "Oscillator setting (D5h) and spread", cite: { page: 49, at: "Table 13-1" } },
+      { what: "Scrolls fixed at 370 kHz", cite: { page: 49, at: "Table 13-1" } },
+      { what: "Pre-charge and VCOMH on brightness", cite: { page: 40, at: "§10.1.17" } },
+      { what: "Partial vertical scroll area (A3h)", cite: { page: 46, at: "§10.2.5" } },
+      { what: "100 ms turn-on after AFh", cite: { page: 27, at: "§8.9" } },
+      { what: "Board values from vendors, forums" },
+    ],
+  },
+  "oled-ssd1306-i2c-32": {
+    maker: "Solomon Systech",
+    docs: [DOCS["solomon-ssd1306"]],
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 1.65, max: 3.3 }, limit: { min: -0.3, max: 4 }, cite: { page: 48, at: "Table 12-1" }, limitCite: { page: 47, at: "Table 11-1" } },
+      { kind: "pinVoltage", limit: { min: { rail: "GND", offset: -0.3 }, max: { rail: "VDD", offset: 0.3 } }, cite: { page: 47, at: "Table 11-1" } },
+      { kind: "busClock", value: { max: 400e3 }, cite: { page: 54, at: "Table 13-6" } },
+      { kind: "address", set: [0x3c, 0x3d], cite: { page: 19, at: "§8.1.5" } },
+      { kind: "segmentCurrent", value: { typ: 100e-6 }, per: "segment", cite: { page: 48, at: "Table 12-1" } },
+    ],
+    modelled: [
+      { what: "Full command table, multi-byte included", cite: { page: 28, at: "Table 9-1" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Page, horizontal, vertical addressing", cite: { page: 34, at: "§10.1.3" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Offset, start line, scan direction", cite: { page: 38, at: "Table 10-1" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "DAh 02h keeps 128×32 upright", cite: { page: 40, at: "Table 10-3" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Dark until 8Dh 14h", cite: { page: 62, at: "Charge Pump Regulator" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Brightness and current track contrast", cite: { page: 48, at: "Table 12-1" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Continuous scroll at frame rate", cite: { page: 44, at: "§10.2.1" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "I²C at 0x3C or 0x3D", cite: { page: 20, at: "§8.1.5.2" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Control byte Co and D/C#", cite: { page: 20, at: "§8.1.5.2" }, test: "tests/sim/ssd1306.test.ts" },
+    ],
+    notModelled: [
+      { what: "6800/8080 parallel, 3-wire SPI", cite: { page: 15, at: "Table 8-1" } },
+      { what: "I²C set-up, hold, start/stop timing", cite: { page: 54, at: "Table 13-6" } },
+      { what: "Oscillator setting (D5h) and spread", cite: { page: 49, at: "Table 13-1" } },
+      { what: "Scrolls fixed at 370 kHz", cite: { page: 49, at: "Table 13-1" } },
+      { what: "Pre-charge and VCOMH on brightness", cite: { page: 40, at: "§10.1.17" } },
+      { what: "Partial vertical scroll area (A3h)", cite: { page: 46, at: "§10.2.5" } },
+      { what: "100 ms turn-on after AFh", cite: { page: 27, at: "§8.9" } },
+      { what: "Board values from vendors, forums" },
+    ],
+  },
+  "oled-ssd1306-spi": {
+    maker: "Solomon Systech",
+    docs: [DOCS["solomon-ssd1306"]],
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 1.65, max: 3.3 }, limit: { min: -0.3, max: 4 }, cite: { page: 48, at: "Table 12-1" }, limitCite: { page: 47, at: "Table 11-1" } },
+      { kind: "pinVoltage", limit: { min: { rail: "GND", offset: -0.3 }, max: { rail: "VDD", offset: 0.3 } }, cite: { page: 47, at: "Table 11-1" } },
+      { kind: "busClock", value: { max: 10e6 }, cite: { page: 52, at: "Table 13-4" } },
+      { kind: "pulse", value: { min: 3e-6 }, cite: { page: 49, at: "Table 13-1" } },
+      { kind: "segmentCurrent", value: { typ: 100e-6 }, per: "segment", cite: { page: 48, at: "Table 12-1" } },
+    ],
+    modelled: [
+      { what: "Full command table, multi-byte included", cite: { page: 28, at: "Table 9-1" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Page, horizontal, vertical addressing", cite: { page: 34, at: "§10.1.3" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Offset, start line, scan direction", cite: { page: 38, at: "Table 10-1" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "DAh 02h interlaces 64-row glass", cite: { page: 40, at: "Table 10-3" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Dark until 8Dh 14h", cite: { page: 62, at: "Charge Pump Regulator" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Brightness and current track contrast", cite: { page: 48, at: "Table 12-1" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Continuous scroll at frame rate", cite: { page: 44, at: "§10.2.1" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "4-wire SPI with D/C#", cite: { page: 17, at: "§8.1.3" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Idle until RES# pulses", cite: { page: 17, at: "§8.1.3" }, test: "tests/sim/ssd1306.test.ts" },
+      { what: "Warns short RES#, fast SCLK", cite: { page: 49, at: "Table 13-1" } },
+      { what: "Warns undriven RES#", cite: { page: 49, at: "Table 13-1" } },
+    ],
+    notModelled: [
+      { what: "6800/8080 parallel, 3-wire SPI", cite: { page: 15, at: "Table 8-1" } },
+      { what: "SPI timing beyond clock cycle", cite: { page: 52, at: "Table 13-4" } },
+      { what: "Oscillator setting (D5h) and spread", cite: { page: 49, at: "Table 13-1" } },
+      { what: "Scrolls fixed at 370 kHz", cite: { page: 49, at: "Table 13-1" } },
+      { what: "Pre-charge and VCOMH on brightness", cite: { page: 40, at: "§10.1.17" } },
+      { what: "Partial vertical scroll area (A3h)", cite: { page: 46, at: "§10.2.5" } },
+      { what: "100 ms turn-on after AFh", cite: { page: 27, at: "§8.9" } },
+      { what: "Board values from vendors, forums" },
+    ],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

@@ -293,6 +293,23 @@ export function MenuBar({
               Reset view
               <MenubarShortcut>{labelFor(KEYMAP.zoomReset)}</MenubarShortcut>
             </MenubarItem>
+            <MenubarItem onClick={act((f) => f.fitAll())}>
+              Fit all
+              <MenubarShortcut>{labelFor(KEYMAP.fitAll)}</MenubarShortcut>
+            </MenubarItem>
+            <MenubarItem onClick={act((f) => f.zoomToSelection())}>
+              Zoom to selection
+              <MenubarShortcut>{labelFor(KEYMAP.zoomToSelection)}</MenubarShortcut>
+            </MenubarItem>
+            <MenubarSeparator />
+            <MenubarItem onClick={act((f) => f.find())}>
+              Find on the field…
+              <MenubarShortcut>{labelFor(KEYMAP.find)}</MenubarShortcut>
+            </MenubarItem>
+            <MenubarItem onClick={act((f) => f.nextProblem())}>
+              Next problem
+              <MenubarShortcut>{labelFor(KEYMAP.nextProblem)}</MenubarShortcut>
+            </MenubarItem>
             <MenubarSeparator />
             <MenubarSub>
               <MenubarSubTrigger>Schematic text size</MenubarSubTrigger>

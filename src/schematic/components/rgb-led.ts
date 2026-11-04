@@ -1,156 +1,8 @@
-import { srgbEncode } from "@/lib/srgb"
 import { LedIcon } from "../icons"
 import type { BodyShape, ComponentDef, Element, PinDef } from "../types"
-
-export const PART_NUMBER = "L-154A4SURKQBDZGW"
-export const RATED_TEST_CURRENT = 0.02
-export const AMBIENT = { min: -40, max: 85, reference: 25 }
-
-type Knot = readonly [celsius: number, amps: number]
-
-export type RgbDie = {
-  id: "R" | "G" | "B"
-  lead: number
-  colour: string
-  material: string
-  emission: number
-  junctionVoltsAt10mA: number
-  seriesOhms: number
-  capacitance: number
-  dominantNm: number
-  chromaticity: readonly [x: number, y: number]
-  millicandelaAt20mA: number
-  intensityPerKelvin: readonly [linear: number, quadratic: number]
-  ratings: { power: number; current: number; peakCurrent: number; reverseVolts: number }
-  derating: readonly Knot[]
-}
-
-export const L154A4SURKQBDZGW: readonly RgbDie[] = [
-  {
-    id: "R",
-    lead: 1,
-    colour: "Hyper Red",
-    material: "AlGaInP on GaAs",
-    emission: 2.796,
-    junctionVoltsAt10mA: 1.8938,
-    seriesOhms: 0.513,
-    capacitance: 35e-12,
-    dominantNm: 630,
-    chromaticity: [0.70792, 0.29203],
-    millicandelaAt20mA: 200,
-    intensityPerKelvin: [-0.01247, 5.656e-5],
-    ratings: { power: 0.075, current: 0.03, peakCurrent: 0.185, reverseVolts: 5 },
-    derating: [
-      [25, 0.03],
-      [75.5, 0.01],
-      [85, 0.00604],
-    ],
-  },
-  {
-    id: "G",
-    lead: 4,
-    colour: "Green",
-    material: "InGaN on sapphire",
-    emission: 9.625,
-    junctionVoltsAt10mA: 3.116,
-    seriesOhms: 0,
-    capacitance: 45e-12,
-    dominantNm: 525,
-    chromaticity: [0.11416, 0.82621],
-    millicandelaAt20mA: 1300,
-    intensityPerKelvin: [-0.00397, 1.054e-5],
-    ratings: { power: 0.1025, current: 0.025, peakCurrent: 0.15, reverseVolts: 5 },
-    derating: [
-      [25, 0.025],
-      [85, 0.00485],
-    ],
-  },
-  {
-    id: "B",
-    lead: 3,
-    colour: "Blue",
-    material: "InGaN",
-    emission: 7.271,
-    junctionVoltsAt10mA: 2.8811,
-    seriesOhms: 13.79,
-    capacitance: 100e-12,
-    dominantNm: 465,
-    chromaticity: [0.1355, 0.03988],
-    millicandelaAt20mA: 300,
-    intensityPerKelvin: [-0.00201, 5.15e-6],
-    ratings: { power: 0.12, current: 0.03, peakCurrent: 0.15, reverseVolts: 5 },
-    derating: [
-      [25, 0.03],
-      [85, 0.00614],
-    ],
-  },
-]
-
-export const COMMON_CATHODE_LEAD = 2
-
-export function ambientOf(props: Record<string, string>): number {
-  const celsius = Number(props.temp)
-  return Number.isFinite(celsius) ? Math.min(AMBIENT.max, Math.max(AMBIENT.min, celsius)) : AMBIENT.reference
-}
-
-export function deratedCurrent(die: RgbDie, celsius: number): number {
-  const knots = die.derating
-  if (celsius <= knots[0][0]) return knots[0][1]
-  for (let k = 1; k < knots.length; k++) {
-    const [t0, i0] = knots[k - 1]
-    const [t1, i1] = knots[k]
-    if (celsius <= t1) return i0 + ((i1 - i0) * (celsius - t0)) / (t1 - t0)
-  }
-  return knots[knots.length - 1][1]
-}
-
-export function intensityVsAmbient(die: RgbDie, celsius: number): number {
-  const dt = celsius - AMBIENT.reference
-  const [linear, quadratic] = die.intensityPerKelvin
-  return Math.max(0, 1 + linear * dt + quadratic * dt * dt)
-}
-
-export function luminousIntensity(die: RgbDie, amps: number, celsius = AMBIENT.reference): number {
-  return die.millicandelaAt20mA * (Math.max(0, amps) / RATED_TEST_CURRENT) * intensityVsAmbient(die, celsius)
-}
-
-const XYZ_TO_LINEAR_SRGB = [
-  [3.2406, -1.5372, -0.4986],
-  [-0.9689, 1.8758, 0.0415],
-  [0.0557, -0.204, 1.057],
-] as const
-
-/** The colour of a light at CIE 1931 chromaticity (x, y), brightest channel at full, as CSS. */
-export function chromaticityColor([x, y]: readonly [number, number]): string {
-  const xyz = [x / y, 1, (1 - x - y) / y]
-  const linear = XYZ_TO_LINEAR_SRGB.map((row) => Math.max(0, row[0] * xyz[0] + row[1] * xyz[1] + row[2] * xyz[2]))
-  const peak = Math.max(...linear)
-  const [r, g, b] = linear.map((c) => Math.round(255 * srgbEncode(c / peak)))
-  return `rgb(${r} ${g} ${b})`
-}
-
-export type DieLight = { level: number; amps?: number } | undefined
-
-export function rgbLedGlow(lights: readonly DieLight[], celsius = AMBIENT.reference, dies: readonly RgbDie[] = L154A4SURKQBDZGW): { color: string; level: number } | null {
-  const xyz = [0, 0, 0]
-  let level = 0
-  dies.forEach((die, i) => {
-    const light = lights[i]
-    if (!light || light.level <= 0) return
-    const relative = intensityVsAmbient(die, celsius)
-    level = Math.max(level, light.level * relative)
-    const luminance = luminousIntensity(die, light.amps ?? 0, celsius)
-    const [x, y] = die.chromaticity
-    xyz[0] += (luminance * x) / y
-    xyz[1] += luminance
-    xyz[2] += (luminance * (1 - x - y)) / y
-  })
-  if (level <= 0 || xyz[1] <= 0) return null
-  const linear = XYZ_TO_LINEAR_SRGB.map((row) => Math.max(0, row[0] * xyz[0] + row[1] * xyz[1] + row[2] * xyz[2]))
-  const peak = Math.max(...linear)
-  const [r, g, b] = linear.map((c) => Math.round(255 * srgbEncode(c / peak)))
-  return { color: `rgb(${r} ${g} ${b})`, level: Math.min(1, level) }
-}
+import { PART_NUMBER, RATED_TEST_CURRENT, AMBIENT, type RgbDie, L154A4SURKQBDZGW, COMMON_CATHODE_LEAD, ambientOf, deratedCurrent, intensityVsAmbient, luminousIntensity, chromaticityColor, type DieLight, rgbLedGlow } from "@/sim/rgb-led-light"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const WIDTH = 4
 const HEIGHT = 6
@@ -202,9 +54,9 @@ const model: Element[] = [
 export const rgbLed: ComponentDef = {
   id: "rgb-led",
   name: "RGB LED, common cathode",
-  description: `Kingbright ${PART_NUMBER}, a 5 mm full-colour lamp: Hyper Red AlGaInP, blue and green InGaN dies on leads 1, 3 and 4, the common cathode on lead 2. Each die follows the datasheet's I–V curve, burns on its own past its ratings (30, 30 and 25 mA DC derated above 25 °C, 185, 150 and 150 mA peak, 5 V reversed), and the package glows in the mix of the light the three emit.`,
-  keywords: [PART_NUMBER, "RGB", "full colour", "full color", "common cathode", "Kingbright"],
-  category: "Semiconductors",
+  description: "Common-cathode 5 mm full-colour lamp",
+  keywords: [PART_NUMBER, "RGB", "full colour", "full color", "common cathode", "Kingbright", "5 mm"],
+  category: "leds",
   icon: LedIcon,
   prefix: "LED",
   width: WIDTH,
@@ -226,3 +78,49 @@ export const rgbLed: ComponentDef = {
 }
 
 export const rgbLeds: ComponentDef[] = [rgbLed]
+
+export { PART_NUMBER, RATED_TEST_CURRENT, AMBIENT, type RgbDie, L154A4SURKQBDZGW, COMMON_CATHODE_LEAD, ambientOf, deratedCurrent, intensityVsAmbient, luminousIntensity, chromaticityColor, type DieLight, rgbLedGlow }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = rgbLeds
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "rgb-led": {
+    maker: "Kingbright",
+    docs: [DOCS["kb-l154a4surkqbdzgw"]],
+    specs: [],
+    characteristics: [
+      { kind: "forwardVoltage", value: { typ: 1.95, max: 2.5 }, at: [{ load: { amps: 20e-3 } }], colour: "red", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardVoltage", value: { typ: 3.3, max: 4.1 }, at: [{ load: { amps: 20e-3 } }], colour: "green", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardVoltage", value: { typ: 3.3, max: 4 }, at: [{ load: { amps: 20e-3 } }], colour: "blue", cite: { page: 2, at: "Electrical / Optical" } },
+      { kind: "forwardCurrent", limit: { max: 30e-3 }, colour: "red", cite: { page: 2, at: "Abs Max" } },
+      { kind: "forwardCurrent", limit: { max: 25e-3 }, colour: "green", cite: { page: 2, at: "Abs Max" } },
+      { kind: "forwardCurrent", limit: { max: 30e-3 }, colour: "blue", cite: { page: 2, at: "Abs Max" } },
+      { kind: "reverseVoltage", limit: { max: 5 }, cite: { page: 2, at: "Abs Max" } },
+    ],
+    modelled: [
+      { what: "Common cathode on lead 2", cite: { page: 1, at: "Package Dimensions" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Anode leads R1, B3, G4", cite: { page: 1, at: "Package Dimensions" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Dies follow digitised I–V curves", cite: { page: 3, at: "Forward Current vs. Forward Voltage (blue p. 4, green p. 5)" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "±0.1 V on dashed part", cite: { page: 3, at: "Forward Current vs. Forward Voltage (blue p. 4, green p. 5)" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Each die burns open alone", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Past derated DC or peak", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Or at 5 V reversed", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Derating curve to 85 °C", cite: { page: 3, at: "Forward Current Derating Curve" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Junction C 35/100/45 pF", cite: { page: 2, at: "Electrical / Optical Characteristics" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Intensity follows current, ambient curves", cite: { page: 3, at: "Luminous Intensity vs. Forward Current" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Glow mixes dominant wavelengths", cite: { page: 3, at: "Luminous Intensity vs. Forward Current" }, test: "tests/sim/rgb-led.test.ts" },
+      { what: "Ambient −40 to +85 °C", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/rgb-led.test.ts" },
+    ],
+    notModelled: [
+      { what: "Viewing angle, no beam drawn", cite: { page: 2, at: "Selection Guide" } },
+      { what: "Spectral half-width", cite: { page: 2, at: "Electrical / Optical Characteristics" } },
+      { what: "Electrostatic discharge damage", cite: { page: 1 } },
+      { what: "Ageing over the part's life", cite: { page: 1, at: "Features" } },
+      { what: "Soldering heat (260 °C)", cite: { page: 2, at: "Absolute Maximum Ratings" } },
+    ],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

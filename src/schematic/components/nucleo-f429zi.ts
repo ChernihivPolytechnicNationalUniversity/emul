@@ -4,6 +4,8 @@ import { mcuModel } from "../mcu-model"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind, Side } from "../types"
 import { LED_COLORS } from "./basic"
 import { BOARD_MM, boardArt, CN7_SHIFT, FRAME, PITCH, ZIO } from "./nucleo-f429zi-art"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * NUCLEO-F429ZI (Nucleo-144, MB1137). Pin data from ST UM1974, Table 16; the board drawn to
@@ -261,9 +263,11 @@ const model: Element[] = [
 
 export const nucleoF429zi: ComponentDef = {
   id: "nucleo-f429zi",
-  name: "Nucleo-144",
+  name: "Nucleo-F429ZI",
+  board: { vendor: "STMicroelectronics", mcu: "STM32F429ZI", mhz: 180, volts: 3.3, tags: ["ST-LINK"], photo: "nucleo-f429zi.webp", core: "Cortex-M4F", memory: "2 MB / 256 KB", onBoard: ["ST-LINK", "Ethernet", "USB OTG"], alias: "Nucleo-144", printed: "MB1137" },
   description: "STM32F429ZI",
-  category: "Boards",
+  keywords: ["STM32", "STM32F429ZI", "NUCLEO-F429ZI", "Nucleo", "Nucleo-144", "MB1137", "ST-LINK", "Cortex-M4"],
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,
@@ -281,10 +285,47 @@ export const nucleoF429zi: ComponentDef = {
   // so HSE works in bypass only. X2 is the 32.768 kHz LSE crystal (UM1974 §6.7).
   mcuClocks: { hse: { hz: 8e6, kind: "clock", startup: 0 }, lse: { hz: 32768, kind: "crystal", startup: 2 } },
   info: {
-    MCU: "STM32F429ZIT6, Cortex-M4F 180 MHz, 2 MB Flash, 256 KB SRAM",
-    "Virtual COM port": "USART3, TX PD8, RX PD9 (via ST-LINK)",
-    "USB OTG FS": "DM PA11, DP PA12, VBUS PA9, ID PA10, PWR_EN PG6, OVRCR PG7",
-    "Ethernet RMII": "REF_CLK PA1, MDIO PA2, MDC PC1, CRS_DV PA7, RXD0 PC4, RXD1 PC5, TX_EN PG11, TXD0 PG13, TXD1 PB13",
-    Source: "ST UM1974, Table 16",
+    // MCU: STM32F429ZIT6, Cortex-M4F 180 MHz, 2 MB Flash, 256 KB SRAM
+    // Virtual COM port: USART3, TX PD8, RX PD9 (via ST-LINK)
+    "Virtual COM port": "USART3 on PD8/PD9",
+    // USB OTG FS: DM PA11, DP PA12, VBUS PA9, ID PA10, PWR_EN PG6, OVRCR PG7
+    "USB OTG FS": "PA11/PA12, VBUS PA9",
+    // Ethernet RMII: REF_CLK PA1, MDIO PA2, MDC PC1, CRS_DV PA7, RXD0 PC4, RXD1 PC5, TX_EN PG11, TXD0 PG13, TXD1 PB13
+    "Ethernet RMII": "RMII, UM1974 Table 16",
+    // Source: ST UM1974, Table 16
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [nucleoF429zi]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "nucleo-f429zi": {
+    maker: "STMicroelectronics",
+    docs: [DOCS["st-um1974"], DOCS["st-mb1137-sch"], DOCS["st-ds9405"]],
+    specs: [],
+    characteristics: [
+      { kind: "clock", value: { max: 180e6 }, cite: { doc: "st-ds9405", page: 17, at: "Table 2" } },
+      { kind: "flash", value: { typ: 2097152 }, cite: { doc: "st-ds9405", page: 16, at: "Table 2" } },
+      { kind: "ram", value: { typ: 262144 }, cite: { doc: "st-ds9405", page: 16, at: "Table 2" } },
+      { kind: "ioLevel", value: { typ: 3.3 }, limit: { max: 4 }, cite: { page: 37, at: "§7.14 Caution 1" }, limitCite: { doc: "st-ds9405", page: 93, at: "Table 14" } },
+      { kind: "input", value: { min: 7, max: 12 }, cite: { page: 23, at: "Table 7 VIN" } },
+      { kind: "ioPins", value: { typ: 114 }, cite: { doc: "st-ds9405", page: 16, at: "Table 2" } },
+    ],
+    modelled: [
+      { what: "Firmware runs at 180 MHz", test: "tests/firmware/nucleo-fw.test.ts" },
+      { what: "8 MHz HSE from ST-LINK", test: "tests/firmware/nucleo-fw.test.ts" },
+      { what: "X2 LSE crystal start-up", test: "tests/firmware/chip-clock.test.ts" },
+      { what: "ST-LINK virtual COM port", test: "tests/sim/nucleo-serial.test.ts" },
+      { what: "User LEDs LD1–LD3", test: "tests/firmware/nucleo-fw.test.ts" },
+      { what: "USER and RESET buttons", test: "tests/sim/nucleo.test.ts" },
+      { what: "USB power tree to 3.3V", test: "tests/sim/nucleo.test.ts" },
+      { what: "Unplugging USB stops the core", test: "tests/firmware/nucleo-fw.test.ts" },
+      { what: "Reflash restarts the core", test: "tests/sim/reflash.test.ts" },
+    ],
+    notModelled: [{ what: "No ST-LINK SWD protocol" }, { what: "No ST-LINK mass storage" }, { what: "No Ethernet MAC or PHY" }, { what: "No USB OTG peripheral" }],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

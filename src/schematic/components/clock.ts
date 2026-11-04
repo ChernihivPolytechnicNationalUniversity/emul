@@ -8,16 +8,18 @@
  * needs are drawn or not as the student likes; they change nothing here.
  */
 import { CrystalIcon, OscillatorIcon } from "../icons"
+import { crystalStartup, RESONATOR_STARTUP } from "../clock-startup"
 import type { ComponentDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
-/** DS9405 Table 33/35 typical start-up times: 2 ms for a MHz crystal, 2 s for a 32 kHz watch crystal. */
-export const crystalStartup = (hz: number) => (hz < 1e6 ? 2 : 2e-3)
 
 export const crystal: ComponentDef = {
   id: "crystal",
   name: "Crystal",
-  description: "Quartz crystal for the MCU's HSE (OSC_IN/OSC_OUT) or LSE (OSC32_IN/OSC32_OUT). Starts in 2 ms; a 32.768 kHz watch crystal in 2 s.",
-  category: "Clock",
+  description: "Quartz crystal for MCU clocks",
+  keywords: ["quartz", "XTAL", "HSE", "LSE", "32.768 kHz", "watch crystal"],
+  category: "ics",
   icon: CrystalIcon,
   prefix: "ZQ",
   defaults: { value: "8 MHz" },
@@ -37,6 +39,14 @@ export const crystal: ComponentDef = {
   ],
   // An open circuit at DC: nothing for the analog engine to solve.
   model: [],
+  datasheet: {
+    basis: "generic",
+    none: "A generic crystal: its frequency is set in the inspector, not taken from one product's datasheet.",
+    // Start-up times from the MCU's datasheet (DS9405 Tables 33 and 35), not the crystal's.
+    sources: [DOCS["st-ds9405"]],
+    modelled: [{ what: "HSE/LSE ready after start-up time" }, { what: "2 ms for MHz crystals" }, { what: "2 s for 32.768 kHz" }, { what: "Clock runs at marked frequency" }],
+    notModelled: [{ what: "Oscillation waveform" }, { what: "Analog engine steps 20 µs" }, { what: "Load caps, drive level, tolerance" }],
+  },
 }
 
 /**
@@ -45,15 +55,13 @@ export const crystal: ComponentDef = {
  */
 export const RESONATOR_TOLERANCE = { initial: 0.5, temperature: 0.3, ageing: 0.2 }
 
-/** Assumed until checked: a ceramic resonator is up in 0.5 ms, a quarter of a MHz crystal's 2 ms (Murata gives no figure). */
-export const RESONATOR_STARTUP = 0.5e-3
 
 export const resonator: ComponentDef = {
   id: "resonator",
   name: "Ceramic resonator",
-  description:
-    "Three-pin ceramic resonator with its load capacitors built in (Murata CSTCE16M0V53, Arduino Uno's 16 MHz): the outer pins across XTAL1/XTAL2 or OSC_IN/OSC_OUT, the middle one to ground. Coarser than quartz: ±0.5 % as made, ±0.3 % with temperature, ±0.2 % with age; the deviation sets where this part sits.",
-  category: "Clock",
+  keywords: ["resonator", "ceramic", "XTAL", "Murata", "CSTCE16M0V53", "16 MHz"],
+  description: "Three-pin ceramic resonator",
+  category: "ics",
   icon: CrystalIcon,
   prefix: "Y",
   defaults: { value: "16 MHz", deviation: "0" },
@@ -78,18 +86,23 @@ export const resonator: ComponentDef = {
   // An open circuit at DC, like the crystal; the built-in 15 pF change nothing at the engine's step.
   model: [],
   info: {
-    Tolerance: `±${RESONATOR_TOLERANCE.initial} % initial, ±${RESONATOR_TOLERANCE.temperature} % over −20…80 °C, ±${RESONATOR_TOLERANCE.ageing} % ageing`,
-    Source: "Murata CSTCE16M0V53-R0 product data (murata.com)",
-    "Start-up": "0.5 ms: assumed, to be checked (Murata gives no figure)",
-    "Not modelled": "the frequency's own drift with temperature and age (set the deviation), the built-in capacitors and ESR",
+    // Tolerance: `±${RESONATOR_TOLERANCE.initial} % initial, ±${RESONATOR_TOLERANCE.temperature} % over −20…80 °C, ±${RESONATOR_TOLERANCE.ageing} % ageing`
+    Tolerance: `±${RESONATOR_TOLERANCE.initial} % initial`,
+    "Temperature drift": `±${RESONATOR_TOLERANCE.temperature} % over −20…80 °C`,
+    Ageing: `±${RESONATOR_TOLERANCE.ageing} %`,
+    // Source (in the datasheet record): "Murata CSTCE16M0V53-R0 product data (murata.com)"
+    // "Start-up": "0.5 ms: assumed, to be checked (Murata gives no figure)"
+    "Start-up": "0.5 ms, assumed (no figure)",
+    // "Not modelled" (in the datasheet record): "the frequency's own drift with temperature and age (set the deviation), the built-in capacitors and ESR"
   },
 }
 
 export const oscillator: ComponentDef = {
   id: "oscillator",
   name: "Clock oscillator",
-  description: "Canned oscillator module: a ready clock into OSC_IN for HSE bypass mode (or OSC32_IN for LSE bypass). Needs VCC.",
-  category: "Clock",
+  description: "Canned clock oscillator module",
+  keywords: ["oscillator", "clock", "oscillator module", "HSE bypass"],
+  category: "ics",
   icon: OscillatorIcon,
   prefix: "G",
   defaults: { value: "8 MHz", vmax: "4 V" },
@@ -115,4 +128,45 @@ export const oscillator: ComponentDef = {
   // The module draws a few milliamps; OUT drives nothing the engine can follow.
   // A few milliamps from VCC; the 3.3 V part is dead past its absolute maximum supply.
   model: [{ kind: "R", a: "VCC", b: "GND", value: 1e3, limits: { voltage: "{vmax}", fail: "short" } }],
+  datasheet: {
+    basis: "generic",
+    none: "A generic oscillator module: its frequency and supply rating are set in the inspector, not taken from one product's datasheet.",
+    sources: [DOCS["sitime-sit8008b"]],
+    modelled: [{ what: "HSE or LSE bypass clock" }, { what: "Runs at marked frequency" }, { what: "A few milliamps from VCC" }, { what: "Dead past its supply rating" }],
+    notModelled: [{ what: "OUT waveform invisible to analog" }, { what: "Frequency tolerance and jitter" }],
+  },
 }
+
+export { crystalStartup, RESONATOR_STARTUP }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [crystal, resonator, oscillator]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "resonator": {
+    maker: "Murata",
+    docs: [DOCS["murata-p16e"], DOCS["murata-cstce16m0v53"]],
+    specs: [],
+    characteristics: [
+      { kind: "frequency", value: { typ: 16e6 }, cite: { doc: "murata-p16e", page: 26, at: "CSTCE_V specifications" } },
+      { kind: "tolerance", value: { max: 0.005, sym: true }, cite: { doc: "murata-p16e", page: 26, at: "CSTCE_V specifications" } },
+      { kind: "temperature", value: { min: -20, max: 80 }, cite: { doc: "murata-p16e", page: 26, at: "CSTCE_V specifications" } },
+      { kind: "capacitance", value: { typ: 15e-12 }, cite: { doc: "murata-p16e", page: 5, at: "Part numbering, load capacity" } },
+    ],
+    modelled: [
+      { what: "MCU runs at 16 MHz", cite: { doc: "murata-p16e", page: 26, at: "CSTCE_V specifications" }, test: "tests/sim/resonator.test.ts" },
+      { what: "Works either way round", test: "tests/sim/resonator.test.ts" },
+      { what: "Deviation shifts the clock", cite: { doc: "murata-p16e", page: 26, at: "CSTCE_V specifications" }, test: "tests/sim/resonator.test.ts" },
+      { what: "Outer pins on XTAL needed", test: "tests/sim/resonator.test.ts" },
+      { what: "Ready after 0.5 ms, assumed" },
+    ],
+    notModelled: [
+      { what: "Drift with temperature and age", cite: { doc: "murata-p16e", page: 26, at: "CSTCE_V specifications" } },
+      { what: "Deviation is set by hand" },
+      { what: "Built-in capacitors and ESR", cite: { doc: "murata-p16e", page: 5, at: "Part numbering, load capacity" } },
+    ],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

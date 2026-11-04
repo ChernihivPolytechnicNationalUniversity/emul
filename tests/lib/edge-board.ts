@@ -103,7 +103,7 @@ export function edgeHeaderBoard(): ComponentDef {
   return {
     id: "edge-board",
     name: "Edge-header board",
-    category: "Boards",
+    category: "boards",
     icon: open746ic.icon,
     width: WIDTH,
     height: HEIGHT,
