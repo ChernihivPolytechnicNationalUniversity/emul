@@ -105,8 +105,6 @@ export function joiningContactsOfNcPads(frozen: Partition, objects: readonly Pla
 
 export function netsJoinedThroughNcPads(frozen: Partition, objects: readonly PlacedObject[]): string[][] {
   const names = stableNames(objects)
-  const groupOf = new Map<string, number>()
-  frozen.forEach((group, i) => group.forEach((key) => groupOf.set(key, i)))
   const at = new Map<string, { key: string; nc: boolean }[]>()
   for (const o of objects) {
     if (isJunctionObject(o)) continue
@@ -116,14 +114,35 @@ export function netsJoinedThroughNcPads(frozen: Partition, objects: readonly Pla
     }
   }
   const nc = new Set([...at.values()].flat().filter((p) => p.nc).map((p) => p.key))
-  const real = (i: number) => frozen[i].some((key) => !nc.has(key))
-  const joined: string[][] = []
+  const ownerOf = new Map<string, string>()
+  frozen.forEach((group, i) => group.forEach((key) => ownerOf.set(key, `net ${i}`)))
+  const owner = (key: string) => ownerOf.get(key) ?? `pin ${key}`
+  const parent = new Map<string, string>()
+  const find = (k: string): string => {
+    const up = parent.get(k)
+    if (up === undefined || up === k) return k
+    const top = find(up)
+    parent.set(k, top)
+    return top
+  }
   for (const pins of at.values()) {
     if (!pins.some((p) => p.nc)) continue
-    const nets = new Set(pins.flatMap((p) => (groupOf.has(p.key) ? (real(groupOf.get(p.key)!) ? [`net ${groupOf.get(p.key)}`] : []) : p.nc ? [] : [`pin ${p.key}`])))
-    if (nets.size > 1) joined.push(pins.map((p) => p.key).sort())
+    for (const p of pins.slice(1)) {
+      const a = find(owner(pins[0].key))
+      const b = find(owner(p.key))
+      if (a !== b) parent.set(a, b)
+    }
   }
-  return joined
+  const real = new Map<string, Set<string>>()
+  const keysOf = new Map<string, Set<string>>()
+  const note = (key: string) => {
+    const root = find(owner(key))
+    keysOf.set(root, (keysOf.get(root) ?? new Set()).add(key))
+    if (!nc.has(key)) real.set(root, (real.get(root) ?? new Set()).add(owner(key)))
+  }
+  for (const group of frozen) for (const key of group) note(key)
+  for (const pins of at.values()) for (const p of pins) note(p.key)
+  return [...real].filter(([, owners]) => owners.size > 1).map(([root]) => [...keysOf.get(root)!].sort())
 }
 
 export const pinPartition = (doc: Schematic): Partition => renamed(doc.objects, partitionOf(wireNets(doc.wires, wirePins(doc.objects))))

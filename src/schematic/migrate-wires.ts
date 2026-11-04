@@ -1,5 +1,6 @@
 import { GRID, objectIndex, objectPins, objectRect, ownBodies, resolvePinIn, routeObstacles, unionOf, type Point } from "./geometry"
 import { frozenCandidates, hasDiagonal, isJunction, laidAgain, wirePins, type Lay } from "./freeze"
+import { pinContacts } from "./contacts"
 import { legacyNets } from "./nets"
 import { getDef } from "./registry"
 import { fieldRouter } from "./placement"
@@ -131,6 +132,8 @@ const onWholeCells = (p: Point) => Number.isInteger(p.x / GRID) && Number.isInte
 
 const objectOf = (key: string) => key.slice(0, key.indexOf(":"))
 
+const CONTACT_TOLERANCE = 0.01
+
 type Why = (distance: string, byId: ReadonlyMap<string, PlacedObject>) => string
 
 function offTheGrid(doc: LegacySchematic): Map<string, Why> {
@@ -151,14 +154,30 @@ function onPadsOtherNetsUse(doc: LegacySchematic, netOf: (key: string) => string
       at.set(pointKey(p.point), list)
     }
   }
+  const joined = new Map<string, string>()
+  const root = (net: string): string => {
+    const up = joined.get(net)
+    if (up === undefined || up === net) return net
+    const top = root(up)
+    joined.set(net, top)
+    return top
+  }
+  const touchesAPad = [...at.values()].filter((group) => group.length > 1 && group.some((g) => g.nc))
+  for (const group of touchesAPad) for (const g of group.slice(1)) {
+    const a = root(netOf(group[0].key))
+    const b = root(netOf(g.key))
+    if (a !== b) joined.set(a < b ? b : a, a < b ? a : b)
+  }
+  const realNets = new Map<string, Set<string>>()
+  for (const net of real) realNets.set(root(net), (realNets.get(root(net)) ?? new Set()).add(net))
   const out = new Map<string, Why>()
-  for (const group of at.values()) {
-    const pad = group.find((g) => g.nc)
-    if (!pad || new Set(group.map((g) => netOf(g.key)).filter((net) => real.has(net))).size < 2) continue
+  for (const group of touchesAPad) {
+    if ((realNets.get(root(netOf(group[0].key)))?.size ?? 0) < 2) continue
+    const pad = group.find((g) => g.nc)!
     const stays = [...group].sort((a, b) => objectPins(b.object, GRID).length - objectPins(a.object, GRID).length)[0].object.id
     for (const g of group)
       if (g.object.id !== stays && !out.has(g.object.id))
-        out.set(g.object.id, (distance, byId) => `${nameOf(g.object)} moved ${distance}: its pin ${g.key.slice(g.key.indexOf(":") + 1)} sat on ${pinName(pad.key, byId)}, a pad marked not connected that another net's wire uses, and a pin on a pad joins it now.`)
+        out.set(g.object.id, (distance, byId) => `${nameOf(g.object)} moved ${distance}: its pin ${g.key.slice(g.key.indexOf(":") + 1)} sat on ${pinName(pad.key, byId)}, a pad marked not connected that joins it to another net, and a pin on a pad joins it now.`)
   }
   return out
 }
@@ -172,13 +191,13 @@ function partsMoved(doc: LegacySchematic, why: ReadonlyMap<string, Why>, netOf: 
   }
   for (const o of doc.objects) if (!why.has(o.id)) take(o)
   const touching = new Map<string, string>()
-  const pinsAt = new Map<string, { key: string; nc: boolean }[]>()
-  for (const o of doc.objects) for (const p of objectPins(o, GRID)) pinsAt.set(pointKey(p.point), [...(pinsAt.get(pointKey(p.point)) ?? []), { key: p.key, nc: p.pin.kind === "nc" }])
-  for (const group of pinsAt.values())
+  const contactGroups = new Map<string, string[]>()
+  for (const [key, group] of pinContacts(doc.objects, GRID).groups) contactGroups.set(group, [...(contactGroups.get(group) ?? []), key])
+  for (const group of contactGroups.values())
     for (const a of group) {
-      if (a.nc || touching.has(a.key)) continue
-      const b = group.find((q) => q.key !== a.key && !q.nc && netOf(q.key) === netOf(a.key) && objectOf(q.key) !== objectOf(a.key))
-      if (b && touching.get(b.key) !== a.key) touching.set(a.key, b.key)
+      if (touching.has(a)) continue
+      const b = group.find((q) => objectOf(q) !== objectOf(a))
+      if (b && touching.get(b) !== a) touching.set(a, b)
     }
   const notes: string[] = []
   const objects = doc.objects.map((o) => {
@@ -207,13 +226,15 @@ function partsMoved(doc: LegacySchematic, why: ReadonlyMap<string, Why>, netOf: 
     return best
   })
   const now = new Map(objects.map((o) => [o.id, o]))
-  const pointOf = (key: string) => {
-    const o = now.get(objectOf(key))!
-    return pointKey(objectPins(o, GRID).find((p) => p.key === key)!.point)
+  const pointOf = (key: string) => objectPins(now.get(objectOf(key))!, GRID).find((p) => p.key === key)!.point
+  const stillTouching = (a: string, b: string) => {
+    const p = pointOf(a)
+    const q = pointOf(b)
+    return Math.abs(p.x - q.x) < CONTACT_TOLERANCE && Math.abs(p.y - q.y) < CONTACT_TOLERANCE
   }
   const wires = [...doc.wires]
   for (const [a, b] of touching) {
-    if ((!why.has(objectOf(a)) && !why.has(objectOf(b))) || pointOf(a) === pointOf(b)) continue
+    if ((!why.has(objectOf(a)) && !why.has(objectOf(b))) || stillTouching(a, b)) continue
     wires.push({ id: newId(), from: refOf(a), to: refOf(b) })
     notes.push(`${pinName(a, byId)} and ${pinName(b, byId)} touched where they stood before; a wire joins them now.`)
   }
@@ -322,7 +343,7 @@ export function wiresAsSegments(saved: LegacySchematic, ids?: () => string): Fro
         : `The wire between ${ends(laid[i])} ran over another net's wire or pin where it was drawn; it is laid again so the circuit stays as it was.`,
     )
   for (const i of stuck) notes.push(`The wire between ${ends(laid[i])} could not be laid clear of another net: check its connections.`)
-  const astray = astrayParts(upgraded, pins, netOf, byId)
+  const astray = astrayParts(upgraded, pins.filter((p) => p.kind !== "nc"), oldNetOf, objectIndex([...saved.objects, ...doc.objects]))
   if (astray.length) notes.push(`The circuit round ${listed(astray)} could not be kept exactly: check its connections.`)
   return { doc: upgraded, notes, routes: new Map(laid.map((l) => [l.wire.id, l.pts])), faithful: !astray.length }
 }
