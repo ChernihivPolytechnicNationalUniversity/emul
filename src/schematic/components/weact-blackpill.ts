@@ -347,27 +347,38 @@ export const defs: ComponentDef[] = [weactBlackpillF411, weactBlackpillF401ce, w
 
 // Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
 // The key numbers with their pages are still to be added (specs).
+/** The MCU's numbers, from its datasheet: Table 2 (features and peripheral counts) and Table 11 (voltage characteristics). */
+type McuSheet = { doc: string; mhz: number; flash: number; ram: number; table2: { memory: number; counts: number }; table11: number }
+
+/** One record per board: the same V3.1 PCB, its own MCU's datasheet for the chip's numbers. */
+const record = (m: McuSheet): Datasheet => ({
+  maker: "WeAct Studio",
+  docs: [DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS[m.doc], DOCS["st-rm0383"]],
+  specs: [],
+  characteristics: [
+    { kind: "clock", value: { max: m.mhz * 1e6 }, cite: { doc: m.doc, page: m.table2.counts, at: "Table 2" } },
+    { kind: "flash", value: { typ: m.flash * 1024 }, cite: { doc: m.doc, page: m.table2.memory, at: "Table 2" } },
+    { kind: "ram", value: { typ: m.ram * 1024 }, cite: { doc: m.doc, page: m.table2.memory, at: "Table 2" } },
+    { kind: "ioLevel", value: { typ: 3.3 }, limit: { max: 4 }, cite: { page: 1, at: "5V -> 3.3V Power conversion" }, limitCite: { doc: m.doc, page: m.table11, at: "Table 11" } },
+    { kind: "input", value: { typ: 5 }, cite: { page: 1, at: "Type-C interface" } },
+    { kind: "ioPins", value: { typ: 36 }, cite: { doc: m.doc, page: m.table2.counts, at: "Table 2" } },
+  ],
+  modelled: [
+    { what: "Runs from 25 MHz HSE", cite: { page: 1, at: "Y2" }, test: "tests/sim/blackpill-blink.test.ts" },
+    { what: "C13 LED blinks from firmware", test: "tests/sim/blackpill-blink.test.ts" },
+    { what: "KEY user button on PA0", test: "tests/sim/blackpill.test.ts" },
+    { what: "USB-C powers 3V3 through ME6231", cite: { page: 1, at: "5V -> 3.3V Power conversion" }, test: "tests/sim/blackpill.test.ts" },
+    { what: "Unplugging USB drops 3V3", test: "tests/sim/blackpill.test.ts" },
+    { what: "SWD pins on P3", test: "tests/sim/blackpill.test.ts" },
+    { what: "BOOT1 held low by R3", test: "tests/sim/blackpill.test.ts" },
+    { what: "PC13 burns past 3 mA", test: "tests/sim/blackpill-blink.test.ts" },
+  ],
+  notModelled: [{ what: "No USB or DFU bootloader" }, { what: "U3 SPI flash not fitted" }, { what: "No SWD wire protocol" }, { what: "No SB1 solder bridge" }],
+})
+
 const RECORDS: Record<string, Datasheet> = {
-  "weact-blackpill-f411": {
-    maker: "WeAct Studio",
-    docs: [DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS["st-ds10314"], DOCS["st-rm0383"]],
-    specs: [],
-    modelled: [],
-    notModelled: [{ what: "No USB or DFU bootloader" }, { what: "U3 SPI flash not fitted" }, { what: "No SWD wire protocol" }, { what: "No SB1 solder bridge" }],
-  },
-  "weact-blackpill-f401ce": {
-    maker: "WeAct Studio",
-    docs: [DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS["st-ds10086"], DOCS["st-rm0383"]],
-    specs: [],
-    modelled: [],
-    notModelled: [{ what: "No USB or DFU bootloader" }, { what: "U3 SPI flash not fitted" }, { what: "No SWD wire protocol" }, { what: "No SB1 solder bridge" }],
-  },
-  "weact-blackpill-f401cc": {
-    maker: "WeAct Studio",
-    docs: [DOCS["weact-minif4x1-v31"], DOCS["microne-me6231"], DOCS["vishay-88525"], DOCS["st-ds9716"], DOCS["st-rm0383"]],
-    specs: [],
-    modelled: [],
-    notModelled: [{ what: "No USB or DFU bootloader" }, { what: "U3 SPI flash not fitted" }, { what: "No SWD wire protocol" }, { what: "No SB1 solder bridge" }],
-  },
+  "weact-blackpill-f411": record({ doc: "st-ds10314", mhz: 100, flash: 512, ram: 128, table2: { memory: 13, counts: 13 }, table11: 61 }),
+  "weact-blackpill-f401ce": record({ doc: "st-ds10086", mhz: 84, flash: 512, ram: 96, table2: { memory: 10, counts: 11 }, table11: 58 }),
+  "weact-blackpill-f401cc": record({ doc: "st-ds9716", mhz: 84, flash: 256, ram: 64, table2: { memory: 11, counts: 11 }, table11: 57 }),
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

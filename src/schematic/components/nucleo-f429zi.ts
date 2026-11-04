@@ -306,8 +306,26 @@ const RECORDS: Record<string, Datasheet> = {
     maker: "STMicroelectronics",
     docs: [DOCS["st-um1974"], DOCS["st-ds9405"]],
     specs: [],
-    modelled: [],
-    notModelled: [],
+    characteristics: [
+      { kind: "clock", value: { max: 180e6 }, cite: { doc: "st-ds9405", page: 17, at: "Table 2" } },
+      { kind: "flash", value: { typ: 2097152 }, cite: { doc: "st-ds9405", page: 16, at: "Table 2" } },
+      { kind: "ram", value: { typ: 262144 }, cite: { doc: "st-ds9405", page: 16, at: "Table 2" } },
+      { kind: "ioLevel", value: { typ: 3.3 }, limit: { max: 4 }, cite: { page: 37, at: "§7.14 Caution 1" }, limitCite: { doc: "st-ds9405", page: 93, at: "Table 14" } },
+      { kind: "input", value: { min: 7, max: 12 }, cite: { page: 23, at: "Table 7 VIN" } },
+      { kind: "ioPins", value: { typ: 114 }, cite: { doc: "st-ds9405", page: 16, at: "Table 2" } },
+    ],
+    modelled: [
+      { what: "Firmware runs at 180 MHz", test: "tests/firmware/nucleo-fw.test.ts" },
+      { what: "8 MHz HSE from ST-LINK", test: "tests/firmware/nucleo-fw.test.ts" },
+      { what: "X2 LSE crystal start-up", test: "tests/firmware/chip-clock.test.ts" },
+      { what: "ST-LINK virtual COM port", test: "tests/sim/nucleo-serial.test.ts" },
+      { what: "User LEDs LD1–LD3", test: "tests/firmware/nucleo-fw.test.ts" },
+      { what: "USER and RESET buttons", test: "tests/sim/nucleo.test.ts" },
+      { what: "USB power tree to 3.3V", test: "tests/sim/nucleo.test.ts" },
+      { what: "Unplugging USB stops the core", test: "tests/firmware/nucleo-fw.test.ts" },
+      { what: "Reflash restarts the core", test: "tests/sim/reflash.test.ts" },
+    ],
+    notModelled: [{ what: "No ST-LINK SWD protocol" }, { what: "No ST-LINK mass storage" }, { what: "No Ethernet MAC or PHY" }, { what: "No USB OTG peripheral" }],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

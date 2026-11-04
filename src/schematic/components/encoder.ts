@@ -140,7 +140,27 @@ export const ky040: ComponentDef = {
     { kind: "R", a: "VCC", b: "CLK", value: "10 kΩ", label: "R2 CLK pull-up" },
     { kind: "R", a: "VCC", b: "DT", value: "10 kΩ", label: "R3 DT pull-up" },
   ],
-  info: { Source: "Community descriptions (Wokwi KY-040 docs, DroneBot Workshop forum); no manufacturer schematic" },
+  // info Source (in the datasheet record): "Community descriptions (Wokwi KY-040 docs, DroneBot Workshop forum); no manufacturer schematic"
+  datasheet: {
+    none: "A no-name breakout board: no maker documents it, so its encoder and pull-ups follow community descriptions.",
+    // The contact resistance bound and the bounce default come from the EC11's data.
+    sources: [DOCS["alps-ec11e"]],
+    modelled: [
+      { what: "Full cycle per detent", test: "tests/sim/encoder.test.ts" },
+      { what: "10 kΩ CLK/DT pull-ups", test: "tests/sim/encoder.test.ts" },
+      { what: "SW floats, no pull-up", test: "tests/sim/encoder.test.ts" },
+      { what: "CLK leads turning clockwise", test: "tests/sim/nano-popular.test.ts" },
+      { what: "Push switch to GND", test: "tests/sim/nucleo-encoder.test.ts" },
+      { what: "Optional bounce, 2 ms settling" },
+    ],
+    notModelled: [
+      { what: "Encoder's maker and part unknown" },
+      { what: "Chattering or sliding-noise waveforms" },
+      { what: "Closed contact is fixed resistance" },
+      { what: "Detent torque and push force" },
+      { what: "Wear and contact life" },
+    ],
+  },
 }
 
 export const encoderComponents: ComponentDef[] = [encoderEc11, ky040]

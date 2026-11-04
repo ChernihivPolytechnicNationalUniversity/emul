@@ -164,7 +164,6 @@ const RECORDS: Record<string, Datasheet> = {
       { what: "Power-on reset, rise time warned", cite: { page: 50, at: "Power Supply Conditions Using Internal Reset Circuit" }, test: "tests/sim/lcd1602.test.ts" },
       { what: "Drives D0–D7 only on reads", test: "tests/sim/lcd1602.test.ts" },
       { what: "Bus timing checked per voltage", cite: { page: 52, at: "Bus Timing Characteristics" } },
-      { what: "125 µA input pull-ups", cite: { page: 51, at: "DC Characteristics (4.5–5.5 V)" } },
     ],
     notModelled: [
       { what: "Oscillator spread (190–350 kHz)", cite: { page: 52, at: "Clock Characteristics" } },
@@ -184,6 +183,7 @@ const RECORDS: Record<string, Datasheet> = {
       { kind: "supply", value: { min: 4.7, max: 5.3 }, limit: { min: -0.5, max: 7 }, cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" }, limitCite: { page: 15, at: "Table 7" } },
       { kind: "busClock", value: { max: 100e3 }, cite: { page: 17, at: "Table 10" } },
       { kind: "address", set: [0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f], cite: { page: 5, at: "Tables 4, 5" } },
+      { kind: "contrast", value: { min: 3.8, typ: 4.2, max: 4.6 }, at: [{ temp: 25 }], cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
     ],
     modelled: [
       { what: "Address 0x27, set by pads", cite: { page: 5, at: "Table 4" }, test: "tests/sim/lcd1602.test.ts" },

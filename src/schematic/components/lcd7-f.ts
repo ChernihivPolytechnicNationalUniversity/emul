@@ -145,8 +145,31 @@ const RECORDS: Record<string, Datasheet> = {
     maker: "Waveshare",
     docs: [DOCS["waveshare-lcd7f-sch"]],
     specs: [],
-    modelled: [],
-    notModelled: [],
+    characteristics: [
+      { kind: "supply", value: { typ: 3.3 }, cite: { page: 1, at: "JP1 LCD_INF" } },
+      { kind: "input", value: { min: 3.3, max: 5 }, cite: { page: 1, at: "U1 PT4103 Vin" } },
+      { kind: "forwardVoltage", value: { typ: 9, approx: true }, cite: { page: 1, at: "VLED+" } },
+      { kind: "output", value: { typ: 10.7, approx: true }, cite: { page: 1, at: "U2 MP1541 AVDD_LCD" } },
+    ],
+    modelled: [
+      { what: "1024×600 picture from LTDC", test: "tests/sim/lcd.test.ts" },
+      { what: "24-bit RGB on the FFC", cite: { page: 1, at: "JP1 LCD_INF" }, test: "tests/sim/lcd.test.ts" },
+      { what: "GT911 at 0x5D after reset", test: "tests/sim/lcd.test.ts" },
+      { what: "Touches reported every 10 ms", test: "tests/sim/lcd.test.ts" },
+      { what: "~0.35 A from 3.3 V", test: "tests/sim/lcd.test.ts" },
+      { what: "Dark when the supply goes", test: "tests/sim/lcd.test.ts" },
+      { what: "DISP enables the backlight", cite: { page: 1, at: "U1 PT4103 EN" } },
+      { what: "10 kΩ touch pull-ups", cite: { page: 1, at: "Touch header" } },
+      { what: "Flags out-of-range pixel clock" },
+    ],
+    notModelled: [
+      { what: "PWM dimming, always full", cite: { page: 1, at: "U1 PT4103 FB" } },
+      { what: "HS, VS, DE polarity unchecked" },
+      { what: "AVDD, VGH, VGL lumped together", cite: { page: 1, at: "U2 MP1541" } },
+      { what: "GT911 configuration has no effect" },
+      { what: "Older GT811 touch version" },
+      { what: "Dithering and scan-direction straps", cite: { page: 1, at: "J1 AT070TN90_V1" } },
+    ],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

@@ -39,6 +39,7 @@ describe("characteristic text (reference strings first)", () => {
     [formatNumber(400e3, "frequency"), "400 kHz"],
     [formatNumber(630e-9, "wavelength"), "630 nm"],
     [formatNumber(0x3c, "address"), "0x3C"],
+    [formatValue({ max: 0.005, sym: true }, "ratio"), "±0.5 %"],
     [formatNumber(32768, "memory"), "32 KB"],
     [formatNumber(224, "memory"), "224 B"],
     [formatNumber(3584, "memory"), "3.5 KB"],
@@ -155,7 +156,7 @@ describe("nothing left behind", () => {
       if (record.characteristics?.length) expect.soft(record.specs, `${def.id}: drop the free-text specs it replaced`).toEqual([])
   })
 
-  it("gives every IC its supply, every LED its forward voltage, once the part is typed", () => {
+  it("gives every powered IC its supply, every LED its forward voltage, once the part is typed", () => {
     const REQUIRED: Partial<Record<string, readonly (keyof typeof KINDS)[]>> = {
       ics: ["supply"],
       displays: ["supply"],
@@ -164,7 +165,9 @@ describe("nothing left behind", () => {
     }
     for (const { def, record } of records()) {
       if (!record.characteristics?.length) continue
-      for (const kind of REQUIRED[def.category] ?? []) expect.soft(record.characteristics.map((c) => c.kind), `${def.id} (${def.category}) needs ${kind}`).toContain(kind)
+      // A supply only for a part that takes one: a resonator or a crystal has no power pin.
+      const powered = def.pins.some((p) => p.kind === "power")
+      for (const kind of REQUIRED[def.category] ?? []) if (kind !== "supply" || powered) expect.soft(record.characteristics.map((c) => c.kind), `${def.id} (${def.category}) needs ${kind}`).toContain(kind)
     }
   })
 })

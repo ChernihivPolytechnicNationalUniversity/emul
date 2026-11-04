@@ -100,6 +100,8 @@ export const KINDS = {
   bandwidth: { label: "Bandwidth", quantity: "frequency", visual: "log", glyph: "sine" },
   slew: { label: "Slew rate", quantity: "slewRate", visual: "log", glyph: "sine" },
   // timing
+  frequency: { label: "Frequency", quantity: "frequency", visual: "log", glyph: "sine" },
+  tolerance: { label: "Tolerance", quantity: "ratio", visual: "range", glyph: "sine" },
   clock: { label: "Max clock", quantity: "frequency", visual: "log", glyph: "sine" },
   busClock: { label: "Bus clock", quantity: "frequency", visual: "log", glyph: "sine" },
   delay: { label: "Delay", quantity: "time", visual: "log", glyph: "clock" },

@@ -146,8 +146,24 @@ const RECORDS: Record<string, Datasheet> = {
     maker: "Murata",
     docs: [DOCS["murata-cstce16m0v53"]],
     specs: [],
-    modelled: [],
-    notModelled: [{ what: "Drift with temperature and age" }, { what: "Deviation is set by hand" }, { what: "Built-in capacitors and ESR" }],
+    characteristics: [
+      { kind: "frequency", value: { typ: 16e6 }, cite: { at: "Specifications" } },
+      { kind: "tolerance", value: { max: 0.005, sym: true }, cite: { at: "Specifications" } },
+      { kind: "temperature", value: { min: -20, max: 80 }, cite: { at: "Specifications" } },
+      { kind: "capacitance", value: { typ: 15e-12 }, cite: { at: "Specifications" } },
+    ],
+    modelled: [
+      { what: "MCU runs at 16 MHz", cite: { at: "Specifications" }, test: "tests/sim/resonator.test.ts" },
+      { what: "Works either way round", test: "tests/sim/resonator.test.ts" },
+      { what: "Deviation shifts the clock", cite: { at: "Specifications" }, test: "tests/sim/resonator.test.ts" },
+      { what: "Outer pins on XTAL needed", test: "tests/sim/resonator.test.ts" },
+      { what: "Ready after 0.5 ms, assumed" },
+    ],
+    notModelled: [
+      { what: "Drift with temperature and age", cite: { at: "Specifications" } },
+      { what: "Deviation is set by hand" },
+      { what: "Built-in capacitors and ESR", cite: { at: "Specifications" } },
+    ],
   },
 }
 for (const def of defs) def.datasheet ??= RECORDS[def.id]

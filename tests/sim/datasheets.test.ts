@@ -15,9 +15,9 @@ import { NOT_MODELLED as ENC28J60 } from "@/sim/enc28j60"
  */
 const PENDING = new Set<string>([
   // No document cited for these in the code, or none to be found for the cited part (WS2815 V1.1, WS2815B 4-pin).
-  "eeprom-24c", "ws2815", "ws2815b-4pin", "ky-040",
+  "ws2815", "ws2815b-4pin",
 ])
-const PENDING_MAX = 4
+const PENDING_MAX = 2
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
 
