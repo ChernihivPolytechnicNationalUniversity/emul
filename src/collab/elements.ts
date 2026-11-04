@@ -1,14 +1,20 @@
 import type * as Y from "yjs"
-import { SCHEMATIC_VERSION, upgradedFrom, type Upgrade } from "@/schematic/migrate"
-import type { HdlModule, PartState, PlacedObject, Schematic, Wire } from "@/schematic/types"
+import { ROOM_ELEMENTS } from "emul-shared/room"
+import { SCHEMATIC_VERSION, upgradedFrom, type SavedSchematic, type Upgrade } from "@/schematic/migrate"
+import type { HdlModule, PartState, PlacedObject, Schematic } from "@/schematic/types"
+import type { WireSegment } from "@/schematic/wires/segment"
 
 export const ROOM_VERSION = "version"
 
-export const roomVersion = () => String(SCHEMATIC_VERSION)
+export const ROOM_FORMAT = "format"
 
-export function onThisVersion(stored: Schematic, stamp: string | undefined): Upgrade & { upgraded: boolean } {
+const FIRST_SHELVED = 4
+
+export const shelfName = (format: number) => (format < FIRST_SHELVED ? ROOM_ELEMENTS : `${ROOM_ELEMENTS}@${format}`)
+
+export function onThisVersion(stored: SavedSchematic | Schematic, stamp: string | undefined): Upgrade & { upgraded: boolean } {
   const version = Number(stamp) || undefined
-  if (version !== undefined && version >= SCHEMATIC_VERSION) return { doc: stored, notes: [], upgraded: false }
+  if (version !== undefined && version >= SCHEMATIC_VERSION) return { doc: stored as Schematic, notes: [], upgraded: false }
   return { ...upgradedFrom(stored, version), upgraded: true }
 }
 
@@ -53,7 +59,7 @@ const unz = <T>(o: Ordered<T>): T => {
 export function join(elements: ReadonlyMap<string, string>): Schematic {
   const objects: Ordered<PlacedObject>[] = []
   const extra = new Map<string, Partial<PlacedObject> & { firmware?: Record<string, string> }>()
-  const wires: Ordered<Wire>[] = []
+  const wires: Ordered<WireSegment>[] = []
   const library: Ordered<HdlModule>[] = []
   const parts: Record<string, PartState> = {}
   const more = (id: string) => extra.get(id) ?? extra.set(id, {}).get(id)!
@@ -71,7 +77,7 @@ export function join(elements: ReadonlyMap<string, string>): Schematic {
     else if (kind === "p") more(id).project = value as PlacedObject["project"]
     else if (kind === "d") more(id).debug = value as PlacedObject["debug"]
     else if (kind === "f") more(id).firmware = value as Record<string, string>
-    else if (kind === "w") wires.push(value as Ordered<Wire>)
+    else if (kind === "w") wires.push(value as Ordered<WireSegment>)
     else if (kind === "s") parts[id] = value as PartState
     else if (kind === "m") library.push(value as Ordered<HdlModule>)
   }
@@ -90,25 +96,72 @@ export function join(elements: ReadonlyMap<string, string>): Schematic {
 
 export type Room = { ydoc: Y.Doc; elements: Y.Map<string>; meta: Y.Map<string> }
 
+export const formatOf = (room: Room) => Number(room.meta.get(ROOM_FORMAT)) || 0
+
+export const newerThanThis = (room: Room) => formatOf(room) > SCHEMATIC_VERSION
+
 export function pushTo(room: Room, doc: Schematic) {
   const next = split(doc)
   room.ydoc.transact(() => {
     for (const [k, v] of next) if (room.elements.get(k) !== v) room.elements.set(k, v)
     for (const k of [...room.elements.keys()]) if (!next.has(k)) room.elements.delete(k)
-    if (room.meta.get(ROOM_VERSION) !== roomVersion()) room.meta.set(ROOM_VERSION, roomVersion())
+    if (formatOf(room) < SCHEMATIC_VERSION) room.meta.set(ROOM_FORMAT, String(SCHEMATIC_VERSION))
   })
 }
 
+function olderShelf(room: Room): { elements: Y.Map<string>; stamp: string | undefined } | null {
+  for (let format = SCHEMATIC_VERSION - 1; format >= FIRST_SHELVED; format--) {
+    const elements = room.ydoc.getMap<string>(shelfName(format))
+    if (elements.size) return { elements, stamp: String(format) }
+  }
+  const legacy = room.ydoc.getMap<string>(shelfName(FIRST_SHELVED - 1))
+  return legacy.size ? { elements: legacy, stamp: room.meta.get(ROOM_VERSION) } : null
+}
+
 export function readRoom(room: Room): Upgrade {
-  const { upgraded, ...read } = onThisVersion(join(new Map(room.elements.entries())), room.meta.get(ROOM_VERSION))
-  if (upgraded) pushTo(room, read.doc)
+  if (room.elements.size) return { doc: join(new Map(room.elements.entries())), notes: [] }
+  const older = olderShelf(room)
+  if (!older) return { doc: join(new Map()), notes: [] }
+  const { upgraded: _upgraded, ...read } = onThisVersion(join(new Map(older.elements.entries())) as unknown as SavedSchematic, older.stamp)
+  pushTo(room, read.doc)
   return read
 }
 
+const holdsAnything = (room: Room) => room.elements.size > 0 || olderShelf(room) !== null
+
 export function hostRoom(room: Room, doc: Schematic): Upgrade | null {
-  if (room.elements.size) return readRoom(room)
+  if (holdsAnything(room)) return readRoom(room)
   pushTo(room, doc)
   return null
 }
 
-export const guestRoom = (room: Room): Upgrade | null => (room.elements.size ? readRoom(room) : null)
+export const guestRoom = (room: Room): Upgrade | null => (holdsAnything(room) ? readRoom(room) : null)
+
+export const roomOf = (ydoc: Y.Doc, meta: Y.Map<string>): Room => ({ ydoc, elements: ydoc.getMap<string>(shelfName(SCHEMATIC_VERSION)), meta })
+
+export type Peer = { format?: unknown }
+
+export const olderPeers = <P extends Peer>(peers: readonly P[]) => peers.filter((p) => !(Number(p.format) >= SCHEMATIC_VERSION))
+
+export const newerPeers = <P extends Peer>(peers: readonly P[]) => peers.filter((p) => Number(p.format) > SCHEMATIC_VERSION)
+
+export type Storage = { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void }
+
+export function reloadForNewer(storage: Storage | null, room: string, format: number): boolean {
+  const key = `emul-reloaded:${room}:${format}`
+  try {
+    if (!storage || storage.getItem(key)) return false
+    storage.setItem(key, "1")
+    return true
+  } catch {
+    return false
+  }
+}
+
+export type NewerSeen = { format: number }
+
+export function onNewerFormat(storage: Storage | null, room: string, format: number, seen: NewerSeen): "reload" | "warn" | null {
+  if (format <= seen.format) return null
+  seen.format = format
+  return reloadForNewer(storage, room, format) ? "reload" : "warn"
+}

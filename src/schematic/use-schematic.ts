@@ -3,11 +3,11 @@ import { isOptLevel, type SourceFile } from "emul-shared/source"
 import { isNetlist } from "emul-shared/hdl"
 import { normalizeFiles } from "@/project/files"
 import { normalizeDebug } from "@/debug/saved"
-import { intersects, objectRect, snap, type FlipAxis, type Point, type Rect, type Turn } from "./geometry"
+import { GRID, intersects, objectPins, objectRect, snap, type FlipAxis, type Point, type Rect, type Turn } from "./geometry"
 import { flipSelection, rotateSelection } from "./orient"
 import { freeSpot, type PlacementScene } from "./placement"
 import { getDef } from "./registry"
-import { migrated, SCHEMATIC_VERSION, upgradedFrom } from "./migrate"
+import { migrated, SCHEMATIC_VERSION, upgradedFrom, type SavedSchematic } from "./migrate"
 import {
   emptySchematic,
   partKey,
@@ -17,11 +17,12 @@ import {
   type Schematic,
   type BoardDebug,
   type HdlModule,
-  type Wire,
 } from "./types"
 import { isHdlDef } from "./hdl"
 import type { WireColorKey } from "./wire-colors"
-import { connectPins, tapWireAt } from "./wiring"
+import { clipOf, connectPins, moved, recoloured, removed, reoriented, tapWireAt, wiringOf, withSegments } from "./wire-edits"
+import { WireGraph } from "./wires/graph"
+import type { WireSegment } from "./wires/segment"
 
 /** A board as a file brings it: its project, build options and debugger settings re-checked. */
 function checked(saved: PlacedObject): PlacedObject {
@@ -45,11 +46,6 @@ function checkedLibrary(library: unknown): HdlModule[] | undefined {
         return { ...rest, files: normalizeFiles(m.files), ...(valid && { netlist, built, builtFrom }) }
       })
     : undefined
-}
-
-function recolor(w: Wire, color: WireColorKey | undefined): Wire {
-  const { color: _previous, ...rest } = w
-  return color ? { ...rest, color } : rest
 }
 
 /** Next free designator with this prefix among `objects`. */
@@ -87,18 +83,22 @@ export const clipOnTheLattice = (clip: Clip): Clip => ({ ...clip, objects: clip.
 
 export type ClipIn = { clip: Clip; notes: string[] }
 
-export function clipOfThisVersion(clip: Clip, version: number | undefined): ClipIn {
-  if (version !== undefined && version >= SCHEMATIC_VERSION) return { clip, notes: [] }
-  const { doc, notes } = upgradedFrom({ objects: clip.objects, wires: clip.wires, parts: clip.parts }, version)
+type SavedClip = { objects: PlacedObject[]; wires?: unknown[]; segments?: WireSegment[]; parts?: Record<string, PartState> }
+
+export function clipOfThisVersion(saved: SavedClip, version: number | undefined): ClipIn | null {
+  const parts = saved.parts ?? {}
+  if (version !== undefined && version > SCHEMATIC_VERSION) return null
+  if (version === SCHEMATIC_VERSION) return { clip: { objects: saved.objects, wires: saved.segments ?? [], parts }, notes: [] }
+  const { doc, notes } = upgradedFrom({ objects: saved.objects, wires: saved.wires ?? [], parts } as SavedSchematic, version)
   return { clip: { objects: doc.objects, wires: doc.wires, parts: doc.parts }, notes }
 }
 
-export const clipboardText = (clip: Clip) => JSON.stringify({ emul: clip, version: SCHEMATIC_VERSION })
+export const clipboardText = (clip: Clip) => JSON.stringify({ emul: { objects: clip.objects, wires: [], segments: clip.wires, parts: clip.parts }, version: SCHEMATIC_VERSION })
 
 export function clipFromClipboard(text: string | undefined): ClipIn | null {
-  let parsed: { emul?: Clip; version?: unknown } | null = null
+  let parsed: { emul?: SavedClip; version?: unknown } | null = null
   try {
-    parsed = text ? (JSON.parse(text) as { emul?: Clip; version?: unknown }) : null
+    parsed = text ? (JSON.parse(text) as { emul?: SavedClip; version?: unknown }) : null
   } catch {
     return null
   }
@@ -113,30 +113,37 @@ export function pasteLanding(scene: PlacementScene, saved: Clip, offset: Point):
 
 export function pastedInto(doc: Schematic, clip: Clip, dx: number, dy: number, idOf: (old: string) => string, newId: () => string): Schematic {
   const ids = new Map(clip.objects.map((o) => [o.id, idOf(o.id)]))
-  const remap = (p: PinRef): PinRef => ({ object: ids.get(p.object) ?? p.object, pin: p.pin })
   const objects = [...doc.objects]
+  const added: PlacedObject[] = []
   for (const o of clipOnTheLattice(clip).objects) {
     const prefix = getDef(o.def)?.prefix
     const next: PlacedObject = { ...o, id: ids.get(o.id)!, x: o.x + dx, y: o.y + dy }
     if (prefix) next.props = { ...o.props, ref: nextRef(objects, prefix) }
     objects.push(next)
+    added.push(next)
   }
-  const wires = clip.wires
-    .filter((w) => ids.has(w.from.object) && ids.has(w.to.object))
-    .map((w) => ({ ...w, id: newId(), from: remap(w.from), to: remap(w.to), points: w.points?.map((p) => ({ x: p.x + dx, y: p.y + dy })) }))
+  const wires = clip.wires.map((s) => ({ ...s, id: newId(), a: { x: s.a.x + dx, y: s.a.y + dy }, b: { x: s.b.x + dx, y: s.b.y + dy } }))
   const parts = { ...doc.parts }
   for (const [k, v] of Object.entries(clip.parts)) {
     const [object, part] = k.split(":")
     const id = ids.get(object)
     if (id) parts[partKey(id, part)] = v
   }
-  return { ...doc, objects, wires: [...doc.wires, ...wires], parts }
+  const points = added.flatMap((o) => objectPins(o, GRID).map((p) => p.point))
+  return withSegments({ ...doc, objects, parts }, wires, [], points, newId)
 }
 
 /** Schematic document plus selection and undo history. All coordinates are world px. */
 export function useSchematic(grid: number) {
   const [history, setHistory] = React.useState<History>(() => ({ past: [], present: emptySchematic(), future: [] }))
   const doc = history.present
+  const [graph] = React.useState(() => new WireGraph())
+  const { objects: docObjects, wires: docWires, library: docLibrary } = doc
+  const wiring = React.useMemo(() => wiringOf(graph, { objects: docObjects, wires: docWires, library: docLibrary }), [graph, docObjects, docWires, docLibrary])
+  const wiringNow = React.useRef(wiring)
+  React.useLayoutEffect(() => {
+    wiringNow.current = wiring
+  }, [wiring])
   const [selectedObjects, setSelectedObjects] = React.useState<ReadonlySet<string>>(() => new Set())
   const [selectedWires, setSelectedWires] = React.useState<ReadonlySet<string>>(() => new Set())
 
@@ -207,18 +214,8 @@ export function useSchematic(grid: number) {
     [grid, setDoc],
   )
 
-  /** Remove objects (with their wires and part state) and wires. */
   const remove = React.useCallback((objects: ReadonlySet<string>, wires: ReadonlySet<string>) => {
-    setDoc((d) => ({
-      ...d,
-      objects: d.objects.filter((o) => !objects.has(o.id)),
-      wires: d.wires.filter(
-        (w) => !wires.has(w.id) && !objects.has(w.from.object) && !objects.has(w.to.object),
-      ),
-      parts: Object.fromEntries(
-        Object.entries(d.parts).filter(([k]) => !objects.has(k.split(":")[0])),
-      ),
-    }))
+    setDoc((d) => removed(d, objects, wires))
     setSelectedObjects((s) => new Set([...s].filter((id) => !objects.has(id))))
     setSelectedWires((s) => new Set([...s].filter((id) => !wires.has(id))))
   }, [setDoc])
@@ -272,13 +269,16 @@ export function useSchematic(grid: number) {
     })
   }, [])
 
-  const selectWire = React.useCallback((id: string, toggle = false) => {
+  const selectWires = React.useCallback((ids: readonly string[], toggle = false) => {
     setSelectedObjects(new Set())
     setSelectedWires((s) => {
-      if (!toggle) return s.has(id) ? s : new Set([id])
+      if (!toggle) return ids.every((id) => s.has(id)) && s.size === ids.length ? s : new Set(ids)
       const next = new Set(s)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      const all = ids.every((id) => next.has(id))
+      for (const id of ids) {
+        if (all) next.delete(id)
+        else next.add(id)
+      }
       return next
     })
   }, [])
@@ -308,19 +308,7 @@ export function useSchematic(grid: number) {
     (from: ReadonlyMap<string, Point>, dx: number, dy: number) => {
       const sdx = snap(dx, grid)
       const sdy = snap(dy, grid)
-      setDoc((d) => ({
-        ...d,
-        objects: d.objects.map((o) => {
-          const p = from.get(o.id)
-          return p ? { ...o, x: p.x + sdx, y: p.y + sdy } : o
-        }),
-        // Bends of wires whose both ends move travel along.
-        wires: d.wires.map((w) =>
-          w.points && from.has(w.from.object) && from.has(w.to.object)
-            ? { ...w, points: w.points.map((p) => ({ x: p.x + sdx, y: p.y + sdy })) }
-            : w,
-        ),
-      }))
+      setDoc((d) => moved(d, from, sdx, sdy, undefined, wiringNow.current))
     },
     [grid, setDoc],
   )
@@ -373,12 +361,12 @@ export function useSchematic(grid: number) {
   }, [setDoc])
 
   const rotate = React.useCallback(
-    (ids: ReadonlySet<string>, turn: Turn) => setDoc((d) => rotateSelection(d, ids, turn, grid)),
+    (ids: ReadonlySet<string>, turn: Turn) => setDoc((d) => reoriented(d, rotateSelection(d, ids, turn, grid), ids)),
     [grid, setDoc],
   )
 
   const flip = React.useCallback(
-    (ids: ReadonlySet<string>, axis: FlipAxis) => setDoc((d) => flipSelection(d, ids, axis, grid)),
+    (ids: ReadonlySet<string>, axis: FlipAxis) => setDoc((d) => reoriented(d, flipSelection(d, ids, axis, grid), ids)),
     [grid, setDoc],
   )
 
@@ -394,33 +382,15 @@ export function useSchematic(grid: number) {
     (entries: Iterable<readonly [string, WireColorKey | undefined]>) => {
       const next = new Map(entries)
       if (next.size === 0) return
-      setDoc((d) => ({
-        ...d,
-        wires: d.wires.map((w) => (next.has(w.id) ? recolor(w, next.get(w.id)) : w)),
-      }))
+      setDoc((d) => recoloured(d, next))
     },
     [setDoc],
   )
 
-  /**
-   * Tap an existing wire at `at` (any world point near it): a junction goes in where the point
-   * projects onto the wire, the wire is split through it and a new wire runs from `from` to
-   * the junction. Wires join pins, so a branch off the middle of one needs a node to branch at.
-   */
   const tapWire = React.useCallback(
-    (wireId: string, at: Point, from: PinRef, points: Point[] = [], color?: WireColorKey) => {
-      setDoc((d) => tapWireAt(d, wireId, at, from, grid, points, color))
+    (segmentId: string, at: Point, from: PinRef, points: Point[] = [], color?: WireColorKey) => {
+      setDoc((d) => tapWireAt(d, segmentId, at, from, points, color))
       setSelectedWires(new Set())
-    },
-    [grid, setDoc],
-  )
-
-  const setWirePoints = React.useCallback(
-    (id: string, points: Point[]) => {
-      setDoc((d) => ({
-        ...d,
-        wires: d.wires.map((w) => (w.id === id ? { ...w, points: points.length ? points : undefined } : w)),
-      }))
     },
     [setDoc],
   )
@@ -436,13 +406,7 @@ export function useSchematic(grid: number) {
   // --- clipboard ------------------------------------------------------------
 
   /** The selected objects with the wires that run between them, ready to paste. */
-  const copySelected = React.useCallback((): Clip | null => {
-    if (selectedObjects.size === 0) return null
-    const objects = doc.objects.filter((o) => selectedObjects.has(o.id))
-    const wires = doc.wires.filter((w) => selectedObjects.has(w.from.object) && selectedObjects.has(w.to.object))
-    const parts = Object.fromEntries(Object.entries(doc.parts).filter(([k]) => selectedObjects.has(k.split(":")[0])))
-    return { objects, wires, parts }
-  }, [doc, selectedObjects])
+  const copySelected = React.useCallback((): Clip | null => clipOf(doc, selectedObjects, wiringNow.current), [doc, selectedObjects])
 
   /**
    * Add a clip's contents shifted by (dx, dy), under fresh ids and free designators, and
@@ -460,6 +424,7 @@ export function useSchematic(grid: number) {
 
   return {
     doc,
+    wiring,
     selectedObjects,
     selectedWires,
     add,
@@ -468,7 +433,7 @@ export function useSchematic(grid: number) {
     clear,
     load,
     selectObject,
-    selectWire,
+    selectWires,
     selectAll,
     deselectAll,
     selectInRect,
@@ -483,7 +448,6 @@ export function useSchematic(grid: number) {
     removeModule,
     addWire,
     tapWire,
-    setWirePoints,
     setWireColors,
     setPart,
     replace,

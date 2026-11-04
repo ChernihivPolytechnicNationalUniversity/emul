@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest"
 import { examples } from "@/schematic/examples"
-import { GRID, intersects, objectPins, objectRect, routeAll, Router, snap } from "@/schematic/geometry"
+import { GRID, intersects, objectPins, objectRect, Router, snap } from "@/schematic/geometry"
 import { bodyBounds, contactCheck, contourOf, designatorRects, freeOffset, freeSpot, landingOffset, nearestFreeWithin, placementCheck, ringsToClear, type PlacementScene } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
-import type { PlacedObject, Wire } from "@/schematic/types"
+import type { LegacyWire as Wire, PlacedObject } from "@/schematic/types"
+import type { WireSegment } from "@/schematic/wires/segment"
+import { routesOf } from "../lib/routes"
 import { boardDocuments } from "../../scripts/lib/stress"
 
 const c = (v: number) => v * GRID
 const part = (id: string, def: string, x: number, y: number): PlacedObject => ({ id, def, x: c(x), y: c(y) })
 
-function scene(objects: PlacedObject[], wires: Wire[] = []): PlacementScene {
-  return { objects, wires, routes: routeAll(objects, wires, GRID), grid: GRID }
+function scene(objects: PlacedObject[], wires: readonly (Wire | WireSegment)[] = []): PlacementScene {
+  return { objects, routes: routesOf(objects, wires), grid: GRID }
 }
 
 describe("a part takes the room it draws, not its whole box", () => {
@@ -202,7 +204,7 @@ describe("parts do not pile onto each other", () => {
   it("bounding the search over a 1 700-board selection does not overflow the call stack", () => {
     const [doc] = boardDocuments([1700])
     const anchor = part("anchor", "resistor", -1000, 0)
-    expect(() => ringsToClear({ objects: [...doc.objects, anchor], wires: [], routes: [], grid: GRID }, doc.objects)).not.toThrow()
+    expect(() => ringsToClear({ objects: [...doc.objects, anchor], routes: [], grid: GRID }, doc.objects)).not.toThrow()
   })
 
   it("a junction is a point on a net, not a part, and goes where its wires meet", () => {
@@ -317,14 +319,7 @@ describe("parts do not pile onto each other", () => {
 })
 
 describe("wires keep off the words", () => {
-  it("a part cannot stand where the wire leaving one of its pins would run through someone's label", () => {
-    const q = part("q", "crystal", 0, 0)
-    const g = part("g", "oscillator", 0, 4)
-    const wire: Wire = { id: "w", from: { object: "q", pin: "1" }, to: { object: "g", pin: "VCC" } }
-    const check = placementCheck(scene([q, g], [wire]), [g])
-    expect(check(0, 0)).toBe(false)
-    expect(check(0, c(-1))).toBe(true)
-  })
+  it.todo("a part cannot stand where the wire the rubber band lays from one of its pins would run through someone's label (phase 4, design.md §6.3)")
 
   it("a wire from a crystal to an oscillator below it goes round the crystal's frequency", () => {
     const q = part("q", "crystal", 0, 0)

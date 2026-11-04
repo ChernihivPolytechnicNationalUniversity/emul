@@ -26,12 +26,13 @@ const PIN_FILL: Record<PinKind, string> = {
 }
 
 export const hollowMarkerHidden = (def: ComponentDef | undefined, kind: PinKind, connected: boolean, contact: boolean) =>
-  connected && !contact && kind === "digital" && !def?.pinsAreSockets
+  (connected || contact) && kind === "digital" && !def?.pinsAreSockets
 
 export type PinMarker = { radiusCells: number; fill?: string; stroke?: string; className: string; strokeWidth: number }
 
-export function pinMarker(def: ComponentDef | undefined, kind: PinKind, live: boolean, contact: boolean, color: string | undefined): PinMarker | null {
-  if (hollowMarkerHidden(def, kind, live, contact)) return null
+export function pinMarker(def: ComponentDef | undefined, kind: PinKind, live: boolean, touching: boolean, color: string | undefined): PinMarker | null {
+  if (hollowMarkerHidden(def, kind, live, touching)) return null
+  const contact = touching && !!def?.pinsAreSockets
   const filled = !!color && (contact || kind === "node")
   return {
     radiusCells: contact ? 0.26 : kind === "nc" ? 0.14 : 0.2,
@@ -40,9 +41,9 @@ export function pinMarker(def: ComponentDef | undefined, kind: PinKind, live: bo
     className: cn(
       "transition-[r] group-hover/pin:stroke-primary",
       !color && "stroke-foreground/60",
-      !color && live && !contact && "stroke-primary",
+      !color && (live || touching) && !contact && "stroke-primary",
       !filled && (contact ? "fill-foreground" : PIN_FILL[kind]),
     ),
-    strokeWidth: live ? 2 : 1,
+    strokeWidth: live || touching ? 2 : 1,
   }
 }

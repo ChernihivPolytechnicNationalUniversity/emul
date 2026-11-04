@@ -15,7 +15,6 @@ const padIntoLiveLoad: Netlist = {
   pinNet: new Map([["u:P", 0], ["u:GND", -1]]),
   nodeNet: new Map(),
   groundKeys: new Set(["u:GND"]),
-  contacts: new Map(),
 }
 
 function bench() {

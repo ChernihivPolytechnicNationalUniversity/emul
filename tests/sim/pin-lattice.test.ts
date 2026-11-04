@@ -12,13 +12,14 @@ import { MODULE_PAD } from "@/schematic/components/open746i-c-art"
 import { examples } from "@/schematic/examples"
 import { blocksOf } from "@/schematic/printed-text"
 import { bodyBounds } from "@/schematic/body"
-import { allowedRotations, bodyCentre, diagonalSquare, DIR, drawnBody, framePoint, GRID, isDiagonal, objectPins, objectRect, objectSize, orientPin, ownBodies, routeAll, stretchedLeads, type Orientation, type Point, type Turn } from "@/schematic/geometry"
-import { buildNets } from "@/schematic/nets"
+import { allowedRotations, bodyCentre, diagonalSquare, DIR, drawnBody, framePoint, GRID, isDiagonal, objectPins, objectRect, objectSize, orientPin, ownBodies, stretchedLeads, type Orientation, type Point, type Turn } from "@/schematic/geometry"
+import { legacyNets as buildNets } from "@/schematic/nets"
 import { rotateSelection } from "@/schematic/orient"
 import { footprint, placementCheck, type PlacementScene } from "@/schematic/placement"
 import { getDef, registry } from "@/schematic/registry"
 import type { ComponentDef, PlacedObject, Rotation, Schematic } from "@/schematic/types"
 import { SimStore } from "@/sim/sim-store"
+import { routesOf } from "../lib/routes"
 
 vi.mock("@/sim/sim-store", async (original) => ({
   ...(await original<typeof import("@/sim/sim-store")>()),
@@ -32,7 +33,7 @@ const half = (v: number) => whole(v * 2)
 const orientationsOf = (def: ComponentDef): Orientation[] => allowedRotations(def).flatMap((rotation) => [{ rotation, mirror: false }, { rotation, mirror: true }])
 const diagonalOrientations: Orientation[] = ([45, 135, 225, 315] as Rotation[]).flatMap((rotation) => [{ rotation, mirror: false }, { rotation, mirror: true }])
 const placedAs = (def: string, o: Orientation, x = 0, y = 0, ref?: string): PlacedObject => ({ id: ref ?? def, def, x: c(x), y: c(y), ...(o.rotation && { rotation: o.rotation }), ...(o.mirror && { mirror: true }), ...(ref && { props: { ref } }) })
-const scene = (objects: PlacedObject[]): PlacementScene => ({ objects, wires: [], routes: [], grid: GRID })
+const scene = (objects: PlacedObject[]): PlacementScene => ({ objects, routes: [], grid: GRID })
 const at = (o: PlacedObject, pin: string) => objectPins(o, GRID).find((p) => p.pin.id === pin)!.point
 const cells = (p: Point) => ({ x: p.x / GRID, y: p.y / GRID })
 const leadEnds = (path: string) => [...path.matchAll(/L(-?[\d.e-]+) (-?[\d.e-]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }))
@@ -521,7 +522,7 @@ describe("a pin name the field does not draw is no obstacle", () => {
     const doc: Schematic = { objects: parts, wires: [], parts: {} }
     for (const d of doc.objects) expect.soft(placementCheck(scene(doc.objects), [d])(0, 0), `${d.props?.ref}`).toBe(false)
     const supply = placedAs("ac-source", { rotation: 0, mirror: false }, -8, 1, "G1")
-    const wired: PlacementScene = { objects: [...parts, supply], wires: [{ id: "w", from: { object: "G1", pin: "+" }, to: { object: "D1", pin: "1" } }], routes: [], grid: GRID }
+    const wired: PlacementScene = { objects: [...parts, supply], routes: routesOf([...parts, supply], [{ id: "w", from: { object: "G1", pin: "+" }, to: { object: "D1", pin: "1" } }]), grid: GRID }
     expect.soft(placementCheck(wired, [parts[2]])(0, 0), "D3, whose cathode's name D1's wire passes at L").toBe(false)
     expect.soft(placementCheck(wired, [parts[0]])(0, 0), "D1, whose wire leaves over D3's hidden name").toBe(false)
   })
@@ -532,11 +533,11 @@ describe("a pin name the field does not draw is no obstacle", () => {
     const away = (o: PlacedObject) => ({ ...o, x: o.x + c(9), y: o.y + c(9) })
     const wire = { id: "w", from: { object: "G1", pin: "+" }, to: { object: "D1", pin: "1" } }
     const d3away = [parts[0], parts[1], away(parts[2]), parts[3], supply]
-    const routes = routeAll(d3away, [wire], GRID)
-    expect.soft(routes.length, "the wire from G1 to D1 is routed").toBe(1)
-    expect.soft(placementCheck({ objects: d3away, wires: [wire], routes, grid: GRID }, [d3away[2]])(-c(9), -c(9)), "D3 brought back past that wire: its cathode's name hides on landing").toBe(false)
+    const routes = routesOf(d3away, [wire])
+    expect.soft(routes.length, "the wire from G1 to D1 is laid").toBe(1)
+    expect.soft(placementCheck({ objects: d3away, routes, grid: GRID }, [d3away[2]])(-c(9), -c(9)), "D3 brought back past that wire: its cathode's name hides on landing").toBe(false)
     const d1away = [away(parts[0]), parts[1], parts[2], parts[3], supply]
-    expect.soft(placementCheck({ objects: d1away, wires: [wire], routes: [], grid: GRID }, [d1away[0]])(-c(9), -c(9)), "D1 brought back: D3's name it lands on hides").toBe(false)
+    expect.soft(placementCheck({ objects: d1away, routes: [], grid: GRID }, [d1away[0]])(-c(9), -c(9)), "D1 brought back: D3's name it lands on hides").toBe(false)
   })
 
   it("names hidden by a contact among the parts that stand still, or among the parts carried together, are no obstacle either", () => {

@@ -74,14 +74,16 @@ describe("a connected pin keeps its marker only where it is a socket", () => {
     for (const id of ["open746i-c", "nucleo-f429zi", "lcd7-f", "lx-lcbst"]) expect(hollowMarkerHidden(def(id), "digital", true, false)).toBe(false)
   })
 
-  it("an open pin, a touching pin and the filled markers are never hidden", () => {
+  it("an open pin and the filled markers are never hidden; a part's pin butted on another reads as a connected one (design.md §8: no dot for two pins)", () => {
     const resistor = def("resistor")
-    expect(hollowMarkerHidden(resistor, "digital", false, false)).toBe(false)
-    expect(hollowMarkerHidden(resistor, "digital", true, true)).toBe(false)
-    for (const kind of ["power", "gnd", "analog", "node", "nc"] as const) expect(hollowMarkerHidden(resistor, kind, true, false)).toBe(false)
+    expect.soft(hollowMarkerHidden(resistor, "digital", false, false), "open").toBe(false)
+    expect.soft(hollowMarkerHidden(resistor, "digital", false, true), "butted").toBe(true)
+    expect.soft(pinMarker(resistor, "digital", false, true, "var(--wire-red)"), "butted, no dot").toBeNull()
+    expect.soft(pinMarker(def("supply"), "power", true, true, "var(--wire-red)")!.radiusCells, "a rail pin butted keeps its own marker, not a contact dot").toBe(pinMarker(def("supply"), "power", true, false, "var(--wire-red)")!.radiusCells)
+    for (const kind of ["power", "gnd", "analog", "node", "nc"] as const) expect.soft(hollowMarkerHidden(resistor, kind, true, false), kind).toBe(false)
   })
 
-  it("a contact is one filled dot, bigger than a pin's own marker, in the net's colour when it has one", () => {
+  it("a socket's contact is one filled dot, bigger than a pin's own marker, in the net's colour when it has one", () => {
     const socket = def("lcd7-f")
     const contact = pinMarker(socket, "digital", true, true, undefined)!
     const free = pinMarker(socket, "digital", false, false, undefined)!

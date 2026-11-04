@@ -9,7 +9,7 @@ type Pin = [PlacedObject, string]
 function sheet(grid: number) {
   const b = builder(grid)
   const vert = (def: string, x: number, y: number, props: Record<string, string> = {}) => b.place(def, x, y, props, 90)
-  const node = (x: number, y: number) => b.place("junction", x - 1, y - 1)
+  const node = b.node
   const gnd = (x: number, y: number) => b.place("ground", x - 1, y)
   const join = (...pins: Pin[]) => {
     for (let k = 1; k < pins.length; k++) b.wire(pins[k - 1][0], pins[k - 1][1], pins[k][0], pins[k][1])

@@ -1,7 +1,8 @@
 import * as React from "react"
 import { SimStore } from "./sim-store"
 import { pinKey, type Damage, type PartState, type Schematic } from "@/schematic/types"
-import { TopologyGate } from "./topology"
+import { FlowGate, TopologyGate } from "./topology"
+import type { Circuit } from "@/schematic/circuit"
 import { benchAudio } from "./audio"
 import { getDef } from "@/schematic/registry"
 import type { Failure, ProbeReading, Reading, TraceChunk } from "./engine"
@@ -115,7 +116,6 @@ function toReadout(s: Snapshot, displays: Map<string, DisplayFrame>): SimReadout
 export type SimOptions = {
   /** Simulated seconds per real second; 1 is real time. */
   speed?: number
-  contacts?: ReadonlyMap<string, string>
   /** Voltages to track across every solver step; the array identity drives the update. */
   probes?: Probe[]
   onFailure?: (f: Failure) => void
@@ -136,7 +136,6 @@ export type SimOptions = {
 export type { DebugBridge } from "@/debug/session"
 
 const NO_PROBES: Probe[] = []
-const NO_CONTACTS: ReadonlyMap<string, string> = new Map()
 
 /**
  * Runs the electrical simulation on a worker thread, at `speed` × real time.
@@ -145,8 +144,9 @@ const NO_CONTACTS: ReadonlyMap<string, string> = new Map()
  */
 export function useSimulation(
   doc: Schematic,
+  circuit: Circuit,
   running: boolean,
-  { speed = 1, contacts = NO_CONTACTS, probes = NO_PROBES, onFailure, traceBucket = 0, onTrace, logic = false, onLogic, onDebugStop, onRunning }: SimOptions = {},
+  { speed = 1, probes = NO_PROBES, onFailure, traceBucket = 0, onTrace, logic = false, onLogic, onDebugStop, onRunning }: SimOptions = {},
 ) {
   const [readout, setReadout] = React.useState<SimReadout>(idle)
   /** True once the worker has taken a step: there is then state a restart would throw away. */
@@ -216,14 +216,16 @@ export function useSimulation(
 
   // Topology and values: anything that changes the netlist.
   const [topologyGate] = React.useState(() => new TopologyGate())
-  const library = React.useMemo(() => doc.library?.map((m) => ({ ...m, files: [] })), [doc.library])
-  const topology = React.useMemo(
-    () => topologyGate.latest({ objects: doc.objects, wires: doc.wires, library }, contacts),
-    [doc.objects, doc.wires, library, contacts, topologyGate],
-  )
+  const [flowGate] = React.useState(() => new FlowGate())
+  const library = React.useMemo(() => circuit.library?.map((m) => ({ ...m, files: [] })), [circuit.library])
+  const topology = React.useMemo(() => topologyGate.latest({ ...circuit, library }), [circuit, library, topologyGate])
+  const flow = React.useMemo(() => flowGate.latest(circuit.flow), [circuit.flow, flowGate])
   React.useEffect(() => {
-    send({ t: "doc", doc: { ...topology, parts: {} } })
+    send({ t: "circuit", circuit: topology })
   }, [send, topology])
+  React.useEffect(() => {
+    send({ t: "flow", flow })
+  }, [send, flow])
 
   // Switch and button states are pushed live; they do not rebuild the netlist.
   React.useEffect(() => {

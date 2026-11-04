@@ -7,7 +7,7 @@
  */
 import { beforeAll, describe, expect, it } from "vitest"
 import { GRID } from "@/schematic/geometry"
-import { builder } from "@/schematic/builder"
+import { builder, connect, copied, rewire } from "@/schematic/builder"
 import { getDef } from "@/schematic/registry"
 import { pinKey } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
@@ -97,9 +97,9 @@ describe("PIC16F628A on the bench: INTOSC, LED, serial terminal", () => {
 
   it("MCLR pulled low holds the part; released, it restarts with an MCLR reset (§14.3)", () => {
     const before = loop.snapshot()!.mcus[b.dd.id].resets
-    const doc = structuredClone(b.doc)
+    const doc = copied(b.doc)
     const gnd = doc.objects.find((o) => o.def === "ground")!
-    doc.wires = doc.wires.map((w) => (w.from.object === b.dd.id && w.from.pin === "RA5" ? { ...w, to: { object: gnd.id, pin: "GND" } } : w))
+    rewire(doc, (w) => (w.from.object === b.dd.id && w.from.pin === "RA5" ? { ...w, to: { object: gnd.id, pin: "GND" } } : w))
     loop.setDoc(doc)
     run(loop, state, 0.05)
     const held = loop.snapshot()!.mcus[b.dd.id]
@@ -120,13 +120,14 @@ describe("13 V on MCLR/VPP", () => {
     const b = bench()
     // RB6 and RB7 to ground, MCLR to a 13 V supply instead of through R1 to +5 V.
     const gnd = b.doc.objects.find((o) => o.def === "ground")!
-    const vpp = { id: "vpp", def: "supply", x: -20, y: 0, rotation: 0, props: { value: "VPP", voltage: "13 V" } }
+    const vpp = { id: "vpp", def: "supply", x: -GRID, y: 0, rotation: 0, props: { value: "VPP", voltage: "13 V" } }
     b.doc.objects.push(vpp as (typeof b.doc.objects)[number])
-    b.doc.wires = b.doc.wires.filter((w) => !(w.from.object === b.dd.id && w.from.pin === "RA5") && !(w.to.object === b.dd.id && w.to.pin === "RA5"))
-    b.doc.wires.push(
-      { id: "w-vpp", from: { object: b.dd.id, pin: "RA5" }, to: { object: "vpp", pin: "V" }, points: [] } as (typeof b.doc.wires)[number],
-      { id: "w-rb6", from: { object: b.dd.id, pin: "RB6" }, to: { object: gnd.id, pin: "GND" }, points: [] } as (typeof b.doc.wires)[number],
-      { id: "w-rb7", from: { object: b.dd.id, pin: "RB7" }, to: { object: gnd.id, pin: "GND" }, points: [] } as (typeof b.doc.wires)[number],
+    rewire(b.doc, (w) => (!(w.from.object === b.dd.id && w.from.pin === "RA5") && !(w.to.object === b.dd.id && w.to.pin === "RA5") ? w : null))
+    connect(
+      b.doc,
+      { id: "w-vpp", from: { object: b.dd.id, pin: "RA5" }, to: { object: "vpp", pin: "V" }, points: [] },
+      { id: "w-rb6", from: { object: b.dd.id, pin: "RB6" }, to: { object: gnd.id, pin: "GND" }, points: [] },
+      { id: "w-rb7", from: { object: b.dd.id, pin: "RB7" }, to: { object: gnd.id, pin: "GND" }, points: [] },
     )
     const { loop, state } = start(b.doc)
     run(loop, state, 0.2)

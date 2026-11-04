@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest"
 import { STM32F401CC, STM32F401CE, STM32F411CE } from "@/mcu/chip"
 import { weactBlackpillF401cc, weactBlackpillF401ce, weactBlackpillF411 } from "@/schematic/components/weact-blackpill"
-import { builder } from "@/schematic/builder"
+import { builder, disconnect } from "@/schematic/builder"
 import { GRID } from "@/schematic/geometry"
 import { partKey, pinKey, type PlacedObject } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
@@ -109,7 +109,7 @@ describe("WeAct Black Pill without firmware", () => {
     doc.parts[partKey(ls.id, "S")] = { on: false }
     expect(lit(settle(), "C13")).toBe(true)
     doc.objects.splice(doc.objects.indexOf(ls), 1)
-    doc.wires.splice(doc.wires.indexOf(w), 1)
+    disconnect(doc, w)
   })
 
   it("pulls PA0 to GND through 330 Ω while KEY is held; NRST pulls R down", () => {

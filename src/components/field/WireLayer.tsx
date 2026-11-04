@@ -1,12 +1,7 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import {
-  nearestSegment,
-  toPath,
-  trimRouteEnds,
-  type Point,
-  type RoutedWire,
-} from "@/schematic/geometry"
+import { toPath, trimRouteEnds, type Point, type RoutedWire } from "@/schematic/geometry"
+import { runPath, type PinCorner } from "@/schematic/wire-look"
 import type { SpatialIndex } from "@/schematic/spatial"
 import type { PlacedObject } from "@/schematic/types"
 import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
@@ -21,7 +16,10 @@ const HIT_PX = 14
 const HANDLE_CELLS = 0.15
 const HANDLE_MIN_PX = 2.5
 const HANDLE_MAX_PX = 4
-const HANDLE_HIT_PX = 11
+const DOT_CELLS = 0.2
+const DOT_MIN_PX = 1.5 * WIRE_PX
+const DOT_MAX_PX = 2.5 * WIRE_PX
+const OPEN_END_CELLS = 0.14
 
 type WireLayerProps = {
   routes: readonly RoutedWire[]
@@ -31,17 +29,13 @@ type WireLayerProps = {
   hoveredNet: string | null
   colorOf: (wireId: string) => WireColorKey
   netOfWire: (wireId: string) => string | undefined
-  bendsOf: (wireId: string) => readonly Point[] | undefined
+  dots: readonly Point[]
+  dangling: readonly Point[]
+  corners: readonly PinCorner[]
   flow: WireFlow
   onWirePointerDown: (e: React.PointerEvent<SVGPathElement>, id: string) => void
   onWirePointerEnter: (id: string) => void
   onWirePointerLeave: (id: string) => void
-  /** Double-click on a segment: insert a bend at `index` of the wire's points. */
-  onInsertBend: (wireId: string, index: number, clientX: number, clientY: number) => void
-  onRemoveBend: (wireId: string, index: number) => void
-  onBendPointerDown: (e: React.PointerEvent<SVGGElement>, wireId: string, index: number) => void
-  onBendPointerMove: (e: React.PointerEvent<SVGGElement>) => void
-  onBendPointerUp: (e: React.PointerEvent<SVGGElement>) => void
 }
 
 type NetGroup = { net: string; wires: RoutedWire[] }
@@ -60,26 +54,48 @@ export const WireLayer = React.memo(function WireLayer({
   hoveredNet,
   colorOf,
   netOfWire,
-  bendsOf,
+  dots,
+  dangling,
+  corners,
   flow,
   onWirePointerDown,
   onWirePointerEnter,
   onWirePointerLeave,
-  onInsertBend,
-  onRemoveBend,
-  onBendPointerDown,
-  onBendPointerMove,
-  onBendPointerUp,
 }: WireLayerProps) {
   React.useEffect(() => {
     flow.setScale(scale)
   }, [flow, scale])
   const radius = wireCornerRadius(grid)
   const px = 1 / scale
-  const handleR = handleRadius(grid, scale)
+  const dotR = Math.min(Math.max(DOT_CELLS * grid * scale, DOT_MIN_PX), DOT_MAX_PX) * px
+  const endOf = React.useMemo(() => {
+    const m = new Map<string, string>()
+    for (const r of routes) for (const p of [r.pts[0], r.pts[r.pts.length - 1]]) if (p) m.set(`${p.x},${p.y}`, r.id)
+    return m
+  }, [routes])
+  const marks = React.useMemo(
+    () => ({
+      dots: dots.flatMap((p) => {
+        const id = endOf.get(`${p.x},${p.y}`)
+        return id ? [{ p, id }] : []
+      }),
+      open: dangling.flatMap((p) => {
+        const id = endOf.get(`${p.x},${p.y}`)
+        return id ? [{ p, id }] : []
+      }),
+    }),
+    [dots, dangling, endOf],
+  )
 
   const groups = React.useMemo(() => groupByNet(routes, netOfWire), [routes, netOfWire])
-  const paths = React.useMemo(() => new Map(routes.map((r) => [r.id, toPath(r.pts, radius)])), [routes, radius])
+  const paths = React.useMemo(() => new Map(routes.map((r) => [r.id, runPath(r.pts, radius, r.leads)])), [routes, radius])
+  const patches = React.useMemo(
+    () => [
+      ...routes.flatMap((r) => [r.leads?.start && toPath([r.leads.start, r.pts[0]]), r.leads?.end && toPath([r.leads.end, r.pts[r.pts.length - 1]])].filter((d): d is string => !!d)),
+      ...corners.map((c) => toPath([c.a, c.at, c.b])),
+    ],
+    [routes, corners],
+  )
   const pathOf = (id: string) => paths.get(id) ?? ""
   const trim = casingTrim(grid)
   const casings = React.useMemo(() => new Map(routes.map((r) => [r.id, toPath(trimRouteEnds(r.pts, trim), radius)])), [routes, radius, trim])
@@ -88,6 +104,16 @@ export const WireLayer = React.memo(function WireLayer({
 
   return (
     <svg data-slot="wires" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
+      {patches.length > 0 && (
+        <g data-slot="pin-turns" pointerEvents="none">
+          {patches.map((d, i) => (
+            <path key={i} d={d} fill="none" stroke="var(--background)" strokeWidth={WIRE_PX + CASING_PX} strokeLinecap="butt" strokeLinejoin="miter" vectorEffect="non-scaling-stroke" />
+          ))}
+          {corners.map((c) => (
+            <path key={`${c.at.x},${c.at.y}`} data-corner={`${c.at.x},${c.at.y}`} d={`M${c.a.x} ${c.a.y} Q${c.at.x} ${c.at.y} ${c.b.x} ${c.b.y}`} fill="none" className="stroke-foreground" strokeWidth={WIRE_PX} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          ))}
+        </g>
+      )}
       {groups.map(({ net, wires }) => (
         <g
           key={net}
@@ -151,45 +177,23 @@ export const WireLayer = React.memo(function WireLayer({
                   onPointerDown={(e) => onWirePointerDown(e, route.id)}
                   onPointerEnter={() => onWirePointerEnter(route.id)}
                   onPointerLeave={() => onWirePointerLeave(route.id)}
-                  onDoubleClick={(e) => {
-                    const seg = nearestSegment(route.pts, clientToLocal(e))
-                    onInsertBend(route.id, route.owner[seg], e.clientX, e.clientY)
-                  }}
                 />
-                {selected.has(route.id) &&
-                  bendsOf(route.id)?.map((p, idx) => (
-                    <g
-                      key={idx}
-                      data-bend={idx}
-                      className="group/bend pointer-events-auto cursor-move"
-                      onPointerDown={(e) => onBendPointerDown(e, route.id, idx)}
-                      onPointerMove={onBendPointerMove}
-                      onPointerUp={onBendPointerUp}
-                      onPointerCancel={onBendPointerUp}
-                      onDoubleClick={(e) => {
-                        e.stopPropagation()
-                        onRemoveBend(route.id, idx)
-                      }}
-                    >
-                      <circle cx={p.x} cy={p.y} r={HANDLE_HIT_PX * px} fill="transparent" stroke="none" />
-                      <circle
-                        cx={p.x}
-                        cy={p.y}
-                        r={handleR}
-                        fill={color}
-                        stroke="var(--background)"
-                        strokeWidth={1.5}
-                        vectorEffect="non-scaling-stroke"
-                        className="transition-[r] group-hover/bend:fill-primary"
-                        pointerEvents="none"
-                      />
-                    </g>
-                  ))}
               </g>
             )
           })}
         </g>
       ))}
+      <g data-slot="wire-marks" pointerEvents="none">
+        {marks.dots.map(({ p, id }) => (
+          <g key={`dot:${p.x},${p.y}`} data-junction={`${p.x},${p.y}`}>
+            <circle cx={p.x} cy={p.y} r={dotR + CASING_PX * px} fill="var(--background)" />
+            <circle cx={p.x} cy={p.y} r={dotR} fill={wireColorVar(colorOf(id))} />
+          </g>
+        ))}
+        {marks.open.map(({ p, id }) => (
+          <circle key={`open:${p.x},${p.y}`} data-dangling={`${p.x},${p.y}`} cx={p.x} cy={p.y} r={OPEN_END_CELLS * grid} fill="var(--background)" stroke={wireColorVar(colorOf(id))} strokeWidth={WIRE_PX} vectorEffect="non-scaling-stroke" />
+        ))}
+      </g>
     </svg>
   )
 })
@@ -253,10 +257,3 @@ function Pending({ objects, index, pending, grid, radius, handleR, part }: { obj
   )
 }
 
-function clientToLocal(e: React.MouseEvent<SVGPathElement>): Point {
-  const svg = e.currentTarget.ownerSVGElement
-  const m = svg?.getScreenCTM()?.inverse()
-  if (!m) return { x: e.clientX, y: e.clientY }
-  const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m)
-  return { x: p.x, y: p.y }
-}

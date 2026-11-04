@@ -522,7 +522,7 @@ export const nucleoPwm: Example = {
     wire(r, "2", led, "1")
     wire(led, "2", gnd, "GND", [[46, 25], [46, 29], [48, 29]])
     // Board ground is CN10 pin 5, right below D6.
-    wire(u, "CN10-5", gnd, "GND", [[31, 26], [31, 31], [50, 31], [50, 29], [48, 29]])
+    wire(u, "CN10-5", gnd, "GND", [[31, 26], [31, 29], [48, 29]])
     // TIM4 input capture on D26 (PB6, CN10-13) fed from LD1's PWM on D33 (PB0, CN10-31).
     wire(u, "CN10-13", u, "CN10-31", [[33, 30], [33, 39]])
     return doc

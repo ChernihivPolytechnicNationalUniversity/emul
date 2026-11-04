@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest"
 import { GRID } from "@/schematic/geometry"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections, rewire } from "@/schematic/builder"
 import { lab1Stand, nucleoBlink } from "@/schematic/examples"
 import { partKey, type Schematic } from "@/schematic/types"
 import { SimLoop, type McuStatus } from "@/sim/loop"
@@ -49,7 +49,7 @@ function lab1WithoutCrystal() {
   dd.props = { ...dd.props, firmware: "lab1-f746.elf", firmwareData: exampleBase64("lab1-f746.elf") }
   const zq = doc.objects.find((o) => o.def === "crystal")!
   doc.objects = doc.objects.filter((o) => o !== zq)
-  doc.wires = doc.wires.filter((w) => w.from.object !== zq.id && w.to.object !== zq.id)
+  rewire(doc, (w) => (w.from.object !== zq.id && w.to.object !== zq.id ? w : null))
   return { doc, dd }
 }
 
@@ -96,7 +96,7 @@ describe("clock sources", () => {
     extra.wire(v, "V", g, "VCC")
     extra.wire(g, "GND", gnd, "GND")
     doc.objects.push(...extra.doc.objects)
-    doc.wires.push(...extra.doc.wires)
+    connect(doc, ...connections(extra.doc))
     const { run, status } = start(doc, dd.id)
     run(0.05)
     expect.soft(problems(status()), "the inspector says why").toBe("HSE in crystal mode, but OSC_IN carries an external clock (needs HSEBYP)")

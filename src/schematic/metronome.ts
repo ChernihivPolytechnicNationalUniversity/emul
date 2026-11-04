@@ -12,12 +12,11 @@ export type MetronomeBench = {
 }
 
 export function buildMetronome(grid: number, opts: { tempo?: string; pitch?: string; volume?: string } = {}): MetronomeBench {
-  const { doc, place, wire } = builder(grid)
+  const { doc, place, wire, node } = builder(grid)
   const vert = (def: string, x: number, y: number, props: Record<string, string> = {}) => place(def, x, y, props, 90)
   const up = (def: string, x: number, y: number, props: Record<string, string> = {}) => place(def, x, y, props, 270)
   const flip = (obj: PlacedObject) => Object.assign(obj, { mirror: true })
   const back = (def: string, x: number, y: number, props: Record<string, string> = {}) => place(def, x, y, props, 180)
-  const node = (x: number, y: number) => place("junction", x - 1, y - 1)
   const gnd = (x: number, y: number): Pin => [place("ground", x - 1, y), "GND"]
   const j = (n: PlacedObject): Pin => [n, "J"]
   const join = (...pins: Pin[]) => {

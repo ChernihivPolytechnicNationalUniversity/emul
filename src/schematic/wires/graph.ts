@@ -11,6 +11,9 @@ export type WireNets = {
   connected: (key: string) => boolean
   junctions: () => readonly Point[]
   dangling: () => readonly Point[]
+  token: (net: string) => object | undefined
+  segment: (id: string) => WireSegment | undefined
+  pin: (key: string) => WirePin | undefined
 }
 
 export type WireDelta = {
@@ -27,7 +30,9 @@ type Net = { segments: Set<string>; pins: Set<string> }
 const EMPTY: readonly string[] = []
 const NO_KINDS: ReadonlySet<PinKind> = new Set()
 
-const samePinEntry = (a: WirePin, b: WirePin) => a === b || (a.key === b.key && a.at.x === b.at.x && a.at.y === b.at.y && !!a.socket === !!b.socket && a.kind === b.kind)
+const sameOut = (a: WirePin, b: WirePin) => a.out === b.out || (!!a.out && !!b.out && a.out.x === b.out.x && a.out.y === b.out.y)
+
+const samePinEntry = (a: WirePin, b: WirePin) => a === b || (a.key === b.key && a.at.x === b.at.x && a.at.y === b.at.y && !!a.socket === !!b.socket && a.kind === b.kind && sameOut(a, b))
 
 const isJunction = (v: Vertex) => v.ends.size + v.pins.size >= 3
 
@@ -56,6 +61,8 @@ export class WireGraph {
 
   of(wires: readonly WireSegment[], pins: readonly WirePin[]): WireNets {
     if (wires === this.lastWires && pins === this.lastPins) return this.view
+    const shift = this.translationTo(wires, pins)
+    if (shift) return this.translate(shift, wires, pins)
     const added: WireSegment[] = []
     const pinsAdded: WirePin[] = []
     for (const s of wires) if (this.segments.get(s.id) !== s) added.push(s)
@@ -68,6 +75,65 @@ export class WireGraph {
     this.lastWires = wires
     this.lastPins = pins
     return view
+  }
+
+  ofEdit(wires: readonly WireSegment[], pins: readonly WirePin[], edit: { from: readonly WireSegment[]; added: readonly WireSegment[]; removed: readonly WireSegment[] }): WireNets {
+    const lastPins = this.lastPins
+    if (edit.from !== this.lastWires || !lastPins || lastPins.length !== pins.length) return this.of(wires, pins)
+    const pinsAdded: WirePin[] = []
+    const pinsRemoved: WirePin[] = []
+    for (let i = 0; i < pins.length; i++) {
+      if (pins[i] === lastPins[i]) continue
+      pinsAdded.push(pins[i])
+      pinsRemoved.push(lastPins[i])
+    }
+    if (pinsAdded.length * 4 > pins.length) return this.of(wires, pins)
+    const view = this.apply({ added: edit.added, removed: edit.removed, pinsAdded, pinsRemoved })
+    this.lastWires = wires
+    this.lastPins = pins
+    return view
+  }
+
+  private translationTo(wires: readonly WireSegment[], pins: readonly WirePin[]): Point | null {
+    if (wires.length !== this.segments.size || pins.length !== this.pins.size || !(wires.length + pins.length)) return null
+    const first = wires.length ? this.segments.get(wires[0].id) : this.pins.get(pins[0].key)
+    if (!first) return null
+    const shift = "a" in first ? { x: wires[0].a.x - first.a.x, y: wires[0].a.y - first.a.y } : { x: pins[0].at.x - first.at.x, y: pins[0].at.y - first.at.y }
+    if (!shift.x && !shift.y) return null
+    const moved = (p: Point, q: Point) => q.x - p.x === shift.x && q.y - p.y === shift.y
+    for (const s of wires) {
+      const was = this.segments.get(s.id)
+      if (!was || was.color !== s.color || !moved(was.a, s.a) || !moved(was.b, s.b)) return null
+    }
+    const seen = new Set<string>()
+    for (const p of pins) {
+      const was = this.pins.get(p.key)
+      if (!was || seen.has(p.key) || !moved(was.at, p.at) || !!was.socket !== !!p.socket || was.kind !== p.kind || !sameOut(was, p)) return null
+      seen.add(p.key)
+    }
+    return shift
+  }
+
+  private translate(shift: Point, wires: readonly WireSegment[], pins: readonly WirePin[]): WireNets {
+    const by = (p: Point): Point => ({ x: p.x + shift.x, y: p.y + shift.y })
+    this.segments = new Map(wires.map((s) => [s.id, s]))
+    this.pins = new Map(pins.map((p) => [p.key, p]))
+    const vertices = new Map<string, Vertex>()
+    for (const v of this.vertices.values()) {
+      const at = by(v.at)
+      vertices.set(pointKey(at), { at, ends: v.ends, pins: v.pins })
+    }
+    this.vertices = vertices
+    const shifted = (points: Map<string, Point>) => new Map([...points.values()].map((p) => by(p)).map((p) => [pointKey(p), p] as const))
+    this.junctionPoints = shifted(this.junctionPoints)
+    this.danglingPoints = shifted(this.danglingPoints)
+    for (const [id, net] of this.members) this.members.set(id, { segments: net.segments, pins: net.pins })
+    this.junctionList = null
+    this.danglingList = null
+    this.view = this.viewAt(++this.version)
+    this.lastWires = wires
+    this.lastPins = pins
+    return this.view
   }
 
   private difference(wires: readonly WireSegment[], pins: readonly WirePin[], added: WireSegment[], pinsAdded: WirePin[]): WireDelta {
@@ -311,6 +377,9 @@ export class WireGraph {
         const g = now()
         return (g.danglingList ??= [...g.danglingPoints.values()])
       },
+      token: (net) => now().members.get(net),
+      segment: (id) => now().segments.get(id),
+      pin: (key) => now().pins.get(key),
     }
   }
 }

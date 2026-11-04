@@ -45,7 +45,7 @@ const lines = (items: readonly unknown[]) => (items.length ? `\n${items.map((ite
 
 export function fixtureText(document: PartitionDocument): string {
   const objects = inventory(document.doc.objects)
-  const nets = pinPartition(document.doc, GRID)
+  const nets = pinPartition(document.doc)
   return `{\n  "source": ${JSON.stringify(document.source)},\n  "objects": [${lines(objects)}],\n  "nets": [${lines(nets)}]\n}\n`
 }
 

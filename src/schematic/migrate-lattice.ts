@@ -1,8 +1,9 @@
 import { PointGrid } from "./contacts"
 import { diagonalSquare, GRID, isDiagonal, objectPins, objectRect, objectSize, orientationOf, orientOffset, rotationAllowed, unionOf, type Point, type Rect } from "./geometry"
-import { buildNets } from "./nets"
+import { legacyNets } from "./nets"
 import { getDef } from "./registry"
-import type { ComponentDef, PinDef, PinRef, PlacedObject, Rotation, Schematic, Wire } from "./types"
+import { cells, listed, nameOf, pinName, refOf } from "./upgrade-names"
+import type { ComponentDef, LegacySchematic as Schematic, LegacyWire as Wire, PinDef, PlacedObject, Rotation } from "./types"
 
 const BEFORE_THE_LATTICE: Record<string, { height?: number; pins?: Record<string, Point> }> = {
   oscillator: { pins: { OUT: { x: 4, y: 1.5 } } },
@@ -94,7 +95,7 @@ function circuitBefore(doc: Schematic): { netOf: (key: string) => string; touchi
 }
 
 function circuitNow(doc: Schematic): (key: string) => string {
-  const nets = buildNets(doc.objects, doc.wires, GRID)
+  const nets = legacyNets(doc.objects, doc.wires, GRID)
   return (key) => nets.netOfPin(key) ?? key
 }
 
@@ -347,11 +348,6 @@ function clustersOf(movers: readonly Mover[]): Mover[][] {
   return [...clusters.values()]
 }
 
-const nameOf = (o: PlacedObject) => o.props?.ref || getDef(o.def)?.name || o.def
-
-const listed = (names: readonly string[]) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`)
-
-const cells = (n: number) => `${n} cell${n === 1 ? "" : "s"}`
 
 function meetsItself(wire: Wire, objects: ReadonlyMap<string, PlacedObject>) {
   const ends = [wire.from, wire.to].map((end) => {
@@ -362,13 +358,6 @@ function meetsItself(wire: Wire, objects: ReadonlyMap<string, PlacedObject>) {
   return ends[0] !== null && ends[0] === ends[1]
 }
 
-const refOf = (key: string): PinRef => ({ object: key.slice(0, key.indexOf(":")), pin: key.slice(key.indexOf(":") + 1) })
-
-function pinName(key: string, objects: ReadonlyMap<string, PlacedObject>) {
-  const { object, pin } = refOf(key)
-  const o = objects.get(object)
-  return `${o ? nameOf(o) : object} ${pin}`
-}
 
 function partition(doc: Schematic, netOf: (key: string) => string): Map<string, string> {
   const groups = new Map<string, string[]>()

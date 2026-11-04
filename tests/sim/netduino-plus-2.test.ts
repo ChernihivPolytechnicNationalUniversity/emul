@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest"
 import { STM32F405RG } from "@/mcu/chip"
 import { netduinoPlus2 } from "@/schematic/components/netduino-plus-2"
-import { builder } from "@/schematic/builder"
+import { builder, disconnect } from "@/schematic/builder"
 import { GRID } from "@/schematic/geometry"
 import { partKey, pinKey } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
@@ -80,7 +80,7 @@ describe("Netduino Plus 2 without firmware", () => {
     snap = settle()
     expect.soft(reading(snap), "NRST back up").toBeGreaterThan(3)
     doc.objects.splice(doc.objects.indexOf(ls), 1)
-    doc.wires.splice(doc.wires.indexOf(w), 1)
+    disconnect(doc, w)
   })
 
   it("holds BOOT0 low through 10 kΩ, high while BTN is pressed", () => {

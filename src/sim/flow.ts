@@ -1,63 +1,34 @@
-import type { Wire } from "@/schematic/types"
-import { pinKey } from "@/schematic/types"
+import type { FlowGraph } from "@/schematic/circuit"
 
-/**
- * Distribute element terminal currents over the wires of each net.
- * Wires are treated as equal unit conductances, so a net with loops splits current
- * evenly; a tree (the common case) gets the unique solution. Returns amps per wire,
- * positive when flowing from `wire.from` to `wire.to`.
- *
- * Pins that touch are one vertex, not two: they sit on the same point, so current passes
- * between them without a wire and their terminal currents belong to the same node.
- */
-export function wireCurrents(
-  wires: Wire[],
-  pinNet: Map<string, number>,
-  groundKeys: Set<string>,
-  terminal: (key: string) => number,
-  contacts: ReadonlyMap<string, string> = new Map(),
-): Map<string, number> {
+export function wireCurrents(flow: FlowGraph, pinNet: Map<string, number>, groundKeys: Set<string>, terminal: (key: string) => number): Map<string, number> {
   const result = new Map<string, number>()
-  const vertex = (key: string) => contacts.get(key) ?? key
-  // Pins that share a vertex inject their currents there, even the ones no wire reaches.
   const members = new Map<string, string[]>()
-  for (const key of contacts.keys()) {
-    const v = vertex(key)
+  for (const [key, v] of Object.entries(flow.pins)) {
     const list = members.get(v)
     if (list) list.push(key)
     else members.set(v, [key])
   }
   const injected = (v: string) => {
-    const group = members.get(v)
-    if (!group) return terminal(v)
     let sum = 0
-    for (const key of group) sum += terminal(key)
+    for (const key of members.get(v) ?? []) sum += terminal(key)
     return sum
   }
-  // Adjacency over pin keys, only for wires on solved nets.
-  const adj = new Map<string, { wire: Wire; other: string }[]>()
-  const link = (a: string, b: string, wire: Wire) => {
-    if (!adj.has(a)) adj.set(a, [])
-    adj.get(a)!.push({ wire, other: b })
+  const adj = new Map<string, { run: string; other: string }[]>()
+  const link = (a: string, b: string, run: string) => {
+    const list = adj.get(a)
+    if (list) list.push({ run, other: b })
+    else adj.set(a, [{ run, other: b }])
   }
-  for (const w of wires) {
-    const from = pinKey(w.from.object, w.from.pin)
-    const to = pinKey(w.to.object, w.to.pin)
-    const a = vertex(from)
-    const b = vertex(to)
-    // Unsolved net, or a wire drawn between two pins that already touch: nothing flows along it.
-    if (pinNet.get(from) === undefined || a === b) {
-      result.set(w.id, 0)
-      continue
-    }
-    link(a, b, w)
-    link(b, a, w)
+  for (const r of flow.runs) {
+    result.set(r.id, 0)
+    if (r.a === r.b) continue
+    link(r.a, r.b, r.id)
+    link(r.b, r.a, r.id)
   }
-
+  const ends = new Map(flow.runs.map((r) => [r.id, r] as const))
   const seen = new Set<string>()
   for (const start of adj.keys()) {
     if (seen.has(start)) continue
-    // Connected component by wires.
     const keys: string[] = []
     const stack = [start]
     seen.add(start)
@@ -71,31 +42,28 @@ export function wireCurrents(
         }
       }
     }
+    if (!keys.some((k) => members.get(k)?.some((key) => pinNet.get(key) !== undefined))) continue
     const index = new Map(keys.map((k, i) => [k, i]))
-    // Reference vertices: ground pins if any, else the first vertex.
     const fixed = new Set<number>()
-    // A vertex is a reference if any pin merged into it is grounded.
-    const grounded = (v: string) => groundKeys.has(v) || (members.get(v)?.some((k) => groundKeys.has(k)) ?? false)
-    for (const k of keys) if (grounded(k)) fixed.add(index.get(k)!)
+    for (const k of keys) if (members.get(k)?.some((key) => groundKeys.has(key))) fixed.add(index.get(k)!)
     if (fixed.size === 0) fixed.add(0)
     const free = keys.map((_, i) => i).filter((i) => !fixed.has(i))
     const pos = new Map(free.map((i, j) => [i, j]))
     const m = free.length
     const L = new Float64Array(m * m)
     const b = new Float64Array(m)
-    const edges: Wire[] = []
+    const runs = new Set<string>()
     for (const k of keys) {
       const i = index.get(k)!
       const row = pos.get(i)
+      for (const { run } of adj.get(k)!) runs.add(run)
       if (row === undefined) continue
-      // Current entering the wire graph at this pin = −(current leaving into the element).
       b[row] = -injected(k)
-      for (const { wire, other } of adj.get(k)!) {
+      for (const { other } of adj.get(k)!) {
         const j = index.get(other)!
         L[row * m + row] += 1
         const col = pos.get(j)
         if (col !== undefined) L[row * m + col] -= 1
-        if (!edges.includes(wire)) edges.push(wire)
       }
     }
     const phi = solve(L, b, m)
@@ -103,8 +71,9 @@ export function wireCurrents(
       const p = pos.get(index.get(k)!)
       return p === undefined ? 0 : phi[p]
     }
-    for (const w of edges) {
-      result.set(w.id, potential(vertex(pinKey(w.from.object, w.from.pin))) - potential(vertex(pinKey(w.to.object, w.to.pin))))
+    for (const id of runs) {
+      const r = ends.get(id)!
+      result.set(id, potential(r.a) - potential(r.b))
     }
   }
   return result

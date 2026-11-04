@@ -9,7 +9,7 @@
  */
 import { beforeAll, describe, expect, it } from "vitest"
 import { GRID } from "@/schematic/geometry"
-import { builder } from "@/schematic/builder"
+import { builder, copied, rewire } from "@/schematic/builder"
 import { getDef } from "@/schematic/registry"
 import { pinKey } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
@@ -118,9 +118,9 @@ describe("ATmega328P on the bench: 16 MHz crystal, LED, serial terminal", () => 
   it("holding RESET low stops the core; releasing it restarts the program", () => {
     const before = loop.snapshot()!.mcus[b.dd.id].resets
     // RESET to ground instead of through R1 to +5 V.
-    const doc = structuredClone(b.doc)
+    const doc = copied(b.doc)
     const gnd = doc.objects.find((o) => o.def === "ground")!
-    doc.wires = doc.wires.map((w) => (w.from.object === b.dd.id && w.from.pin === "PC6" ? { ...w, to: { object: gnd.id, pin: "GND" } } : w))
+    rewire(doc, (w) => (w.from.object === b.dd.id && w.from.pin === "PC6" ? { ...w, to: { object: gnd.id, pin: "GND" } } : w))
     loop.setDoc(doc)
     run(loop, state, 0.05)
     const held = loop.snapshot()!.mcus[b.dd.id]
@@ -167,7 +167,7 @@ describe("RESET as I/O or dW line: grounding PC6 does not reset the part", () =>
     const b = bench()
     b.dd.props = { ...b.dd.props, fuseHigh: high }
     const gnd = b.doc.objects.find((o) => o.def === "ground")!
-    b.doc.wires = b.doc.wires.map((w) => (w.from.object === b.dd.id && w.from.pin === "PC6" ? { ...w, to: { object: gnd.id, pin: "GND" } } : w))
+    rewire(b.doc, (w) => (w.from.object === b.dd.id && w.from.pin === "PC6" ? { ...w, to: { object: gnd.id, pin: "GND" } } : w))
     const { loop, state } = start(b.doc)
     run(loop, state, 1.2)
     const st = loop.snapshot()!.mcus[b.dd.id]

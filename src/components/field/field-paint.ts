@@ -1,4 +1,5 @@
 import { bodyCentre, objectRect, orientationOf, stretchedLeads, toPath, trimRouteEnds, type Rect, type RoutedWire } from "@/schematic/geometry"
+import { runPath } from "@/schematic/wire-look"
 import { getDef } from "@/schematic/registry"
 import type { ComponentDef, PlacedObject } from "@/schematic/types"
 import { wireColorVar, type WireColorKey } from "@/schematic/wire-colors"
@@ -13,7 +14,7 @@ const wirePaths = new WeakMap<RoutedWire, Path2D>()
 function wirePath(route: RoutedWire, radius: number) {
   const cached = wirePaths.get(route)
   if (cached) return cached
-  const path = new Path2D(toPath(route.pts, radius))
+  const path = new Path2D(runPath(route.pts, radius, route.leads))
   wirePaths.set(route, path)
   return path
 }

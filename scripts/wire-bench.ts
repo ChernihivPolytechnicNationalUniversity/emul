@@ -1,4 +1,8 @@
+import { builder, connect, connections, legacyOf } from "@/schematic/builder"
+import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
+import { wiresAsSegments } from "@/schematic/migrate-wires"
+import { getDef } from "@/schematic/registry"
 import { upgraded } from "@/schematic/migrate"
 import { placementCheck } from "@/schematic/placement"
 import type { PlacedObject, Schematic } from "@/schematic/types"
@@ -160,7 +164,7 @@ const lattice = time(() => upgraded(chain()), 3)
 const BOARDS = 400
 const sheet = boardDocuments([BOARDS])[0]
 const carried: PlacedObject = { id: "carried", def: "crystal", x: 38 * GRID, y: 28 * GRID, props: { ref: "Y1" } }
-const dragStart = time(() => placementCheck({ objects: [...sheet.objects, carried], wires: [], routes: [], grid: GRID }, [carried]), 5)
+const dragStart = time(() => placementCheck({ objects: [...sheet.objects, carried], routes: [], grid: GRID }, [carried]), 5)
 const FENCE = 60
 const FENCED = 40
 const fenced = (): Schematic => ({
@@ -173,8 +177,25 @@ const fenced = (): Schematic => ({
   version: 2,
 } as Schematic)
 const fencedIn = time(() => upgraded(fenced()), 3)
+const STRIP_WIRES = 23
+const crowded = (() => {
+  const doc = lab1Board.build(GRID)
+  const board = doc.objects.find((o) => o.def === "open746i-c")!
+  const strips = getDef("open746i-c")!.pins.filter((p) => /^P(18|19)-\d+$/.test(p.id) && /^P[A-I]\d+$/.test(p.label ?? ""))
+  const load = builder(GRID)
+  strips.slice(0, STRIP_WIRES).forEach((p, i) => {
+    const sw = load.place("switch", 90 + (i % 14) * 6, 4 + Math.floor(i / 14) * 6)
+    load.wire(board, p.id, sw, "1")
+    load.wire(sw, "2", board, "P18-36")
+  })
+  doc.objects.push(...load.doc.objects)
+  connect(doc, ...connections(load.doc))
+  return legacyOf(doc)
+})()
+const frozen = time(() => wiresAsSegments(crowded), 3)
 console.log(`  an old file's ${CHAIN} resistors chained on their diagonals, moved onto the lattice: ${ms(lattice)}; a drag's placement check set up on ${BOARDS} boards: ${ms(dragStart)}`)
 console.log(`  ${FENCED} diagonal resistors fenced in by ${FENCE * FENCE} grounds, each taken out to a clear spot: ${ms(fencedIn)}`)
+console.log(`  an old file's ${2 * STRIP_WIRES} wires crowding into the Open746I-C's strips, frozen and laid clear of each other's nets: ${ms(frozen)}`)
 
 console.log("")
 const large = results[results.length - 1]
@@ -190,5 +211,6 @@ check(`the graph handed ${2 * large.n} value-equal pins`, large.copies, 2)
 check(`an old file's ${CHAIN}-part diagonal chain moved onto the lattice`, lattice, 400)
 check(`a drag's placement check set up on ${BOARDS} boards`, dragStart, 30)
 check(`${FENCED} parts fenced in by ${FENCE * FENCE} grounds taken out to clear spots`, fencedIn, 300)
-console.log(`\n${12 - failed}/12 checks passed`)
+check(`an old file's ${2 * STRIP_WIRES} crowded wires frozen`, frozen, 600)
+console.log(`\n${13 - failed}/13 checks passed`)
 if (failed) process.exitCode = 1

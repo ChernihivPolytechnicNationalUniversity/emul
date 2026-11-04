@@ -4,6 +4,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { chromium, type Browser, type Page } from "playwright-core"
 import { GRID, objectPins, objectRect } from "@/schematic/geometry"
+import { stamped } from "@/schematic/migrate"
 import type { Schematic } from "@/schematic/types"
 import { boardDocuments, stressDocuments } from "./lib/stress"
 
@@ -131,7 +132,7 @@ async function openField(browser: Browser, doc: Schematic) {
   await page.setInputFiles("input[type=file]", {
     name: `${name}.emul`,
     mimeType: "application/octet-stream",
-    buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name, schematic: doc })),
+    buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name, schematic: stamped(doc) })),
   })
   await holdsTitle(page, name)
   await waitUntilDrawn(page)

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { builder } from "@/schematic/builder"
+import { builder, legacyOf } from "@/schematic/builder"
+import { circuitOf } from "@/schematic/circuit"
 import { ContactIndex, contactsAfterMove, pinContacts } from "@/schematic/contacts"
 import { SpatialIndex } from "@/schematic/spatial"
 import { examples, lab1Stand } from "@/schematic/examples"
@@ -25,16 +26,20 @@ import {
   type RoutedWire,
   type WireEnd,
 } from "@/schematic/geometry"
-import { buildNets } from "@/schematic/nets"
+import { legacyNets as buildNets } from "@/schematic/nets"
 import { autoNetColor, semanticNetColor, WIRE_COLORS } from "@/schematic/wire-colors"
-import { tapWireAt } from "@/schematic/wiring"
+import { nearestOn, pinsOf, tapWireAt, wiringOf } from "@/schematic/wire-edits"
+import { WireGraph } from "@/schematic/wires/graph"
+import type { WireSegment } from "@/schematic/wires/segment"
 import { getDef } from "@/schematic/registry"
-import { partKey, pinKey, type ComponentDef, type PinKind, type PlacedObject, type Schematic } from "@/schematic/types"
+import { partKey, pinKey, type ComponentDef, type LegacySchematic, type PinKind, type PlacedObject, type Schematic } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
 import { TopologyGate } from "@/sim/topology"
 import { exampleBase64 } from "../lib/firmware"
 
-const route = (doc: Schematic, id: string) => routeAll(doc.objects, doc.wires, GRID).find((r) => r.id === id)!
+const legacy = (doc: Schematic): LegacySchematic => legacyOf(doc)
+const route = (doc: Schematic, id: string) => routeAll(legacy(doc).objects, legacy(doc).wires, GRID).find((r) => r.id === id)!
+const wiring = (doc: Schematic) => wiringOf(new WireGraph(), doc)
 const horizontal = (a: Point, b: Point) => a.y === b.y
 function crosses(pts: Point[], r: { x: number; y: number; w: number; h: number }) {
   const [x0, x1, y0, y1] = [r.x + 0.5, r.x + r.w - 0.5, r.y + 0.5, r.y + r.h - 0.5]
@@ -128,7 +133,7 @@ describe("nets and colours", () => {
     const gnd = place("ground", 20, 4)
     wire(r1, "2", r2, "1")
     wire(r3, "2", gnd, "GND")
-    const nets = buildNets(doc.objects, doc.wires, GRID)
+    const { nets } = wiring(doc)
     const netOf = (obj: { id: string }, pin: string) => nets.netOfPin(pinKey(obj.id, pin))
     expect.soft(netOf(r1, "2") === netOf(r2, "1"), "a wire joins its two pins").toBe(true)
     expect.soft(netOf(r2, "2") === netOf(r3, "1"), "touching pins join without a wire").toBe(true)
@@ -148,9 +153,9 @@ describe("nets and colours", () => {
     const { doc, place, wire } = builder(GRID)
     const r = place("resistor", 0, 0)
     const gnd = place("ground", 8, 4)
-    const w = wire(r, "2", gnd, "GND")
-    const nets = buildNets(doc.objects, doc.wires, GRID)
-    expect.soft(autoNetColor(nets.kindsOf(nets.netOfWire(w.id)!)), "read off a real document").toBe("black")
+    wire(r, "2", gnd, "GND")
+    const { nets, runs } = wiring(doc)
+    expect.soft(autoNetColor(nets.kindsOf(nets.netOfWire(runs[0].id)!)), "read off a real document").toBe("black")
   })
 
   describe("every wire colour has a flow colour that reads against it", () => {
@@ -194,11 +199,11 @@ describe("nudging", () => {
       [10, 8],
       [18, 8],
     ])
-    const raw = routeAll(doc.objects, doc.wires, GRID)
+    const raw = routeAll(legacy(doc).objects, legacy(doc).wires, GRID)
     const lane = 8 * GRID
     expect(onLine(raw.find((r) => r.id === wa.id)!, lane).length > 0 && onLine(raw.find((r) => r.id === wb.id)!, lane).length > 0, "both routes use the lane before nudging").toBe(true)
 
-    const nets = buildNets(doc.objects, doc.wires, GRID)
+    const nets = buildNets(legacy(doc).objects, legacy(doc).wires, GRID)
     const out = nudgeRoutes(raw, nets.netOfWire, GRID)
     const ya = onLine(out.find((r) => r.id === wa.id)!, lane)[0].y
     const yb = onLine(out.find((r) => r.id === wb.id)!, lane)[0].y
@@ -218,8 +223,8 @@ describe("nudging", () => {
     const c = place("resistor", 24, 8)
     const w1 = wire(a, "2", b, "1", [[12, 4]])
     const w2 = wire(a, "2", c, "1", [[12, 4]])
-    const raw = routeAll(doc.objects, doc.wires, GRID)
-    const nets = buildNets(doc.objects, doc.wires, GRID)
+    const raw = routeAll(legacy(doc).objects, legacy(doc).wires, GRID)
+    const nets = buildNets(legacy(doc).objects, legacy(doc).wires, GRID)
     const out = nudgeRoutes(raw, nets.netOfWire, GRID)
     expect.soft(nets.nets.length, "one net").toBe(1)
     expect.soft(out === raw, "nothing moved").toBe(true)
@@ -237,8 +242,8 @@ describe("nudging", () => {
       [6, 1],
       [8, 1],
     ])
-    const raw = routeAll(doc.objects, doc.wires, GRID)
-    const nets = buildNets(doc.objects, doc.wires, GRID)
+    const raw = routeAll(legacy(doc).objects, legacy(doc).wires, GRID)
+    const nets = buildNets(legacy(doc).objects, legacy(doc).wires, GRID)
     const out = nudgeRoutes(raw, nets.netOfWire, GRID)
     const s0 = find(raw, straight.id)
     const s1 = find(out, straight.id)
@@ -267,8 +272,8 @@ describe("nudging", () => {
       [8, 3],
       [10, 3],
     ])
-    const raw = routeAll(doc.objects, doc.wires, GRID)
-    const nets = buildNets(doc.objects, doc.wires, GRID)
+    const raw = routeAll(legacy(doc).objects, legacy(doc).wires, GRID)
+    const nets = buildNets(legacy(doc).objects, legacy(doc).wires, GRID)
     const out = nudgeRoutes(raw, nets.netOfWire, GRID)
     const r = find(out, long.id)
     expect.soft(orthogonal(r), "chained run still orthogonal").toBe(true)
@@ -291,8 +296,8 @@ describe("nudging", () => {
         ]).id,
       )
     }
-    const raw = routeAll(doc.objects, doc.wires, GRID)
-    const nets = buildNets(doc.objects, doc.wires, GRID)
+    const raw = routeAll(legacy(doc).objects, legacy(doc).wires, GRID)
+    const nets = buildNets(legacy(doc).objects, legacy(doc).wires, GRID)
     const out = nudgeRoutes(raw, nets.netOfWire, GRID)
     const offsets = ids.map((id) => Math.abs(onLine(find(out, id), 30 * GRID)[0].y - 30 * GRID))
     expect.soft(nets.nets.length, "six nets on one lane").toBe(6)
@@ -419,7 +424,7 @@ describe("nudging", () => {
   
     let apart = 0
     let nudgedAnything = 0
-    const agrees = (doc: Schematic) => {
+    const agrees = (doc: LegacySchematic) => {
       const nets = buildNets(doc.objects, doc.wires, GRID)
       const straight = new Router().routeAll(doc.objects, doc.wires, GRID)
       const now = nudgeRoutes(new Router().routeAll(doc.objects, doc.wires, GRID), nets.netOfWire, GRID)
@@ -428,10 +433,10 @@ describe("nudging", () => {
       if (shape(now) !== shape(before)) apart++
     }
   
-    for (const example of examples) agrees(example.build(GRID))
+    for (const example of examples) agrees(legacy(example.build(GRID)))
     let seed = 5150
     const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
-    const base = lab1Stand.build(GRID)
+    const base = legacy(lab1Stand.build(GRID))
     for (let i = 0; i < 12; i++) {
       agrees({
         ...base,
@@ -497,78 +502,74 @@ describe("a bend handle never leaves its wire", () => {
 })
 
 describe("tapping a wire", () => {
-  it("drops a junction on it and joins the nets", () => {
-    const { doc, place, wire } = builder(GRID)
+  const ends = (doc: Schematic, p: Point) => doc.wires.filter((w) => (w.a.x === p.x && w.a.y === p.y) || (w.b.x === p.x && w.b.y === p.y)).length
+  const shapeOf = (wires: readonly WireSegment[]) => wires.map((w) => [w.a, w.b].map((q) => `${q.x},${q.y}`).sort().join(" ")).sort().join("|")
+
+  it("ends the new wire on it: the wire splits there, a dot marks the branch, no junction part, and the nets join", () => {
+    const { doc: built, place, wire } = builder(GRID)
     const r1 = place("resistor", 0, 0)
     const r2 = place("resistor", 16, 0)
     const r3 = place("resistor", 8, 6)
     const w = wire(r1, "2", r2, "1")
     w.color = "blue"
-    const route = routeAll(doc.objects, doc.wires, GRID)[0]
+    const doc: Schematic = { ...built }
     const beside = { x: 9 * GRID + 5, y: 1 * GRID + 7 }
-    const tapped = tapWireAt(doc, w.id, beside, { object: r3.id, pin: "1" }, GRID)
-    const junction = tapped.objects.find((o) => o.def === "junction")!
-    expect(junction, "a junction was added").toBeDefined()
-    expect.soft(tapped.wires.length, "three wires now").toBe(3)
-    const jPoint = { x: junction.x + GRID, y: junction.y + GRID }
-    expect.soft(jPoint.y, "junction on the wire's line").toBe(route.pts[1].y)
-    expect.soft(jPoint.x, "junction snapped along the wire").toBe(9 * GRID)
-    expect.soft(tapped.wires.filter((x) => x.color === "blue").length, "both halves keep the colour").toBe(2)
-    const nets = buildNets(tapped.objects, tapped.wires, GRID)
+    const tapped = tapWireAt(doc, w.id, beside, { object: r3.id, pin: "1" })
+    const tap = { x: 9 * GRID, y: GRID }
+    expect.soft(tapped.objects.length, "no part added").toBe(doc.objects.length)
+    expect.soft(ends(tapped, tap), "three wire ends where the tap projects, snapped along the wire").toBe(3)
+    expect.soft(wiring(tapped).dots, "the branch is a dot").toContainEqual(tap)
+    expect.soft(tapped.wires.filter((x) => x.a.y === GRID && x.b.y === GRID && x.color === "blue").length, "both halves keep the colour").toBe(2)
+    const { nets } = wiring(tapped)
     const net = nets.netOfPin(pinKey(r1.id, "2"))
-    expect.soft([pinKey(r2.id, "1"), pinKey(r3.id, "1"), pinKey(junction.id, "J")].every((k) => nets.netOfPin(k) === net), "R1, R2, R3 and the junction are one net").toBe(true)
+    expect.soft([pinKey(r2.id, "1"), pinKey(r3.id, "1")].every((k) => nets.netOfPin(k) === net), "R1, R2 and R3 are one net").toBe(true)
 
-    expect.soft(tapWireAt(doc, w.id, beside, { object: r1.id, pin: "2" }, GRID) === doc, "tapping from the wire's own end changes nothing").toBe(true)
-    expect.soft(tapWireAt(doc, "nope", beside, { object: r3.id, pin: "1" }, GRID) === doc, "an unknown wire changes nothing").toBe(true)
-
-    const atPin = tapWireAt(doc, w.id, route.pts[0], { object: r3.id, pin: "1" }, GRID)
-    expect.soft(atPin.objects.length === doc.objects.length && atPin.wires.length === 2, "a tap on the end pin wires straight to the pin").toBe(true)
-    expect.soft(atPin.wires[1].to.object === r1.id && atPin.wires[1].to.pin === "2", "…to that pin").toBe(true)
+    expect.soft(shapeOf(tapWireAt(doc, w.id, beside, { object: r1.id, pin: "2" }).wires), "a tap from the wire's own end lies along it and merges into it").toBe(shapeOf(doc.wires))
+    expect.soft(tapWireAt(doc, "nope", beside, { object: r3.id, pin: "1" }) === doc, "an unknown wire changes nothing").toBe(true)
   })
 
-  it("leaves both halves of a tapped wire straight and meets the junction along the tap's own axis", () => {
-    const { doc, place, wire } = builder(GRID)
+  it("leaves both halves of a tapped wire on its row and meets it along the tap's own axis", () => {
+    const { doc: built, place, wire } = builder(GRID)
     const r1 = place("resistor", 0, 0)
     const r2 = place("resistor", 16, 0)
     const r3 = place("resistor", 8, 6)
     const w = wire(r1, "2", r2, "1")
-    const tapped = tapWireAt(doc, w.id, { x: 9 * GRID + 5, y: 1 * GRID + 7 }, { object: r3.id, pin: "1" }, GRID)
-    const junction = tapped.objects.find((o) => o.def === "junction")!
-    const routes = routeAll(tapped.objects, tapped.wires, GRID)
-    const routeOf = (from: string, to: string) => routes.find((r) => {
-      const x = tapped.wires.find((q) => q.id === r.id)!
-      return x.from.object === from && x.to.object === to
-    })!
-    for (const half of [routeOf(r1.id, junction.id), routeOf(junction.id, r2.id)])
-      expect.soft(half.pts.every((p) => p.y === GRID), `a half stays on the wire's row: ${JSON.stringify(half.pts)}`).toBe(true)
-    const tap = routeOf(r3.id, junction.id).pts
-    const [before, end] = tap.slice(-2)
-    expect.soft(before.x === end.x && before.y > end.y, `the tap comes up into the junction rather than along the wire: ${JSON.stringify(tap)}`).toBe(true)
+    const doc: Schematic = { ...built }
+    const tapped = tapWireAt(doc, w.id, { x: 9 * GRID + 5, y: 1 * GRID + 7 }, { object: r3.id, pin: "1" })
+    const onRow = tapped.wires.filter((x) => x.a.y === GRID && x.b.y === GRID)
+    expect.soft(onRow.length, "the two halves on the wire's row").toBe(2)
+    const into = tapped.wires.filter((x) => !onRow.includes(x) && ((x.a.x === 9 * GRID && x.a.y === GRID) || (x.b.x === 9 * GRID && x.b.y === GRID)))
+    expect.soft(into.length === 1 && into[0].a.x === into[0].b.x, `the tap comes up into the wire rather than along it: ${JSON.stringify(into)}`).toBe(true)
   })
 
-  it("routes a junction-to-junction wire on one row straight, either way round", () => {
-    const { doc, place, wire } = builder(GRID)
-    const left = place("junction", 0, 0)
-    const right = place("junction", 10, 0)
+  it("lays a wire between two branch points on one row straight, either way round", () => {
+    const { doc, wire, node } = builder(GRID)
+    const left = node(1, 1)
+    const right = node(11, 1)
     wire(left, "J", right, "J")
     wire(right, "J", left, "J")
-    for (const route of routeAll(doc.objects, doc.wires, GRID)) expect.soft(route.pts.every((p) => p.y === GRID), JSON.stringify(route.pts)).toBe(true)
+    for (const s of doc.wires) expect.soft(s.a.y === GRID && s.b.y === GRID, JSON.stringify(s)).toBe(true)
   })
 
-  it("ties two MCU pins through a junction to one button (the PG2/PG3 stand)", () => {
-    const doc = lab1Stand.build(GRID)
-    const dd = doc.objects.find((o) => o.def === "stm32f746ig")!
-    const byRef = (ref: string) => doc.objects.find((o) => o.props?.ref === ref)!
-    const pg3Wire = doc.wires.find((w) => w.from.object === dd.id && w.from.pin === "PG3")!
-    const route = routeAll(doc.objects, doc.wires, GRID).find((r) => r.id === pg3Wire.id)!
-    const mid = route.pts[Math.floor(route.pts.length / 2)]
-    const tapped = tapWireAt(doc, pg3Wire.id, { x: mid.x + 3, y: mid.y - 4 }, { object: dd.id, pin: "PG2" }, GRID)
-    const junction = tapped.objects.find((o) => o.def === "junction")!
-    expect(junction, "a tap from a pin of the same object is allowed").toBeDefined()
-    const nets = buildNets(tapped.objects, tapped.wires, GRID)
+  it("ties two MCU pins to one button by ending the second wire on the first (the PG2/PG3 stand)", () => {
+    const built = lab1Stand.build(GRID)
+    const dd = built.objects.find((o) => o.def === "stm32f746ig")!
+    const byRef = (ref: string) => built.objects.find((o) => o.props?.ref === ref)!
+    const pg3 = legacyOf(built).wires.find((w) => w.from.object === dd.id && w.from.pin === "PG3")!
+    const doc: Schematic = { ...built }
+    const run = wiring(doc).runs.find((r) => r.segments.some((x) => x.id === pg3.id))!
+    const middle = run.segments[Math.floor(run.segments.length / 2)]
+    const mid = { x: (middle.a.x + middle.b.x) / 2, y: (middle.a.y + middle.b.y) / 2 }
+    const tapped = tapWireAt(doc, middle.id, { x: mid.x + 3, y: mid.y - 4 }, { object: dd.id, pin: "PG2" })
+    const { nets, runs, dots } = wiring(tapped)
     expect.soft(nets.netOfPin(pinKey(dd.id, "PG2")) === nets.netOfPin(pinKey(dd.id, "PG3")), "PG2 and PG3 are one net").toBe(true)
     expect.soft(nets.netOfPin(pinKey(dd.id, "PG2")) === nets.netOfPin(pinKey(byRef("SA3").id, "1")), "…with SA3's contact").toBe(true)
     expect.soft(nets.netOfPin(pinKey(dd.id, "PG2")) === nets.netOfPin(pinKey(byRef("SA2").id, "1")), "SA2's contact is on it too").toBe(true)
+    const endsAt = (r: (typeof runs)[number], p: Point) => [r.points[0], r.points[r.points.length - 1]].some((q) => q.x === p.x && q.y === p.y)
+    const branch = nearestOn(middle, { x: mid.x + 3, y: mid.y - 4 })
+    expect.soft(dots, "the branch is a dot").toContainEqual(branch)
+    const atBranch = runs.filter((r) => endsAt(r, branch))
+    expect.soft(atBranch.length, "three runs meet at the branch").toBe(3)
 
     dd.props = { ...dd.props, firmware: "lab1-f746.elf", firmwareData: exampleBase64("lab1-f746.elf") }
     const loop = new SimLoop()
@@ -576,7 +577,7 @@ describe("tapping a wire", () => {
     loop.setParts(tapped.parts)
     loop.setRunning(true)
     let clock = 0
-    const run = (seconds: number) => {
+    const runFor = (seconds: number) => {
       const end = clock + seconds * 1000
       while (clock < end) {
         clock = Math.min(end, clock + 10)
@@ -585,23 +586,24 @@ describe("tapping a wire", () => {
       return loop.snapshot()!
     }
     const v = (pin: string) => loop.snapshot()!.pinVoltage[pinKey(dd.id, pin)]!
-    run(0.1)
+    runFor(0.1)
     expect.soft(Math.min(v("PG2"), v("PG3")), "both pins idle high on their pull-ups").toBeNear(3.3, 0.05)
     loop.setParts({ [partKey(byRef("SA3").id, "SW")]: { pressed: true } })
-    const snap = run(0.05)
+    const snap = runFor(0.05)
     expect.soft(v("PG3"), "SA3 pressed: PG3 low").toBeNear(0, 0.05)
-    expect.soft(v("PG2"), "SA3 pressed: PG2 low through the junction").toBeNear(0, 0.05)
-    const toJ = tapped.wires.filter((w) => w.to.object === junction.id)
-    const fromJ = tapped.wires.find((w) => w.from.object === junction.id)!
-    const into = toJ.reduce((sum, w) => sum + Math.abs(snap.wireCurrent[w.id] ?? 0), 0)
-    expect.soft(toJ.length, "two wires feed the junction").toBe(2)
-    expect.soft(Math.abs(snap.wireCurrent[fromJ.id] ?? 0) * 1e6, "current out of the junction is the sum of what comes in (µA)").toBeNear(into * 1e6, Math.max(1, into * 1e6 * 0.02))
-    expect.soft(Math.min(...toJ.map((w) => Math.abs(snap.wireCurrent[w.id] ?? 0))) * 1e6, "each pin contributes (µA)").toBeGreaterThan(10)
+    expect.soft(v("PG2"), "SA3 pressed: PG2 low through the branch").toBeNear(0, 0.05)
+    const inward = atBranch.map((r) => {
+      const amps = snap.wireCurrent[r.id] ?? 0
+      const last = r.points[r.points.length - 1]
+      return last.x === branch.x && last.y === branch.y ? amps : -amps
+    })
+    expect.soft(Math.abs(inward.reduce((a, b) => a + b, 0)) * 1e6, "what comes into the branch goes out of it (µA)").toBeNear(0, 1)
+    expect.soft(Math.min(...inward.map(Math.abs)) * 1e6, "each pin contributes (µA)").toBeGreaterThan(10)
     loop.setParts({ [partKey(byRef("SA3").id, "SW")]: { pressed: false }, [partKey(byRef("SA2").id, "SW")]: { pressed: true } })
-    run(0.05)
+    runFor(0.05)
     expect.soft(v("PG3"), "SA2 pressed instead: PG3 follows PG2").toBeNear(0, 0.05)
     loop.setParts({ [partKey(byRef("SA2").id, "SW")]: { pressed: false } })
-    run(0.05)
+    runFor(0.05)
     expect.soft(Math.min(v("PG2"), v("PG3")), "released: both back high").toBeNear(3.3, 0.05)
   })
 })
@@ -784,42 +786,43 @@ describe("caching", () => {
     expect.soft(pinContacts(at(r2, 25).objects, GRID) === parted, "…and settles back on the empty map").toBe(true)
   })
 
-  it("tells the solver about the document only when the circuit changed", () => {
+  it("tells the solver about the document only when the circuit changed: the pin partition, not the geometry", () => {
     const gate = new TopologyGate()
-    const { doc, place, wire } = builder(GRID)
+    const { doc: built, place, wire } = builder(GRID)
     const r1 = place("resistor", 0, 0)
     const r2 = place("resistor", 20, 0)
     const gnd = place("ground", 30, 4)
-    const w = wire(r2, "2", gnd, "GND")
+    wire(r2, "2", gnd, "GND")
+    const doc: Schematic = { ...built }
     const shift = (o: { id: string }, x: number): Schematic => ({ ...doc, objects: doc.objects.map((p) => (p.id === o.id ? { ...p, x: x * GRID } : p)) })
-    const sent = (d: Schematic) => gate.latest({ objects: d.objects, wires: d.wires }, buildNets(d.objects, d.wires, GRID).contacts)
+    const sent = (d: Schematic) => gate.latest(circuitOf(d))
 
     const first = sent(doc)
     expect.soft(sent(doc) === first, "the same document twice is sent once").toBe(true)
-    expect.soft(sent(shift(r2, 24)) === first, "a move that connects nothing is not resent").toBe(true)
-    const met = sent(shift(r2, 4))
+    expect.soft(sent(shift(r1, -10)) === first, "a move that connects nothing is not resent").toBe(true)
+    const met = sent(shift(r1, 16))
     expect.soft(met !== first, "a move that lands a pin on another is").toBe(true)
-    expect.soft(sent(shift(r2, 4)) === met, "…and staying there is not").toBe(true)
-    const apart = sent(shift(r2, 20))
+    expect.soft(sent(shift(r1, 16)) === met, "…and staying there is not").toBe(true)
+    const apart = sent(shift(r1, 0))
     expect.soft(apart !== met, "moving apart again is").toBe(true)
 
     const settled = sent(doc)
     const coloured: Schematic = { ...doc, wires: doc.wires.map((x) => ({ ...x, color: "blue" as const })) }
     expect.soft(sent(coloured) === settled, "a wire recoloured is not").toBe(true)
-    const bent: Schematic = { ...coloured, wires: coloured.wires.map((x) => ({ ...x, points: [{ x: 0, y: 0 }] })) }
-    expect.soft(sent(bent) === settled, "a bend point moved is not").toBe(true)
-    const rotated: Schematic = { ...bent, objects: bent.objects.map((o) => (o.id === gnd.id ? { ...o, rotation: 90 as const } : o)) }
-    expect.soft(sent(rotated) === settled, "a rotation that touches nothing is not").toBe(true)
-    const revalued: Schematic = { ...rotated, objects: rotated.objects.map((o) => (o.id === r1.id ? { ...o, props: { ...o.props, value: "2 kΩ" } } : o)) }
+    const stub: Schematic = { ...coloured, wires: [...coloured.wires, { id: "stub", a: { x: 50 * GRID, y: 0 }, b: { x: 54 * GRID, y: 0 } }] }
+    expect.soft(sent(stub) === settled, "a wire drawn into empty space is not").toBe(true)
+    const rotated: Schematic = { ...stub, objects: stub.objects.map((o) => (o.id === gnd.id ? { ...o, rotation: 90 as const } : o)) }
+    expect.soft(sent(rotated) !== settled, "a rotation that takes a pin off its wire is").toBe(true)
+    const revalued: Schematic = { ...stub, objects: stub.objects.map((o) => (o.id === r1.id ? { ...o, props: { ...o.props, value: "2 kΩ" } } : o)) }
     const valued = sent(revalued)
     expect.soft(valued !== settled, "a component's value is").toBe(true)
-    const unwired: Schematic = { ...revalued, wires: revalued.wires.filter((x) => x.id !== w.id) }
+    const unwired: Schematic = { ...revalued, wires: revalued.wires.filter((x) => x.id === "stub") }
     expect.soft(sent(unwired) !== valued, "a wire removed is").toBe(true)
   })
 
   describe("obstacles queried near a wire route what the whole document would", () => {
     const trace = (id: string, pts: readonly Point[]) => `${id} ${pts.map((p) => `${p.x},${p.y}`).join(" ")}`
-    const globally = (doc: Schematic) =>
+    const globally = (doc: LegacySchematic) =>
       doc.wires
         .flatMap((w) => {
           const a = resolvePin(doc.objects, w.from, GRID)
@@ -841,7 +844,7 @@ describe("caching", () => {
         })
         .sort()
         .join("\n")
-    const locally = (doc: Schematic) =>
+    const locally = (doc: LegacySchematic) =>
       new Router()
         .routeAll(doc.objects, doc.wires, GRID)
         .map((r) => trace(r.id, r.pts))
@@ -849,7 +852,7 @@ describe("caching", () => {
         .join("\n")
 
     it.each(examples.map((e) => [e.id, e] as const))("on %s", (_, example) => {
-      const doc = example.build(GRID)
+      const doc = legacyOf(example.build(GRID))
       expect(locally(doc)).toBe(globally(doc))
     })
 
@@ -857,9 +860,9 @@ describe("caching", () => {
       let seed = 7401
       const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
       let apart = 0
-      const base = lab1Stand.build(GRID)
+      const base = legacyOf(lab1Stand.build(GRID))
       for (let i = 0; i < 12; i++) {
-        const jittered: Schematic = {
+        const jittered: LegacySchematic = {
           ...base,
           objects: base.objects.map((o) => ({ ...o, x: o.x + Math.round(random() * 6 - 3) * GRID, y: o.y + Math.round(random() * 6 - 3) * GRID })),
         }
@@ -871,9 +874,9 @@ describe("caching", () => {
 
   it("keeps a router between edits that routes exactly what a fresh one does", () => {
     const kept = new Router()
-    let doc = lab1Stand.build(GRID)
+    let doc = legacyOf(lab1Stand.build(GRID))
     let previous: readonly RoutedWire[] = []
-    const after = (what: string, next: Schematic) => {
+    const after = (what: string, next: LegacySchematic) => {
       doc = next
       const got = kept.routeAll(doc.objects, doc.wires, GRID)
       const want = new Router().routeAll(doc.objects, doc.wires, GRID)
@@ -883,7 +886,7 @@ describe("caching", () => {
     }
 
     const byRef = (ref: string) => doc.objects.find((o) => o.props?.ref === ref)!
-    const moveBy = (id: string, dx: number, dy: number): Schematic => ({
+    const moveBy = (id: string, dx: number, dy: number): LegacySchematic => ({
       ...doc,
       objects: doc.objects.map((o) => (o.id === id ? { ...o, x: o.x + dx * GRID, y: o.y + dy * GRID } : o)),
     })
@@ -1091,7 +1094,7 @@ describe("coincident pins, against a brute-force sweep over every pair", () => {
   })
 })
 
-describe("every example routes cleanly: no run doubles back, no wire through a body or over a foreign pin", () => {
+describe("every example's stored wires are clean: in normal form, through no body they do not belong to, over no pin of another net", () => {
   const segmentCrosses = (p: Point, q: Point, r: { x: number; y: number; w: number; h: number }) => {
     const [x0, x1, y0, y1] = [r.x + 0.5, r.x + r.w - 0.5, r.y + 0.5, r.y + r.h - 0.5]
     return p.y === q.y
@@ -1099,36 +1102,27 @@ describe("every example routes cleanly: no run doubles back, no wire through a b
       : p.x === q.x && p.x > x0 && p.x < x1 && Math.max(p.y, q.y) > y0 && Math.min(p.y, q.y) < y1
   }
   const runsOver = (p: Point, q: Point, t: Point) =>
-    (p.y === q.y && Math.abs(t.y - p.y) < 0.5 && t.x > Math.min(p.x, q.x) + 0.5 && t.x < Math.max(p.x, q.x) - 0.5) ||
-    (p.x === q.x && Math.abs(t.x - p.x) < 0.5 && t.y > Math.min(p.y, q.y) + 0.5 && t.y < Math.max(p.y, q.y) - 0.5)
-  const turnsBack = (a: Point, b: Point, c: Point) => {
-    const dot = (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)
-    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
-    return dot < 0 && Math.abs(cross) < 1e-6
-  }
+    (p.y === q.y && t.y === p.y && t.x > Math.min(p.x, q.x) && t.x < Math.max(p.x, q.x)) || (p.x === q.x && t.x === p.x && t.y > Math.min(p.y, q.y) && t.y < Math.max(p.y, q.y))
   const axisAligned = (o: PlacedObject) => (o.rotation ?? 0) % 90 === 0
 
   it.each(examples.map((e) => [e.id, e] as const))("%s", (_, example) => {
-    const doc = example.build(GRID)
-    const nets = buildNets(doc.objects, doc.wires, GRID)
-    const routes = nudgeRoutes(new Router().routeAll(doc.objects, doc.wires, GRID), nets.netOfWire, GRID)
-    const wireById = new Map(doc.wires.map((w) => [w.id, w]))
+    const doc: Schematic = { ...example.build(GRID) }
+    const { runs, nets } = wiringOf(new WireGraph(), doc)
+    const pins = pinsOf(doc.objects)
+    const ownersAt = (p: Point) => pins.filter((q) => q.at.x === p.x && q.at.y === p.y).map((q) => q.key.slice(0, q.key.indexOf(":")))
     const refOf = (id: string) => doc.objects.find((o) => o.id === id)?.props?.ref ?? id
-    const name = (id: string) => {
-      const w = wireById.get(id)!
-      return `${refOf(w.from.object)}.${w.from.pin}→${refOf(w.to.object)}.${w.to.pin}`
-    }
     const issues = new Set<string>()
-    for (const r of routes) {
-      const w = wireById.get(r.id)!
-      for (let i = 1; i + 1 < r.pts.length; i++) if (turnsBack(r.pts[i - 1], r.pts[i], r.pts[i + 1])) issues.add(`${name(r.id)} doubles back`)
+    for (const run of runs) {
+      const net = nets.netOfWire(run.id)
+      const own = new Set([...ownersAt(run.points[0]), ...ownersAt(run.points[run.points.length - 1]), ...(net === undefined ? [] : nets.pinsOf(net).map((key) => key.slice(0, key.indexOf(":"))))])
+      const name = `${run.points[0].x / GRID},${run.points[0].y / GRID}→${run.points[run.points.length - 1].x / GRID},${run.points[run.points.length - 1].y / GRID}`
       for (const o of doc.objects) {
-        if (o.id === w.from.object || o.id === w.to.object || !axisAligned(o)) continue
+        if (own.has(o.id) || !axisAligned(o)) continue
         const rect = objectRect(o, GRID)
-        if (r.pts.some((p, i) => i > 0 && segmentCrosses(r.pts[i - 1], p, rect))) issues.add(`${name(r.id)} crosses ${refOf(o.id)}`)
+        if (run.points.some((p, i) => i > 0 && segmentCrosses(run.points[i - 1], p, rect))) issues.add(`${name} crosses ${refOf(o.id)}`)
         for (const pin of objectPins(o, GRID)) {
-          if (pin.pin.kind === "nc") continue
-          if (r.pts.some((p, i) => i > 0 && runsOver(r.pts[i - 1], p, pin.point))) issues.add(`${name(r.id)} runs over ${refOf(o.id)}.${pin.pin.id}`)
+          if (getDef(o.def)?.pinsAreSockets || nets.netOfPin(pin.key) === net) continue
+          if (run.points.some((p, i) => i > 0 && runsOver(run.points[i - 1], p, pin.point))) issues.add(`${name} runs over ${refOf(o.id)}.${pin.pin.id}`)
         }
       }
     }

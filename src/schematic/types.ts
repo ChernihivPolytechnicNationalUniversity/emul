@@ -5,6 +5,7 @@ import type { MemoryRegion } from "@/mcu/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import type { Icon } from "./icons"
 import type { WireColorKey } from "./wire-colors"
+import type { WireSegment } from "./wires/segment"
 
 /** Direction pointing outward from the component; wires leave the pin this way. */
 export type Side = "left" | "right" | "top" | "bottom"
@@ -552,11 +553,10 @@ export type BoardDebug = {
 
 export type Point = { x: number; y: number }
 
-export type Wire = {
+export type LegacyWire = {
   id: string
   from: PinRef
   to: PinRef
-  /** User-placed bend points in world px (snapped); the router connects them orthogonally. */
   points?: Point[]
   color?: WireColorKey
 }
@@ -586,7 +586,7 @@ export type HdlModule = {
 
 export type Schematic = {
   objects: PlacedObject[]
-  wires: Wire[]
+  wires: WireSegment[]
   /** Keyed by partKey(objectId, partId). */
   parts: Record<string, PartState>
   library?: HdlModule[]
@@ -594,5 +594,7 @@ export type Schematic = {
 
 export const partKey = (object: string, part: string) => `${object}:${part}`
 export const pinKey = (object: string, pin: string) => `${object}:${pin}`
+
+export type LegacySchematic = Omit<Schematic, "wires"> & { wires: LegacyWire[] }
 
 export const emptySchematic = (): Schematic => ({ objects: [], wires: [], parts: {} })

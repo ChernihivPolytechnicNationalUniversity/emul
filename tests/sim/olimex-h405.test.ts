@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { STM32F405RG } from "@/mcu/chip"
 import { olimexStm32H405 } from "@/schematic/components/olimex-stm32-h405"
-import { builder } from "@/schematic/builder"
+import { builder, disconnect } from "@/schematic/builder"
 import { pinContacts } from "@/schematic/contacts"
 import { getDef } from "@/schematic/registry"
 import { GRID } from "@/schematic/geometry"
@@ -94,7 +94,7 @@ describe("Olimex STM32-H405 without firmware", () => {
     doc.parts[partKey(ls.id, "S")] = { on: false }
     expect(lit(settle(), "STAT")).toBe(true)
     doc.objects.splice(doc.objects.indexOf(ls), 1)
-    doc.wires.splice(doc.wires.indexOf(w), 1)
+    disconnect(doc, w)
   })
 
   it("reads BUT on PA0 high through 10 kΩ, low when pressed; RESET pulls RST down", () => {
@@ -136,7 +136,7 @@ describe("Olimex STM32-H405 circuits beyond the headers' own pins", () => {
     expect.soft(pulled, "DISC low: Q4 follows its 3.84 V base, 1.5 kΩ against the host's 15 kΩ").toBeGreaterThan(2.5)
     expect.soft(pulled).toBeLessThan(3.3)
     doc.objects.splice(doc.objects.indexOf(ls), 1)
-    doc.wires.splice(doc.wires.indexOf(w), 1)
+    disconnect(doc, w)
   })
 
   it("ties the JTAG header's 1 and 2 to 3.3 V, 15 to RST, the even pins to GND, and pulls 11, 17 and 19 down", () => {
@@ -158,7 +158,7 @@ describe("Olimex STM32-H405 circuits beyond the headers' own pins", () => {
     expect.soft(v(snap, u, "EXT1-5"), "3.3V").toBeNearRel(3.305, 0.01)
     expect.soft(v(snap, u, "EXT2-23"), "+5V_USB stays off: D1 blocks, all but its leakage").toBeLessThan(0.5)
     for (const o of [supply, gnd]) doc.objects.splice(doc.objects.indexOf(o), 1)
-    for (const w of wires) doc.wires.splice(doc.wires.indexOf(w), 1)
+    disconnect(doc, ...wires)
     doc.parts[partKey(u.id, "USB")] = { on: true }
   })
 
@@ -174,7 +174,7 @@ describe("Olimex STM32-H405 circuits beyond the headers' own pins", () => {
     expect.soft(v(snap, u, "EXT2-26"), "VIN, left at 4.7 V on C2 by the USB just unplugged, leaks away and is not held up from the rail: the LM1117 does not conduct backwards").toBeLessThan(3.3)
     expect.soft(failures, "nothing damaged").toEqual([])
     for (const o of [supply, gnd]) doc.objects.splice(doc.objects.indexOf(o), 1)
-    for (const w of wires) doc.wires.splice(doc.wires.indexOf(w), 1)
+    disconnect(doc, ...wires)
     doc.parts[partKey(u.id, "USB")] = { on: true }
   })
 
@@ -387,7 +387,7 @@ describe("Olimex STM32-H405 circuits beyond the headers' own pins", () => {
     expect.soft(v(snap, u, "JTAG-3"), "TRST follows RST through R-T").toBeLessThan(0.5)
     doc.parts[partKey(u.id, "RESET")] = { pressed: false }
     doc.objects.splice(doc.objects.indexOf(ls), 1)
-    doc.wires.splice(doc.wires.indexOf(w), 1)
+    disconnect(doc, w)
     u.props = { ...u.props, vbat: "closed", lede: "closed", rt: "open" }
   })
 })

@@ -1,7 +1,7 @@
 import { bodyBounds } from "./body"
 import { getDef } from "./registry"
 import { SpatialIndex } from "./spatial"
-import type { BodyShape, ComponentDef, PinDef, PinRef, PlacedObject, Point, Rotation, Side, Wire } from "./types"
+import type { BodyShape, ComponentDef, LegacyWire as Wire, PinDef, PinRef, PlacedObject, Point, Rotation, Side } from "./types"
 
 export type { Point }
 
@@ -537,6 +537,8 @@ function crossings(a1: Point, mid: Point[], b1: Point, avoid: Rect[]) {
   return n
 }
 
+export const bodyCrossings = (pts: readonly Point[], rects: Rect[]) => (pts.length < 2 ? 0 : crossings(pts[0], pts.slice(1, -1), pts[pts.length - 1], rects))
+
 const strictlyInside = (p: Point, r: Rect) => p.x > r.x + 0.5 && p.x < r.x + r.w - 0.5 && p.y > r.y + 0.5 && p.y < r.y + r.h - 0.5
 
 const ownBodyCache = new WeakMap<PlacedObject, { grid: number; body: Rect | null }>()
@@ -678,6 +680,7 @@ function dedupeRoute(pts: Point[], owner: number[]): Route {
 
 export type RoutedWire = {
   id: string
+  leads?: { start?: Point; end?: Point }
   pts: Point[]
   owner: number[]
 }

@@ -1,7 +1,9 @@
 import { GRID } from "@/schematic/geometry"
-import { buildNets } from "@/schematic/nets"
+import { wirePins } from "@/schematic/migrate-wires"
+import { legacyNets } from "@/schematic/nets"
 import { getDef } from "@/schematic/registry"
-import type { PlacedObject, Point, Schematic } from "@/schematic/types"
+import type { LegacySchematic, PlacedObject, Point, Schematic } from "@/schematic/types"
+import { pinPartition as partitionOf, wireNets } from "@/schematic/wires/graph"
 
 export type Partition = string[][]
 
@@ -72,8 +74,39 @@ export function renamed(objects: readonly PlacedObject[], groups: Iterable<Itera
   return canonical([...groups].map((g) => [...g].flatMap((k) => keyOf(k) ?? [])))
 }
 
-export function pinPartition(doc: Schematic, grid: number): Partition {
-  const nets = buildNets(doc.objects, doc.wires, grid)
+export function joiningContactsOfNcPads(frozen: Partition, objects: readonly PlacedObject[]): Partition {
+  const names = stableNames(objects)
+  const parent = new Map<string, string>()
+  const find = (k: string): string => {
+    let r = k
+    while (parent.has(r) && parent.get(r) !== r) r = parent.get(r)!
+    return r
+  }
+  const join = (a: string, b: string) => {
+    for (const k of [a, b]) if (!parent.has(k)) parent.set(k, k)
+    const ra = find(a)
+    const rb = find(b)
+    if (ra !== rb) parent.set(ra, rb)
+  }
+  for (const group of frozen) for (const key of group.slice(1)) join(group[0], key)
+  const at = new Map<string, { key: string; nc: boolean }[]>()
+  for (const o of objects) {
+    if (isJunctionObject(o)) continue
+    for (const p of wirePins([o])) {
+      const point = `${p.at.x},${p.at.y}`
+      at.set(point, [...(at.get(point) ?? []), { key: `${names.get(o.id)}.${p.key.slice(p.key.indexOf(":") + 1)}`, nc: p.kind === "nc" }])
+    }
+  }
+  for (const pins of at.values()) if (pins.length > 1 && pins.some((p) => p.nc)) for (const p of pins.slice(1)) join(pins[0].key, p.key)
+  const groups = new Map<string, string[]>()
+  for (const key of parent.keys()) groups.set(find(key), [...(groups.get(find(key)) ?? []), key])
+  return canonical(groups.values())
+}
+
+export const pinPartition = (doc: Schematic): Partition => renamed(doc.objects, partitionOf(wireNets(doc.wires, wirePins(doc.objects))))
+
+export function legacyPinPartition(doc: LegacySchematic, grid: number): Partition {
+  const nets = legacyNets(doc.objects, doc.wires, grid)
   const groups = new Map<string, string[]>()
   for (const o of doc.objects) {
     const def = getDef(o.def)
@@ -171,22 +204,3 @@ function beyond(groups: Partition, against: Partition): string[][] {
 }
 
 export const partitionDiff = (want: Partition, got: Partition) => ({ missing: beyond(want, got), extra: beyond(got, want) })
-
-export const OVERLAPS_THE_MIGRATION_MUST_REROUTE: Record<string, string[][]> = {
-  "nucleo-serial": [["TERM1.RX", "TERM1.TX", "U1.VCP-RX", "U1.VCP-TX"]],
-  "open746-touch": [["TERM1.RX", "TERM1.TX", "U1.P3-7", "U1.VCP-RX", "U1.VCP-TX"]],
-  "charge-boost-chips": [["LED1.2", "LED2.2", "U1.CHRG", "U1.STDBY"]],
-  "system-exam": [["C5.1", "C5.2", "D2.2", "D3.2", "D4.1", "D5.1", "R10.1", "R10.2"]],
-  "emul-1.28.0--lab2-rgb-pwm.emul": [["R2.2", "R3.2", "U1.P4-5", "U1.P4-7"]],
-}
-
-export function withMerges(partition: Partition, merges: readonly string[][]): Partition {
-  let groups = partition.map((g) => [...g])
-  for (const merge of merges) {
-    const members = new Set(merge)
-    const touched = groups.filter((g) => g.some((k) => members.has(k)))
-    const joined = touched.flat()
-    groups = [...groups.filter((g) => !touched.includes(g)), [...joined, ...merge.filter((k) => !joined.includes(k))]]
-  }
-  return canonical(groups)
-}

@@ -1,8 +1,9 @@
 import { GRID, orientationOf, orientPin, pinPoint, type Point } from "./geometry"
 import { partsOnTheLattice, uprightOnTheLattice } from "./migrate-lattice"
 import { BOARD_IN_1_28, RENUMBERED_SINCE_1_28 } from "./migrate-open746i-c"
+import { wiresAsSegments } from "./migrate-wires"
 import { getDef, getPin, withLibrary } from "./registry"
-import { partKey, type ComponentDef, type PinRef, type PlacedObject, type Schematic, type Wire } from "./types"
+import { partKey, type ComponentDef, type LegacySchematic, type LegacyWire, type PinRef, type PlacedObject, type Schematic } from "./types"
 
 const savedAsHctSelect = (o: PlacedObject) => o.def === "hc595" && o.props?.value === "74HCT595"
 
@@ -18,37 +19,50 @@ export function migrated(saved: PlacedObject): PlacedObject {
 
 export type VersionedSchematic = Schematic & { version?: number }
 
+export type SavedSchematic = Omit<Schematic, "wires"> & { wires: unknown[]; version?: number }
+
 export type Upgrade = { doc: Schematic; notes: string[] }
 
-const steps: ((doc: Schematic) => Upgrade)[] = [open746HeadersAsOnTheBoard, (doc) => partsOnTheLattice(doc)]
+type LegacyUpgrade = { doc: LegacySchematic; notes: string[] }
 
-export const SCHEMATIC_VERSION = steps.length + 1
+const legacySteps: ((doc: LegacySchematic) => LegacyUpgrade)[] = [open746HeadersAsOnTheBoard, (doc) => partsOnTheLattice(doc)]
 
-export function versionOf(doc: Schematic): number {
-  const { version } = doc as VersionedSchematic
-  return typeof version === "number" && Number.isInteger(version) && version >= 1 ? version : 1
+export const SCHEMATIC_VERSION = legacySteps.length + 2
+
+const drawnAsSegments = (wires: unknown) => Array.isArray(wires) && wires.length > 0 && wires.every((w) => !!w && typeof w === "object" && "a" in w && "b" in w && !("from" in w))
+
+export function versionOf(doc: object): number {
+  const { version, wires } = doc as { version?: unknown; wires?: unknown }
+  if (typeof version === "number" && Number.isInteger(version) && version >= 1) return version
+  return drawnAsSegments(wires) ? SCHEMATIC_VERSION : 1
 }
 
 export const stamped = (doc: Schematic): VersionedSchematic => ({ ...doc, version: SCHEMATIC_VERSION })
 
-export function upgraded(doc: Schematic): Upgrade {
+export function legacyUpgraded(doc: SavedSchematic | LegacySchematic): LegacyUpgrade {
   const from = versionOf(doc)
-  if (from >= SCHEMATIC_VERSION) return { doc, notes: [] }
   return withLibrary(doc.library, () => {
     const notes: string[] = []
-    let now = doc
-    for (const step of steps.slice(from - 1)) {
+    let now = doc as LegacySchematic
+    for (const step of legacySteps.slice(from - 1)) {
       const next = step(now)
       now = next.doc
       notes.push(...next.notes)
     }
-    return { doc: stamped(now), notes }
+    return { doc: now, notes }
   })
+}
+
+export function upgraded(doc: SavedSchematic | Schematic): Upgrade {
+  if (versionOf(doc) >= SCHEMATIC_VERSION) return { doc: doc as Schematic, notes: [] }
+  const legacy = legacyUpgraded(doc as SavedSchematic)
+  const frozen = withLibrary(doc.library, () => wiresAsSegments(legacy.doc))
+  return { doc: stamped(frozen.doc), notes: [...legacy.notes, ...frozen.notes] }
 }
 
 const BEFORE_VERSIONS = 2
 
-export const upgradedFrom = (doc: Schematic, version: number | undefined): Upgrade => upgraded({ ...doc, version: version ?? BEFORE_VERSIONS } as VersionedSchematic)
+export const upgradedFrom = (doc: SavedSchematic | Schematic, version: number | undefined): Upgrade => upgraded({ ...doc, version: version ?? (drawnAsSegments(doc.wires) ? SCHEMATIC_VERSION : BEFORE_VERSIONS) } as SavedSchematic)
 
 const OPEN746 = "open746i-c"
 const LCD7 = "lcd7-f"
@@ -58,10 +72,10 @@ const boardName = (board: PlacedObject) => board.props?.ref || "Open746I-C"
 
 const STRIP_PIN = /^P(18|19|20|21)-\d+$/
 
-const wiredToTheStrips = (doc: Schematic, boards: readonly PlacedObject[]) =>
+const wiredToTheStrips = (doc: LegacySchematic, boards: readonly PlacedObject[]) =>
   doc.wires.some((w) => [w.from, w.to].some((end) => STRIP_PIN.test(end.pin) && boards.some((b) => b.id === end.object)))
 
-function open746HeadersAsOnTheBoard(doc: Schematic): Upgrade {
+function open746HeadersAsOnTheBoard(doc: LegacySchematic): LegacyUpgrade {
   const boards = doc.objects.filter((o) => o.def === OPEN746)
   const def = getDef(OPEN746)
   if (!boards.length || !def || wiredToTheStrips(doc, boards)) return { doc, notes: [] }
@@ -72,7 +86,7 @@ function open746HeadersAsOnTheBoard(doc: Schematic): Upgrade {
     moved.set(end.object, [...(moved.get(end.object) ?? []), end.pin])
     return { ...end, pin: now }
   }
-  const wires = doc.wires.map((w): Wire => {
+  const wires = doc.wires.map((w): LegacyWire => {
     const from = renumbered(w.from)
     const to = renumbered(w.to)
     return from === w.from && to === w.to ? w : { ...w, from, to }
@@ -88,7 +102,7 @@ function renumberingNote(board: PlacedObject, ends: readonly string[] | undefine
   return [`${boardName(board)}: ${ends.length} wire ${ends.length === 1 ? "end" : "ends"} on ${headers.join(", ")} moved to keep the same signals, now that these pins are numbered as on the board itself.`]
 }
 
-function solderedJmp1Note(doc: Schematic, board: PlacedObject): string[] {
+function solderedJmp1Note(doc: LegacySchematic, board: PlacedObject): string[] {
   if (doc.parts?.[partKey(board.id, "JMP1")]?.on !== false) return []
   return [`${boardName(board)}: JMP1 was open in this project. On the board it is a 0 Ω resistor soldered in place, not a jumper, so the SD card detect on P6-9 now always reaches PC13.`]
 }

@@ -1,11 +1,11 @@
-import { DIR, framePoint, intersects, objectPins, objectRect, orientationOf, placedText, resolvePinIn, routeBox, Router, standsOnItsDiagonal, touches, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
+import { framePoint, intersects, objectPins, objectRect, orientationOf, placedText, routeBox, Router, standsOnItsDiagonal, touches, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
 import { getDef } from "./registry"
 import { BoxIndex, BUCKET_CELLS } from "./spatial"
 import { PointGrid } from "./contacts"
 import { bodyBounds } from "./body"
 import { blocksOf } from "./printed-text"
 import { boundsOf, boxCorners, labelFrame, labelKnockout, PIN_LABEL_CELLS, pinLabelById, pinLabels } from "@/components/field/pin-label"
-import type { ComponentDef, PinRef, PlacedObject, Wire } from "./types"
+import type { ComponentDef, PlacedObject } from "./types"
 
 export { bodyBounds }
 
@@ -210,7 +210,6 @@ function strictlyInside(corners: readonly Point[], p: Point) {
 
 export type PlacementScene = {
   objects: readonly PlacedObject[]
-  wires: readonly Wire[]
   routes: readonly RoutedWire[]
   grid: number
 }
@@ -295,37 +294,15 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
     if (!labels) drawnOf.set(other, (labels = drawnNames(other, touchingFixed).labels))
     return labels
   }
-  const byId = new Map(scene.objects.map((o) => [o.id, o]))
-  const stubOf = (ref: PinRef): Point[] | null => {
-    const found = resolvePinIn(byId, ref, scene.grid)
-    if (!found) return null
-    const d = DIR[found.pin.side]
-    const stub = (found.pin.stub ?? 1) * scene.grid
-    return [found.point, { x: found.point.x + d.x * stub, y: found.point.y + d.y * stub }]
-  }
-  const attached = new Set(scene.wires.filter((w) => ids.has(w.from.object) || ids.has(w.to.object)).map((w) => w.id))
-  const routes = scene.routes.filter((r) => !attached.has(r.id)).map((route) => ({ route, box: routeBox(route) }))
-  const routeById = new Map(scene.routes.map((r) => [r.id, r]))
-  const carried: { segment: Point[]; target: string | null }[] = []
-  const anchored: Point[][] = []
-  for (const w of scene.wires) {
-    const fromMoves = ids.has(w.from.object)
-    const toMoves = ids.has(w.to.object)
-    if (fromMoves && toMoves) {
-      const route = routeById.get(w.id)
-      if (route) for (let i = 1; i < route.pts.length; i++) carried.push({ segment: [route.pts[i - 1], route.pts[i]], target: null })
-    } else if (fromMoves || toMoves) {
-      const [near, far] = fromMoves ? [w.from, w.to] : [w.to, w.from]
-      const moving = stubOf(near)
-      const fixed = stubOf(far)
-      if (moving) carried.push({ segment: moving, target: far.object })
-      if (fixed) anchored.push(fixed)
-    }
-  }
-  if (!movers.length || (!others.length && !routes.length && !anchored.length)) return () => false
+  const movingAt = new Set(moving.flatMap((o) => objectPins(o, scene.grid).map((p) => `${p.point.x},${p.point.y}`)))
+  const endsOnMover = (route: RoutedWire) => [route.pts[0], route.pts[route.pts.length - 1]].map((p) => !!p && movingAt.has(`${p.x},${p.y}`))
+  const routes = scene.routes.filter((r) => !endsOnMover(r).some(Boolean)).map((route) => ({ route, box: routeBox(route) }))
+  const carried: Point[][] = []
+  for (const route of scene.routes) if (endsOnMover(route).every(Boolean)) for (let i = 1; i < route.pts.length; i++) carried.push([route.pts[i - 1], route.pts[i]])
+  if (!movers.length || (!others.length && !routes.length)) return () => false
   const area = unionOf(movers.map((m) => m.box))
   const nearby = new BoxIndex(others, (o) => o.box, BUCKET_CELLS * scene.grid)
-  const carriedBox = carried.length ? boxOf(carried.flatMap((c) => c.segment)) : null
+  const carriedBox = carried.length ? boxOf(carried.flat()) : null
   const carriedReach = carriedBox && { x: carriedBox.x - 1, y: carriedBox.y - 1, w: carriedBox.w + 2, h: carriedBox.h + 2 }
   const hit = (a: Quad, b: Quad) => intersects(a.box, b.box) && overlap(a.corners, b.corners)
   const hitsAny = (a: readonly Quad[], list: readonly Quad[]) => a.some((q) => list.some((b) => hit(q, b)))
@@ -393,24 +370,15 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
     for (let i = 0; i < movers.length; i++) if (nearby.some(shiftedRect(movers[i].box, dx, dy), (other) => collides(i, other))) return true
     if (carriedReach) {
       const crosses = (other: Placed) =>
-        carried.some(({ segment: [p, q], target }) => {
+        carried.some(([p, q]) => {
           const segment = [
             { x: p.x + dx, y: p.y + dy },
             { x: q.x + dx, y: q.y + dy },
           ]
           const box = segmentBox(segment)
-          return (
-            labelsOf(other).some((l) => touches(box, l.box) && shownOnOther(l) && overlap(segment, l.corners)) ||
-            (target !== other.object.id && other.contour.some((q) => touches(box, q.box) && overlap(segment, q.corners)))
-          )
+          return labelsOf(other).some((l) => touches(box, l.box) && shownOnOther(l) && overlap(segment, l.corners)) || other.contour.some((q) => touches(box, q.box) && overlap(segment, q.corners))
         })
       if (nearby.some(shiftedRect(carriedReach, dx, dy), crosses)) return true
-    }
-    for (const segment of anchored) {
-      const box = segmentBox(segment)
-      for (let i = 0; i < movers.length; i++) {
-        if (labelOn(i, (label) => overlap(segment, label.corners), box)) return true
-      }
     }
     for (const { route, box } of routes) {
       if (!intersects(box, reach)) continue

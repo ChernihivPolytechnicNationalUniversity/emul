@@ -29,7 +29,7 @@ export type ExamBench = {
 const V12 = { value: "+12V", voltage: "12 V" }
 
 export function buildExam(grid: number): ExamBench {
-  const { doc, place, wire } = builder(grid)
+  const { doc, place, wire, node } = builder(grid)
   /** A rail symbol at (x, y) whose pin sits at (x+1, y+2); wires join it on the row below. */
   const rail = (x: number, y: number) => place("supply", x, y, V12)
   const gnd = (x: number, y: number) => place("ground", x, y)
@@ -64,7 +64,7 @@ export function buildExam(grid: number): ExamBench {
     const q = place("npn", ox + 14, 9, { value: "BC547", beta: "200" })
     const re = vert("resistor", ox + 16, 14, { value: "1 kΩ", power: "0.25" })
     const r1 = vert("resistor", ox + 8, 4, { value: "47 kΩ", power: "0.25" })
-    const j = place("junction", ox + 8, 10)
+    const j = node(ox + 9, 11)
     const r2 = vert("resistor", ox + 8, 12, { value: "10 kΩ", power: "0.25" })
     const cin = place("capacitor-polarized", ox + 2, 10, { value: "10 µF", vmax: "25 V" })
     const src = place("ac-source", ox - 1, 12, { value: "100 mV", freq: "1 kHz", offset: "0 V", rint: "1 Ω", imax: "1 A" })
@@ -189,7 +189,7 @@ export function buildExam(grid: number): ExamBench {
     const load = vert("resistor", ox + 10, 4, { value: "1 kΩ", power: "0.25" })
     const q1 = place("npn", ox, 9, { value: "BC547", beta: "200" })
     const q2 = place("npn", ox + 8, 9, { value: "BC547", beta: "200" })
-    const j = place("junction", ox + 4, 10)
+    const j = node(ox + 5, 11)
     const g = gnd(ox + 4, 15)
     wire(v, "V", rref, "1", [[ox + 7, 3], [ox + 3, 3]])
     wire(v, "V", load, "1", [[ox + 7, 3], [ox + 11, 3]])

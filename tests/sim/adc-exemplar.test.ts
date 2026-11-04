@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { STM32F746IG } from "@/mcu/chip"
 import { parseElf } from "@/mcu/elf"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { pinKey } from "@/schematic/types"
@@ -55,7 +55,7 @@ describe("the lecturer's STM32F767ZI_ADC exemplar ported to the Open746I-C: TIM5
     divider(PA3, "10 kΩ", "10 kΩ", 4)
     divider(PA4, "10 kΩ", "20 kΩ", 12)
     doc.objects.push(...b.doc.objects)
-    doc.wires.push(...b.doc.wires)
+    connect(doc, ...connections(b.doc))
     loop.setDoc(doc)
     loop.setParts(doc.parts)
     loop.setRunning(true)

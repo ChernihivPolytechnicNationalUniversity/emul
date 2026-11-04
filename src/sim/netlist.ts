@@ -1,5 +1,4 @@
-import { GRID } from "@/schematic/geometry"
-import { pinContacts } from "@/schematic/contacts"
+import { circuitIn, type Circuit } from "@/schematic/circuit"
 import { getDef } from "@/schematic/registry"
 import { pinKey, type Damage, type Element, type Limits, type NodeRef, type PlacedObject, type ProtChip, type Schematic, type Value } from "@/schematic/types"
 import { chemistryById, defaultResistance, type Chemistry } from "./battery"
@@ -120,8 +119,6 @@ export type Netlist = {
   nodeNet: Map<string, number>
   /** Node keys tied to the reference node by GND elements (current sinks for wire flow). */
   groundKeys: Set<string>
-  /** Pins joined by touching another pin rather than by a wire, keyed to their group. */
-  contacts: ReadonlyMap<string, string>
 }
 
 /** Contact resistance of a switch that does not state its own. */
@@ -262,14 +259,12 @@ function damaged(el: Element, index: number, dmg: Damage | undefined): Element |
  * looking at (oscilloscope probes): an MCU pad on such a net is solved even with nothing
  * else attached, so a bare pin can be probed.
  */
-export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}, grid = GRID, watched: Iterable<string> = []): Netlist {
+export function buildNetlist(input: Schematic | Circuit, damage: Record<string, Damage> = {}, watched: Iterable<string> = []): Netlist {
+  const doc = circuitIn(input)
   const uf = new UnionFind()
   const node = (obj: PlacedObject, ref: string) => `${obj.id}:${ref}`
 
-  for (const w of doc.wires) uf.union(pinKey(w.from.object, w.from.pin), pinKey(w.to.object, w.to.pin))
-  // Pins placed on top of each other are the same conductor, wire or no wire.
-  const contacts = pinContacts(doc.objects, grid)
-  for (const [key, root] of contacts.groups) uf.union(key, root)
+  for (const group of doc.nets) for (let i = 1; i < group.length; i++) uf.union(group[0], group[i])
 
   type Pending = { obj: PlacedObject; el: Element; index: number; props: Record<string, string> }
   const pending: Pending[] = []
@@ -369,10 +364,7 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
   // A pad joins the matrix when something else is on its net, when a wire leaves it, or when
   // a probe watches it; a pad with nothing attached has nothing to compute and is left out.
   const wanted = new Set<string>()
-  for (const w of doc.wires) {
-    wanted.add(uf.find(pinKey(w.from.object, w.from.pin)))
-    wanted.add(uf.find(pinKey(w.to.object, w.to.pin)))
-  }
+  for (const key of doc.wired) wanted.add(uf.find(key))
   for (const key of watched) wanted.add(uf.find(key))
   // Two drivers on one net with no wire between them: a board's MCU pad and a chip of the same
   // board on it (an accelerometer's SPI lines, a codec's I²C).
@@ -720,5 +712,5 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
     }
   }
 
-  return { nodes, sources, elements, pinNet, nodeNet, groundKeys, contacts: contacts.groups }
+  return { nodes, sources, elements, pinNet, nodeNet, groundKeys }
 }

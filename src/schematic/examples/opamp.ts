@@ -9,8 +9,7 @@ function sheet(grid: number) {
   const b = builder(grid)
   /** A two-pin part standing up: pin 1 at (x + 1, y), pin 2 at (x + 1, y + 4). */
   const vert = (def: string, x: number, y: number, props: Record<string, string> = {}, rotation: Rotation = 90) => b.place(def, x, y, props, rotation)
-  /** A junction whose pin sits at (x, y). */
-  const node = (x: number, y: number) => b.place("junction", x - 1, y - 1)
+  const node = b.node
   /** A ground symbol whose pin sits at (x, y). */
   const gnd = (x: number, y: number) => b.place("ground", x - 1, y)
   /** A supply rail whose pin sits at (x, y): above it, or hanging below it for a negative rail. */

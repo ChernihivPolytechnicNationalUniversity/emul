@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { STM32F746IG } from "@/mcu/chip"
 import { parsePad } from "@/mcu/pads"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
@@ -44,7 +44,7 @@ function boardWith(load: Load, keep: string[] = [], unplugged: Record<string, Pa
   const b = builder(GRID)
   load(u, b)
   doc.objects.push(...b.doc.objects)
-  doc.wires.push(...b.doc.wires)
+  connect(doc, ...connections(b.doc))
   const loop = new SimLoop()
   loop.setDoc(doc)
   const parts: Record<string, PartState> = { ...doc.parts }

@@ -1,10 +1,12 @@
 import { existsSync, readdirSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import { legacyOf } from "@/schematic/builder"
 import { GRID, objectPins, Router } from "@/schematic/geometry"
+import { wiresAsSegments } from "@/schematic/migrate-wires"
 import { designatorRects, fieldRouter } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
-import type { PlacedObject, Point, Schematic, Wire } from "@/schematic/types"
-import { canonical, duplicateRefs, geometricGroups, inventory, OVERLAPS_THE_MIGRATION_MUST_REROUTE, partitionDiff, pinPartition, polylineSegments, renamed, stableNames, withMerges, type Partition, type RefPin, type RefSegment } from "../lib/pin-partition"
+import type { LegacySchematic, LegacyWire as Wire, PlacedObject, Point } from "@/schematic/types"
+import { canonical, duplicateRefs, geometricGroups, inventory, joiningContactsOfNcPads, legacyPinPartition, partitionDiff, pinPartition, polylineSegments, renamed, stableNames, type Partition, type RefPin, type RefSegment } from "../lib/pin-partition"
 import { fixturePath, PARTITIONS, partitionDocuments, readFixture } from "../lib/partition-documents"
 import { SCHEMATIC_CASES } from "../lib/schematic-cases"
 
@@ -19,7 +21,7 @@ describe("the pin partition every later phase must keep: the groups of pins on o
       expect.soft(fixture, `${name}: no fixture at ${fixturePath(name)} — run pnpm pin-partitions`).not.toBeNull()
       if (!fixture) continue
       expect.soft(inventory(doc.objects), `${name}: every part, so that a part gone missing cannot pass for one left unwired`).toEqual(fixture.objects)
-      expect.soft(pinPartition(doc, GRID), `${name}: partition from today's wires and contacts`).toEqual(fixture.nets)
+      expect.soft(pinPartition(doc), `${name}: partition from the stored wires and the contacts, exactly, with no register of exceptions (NC pads' contacts joined, design.md §1.2)`).toEqual(joiningContactsOfNcPads(fixture.nets, doc.objects))
     }
   })
 
@@ -27,7 +29,7 @@ describe("the pin partition every later phase must keep: the groups of pins on o
     for (const { name, doc } of documents) {
       const reversed = { ...doc, objects: [...doc.objects].reverse() }
       expect.soft(inventory(reversed.objects), `${name}: parts`).toEqual(inventory(doc.objects))
-      expect.soft(pinPartition(reversed, GRID), `${name}: partition`).toEqual(pinPartition(doc, GRID))
+      expect.soft(pinPartition(reversed), `${name}: partition`).toEqual(pinPartition(doc))
     }
   })
 
@@ -47,9 +49,10 @@ describe("the pin partition every later phase must keep: the groups of pins on o
     ]
     const wire = (id: string, from: [string, string], to: [string, string]): Wire => ({ id, from: { object: from[0], pin: from[1] }, to: { object: to[0], pin: to[1] } })
     const common = [wire("1", ["a", "2"], ["r1", "1"]), wire("2", ["b", "2"], ["r2", "1"])]
-    const before: Schematic = { objects, wires: [...common, wire("3", ["a", "1"], ["g", "GND"]), wire("4", ["b", "1"], ["v", "V"])], parts: {} }
-    const swapped: Schematic = { objects, wires: [...common, wire("3", ["a", "1"], ["v", "V"]), wire("4", ["b", "1"], ["g", "GND"])], parts: {} }
-    expect.soft(pinPartition(swapped, GRID), "ground and supply swapped between two unnamed resistors").not.toEqual(pinPartition(before, GRID))
+    const before: LegacySchematic = { objects, wires: [...common, wire("3", ["a", "1"], ["g", "GND"]), wire("4", ["b", "1"], ["v", "V"])], parts: {} }
+    const swapped: LegacySchematic = { objects, wires: [...common, wire("3", ["a", "1"], ["v", "V"]), wire("4", ["b", "1"], ["g", "GND"])], parts: {} }
+    expect.soft(legacyPinPartition(swapped, GRID), "ground and supply swapped between two unnamed resistors").not.toEqual(legacyPinPartition(before, GRID))
+    expect.soft(pinPartition(wiresAsSegments(swapped).doc), "the same, frozen").not.toEqual(pinPartition(wiresAsSegments(before).doc))
   })
 
   it("a partition is compared group for group, so a repeated group lost or gained is a difference", () => {
@@ -79,7 +82,7 @@ describe("the pin partition every later phase must keep: the groups of pins on o
 
   it("a junction part is not a pin of the circuit: the nets it joins are one group without it", () => {
     const tap = SCHEMATIC_CASES.find((c) => c.name === "junction-tap")!.build()
-    expect.soft(pinPartition(tap, GRID), "R1, R2 and R3 on one junction").toEqual([["R1.2", "R2.1", "R3.1"]])
+    expect.soft(pinPartition(tap), "R1, R2 and R3 on one branch point").toEqual([["R1.2", "R2.1", "R3.1"]])
     const fixture = readFixture("metronome")
     expect.soft(existsSync(fixturePath("metronome")), "the metronome is frozen").toBe(true)
     expect.soft(fixture?.nets.flat().some((k) => k.startsWith("junction")), "junction pins in the metronome's partition").toBe(false)
@@ -152,10 +155,10 @@ describe("the brute-force geometric reference: connected exactly when a conducto
   })
 })
 
-const refPins = (doc: Schematic): RefPin[] =>
+const refPins = (doc: Pick<LegacySchematic, "objects">): RefPin[] =>
   doc.objects.flatMap((o) => objectPins(o, GRID).map((p) => ({ key: p.key, at: p.point, socket: !!getDef(o.def)?.pinsAreSockets, nc: p.pin.kind === "nc" })))
 
-function frozenPartition(doc: Schematic, corners = polylineSegments) {
+function frozenPartition(doc: LegacySchematic, corners = polylineSegments) {
   const routes = fieldRouter().routeAll(doc.objects, doc.wires, GRID)
   const byId = new Map(doc.wires.map((w) => [w.id, w]))
   const pinned = (w: Wire) => [`${w.from.object}:${w.from.pin}`, `${w.to.object}:${w.to.pin}`] as const
@@ -165,42 +168,23 @@ function frozenPartition(doc: Schematic, corners = polylineSegments) {
 
 const everyVertex = (pts: readonly Point[]): RefSegment[] => pts.slice(1).flatMap((p, i) => (p.x === pts[i].x && p.y === pts[i].y ? [] : [{ a: pts[i], b: p }]))
 
+const legacyExample = (name: string) => legacyOf(documents.find((d) => d.name === name)!.doc)
 
-describe("the reference against today's buildNets, every wire routed by today's router and frozen", () => {
-  it("agrees on every document whose frozen routes keep off other nets' wiring and pins", () => {
-    let agreeing = 0
-    for (const { name, doc } of documents) {
-      if (name in OVERLAPS_THE_MIGRATION_MUST_REROUTE) continue
-      const { missing, extra } = partitionDiff(pinPartition(doc, GRID), frozenPartition(doc))
-      expect.soft({ missing, extra }, `${name}: frozen geometry against today's nets`).toEqual({ missing: [], extra: [] })
-      agreeing++
-    }
-    expect.soft(agreeing, "documents checked exactly").toBe(documents.length - Object.keys(OVERLAPS_THE_MIGRATION_MUST_REROUTE).length)
-  })
-
-  it("the documents where a frozen route touches another net's wiring or pins merge exactly the recorded nets, and nothing else", () => {
-    for (const [name, merged] of Object.entries(OVERLAPS_THE_MIGRATION_MUST_REROUTE)) {
-      const document = documents.find((d) => d.name === name)
-      expect.soft(document, `${name} is still a document`).toBeDefined()
-      if (!document) continue
-      expect.soft(frozenPartition(document.doc), `${name}: the whole frozen partition, the recorded merges applied and nothing else`).toEqual(withMerges(pinPartition(document.doc, GRID), merged))
-    }
-  })
-
-  it("a wire whose two pins coincide keeps its connection when frozen, even to a pad the board leaves unconnected", () => {
+describe("what phase 0 learnt from freezing today's routes, kept as the reasons the upgrade does what it does", () => {
+  it("a wire whose two pins coincide keeps its connection through the upgrade, and an NC pad is now a pin like any other", () => {
     const board: PlacedObject = { id: "u1", def: "nucleo-f429zi", x: 0, y: 0, props: { ref: "U1" } }
     const pad = objectPins(board, GRID).find((p) => p.pin.id === "CN8-1")!.point
     const resistor: PlacedObject = { id: "r1", def: "resistor", x: pad.x, y: pad.y - GRID, props: { ref: "R1" } }
-    const butted: Schematic = { objects: [board, resistor], wires: [], parts: {} }
-    const wired: Schematic = { ...butted, wires: [{ id: "w", from: { object: "r1", pin: "1" }, to: { object: "u1", pin: "CN8-1" } }] }
-    expect.soft(pinPartition(butted, GRID), "butted on the NC pad, today: nothing").toEqual([])
-    expect.soft(frozenPartition(butted), "frozen: nothing").toEqual([])
-    expect.soft(pinPartition(wired, GRID), "wired to it, today: joined").toEqual([["R1.1", "U1.CN8-1"]])
-    expect.soft(frozenPartition(wired), "frozen: still joined").toEqual([["R1.1", "U1.CN8-1"]])
+    const butted: LegacySchematic = { objects: [board, resistor], wires: [], parts: {} }
+    const wired: LegacySchematic = { ...butted, wires: [{ id: "w", from: { object: "r1", pin: "1" }, to: { object: "u1", pin: "CN8-1" } }] }
+    expect.soft(legacyPinPartition(butted, GRID), "butted on the NC pad, before: nothing").toEqual([])
+    expect.soft(pinPartition(wiresAsSegments(butted).doc), "upgraded: joined, as design.md §13.6 decided").toEqual([["R1.1", "U1.CN8-1"]])
+    expect.soft(legacyPinPartition(wired, GRID), "wired to it, before: joined").toEqual([["R1.1", "U1.CN8-1"]])
+    expect.soft(pinPartition(wiresAsSegments(wired).doc), "upgraded: still joined").toEqual([["R1.1", "U1.CN8-1"]])
   })
 
   it("the freeze routes as the field does, designators and values in the way included", () => {
-    const doc = documents.find((d) => d.name === "charge-boost-chips")!.doc
+    const doc = legacyExample("charge-boost-chips")
     const shape = (router: Router) => router.routeAll(doc.objects, doc.wires, GRID).map((r) => r.pts)
     expect.soft(shape(fieldRouter()), "the field's router").toEqual(shape(new Router(designatorRects)))
     expect.soft(shape(new Router()), "a router blind to text routes this document differently, so the check above can fail").not.toEqual(shape(new Router(designatorRects)))
@@ -208,20 +192,21 @@ describe("the reference against today's buildNets, every wire routed by today's 
 
   it("a frozen route has to be written as its corners: kept, the stub ends lying on another net's wire at a crossing join the two nets", () => {
     const joined = (name: string) => {
-      const doc = documents.find((d) => d.name === name)!.doc
-      return partitionDiff(pinPartition(doc, GRID), frozenPartition(doc, everyVertex)).extra
+      const doc = legacyExample(name)
+      return partitionDiff(legacyPinPartition(doc, GRID), frozenPartition(doc, everyVertex)).extra
     }
     expect.soft(joined("metronome"), "the supply rail shorted to two grounds through R17 and D7's stub ends").toContainEqual(expect.arrayContaining(["R17.2", "D7.1", "U1.VCC"]))
     expect.soft(joined("logic").length, "logic: three pairs of gate nets joined").toBe(3)
   })
 
-  it("the merge register is exact: dropping a net or merging one more fails it", () => {
-    const today: Partition = [["A.1", "B.1"], ["C.1", "D.1"], ["E.1", "F.1"]]
-    const register = [["A.1", "B.1", "C.1", "D.1"]]
-    expect.soft(withMerges(today, register), "the recorded merge").toEqual([["A.1", "B.1", "C.1", "D.1"], ["E.1", "F.1"]])
-    expect.soft(withMerges(today, register), "a lost net").not.toEqual([["A.1", "B.1", "C.1", "D.1"]])
-    expect.soft(withMerges(today, register), "one merge too many").not.toEqual([["A.1", "B.1", "C.1", "D.1", "E.1", "F.1"]])
-    expect.soft(withMerges(today, [["A.1", "C.1", "S.1"]]), "a socket that joins by the merge alone").toEqual([["A.1", "B.1", "C.1", "D.1", "S.1"], ["E.1", "F.1"]])
+  it("written as its corners, a frozen route still touches another net in five documents, the ones the upgrade lays again", () => {
+    const touching = documents.filter((d) => d.name in SCHEMATIC_EXAMPLE_NAMES).map((d) => {
+      const doc = legacyOf(d.doc)
+      return { name: d.name, extra: partitionDiff(legacyPinPartition(doc, GRID), frozenPartition(doc)).extra.length }
+    })
+    expect.soft(touching.filter((t) => t.extra > 0).map((t) => t.name).sort(), "examples whose naive freeze merges nets").toEqual(["charge-boost-chips", "nucleo-serial", "open746-touch", "system-exam"])
+    for (const { name, doc } of documents.filter((d) => d.name in SCHEMATIC_EXAMPLE_NAMES)) expect.soft(pinPartition(doc), `${name}: the upgrade keeps the circuit all the same`).toEqual(readFixture(name)!.nets)
   })
 })
 
+const SCHEMATIC_EXAMPLE_NAMES = Object.fromEntries(documents.filter((d) => d.source.startsWith("example ")).map((d) => [d.name, true]))

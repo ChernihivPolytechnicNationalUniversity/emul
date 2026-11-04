@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { GRID, objectPins } from "@/schematic/geometry"
-import { fieldRouter } from "@/schematic/placement"
-import { getDef } from "@/schematic/registry"
-import type { Point, Schematic } from "@/schematic/types"
+import { GRID } from "@/schematic/geometry"
+import { wirePins } from "@/schematic/migrate-wires"
+import type { Point } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
 import { danglingEnds, junctionsOf, pinPartition, WireGraph, wireNets } from "@/schematic/wires/graph"
 import { commitEdit, normalise, type Touched } from "@/schematic/wires/normal-form"
 import { HALF_CELL, type WirePin, type WireSegment } from "@/schematic/wires/segment"
-import { canonical, geometricGroups, OVERLAPS_THE_MIGRATION_MUST_REROUTE, polylineSegments, renamed, withMerges } from "../lib/pin-partition"
+import { canonical, geometricGroups, joiningContactsOfNcPads, renamed } from "../lib/pin-partition"
 import { partitionDocuments, readFixture } from "../lib/partition-documents"
 import { bruteDangling, bruteJunctions, counter, geometryOf, normalFormViolations, paintOf, random, referencePartition, sortedPoints } from "../lib/wire-reference"
 
@@ -375,35 +374,17 @@ describe("random edit sequences against the brute-force reference (junctions.md 
   })
 })
 
-describe("today's examples, every wire routed and frozen, then normalised", () => {
-  it("keep the circuit frozen in phase 0 wherever the frozen routes keep to the lattice and to their own corridors", async () => {
-    const skipped: string[] = []
+describe("today's examples and files, every wire frozen into segments", () => {
+  it("are in normal form and give exactly the circuit phase 0 froze, with no register of exceptions", async () => {
     for (const { name, doc } of await partitionDocuments()) {
       const fixture = readFixture(name)
       if (!fixture) continue
-      const { segments, pins, offLattice } = frozen(doc)
-      if (offLattice) {
-        skipped.push(name)
-        continue
-      }
-      const wires = normalise(segments, pins, undefined, counter(name))
-      expect.soft(normalFormViolations(wires, pins), `${name}: normal form`).toEqual([])
-      const got = renamed(doc.objects, pinPartition(wireNets(wires, pins)))
-      const raw = renamed(doc.objects, geometricGroups(pins.map((p) => ({ key: p.key, at: p.at, socket: p.socket })), segments))
-      expect.soft(got, `${name}: the same circuit as the frozen drawing before normalising`).toEqual(raw)
-      expect.soft(got, `${name}: the frozen partition, with exactly the merges phase 0 recorded`).toEqual(withMerges(fixture.nets, OVERLAPS_THE_MIGRATION_MUST_REROUTE[name] ?? []))
+      const pins = wirePins(doc.objects)
+      expect.soft(normalFormViolations(doc.wires, pins), `${name}: normal form`).toEqual([])
+      const got = renamed(doc.objects, pinPartition(wireNets(doc.wires, pins)))
+      const raw = renamed(doc.objects, geometricGroups(pins.map((p) => ({ key: p.key, at: p.at, socket: p.socket })), doc.wires))
+      expect.soft(got, `${name}: the graph agrees with the brute-force reference`).toEqual(raw)
+      expect.soft(got, `${name}: the circuit phase 0 froze, NC pads' contacts joined`).toEqual(joiningContactsOfNcPads(fixture.nets, doc.objects))
     }
-    expect.soft(skipped, "documents whose diagonal pins leave by today's 45° stubs, frozen in phase 3").toEqual(DIAGONAL_STUBS)
   })
 })
-
-const DIAGONAL_STUBS = ["power-supply", "system-exam", "bridge", "emul-1.42.0--power-supply.emul", "emul-1.42.0--resistor-bridge.emul"]
-
-function frozen(doc: Schematic) {
-  const routes = fieldRouter().routeAll(doc.objects, doc.wires, GRID)
-  const segments: WireSegment[] = routes.flatMap((r) => polylineSegments(r.pts).map((s, i) => ({ id: `${r.id}/${i}`, a: s.a, b: s.b })))
-  const pins: WirePin[] = doc.objects.flatMap((o) => objectPins(o, GRID).map((p) => ({ key: p.key, at: p.point, socket: !!getDef(o.def)?.pinsAreSockets, kind: p.pin.kind })))
-  const onLattice = (p: Point) => Number.isInteger(p.x / HALF_CELL) && Number.isInteger(p.y / HALF_CELL)
-  const offLattice = segments.some((s) => !onLattice(s.a) || !onLattice(s.b) || (s.a.x !== s.b.x && s.a.y !== s.b.y))
-  return { segments, pins, offLattice }
-}

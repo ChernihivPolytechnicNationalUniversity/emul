@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { chromium, type Page } from "playwright-core"
 import { examples } from "@/schematic/examples"
 import { bodyCentre, GRID, objectPins, objectRect, orientationOf, type Point, type Turn } from "@/schematic/geometry"
-import { SCHEMATIC_VERSION } from "@/schematic/migrate"
+import { SCHEMATIC_VERSION, stamped } from "@/schematic/migrate"
 import { rotateSelection } from "@/schematic/orient"
 import { bodyBounds, contourOf } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
@@ -47,7 +47,7 @@ async function openDoc(page: Page, name: string, doc: Schematic) {
   await page.waitForSelector("[data-slot=dot-field-viewport]")
   const landing = Date.now() + LANDING_TIMEOUT_MS
   while ((await pageTitle(page)).startsWith("εmul") && Date.now() < landing) await page.waitForTimeout(100)
-  await page.setInputFiles("input[type=file]", { name: `${name}.emul`, mimeType: "application/octet-stream", buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name, schematic: doc })) })
+  await page.setInputFiles("input[type=file]", { name: `${name}.emul`, mimeType: "application/octet-stream", buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name, schematic: stamped(doc) })) })
   const opened = Date.now() + LANDING_TIMEOUT_MS
   while (!(await pageTitle(page)).startsWith(`${name} `) && Date.now() < opened) await page.waitForTimeout(100)
   if (!(await pageTitle(page)).startsWith(`${name} `)) throw new Error(`the field never showed ${name}: it shows “${await pageTitle(page)}”`)
@@ -102,7 +102,7 @@ const dots = (page: Page, id: string) =>
     const group = document.querySelector(`[data-pins="${CSS.escape(objectId)}"]`)
     const markers = [...(group?.querySelectorAll(":scope > [data-pin] > [data-marker]") ?? [])].filter((m) => m.getAttribute("display") !== "none")
     const contact = markers.filter((m) => Number(m.getAttribute("r")) > 6)
-    return { contact: contact.length, black: contact.filter((m) => m.getAttribute("class")?.includes("fill-foreground")).length }
+    return { contact: contact.length, black: contact.filter((m) => m.getAttribute("class")?.includes("fill-foreground")).length, open: markers.length }
   }, id)
 
 const blockedNow = (page: Page, id: string) => page.evaluate((objectId) => document.querySelector(`[data-body="${CSS.escape(objectId)}"]`)?.hasAttribute("data-blocked") ?? false, id)
@@ -224,7 +224,10 @@ async function bridgeBuiltByHand(page: Page) {
     }),
   )
   expect("each diode turned by R and Shift+R stands on its diagonal", placed.filter((p) => p.id?.startsWith("d")).map((p) => p.transform), ["rotate(315deg)", "rotate(225deg)", "rotate(225deg)", "rotate(315deg)"])
-  for (const id of ["d1", "d2", "d3", "d4"]) expect(`${id}: both pins meet a neighbour's (a contact dot on each)`, (await dots(page, id)).contact, 2)
+  for (const id of ["d1", "d2", "d3", "d4"]) {
+    const marks = await dots(page, id)
+    expect(`${id}: both pins meet a neighbour's: no open-pin marker left, and no dot where only two ends meet (design.md §3.2–3.3)`, { open: marks.open, contact: marks.contact }, { open: 0, contact: 0 })
+  }
 }
 
 async function addingLandsInView(page: Page) {

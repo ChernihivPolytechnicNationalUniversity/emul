@@ -1,0 +1,14 @@
+{
+  "source": "tests/data/before-the-segments/junction-unwired-on-route.emul",
+  "objects": [
+    "R1 (resistor)",
+    "R2 (resistor)",
+    "R3 (resistor)"
+  ],
+  "nets": [
+    [
+      "R1.2",
+      "R2.1"
+    ]
+  ]
+}

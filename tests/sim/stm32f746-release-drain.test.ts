@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { STM32F429ZI, STM32F746IG, type ChipProfile } from "@/mcu/chip"
 import { parsePad } from "@/mcu/pads"
 import { Stm32 } from "@/mcu/stm32f429"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { partKey } from "@/schematic/types"
@@ -90,7 +90,7 @@ describe("the F746's debug-port pads drain on release from output high at speed 
       const term = b.place("serial-terminal", 34, -9, { baud: "115200" })
       b.wire(u, "VCP-TX", term, "RX")
       doc.objects.push(...b.doc.objects)
-      doc.wires.push(...b.doc.wires)
+      connect(doc, ...connections(b.doc))
       const loop = new SimLoop()
       loop.setDoc(doc)
       loop.setParts({ ...doc.parts, ...Object.fromEntries(Object.entries(AS_ON_THE_BENCH).map(([part, state]) => [partKey(u.id, part), state])) })

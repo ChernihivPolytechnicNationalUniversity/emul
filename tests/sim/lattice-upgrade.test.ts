@@ -1,19 +1,20 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import * as Y from "yjs"
-import { guestRoom, hostRoom, join as joinRoom, onThisVersion, readRoom, ROOM_VERSION, roomVersion, split, type Room } from "@/collab/elements"
 import { parseProject, readProjectFile } from "@/project/project-store"
 import { setLibrary } from "@/schematic/registry"
-import { builder } from "@/schematic/builder"
+import { builder, legacyOf } from "@/schematic/builder"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, objectRect, type Orientation, type Point } from "@/schematic/geometry"
-import { migrated, SCHEMATIC_VERSION, upgraded } from "@/schematic/migrate"
-import { buildNets } from "@/schematic/nets"
+import { legacyUpgraded, migrated, SCHEMATIC_VERSION, upgraded } from "@/schematic/migrate"
+import { legacyNets as buildNets } from "@/schematic/nets"
 import { placementCheck } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
-import type { HdlModule, PlacedObject, Rotation, Schematic } from "@/schematic/types"
-import { clipboardText, clipFromClipboard, clipOfThisVersion, pasteLanding, pastedInto, type Clip } from "@/schematic/use-schematic"
+import type { HdlModule, LegacySchematic, PlacedObject, Rotation, Schematic } from "@/schematic/types"
+import { pasteLanding, pastedInto, type Clip } from "@/schematic/use-schematic"
+import { pinsOf } from "@/schematic/wire-edits"
+import { pinPartition as graphPartition, wireNets } from "@/schematic/wires/graph"
+import { legacyCircuit } from "../lib/legacy-circuit"
 import { SimLoop } from "@/sim/loop"
 
 const ROOT = join(import.meta.dirname, "..", "..")
@@ -21,10 +22,12 @@ const c = (v: number) => v * GRID
 const whole = (v: number) => Math.abs(v - Math.round(v)) < 1e-9
 const placedAs = (def: string, o: Orientation, x = 0, y = 0, ref?: string): PlacedObject => ({ id: ref ?? def, def, x: c(x), y: c(y), ...(o.rotation && { rotation: o.rotation }), ...(o.mirror && { mirror: true }), ...(ref && { props: { ref } }) })
 const at = (o: PlacedObject, pin: string) => objectPins(o, GRID).find((p) => p.pin.id === pin)!.point
-const old = (objects: PlacedObject[], wires: Schematic["wires"] = []) => ({ objects, wires, parts: {}, version: 2 }) as Schematic
+const old = (objects: PlacedObject[], wires: LegacySchematic["wires"] = []): LegacySchematic => ({ objects, wires, parts: {}, version: 2 }) as LegacySchematic
 const upright = (rotation: Rotation): Orientation => ({ rotation, mirror: false })
 
-function connected(doc: Schematic): string[][] {
+const connectedNow = (doc: Schematic): string[][] => graphPartition(wireNets(doc.wires, pinsOf(doc.objects))).map((g) => [...g].sort()).sort()
+
+function connected(doc: LegacySchematic): string[][] {
   const nets = buildNets(doc.objects, doc.wires, GRID)
   const groups = new Map<string, string[]>()
   for (const o of doc.objects)
@@ -63,18 +66,16 @@ const INVERTER: HdlModule = { id: "hdl:inv", name: "inv", files: [], built: "inv
 
 const WITH_ENABLE: HdlModule = { ...INVERTER, built: "inv-en", netlist: { ...INVERTER.netlist!, nets: 4, ports: [...INVERTER.netlist!.ports, { name: "en", dir: "input", bits: [3], offset: 0, upto: false }] } as never }
 
-const touchingAny = (doc: Schematic, id: string) => connected(doc).filter((g) => g.some((k) => k.startsWith(`${id}:`)))
+const touchingAny = (doc: LegacySchematic, id: string) => connected(doc).filter((g) => g.some((k) => k.startsWith(`${id}:`)))
 
 const overlap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 
-const emptyDoc = (): Schematic => ({ objects: [], wires: [], parts: {} })
-
 const OLD = join(ROOT, "tests", "data", "emul-1.42.0")
 
-async function rawOld(file: string): Promise<Schematic> {
+async function rawOld(file: string): Promise<LegacySchematic> {
   const { Zstd } = await import("@hpcc-js/wasm-zstd")
   const bytes = (await Zstd.load()).decompress(new Uint8Array(readFileSync(join(OLD, file))))
-  return (JSON.parse(new TextDecoder().decode(bytes)) as { schematic: Schematic }).schematic
+  return (JSON.parse(new TextDecoder().decode(bytes)) as { schematic: LegacySchematic }).schematic
 }
 
 async function opened(file: string) {
@@ -83,12 +84,12 @@ async function opened(file: string) {
   return read
 }
 
-const refOf = (doc: Schematic, id: string) => doc.objects.find((o) => o.id === id)?.props?.ref
+const refOf = (doc: Pick<Schematic, "objects">, id: string) => doc.objects.find((o) => o.id === id)?.props?.ref
 
 describe("an old file's diagonal parts move onto the lattice without changing the circuit (design.md §10 item 1; the user, 2026-11-04: old projects must keep working)", () => {
   it("an old power supply's bridge closes: every diode moves under a cell, the four corners meet pin to pin and the four wires between them go", async () => {
     const before = await rawOld("power-supply.emul")
-    const { doc, notes } = await opened("power-supply.emul")
+    const { doc, notes } = legacyUpgraded(before)
     const diodes = doc.objects.filter((o) => o.def === "diode")
     const was = new Map(before.objects.map((o) => [o.id, o]))
     for (const d of diodes) {
@@ -108,9 +109,9 @@ describe("an old file's diagonal parts move onto the lattice without changing th
   it("the old power supply rectifies the same after the upgrade: every reading equal, simulated side by side", async () => {
     const before = await rawOld("power-supply.emul")
     const { doc } = await opened("power-supply.emul")
-    const run = (d: Schematic) => {
+    const run = (d: Schematic | LegacySchematic) => {
       const loop = new SimLoop()
-      loop.setDoc(d)
+      loop.setDoc((d.wires as object[]).some((w) => "from" in w) ? legacyCircuit(d as LegacySchematic) : (d as Schematic))
       loop.setRunning(true)
       let clock = 0
       loop.advance(clock)
@@ -129,8 +130,7 @@ describe("an old file's diagonal parts move onto the lattice without changing th
 
   it("parts an old file left almost touching are not joined by the upgrade: each takes the nearest spot that keeps the circuit", async () => {
     const { doc } = await opened("led-diamond.emul")
-    const nets = buildNets(doc.objects, doc.wires, GRID)
-    expect.soft(doc.objects.flatMap((o) => objectPins(o, GRID)).filter((p) => nets.netOfPin(p.key) !== undefined).map((p) => p.key), "pins in contact").toEqual([])
+    expect.soft(connectedNow(doc), "pins in contact").toEqual([])
     const before = await rawOld("led-diamond.emul")
     for (const o of doc.objects) {
       const old = before.objects.find((x) => x.id === o.id)!
@@ -154,17 +154,17 @@ describe("an old file's diagonal parts move onto the lattice without changing th
     const r = { ...placedAs("resistor", { rotation: 0, mirror: false }, 0, 0, "R1") }
     const pin2 = at(r, "2")
     const resistor = { ...r, x: r.x + base.x - GRID - pin2.x, y: r.y + base.y - pin2.y }
-    const old = { objects: [q, resistor], wires: [{ id: "w", from: { object: "R1", pin: "2" }, to: { object: "Q1", pin: "B" } }], parts: {}, version: 2 } as Schematic
-    const { doc } = upgraded(old)
+    const old = { objects: [q, resistor], wires: [{ id: "w", from: { object: "R1", pin: "2" }, to: { object: "Q1", pin: "B" } }], parts: {}, version: 2 } as LegacySchematic
+    const { doc } = legacyUpgraded(old)
     const turned = doc.objects.find((o) => o.id === "Q1")!
     expect.soft([turned.x, turned.y, turned.rotation ?? 0], "Q1 turned where it stood").toEqual([inPlace.x, inPlace.y, inPlace.rotation ?? 0])
     expect.soft(doc.wires.map((w) => w.id), "its wire kept").toEqual(["w"])
   })
 
   it("a file without diagonal parts comes through untouched, and an upgraded file is not upgraded again", () => {
-    const plain = examples.find((e) => e.id === "battery-life")!.build(GRID)
-    expect.soft(upgraded({ ...plain, version: 2 } as Schematic).doc.objects, "nothing to move").toBe(plain.objects)
-    const { doc } = upgraded({ ...diamondOld(), version: 2 } as Schematic)
+    const plain = legacyOf(examples.find((e) => e.id === "battery-life")!.build(GRID))
+    expect.soft(legacyUpgraded({ ...plain, version: 2 } as LegacySchematic).doc.objects, "nothing to move").toBe(plain.objects)
+    const { doc } = upgraded({ ...diamondOld(), version: 2 } as LegacySchematic)
     expect.soft(upgraded(doc).doc, "already at this version").toBe(doc)
     expect.soft((doc as Schematic & { version?: number }).version, "stamped").toBe(SCHEMATIC_VERSION)
   })
@@ -177,10 +177,10 @@ describe("an old file's diagonal parts move onto the lattice without changing th
   })
 })
 
-function diamondOld(): Schematic {
+function diamondOld(): LegacySchematic {
   const { doc, place } = builder(GRID)
   for (const [x, y, rotation] of [[0, 0, 315], [5, 0, 45], [0, 3, 45], [5, 3, 315]] as [number, number, Rotation][]) place("led", x, y, { value: "red" }, rotation)
-  return doc
+  return legacyOf(doc)
 }
 
 
@@ -198,7 +198,7 @@ describe("the upgrade keeps every old circuit, whatever moved onto the lattice (
           if (Math.hypot(was.x - lands.x, was.y - lands.y) < 0.5) continue
           const resistor: PlacedObject = { id: "R1", def: "resistor", x: lands.x, y: lands.y - GRID, props: { ref: "R1" } }
           if (at(resistor, "1").x !== lands.x || at(resistor, "1").y !== lands.y) continue
-          const { doc, notes } = upgraded(old([part, resistor]))
+          const { doc, notes } = legacyUpgraded(old([part, resistor]))
           cases++
           expect.soft(connected(doc), `${def} ${rotation}° ${pin}: nothing joined`).toEqual([])
           expect.soft(notes.length > 0, `${def} ${rotation}° ${pin}: the move is told`).toBe(true)
@@ -209,7 +209,7 @@ describe("the upgrade keeps every old circuit, whatever moved onto the lattice (
   it("two oscillators whose OUTs touched before meet still: a wire joins them now", () => {
     const a = placedAs("oscillator", upright(0), 0, 0, "G1")
     const b = placedAs("oscillator", upright(180), 4, 0, "G2")
-    const { doc, notes } = upgraded(old([a, b]))
+    const { doc, notes } = legacyUpgraded(old([a, b]))
     expect.soft(connected(doc), "G1's OUT with G2's").toEqual([["G1:OUT", "G2:OUT"]])
     expect.soft(notes.some((n) => n.includes("touched where they stood before")), "told").toBe(true)
   })
@@ -218,7 +218,7 @@ describe("the upgrade keeps every old circuit, whatever moved onto the lattice (
     const a = placedAs("resistor", upright(45), 0, 0, "A")
     const b = placedAs("resistor", upright(45), 4, 5, "B")
     const grounds = ([[0, 0], [0, 1], [1, 0], [1, 1], [5, 6], [4, 6], [5, 5]] as const).map(([x, y], i) => groundOn(`G${i}`, { x: c(x), y: c(y) }))
-    const { doc } = upgraded(old([a, b, ...grounds]))
+    const { doc } = legacyUpgraded(old([a, b, ...grounds]))
     expect.soft(connected(doc).filter((g) => g.some((k) => k.startsWith("A:") || k.startsWith("B:"))), "A and B join nothing").toEqual([])
   })
 
@@ -226,7 +226,7 @@ describe("the upgrade keeps every old circuit, whatever moved onto the lattice (
     const r = placedAs("resistor", upright(45), 0, 0, "R1")
     const grounds: PlacedObject[] = []
     for (let x = -1; x <= 2; x++) for (let y = -1; y <= 2; y++) grounds.push(groundOn(`G${x}${y}`, { x: c(x), y: c(y) }))
-    const { doc, notes } = upgraded(old([r, ...grounds]))
+    const { doc, notes } = legacyUpgraded(old([r, ...grounds]))
     expect.soft(connected(doc).filter((g) => g.some((k) => k.startsWith("R1:"))), "R1 joins nothing").toEqual([])
     expect.soft(notes.some((n) => n.includes("R1")), "the note names R1").toBe(true)
   })
@@ -234,14 +234,14 @@ describe("the upgrade keeps every old circuit, whatever moved onto the lattice (
   it("a contact an old file made between two diagonal parts survives when one of them turns: a wire joins them", () => {
     const crystal = placedAs("crystal", upright(45), 0, 0, "Y1")
     const pot = placedAs("potentiometer", upright(45), 0, 0, "RV1")
-    const { doc } = upgraded(old([crystal, pot]))
+    const { doc } = legacyUpgraded(old([crystal, pot]))
     expect.soft(connected(doc), "both ends still on the pot's ends").toEqual([["RV1:1", "Y1:1"], ["RV1:2", "Y1:2"]])
   })
 
   it("two diodes an old file stacked head to tail on one diagonal stay stacked, their contacts kept without a wire", () => {
     const d1 = placedAs("diode", upright(45), 2, 2, "D1")
     const d2 = placedAs("diode", upright(225), 2, 2, "D2")
-    const { doc, notes } = upgraded(old([d1, d2]))
+    const { doc, notes } = legacyUpgraded(old([d1, d2]))
     expect.soft(connected(doc), "anode on cathode both ways, as before").toEqual([["D1:1", "D2:2"], ["D1:2", "D2:1"]])
     expect.soft(doc.wires, "no wire needed").toEqual([])
     expect.soft(notes, "nothing to tell").toEqual([])
@@ -255,7 +255,7 @@ describe("the upgrade keeps every old circuit, whatever moved onto the lattice (
     const turned = { x: (base.x - def.width / 2) * Math.SQRT1_2 - (base.y - def.height / 2) * Math.SQRT1_2, y: (base.x - def.width / 2) * Math.SQRT1_2 + (base.y - def.height / 2) * Math.SQRT1_2 }
     const b = { x: (box / 2 + turned.x) * GRID, y: (box / 2 + turned.y) * GRID }
     const resistor: PlacedObject = { id: "R1", def: "resistor", x: b.x - 4 * GRID, y: b.y - GRID, props: { ref: "R1" } }
-    const { doc } = upgraded(old([q, resistor]))
+    const { doc } = legacyUpgraded(old([q, resistor]))
     expect.soft(connected(doc), "Q1's base still on R1's pin 2").toEqual([["Q1:B", "R1:2"]])
   })
 
@@ -264,7 +264,7 @@ describe("the upgrade keeps every old circuit, whatever moved onto the lattice (
     const pad = at(board, "NC")
     const r1 = placedAs("resistor", upright(45), pad.x / GRID - 1, pad.y / GRID - 1, "R1")
     const wire = { id: "w", from: { object: "R1", pin: "1" }, to: { object: "U1", pin: "NC" } }
-    const { doc } = upgraded(old([board, r1], [wire]))
+    const { doc } = legacyUpgraded(old([board, r1], [wire]))
     const moved = doc.objects.find((o) => o.id === "R1")!
     expect.soft(at(moved, "1"), "R1's pin 1 now on the NC pad").toEqual(pad)
     expect.soft(doc.wires.map((w) => w.id), "the wire to the NC pad stays").toEqual(["w"])
@@ -273,7 +273,7 @@ describe("the upgrade keeps every old circuit, whatever moved onto the lattice (
 
   it("a long chain of diagonal parts, one cluster too big to try every way, still joins nothing new", () => {
     const parts = Array.from({ length: 40 }, (_, i) => placedAs("resistor", upright(45), 3 * i, 3 * i, `R${i + 1}`))
-    const { doc } = upgraded(old(parts))
+    const { doc } = legacyUpgraded(old(parts))
     expect.soft(connected(doc), "no contacts").toEqual([])
     for (const o of doc.objects) for (const { point } of objectPins(o, GRID)) expect.soft([whole(point.x / GRID), whole(point.y / GRID)], `${o.props?.ref} on the grid`).toEqual([true, true])
   })
@@ -284,12 +284,12 @@ describe("a paste from an older εmul turns a part off a diagonal before it look
     const resistor = placedAs("resistor", upright(0), -1, 4, "R9")
     const doc: Schematic = { objects: [resistor], wires: [], parts: {} }
     const clip: Clip = { objects: [placedAs("npn", upright(45), 0, 0, "Q1")], wires: [], parts: {} }
-    const { clip: landing, at: spot } = pasteLanding({ objects: doc.objects, wires: [], routes: [], grid: GRID }, clip, { x: GRID, y: GRID })
+    const { clip: landing, at: spot } = pasteLanding({ objects: doc.objects, routes: [], grid: GRID }, clip, { x: GRID, y: GRID })
     expect.soft(landing.objects[0].rotation ?? 0, "turned before anything else").toBe(0)
     const pasted = pastedInto(doc, landing, spot.x, spot.y, () => "Q2", () => "w")
     const q = pasted.objects.find((o) => o.id === "Q2")!
     expect.soft([q.x, q.y, q.rotation ?? 0], "where the room was found").toEqual([landing.objects[0].x + spot.x, landing.objects[0].y + spot.y, 0])
-    expect.soft(placementCheck({ objects: pasted.objects, wires: [], routes: [], grid: GRID }, [q])(0, 0), "not refused where it landed").toBe(false)
+    expect.soft(placementCheck({ objects: pasted.objects, routes: [], grid: GRID }, [q])(0, 0), "not refused where it landed").toBe(false)
     expect.soft(objectRect(q, GRID).w, "a right-angle box").toBe(objectRect({ ...q, rotation: undefined }, GRID).w)
   })
 })
@@ -301,7 +301,7 @@ describe("an old file's HDL parts are known while it is upgraded, though the fie
     setLibrary([])
     const { doc } = parseProject(file([{ id: "U1", def: "hdl:inv", x: 0, y: 0, props: { ref: "U1" } }, { id: "R1", def: "resistor", x: c(-3), y: c(-3), rotation: 45, props: { ref: "R1" } }]))!
     setLibrary([INVERTER])
-    expect.soft(connected(doc), "R1 touches nothing of U1").toEqual([])
+    expect.soft(connectedNow(doc), "R1 touches nothing of U1").toEqual([])
     setLibrary([])
   })
 
@@ -317,32 +317,12 @@ describe("an old file's HDL parts are known while it is upgraded, though the fie
   })
 })
 
-describe("a live room or a clip from before the lattice is upgraded on its way in, and one from now is left alone (phase 2 review)", () => {
-  it("a room with no version stamp is upgraded as the file would be; a stamped room is taken as it is, even a second time", async () => {
-    const stored = await rawOld("led-diamond.emul")
-    const { doc, upgraded: changed } = onThisVersion(stored, undefined)
-    expect.soft(changed, "upgraded").toBe(true)
-    expect.soft(connected(doc), "the LEDs left apart, as in the file").toEqual([])
-    const again = onThisVersion(doc, String(SCHEMATIC_VERSION))
-    expect.soft(again.upgraded, "a stamped room is not upgraded").toBe(false)
-    expect.soft(again.doc, "nor changed").toBe(doc)
-  })
-
-  it("a clip copied in an older tab carries no version and is upgraded before it is pasted; one carrying this version is pasted as it is", async () => {
-    const stored = await rawOld("led-diamond.emul")
-    const clip: Clip = { objects: stored.objects, wires: stored.wires, parts: stored.parts }
-    const pasted = pastedInto({ objects: [], wires: [], parts: {} }, clipOfThisVersion(clip, undefined).clip, 0, 0, (id) => id, () => "w")
-    expect.soft(connected(pasted), "the LEDs pasted apart").toEqual([])
-    expect.soft(clipOfThisVersion(clip, SCHEMATIC_VERSION).clip, "a clip of this version is untouched").toBe(clip)
-  })
-})
-
 describe("the upgrade's finer rules (phase 2 review)", () => {
   it("a wire between two pins that already met, on parts the upgrade does not move, is left alone", () => {
     const a = placedAs("resistor", upright(0), 0, 0, "R1")
     const b = placedAs("resistor", upright(0), 4, 0, "R2")
     const wire = { id: "w", from: { object: "R1", pin: "2" }, to: { object: "R2", pin: "1" } }
-    const { doc } = upgraded(old([a, b, placedAs("led", upright(45), 10, 10, "LED1")], [wire]))
+    const { doc } = legacyUpgraded(old([a, b, placedAs("led", upright(45), 10, 10, "LED1")], [wire]))
     expect.soft(doc.wires.map((w) => w.id), "the wire stays").toEqual(["w"])
   })
 
@@ -351,7 +331,7 @@ describe("the upgrade's finer rules (phase 2 review)", () => {
       for (const mirror of [false, true])
       for (const [x, y] of [[5, 5], [5, 6], [6, 5], [6, 6], [7, 4]]) {
         const meter = { ...placedAs("voltmeter", { rotation, mirror }, x, y, "PV1") }
-        const { doc } = upgraded(old([meter]))
+        const { doc } = legacyUpgraded(old([meter]))
         const moved = doc.objects[0]
         const [plus, minus] = [before(meter, "+"), before(meter, "-")]
         const middle = { x: (plus.x + minus.x) / 2 / GRID, y: (plus.y + minus.y) / 2 / GRID }
@@ -364,7 +344,7 @@ describe("the upgrade's finer rules (phase 2 review)", () => {
     const back = migrated(q)
     const emitter = at(back, "E")
     const ground = groundOn("GND", emitter)
-    const { doc, notes } = upgraded(old([q, ground]))
+    const { doc, notes } = legacyUpgraded(old([q, ground]))
     const turned = doc.objects.find((o) => o.id === "Q1")!
     expect.soft(turned.rotation ?? 0, "turned forward to 90°").toBe(90)
     expect.soft(connected(doc), "the emitter left off the ground").toEqual([])
@@ -375,7 +355,7 @@ describe("the upgrade's finer rules (phase 2 review)", () => {
     const r = placedAs("resistor", upright(45), 0, 0, "R1")
     const grounds: PlacedObject[] = []
     for (let x = -5; x <= 7; x++) for (let y = -5; y <= 7; y++) grounds.push(groundOn(`G${x}_${y}`, { x: c(x), y: c(y) }))
-    const { doc, notes } = upgraded(old([r, ...grounds]))
+    const { doc, notes } = legacyUpgraded(old([r, ...grounds]))
     const moved = doc.objects.find((o) => o.id === "R1")!
     expect.soft(touchingAny(doc, "R1"), "R1's ends on no ground").toEqual([])
     expect.soft(grounds.filter((g) => overlap(objectRect(g, GRID), objectRect(moved, GRID))).map((g) => g.id), "on no ground's body").toEqual([])
@@ -387,26 +367,26 @@ describe("the upgrade's finer rules (phase 2 review)", () => {
   it("old pins chained closer than the old tolerance stay one net, however the file orders them", () => {
     const four = (step: number) =>
       [0, 3, 1, 2].map((k): PlacedObject => ({ id: `R${k}`, def: "resistor", x: k * step, y: 0, rotation: 45, props: { ref: `R${k}` } }))
-    expect.soft(connected(upgraded(old(four(0.006))).doc), "0.006 px apart: both ends of all four joined, as before").toEqual([
+    expect.soft(connected(legacyUpgraded(old(four(0.006))).doc), "0.006 px apart: both ends of all four joined, as before").toEqual([
       ["R0:1", "R1:1", "R2:1", "R3:1"],
       ["R0:2", "R1:2", "R2:2", "R3:2"],
     ])
-    expect.soft(connected(upgraded(old(four(0.0099))).doc), "0.0099 px apart: joined").toEqual([
+    expect.soft(connected(legacyUpgraded(old(four(0.0099))).doc), "0.0099 px apart: joined").toEqual([
       ["R0:1", "R1:1", "R2:1", "R3:1"],
       ["R0:2", "R1:2", "R2:2", "R3:2"],
     ])
-    expect.soft(connected(upgraded(old(four(0.0101))).doc), "0.0101 px apart: never touched, still apart").toEqual([])
+    expect.soft(connected(legacyUpgraded(old(four(0.0101))).doc), "0.0101 px apart: never touched, still apart").toEqual([])
   })
 
   it("a pin now on the grid meets no old pin within the old tolerance of it", () => {
     const resistorAt = (x: number): PlacedObject => ({ id: "R", def: "resistor", x, y: c(1), props: { ref: "R" } })
     const oscillator = placedAs("oscillator", upright(0), 0, 0, "A")
     for (const off of [0.006, 0.0099]) {
-      const { doc, notes } = upgraded(old([oscillator, resistorAt(c(4) + off)]))
+      const { doc, notes } = legacyUpgraded(old([oscillator, resistorAt(c(4) + off)]))
       expect.soft(connected(doc), `${off} px off the grid: OUT keeps off R`).toEqual([])
       expect.soft(notes, `${off} px: A moves and says so`).toEqual(["A moved 1 cell: its pins, now on the grid, would have touched another net's where it stood."])
     }
-    const { doc, notes } = upgraded(old([oscillator, resistorAt(c(4) + 0.0101)]))
+    const { doc, notes } = legacyUpgraded(old([oscillator, resistorAt(c(4) + 0.0101)]))
     expect.soft(connected(doc), "0.0101 px off: apart").toEqual([])
     expect.soft(notes, "0.0101 px off: A stays where it stood").toEqual([])
   })
@@ -416,7 +396,7 @@ describe("the upgrade's finer rules (phase 2 review)", () => {
     const b = placedAs("resistor", upright(45), 2, 2, "B")
     const grounds: PlacedObject[] = []
     for (let x = -1; x <= 6; x++) for (let y = -1; y <= 6; y++) if (!(x === 1 && y === 1) && !(x === 4 && y === 4)) grounds.push(groundOn(`G${x}_${y}`, { x: c(x), y: c(y) }))
-    const { doc, notes } = upgraded(old([a, b, ...grounds]))
+    const { doc, notes } = legacyUpgraded(old([a, b, ...grounds]))
     expect.soft([...touchingAny(doc, "A"), ...touchingAny(doc, "B")], "A and B on no ground").toEqual([])
     for (const [id, was] of [["A", a], ["B", b]] as const) {
       const now = doc.objects.find((o) => o.id === id)!
@@ -429,7 +409,7 @@ describe("the upgrade's finer rules (phase 2 review)", () => {
     const def = getDef("resistor")!
     const half = ((def.width + def.height) * Math.SQRT1_2) / 2
     const centredAt = (id: string, mx: number, my: number): PlacedObject => ({ id, def: "resistor", x: (mx - half) * GRID, y: (my - half) * GRID, rotation: 45, props: { ref: id } })
-    const { doc } = upgraded(old([centredAt("A", 11.9, 11.5), centredAt("B", 11.5, 11.5)]))
+    const { doc } = legacyUpgraded(old([centredAt("A", 11.9, 11.5), centredAt("B", 11.5, 11.5)]))
     const square = (id: string) => [doc.objects.find((o) => o.id === id)!.x / GRID, doc.objects.find((o) => o.id === id)!.y / GRID]
     expect.soft(square("B"), "B keeps the square round its old middle").toEqual([10, 10])
     expect.soft(square("A"), "A takes its second, a cell to the right").toEqual([11, 10])
@@ -454,74 +434,5 @@ describe("a part whose definition arrives after its pins were first asked for ge
     setLibrary([WITH_ENABLE])
     expect.soft(objectPins(u1, GRID).map((p) => p.pin.id).sort(), "the rebuilt module's pins").toEqual(["GND", "VCC", "a", "en", "y"])
     setLibrary([])
-  })
-})
-
-const roomHolding = (doc?: Schematic, stamp?: string): Room => {
-  const ydoc = new Y.Doc()
-  const room: Room = { ydoc, elements: ydoc.getMap<string>("elements"), meta: ydoc.getMap<string>("meta") }
-  if (doc) for (const [k, v] of split(doc)) room.elements.set(k, v)
-  if (stamp) room.meta.set(ROOM_VERSION, stamp)
-  return room
-}
-
-const placements = (doc: Schematic) => doc.objects.map((o) => [o.id, o.x, o.y, o.rotation ?? 0]).sort()
-
-describe("a live room is entered through the upgrade, and an upgraded room is written back stamped (phase 2 verification)", () => {
-  it("a guest entering a room an older εmul filled gets it as the file opens, notes and all, and the room is stamped with it", async () => {
-    const file = await opened("npn-on-a-diagonal.emul")
-    const room = roomHolding(await rawOld("npn-on-a-diagonal.emul"))
-    const entered = guestRoom(room)!
-    expect.soft(entered.notes, "the file's notes").toEqual(file.notes)
-    expect.soft(placements(entered.doc), "the file's placements").toEqual(placements(file.doc))
-    expect.soft(room.meta.get(ROOM_VERSION), "stamped").toBe(roomVersion())
-    expect.soft(placements(joinRoom(new Map(room.elements.entries()))), "written back").toEqual(placements(file.doc))
-    const again = readRoom(room)
-    expect.soft(again.notes, "read again: nothing to say").toEqual([])
-    expect.soft(placements(again.doc), "nor anything moved").toEqual(placements(file.doc))
-  })
-
-  it("a host entering such a room gets the same; a host bringing a document to an empty room writes it stamped", async () => {
-    const file = await opened("npn-on-a-diagonal.emul")
-    const old = roomHolding(await rawOld("npn-on-a-diagonal.emul"))
-    const entered = hostRoom(old, emptyDoc())!
-    expect.soft(entered.notes, "the file's notes").toEqual(file.notes)
-    expect.soft(old.meta.get(ROOM_VERSION), "stamped").toBe(roomVersion())
-    const empty = roomHolding()
-    expect.soft(hostRoom(empty, file.doc), "an empty room has nothing to hand back").toBeNull()
-    expect.soft(empty.meta.get(ROOM_VERSION), "stamped").toBe(roomVersion())
-    expect.soft(placements(joinRoom(new Map(empty.elements.entries()))), "holding the host's document").toEqual(placements(file.doc))
-    expect.soft(placements(guestRoom(empty)!.doc), "which a guest reads unchanged").toEqual(placements(file.doc))
-  })
-
-  it("a room stamped with this version is read as it is, and an empty one turns a guest away", async () => {
-    const file = await opened("led-diamond.emul")
-    const room = roomHolding(file.doc, roomVersion())
-    const entered = guestRoom(room)!
-    expect.soft(entered.notes, "no notes").toEqual([])
-    expect.soft(placements(entered.doc), "unchanged").toEqual(placements(file.doc))
-    expect.soft(guestRoom(roomHolding()), "empty").toBeNull()
-  })
-})
-
-describe("the clipboard carries the version, and a clip from an older tab is upgraded with its notes (phase 2 verification)", () => {
-  it("a clip copied here comes back exactly as it went", async () => {
-    const { doc } = await opened("power-supply.emul")
-    const clip: Clip = { objects: doc.objects, wires: doc.wires, parts: doc.parts }
-    const back = clipFromClipboard(clipboardText(clip))!
-    expect.soft(back.notes, "nothing to say").toEqual([])
-    expect.soft(placements({ ...doc, ...back.clip }), "every part where it was").toEqual(placements(doc))
-  })
-
-  it("a clip from an older tab, with no version, is upgraded and says what moved", async () => {
-    const file = await opened("npn-on-a-diagonal.emul")
-    const stored = await rawOld("npn-on-a-diagonal.emul")
-    const back = clipFromClipboard(JSON.stringify({ emul: { objects: stored.objects, wires: stored.wires, parts: stored.parts } }))!
-    expect.soft(back.notes, "the file's notes").toEqual(file.notes)
-    expect.soft(placements({ ...file.doc, ...back.clip }), "the file's placements").toEqual(placements(file.doc))
-  })
-
-  it("text that is not an εmul clip is no clip", () => {
-    for (const text of [undefined, "", "R1 10k", "{\"emul\": 3}", JSON.stringify({ objects: [] })]) expect.soft(clipFromClipboard(text), JSON.stringify(text)).toBeNull()
   })
 })
