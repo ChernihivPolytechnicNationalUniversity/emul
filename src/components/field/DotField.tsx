@@ -20,7 +20,7 @@ import { SpatialIndex } from "@/schematic/spatial"
 import { fieldDetail } from "./detail"
 import { savedTextScale, saveTextScale } from "./text-scale"
 import { buildNets } from "@/schematic/nets"
-import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, WIRE_COLOR_BY_CODE, type WireColorKey } from "@/schematic/wire-colors"
+import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, wireColorFor, type WireColorKey } from "@/schematic/wire-colors"
 import { partKey, pinKey, type PinRef, type PlacedObject, type Schematic } from "@/schematic/types"
 import { getDef, notifyLibrary, partInitial, pinName, setLibrary } from "@/schematic/registry"
 import { newModuleId, TEMPLATES } from "@/schematic/hdl"
@@ -28,6 +28,8 @@ import type { HdlLanguage } from "emul-shared/hdl"
 import { languageOf } from "emul-shared/hdl"
 import type { SourceFile } from "emul-shared/source"
 import { bytesToBase64 } from "@/lib/bytes"
+import { composing, dispatch, keepsPageInPlace, matches, matchesAny, ownsKeys, typesAhead } from "@/lib/keys"
+import { KEYMAP, labelFor } from "@/lib/keymap"
 import { useEvent } from "@/hooks/use-event"
 import { useSchematic, type Clip } from "@/schematic/use-schematic"
 import { contactCheck, designatorRects, freeSpot, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
@@ -409,7 +411,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (!c) return
     setClip(c)
     pasted.current = 0
-    navigator.clipboard?.writeText(JSON.stringify({ emul: c })).catch(() => {})
+    const text = JSON.stringify({ emul: c })
+    navigator.clipboard?.writeText(text).catch(() => {})
+    return text
   }, [copySelected])
   const paste = React.useCallback(
     (c: Clip | null = clip) => {
@@ -424,8 +428,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (c) pasteFree(c, grid, grid)
   }, [copySelected, pasteFree, grid])
   const cut = React.useCallback(() => {
-    copy()
+    const text = copy()
     sch.removeSelected()
+    return text
   }, [copy, sch])
 
   const initialDoc = React.useRef(sch.doc)
@@ -963,70 +968,60 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   }
 
   // --- keyboard --------------------------------------------------------------
-  /** Keys typed into a text field are the field's; buttons (a just-clicked palette entry) are fine. */
-  // Monaco types through an EditContext on a plain div, so the code panel counts as a text field too.
-  const inTextField = (e: Event) => {
-    const t = e.target as HTMLElement | null
-    return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable || !!t.closest?.('[data-slot="code-panel"]'))
-  }
   const onKey = useEvent((e: KeyboardEvent) => {
-    if (inTextField(e)) return
-    const mod = e.ctrlKey || e.metaKey
-    const key = e.key.toLowerCase()
-    if (e.key === "Delete" || e.key === "Backspace") {
+    if (ownsKeys(e.target) || composing(e)) return
+    if (matchesAny(e, KEYMAP.remove) && (!e.defaultPrevented || keepsPageInPlace(e))) {
       sch.removeSelected()
-    } else if (e.key === "Escape") {
+      return
+    }
+    if (matches(e, KEYMAP.deselect) && e.isTrusted && !e.defaultPrevented) {
       if (measure.active) measure.stop()
       sch.deselectAll()
       setPending(null)
       setHoveredWire(null)
-    } else if (!mod && !e.altKey && WIRE_COLOR_BY_CODE.has(e.code) && (pending || sch.selectedWires.size > 0)) {
-      const color = WIRE_COLOR_BY_CODE.get(e.code)
+      return
+    }
+    const commands = [
+      { keys: KEYMAP.undo, run: () => sch.undo() },
+      { keys: KEYMAP.redo, run: () => sch.redo() },
+      { keys: KEYMAP.selectAll, run: () => sch.selectAll() },
+      { keys: KEYMAP.duplicate, run: duplicate },
+      { keys: KEYMAP.code, run: () => setCodeOpen((o) => !o) },
+    ]
+    if (dispatch(e, commands) || typesAhead(e.target)) return
+    const color = pending || sch.selectedWires.size > 0 ? wireColorFor(e) : undefined
+    if (color) {
       e.preventDefault()
-      if (!color) return
       if (pending) setPending({ ...pending, color, chosen: true })
       else paintSelected(color, e.shiftKey)
-    } else if (mod && key === "z") {
-      e.preventDefault()
-      if (e.shiftKey) sch.redo()
-      else sch.undo()
-    } else if (mod && key === "y") {
-      e.preventDefault()
-      sch.redo()
-    } else if (mod && key === "a") {
-      e.preventDefault()
-      sch.selectAll()
-    } else if (mod && key === "d") {
-      e.preventDefault()
-      duplicate()
-    } else if (mod && key === "j") {
-      e.preventDefault()
-      setCodeOpen((o) => !o)
-    } else if (!mod && !e.altKey && key === "m") {
-      measure.toggle()
-    } else if (!mod && !e.altKey && key === "o") {
-      setScopeOpen((o) => !o)
-    } else if (!mod && !e.altKey && key === "l") {
-      setLogicOpen((o) => !o)
-    } else if (!mod && !e.altKey && key === "r") {
-      if (sch.selectedObjects.size) sch.rotate(sch.selectedObjects, e.shiftKey ? -45 : 45)
-    } else if (!mod && !e.altKey && (key === "x" || key === "y")) {
-      if (sch.selectedObjects.size) sch.flip(sch.selectedObjects, key === "x" ? "horizontal" : "vertical")
+      return
     }
+    const selected = () => sch.selectedObjects.size > 0
+    dispatch(e, [
+      { keys: KEYMAP.measure, run: () => measure.toggle() },
+      { keys: KEYMAP.scope, run: () => setScopeOpen((o) => !o) },
+      { keys: KEYMAP.logic, run: () => setLogicOpen((o) => !o) },
+      { keys: KEYMAP.rotate, when: selected, run: () => sch.rotate(sch.selectedObjects, 45) },
+      { keys: KEYMAP.rotateBack, when: selected, run: () => sch.rotate(sch.selectedObjects, -45) },
+      { keys: KEYMAP.flipHorizontal, when: selected, run: () => sch.flip(sch.selectedObjects, "horizontal") },
+      { keys: KEYMAP.flipVertical, when: selected, run: () => sch.flip(sch.selectedObjects, "vertical") },
+    ])
   })
   // Cut/copy/paste ride the native events so the system clipboard sees them too.
   const onCopy = useEvent((e: ClipboardEvent) => {
-    if (inTextField(e) || !sch.selectedObjects.size) return
+    if (ownsKeys(e.target) || !sch.selectedObjects.size) return
     e.preventDefault()
-    copy()
+    const text = copy()
+    if (text) e.clipboardData?.setData("text/plain", text)
   })
   const onCut = useEvent((e: ClipboardEvent) => {
-    if (inTextField(e) || !sch.selectedObjects.size) return
+    if (ownsKeys(e.target) || !sch.selectedObjects.size) return
     e.preventDefault()
-    cut()
+    const text = cut()
+    if (text) e.clipboardData?.setData("text/plain", text)
   })
   const onPaste = useEvent((e: ClipboardEvent) => {
-    if (inTextField(e)) return
+    if (ownsKeys(e.target)) return
     e.preventDefault()
     const text = e.clipboardData?.getData("text/plain")
     let external: Clip | null = null
@@ -1348,67 +1343,67 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!sch.canUndo} onClick={sch.undo}>
           Undo
-          <ContextMenuShortcut>⌘Z</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.undo)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!sch.canRedo} onClick={sch.redo}>
           Redo
-          <ContextMenuShortcut>⇧⌘Z</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.redo)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!hasObjects} onClick={cut}>
           Cut
-          <ContextMenuShortcut>⌘X</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.cut)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasObjects} onClick={copy}>
           Copy
-          <ContextMenuShortcut>⌘C</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.copy)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!clip} onClick={() => paste()}>
           Paste
-          <ContextMenuShortcut>⌘V</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.paste)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasObjects} onClick={duplicate}>
           Duplicate
-          <ContextMenuShortcut>⌘D</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.duplicate)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!hasObjects} onClick={() => sch.rotate(sch.selectedObjects, 45)}>
           Rotate 45° clockwise
-          <ContextMenuShortcut>R</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.rotate)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasObjects} onClick={() => sch.rotate(sch.selectedObjects, -45)}>
           Rotate 45° counter-clockwise
-          <ContextMenuShortcut>⇧R</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.rotateBack)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasObjects} onClick={() => sch.flip(sch.selectedObjects, "horizontal")}>
           Mirror horizontally
-          <ContextMenuShortcut>X</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.flipHorizontal)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasObjects} onClick={() => sch.flip(sch.selectedObjects, "vertical")}>
           Mirror vertically
-          <ContextMenuShortcut>Y</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.flipVertical)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!hasSelection} onClick={sch.removeSelected}>
           Delete
-          <ContextMenuShortcut>Del</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.remove)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!selectedBoard} onClick={() => setCodeOpen(true)}>
           Source code
-          <ContextMenuShortcut>⌘J</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.code)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onClick={zoomIn}>
           Zoom in
-          <ContextMenuShortcut>⌘+</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.zoomIn)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem onClick={zoomOut}>
           Zoom out
-          <ContextMenuShortcut>⌘−</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.zoomOut)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem onClick={reset}>
           Reset view
-          <ContextMenuShortcut>⌘0</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.zoomReset)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={sch.doc.wires.length === 0} onClick={autoColorAllNets}>
@@ -1420,7 +1415,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         <ContextMenuSeparator />
         <ContextMenuItem disabled={isEmpty} onClick={sch.selectAll}>
           Select all
-          <ContextMenuShortcut>⌘A</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.selectAll)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem
           disabled={!hasSelection}
@@ -1430,7 +1425,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           }}
         >
           Deselect
-          <ContextMenuShortcut>Esc</ContextMenuShortcut>
+          <ContextMenuShortcut>{labelFor(KEYMAP.deselect)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem variant="destructive" disabled={isEmpty} onClick={sch.clear}>
           Clear field

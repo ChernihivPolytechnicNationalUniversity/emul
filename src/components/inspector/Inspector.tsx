@@ -8,6 +8,7 @@ import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
 import { ChevronDownIcon, CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { KEYMAP, labelFor } from "@/lib/keymap"
 import { chipById } from "@/mcu/chip"
 import { avrChipById } from "@/mcu/avr/chip"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -530,7 +531,7 @@ function FirmwarePanel({ object, chip, sim, sections, onChange, onFirmware, onCo
       action={
         <ButtonGroup>
           {onCode && (
-            <Button variant="outline" size="xs" onClick={() => onCode(object.id)} title="Source code (⌘J)">
+            <Button variant="outline" size="xs" onClick={() => onCode(object.id)} title={`Source code (${labelFor(KEYMAP.code)})`}>
               <CodeIcon />
               Code…
             </Button>

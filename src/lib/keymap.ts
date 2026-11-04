@@ -1,0 +1,45 @@
+import { alternatives, shortcutLabel, type Keys } from "./keys"
+
+export const KEYMAP = {
+  undo: { key: "z", mod: true, repeats: true },
+  redo: [
+    { key: "z", mod: true, shift: true, repeats: true },
+    { key: "y", mod: true, repeats: true },
+  ],
+  cut: { key: "x", mod: true },
+  copy: { key: "c", mod: true },
+  paste: { key: "v", mod: true },
+  duplicate: { key: "d", mod: true },
+  selectAll: { key: "a", mod: true },
+  deselect: { key: "Escape" },
+  remove: [{ key: "Delete" }, { key: "Backspace" }],
+  rotate: { key: "r", repeats: true },
+  rotateBack: { key: "r", shift: true, repeats: true },
+  flipHorizontal: { key: "x" },
+  flipVertical: { key: "y" },
+  measure: { key: "m" },
+  scope: { key: "o" },
+  logic: { key: "l" },
+  code: { key: "j", mod: true },
+  sidebar: { key: "b", mod: true },
+  zoomIn: [
+    { key: "+", mod: true, shift: "either", repeats: true },
+    { key: "=", mod: true, shift: "either", repeats: true },
+  ],
+  zoomOut: { key: "-", mod: true, shift: "either", repeats: true },
+  zoomReset: { key: "0", mod: true, shift: "either" },
+  save: { key: "s", mod: true },
+  open: { key: "o", mod: true },
+  projects: { key: "o", mod: true, shift: true },
+  disassembly: { key: "d", mod: true, shift: true },
+  continue: { key: "F5" },
+  restart: { key: "F5", mod: true, shift: true },
+  toggleBreakpoint: { key: "F9" },
+  runToCursor: { key: "F10", mod: true },
+  stepOver: { key: "F10", repeats: true },
+  stepInto: { key: "F11", repeats: true },
+  stepOut: { key: "F11", shift: true, repeats: true },
+  stepInstruction: { key: "F11", alt: true, repeats: true },
+} as const satisfies Record<string, Keys>
+
+export const labelFor = (keys: Keys) => shortcutLabel(alternatives(keys)[0])

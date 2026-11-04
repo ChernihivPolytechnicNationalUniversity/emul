@@ -7,6 +7,7 @@ import { expressionAt, isDoc, tabOf, uriOf } from "./models"
 import type { Diagnostic } from "@/project/diagnostics"
 import { useEvent } from "@/hooks/use-event"
 import { cn } from "@/lib/utils"
+import { DEBUG_SHORTCUTS } from "./debug-shortcuts"
 
 /** What the menu's Undo/Redo need: whether the text has the focus, and the editor's own history. */
 export type EditorHandle = {
@@ -139,18 +140,26 @@ export function Editor({ ref, objectId, files, docs, active, target, diagnostics
     editor.current = ed
     marks.current = ed.createDecorationsCollection()
     const line = () => ed.getPosition()?.lineNumber ?? 1
+    let held = false
+    const noteRepeat = (e: KeyboardEvent) => {
+      held = e.repeat
+    }
+    el.addEventListener("keydown", noteRepeat, true)
+    const press = (k: DebugKey) => () => {
+      if (!held || DEBUG_SHORTCUTS[k].repeats) debugKey(k, line())
+    }
     // ⌘S is a reflex; the code lives in the schematic, so the browser's "save page" must not appear.
     ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {})
     ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyJ, toggle)
     // The debugger's keys, as in VS Code (F5 would reload the page if it got past).
-    ed.addCommand(monaco.KeyCode.F5, () => debugKey("continue", line()))
-    ed.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.CtrlCmd | monaco.KeyCode.F5, () => debugKey("restart", line()))
-    ed.addCommand(monaco.KeyCode.F9, () => debugKey("toggleBreakpoint", line()))
-    ed.addCommand(monaco.KeyCode.F10, () => debugKey("stepOver", line()))
-    ed.addCommand(monaco.KeyCode.F11, () => debugKey("stepInto", line()))
-    ed.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F11, () => debugKey("stepOut", line()))
-    ed.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.F11, () => debugKey("stepInstruction", line()))
-    ed.addAction({ id: "emul.runToCursor", label: "Run to Cursor", keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.F10], contextMenuGroupId: "debug", contextMenuOrder: 1, run: () => debugKey("runToCursor", line()) })
+    ed.addCommand(monaco.KeyCode.F5, press("continue"))
+    ed.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.CtrlCmd | monaco.KeyCode.F5, press("restart"))
+    ed.addCommand(monaco.KeyCode.F9, press("toggleBreakpoint"))
+    ed.addCommand(monaco.KeyCode.F10, press("stepOver"))
+    ed.addCommand(monaco.KeyCode.F11, press("stepInto"))
+    ed.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F11, press("stepOut"))
+    ed.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.F11, press("stepInstruction"))
+    ed.addAction({ id: "emul.runToCursor", label: "Run to Cursor", keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.F10], contextMenuGroupId: "debug", contextMenuOrder: 1, run: press("runToCursor") })
     ed.addAction({ id: "emul.toggleBreakpoint", label: "Toggle Breakpoint", contextMenuGroupId: "debug", contextMenuOrder: 2, run: () => debugKey("toggleBreakpoint", line()) })
     ed.addAction({
       id: "emul.addWatch",
@@ -196,6 +205,7 @@ export function Editor({ ref, objectId, files, docs, active, target, diagnostics
       }),
     ]
     return () => {
+      el.removeEventListener("keydown", noteRepeat, true)
       for (const s of subs) s.dispose()
       ed.setModel(null)
       ed.dispose()

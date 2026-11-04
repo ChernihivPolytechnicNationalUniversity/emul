@@ -15,6 +15,8 @@ import { cubeIdeProject } from "@/project/cubeide"
 import { stSite } from "@/project/st-site"
 import { downloadBlob } from "@/lib/download"
 import { writeZip } from "@/lib/zip"
+import { dispatch } from "@/lib/keys"
+import { KEYMAP } from "@/lib/keymap"
 import { chipById } from "@/mcu/chip"
 import { getDef } from "@/schematic/registry"
 import type { BoardDebug, PlacedObject } from "@/schematic/types"
@@ -39,6 +41,7 @@ import { DisassemblyView } from "@/components/debug/DisassemblyView"
 import { SourceMissing } from "@/components/debug/SourceMissing"
 import { useBenchRunning, useDebugView } from "@/components/debug/use-debug"
 import { Editor, type DebugKey, type EditorHandle, type ExecMark, type GutterBreakpoint } from "./Editor"
+import { DEBUG_SHORTCUTS } from "./debug-shortcuts"
 import { Explorer } from "./Explorer"
 import { ProgramSources } from "./ProgramSources"
 import { Tabs } from "./Tabs"
@@ -348,12 +351,9 @@ export function CodePanel({ ref, board, boards, onPick, onFiles, onFirmware, onB
     const k: DebugKey | null = e.key === "F5" ? (e.shiftKey && (e.ctrlKey || e.metaKey) ? "restart" : "continue") : e.key === "F10" ? "stepOver" : e.key === "F11" ? (e.shiftKey ? "stepOut" : e.altKey ? "stepInstruction" : "stepInto") : null
     if (k) {
       e.preventDefault()
-      act(k)
+      if (!e.repeat || DEBUG_SHORTCUTS[k].repeats) act(k)
     }
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "d") {
-      e.preventDefault()
-      openFile(active === DISASM ? (tabOfFrame(frame) ?? first ?? DISASM) : DISASM)
-    }
+    dispatch(e.nativeEvent, [{ keys: KEYMAP.disassembly, run: () => openFile(active === DISASM ? (tabOfFrame(frame) ?? first ?? DISASM) : DISASM) }])
   }
 
   /** Add source files the image names: each to the file it stands for (the one missing here, when this is for it). */
