@@ -65,6 +65,15 @@ describe("a letter shortcut is the Latin letter the key types, or its place when
   })
 })
 
+describe("a dead key on a letter's place", () => {
+  it("is that place's letter, since nothing is being typed on the field (TanStack Hotkeys does the same)", () => {
+    expect.soft(hits(press("Dead", "KeyR", { shiftKey: true }), KEYMAP.rotateBack), "Hebrew on a Mac: Shift+R is a dead key (Safari, Chrome)").toBe(true)
+    expect.soft(hits(press("", "KeyR", { shiftKey: true, keyCode: 80 }), KEYMAP.rotateBack), "Firefox reports that dead key as an empty key").toBe(true)
+    expect.soft(hits(press("Dead", "Equal"), KEYMAP.zoomIn), "a dead key elsewhere is nothing").toBe(false)
+    expect.soft(hits(press("Dead", "KeyR", { altKey: true }), KEYMAP.rotate), "Option dead keys stay Option").toBe(false)
+  })
+})
+
 describe("modifiers match exactly", () => {
   it("takes Ctrl and Cmd as the command key, and nothing else added", () => {
     expect.soft(hits(press("a", "KeyA", { metaKey: true }), KEYMAP.selectAll), "Cmd+A").toBe(true)
@@ -115,7 +124,6 @@ describe("a key press an input method is still composing is nobody's shortcut", 
     expect.soft(hits(ctrl("z", "KeyZ", { isComposing: true }), KEYMAP.undo), "isComposing").toBe(false)
     expect.soft(hits(press("m", "KeyM", { keyCode: 229 }), KEYMAP.measure), "keyCode 229 (Safari's commit)").toBe(false)
     expect.soft(hits(press("Process", "KeyM"), KEYMAP.measure), "Process").toBe(false)
-    expect.soft(hits(press("Dead", "KeyM"), KEYMAP.measure), "a dead key").toBe(false)
     expect.soft(wireColorFor(press("Process", "Digit1")), "no wire colour either").toBeUndefined()
   })
 })

@@ -19,7 +19,8 @@ export type Keys = Shortcut | readonly [Shortcut, ...Shortcut[]]
 export type Binding = { keys: Keys; run: () => void; when?: () => boolean }
 
 const IME_PROCESSING = 229
-const NOT_A_KEY = new Set(["Process", "Unidentified", "Dead"])
+const NOT_A_KEY = new Set(["Process", "Unidentified"])
+const DEAD_KEY = "Dead"
 const NON_ASCII_TEXT = /^\P{ASCII}+$/u
 const LATIN_SCRIPT = /\p{Script=Latin}/u
 const SINGLE_DIGIT = /^[0-9]$/
@@ -45,6 +46,7 @@ function commandLetterByKeyCode(e: KeyPress, key: string): boolean {
 function typesKey(e: KeyPress, key: string): boolean {
   if (key.length > 1) return e.key === key
   if (e.key.toLowerCase() === key) return true
+  if (e.key === DEAD_KEY || e.key === "") return SINGLE_LETTER.test(key) && e.code === `Key${key.toUpperCase()}`
   if (!NON_ASCII_TEXT.test(e.key)) return commandLetterByKeyCode(e, key)
   if (SINGLE_DIGIT.test(key)) return e.code === `Digit${key}`
   if (SINGLE_LETTER.test(key)) return e.code === `Key${key.toUpperCase()}` && !LATIN_SCRIPT.test(e.key)
