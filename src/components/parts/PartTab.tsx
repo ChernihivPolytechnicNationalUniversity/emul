@@ -35,7 +35,7 @@ export function PartTab({ def }: { def: ComponentDef }) {
       </div>
       {record ? <ModelClaims record={record} /> : pending && (pending.modelled.length > 0 || pending.notModelled.length > 0) && <ModelClaims record={{ none: "", ...pending }} />}
       {record && !sheet && "none" in record && <p className="text-xs text-muted-foreground">{record.none}</p>}
-      {def.info && <Details info={def.info} skip={record ? undefined : NOTES_SHOWN_ELSEWHERE} />}
+      {def.info && <Details info={def.info} skip={NOTES_SHOWN_ELSEWHERE} />}
       {sheet && <DocLinks docs={sheet.docs} />}
       {record && "none" in record && record.sources && <DocLinks docs={record.sources} label="Defaults and behaviour taken from" />}
       {pending && pending.source.length > 0 && (

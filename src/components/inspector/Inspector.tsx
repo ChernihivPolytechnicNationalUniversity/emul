@@ -129,7 +129,7 @@ export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmwa
   const open = sections.isOpen("panel")
 
   return (
-    <Card data-slot="inspector" className={cn("max-h-[calc(100%-1.5rem)] w-72 gap-4 overflow-y-auto py-4 shadow-md", !open && "py-3", className)} {...props}>
+    <Card data-slot="inspector" className={cn("max-h-[calc(100%-6.75rem)] w-72 gap-4 overflow-y-auto py-4 shadow-md", !open && "py-3", className)} {...props}>
       <CardHeader className="px-4">
         <CardTitle className="text-sm">{def ? [object?.props?.ref, def.name].filter(Boolean).join(" · ") : `${selected.length} components`}</CardTitle>
         {open && def && maker(def) && <CardDescription className="col-span-2 text-xs">{maker(def)}</CardDescription>}
