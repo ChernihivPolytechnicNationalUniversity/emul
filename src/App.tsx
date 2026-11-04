@@ -19,6 +19,8 @@ import { fileName, nameFromFile, projectFile, readProjectFile, shareLink } from 
 import { cubeBench, importNotes, readCubeProject, unsupportedChip, type ProjectEntry } from "@/project/cubemx"
 import { dropEntries, filesEntries, isProjectDrop, isZip, pickFolder } from "@/project/entries"
 import { downloadBlob } from "@/lib/download"
+import { dispatch } from "@/lib/keys"
+import { KEYMAP } from "@/lib/keymap"
 import { Button } from "@/components/ui/button"
 import { ProjectsSheet } from "@/components/projects/ProjectsSheet"
 import { hostedRoom, roomFromPath, useLive } from "@/collab/use-live"
@@ -307,13 +309,11 @@ export default function App() {
 
   // ⌘S and ⌘O belong to the browser until we take them.
   const onKey = useEvent((e: KeyboardEvent) => {
-    if (!(e.metaKey || e.ctrlKey)) return
-    const key = e.key.toLowerCase()
-    if (key !== "s" && key !== "o") return
-    e.preventDefault()
-    if (key === "s") save()
-    else if (e.shiftKey) setProjectsOpen(true)
-    else open()
+    dispatch(e, [
+      { keys: KEYMAP.save, run: save },
+      { keys: KEYMAP.open, run: open },
+      { keys: KEYMAP.projects, run: () => setProjectsOpen(true) },
+    ])
   })
   React.useEffect(() => {
     window.addEventListener("keydown", onKey)

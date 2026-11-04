@@ -2,6 +2,7 @@ import * as React from "react"
 import { ChevronRightIcon } from "lucide-react"
 import type { BoardView, DebugController } from "@/debug/session"
 import { loadPeripheralMap, type PeripheralMap } from "@/debug/peripherals"
+import { stopUnlessAppCommand } from "@/lib/keymap"
 import { cn } from "@/lib/utils"
 
 type Block = { name: string; base: number; group: string; registers: { name: string; offset: number; size: number; access?: string; fields?: { name: string; pos: number; width: number }[] }[] }
@@ -49,7 +50,7 @@ export function PeripheralsView({ debug, boardId, chip, view }: { debug: DebugCo
           className="h-5 w-56 rounded-sm border bg-transparent px-1 outline-none focus:bg-muted"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDown={stopUnlessAppCommand}
           placeholder="Filter: GPIOB, TIM7, ODR…"
           aria-label="Filter peripherals"
         />

@@ -8,6 +8,7 @@ import type { DebugInfo } from "@/debug/info"
 import { variableValue } from "@/debug/values"
 import { breakpointLabel, breakpointPlace } from "@/debug/breakpoints"
 import { excName } from "@/mcu/faults"
+import { stopUnlessAppCommand } from "@/lib/keymap"
 import { cn } from "@/lib/utils"
 import { ValueTree, type TreeRoot } from "./ValueTree"
 import { MemoryView } from "./MemoryView"
@@ -221,7 +222,7 @@ function WatchView({ debug, boardId, view, watches, onWatches }: { debug: DebugC
           placeholder="Add an expression: counter, buf[3], GPIOA->ODR, *p, (uint8_t)x…"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDown={stopUnlessAppCommand}
         />
       </form>
       {!stopped && watches.length > 0 && <div className="px-6 text-[11px] text-muted-foreground">{notStopped(view)}</div>}
@@ -310,7 +311,7 @@ function BreakpointsView({ info, breakpoints, onBreakpoints, catchFaults, onCatc
           placeholder="Break on a function (HAL_GPIO_EXTI_Callback) or an address (0x08000400)"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDown={stopUnlessAppCommand}
         />
         {breakpoints.length > 0 && (
           <Button variant="ghost" size="xs" onClick={() => onBreakpoints([])} title="Remove every breakpoint">
@@ -382,7 +383,7 @@ function RegistersView({ debug, boardId, view }: { debug: DebugController; board
             onChange={(e) => setEditing({ name, text: e.target.value })}
             onBlur={() => !edit.busy && setEditing(null)}
             onKeyDown={(e) => {
-              e.stopPropagation()
+              stopUnlessAppCommand(e)
               if (e.key === "Enter") void commit(name, edit.text)
               else if (e.key === "Escape") setEditing(null)
             }}

@@ -29,6 +29,7 @@ import { Avatar } from "@/components/share/Avatar"
 import { Button } from "@/components/ui/button"
 import { SPEEDS, formatSpeed } from "@/sim/speeds"
 import { TEXT_SCALES } from "@/components/field/text-scale"
+import { KEYMAP, labelFor } from "@/lib/keymap"
 
 // A desktop menu is compact: small type, one line per command, a check column on the left
 // that every row shares so labels line up, and a shortcut column on the right. The generated
@@ -145,7 +146,7 @@ export function MenuBar({
             <MenubarItem onClick={onNew}>New project</MenubarItem>
             <MenubarItem onClick={onProjects}>
               Projects…
-              <MenubarShortcut>⇧⌘O</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.projects)}</MenubarShortcut>
             </MenubarItem>
             <MenubarSub>
               <MenubarSubTrigger disabled={recent.length === 0}>Open recent</MenubarSubTrigger>
@@ -160,12 +161,12 @@ export function MenuBar({
             <MenubarSeparator />
             <MenubarItem onClick={onOpenFile}>
               Open file…
-              <MenubarShortcut>⌘O</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.open)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={onOpenCube}>Open STM32 project…</MenubarItem>
             <MenubarItem onClick={onSaveFile} disabled={state.isEmpty}>
               Save to file
-              <MenubarShortcut>⌘S</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.save)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={onLive} disabled={state.isEmpty && live === "off"}>
               Live session…
@@ -212,58 +213,58 @@ export function MenuBar({
           <MenubarContent>
             <MenubarItem onClick={act((f) => f.undo())} disabled={!state.canUndo}>
               Undo
-              <MenubarShortcut>⌘Z</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.undo)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={act((f) => f.redo())} disabled={!state.canRedo}>
               Redo
-              <MenubarShortcut>⇧⌘Z</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.redo)}</MenubarShortcut>
             </MenubarItem>
             <MenubarSeparator />
             <MenubarItem onClick={act((f) => f.cut())} disabled={!state.hasObjects}>
               Cut
-              <MenubarShortcut>⌘X</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.cut)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={act((f) => f.copy())} disabled={!state.hasObjects}>
               Copy
-              <MenubarShortcut>⌘C</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.copy)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={act((f) => f.paste())} disabled={!state.canPaste}>
               Paste
-              <MenubarShortcut>⌘V</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.paste)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={act((f) => f.duplicate())} disabled={!state.hasObjects}>
               Duplicate
-              <MenubarShortcut>⌘D</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.duplicate)}</MenubarShortcut>
             </MenubarItem>
             <MenubarSeparator />
             <MenubarItem onClick={act((f) => f.rotate(45))} disabled={!state.hasObjects}>
               Rotate 45° clockwise
-              <MenubarShortcut>R</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.rotate)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={act((f) => f.rotate(-45))} disabled={!state.hasObjects}>
               Rotate 45° counter-clockwise
-              <MenubarShortcut>⇧R</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.rotateBack)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={act((f) => f.flip("horizontal"))} disabled={!state.hasObjects}>
               Mirror horizontally
-              <MenubarShortcut>X</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.flipHorizontal)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={act((f) => f.flip("vertical"))} disabled={!state.hasObjects}>
               Mirror vertically
-              <MenubarShortcut>Y</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.flipVertical)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem variant="destructive" onClick={act((f) => f.deleteSelected())} disabled={!state.hasSelection}>
               Delete
-              <MenubarShortcut>Del</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.remove)}</MenubarShortcut>
             </MenubarItem>
             <MenubarSeparator />
             <MenubarItem onClick={act((f) => f.selectAll())} disabled={state.isEmpty}>
               Select all
-              <MenubarShortcut>⌘A</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.selectAll)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={act((f) => f.deselectAll())} disabled={!state.hasSelection}>
               Deselect
-              <MenubarShortcut>Esc</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.deselect)}</MenubarShortcut>
             </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
@@ -273,24 +274,24 @@ export function MenuBar({
           <MenubarContent>
             <MenubarCheckboxItem checked={sidebarOpen} onClick={onSidebarToggle}>
               Components sidebar
-              <MenubarShortcut>⌘B</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.sidebar)}</MenubarShortcut>
             </MenubarCheckboxItem>
             <MenubarCheckboxItem checked={state.code} onClick={act((f) => f.toggleCode())}>
               Code editor
-              <MenubarShortcut>⌘J</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.code)}</MenubarShortcut>
             </MenubarCheckboxItem>
             <MenubarSeparator />
             <MenubarItem onClick={act((f) => f.zoomIn())}>
               Zoom in
-              <MenubarShortcut>⌘+</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.zoomIn)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={act((f) => f.zoomOut())}>
               Zoom out
-              <MenubarShortcut>⌘−</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.zoomOut)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={act((f) => f.resetView())}>
               Reset view
-              <MenubarShortcut>⌘0</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.zoomReset)}</MenubarShortcut>
             </MenubarItem>
             <MenubarSeparator />
             <MenubarSub>
@@ -320,15 +321,15 @@ export function MenuBar({
             <MenubarSeparator />
             <MenubarCheckboxItem checked={state.probing} onClick={act((f) => f.toggleProbe())}>
               Probe two points
-              <MenubarShortcut>M</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.measure)}</MenubarShortcut>
             </MenubarCheckboxItem>
             <MenubarCheckboxItem checked={state.scope} onClick={act((f) => f.toggleScope())}>
               Oscilloscope
-              <MenubarShortcut>O</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.scope)}</MenubarShortcut>
             </MenubarCheckboxItem>
             <MenubarCheckboxItem checked={state.logic} onClick={act((f) => f.toggleLogic())}>
               Logic analyser
-              <MenubarShortcut>L</MenubarShortcut>
+              <MenubarShortcut>{labelFor(KEYMAP.logic)}</MenubarShortcut>
             </MenubarCheckboxItem>
             <MenubarSeparator />
             <MenubarSub>

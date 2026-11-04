@@ -6,6 +6,8 @@ import type { ProjectEntry } from "@/project/cubemx"
 import { dropEntries, isProjectDrop } from "@/project/entries"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { matchesAny } from "@/lib/keys"
+import { KEYMAP, labelFor, stopUnlessAppCommand } from "@/lib/keymap"
 import { cn } from "@/lib/utils"
 
 type ExplorerProps = React.ComponentProps<"div"> & {
@@ -213,6 +215,14 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
       const next = rows[Math.max(0, Math.min(rows.length - 1, to))]
       if (next) setFocused(next.path)
     }
+    if (node && matchesAny(e.nativeEvent, KEYMAP.renameFile)) {
+      e.preventDefault()
+      return setEditing({ kind: "rename", path: node.path, folder: !!node.children })
+    }
+    if (node && matchesAny(e.nativeEvent, KEYMAP.deleteFile)) {
+      e.preventDefault()
+      return remove(node)
+    }
     switch (e.key) {
       case "ArrowDown":
         step(i < 0 ? 0 : i + 1)
@@ -238,12 +248,6 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
       case "Enter":
       case " ":
         if (node) pick(node)
-        break
-      case "F2":
-        if (node) setEditing({ kind: "rename", path: node.path, folder: !!node.children })
-        break
-      case "Delete":
-        if (node) remove(node)
         break
       default:
         return
@@ -402,11 +406,11 @@ export function Explorer({ files, active, onOpen, onCreate, onRename, onRemove, 
               <ContextMenuSeparator />
               <ContextMenuItem onClick={() => setEditing({ kind: "rename", path: menuNode.path, folder: !!menuNode.children })}>
                 Rename…
-                <ContextMenuShortcut>F2</ContextMenuShortcut>
+                <ContextMenuShortcut>{labelFor(KEYMAP.renameFile)}</ContextMenuShortcut>
               </ContextMenuItem>
               <ContextMenuItem variant="destructive" onClick={() => remove(menuNode)}>
                 Delete
-                <ContextMenuShortcut>Del</ContextMenuShortcut>
+                <ContextMenuShortcut>{labelFor(KEYMAP.deleteFile)}</ContextMenuShortcut>
               </ContextMenuItem>
             </>
           )}
@@ -480,7 +484,7 @@ function NameInput({
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
-        e.stopPropagation()
+        stopUnlessAppCommand(e)
         if (e.key !== "Enter" && e.key !== "Escape") return
         // The editor takes focus in the same tick; without this the key lands there as a newline.
         e.preventDefault()
