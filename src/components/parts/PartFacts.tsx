@@ -1,9 +1,9 @@
 import * as React from "react"
-import { CheckIcon, ExternalLinkIcon, MinusIcon } from "lucide-react"
+import { ArchiveIcon, CheckIcon, ExternalLinkIcon, MinusIcon } from "lucide-react"
 import { cn } from "cn"
-import { citedDoc, citeLabel, docUrl, hasDatasheet } from "@/schematic/datasheets"
+import { citedDoc, citeLabel, docUrl, hasDatasheet, shortRev } from "@/schematic/datasheets"
 import { GRID, objectRect } from "@/schematic/geometry"
-import type { Claim, ComponentDef, Datasheet, DocRecord, NoDatasheet, PlacedObject } from "@/schematic/types"
+import type { Claim, ComponentDef, Datasheet, DocKind, DocRecord, NoDatasheet, PlacedObject } from "@/schematic/types"
 import { PartDrawing } from "@/components/field/GhostLayer"
 import { fieldDetail } from "@/components/field/detail"
 import { SimStore } from "@/sim/sim-store"
@@ -148,35 +148,69 @@ export function ModelClaims({ record }: { record: Datasheet | NoDatasheet }) {
   )
 }
 
-/** The documents, one to a line: the maker's copy, its revision, its archived copy; when the links were checked. */
-export function DocLinks({ docs, label }: { docs: readonly DocRecord[]; label?: string }) {
+/** What a document is, as the list labels it, and the colour of its kind. */
+const DOC_KINDS: Record<DocKind, [label: string, colour: string]> = {
+  datasheet: ["Datasheet", "text-blue-600"],
+  catalogue: ["Catalogue", "text-blue-600"],
+  referenceManual: ["Ref. manual", "text-teal-600"],
+  coreManual: ["Core manual", "text-teal-600"],
+  errata: ["Errata", "text-red-600"],
+  programmingSpec: ["Prog. spec", "text-teal-600"],
+  userManual: ["Manual", "text-orange-600"],
+  schematic: ["Schematic", "text-violet-600"],
+  pinout: ["Pinout", "text-violet-600"],
+  appNote: ["App note", "text-muted-foreground"],
+  productPage: ["Product page", "text-muted-foreground"],
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+/**
+ * The documents, one to a line: what kind it is, its number and short revision, open and archive.
+ * When the links were last seen to work sits in the header, a green dot and a month.
+ */
+export function DocLinks({ docs, label = "Documents" }: { docs: readonly DocRecord[]; label?: string }) {
   const checked = docs.map((d) => d.checked).sort()[0]
-  const link = "inline-flex items-center gap-1 font-medium text-primary hover:underline"
+  const [year, month] = checked ? checked.split("-").map(Number) : []
+  const icon = "inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
   return (
     <div className="border-t pt-2.5 text-[12.5px]">
-      {label && <p className="mb-1 text-[11.5px] text-muted-foreground">{label}</p>}
-      <ul className="grid grid-cols-[auto_1fr_auto] items-baseline gap-x-2.5 gap-y-1">
-        {docs.map((d) => (
-          <li key={d.key} className="contents">
-            <a href={d.url} target="_blank" rel="noopener noreferrer" className={link} title={[d.maker, d.title, d.note].filter(Boolean).join(" · ")}>
-              {d.id}
-              <ExternalLinkIcon className="size-3" />
-            </a>
-            <span className="truncate text-[11.5px] text-muted-foreground" title={d.rev}>
-              {d.rev && `rev ${d.rev}`}
-            </span>
-            {d.archive ? (
-              <a href={d.archive} target="_blank" rel="noopener noreferrer" className={cn(link, "text-[11.5px]")} title={`Archived copy of ${d.id}`}>
-                archive
-                <ExternalLinkIcon className="size-3" />
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{label}</span>
+        {checked && (
+          <span className="ml-auto flex items-center gap-1 text-[11px] whitespace-nowrap text-green-700 dark:text-green-500" title={`Links checked ${checked}`}>
+            <span className="size-1.5 rounded-full bg-green-600" />
+            links ok · {MONTHS[month - 1]} {year}
+          </span>
+        )}
+      </div>
+      <ul className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5">
+        {docs.map((d) => {
+          const [kind, colour] = DOC_KINDS[d.kind]
+          const rev = shortRev(d.rev)
+          return (
+            <li key={d.key} className="contents">
+              <span className={cn("text-[11px] whitespace-nowrap", colour)}>{kind}</span>
+              <a href={d.url} target="_blank" rel="noopener noreferrer" className="truncate py-0.5 hover:underline" title={[d.maker, d.title, d.rev && `rev ${d.rev}`, d.note].filter(Boolean).join(" · ")}>
+                <span className="font-medium">{d.id}</span>
+                <span className="ml-1.5 text-[11px] text-muted-foreground tabular-nums">{rev || "—"}</span>
               </a>
-            ) : (
-              <span />
-            )}
-          </li>
-        ))}
+              <span className="flex gap-0.5">
+                <a href={d.url} target="_blank" rel="noopener noreferrer" className={icon} title={`Open ${d.id}`} aria-label={`Open ${d.id}`}>
+                  <ExternalLinkIcon className="size-3" />
+                </a>
+                {d.archive ? (
+                  <a href={d.archive} target="_blank" rel="noopener noreferrer" className={icon} title={`Archived copy of ${d.id}`} aria-label={`Archived copy of ${d.id}`}>
+                    <ArchiveIcon className="size-3" />
+                  </a>
+                ) : (
+                  <span className="size-5" />
+                )}
+              </span>
+            </li>
+          )
+        })}
       </ul>
-      {checked && <p className="mt-1.5 text-right text-[11.5px] text-muted-foreground">checked {checked}</p>}
     </div>
   )
 }
