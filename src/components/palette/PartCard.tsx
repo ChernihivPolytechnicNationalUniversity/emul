@@ -122,7 +122,7 @@ function CardBody() {
       <>
       <div className="flex gap-3.5">
         {def ? (
-          <SymbolPreview def={def} size={96} />
+          <SymbolPreview def={def} size={96} maxHeight={150} />
         ) : (
           <Skeleton className="size-24 shrink-0 rounded-[10px]" />
         )}

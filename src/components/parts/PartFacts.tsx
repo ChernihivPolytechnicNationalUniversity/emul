@@ -21,10 +21,22 @@ const idle = new SimStore()
  * in a wide box) is drawn turned a quarter, as it can be placed. A faint outline keeps a white
  * board's edge visible on a light ground at a small scale, where its own 1-cell line is a hairline.
  */
-export function SymbolPreview({ def, size, width = size, height = size, turn, className }: { def: ComponentDef; size?: number; width?: number; height?: number; turn?: boolean; className?: string }) {
-  const w = width ?? 96
-  const h = height ?? 96
+export function SymbolPreview({ def, size, width = size, height = size, maxHeight, turn, fill, className }: { def: ComponentDef; size?: number; width?: number; height?: number; maxHeight?: number; turn?: boolean; fill?: boolean; className?: string }) {
   const upright = React.useMemo(() => objectRect({ id: "preview", def: def.id, x: 0, y: 0 }, GRID), [def])
+  // `fill`: as wide as the place it stands in (the inspector's column), measured.
+  const frame = React.useRef<HTMLDivElement>(null)
+  const [measured, setMeasured] = React.useState(0)
+  React.useLayoutEffect(() => {
+    const el = frame.current
+    if (!fill || !el) return
+    const seen = new ResizeObserver(() => setMeasured(el.clientWidth))
+    seen.observe(el)
+    return () => seen.disconnect()
+  }, [fill])
+  const w = fill ? measured || (width ?? 96) : (width ?? 96)
+  // With `maxHeight` the box grows to the part's own proportions (a tall chip is drawn tall, not shrunk into a square), from `height` up to it.
+  const tall = (upright.h + 2 * GRID) / (upright.w + 2 * GRID)
+  const h = maxHeight ? Math.round(Math.min(maxHeight, Math.max(height ?? 96, tall * w))) : (height ?? 96)
   const fit = (bw: number, bh: number) => Math.min(w / (bw + 2 * GRID), h / (bh + 2 * GRID))
   const quarter = !!turn && fit(upright.h, upright.w) > fit(upright.w, upright.h) * 1.15
   const object = React.useMemo<PlacedObject>(() => ({ id: "preview", def: def.id, x: 0, y: 0, rotation: quarter ? 90 : 0, props: { ...def.defaults } }), [def, quarter])
@@ -34,7 +46,7 @@ export function SymbolPreview({ def, size, width = size, height = size, turn, cl
   // A preview is never a crowd of parts: always the drawn detail, never the zoomed-out canvas.
   const detail = React.useMemo(() => ({ ...fieldDetail(GRID, scale, 1), canvas: false }), [scale])
   return (
-    <div className={cn("relative shrink-0 overflow-hidden rounded-[10px] border bg-muted/40", className)} style={{ width: w, height: h }} aria-hidden>
+    <div ref={frame} className={cn("relative shrink-0 overflow-hidden rounded-[10px] border bg-muted/40", fill && "w-full", className)} style={{ width: fill ? undefined : w, height: h }} aria-hidden>
       <div
         className="absolute top-0 left-0 origin-top-left drop-shadow-[0_0_0.6px_rgba(0,0,0,.55)] dark:drop-shadow-[0_0_0.6px_rgba(255,255,255,.5)]"
         style={{ transform: `translate(${(w - view.w * scale) / 2}px, ${(h - view.h * scale) / 2}px) scale(${scale}) translate(${-view.x}px, ${-view.y}px)` }}
@@ -47,23 +59,46 @@ export function SymbolPreview({ def, size, width = size, height = size, turn, cl
 
 /** A link into a document at the cited page; plain grey text when the record names no page. */
 function CiteLink({ record, cite }: { record: Datasheet; cite: Claim["cite"] }) {
-  const label = citeLabel(cite)
-  if (!label) return null
+  const full = citeLabel(cite)
+  if (!full) return null
+  // The page alone in the line; the section or table it is in, in the tip.
+  const label = cite?.page ? `p. ${cite.page}` : full
   const doc = citedDoc(record, cite)
   const className = "text-[11px] whitespace-nowrap text-muted-foreground/70 tabular-nums"
   return doc ? (
-    <a href={docUrl(doc, cite?.page)} target="_blank" rel="noopener noreferrer" className={cn(className, "hover:text-primary hover:underline")} title={`${doc.id}${doc.rev ? ` rev ${doc.rev}` : ""}, ${label}`}>
+    <a href={docUrl(doc, cite?.page)} target="_blank" rel="noopener noreferrer" className={cn(className, "hover:text-primary hover:underline")} title={`${doc.id}${doc.rev ? ` rev ${doc.rev}` : ""}, ${full}`}>
       {label}
     </a>
   ) : (
-    <span className={className}>{label}</span>
+    <span className={className} title={full}>
+      {label}
+    </span>
   )
 }
 
-/** The key numbers: name, value, page. */
-export function SpecList({ record, limit, className }: { record: Datasheet; limit?: number; className?: string }) {
+/**
+ * The key numbers: name, value, page. In a row each beside the card's preview; `stacked` in a
+ * narrow column (the inspector): the name and its page on one line, the value under them, whole.
+ */
+export function SpecList({ record, limit, stacked, className }: { record: Datasheet; limit?: number; stacked?: boolean; className?: string }) {
   const specs = limit ? record.specs.slice(0, limit) : record.specs
   if (!specs.length) return null
+  if (stacked)
+    return (
+      <dl className={cn("grid gap-y-2 text-[12.5px]", className)}>
+        {specs.map((s) => (
+          <div key={s.label}>
+            <dt className="flex items-baseline gap-2 text-[11.5px] text-muted-foreground">
+              {s.label}
+              <span className="ml-auto">
+                <CiteLink record={record} cite={s.cite} />
+              </span>
+            </dt>
+            <dd className="leading-snug tabular-nums">{s.value}</dd>
+          </div>
+        ))}
+      </dl>
+    )
   return (
     <dl className={cn("grid grid-cols-[auto_1fr_auto] items-baseline gap-x-3 gap-y-1.5 text-[12.5px]", className)}>
       {specs.map((s) => (
