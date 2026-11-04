@@ -4,7 +4,9 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { chromium, type Page } from "playwright-core"
 import { examples } from "@/schematic/examples"
-import { GRID, objectPins, objectRect, type Point } from "@/schematic/geometry"
+import { bodyCentre, GRID, objectPins, objectRect, orientationOf, type Point, type Turn } from "@/schematic/geometry"
+import { SCHEMATIC_VERSION } from "@/schematic/migrate"
+import { rotateSelection } from "@/schematic/orient"
 import { bodyBounds, contourOf } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject, Schematic } from "@/schematic/types"
@@ -37,10 +39,18 @@ function chromiumExecutable() {
 
 const shoot = (page: Page, name: string) => (SHOTS ? page.screenshot({ path: join(SHOTS, `${name}.png`) }) : Promise.resolve())
 
+const LANDING_TIMEOUT_MS = 15_000
+const pageTitle = (page: Page) => page.evaluate(() => document.title)
+
 async function openDoc(page: Page, name: string, doc: Schematic) {
   await page.goto(DEV_SERVER, { waitUntil: "domcontentloaded" })
   await page.waitForSelector("[data-slot=dot-field-viewport]")
+  const landing = Date.now() + LANDING_TIMEOUT_MS
+  while ((await pageTitle(page)).startsWith("εmul") && Date.now() < landing) await page.waitForTimeout(100)
   await page.setInputFiles("input[type=file]", { name: `${name}.emul`, mimeType: "application/octet-stream", buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name, schematic: doc })) })
+  const opened = Date.now() + LANDING_TIMEOUT_MS
+  while (!(await pageTitle(page)).startsWith(`${name} `) && Date.now() < opened) await page.waitForTimeout(100)
+  if (!(await pageTitle(page)).startsWith(`${name} `)) throw new Error(`the field never showed ${name}: it shows “${await pageTitle(page)}”`)
   await page.waitForSelector("[data-slot=component]")
   await page.waitForTimeout(2000)
   return doc
@@ -174,6 +184,47 @@ async function contactsFollowTheDrag(page: Page) {
   await page.mouse.up()
   await page.waitForTimeout(800)
   expect("released: the committed picture is the same", { lcd: await dots(page, lcd.id), board: await dots(page, board.id) }, before)
+}
+
+async function bridgeBuiltByHand(page: Page) {
+  console.log("\na diode bridge built by hand: four diodes turned with R and Shift+R, dragged corner to corner")
+  const diode = (n: number): PlacedObject => ({ id: `d${n}`, def: "diode", x: 0, y: (n - 1) * 3 * GRID, props: { ref: `D${n}`, value: "1N4007", vrev: "1000 V" } })
+  let doc: Schematic = { objects: [1, 2, 3, 4].map(diode), wires: [], parts: {} }
+  const corner: PlacedObject = { id: "g", def: "ground", x: 12 * GRID, y: 10 * GRID }
+  await openDoc(page, "bridge-by-hand", { ...doc, objects: [...doc.objects, corner], version: SCHEMATIC_VERSION } as Schematic)
+  const frame = await fieldFrame(page)
+  const middle = (o: PlacedObject) => {
+    const c = bodyCentre(getDef(o.def)!, orientationOf(o))
+    return frame.toScreen({ x: o.x + c.x * GRID, y: o.y + c.y * GRID })
+  }
+  const plan: [string, Turn, number, number, number][] = [["d1", -1, 1, 5, 1], ["d2", -1, 3, 8, 1], ["d3", -1, 3, 5, 4], ["d4", -1, 1, 8, 4]]
+  const reachable = (p: Point) => p.x > 270 && p.x < 1150 && p.y > 40 && p.y < 950
+  for (const [id, turn, presses, tx, ty] of plan) {
+    const before = doc.objects.find((o) => o.id === id)!
+    expect(`${id} starts where the pointer can reach it, clear of the inspector`, reachable(middle(before)), true)
+    await page.mouse.click(middle(before).x, middle(before).y)
+    for (let i = 0; i < presses; i++) {
+      await page.keyboard.press(turn > 0 ? "r" : "Shift+R")
+      doc = rotateSelection(doc, new Set([id]), turn, GRID)
+      await page.waitForTimeout(150)
+    }
+    const turned = doc.objects.find((o) => o.id === id)!
+    const target = { ...turned, x: tx * GRID, y: ty * GRID }
+    expect(`${id} goes where the pointer can reach`, reachable(middle(target)), true)
+    await dragBy(page, middle(turned), middle(target))
+    doc = { ...doc, objects: doc.objects.map((o) => (o.id === id ? target : o)) }
+  }
+  await page.mouse.click(300, 900)
+  await page.waitForTimeout(500)
+  await shoot(page, "bridge-by-hand")
+  const placed = await page.evaluate(() =>
+    [...document.querySelectorAll("[data-body]")].map((e) => {
+      const svg = e.querySelector<SVGSVGElement>("[data-slot=component]")!
+      return { id: e.getAttribute("data-body"), transform: svg.style.transform }
+    }),
+  )
+  expect("each diode turned by R and Shift+R stands on its diagonal", placed.filter((p) => p.id?.startsWith("d")).map((p) => p.transform), ["rotate(315deg)", "rotate(225deg)", "rotate(225deg)", "rotate(315deg)"])
+  for (const id of ["d1", "d2", "d3", "d4"]) expect(`${id}: both pins meet a neighbour's (a contact dot on each)`, (await dots(page, id)).contact, 2)
 }
 
 async function addingLandsInView(page: Page) {
@@ -334,6 +385,7 @@ const errors: string[] = []
 page.on("pageerror", (e) => errors.push(String(e)))
 try {
   await contactsFollowTheDrag(page)
+  await bridgeBuiltByHand(page)
   await noPluggingIntoHeaders(page)
   await freedSlotTakesTheDrop(page)
   await addingLandsInView(page)
