@@ -13,6 +13,7 @@ const SHIFTED = 1
 const ALT_GRAPH = 2
 
 const SHORTCUTS = Object.entries(KEYMAP).flatMap(([name, keys]) => alternatives(keys).filter((s) => s.key.length === 1).map((s) => ({ name, shortcut: s })))
+const redoBy = (key: string) => alternatives(KEYMAP.redo).find((s) => s.key === key)!
 const latinLayout = (layout: Layout) => [..."abcdefghijklmnopqrstuvwxyz"].every((letter) => Object.values(layout).some((levels) => levels[PLAIN] === letter))
 
 function virtualKey(layout: Layout, code: string): number {
@@ -62,7 +63,7 @@ describe("shortcuts on 22 keyboard layouts, as libxkbcommon types them", () => {
               if (!layout[code][level] || (level === ALT_GRAPH && platform === "mac")) continue
               const e = press(layout, code, level, platform, level !== ALT_GRAPH && !!shortcut.mod)
               presses++
-              const ours = matches(e, shortcut)
+              const ours = matches(e, shortcut, platform === "mac" ? "apple" : "linux")
               if (ours === lexicalMatches(e, shortcut, platform)) continue
               const labelled = level !== ALT_GRAPH && labelledKey(layout, shortcut.key, level) === code
               if (ours && labelled) beyondLexical.push(`${platform} ${name} ${binding} ${code} ${JSON.stringify(e.key)}`)
@@ -107,8 +108,8 @@ describe("shortcuts on 22 keyboard layouts, as libxkbcommon types them", () => {
     const windows: [string, string, string, boolean, Shortcut][] = [
       ["я", "KeyZ", "Ctrl+Я", false, KEYMAP.undo],
       ["ф", "KeyA", "Ctrl+Ф", false, KEYMAP.selectAll],
-      ["Я", "KeyZ", "Ctrl+Shift+Я", true, KEYMAP.redo[0]],
-      ["н", "KeyY", "Ctrl+Н", false, KEYMAP.redo[1]],
+      ["Я", "KeyZ", "Ctrl+Shift+Я", true, redoBy("z")],
+      ["н", "KeyY", "Ctrl+Н", false, redoBy("y")],
       ["в", "KeyD", "Ctrl+В", false, KEYMAP.duplicate],
       ["ы", "KeyS", "Ctrl+Ы", false, KEYMAP.save],
     ]

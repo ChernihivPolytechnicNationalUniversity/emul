@@ -1,3 +1,5 @@
+import { currentPlatform, type Platform } from "./platform"
+
 export type KeyPress = Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey"> & {
   repeat?: boolean
   isComposing?: boolean
@@ -53,21 +55,25 @@ function typesKey(e: KeyPress, key: string): boolean {
   return false
 }
 
-export function matches(e: KeyPress, shortcut: Shortcut): boolean {
-  if (composing(e) || altGraph(e) || e.altKey !== !!shortcut.alt) return false
-  if ((e.ctrlKey || e.metaKey) !== !!shortcut.mod) return false
+export function commandHeld(e: Pick<KeyPress, "ctrlKey" | "metaKey">, platform: Platform = currentPlatform()): boolean {
+  return platform === "apple" ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
+}
+
+export function matches(e: KeyPress, shortcut: Shortcut, platform: Platform = currentPlatform()): boolean {
+  if (composing(e) || (platform !== "apple" && altGraph(e)) || e.altKey !== !!shortcut.alt) return false
+  if (shortcut.mod ? !commandHeld(e, platform) : e.ctrlKey || e.metaKey) return false
   if (shortcut.shift !== "either" && e.shiftKey !== !!shortcut.shift) return false
   return typesKey(e, shortcut.key)
 }
 
-export function matchesAny(e: KeyPress, keys: Keys): Shortcut | undefined {
-  return alternatives(keys).find((shortcut) => matches(e, shortcut))
+export function matchesAny(e: KeyPress, keys: Keys, platform: Platform = currentPlatform()): Shortcut | undefined {
+  return alternatives(keys).find((shortcut) => matches(e, shortcut, platform))
 }
 
-export function dispatch(e: KeyPress & Pick<KeyboardEvent, "preventDefault">, bindings: readonly Binding[]): boolean {
+export function dispatch(e: KeyPress & Pick<KeyboardEvent, "preventDefault">, bindings: readonly Binding[], platform: Platform = currentPlatform()): boolean {
   if (e.defaultPrevented) return false
   for (const binding of bindings) {
-    const hit = matchesAny(e, binding.keys)
+    const hit = matchesAny(e, binding.keys, platform)
     if (!hit || (binding.when && !binding.when())) continue
     e.preventDefault()
     if (!e.repeat || hit.repeats) binding.run()

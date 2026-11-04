@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import { DEBUG_SHORTCUTS } from "@/components/code/debug-shortcuts"
 import { alternatives, closeMenusAfterCommands, dispatch, editsText, holdBrowserNavigationKeys, keepsPageInPlace, matches, ownsKeys, shortcutLabel, typesAhead, type KeyPress, type Keys } from "@/lib/keys"
-import { KEYMAP, labelFor } from "@/lib/keymap"
+import { KEYMAP, keymapFor, labelFor } from "@/lib/keymap"
+import type { Platform } from "@/lib/platform"
 import { wireColorFor } from "@/schematic/wire-colors"
 
 type Press = Partial<KeyPress> & { altGraph?: boolean }
@@ -17,7 +18,8 @@ const press = (key: string, code: string, mods: Press = {}): KeyPress => ({
   getModifierState: (name: string) => name === "AltGraph" && !!mods.altGraph,
 })
 const ctrl = (key: string, code: string, mods: Press = {}) => press(key, code, { ctrlKey: true, ...mods })
-const hits = (e: KeyPress, keys: Keys) => alternatives(keys).some((s) => matches(e, s))
+const hits = (e: KeyPress, keys: Keys, platform: Platform = "linux") => alternatives(keys).some((s) => matches(e, s, platform))
+const MAC = keymapFor("apple")
 
 const element = (tagName: string, extra: { type?: string; readOnly?: boolean; isContentEditable?: boolean; inside?: string } = {}) =>
   ({
@@ -31,7 +33,7 @@ const element = (tagName: string, extra: { type?: string; readOnly?: boolean; is
 describe("a letter shortcut is the Latin letter the key types, or its place when the layout types another script there", () => {
   it("follows a Latin letter wherever the layout puts it", () => {
     expect.soft(hits(ctrl("z", "KeyZ"), KEYMAP.undo), "US: Ctrl+Z").toBe(true)
-    expect.soft(hits(press("Z", "KeyZ", { metaKey: true, shiftKey: true }), KEYMAP.redo), "US: Cmd+Shift+Z").toBe(true)
+    expect.soft(hits(press("Z", "KeyZ", { metaKey: true, shiftKey: true }), MAC.redo, "apple"), "US: Cmd+Shift+Z on a Mac").toBe(true)
     expect.soft(hits(ctrl("z", "KeyW"), KEYMAP.undo), "AZERTY: the key printed Z, where US has W").toBe(true)
     expect.soft(hits(ctrl("w", "KeyZ"), KEYMAP.undo), "AZERTY: the key in US Z's place types w").toBe(false)
     expect.soft(hits(ctrl("y", "KeyZ"), KEYMAP.redo), "QWERTZ: the key printed Y, where US has Z").toBe(true)
@@ -75,8 +77,9 @@ describe("a dead key on a letter's place", () => {
 })
 
 describe("modifiers match exactly", () => {
-  it("takes Ctrl and Cmd as the command key, and nothing else added", () => {
-    expect.soft(hits(press("a", "KeyA", { metaKey: true }), KEYMAP.selectAll), "Cmd+A").toBe(true)
+  it("take the platform's command key, and nothing else added", () => {
+    expect.soft(hits(press("a", "KeyA", { metaKey: true }), MAC.selectAll, "apple"), "Cmd+A on a Mac").toBe(true)
+    expect.soft(hits(press("a", "KeyA", { metaKey: true }), KEYMAP.selectAll), "Super+A on Linux").toBe(false)
     expect.soft(hits(ctrl("a", "KeyA", { shiftKey: true }), KEYMAP.selectAll), "Ctrl+Shift+A stays the browser's").toBe(false)
     expect.soft(hits(press("M", "KeyM", { shiftKey: true }), KEYMAP.measure), "Shift+M is not M").toBe(false)
     expect.soft(hits(press("m", "KeyM", { ctrlKey: true }), KEYMAP.measure), "Ctrl+M is not M").toBe(false)
@@ -246,8 +249,8 @@ describe("Backspace never takes the page back", () => {
 
 describe("labels come from the same shortcuts", () => {
   it("print Apple's symbols on a Mac and words elsewhere", () => {
-    expect.soft(shortcutLabel(KEYMAP.redo[0], true), "Mac redo").toBe("⇧⌘Z")
-    expect.soft(shortcutLabel(KEYMAP.redo[0], false), "Windows redo").toBe("Ctrl+Shift+Z")
+    expect.soft(shortcutLabel(alternatives(KEYMAP.redo)[0], true), "Mac redo").toBe("⇧⌘Z")
+    expect.soft(shortcutLabel(alternatives(KEYMAP.redo)[0], false), "Windows redo").toBe("Ctrl+Shift+Z")
     expect.soft(shortcutLabel(KEYMAP.zoomOut, false), "zoom out").toBe("Ctrl+−")
     expect.soft(shortcutLabel(KEYMAP.stepInstruction, true), "Mac Option+F11").toBe("⌥F11")
     expect.soft(shortcutLabel(KEYMAP.stepInstruction, false), "Alt+F11").toBe("Alt+F11")

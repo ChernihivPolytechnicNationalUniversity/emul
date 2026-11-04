@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { alternatives, matches, type KeyPress, type Keys } from "@/lib/keys"
-import { KEYMAP } from "@/lib/keymap"
+import { keymapFor } from "@/lib/keymap"
 import { wireColorFor } from "@/schematic/wire-colors"
 
 type Recorded = [key: string, code: string, keyCode: number, modifiers: string]
 type Fixture = { machines: Record<string, string[]>; presses: Record<string, Record<string, Recorded>> }
 
 const DATA: Fixture = JSON.parse(readFileSync(new URL("../data/keyboard-macos/presses.json", import.meta.url), "utf8"))
-const SHORTCUTS = Object.entries(KEYMAP).flatMap(([name, keys]) => alternatives(keys as Keys).map((shortcut) => ({ name, shortcut })))
+const SHORTCUTS = Object.entries(keymapFor("apple")).flatMap(([name, keys]) => alternatives(keys as Keys).map((shortcut) => ({ name, shortcut })))
 
 const pressOf = ([key, code, keyCode, modifiers]: Recorded): KeyPress => ({
   key,
@@ -20,7 +20,7 @@ const pressOf = ([key, code, keyCode, modifiers]: Recorded): KeyPress => ({
   altKey: modifiers.includes("a"),
   getModifierState: (name) => name === "AltGraph" && modifiers.includes("g"),
 })
-const decide = (recorded: Recorded) => [...new Set(SHORTCUTS.filter(({ shortcut }) => matches(pressOf(recorded), shortcut)).map(({ name }) => name))].sort()
+const decide = (recorded: Recorded) => [...new Set(SHORTCUTS.filter(({ shortcut }) => matches(pressOf(recorded), shortcut, "apple")).map(({ name }) => name))].sort()
 
 const INTENT: Record<string, string[]> = {
   "Cmd+Z": ["undo"], "Cmd+Shift+Z": ["redo"], "Cmd+Y": ["redo"], "Cmd+A": ["selectAll"], "Cmd+D": ["duplicate"], "Cmd+Shift+D": ["disassembly"],
