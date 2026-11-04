@@ -41,7 +41,7 @@ type ComponentsSidebarProps = React.ComponentProps<typeof Sidebar> & {
   onHdlNew?: (language: HdlLanguage) => void
   onHdlImport?: () => void
   onHdlOpen?: (id: string) => void
-  /** Show one group alone, open: what a group icon of the folded palette slides out. */
+  /** Show one group alone, open: what a group icon of the folded palette slides out (QUICK_GROUP: recent and favourites alone). */
   only?: string
   /** The search box got the focus (a sheet grows to full height for the keyboard). */
   onSearchFocus?: () => void
@@ -386,6 +386,9 @@ function useWarmQuickParts(recent: readonly string[], favourites: readonly strin
   }, [recent, favourites])
 }
 
+/** The folded palette's star: the recent and favourite parts, without the groups under them. */
+export const QUICK_GROUP = "quick"
+
 export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdlImport, onHdlOpen, only, onSearchFocus, autoFocusSearch, ...props }: ComponentsSidebarProps) {
   const library = useLibrary()
   const quick = useQuickLists()
@@ -508,8 +511,8 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
           ) : (
             <>
               {focused && <SearchIntro onExample={ask} />}
-              {!only && <QuickStrip label="Recent" ids={recent} />}
-              {!only && <QuickStrip label="Favourites" ids={quick.favourites} action={<StarIcon className="size-3.5 fill-amber-400 text-amber-500" />} />}
+              {(!only || only === QUICK_GROUP) && <QuickStrip label="Recent" ids={recent} />}
+              {(!only || only === QUICK_GROUP) && <QuickStrip label="Favourites" ids={quick.favourites} action={<StarIcon className="size-3.5 fill-amber-400 text-amber-500" />} />}
             </>
           )}
           {hdl.length > 0 && (!only || only === HDL_GROUP) && (

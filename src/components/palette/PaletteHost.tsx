@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { PaletteMode, WidthClass } from "@/hooks/use-size-class"
 import { HdlIcon } from "@/schematic/icons"
-import { ComponentsSidebar } from "./ComponentsSidebar"
+import { ComponentsSidebar, QUICK_GROUP } from "./ComponentsSidebar"
 import { clampWidth, FOLD_BELOW, PALETTE_SEARCH_EVENT, RAIL_PX, saveWidth } from "./dock-width"
 import { paletteGroups, useLibrary } from "./items"
 import { useQuickLists } from "./recents"
@@ -157,7 +157,7 @@ function RailWithFlyout({ sidebar }: { sidebar: SidebarProps }) {
   // Search and the quick lists first, set off by a line from the groups; a group's tip names it and counts its parts.
   const tools: RailItem[] = [
     { id: "search", label: "Search parts", hint: "/", icon: <SearchIcon /> },
-    ...(quick.favourites.length || quick.recent.length ? [{ id: "quick", label: "Recent and favourites", icon: <StarIcon /> }] : []),
+    ...(quick.favourites.length || quick.recent.length ? [{ id: QUICK_GROUP, label: "Recent and favourites", icon: <StarIcon /> }] : []),
     ...(library.length ? [{ id: "hdl", label: "Project modules", hint: String(library.length), icon: <HdlIcon /> }] : []),
   ]
   const groups: RailItem[] = paletteGroups.map((g) => {
@@ -190,7 +190,7 @@ function RailWithFlyout({ sidebar }: { sidebar: SidebarProps }) {
             key={shown}
             collapsible="none"
             className="h-full w-full"
-            only={shown === "search" || shown === "quick" ? undefined : shown}
+            only={shown === "search" ? undefined : shown}
             autoFocusSearch={shown === "search"}
             {...flyoutSidebar}
           />
