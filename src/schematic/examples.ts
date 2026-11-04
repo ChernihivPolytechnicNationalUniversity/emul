@@ -1,7 +1,7 @@
 import { BatteryMediumIcon, CircleDashedIcon, CpuIcon, NetworkIcon, ZapIcon } from "lucide-react"
 import type { OptLevel } from "emul-shared/source"
 import { builder } from "./builder"
-import { getDef } from "./registry"
+import { need } from "./registry"
 import { systemExam } from "./exam"
 import { transistorLogic } from "./logic"
 import { ne555Flasher, nucleoShiftRegister } from "./timers"
@@ -440,7 +440,7 @@ export const lab1Stand: Example = {
   projects: [{ ref: "DD1", load: lab1Project }],
   build(grid) {
     const { doc, place, wire } = builder(grid)
-    const chip = getDef("stm32f746ig")!
+    const chip = need("stm32f746ig")
     const y = (pin: string) => chip.pins.find((p) => p.id === pin)!.y
     const R = chip.width
     const dd = place("stm32f746ig", 0, 0)

@@ -375,3 +375,6 @@ export const arduinoNano: ComponentDef = {
     Source: "Arduino Nano V3.3 schematic (A000005-schematics.pdf), A000005 datasheet",
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [arduinoNano]

@@ -125,3 +125,6 @@ export const lcd7f: ComponentDef = {
     Source: "Waveshare 7inch-Capacitive-Touch-LCD-F schematic (GT911 version)",
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [lcd7f]

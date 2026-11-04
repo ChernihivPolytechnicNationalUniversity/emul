@@ -3,6 +3,8 @@ import { formatSI } from "./units"
 
 export const HC595_OUTPUTS = ["QA", "QB", "QC", "QD", "QE", "QF", "QG", "QH"] as const
 export const HC595_INPUTS = ["SER", "SRCLK", "RCLK", "SRCLR", "OE"] as const
+/** Which of the part's hidden model resistors carry its supply current in and out. */
+export const HC595_LINKS = { vcc: 0, gnd: 1 } as const
 const SERIAL_OUT = "QHS"
 const DRIVEN = [...HC595_OUTPUTS, SERIAL_OUT] as const
 

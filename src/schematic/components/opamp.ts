@@ -106,3 +106,6 @@ function opampDef(p: OpampPreset): ComponentDef {
 }
 
 export const opamps: ComponentDef[] = OPAMP_PRESETS.map(opampDef)
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = opamps

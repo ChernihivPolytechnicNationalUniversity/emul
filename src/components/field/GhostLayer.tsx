@@ -1,6 +1,6 @@
 import * as React from "react"
 import { objectIndex, objectRect, snap } from "@/schematic/geometry"
-import { getDef } from "@/schematic/registry"
+import { getDef, getDefsVersion, getMeta, subscribeDefs } from "@/schematic/registry"
 import type { PlacedObject } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
 import { FieldCanvas } from "./FieldCanvas"
@@ -66,13 +66,32 @@ function placementObject(defId: string, at: { x: number; y: number }, grid: numb
 }
 
 export function PlacementGhost({ defId, at, grid, scale, colorOf, raster }: { defId: string; at: { x: number; y: number }; grid: number; scale: number; colorOf: (wireId: string) => WireColorKey; raster: SymbolRaster }) {
-  const object = React.useMemo(() => placementObject(defId, at, grid), [defId, at, grid])
-  if (!object) return null
+  // Redrawn when a file of parts arrives: the part in hand may be the one that was loading.
+  const version = React.useSyncExternalStore(subscribeDefs, getDefsVersion)
+  const object = React.useMemo(() => (void version, placementObject(defId, at, grid)), [defId, at, grid, version])
+  if (!object) return <LoadingGhost defId={defId} at={at} grid={grid} scale={scale} />
   const box = objectRect(object, grid)
   const view = { x: box.x - grid, y: box.y - grid, w: box.w + 2 * grid, h: box.h + 2 * grid }
   return (
     <div data-slot="placement-ghost" className="pointer-events-none absolute top-0 left-0 opacity-60">
       <FieldCanvas objects={[object]} routes={NO_ROUTES} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={raster} />
     </div>
+  )
+}
+
+/** A part whose file is still loading: a dashed box of its size from the catalogue, where it will land. */
+function LoadingGhost({ defId, at, grid, scale }: { defId: string; at: { x: number; y: number }; grid: number; scale: number }) {
+  const meta = getMeta(defId)
+  if (!meta) return null
+  const x = snap(at.x - (meta.width * grid) / 2, grid)
+  const y = snap(at.y - (meta.height * grid) / 2, grid)
+  return (
+    <div
+      data-slot="placement-ghost"
+      data-loading=""
+      className="pointer-events-none absolute animate-pulse rounded-sm border-dashed border-muted-foreground/60"
+      // World units, like the field's canvases; the line keeps 2 screen px at any zoom.
+      style={{ left: x, top: y, width: meta.width * grid, height: meta.height * grid, borderWidth: 2 / scale }}
+    />
   )
 }

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { registry } from "@/schematic/registry"
+import { catalogue } from "@/schematic/registry"
 import { searchParts, similarParts, toolHints } from "@/components/palette/search"
 
 // What a student types, and what the palette must answer. The queries come from the palette audit:
 // a part's own name, the word a datasheet or a lab sheet uses, the silkscreen on a board, a typo.
 
-const ids = (query: string) => searchParts(registry, query).map((h) => h.def.id)
+const ids = (query: string) => searchParts(catalogue, query).map((h) => h.def.id)
 const first = (query: string) => ids(query)[0]
 
 describe("palette search finds", () => {
@@ -58,11 +58,11 @@ describe("palette search finds", () => {
   })
 
   it("a sounder by any of its names", () => {
-    for (const q of ["speaker", "piezo", "buzzer", "beeper"]) expect(registry.find((d) => d.id === first(q))?.category, q).toBe("sound")
+    for (const q of ["speaker", "piezo", "buzzer", "beeper"]) expect(catalogue.find((d) => d.id === first(q))?.category, q).toBe("sound")
   })
 
   it("every STM32 board and chip by the family's name, the boards first", () => {
-    const stm32 = registry.filter((d) => d.id.startsWith("stm32f") || (d.category === "boards" && !d.id.startsWith("arduino")))
+    const stm32 = catalogue.filter((d) => d.id.startsWith("stm32f") || (d.category === "boards" && !d.id.startsWith("arduino")))
     const found = ids("stm32")
     expect(found.slice(0, stm32.length).sort()).toEqual(stm32.map((d) => d.id).sort())
   })
@@ -86,7 +86,7 @@ describe("palette search finds", () => {
   })
 
   it("only parts that match every word", () => {
-    for (const h of searchParts(registry, "oled spi")) expect(h.def.id).toBe("oled-ssd1306-spi")
+    for (const h of searchParts(catalogue, "oled spi")) expect(h.def.id).toBe("oled-ssd1306-spi")
   })
 })
 
@@ -105,24 +105,24 @@ describe("a typo", () => {
     // "lad" is one edit from "led", but "ladder" or any word holding it would match as typed first;
     // a short word is never corrected: too many parts are one edit away.
     expect(ids("lad")).toEqual([])
-    const hits = searchParts(registry, "ressistor")
+    const hits = searchParts(catalogue, "ressistor")
     expect(hits[0].corrected).toBe(true)
-    expect(searchParts(registry, "resistor")[0].corrected).toBe(false)
+    expect(searchParts(catalogue, "resistor")[0].corrected).toBe(false)
   })
 })
 
 describe("every part", () => {
   it("comes first for its own name", () => {
-    for (const def of registry) expect.soft(first(def.name), `"${def.name}"`).toBe(def.id)
+    for (const def of catalogue) expect.soft(first(def.name), `"${def.name}"`).toBe(def.id)
   })
 
   it("is found by each of its keywords, behind only parts that carry the same word", () => {
     const fold = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "")
     const owns = (id: string, k: string) => {
-      const d = registry.find((x) => x.id === id)!
+      const d = catalogue.find((x) => x.id === id)!
       return fold(d.name).includes(fold(k)) || (d.keywords ?? []).some((w) => fold(w).includes(fold(k)))
     }
-    for (const def of registry)
+    for (const def of catalogue)
       for (const k of def.keywords ?? []) {
         const found = ids(k)
         const at = found.indexOf(def.id)
@@ -135,17 +135,17 @@ describe("every part", () => {
 
 describe("a hit", () => {
   it("marks the matched letters of the name", () => {
-    const hit = searchParts(registry, "pot")[0]
+    const hit = searchParts(catalogue, "pot")[0]
     expect(hit.ranges).toEqual([[0, 3]])
-    const lcd = searchParts(registry, "lcd i2c")[0]
+    const lcd = searchParts(catalogue, "lcd i2c")[0]
     expect(lcd.ranges.map(([a, b]) => lcd.def.name.slice(a, b))).toEqual(["LCD", "I²C"])
   })
 
   it("names the keyword that found it when the name does not say", () => {
-    expect(searchParts(registry, "rheostat")[0].matched).toBe("rheostat")
-    expect(searchParts(registry, "MB1137")[0].matched).toBe("MB1137")
-    expect(searchParts(registry, "resistor")[0].matched).toBeUndefined()
-    expect(searchParts(registry, "lcd i2c")[0].matched).toBeUndefined()
+    expect(searchParts(catalogue, "rheostat")[0].matched).toBe("rheostat")
+    expect(searchParts(catalogue, "MB1137")[0].matched).toBe("MB1137")
+    expect(searchParts(catalogue, "resistor")[0].matched).toBeUndefined()
+    expect(searchParts(catalogue, "lcd i2c")[0].matched).toBeUndefined()
   })
 })
 
@@ -160,17 +160,17 @@ describe("tools that are not parts", () => {
 
 describe("when the words do not all match", () => {
   it("a forgiven typo says what it was read as", () => {
-    expect(searchParts(registry, "capasitor")[0].correction).toBe("capacitor")
-    expect(searchParts(registry, "ressistor")[0].correction).toBe("resistor")
-    expect(searchParts(registry, "capacitor")[0].correction).toBeUndefined()
+    expect(searchParts(catalogue, "capasitor")[0].correction).toBe("capacitor")
+    expect(searchParts(catalogue, "ressistor")[0].correction).toBe("resistor")
+    expect(searchParts(catalogue, "capacitor")[0].correction).toBeUndefined()
   })
 
   it("parts that match some of the words are offered as similar", () => {
     expect(ids("blue pill")).toEqual([])
-    const similar = similarParts(registry, "blue pill").map((h) => h.def.id)
+    const similar = similarParts(catalogue, "blue pill").map((h) => h.def.id)
     expect(similar.length).toBeGreaterThan(0)
     expect(similar.length).toBeLessThanOrEqual(3)
     expect(similar[0]).toMatch(/^weact-blackpill/)
-    expect(similarParts(registry, "qqzzxx")).toEqual([])
+    expect(similarParts(catalogue, "qqzzxx")).toEqual([])
   })
 })

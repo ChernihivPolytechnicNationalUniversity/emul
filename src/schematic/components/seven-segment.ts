@@ -243,3 +243,6 @@ export const sevenSegmentComponents: ComponentDef[] = [
   display({ id: "seven-segment-4-ca", name: "4-digit 7-segment display, common anode", polarity: "anode", digits: 4, parts: ["CA56-12EWA", "CA56-12SRWA"] }),
   display({ id: "seven-segment-4-cc", name: "4-digit 7-segment display, common cathode", polarity: "cathode", digits: 4, parts: ["CC56-12EWA", "CC56-12SRWA"] }),
 ]
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = sevenSegmentComponents

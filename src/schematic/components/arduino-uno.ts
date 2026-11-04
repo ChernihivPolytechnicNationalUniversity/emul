@@ -317,3 +317,6 @@ export const arduinoUno: ComponentDef = {
     Source: "Arduino UNO Rev3e schematic and Eagle files (A000066), A000066 datasheet, Arduino AVR boards.txt",
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [arduinoUno]

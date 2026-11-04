@@ -1,9 +1,8 @@
 import type { EepromSnapshot } from "@/sim/digital"
 import type { HdlSnapshot } from "@/sim/hdl"
-import { HC595_OUTPUTS, type ShiftRegisterSnapshot } from "@/sim/hc595"
-import { BUZZER_KINDS, type BuzzerSnapshot } from "@/sim/buzzer"
-import { HC595_LINKS, isShiftRegisterDef } from "@/schematic/components/hc595"
-import { isBuzzerDef } from "@/schematic/components/buzzer"
+import { HC595_LINKS, HC595_OUTPUTS, shiftRegisterOfDef, type ShiftRegisterSnapshot } from "@/sim/hc595"
+import { BUZZER_KINDS, buzzerOfDef, type BuzzerSnapshot } from "@/sim/buzzer"
+import { productById } from "@/sim/addressable/products"
 import type { ClockStatus, PowerStatus } from "@/mcu/stm32f429"
 import * as React from "react"
 import { ChevronDownIcon, CodeIcon, CpuIcon, FlameIcon, FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UploadIcon, XIcon } from "lucide-react"
@@ -43,7 +42,6 @@ function powerLabel(p: PowerStatus): string {
 import { LiveReadings } from "./LiveReadings"
 import { useSectionsOpen, type SectionsOpen } from "./collapsed-sections"
 import { AddressablePanel } from "./AddressablePanel"
-import { isAddressableDef } from "@/schematic/components/addressable"
 
 /** "PLL ← HSE 8 MHz clock", "HSI": the system clock source and what feeds the oscillator it hangs on. */
 function clockLabel(c: ClockStatus): string {
@@ -159,17 +157,17 @@ export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmwa
               <EepromPanel object={object} sim={sim} />
             </Section>
           )}
-          {isShiftRegisterDef(def.id) && (
+          {shiftRegisterOfDef(def.id) && (
             <Section id="outputs" label="Outputs" sections={sections}>
               <ShiftRegisterPanel object={object} sim={sim} />
             </Section>
           )}
-          {isBuzzerDef(def.id) && (
+          {buzzerOfDef(def.id) && (
             <Section id="sound" label="Sound" sections={sections}>
               <BuzzerPanel object={object} sim={sim} />
             </Section>
           )}
-          {isAddressableDef(def.id) && (
+          {productById(def.id) && (
             <Section id="leds" label="LEDs" sections={sections}>
               <AddressablePanel objectId={object.id} sim={sim} />
             </Section>

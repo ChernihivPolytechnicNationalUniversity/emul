@@ -411,6 +411,12 @@ export type PropField =
 
 export type ModelElement = Element & { label?: string }
 
+/** A part as the generated catalogue lists it (catalogue.gen.ts): the icon by name, the file its definition loads from. */
+export type CatalogueEntry = Pick<ComponentDef, "id" | "name" | "description" | "category" | "keywords" | "width" | "height" | "prefix" | "chip" | "board"> & {
+  icon: string
+  file: string
+}
+
 export type ComponentDef = {
   id: string
   name: string

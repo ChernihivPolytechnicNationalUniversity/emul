@@ -106,3 +106,6 @@ export const oledSpi: ComponentDef = {
 }
 
 export const oledModules: ComponentDef[] = [oledI2c, oledI2c32, oledSpi]
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = oledModules

@@ -171,3 +171,6 @@ const DESCRIPTION: Record<string, string> = {
 export const picChips: ComponentDef[] = PIC_CHIPS.map((c) =>
   picChip(c, PDIP18, DESCRIPTION[c.id] ?? `8-bit PIC16 MCU, ${c.flashWords / 1024}K words Flash, PDIP-18${c.revisionA ? "" : " — the original (non-A) silicon, DS40300C"}${c.grade < 20e6 ? `, ${c.grade / 1e6} MHz grade` : ""}${c.lowVoltage ? ", 2.0 V LF part" : ""}`),
 )
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = picChips

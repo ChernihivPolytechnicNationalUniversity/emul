@@ -1,3 +1,4 @@
+import { LED_COLORS } from "../led-colors"
 import {
   AcSourceIcon,
   BatteryIcon,
@@ -36,14 +37,6 @@ const TRACK_LIMITS = { current: wiperCurrent, fatal: false } as const
 /** A junction that overheats or avalanches melts through: the die fails short, not open. */
 const Q_LIMITS = { current: "{icmax}", voltage: "{vcemax}", power: "{pmax}", fail: "short" } as const
 
-/** LED colours: CSS colour and typical forward voltage. */
-export const LED_COLORS: Record<string, { css: string; vf: number; vr: number }> = {
-  red: { css: "#ef4444", vf: 1.9, vr: 15 },
-  green: { css: "#22c55e", vf: 2.1, vr: 15 },
-  blue: { css: "#3b82f6", vf: 3.0, vr: 5 },
-  yellow: { css: "#eab308", vf: 2.0, vr: 15 },
-  white: { css: "#f5f5f5", vf: 3.0, vr: 5 },
-}
 
 /**
  * Discrete components drawn as IEC schematic symbols.
@@ -906,3 +899,8 @@ export const basicComponents: ComponentDef[] = [
   logicState,
   serialTerminal,
 ]
+
+export { LED_COLORS }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = basicComponents

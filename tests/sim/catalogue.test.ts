@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { CATEGORIES, categoryLabel, isPaletteCategory } from "@/schematic/categories"
 import * as icons from "@/schematic/icons"
-import { getDef, registry } from "@/schematic/registry"
+import { getDef, allDefs } from "@/schematic/registry"
 import { FAMILIES, familyOf, pinLayout, swapsFor } from "@/schematic/families"
 
 // The palette's rules, checked for every part so that a new part cannot break them:
@@ -27,21 +27,21 @@ describe("palette groups", () => {
   })
 
   it("every part sits in one of them", () => {
-    for (const def of registry) expect.soft(isPaletteCategory(def.category), `${def.id}: "${def.category}"`).toBe(true)
+    for (const def of allDefs()) expect.soft(isPaletteCategory(def.category), `${def.id}: "${def.category}"`).toBe(true)
   })
 
   it("no group is a group of one", () => {
-    for (const c of CATEGORIES) expect.soft(registry.filter((d) => d.category === c.id).length, c.id).toBeGreaterThanOrEqual(2)
+    for (const c of CATEGORIES) expect.soft(allDefs().filter((d) => d.category === c.id).length, c.id).toBeGreaterThanOrEqual(2)
   })
 
   it("the everyday parts open the palette", () => {
-    const basics = registry.filter((d) => d.category === "basics").map((d) => d.id)
+    const basics = allDefs().filter((d) => d.category === "basics").map((d) => d.id)
     for (const id of ["resistor", "potentiometer", "capacitor", "led", "pushbutton", "switch", "ground", "supply"]) expect(basics).toContain(id)
   })
 
   it("boards are ready-to-run boards and bare chips are microcontrollers", () => {
-    for (const def of registry.filter((d) => d.category === "boards")) expect.soft(def.pinsAreSockets, def.id).toBe(true)
-    for (const def of registry.filter((d) => d.category === "mcus")) {
+    for (const def of allDefs().filter((d) => d.category === "boards")) expect.soft(def.pinsAreSockets, def.id).toBe(true)
+    for (const def of allDefs().filter((d) => d.category === "mcus")) {
       expect.soft(def.chip, def.id).toBeTruthy()
       expect.soft(def.pinsAreSockets, def.id).toBeFalsy()
     }
@@ -50,7 +50,7 @@ describe("palette groups", () => {
 
 describe("boards", () => {
   it("each carry a tile that says which board it is", () => {
-    for (const def of registry) {
+    for (const def of allDefs()) {
       const card = def.board
       if (def.category !== "boards") {
         expect.soft(card, `${def.id} is no board: no tile`).toBeUndefined()
@@ -73,7 +73,7 @@ describe("boards", () => {
 describe("part names", () => {
   it("are unique however they are spelled", () => {
     const seen = new Map<string, string>()
-    for (const def of registry) {
+    for (const def of allDefs()) {
       const key = fold(def.name)
       expect.soft(seen.get(key), `${def.id} and ${seen.get(key)} share the name "${def.name}"`).toBeUndefined()
       seen.set(key, def.id)
@@ -82,22 +82,22 @@ describe("part names", () => {
 
   it("fit a palette row", () => {
     // A family's row shows the family's name; a part of its own shows its name.
-    for (const def of registry) if (!familyOf(def.id)) expect.soft(def.name.length, `${def.id}: "${def.name}"`).toBeLessThanOrEqual(NAME_BUDGET)
+    for (const def of allDefs()) if (!familyOf(def.id)) expect.soft(def.name.length, `${def.id}: "${def.name}"`).toBeLessThanOrEqual(NAME_BUDGET)
     for (const f of FAMILIES) expect.soft(f.name.length, `family ${f.id}: "${f.name}"`).toBeLessThanOrEqual(NAME_BUDGET)
   })
 
   it("and descriptions are given", () => {
-    for (const def of registry) if (!NO_DESCRIPTION.has(def.id)) expect.soft(def.description?.trim(), def.id).toBeTruthy()
+    for (const def of allDefs()) if (!NO_DESCRIPTION.has(def.id)) expect.soft(def.description?.trim(), def.id).toBeTruthy()
     for (const id of NO_DESCRIPTION) expect.soft(getDef(id)?.description, `${id} has a description now: drop it from NO_DESCRIPTION`).toBeUndefined()
   })
 
   it("come with the words a student searches by", () => {
     // The name alone finds a part only by its name: a "pot" or a "GND" needs saying.
-    for (const def of registry) expect.soft(def.keywords?.length ?? 0, `${def.id}: give it keywords`).toBeGreaterThan(0)
+    for (const def of allDefs()) expect.soft(def.keywords?.length ?? 0, `${def.id}: give it keywords`).toBeGreaterThan(0)
   })
 
   it("are English, like the rest of the interface", () => {
-    for (const def of registry) {
+    for (const def of allDefs()) {
       const texts = [def.name, def.description ?? "", ...(def.keywords ?? []), ...(def.fields ?? []).map((f) => f.label)]
       for (const text of texts) expect.soft(CYRILLIC.test(text), `${def.id}: "${text}"`).toBe(false)
     }
@@ -106,7 +106,7 @@ describe("part names", () => {
 
 describe("part ids", () => {
   it("are unique", () => {
-    expect(new Set(registry.map((d) => d.id)).size).toBe(registry.length)
+    expect(new Set(allDefs().map((d) => d.id)).size).toBe(allDefs().length)
   })
 
   it("that saved projects use keep loading", () => {
@@ -118,7 +118,7 @@ describe("part ids", () => {
 describe("part icons", () => {
   it("come from the icon set", () => {
     const known = new Set<unknown>(Object.values(icons))
-    for (const def of registry) expect.soft(known.has(def.icon), def.id).toBe(true)
+    for (const def of allDefs()) expect.soft(known.has(def.icon), def.id).toBe(true)
   })
 })
 
@@ -161,7 +161,7 @@ describe("families", () => {
 
   it("take in every part that could be one: the same pins in the same group make a family", () => {
     const loose = new Map<string, string[]>()
-    for (const def of registry) {
+    for (const def of allDefs()) {
       if (familyOf(def.id) || DISTINCT.has(def.id)) continue
       const key = `${def.category} ${pinsOf(def)}`
       loose.set(key, [...(loose.get(key) ?? []), def.id])

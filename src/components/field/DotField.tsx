@@ -23,7 +23,7 @@ import { savedTextScale, saveTextScale } from "./text-scale"
 import { buildNets } from "@/schematic/nets"
 import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, WIRE_COLOR_BY_CODE, type WireColorKey } from "@/schematic/wire-colors"
 import { partKey, pinKey, type PinRef, type PlacedObject, type Schematic } from "@/schematic/types"
-import { getDef, notifyLibrary, partInitial, pinName, setLibrary } from "@/schematic/registry"
+import { afterDefs, defIds, defsQueue, ensureDefs, getDef, getMeta, notifyLibrary, partInitial, pinName, setLibrary } from "@/schematic/registry"
 import { newModuleId, TEMPLATES } from "@/schematic/hdl"
 import type { HdlLanguage } from "emul-shared/hdl"
 import { languageOf } from "emul-shared/hdl"
@@ -395,12 +395,18 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const landed = objects.map((o) => ({ ...o, x: o.x + dx, y: o.y + dy }))
     if (landed.length) reveal(unionOf(landed.flatMap((o) => [objectRect(o, grid), ...designatorRects(o, grid)])), CLEAR_OF_CONTROLS_PX)
   }
-  const pasteFree = useEvent((c: Clip, dx: number, dy: number) => {
-    const probes = c.objects.map((o) => ({ ...o, id: `paste:${o.id}` }))
-    const at = freeSpot(scene(), probes, { x: dx, y: dy })
-    pasteClip(c, at.x, at.y)
-    revealPlaced(probes, snap(at.x, grid), snap(at.y, grid))
-  })
+  /** A part's file failed to load (the network dropped): say so, nothing is placed. */
+  const cannotLoad = useEvent((e: unknown) => toast.error("Cannot load the part", { description: `${(e as Error)?.message ?? e}. Check the connection and try again.` }))
+  /** Documents, merges and pastes go in in the order they came, each once its parts have loaded. */
+  const inOrder = React.useMemo(() => defsQueue((e) => cannotLoad(e)), [cannotLoad])
+  const pasteFree = useEvent((c: Clip, dx: number, dy: number) =>
+    inOrder(defIds(c), () => {
+      const probes = c.objects.map((o) => ({ ...o, id: `paste:${o.id}` }))
+      const at = freeSpot(scene(), probes, { x: dx, y: dy })
+      pasteClip(c, at.x, at.y)
+      revealPlaced(probes, snap(at.x, grid), snap(at.y, grid))
+    }),
+  )
   const addFree = useEvent((defId: string, center: Point) => {
     const def = getDef(defId)
     if (!def) return sch.add(defId, center)
@@ -410,16 +416,31 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (added) revealPlaced([added], 0, 0)
     return added
   })
+  /** Place a part in the first free spot near a point, once its file has loaded. */
+  const addFreeLoaded = useEvent((defId: string, center: Point, then?: () => void) =>
+    afterDefs([defId], () => {
+      if (addFree(defId, center)) then?.()
+    }, cannotLoad),
+  )
   // Stable for the menu's handle, which is built once.
   const placed = useEvent((defId: string) => onPlaced?.(defId))
   /** The armed part where the pointer is: the spot is the student's, nothing is nudged. */
   const placeArmed = useEvent((e: React.PointerEvent, defId: string) => {
-    const added = sch.add(defId, toWorld(e.clientX, e.clientY))
-    if (!added) return
-    sch.selectObject(added.id)
-    placed(defId)
-    if (!e.shiftKey) onArmedChange?.(null)
+    // Read the event now: a part still loading is placed when its file is here.
+    const at = toWorld(e.clientX, e.clientY)
+    const more = e.shiftKey
+    if (!more) onArmedChange?.(null)
+    afterDefs([defId], () => {
+      const added = sch.add(defId, at)
+      if (!added) return
+      sch.selectObject(added.id)
+      placed(defId)
+    }, cannotLoad)
   })
+  // A part taken in hand starts loading at once: by the click it is usually here.
+  React.useEffect(() => {
+    if (armed) void ensureDefs([armed])?.catch(() => {})
+  }, [armed])
   /** Where the pointer is over the field while a part is in hand: the ghost's spot. */
   const [armedAt, setArmedAt] = React.useState<Point | null>(null)
   const copy = React.useCallback(() => {
@@ -492,28 +513,29 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     ref,
     () => ({
       addAtCenter: (defId) => {
-        if (addFree(defId, viewCenter())) placed(defId)
+        addFreeLoaded(defId, viewCenter(), () => placed(defId))
       },
-      load: (next) => {
-        // A new document has no simulation history: drop the frozen picture as well.
-        setSimRunning(false)
-        restart()
-        trace.clear()
-        logic.clear()
-        load(next)
-        const rects = next.objects.map((o) => objectRect(o, grid))
-        if (rects.length === 0) return
-        // Grown by a cell on each side: wires are routed outside the component boxes.
-        const x = Math.min(...rects.map((r) => r.x)) - grid
-        const y = Math.min(...rects.map((r) => r.y)) - grid
-        fitTo({
-          x,
-          y,
-          w: Math.max(...rects.map((r) => r.x + r.w)) + grid - x,
-          h: Math.max(...rects.map((r) => r.y + r.h)) + grid - y,
-        })
-      },
-      merge: sch.replace,
+      load: (next) =>
+        inOrder(defIds(next), () => {
+          // A new document has no simulation history: drop the frozen picture as well.
+          setSimRunning(false)
+          restart()
+          trace.clear()
+          logic.clear()
+          load(next)
+          const rects = next.objects.map((o) => objectRect(o, grid))
+          if (rects.length === 0) return
+          // Grown by a cell on each side: wires are routed outside the component boxes.
+          const x = Math.min(...rects.map((r) => r.x)) - grid
+          const y = Math.min(...rects.map((r) => r.y)) - grid
+          fitTo({
+            x,
+            y,
+            w: Math.max(...rects.map((r) => r.x + r.w)) + grid - x,
+            h: Math.max(...rects.map((r) => r.y + r.h)) + grid - y,
+          })
+        }),
+      merge: (next) => inOrder(defIds(next), () => sch.replace(next)),
       doc: () => sch.doc,
       exportPng: exportImage,
       clear: () => {
@@ -574,7 +596,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       },
       openHdl: (id) => setHdlId(id),
     }),
-    [addFree, placed, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle, exportImage],
+    [addFreeLoaded, inOrder, placed, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle, exportImage],
   )
 
   // --- moving objects -------------------------------------------------------
@@ -1144,7 +1166,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               <span className="truncate">
                 <span className="pointer-coarse:hidden">Click the field to place </span>
                 <span className="hidden pointer-coarse:inline">Placing </span>
-                <span className="font-semibold">{getDef(armed)?.name ?? armed}</span>
+                <span className="font-semibold">{getMeta(armed)?.name ?? armed}</span>
                 <span className="text-muted-foreground pointer-coarse:hidden"> · Shift+click places more · Esc cancels</span>
                 <span className="hidden opacity-75 pointer-coarse:inline"> · tap the bench</span>
               </span>
@@ -1382,7 +1404,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               <React.Fragment key={g.id}>
                 {gi > 0 && <ContextMenuSeparator />}
                 {g.items.map((def) => (
-                  <ContextMenuItem key={def.id} onClick={() => addFree(def.id, menuPoint.current)}>
+                  <ContextMenuItem key={def.id} onClick={() => addFreeLoaded(def.id, menuPoint.current)}>
                     <def.icon />
                     {def.name}
                   </ContextMenuItem>

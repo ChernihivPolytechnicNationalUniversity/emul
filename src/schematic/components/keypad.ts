@@ -80,3 +80,6 @@ export const keypad4x4: ComponentDef = {
   model,
   info: { Source: "Parallax #27899 4x4 Matrix Membrane Keypad, v1.2 (12/16/2011); Adafruit #3844 product page (contact resistance)" },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [keypad4x4]

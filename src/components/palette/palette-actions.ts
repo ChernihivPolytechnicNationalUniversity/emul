@@ -1,12 +1,12 @@
 import * as React from "react"
-import type { ComponentDef } from "@/schematic/types"
+import { ensureDefs, type PartMeta } from "@/schematic/registry"
 
 /** What every row of the palette does, shared rather than threaded through each list. */
 export type PaletteActions = {
   /** A pointer click takes the part in hand; Enter or Space on a focused row places it at once. */
-  activate: (def: ComponentDef, e: React.MouseEvent) => void
+  activate: (def: PartMeta, e: React.MouseEvent) => void
   /** Take this part in hand (a drag starting), or put whatever is in hand back (a drag let go off the field). */
-  take: (def: ComponentDef | null) => void
+  take: (def: PartMeta | null) => void
   armed: string | null
   favourites: ReadonlySet<string>
 }
@@ -29,10 +29,15 @@ let swallowClick = false
 /** Whether the click that ends a drag should be ignored (it would put the part straight back). */
 export const clickEndsDrag = () => swallowClick
 
-export function useDragOut(def: ComponentDef) {
+/** Start loading a part's file before it is asked for: the pointer resting on its row, the keyboard on it. */
+export const prefetch = (id: string) => void ensureDefs([id])?.catch(() => {})
+
+export function useDragOut(def: PartMeta) {
   const { take } = usePaletteActions()
   return {
     draggable: false,
+    onPointerEnter: () => prefetch(def.id),
+    onFocus: () => prefetch(def.id),
     onPointerDown: (e: React.PointerEvent) => {
       if (e.button !== 0 || e.pointerType === "touch") return
       const from = { x: e.clientX, y: e.clientY }

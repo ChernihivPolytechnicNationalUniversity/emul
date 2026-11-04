@@ -272,3 +272,6 @@ export const olimexStm32H405: ComponentDef = {
     Source: "Olimex STM32-H405 user manual rev B, Rev. C schematic and dimension drawing",
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [olimexStm32H405]

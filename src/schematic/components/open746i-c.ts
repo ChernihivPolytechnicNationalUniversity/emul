@@ -745,3 +745,6 @@ export const open746ic: ComponentDef = {
     Source: "Waveshare Open746I-C and Core746I schematics",
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [open746ic]

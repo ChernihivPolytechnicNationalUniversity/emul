@@ -1,5 +1,5 @@
 import * as React from "react"
-import { getDef } from "@/schematic/registry"
+import { getMeta } from "@/schematic/registry"
 
 // The parts a student placed lately and the ones they starred, kept in this browser only.
 // Two strips, not one adaptive list: the palette's own order never moves under the pointer.
@@ -12,7 +12,7 @@ export const RECENT_KEEP = 12
 export function readIds(raw: string | null): string[] {
   try {
     const saved: unknown = JSON.parse(raw ?? "[]")
-    return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string" && getDef(id) !== undefined) : []
+    return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string" && getMeta(id) !== undefined) : []
   } catch {
     return []
   }

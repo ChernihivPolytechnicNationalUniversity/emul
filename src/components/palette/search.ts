@@ -1,6 +1,6 @@
 import { CATEGORIES, categoryLabel, isPaletteCategory } from "@/schematic/categories"
 import { familyOf } from "@/schematic/families"
-import type { ComponentDef } from "@/schematic/types"
+import type { PartMeta } from "@/schematic/registry"
 
 // The palette's search: every word typed must match somewhere in a part (its name, a keyword, its
 // group, its description); a part ranks by how well each word matched and where. An exact name
@@ -10,7 +10,7 @@ import type { ComponentDef } from "@/schematic/types"
 // typed. Equal matches keep the palette's own order: group first, then the part's place in it.
 
 export type SearchHit = {
-  def: ComponentDef
+  def: PartMeta
   score: number
   /** Matched spans of the part's name, [start, end) in its characters, sorted and merged. */
   ranges: [number, number][]
@@ -51,7 +51,12 @@ export function normalize(text: string): string {
   return out
 }
 
-const isAlnum = (c: string | undefined) => c !== undefined && /[a-z0-9]/.test(c)
+/** A lower-case letter or a digit (the text is normalized): by char code, as this runs for every letter of every part. */
+function isAlnum(c: string | undefined): boolean {
+  if (c === undefined) return false
+  const k = c.charCodeAt(0)
+  return (k >= 97 && k <= 122) || (k >= 48 && k <= 57)
+}
 
 /** Letters and digits only, with where each came from in the text. */
 function compact(text: string): { text: string; at: number[] } {
@@ -65,16 +70,22 @@ function compact(text: string): { text: string; at: number[] } {
   return { text: out, at }
 }
 
-type Field = { text: string; compact: { text: string; at: number[] }; weight: number; inside: boolean; scattered: boolean }
+/** Words of five letters or more and where they start: what a typo may be forgiven against. */
+type Word = { text: string; at: number }
+type Field = { text: string; compact: { text: string; at: number[] }; weight: number; inside: boolean; scattered: boolean; words: Word[] }
+/** A word of the query, with its letters-only form worked out once rather than per part. */
+type Token = { text: string; compact: string }
 type Match = { score: number; range?: [number, number][]; word?: string }
 
 function field(text: string, weight: number, inside: boolean, scattered = false): Field {
   const norm = normalize(text)
-  return { text: norm, compact: compact(norm), weight, inside, scattered }
+  const words = weight >= KEYWORD ? [...norm.matchAll(/[a-z0-9]+/g)].filter((m) => m[0].length >= 5).map((m) => ({ text: m[0], at: m.index })) : []
+  return { text: norm, compact: compact(norm), weight, inside, scattered, words }
 }
 
 /** The best way `token` sits in `f`, unweighted, with the span it covers. */
-function matchField(token: string, f: Field): Match {
+function matchField(tok: Token, f: Field): Match {
+  const token = tok.text
   const text = f.text
   const n = token.length
   if (text === token) return { score: EXACT, range: [[0, n]] }
@@ -92,7 +103,7 @@ function matchField(token: string, f: Field): Match {
   }
   if (best.score >= WORD_START) return best
   // The same letters without the punctuation and spaces: "ky040" for "KY-040", "blackpill" for "Black Pill".
-  const c = compact(token).text
+  const c = tok.compact
   if (c.length > 1 && (f.inside || c.length === f.compact.text.length)) {
     const at = f.compact.text.indexOf(c)
     if (at >= 0) {
@@ -135,19 +146,18 @@ function withinOneEdit(a: string, b: string): boolean {
 }
 
 /** A typo forgiven: one letter wrong, missing, extra or swapped in a word of the name or a keyword, for words of five letters or more. */
-function matchTypo(token: string, f: Field): Match {
-  if (token.length < 5 || f.weight < KEYWORD) return { score: 0 }
-  for (const m of f.text.matchAll(/[a-z0-9]+/g))
-    if (m[0].length >= 5 && withinOneEdit(token, m[0])) return { score: TYPO, range: [[m.index, m.index + m[0].length]], word: m[0] }
+function matchTypo({ text: token }: Token, f: Field): Match {
+  if (token.length < 5) return { score: 0 }
+  for (const w of f.words) if (withinOneEdit(token, w.text)) return { score: TYPO, range: [[w.at, w.at + w.text.length]], word: w.text }
   return { score: 0 }
 }
 
-type Entry = { def: ComponentDef; order: number; group: number; name: Field; keywords: Field[]; rest: Field[] }
+type Entry = { def: PartMeta; order: number; group: number; name: Field; keywords: Field[]; rest: Field[] }
 
-const entries = new WeakMap<readonly ComponentDef[], Entry[]>()
+const entries = new WeakMap<readonly PartMeta[], Entry[]>()
 const GROUP_ORDER = new Map<string, number>(CATEGORIES.map((c, i) => [c.id, i]))
 
-function index(defs: readonly ComponentDef[]): Entry[] {
+function index(defs: readonly PartMeta[]): Entry[] {
   let list = entries.get(defs)
   if (!list) {
     list = defs.map((def, order) => ({
@@ -178,7 +188,7 @@ function merge(ranges: [number, number][]): [number, number][] {
   return out
 }
 
-function score(entry: Entry, tokens: string[], whole: string, match: (token: string, f: Field) => Match): SearchHit | undefined {
+function score(entry: Entry, tokens: Token[], whole: string, match: (token: Token, f: Field) => Match): SearchHit | undefined {
   let total = 0
   const ranges: [number, number][] = []
   let matched: string | undefined
@@ -205,20 +215,22 @@ function score(entry: Entry, tokens: string[], whole: string, match: (token: str
   return { def: entry.def, score: total, ranges: merge(ranges), matched, corrected: false, correction }
 }
 
+const tokenOf = (text: string): Token => ({ text, compact: compact(text).text })
+
 /** Where the words of `query` sit in `text`, for a label that is not a part's own name (a family's). */
 export function highlight(text: string, query: string): [number, number][] {
   const f = field(text, NAME, true)
-  const tokens = normalize(query).trim().split(/\s+/).filter(Boolean)
+  const tokens = normalize(query).trim().split(/\s+/).filter(Boolean).map(tokenOf)
   return merge(tokens.flatMap((t) => matchField(t, f).range ?? []))
 }
 
 /** Parts that match every word of `query`, best first; none for a blank query. */
-export function searchParts(defs: readonly ComponentDef[], query: string): SearchHit[] {
+export function searchParts(defs: readonly PartMeta[], query: string): SearchHit[] {
   const whole = normalize(query).trim().replace(/\s+/g, " ")
   if (!whole) return []
-  const tokens = whole.split(" ")
+  const tokens = whole.split(" ").map(tokenOf)
   const list = index(defs)
-  const run = (match: (token: string, f: Field) => Match, corrected: boolean) =>
+  const run = (match: (token: Token, f: Field) => Match, corrected: boolean) =>
     list
       .map((e) => {
         const hit = score(e, tokens, whole, match)
@@ -236,10 +248,10 @@ export function searchParts(defs: readonly ComponentDef[], query: string): Searc
 }
 
 /** For a query nothing matches in full: the best parts that match one of its words, a few. */
-export function similarParts(defs: readonly ComponentDef[], query: string, count = 3): SearchHit[] {
+export function similarParts(defs: readonly PartMeta[], query: string, count = 3): SearchHit[] {
   const words = normalize(query).trim().split(/\s+/).filter((w) => w.length >= 3)
   if (words.length < 2) return []
-  const best = new Map<ComponentDef, SearchHit>()
+  const best = new Map<PartMeta, SearchHit>()
   for (const word of words)
     for (const hit of searchParts(defs, word).slice(0, count))
       if ((best.get(hit.def)?.score ?? -1) < hit.score) best.set(hit.def, hit)

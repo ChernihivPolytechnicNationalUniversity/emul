@@ -290,3 +290,6 @@ export const nucleoF429zi: ComponentDef = {
     Source: "ST UM1974, Table 16",
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [nucleoF429zi]

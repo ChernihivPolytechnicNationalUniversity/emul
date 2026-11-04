@@ -72,3 +72,6 @@ export const ammeter: ComponentDef = {
 }
 
 export const meterComponents: ComponentDef[] = [voltmeter, ammeter]
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = meterComponents

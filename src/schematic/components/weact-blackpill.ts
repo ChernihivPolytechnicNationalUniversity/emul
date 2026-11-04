@@ -328,3 +328,6 @@ function blackPill(chip: ChipProfile, id: string, mcu: string): ComponentDef {
 export const weactBlackpillF411 = blackPill(STM32F411CE, "weact-blackpill-f411", "STM32F411CEU6, Cortex-M4F 100 MHz, 512 KB Flash, 128 KB SRAM; HSE 25 MHz, LSE 32.768 kHz")
 export const weactBlackpillF401cc = blackPill(STM32F401CC, "weact-blackpill-f401cc", "STM32F401CCU6, Cortex-M4F 84 MHz, 256 KB Flash, 64 KB SRAM; HSE 25 MHz, LSE 32.768 kHz")
 export const weactBlackpillF401ce = blackPill(STM32F401CE, "weact-blackpill-f401ce", "STM32F401CEU6, Cortex-M4F 84 MHz, 512 KB Flash, 96 KB SRAM; HSE 25 MHz, LSE 32.768 kHz")
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [weactBlackpillF411, weactBlackpillF401ce, weactBlackpillF401cc]

@@ -144,3 +144,6 @@ export const ky040: ComponentDef = {
 }
 
 export const encoderComponents: ComponentDef[] = [encoderEc11, ky040]
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = encoderComponents

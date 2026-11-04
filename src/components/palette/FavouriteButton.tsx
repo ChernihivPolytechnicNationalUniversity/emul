@@ -1,10 +1,10 @@
 import { StarIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { ComponentDef } from "@/schematic/types"
+import type { PartMeta } from "@/schematic/registry"
 import { usePaletteActions } from "./palette-actions"
 import { flipFavourite } from "./recents"
 
-export function FavouriteButton({ def, className }: { def: ComponentDef; className?: string }) {
+export function FavouriteButton({ def, className }: { def: PartMeta; className?: string }) {
   const { favourites } = usePaletteActions()
   const on = favourites.has(def.id)
   return (

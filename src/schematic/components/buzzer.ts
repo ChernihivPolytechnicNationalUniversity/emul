@@ -153,3 +153,6 @@ function buzzerDef(preset: BuzzerPreset): ComponentDef {
 export const buzzers: ComponentDef[] = BUZZER_PRESETS.map(buzzerDef)
 
 export const isBuzzerDef = (defId: string) => buzzerOfDef(defId) !== undefined
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = buzzers

@@ -8,10 +8,9 @@
  * needs are drawn or not as the student likes; they change nothing here.
  */
 import { CrystalIcon, OscillatorIcon } from "../icons"
+import { crystalStartup, RESONATOR_STARTUP } from "../clock-startup"
 import type { ComponentDef } from "../types"
 
-/** DS9405 Table 33/35 typical start-up times: 2 ms for a MHz crystal, 2 s for a 32 kHz watch crystal. */
-export const crystalStartup = (hz: number) => (hz < 1e6 ? 2 : 2e-3)
 
 export const crystal: ComponentDef = {
   id: "crystal",
@@ -46,8 +45,6 @@ export const crystal: ComponentDef = {
  */
 export const RESONATOR_TOLERANCE = { initial: 0.5, temperature: 0.3, ageing: 0.2 }
 
-/** Assumed until checked: a ceramic resonator is up in 0.5 ms, a quarter of a MHz crystal's 2 ms (Murata gives no figure). */
-export const RESONATOR_STARTUP = 0.5e-3
 
 export const resonator: ComponentDef = {
   id: "resonator",
@@ -119,3 +116,8 @@ export const oscillator: ComponentDef = {
   // A few milliamps from VCC; the 3.3 V part is dead past its absolute maximum supply.
   model: [{ kind: "R", a: "VCC", b: "GND", value: 1e3, limits: { voltage: "{vmax}", fail: "short" } }],
 }
+
+export { crystalStartup, RESONATOR_STARTUP }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [crystal, resonator, oscillator]

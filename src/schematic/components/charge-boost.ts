@@ -94,3 +94,6 @@ export const chargeBoostModule: ComponentDef = {
     Source: "Datasheets: TP4056 (NanJing Top Power), DW03 (PJSEMI), MT3608 (Aerosemi)",
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [chargeBoostModule]

@@ -17,12 +17,13 @@ import {
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 import { hitEntries, paletteGroups, useLibrary, type PaletteEntry } from "./items"
+import { VirtualRows, type RowSlot } from "./VirtualRows"
 import { useGroupsOpen } from "./collapsed-groups"
-import type { ComponentDef } from "@/schematic/types"
+import type { PartMeta } from "@/schematic/registry"
 import type { HdlLanguage } from "emul-shared/hdl"
 import { HdlIcon } from "@/schematic/icons"
 import { isModified } from "@/schematic/hdl"
-import { getDef, registry } from "@/schematic/registry"
+import { catalogue, ensureDefs, getMeta } from "@/schematic/registry"
 import { BoardTile } from "./BoardTile"
 import { useQuickLists } from "./recents"
 import { Actions, clickEndsDrag, useDragOut, usePaletteActions, type PaletteActions } from "./palette-actions"
@@ -31,11 +32,11 @@ import { hdlCreateMatch, highlight, requestPartUrl, searchParts, similarParts, t
 
 type ComponentsSidebarProps = React.ComponentProps<typeof Sidebar> & {
   /** Place the part at once, at the centre of the view: the keyboard's way in. */
-  onPick?: (item: ComponentDef) => void
+  onPick?: (item: PartMeta) => void
   /** The part taken in hand, for a click on the field to place. */
   armed?: string | null
   /** Take the part in hand (or put it back, if it is the one in hand). */
-  onArm?: (item: ComponentDef) => void
+  onArm?: (item: PartMeta) => void
   onHdlNew?: (language: HdlLanguage) => void
   onHdlImport?: () => void
   onHdlOpen?: (id: string) => void
@@ -110,14 +111,14 @@ function Kbd({ children }: { children: React.ReactNode }) {
 }
 
 /** One part, one row: icon, name, and on the right what tells it apart (variants, the word that found it). */
-function PartRow({ entry, ranges = [], matched, variant, selected }: { entry: PaletteEntry; ranges?: [number, number][]; matched?: string; variant?: string; selected?: boolean }) {
+function PartRow({ entry, ranges = [], matched, variant, selected, slot }: { entry: PaletteEntry; ranges?: [number, number][]; matched?: string; variant?: string; selected?: boolean; slot?: RowSlot }) {
   const { activate, armed, favourites } = usePaletteActions()
   const item = entry.def
   const title = entry.family ? `${entry.family.variants.length} variants; this places ${item.name}, the inspector switches it` : item.description
   const inHand = armed === item.id
   const drag = useDragOut(item)
   return (
-    <SidebarMenuItem>
+    <SidebarMenuItem {...slot}>
       <SidebarMenuButton
         {...drag}
         onClick={(e) => activate(item, e)}
@@ -176,7 +177,7 @@ function PartTile({ entry }: { entry: PaletteEntry }) {
   )
 }
 
-function QuickChip({ def }: { def: ComponentDef }) {
+function QuickChip({ def }: { def: PartMeta }) {
   const { activate, armed } = usePaletteActions()
   const drag = useDragOut(def)
   return (
@@ -199,7 +200,7 @@ function QuickChip({ def }: { def: ComponentDef }) {
 
 /** Favourite or recent parts: round chips with the part's icon and name, wrapping. */
 function QuickStrip({ label, ids, action }: { label: string; ids: readonly string[]; action?: React.ReactNode }) {
-  const defs = ids.flatMap((id) => getDef(id) ?? [])
+  const defs = ids.flatMap((id) => getMeta(id) ?? [])
   if (defs.length === 0) return null
   return (
     <SidebarGroup className="py-0.5">
@@ -235,9 +236,9 @@ function HdlCreateItems({ onHdlNew, onHdlImport }: Pick<ComponentsSidebarProps, 
 /** The search's rows, also what the arrow keys walk through and Enter places. */
 function useSearchRows(query: string) {
   return React.useMemo(() => {
-    const hits = searchParts(registry, query)
+    const hits = searchParts(catalogue, query)
     const rows = hitEntries(hits)
-    const similar = hits.length === 0 ? hitEntries(similarParts(registry, query)) : []
+    const similar = hits.length === 0 ? hitEntries(similarParts(catalogue, query)) : []
     return { hits, rows, similar, pickable: rows.length ? rows : similar }
   }, [query])
 }
@@ -289,10 +290,13 @@ function SearchResults({ query, search, selected, onHdlNew, onHdlImport }: { que
           ) : (
             <Heading count={rows.length}>From library</Heading>
           )}
-          <SidebarMenu>
-            {rows.map((row, i) => (
+          <VirtualRows
+            items={rows}
+            selected={selected}
+            row={(row, i, slot) => (
               <PartRow
                 key={row.key}
+                slot={slot}
                 entry={row}
                 ranges={row.hit.corrected ? [] : row.family ? highlight(row.name, query) : row.hit.ranges}
                 // A family found by one of its other variants says which: that variant is what Enter places.
@@ -300,8 +304,8 @@ function SearchResults({ query, search, selected, onHdlNew, onHdlImport }: { que
                 matched={row.family ? undefined : row.hit.matched}
                 selected={i === selected}
               />
-            ))}
-          </SidebarMenu>
+            )}
+          />
         </>
       ) : (
         !hdl &&
@@ -364,9 +368,25 @@ function SearchIntro({ onExample }: { onExample: (q: string) => void }) {
   )
 }
 
+/** While the page is idle, load the parts a student keeps reaching for: their recent and favourite parts are ready when picked. */
+function useWarmQuickParts(recent: readonly string[], favourites: readonly string[]) {
+  React.useEffect(() => {
+    const ids = [...recent, ...favourites]
+    if (!ids.length) return
+    const warm = () => void ensureDefs(ids)?.catch(() => {})
+    if (typeof requestIdleCallback !== "function") {
+      const t = setTimeout(warm, 1500)
+      return () => clearTimeout(t)
+    }
+    const handle = requestIdleCallback(warm, { timeout: 5000 })
+    return () => cancelIdleCallback(handle)
+  }, [recent, favourites])
+}
+
 export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdlImport, onHdlOpen, only, onSearchFocus, autoFocusSearch, ...props }: ComponentsSidebarProps) {
   const library = useLibrary()
   const quick = useQuickLists()
+  useWarmQuickParts(quick.recent, quick.favourites)
   const [query, setQuery] = React.useState("")
   const [focused, setFocused] = React.useState(false)
   const [selected, setSelected] = React.useState(0)
@@ -375,7 +395,9 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
   const groupsOpen = useGroupsOpen(q)
 
   const hdl = library.filter((e) => !q || e.module.name.toLowerCase().includes(q))
-  const search = useSearchRows(query)
+  // Typing never waits for the search: with thousands of parts the results follow a frame behind the letters.
+  const searched = React.useDeferredValue(query)
+  const search = useSearchRows(searched)
   const favourites = React.useMemo(() => new Set(quick.favourites), [quick.favourites])
   const recent = quick.recent.filter((id) => !favourites.has(id)).slice(0, 6)
 
@@ -403,7 +425,7 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
         const now = inHand.current
         if (def && now !== def.id) onArm?.(def)
         else if (!def && now) {
-          const held = getDef(now)
+          const held = getMeta(now)
           if (held) onArm?.(held)
         }
       },
@@ -479,7 +501,7 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
         </SidebarHeader>
         <SidebarContent className="@container gap-0">
           {q ? (
-            <SearchResults query={query} search={search} selected={selected} onHdlNew={onHdlNew} onHdlImport={onHdlImport} />
+            <SearchResults query={searched} search={search} selected={selected} onHdlNew={onHdlNew} onHdlImport={onHdlImport} />
           ) : (
             <>
               {focused && <SearchIntro onExample={ask} />}
@@ -559,11 +581,7 @@ export function ComponentsSidebar({ onPick, armed = null, onArm, onHdlNew, onHdl
                           ))}
                         </div>
                       )}
-                      <SidebarMenu className={group.id === "basics" ? "@min-[20rem]:hidden" : undefined}>
-                        {group.entries.map((entry) => (
-                          <PartRow key={entry.key} entry={entry} />
-                        ))}
-                      </SidebarMenu>
+                      <VirtualRows className={group.id === "basics" ? "@min-[20rem]:hidden" : undefined} items={group.entries} row={(entry, _i, slot) => <PartRow key={entry.key} entry={entry} slot={slot} />} />
                     </>
                   )}
                 </PaletteSection>

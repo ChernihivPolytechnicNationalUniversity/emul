@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { hollowMarkerHidden, pinMarker } from "@/components/field/pin-marker"
 import { selectionOutline } from "@/components/field/selection-geometry"
 import { trimRouteEnds } from "@/schematic/geometry"
-import { getDef, registry } from "@/schematic/registry"
+import { getDef, allDefs } from "@/schematic/registry"
 
 const def = (id: string) => getDef(id)!
 const subpaths = (d: string) => d.split(/(?=M)/).filter((s) => s.trim())
@@ -93,7 +93,7 @@ describe("a connected pin keeps its marker only where it is a socket", () => {
   })
 
   it("every board is a socket board", () => {
-    const boards = registry.filter((d) => d.category === "boards")
+    const boards = allDefs().filter((d) => d.category === "boards")
     expect(boards.length).toBeGreaterThan(0)
     for (const board of boards) expect(board.pinsAreSockets).toBe(true)
   })

@@ -1,5 +1,5 @@
 import { bodyBounds } from "./body"
-import { getDef, getPin } from "./registry"
+import { getDef, getMeta, getPin } from "./registry"
 import { SpatialIndex } from "./spatial"
 import type { ComponentDef, PinDef, PinRef, PlacedObject, Point, Rotation, Side, Wire } from "./types"
 
@@ -93,7 +93,7 @@ export function unorientOffset(v: Point, { rotation, mirror }: Orientation): Poi
 }
 
 /** Size in cells of the rotated bounding box. On a diagonal it is the axis-aligned hull. */
-export function objectSize(def: ComponentDef, rot: Rotation = 0) {
+export function objectSize(def: Pick<ComponentDef, "width" | "height">, rot: Rotation = 0) {
   const i = rot / 45
   const c = Math.abs(COS[i])
   const s = Math.abs(SIN[i])
@@ -155,7 +155,8 @@ export function unionOf(rects: readonly Rect[]): Rect {
 
 /** World-space bounding box of a placed object. */
 export function objectRect(obj: PlacedObject, grid: number): Rect {
-  const def = getDef(obj.def)
+  // A part still loading has its size from the catalogue: a thumbnail or a fit-to-view is right meanwhile.
+  const def = getDef(obj.def) ?? getMeta(obj.def)
   if (!def) return { x: obj.x, y: obj.y, w: grid, h: grid }
   const { w, h } = objectSize(def, obj.rotation)
   return { x: obj.x, y: obj.y, w: w * grid, h: h * grid }

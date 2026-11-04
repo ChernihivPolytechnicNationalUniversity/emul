@@ -202,3 +202,6 @@ export const lp2985Chip: ComponentDef = {
 }
 
 export const powerIcs = [tp4056Chip, dw03Chip, mt3608Chip, ncp1117Chip, lp2985Chip]
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = powerIcs

@@ -167,7 +167,7 @@ export function useProjects(load: (doc: Schematic) => void, landing?: Landing): 
     if (meta.current?.id === id) return
     await flush()
     const p = await readProject(id)
-    const opened = p && parseProject(p.text)
+    const opened = p && (await parseProject(p.text))
     if (!p || !opened) {
       toast.error("That project could not be opened")
       return void refresh()
@@ -225,7 +225,7 @@ export function useProjects(load: (doc: Schematic) => void, landing?: Landing): 
     if (meta.current?.id === id) {
       if (rest.length) {
         const q = await readProject(rest[0].id)
-        const doc = q && parseSchematic(q.text)
+        const doc = q && (await parseSchematic(q.text))
         if (q && doc) enter(q.meta, q.text, doc, true)
       } else {
         const now = Date.now()
@@ -285,7 +285,7 @@ export function useProjects(load: (doc: Schematic) => void, landing?: Landing): 
   const read = useEvent(async (id: string) => {
     if (meta.current?.id === id) await flush()
     const p = await readProject(id)
-    const doc = p && parseSchematic(p.text)
+    const doc = p && (await parseSchematic(p.text))
     return p && doc ? { meta: p.meta, doc } : null
   })
 
@@ -293,7 +293,7 @@ export function useProjects(load: (doc: Schematic) => void, landing?: Landing): 
     const m = meta.current
     if (!m) return
     const p = await readProject(m.id)
-    const opened = p && parseProject(p.text)
+    const opened = p && (await parseProject(p.text))
     if (!p || !opened || p.text === saved.current) return
     enter(p.meta, p.text, opened.doc, true)
     announceUpgrade(opened.notes)
@@ -328,7 +328,7 @@ export function useProjects(load: (doc: Schematic) => void, landing?: Landing): 
     for (const id of [tabProject(), await lastProject()]) {
       if (!id || !all.some((p) => p.id === id)) continue
       const p = await readProject(id)
-      const opened = p && parseProject(p.text)
+      const opened = p && (await parseProject(p.text))
       if (!p || !opened) continue
       const doc = opened.doc
       enter(p.meta, p.text, doc, true)

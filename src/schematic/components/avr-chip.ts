@@ -215,3 +215,6 @@ const TQFP32: Package = {
 
 export const atmega328p = avrChip(ATMEGA328P, PDIP28, "8-bit AVR MCU, PDIP-28 — the Arduino Uno chip")
 export const atmega328pAu = avrChip(ATMEGA328P, TQFP32, "8-bit AVR MCU, TQFP-32 — the Arduino Nano chip, with the analog-only ADC6/ADC7", "atmega328p-au")
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [atmega328p, atmega328pAu]

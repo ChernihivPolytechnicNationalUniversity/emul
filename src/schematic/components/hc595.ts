@@ -1,4 +1,4 @@
-import { HC595_INPUTS, HC595_OUTPUTS, SHIFT_REGISTER_DEFS, shiftRegisterOfDef, type ShiftRegisterPart } from "@/sim/hc595"
+import { HC595_INPUTS, HC595_LINKS, HC595_OUTPUTS, SHIFT_REGISTER_DEFS, shiftRegisterOfDef, type ShiftRegisterPart } from "@/sim/hc595"
 import { ShiftRegisterIcon } from "../icons"
 import { pinNumbers } from "../pin-numbers"
 import type { ComponentDef, Element, PinDef } from "../types"
@@ -34,7 +34,6 @@ const CLAMP = { current: 0.02, tau: 1, fail: "short" } as const
 
 const OUTPUT_LIMITS = { voltage: 7, current: 0.035, tau: 1, fail: "open" } as const
 
-export const HC595_LINKS = { vcc: 0, gnd: 1 } as const
 
 const model: Element[] = [
   { kind: "R", a: "VCC", b: "$vcc", value: 0.05, hidden: true, limits: { current: 0.5, tau: 1, fail: "open", fatal: false } },
@@ -97,3 +96,8 @@ export const hct595 = shiftRegister({
 })
 
 export const isShiftRegisterDef = (defId: string) => shiftRegisterOfDef(defId) !== undefined
+
+export { HC595_LINKS }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [hc595, hct595]

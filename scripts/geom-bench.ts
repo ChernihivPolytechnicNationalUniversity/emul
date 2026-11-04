@@ -1,3 +1,4 @@
+import "./lib/all-parts"
 import { buildNets } from "@/schematic/nets"
 import { GRID, nudgeRoutes, objectPins, routeBox, Router, touches } from "@/schematic/geometry"
 import { SpatialIndex } from "@/schematic/spatial"

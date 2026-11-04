@@ -1,3 +1,4 @@
+import "./lib/all-parts"
 import { Buffer } from "node:buffer"
 import { existsSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"

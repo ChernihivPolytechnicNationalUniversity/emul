@@ -279,3 +279,6 @@ export const stm32f4Discovery: ComponentDef = {
     Source: "ST UM1472 Rev 9, MB997 schematics B.2–G-01, rev-E board file",
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [stm32f4Discovery]

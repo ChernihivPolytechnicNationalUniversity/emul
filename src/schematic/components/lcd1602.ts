@@ -131,3 +131,6 @@ export const lcd1602I2c: ComponentDef = {
 }
 
 export const lcdModules: ComponentDef[] = [lcd1602, lcd1602I2c]
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = lcdModules

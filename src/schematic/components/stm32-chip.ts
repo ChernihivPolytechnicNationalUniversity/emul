@@ -282,3 +282,6 @@ export const stm32f405rg = stm32Chip(STM32F405RG, LQFP64_F40X, "Cortex-M4F MCU, 
 export const stm32f411ce = stm32Chip(STM32F411CE, UFQFPN48_F4X1, "Cortex-M4F MCU, UFQFPN48")
 export const stm32f401cc = stm32Chip(STM32F401CC, UFQFPN48_F4X1, "Cortex-M4F MCU, UFQFPN48")
 export const stm32f401ce = stm32Chip(STM32F401CE, UFQFPN48_F4X1, "Cortex-M4F MCU, UFQFPN48")
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [stm32f746ig, stm32f429zi, stm32f407vg, stm32f405rg, stm32f411ce, stm32f401ce, stm32f401cc]

@@ -40,3 +40,6 @@ export const servoSg90: ComponentDef = {
   ],
   info: { Source: "TowerPro SG90 sheet (components101 / FriendlyWire copies); Rapid 37-1330 (Version 1, October 2013); currents: vendor spec sheet and RobotShop" },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [servoSg90]

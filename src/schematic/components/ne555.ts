@@ -59,3 +59,6 @@ export const ne555: ComponentDef = {
   ],
   info: { Package: "PDIP-8", Source: "TI NE555 datasheet SLFS022K (2026), typical characteristics at 25 °C" },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [ne555]

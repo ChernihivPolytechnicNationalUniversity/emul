@@ -7,7 +7,7 @@ export const DEFAULT_BUILD_OPT: OptLevel = "-O0"
 export const AVR_BUILD_OPT: OptLevel = "-Os"
 
 /** The build target of a board or chip: its chip's id (an AVR's, upper-case in its profile, too). */
-export const buildTarget = (def: ComponentDef | undefined): Target | undefined => TARGETS.find((t) => t === def?.chip?.toLowerCase())
+export const buildTarget = (def: Pick<ComponentDef, "chip"> | undefined): Target | undefined => TARGETS.find((t) => t === def?.chip?.toLowerCase())
 
 /** The level a board's project compiles at: an AVR builds at -Os as the Arduino IDE does, since avr-libc's delays are only right when optimized. */
 export const buildOpt = (board: PlacedObject | null | undefined, target: Target | undefined): OptLevel =>

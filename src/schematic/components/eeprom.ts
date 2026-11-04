@@ -72,3 +72,6 @@ export const eeprom24c: ComponentDef = {
     { kind: "GPIO", node: "WP", vdd: 3.3, limits: EEPROM_PIN },
   ],
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [eeprom24c]

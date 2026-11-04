@@ -1,7 +1,7 @@
 import { SOURCE_LIMITS, STM32_TARGETS, sourcePath, type SourceFile, type Stm32Target } from "emul-shared/source"
 import { chipById } from "@/mcu/chip"
 import { builder } from "@/schematic/builder"
-import { getDef } from "@/schematic/registry"
+import { getMeta } from "@/schematic/registry"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import { normalizeFiles } from "./files"
 
@@ -59,7 +59,7 @@ const FAMILY_LENGTH = "STM32F746".length
 const PART_LENGTH = "STM32F746IG".length
 export const partOf = (target: Stm32Target) => chipById(target)!.name
 const familyOf = (target: Stm32Target) => partOf(target).slice(0, FAMILY_LENGTH)
-const boardName = (target: Stm32Target) => getDef(BOARD_FOR[target])?.name ?? BOARD_FOR[target]
+const boardName = (target: Stm32Target) => getMeta(BOARD_FOR[target])?.name ?? BOARD_FOR[target]
 
 export function couldBePart(mcu: string, target: Stm32Target): boolean {
   const named = mcu.toUpperCase().slice(0, PART_LENGTH)

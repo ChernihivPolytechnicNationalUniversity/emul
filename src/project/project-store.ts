@@ -1,5 +1,6 @@
 import { objectIndex, objectRect, resolvePinIn, GRID } from "@/schematic/geometry"
 import { stamped, upgraded, type Upgrade } from "@/schematic/migrate"
+import { defIds, ensureDefs } from "@/schematic/registry"
 import type { Schematic } from "@/schematic/types"
 
 const DB_NAME = "emul"
@@ -22,17 +23,28 @@ export function isSchematic(doc: unknown): doc is Schematic {
   return !!d && Array.isArray(d.objects) && Array.isArray(d.wires)
 }
 
-export function parseProject(text: string): Upgrade | null {
+function schematicOf(text: string): Schematic | null {
   try {
     const doc: unknown = JSON.parse(text)
-    return isSchematic(doc) ? upgraded(doc) : null
+    return isSchematic(doc) ? doc : null
   } catch {
     return null
   }
 }
 
-export function parseSchematic(text: string): Schematic | null {
-  return parseProject(text)?.doc ?? null
+/** A document brought up to this version; its parts load first, since the upgrade reads their pins. */
+async function upgradedWithParts(doc: Schematic): Promise<Upgrade> {
+  await ensureDefs(defIds(doc))
+  return upgraded(doc)
+}
+
+export async function parseProject(text: string): Promise<Upgrade | null> {
+  const doc = schematicOf(text)
+  return doc && upgradedWithParts(doc)
+}
+
+export async function parseSchematic(text: string): Promise<Schematic | null> {
+  return (await parseProject(text))?.doc ?? null
 }
 
 export const schematicText = (doc: Schematic) => JSON.stringify(stamped(doc))
@@ -59,7 +71,7 @@ async function readProjectBytes(raw: Uint8Array): Promise<ReadProject | null> {
   }
   const f = parsed as { format?: unknown; name?: unknown; schematic?: unknown }
   if (f?.format !== FILE_FORMAT || !isSchematic(f.schematic)) return null
-  return { name: typeof f.name === "string" ? f.name : undefined, ...upgraded(f.schematic) }
+  return { name: typeof f.name === "string" ? f.name : undefined, ...(await upgradedWithParts(f.schematic)) }
 }
 
 async function projectBytes(name: string, doc: Schematic): Promise<Uint8Array> {
@@ -144,10 +156,11 @@ function database(): Promise<IDBDatabase> {
       const old = tx.objectStore(LEGACY).get("current")
       old.onsuccess = () => {
         const b = old.result as { text?: unknown; at?: unknown } | undefined
-        const doc = typeof b?.text === "string" ? parseSchematic(b.text) : null
+        // Inside the upgrade nothing can be awaited, so no part loads: the thumbnail comes with the next save.
+        const doc = typeof b?.text === "string" ? schematicOf(b.text) : null
         if (b && doc && doc.objects.length) {
           const at = typeof b.at === "number" ? b.at : Date.now()
-          const meta: ProjectMeta = { id: newId(), name: "Untitled", created: at, at, thumb: thumbnail(doc) }
+          const meta: ProjectMeta = { id: newId(), name: "Untitled", created: at, at }
           tx.objectStore(META).put(meta)
           tx.objectStore(DOCS).put(b.text, meta.id)
           tx.objectStore(PREFS).put(meta.id, LAST)

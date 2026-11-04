@@ -395,3 +395,6 @@ export const addressableComponents: ComponentDef[] = PRODUCTS.map(addressableDef
 
 /** Whether a definition id is one of these (the inspector shows their latched words). */
 export const isAddressableDef = (id: string) => PRODUCTS.some((p) => p.id === id)
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = addressableComponents

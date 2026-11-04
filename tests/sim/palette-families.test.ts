@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { registry, getDef } from "@/schematic/registry"
+import { catalogue, getDef } from "@/schematic/registry"
 import { FAMILIES, familyOf, swapsFor } from "@/schematic/families"
 import { keptProps } from "@/schematic/use-schematic"
 import { hitEntries, paletteGroups } from "@/components/palette/items"
 import { searchParts } from "@/components/palette/search"
 
-const rows = (query: string) => hitEntries(searchParts(registry, query))
+const rows = (query: string) => hitEntries(searchParts(catalogue, query))
 
 describe("the palette's rows", () => {
   it("show a family once, where its first part stood, placing its first variant", () => {
@@ -16,7 +16,7 @@ describe("the palette's rows", () => {
       expect.soft(mine[0]?.def.id, f.id).toBe(f.variants[0][0])
       expect.soft(mine[0]?.name, f.id).toBe(f.name)
     }
-    expect(entries.length).toBe(registry.filter((d) => !familyOf(d.id)).length + FAMILIES.length)
+    expect(entries.length).toBe(catalogue.filter((d) => !familyOf(d.id)).length + FAMILIES.length)
   })
 
   it("say what a family holds", () => {

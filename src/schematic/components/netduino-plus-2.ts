@@ -232,3 +232,6 @@ export const netduinoPlus2: ComponentDef = {
     Source: "Secret Labs CW0034 Rev A schematic; Arduino Uno R3 board file for the outline",
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [netduinoPlus2]
