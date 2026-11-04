@@ -49,18 +49,20 @@ function GlyphIcon({ glyph }: { glyph: Glyph }) {
   )
 }
 
-/** A band on a linear scale: green for the value, a dot for typ, the abs max hatched beyond its red tick. */
-function RangeBar({ c, w: W }: { c: Characteristic; w: number }) {
-  const v = c.value
-  const vals = [v?.min, v?.typ, v?.max, c.limit?.max, c.limit?.min].map((l) => num(l, 0)).filter((n): n is number => n !== undefined)
-  const sym = v?.sym || c.limit?.sym
+/**
+ * A band on a linear scale: the value's min–max as a band, typ as a dot, a typ with only a max as a
+ * dot and a whisker up to it; the abs max hatched beyond its red tick. Several colours of one LED
+ * share the scale, each in its own colour, a little apart.
+ */
+function RangeBar({ cs, w: W }: { cs: Characteristic[]; w: number }) {
+  const vals = cs.flatMap((c) => [c.value?.min, c.value?.typ, c.value?.max, c.limit?.max, c.limit?.min].map((l) => num(l, 0)).filter((n): n is number => n !== undefined))
+  const sym = cs.some((c) => c.value?.sym || c.limit?.sym)
   const top = Math.max(...vals.map(Math.abs), 1e-12) * 1.15
   const lo = sym ? -top : Math.min(0, ...vals)
   const hi = top
   const x = (n: number) => 4 + ((n - lo) / (hi - lo)) * (W - 8)
-  const band = v ? (v.sym ? [-num(v.max, 0)!, num(v.max, 0)!] : [num(v.min, 0) ?? num(v.typ, 0) ?? lo, num(v.max, 0) ?? num(v.typ, 0) ?? hi]) : undefined
-  const limits = c.limit ? (c.limit.sym ? [num(c.limit.max, 0)!, -num(c.limit.max, 0)!] : [num(c.limit.max, 0), num(c.limit.min, 0)].filter((n): n is number => n !== undefined)) : []
-  const typ = num(v?.typ, 0)
+  const limits = [...new Set(cs.flatMap((c) => (c.limit ? (c.limit.sym ? [num(c.limit.max, 0)!, -num(c.limit.max, 0)!] : [num(c.limit.max, 0), num(c.limit.min, 0)].filter((n): n is number => n !== undefined)) : [])))]
+  const q = KINDS[cs[0].kind].quantity
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden>
       <defs>
@@ -70,10 +72,40 @@ function RangeBar({ c, w: W }: { c: Characteristic; w: number }) {
       </defs>
       <line x1={x(lo)} x2={x(hi)} y1={11} y2={11} className="stroke-muted-foreground/50" />
       {limits.map((l) => (l > 0 ? <rect key={l} x={x(l)} y={6} width={x(hi) - x(l)} height={10} fill="url(#abs-hatch)" /> : <rect key={l} x={x(lo)} y={6} width={x(l) - x(lo)} height={10} fill="url(#abs-hatch)" />))}
-      {band && band[1] > band[0] && <rect x={x(band[0])} y={6} width={Math.max(2, x(band[1]) - x(band[0]))} height={10} rx={2} fill={GREEN} fillOpacity={0.18} stroke={GREEN} strokeDasharray={v?.approx ? "2 1.5" : undefined} />}
+      {cs.map((c, i) => {
+        const v = c.value
+        if (!v) return null
+        const y = 11 + (i - (cs.length - 1) / 2) * 4
+        const ink = c.colour ? COLOURS[c.colour] : undefined
+        const min = v.sym ? -num(v.max, 0)! : num(v.min, 0)
+        const max = num(v.max, 0)
+        const typ = num(v.typ, 0)
+        const dash = v.approx ? "2 1.5" : undefined
+        return (
+          <g key={i}>
+            {min !== undefined && max !== undefined && max > min && (
+              <rect x={x(min)} y={y - (cs.length > 1 ? 2 : 5)} width={Math.max(2, x(max) - x(min))} height={cs.length > 1 ? 4 : 10} rx={2} fill={ink ?? GREEN} fillOpacity={ink ? 0.35 : 0.18} stroke={ink ?? GREEN} strokeDasharray={dash}>
+                <title>{`${formatNumber(min, q)} … ${formatNumber(max, q)}`}</title>
+              </rect>
+            )}
+            {min === undefined && typ !== undefined && max !== undefined && (
+              <g stroke={ink ?? "currentColor"} className={ink ? undefined : "text-foreground"} strokeDasharray={dash}>
+                <line x1={x(typ)} x2={x(max)} y1={y} y2={y} strokeWidth={1.4} />
+                <line x1={x(max)} x2={x(max)} y1={y - 3} y2={y + 3} strokeWidth={1.4}>
+                  <title>{`max ${formatNumber(max, q)}`}</title>
+                </line>
+              </g>
+            )}
+            {typ !== undefined && (
+              <circle cx={x(typ)} cy={y} r={3} fill={ink ?? "currentColor"} className={ink ? undefined : "fill-foreground"}>
+                <title>{`typ ${formatNumber(typ, q)}`}</title>
+              </circle>
+            )}
+          </g>
+        )
+      })}
       {limits.map((l) => <line key={`t${l}`} x1={x(l)} x2={x(l)} y1={3} y2={17} stroke={RED} strokeWidth={2} />)}
-      {limits.filter((l) => l > 0).map((l) => <text key={`n${l}`} x={Math.min(x(l), W - 2)} y={26} fontSize={9} textAnchor={x(l) > W - 24 ? "end" : "middle"} fill={RED}>{formatNumber(l, KINDS[c.kind].quantity)}</text>)}
-      {typ !== undefined && <circle cx={x(typ)} cy={11} r={3} className="fill-foreground" />}
+      {limits.filter((l) => l > 0).map((l) => <text key={`n${l}`} x={Math.min(x(l), W - 2)} y={26} fontSize={9} textAnchor={x(l) > W - 24 ? "end" : "middle"} fill={RED}>{formatNumber(l, q)}</text>)}
     </svg>
   )
 }
@@ -159,12 +191,13 @@ function Swatch({ c }: { c: Characteristic }) {
   return <span className="inline-block h-3.5 w-8 rounded-[4px] border" style={{ background: wavelengthColour(nm) }} aria-hidden />
 }
 
-function Visual({ c, w }: { c: Characteristic; w: number }) {
+function Visual({ cs, w }: { cs: Characteristic[]; w: number }) {
+  const c = cs[0]
   const visual = KINDS[c.kind].visual
   if (visual === "tokens") return <span />
   if (visual === "swatch") return <Swatch c={c} />
   if (!c.value && visual !== "range") return <span />
-  if (visual === "range") return <RangeBar c={c} w={w} />
+  if (visual === "range") return <RangeBar cs={cs} w={w} />
   if (visual === "rail") return <RailBar c={c} w={w} />
   if (visual === "log") return <LogRuler c={c} w={w} />
   return <LevelMeter c={c} w={w} />
@@ -199,7 +232,8 @@ function useWidth() {
 }
 
 /** One characteristic: glyph, label, its conditions as chips and the number on a line; its visual and page under them. */
-function Row({ record, c }: { record: Datasheet; c: Characteristic }) {
+function Row({ record, cs }: { record: Datasheet; cs: Characteristic[] }) {
+  const c = cs[0]
   const k = KINDS[c.kind]
   const chips = [...(c.at ?? []).map(formatCondition), ...(c.per ? [PER[c.per]] : [])]
   const text = c.set ? c.set.map((n) => formatNumber(n, k.quantity)).join(" │ ") : formatCharacteristic(c)
@@ -220,13 +254,19 @@ function Row({ record, c }: { record: Datasheet; c: Characteristic }) {
           ))}
         </span>
         <span className="text-[12.5px] font-medium whitespace-nowrap tabular-nums">
-          {c.colour && <span className="mr-1 inline-block size-2 rounded-full align-middle" style={{ background: COLOURS[c.colour] }} />}
-          {value || <span className="text-red-600">⚠ {limit}</span>}
+          {cs.length > 1
+            ? cs.map((g, i) => (
+                <span key={i} className="ml-1.5 first:ml-0">
+                  <span className="mr-0.5 inline-block size-2 rounded-full align-middle" style={{ background: g.colour ? COLOURS[g.colour] : undefined }} />
+                  {i < cs.length - 1 ? (formatCharacteristic(g).split(" ⚠ ")[0] ?? "").replace(/\s\S+$/, "") : formatCharacteristic(g).split(" ⚠ ")[0]}
+                </span>
+              ))
+            : value || <span className="text-red-600">⚠ {limit}</span>}
         </span>
       </div>
       <div className="flex items-end gap-2 pl-[22px]">
         <div ref={frame} className="min-w-0 flex-1">
-          {w > 0 && <Visual c={c} w={w} />}
+          {w > 0 && <Visual cs={cs} w={w} />}
         </div>
         <Page record={record} c={c} />
       </div>
@@ -234,14 +274,26 @@ function Row({ record, c }: { record: Datasheet; c: Characteristic }) {
   )
 }
 
-/** The part's characteristics, one row each, in the record's order. */
+/** One kind given per colour (an RGB LED's red, green, blue) under the same conditions: one row, one scale. */
+function groups(rows: readonly Characteristic[]): Characteristic[][] {
+  const out: Characteristic[][] = []
+  for (const c of rows) {
+    const last = out[out.length - 1]
+    const same = last && c.colour && last[0].colour && last[0].kind === c.kind && KINDS[c.kind].visual === "range" && JSON.stringify(last[0].at ?? []) === JSON.stringify(c.at ?? [])
+    if (same) last.push(c)
+    else out.push([c])
+  }
+  return out
+}
+
+/** The part's characteristics, one row each (colours of one kind together), in the record's order. */
 export function CharacteristicList({ record, limit, className }: { record: Datasheet; limit?: number; className?: string }) {
-  const rows = record.characteristics ?? []
+  const rows = groups(record.characteristics ?? [])
   if (!rows.length) return null
   return (
     <ul className={cn("flex flex-col", className)}>
-      {(limit ? rows.slice(0, limit) : rows).map((c, i) => (
-        <Row key={`${c.kind}${c.colour ?? ""}${i}`} record={record} c={c} />
+      {(limit ? rows.slice(0, limit) : rows).map((cs, i) => (
+        <Row key={`${cs[0].kind}${i}`} record={record} cs={cs} />
       ))}
     </ul>
   )
