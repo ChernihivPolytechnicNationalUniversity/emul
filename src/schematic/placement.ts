@@ -230,16 +230,45 @@ const pinGridOf = (objects: Iterable<PlacedObject>, grid: number) => {
 
 type OwnedPin = Point & { owner: string }
 
-function touchingPinsOf(objects: Iterable<PlacedObject>, grid: number) {
-  const pins = new PointGrid<OwnedPin>()
-  for (const o of objects) pins.add(objectPins(o, grid).flatMap(({ pin, point }) => (pin.kind === "nc" ? [] : [{ x: point.x, y: point.y, owner: o.id }])))
-  return pins
+const ownedPins = (o: PlacedObject, grid: number): OwnedPin[] => objectPins(o, grid).flatMap(({ pin, point }) => (pin.kind === "nc" ? [] : [{ x: point.x, y: point.y, owner: o.id }]))
+
+const overhangs = new WeakMap<ComponentDef, number>()
+
+function pinOverhang(def: ComponentDef | undefined): number {
+  if (!def) return 0
+  let overhang = overhangs.get(def)
+  if (overhang === undefined) {
+    overhang = 0
+    for (const pin of def.pins) overhang = Math.max(overhang, -pin.x, pin.x - def.width, -pin.y, pin.y - def.height)
+    overhangs.set(def, overhang)
+  }
+  return overhang
 }
 
-const touchedAt = (pins: PointGrid<OwnedPin>, at: Point, owner: string) => pins.at(at.x, at.y).some((p) => p.owner !== owner)
+function pinsTouching(objects: readonly PlacedObject[], grid: number) {
+  let index: BoxIndex<PlacedObject> | null = null
+  let reach = 0
+  const pins = new PointGrid<OwnedPin>()
+  const indexed = new Set<string>()
+  return (at: Point, owner: string | null) => {
+    if (!index) {
+      for (const def of new Set(objects.map((o) => getDef(o.def)))) reach = Math.max(reach, pinOverhang(def))
+      reach = (reach + 1) * grid
+      index = new BoxIndex(objects, (o) => objectRect(o, grid), BUCKET_CELLS * grid)
+    }
+    index.some({ x: at.x - reach, y: at.y - reach, w: reach * 2, h: reach * 2 }, (o) => {
+      if (!indexed.has(o.id)) {
+        indexed.add(o.id)
+        pins.add(ownedPins(o, grid))
+      }
+      return false
+    })
+    return pins.at(at.x, at.y).some((p) => p.owner !== owner)
+  }
+}
 
-const drawnNames = (placed: Placed, pins: PointGrid<OwnedPin>): Placed => {
-  const labels = placed.labels.filter((q) => !q.names || !touchedAt(pins, q.names, placed.object.id))
+const drawnNames = (placed: Placed, touching: (at: Point, owner: string) => boolean): Placed => {
+  const labels = placed.labels.filter((q) => !q.names || !touching(q.names, placed.object.id))
   return labels.length === placed.labels.length ? placed : { ...placed, labels }
 }
 
@@ -254,10 +283,18 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
     const f = footprints(object, scene.grid)
     return f ? { object, ...f, box: unionOf([f.body.box, ...f.labels.map((q) => q.box)]) } : null
   }
-  const fixedPins = touchingPinsOf(scene.objects.filter((o) => !ids.has(o.id)), scene.grid)
-  const carriedPins = touchingPinsOf(moving, scene.grid)
-  const movers = moving.map(place).filter((p): p is Placed => p !== null).map((p) => drawnNames(p, carriedPins))
-  const others = scene.objects.filter((o) => !ids.has(o.id)).map(place).filter((p): p is Placed => p !== null).map((p) => drawnNames(p, fixedPins))
+  const touchingFixed = pinsTouching(scene.objects.filter((o) => !ids.has(o.id)), scene.grid)
+  const carriedPins = new PointGrid<OwnedPin>()
+  for (const o of moving) carriedPins.add(ownedPins(o, scene.grid))
+  const touchingCarried = (at: Point, owner: string | null) => carriedPins.at(at.x, at.y).some((p) => p.owner !== owner)
+  const movers = moving.map(place).filter((p): p is Placed => p !== null).map((p) => drawnNames(p, touchingCarried))
+  const others = scene.objects.filter((o) => !ids.has(o.id)).map(place).filter((p): p is Placed => p !== null)
+  const drawnOf = new Map<Placed, readonly Quad[]>()
+  const labelsOf = (other: Placed) => {
+    let labels = drawnOf.get(other)
+    if (!labels) drawnOf.set(other, (labels = drawnNames(other, touchingFixed).labels))
+    return labels
+  }
   const byId = new Map(scene.objects.map((o) => [o.id, o]))
   const stubOf = (ref: PinRef): Point[] | null => {
     const found = resolvePinIn(byId, ref, scene.grid)
@@ -330,7 +367,7 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
     const reach = shiftedRect(area, dx, dy)
     const bodies: Quad[][] = []
     const bodyAt = (i: number) => (bodies[i] ??= movers[i].contour.map((q) => moved(q, dx, dy)))
-    const shownOnMover = (q: Quad) => !q.names || !fixedPins.has(q.names.x + dx, q.names.y + dy)
+    const shownOnMover = (q: Quad) => !q.names || !touchingFixed({ x: q.names.x + dx, y: q.names.y + dy }, null)
     const shownOnOther = (q: Quad) => !q.names || !carriedPins.has(q.names.x - dx, q.names.y - dy)
     const labelOn = (i: number, hits: (label: Quad) => boolean, box: Rect) =>
       movers[i].labels.some((q) => touches(shiftedRect(q.box, dx, dy), box) && shownOnMover(q) && hits(moved(q, dx, dy)))
@@ -350,7 +387,7 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
       const box = shiftedRect(m.box, dx, dy)
       if (!intersects(box, other.box)) return false
       if (hitsAny(bodyAt(i), other.contour)) return !bothSocketed(m.object, other.object) || !docked(i, other)
-      if (!hitsAny(bodyAt(i), other.labels.filter(shownOnOther)) && !labelOnBody(i, other.contour)) return false
+      if (!hitsAny(bodyAt(i), labelsOf(other).filter(shownOnOther)) && !labelOnBody(i, other.contour)) return false
       return !touchingAt(m.object, other.object, dx, dy)
     }
     for (let i = 0; i < movers.length; i++) if (nearby.some(shiftedRect(movers[i].box, dx, dy), (other) => collides(i, other))) return true
@@ -363,7 +400,7 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
           ]
           const box = segmentBox(segment)
           return (
-            other.labels.some((l) => touches(box, l.box) && shownOnOther(l) && overlap(segment, l.corners)) ||
+            labelsOf(other).some((l) => touches(box, l.box) && shownOnOther(l) && overlap(segment, l.corners)) ||
             (target !== other.object.id && other.contour.some((q) => touches(box, q.box) && overlap(segment, q.corners)))
           )
         })

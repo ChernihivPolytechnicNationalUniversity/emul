@@ -82,6 +82,30 @@ function keepLive(target: Schematic, current: Schematic): Schematic {
 /** What copy puts on the clipboard: the picked objects, the wires among them, their part state. */
 export type Clip = Pick<Schematic, "objects" | "wires" | "parts">
 
+export const clipOnTheLattice = (clip: Clip): Clip => ({ ...clip, objects: clip.objects.map(migrated) })
+
+export function pastedInto(doc: Schematic, clip: Clip, dx: number, dy: number, idOf: (old: string) => string, newId: () => string): Schematic {
+  const ids = new Map(clip.objects.map((o) => [o.id, idOf(o.id)]))
+  const remap = (p: PinRef): PinRef => ({ object: ids.get(p.object) ?? p.object, pin: p.pin })
+  const objects = [...doc.objects]
+  for (const o of clipOnTheLattice(clip).objects) {
+    const prefix = getDef(o.def)?.prefix
+    const next: PlacedObject = { ...o, id: ids.get(o.id)!, x: o.x + dx, y: o.y + dy }
+    if (prefix) next.props = { ...o.props, ref: nextRef(objects, prefix) }
+    objects.push(next)
+  }
+  const wires = clip.wires
+    .filter((w) => ids.has(w.from.object) && ids.has(w.to.object))
+    .map((w) => ({ ...w, id: newId(), from: remap(w.from), to: remap(w.to), points: w.points?.map((p) => ({ x: p.x + dx, y: p.y + dy })) }))
+  const parts = { ...doc.parts }
+  for (const [k, v] of Object.entries(clip.parts)) {
+    const [object, part] = k.split(":")
+    const id = ids.get(object)
+    if (id) parts[partKey(id, part)] = v
+  }
+  return { ...doc, objects, wires: [...doc.wires, ...wires], parts }
+}
+
 /** Schematic document plus selection and undo history. All coordinates are world px. */
 export function useSchematic(grid: number) {
   const [history, setHistory] = React.useState<History>(() => ({ past: [], present: emptySchematic(), future: [] }))
@@ -400,35 +424,7 @@ export function useSchematic(grid: number) {
   const paste = React.useCallback(
     (clip: Clip, dx: number, dy: number) => {
       const ids = new Map(clip.objects.map((o) => [o.id, crypto.randomUUID()]))
-      const sdx = snap(dx, grid)
-      const sdy = snap(dy, grid)
-      const remap = (p: PinRef): PinRef => ({ object: ids.get(p.object) ?? p.object, pin: p.pin })
-      setDoc((d) => {
-        const objects = [...d.objects]
-        for (const o of clip.objects) {
-          const prefix = getDef(o.def)?.prefix
-          const upright = migrated(o)
-          const next: PlacedObject = { ...upright, id: ids.get(o.id)!, x: upright.x + sdx, y: upright.y + sdy }
-          if (prefix) next.props = { ...o.props, ref: nextRef(objects, prefix) }
-          objects.push(next)
-        }
-        const wires = clip.wires
-          .filter((w) => ids.has(w.from.object) && ids.has(w.to.object))
-          .map((w) => ({
-            ...w,
-            id: crypto.randomUUID(),
-            from: remap(w.from),
-            to: remap(w.to),
-            points: w.points?.map((p) => ({ x: p.x + sdx, y: p.y + sdy })),
-          }))
-        const parts = { ...d.parts }
-        for (const [k, v] of Object.entries(clip.parts)) {
-          const [object, part] = k.split(":")
-          const id = ids.get(object)
-          if (id) parts[partKey(id, part)] = v
-        }
-        return { ...d, objects, wires: [...d.wires, ...wires], parts }
-      })
+      setDoc((d) => pastedInto(d, clip, snap(dx, grid), snap(dy, grid), (old) => ids.get(old)!, () => crypto.randomUUID()))
       setSelectedObjects(new Set(ids.values()))
       setSelectedWires(new Set())
     },

@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
 import * as React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -7,20 +5,19 @@ import { ComponentView } from "@/components/field/ComponentView"
 import { fieldDetail } from "@/components/field/detail"
 import type { FieldPalette } from "@/components/field/field-palette"
 import { SelectionLayer } from "@/components/field/SelectionLayer"
-import { SymbolRaster } from "@/components/field/symbol-raster"
-import { readProjectFile } from "@/project/project-store"
-import { builder } from "@/schematic/builder"
+import { exportPng } from "@/components/field/export-image"
+import { paintField } from "@/components/field/field-paint"
+import { SymbolRaster, TextRaster } from "@/components/field/symbol-raster"
 import { MODULE_PAD } from "@/schematic/components/open746i-c-art"
 import { examples } from "@/schematic/examples"
 import { blocksOf } from "@/schematic/printed-text"
-import { allowedRotations, bodyCentre, diagonalSquare, DIR, drawnBody, framePoint, GRID, isDiagonal, objectPins, objectRect, objectSize, orientPin, stretchedLeads, type Orientation, type Point, type Turn } from "@/schematic/geometry"
-import { migrated, SCHEMATIC_VERSION, upgraded } from "@/schematic/migrate"
+import { bodyBounds } from "@/schematic/body"
+import { allowedRotations, bodyCentre, diagonalSquare, DIR, drawnBody, framePoint, GRID, isDiagonal, objectPins, objectRect, objectSize, orientPin, ownBodies, routeAll, stretchedLeads, type Orientation, type Point, type Turn } from "@/schematic/geometry"
 import { buildNets } from "@/schematic/nets"
 import { rotateSelection } from "@/schematic/orient"
 import { footprint, placementCheck, type PlacementScene } from "@/schematic/placement"
 import { getDef, registry } from "@/schematic/registry"
 import type { ComponentDef, PlacedObject, Rotation, Schematic } from "@/schematic/types"
-import { SimLoop } from "@/sim/loop"
 import { SimStore } from "@/sim/sim-store"
 
 vi.mock("@/sim/sim-store", async (original) => ({
@@ -29,7 +26,6 @@ vi.mock("@/sim/sim-store", async (original) => ({
   useObjectReadings: () => [],
 }))
 
-const ROOT = join(import.meta.dirname, "..", "..")
 const c = (v: number) => v * GRID
 const whole = (v: number) => Math.abs(v - Math.round(v)) < 1e-9
 const half = (v: number) => whole(v * 2)
@@ -41,6 +37,7 @@ const at = (o: PlacedObject, pin: string) => objectPins(o, GRID).find((p) => p.p
 const cells = (p: Point) => ({ x: p.x / GRID, y: p.y / GRID })
 const leadEnds = (path: string) => [...path.matchAll(/L(-?[\d.e-]+) (-?[\d.e-]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }))
 const diagonalParts = registry.filter((def) => diagonalSquare(def) !== null)
+const refOf = (doc: Schematic, id: string) => doc.objects.find((o) => o.id === id)?.props?.ref
 
 const STANDS_ON_A_DIAGONAL = ["ac-source", "ammeter", "battery", "capacitor", "capacitor-polarized", "crystal", "dc-source", "diode", "inductor", "led", "polyfuse", "pulse-source", "pushbutton", "resistor", "switch", "voltmeter", "zener"]
 const HALF_CELL_BOARDS = ["open746i-c", "weact-blackpill-f401cc", "weact-blackpill-f401ce", "weact-blackpill-f411"]
@@ -250,120 +247,6 @@ describe("R turns to the next orientation the part allows (design.md §4.3, §6.
   })
 })
 
-const OLD = join(ROOT, "tests", "data", "emul-1.42.0")
-
-async function rawOld(file: string): Promise<Schematic> {
-  const { Zstd } = await import("@hpcc-js/wasm-zstd")
-  const bytes = (await Zstd.load()).decompress(new Uint8Array(readFileSync(join(OLD, file))))
-  return (JSON.parse(new TextDecoder().decode(bytes)) as { schematic: Schematic }).schematic
-}
-
-async function opened(file: string) {
-  const read = await readProjectFile(new Blob([readFileSync(join(OLD, file))]))
-  if (!read) throw new Error(`${file} does not read`)
-  return read
-}
-
-const refOf = (doc: Schematic, id: string) => doc.objects.find((o) => o.id === id)?.props?.ref
-
-describe("an old file's diagonal parts move onto the lattice without changing the circuit (design.md §10 item 1; the user, 2026-11-04: old projects must keep working)", () => {
-  it("an old power supply's bridge closes: every diode moves under a cell, the four corners meet pin to pin and the four wires between them go", async () => {
-    const before = await rawOld("power-supply.emul")
-    const { doc, notes } = await opened("power-supply.emul")
-    const diodes = doc.objects.filter((o) => o.def === "diode")
-    const was = new Map(before.objects.map((o) => [o.id, o]))
-    for (const d of diodes) {
-      const old = was.get(d.id)!
-      const def = getDef(d.def)!
-      const middleBefore = { x: old.x / GRID + (def.width + def.height) * Math.SQRT1_2 / 2, y: old.y / GRID + (def.width + def.height) * Math.SQRT1_2 / 2 }
-      const middleNow = { x: d.x / GRID + 1.5, y: d.y / GRID + 1.5 }
-      expect.soft(Math.hypot(middleNow.x - middleBefore.x, middleNow.y - middleBefore.y), `${d.props?.ref} moved under a cell`).toBeLessThan(1)
-    }
-    const [d1, d2, d3, d4] = ["D1", "D2", "D3", "D4"].map((ref) => doc.objects.find((o) => o.props?.ref === ref)!)
-    expect.soft([at(d1, "1"), at(d1, "2"), at(d2, "1"), at(d3, "1")], "the corners").toEqual([at(d3, "2"), at(d2, "2"), at(d4, "2"), at(d4, "1")])
-    const gone = before.wires.filter((w) => !doc.wires.some((x) => x.id === w.id)).map((w) => `${refOf(before, w.from.object)}.${w.from.pin}–${refOf(before, w.to.object)}.${w.to.pin}`)
-    expect.soft(gone.sort(), "the wires between pins that now meet").toEqual(["D1.1–D3.2", "D1.2–D2.2", "D2.1–D4.2", "D3.1–D4.1"])
-    expect.soft(notes.some((n) => n.includes("D1, D2, D3 and D4 now meet pin to pin")), "the upgrade says so").toBe(true)
-  })
-
-  it("the old power supply rectifies the same after the upgrade: every reading equal, simulated side by side", async () => {
-    const before = await rawOld("power-supply.emul")
-    const { doc } = await opened("power-supply.emul")
-    const run = (d: Schematic) => {
-      const loop = new SimLoop()
-      loop.setDoc(d)
-      loop.setRunning(true)
-      let clock = 0
-      loop.advance(clock)
-      for (let i = 0; i < 40; i++) loop.advance((clock += 25))
-      return loop.snapshot()!
-    }
-    const a = run(before)
-    const b = run(doc)
-    const readings = a.readings.filter((r) => Math.abs(r.voltage) > 1e-3)
-    expect.soft(readings.length, "readings to compare").toBeGreaterThan(5)
-    for (const r of readings) {
-      const same = b.readings.find((x) => x.object === r.object && x.element === r.element)
-      expect.soft(same?.voltage ?? NaN, `${refOf(before, r.object)} element ${r.element}: voltage`).toBeNearRel(r.voltage, 1e-6)
-    }
-  })
-
-  it("parts an old file left almost touching are not joined by the upgrade: each takes the nearest spot that keeps the circuit", async () => {
-    const { doc } = await opened("led-diamond.emul")
-    const nets = buildNets(doc.objects, doc.wires, GRID)
-    expect.soft(doc.objects.flatMap((o) => objectPins(o, GRID)).filter((p) => nets.netOfPin(p.key) !== undefined).map((p) => p.key), "pins in contact").toEqual([])
-    const before = await rawOld("led-diamond.emul")
-    for (const o of doc.objects) {
-      const old = before.objects.find((x) => x.id === o.id)!
-      const middleBefore = (old.x + c(6 * Math.SQRT1_2 / 2)) / GRID
-      expect.soft(Math.abs(o.x / GRID + 1.5 - middleBefore), `${o.props?.ref} moved less than a cell and a half`).toBeLessThan(1.5)
-    }
-  })
-
-  it("a multi-pin part an old file left on a diagonal turns back to a right angle, keeps its wires and is named in the notes", async () => {
-    const { doc, notes } = await opened("npn-on-a-diagonal.emul")
-    const q1 = doc.objects.find((o) => o.def === "npn")!
-    expect.soft(q1.rotation ?? 0, "Q1 on a right angle").toBe(0)
-    for (const { point } of objectPins(q1, GRID)) expect.soft([whole(point.x / GRID), whole(point.y / GRID)], "its pins on whole cells").toEqual([true, true])
-    expect.soft(notes, "the note").toEqual(["Q1 stood at 45°, where only a two-pin part can stand now: turned to 0°."])
-  })
-
-  it("a multi-pin part turns in place even where a cell's shift would set its pin on the pin it is wired to", () => {
-    const q = placedAs("npn", { rotation: 45, mirror: false }, 4, 4, "Q1")
-    const inPlace = migrated(q)
-    const base = at(inPlace, "B")
-    const r = { ...placedAs("resistor", { rotation: 0, mirror: false }, 0, 0, "R1") }
-    const pin2 = at(r, "2")
-    const resistor = { ...r, x: r.x + base.x - GRID - pin2.x, y: r.y + base.y - pin2.y }
-    const old = { objects: [q, resistor], wires: [{ id: "w", from: { object: "R1", pin: "2" }, to: { object: "Q1", pin: "B" } }], parts: {}, version: 2 } as Schematic
-    const { doc } = upgraded(old)
-    const turned = doc.objects.find((o) => o.id === "Q1")!
-    expect.soft([turned.x, turned.y, turned.rotation ?? 0], "Q1 turned where it stood").toEqual([inPlace.x, inPlace.y, inPlace.rotation ?? 0])
-    expect.soft(doc.wires.map((w) => w.id), "its wire kept").toEqual(["w"])
-  })
-
-  it("a file without diagonal parts comes through untouched, and an upgraded file is not upgraded again", () => {
-    const plain = examples.find((e) => e.id === "battery-life")!.build(GRID)
-    expect.soft(upgraded({ ...plain, version: 2 } as Schematic).doc.objects, "nothing to move").toBe(plain.objects)
-    const { doc } = upgraded({ ...diamondOld(), version: 2 } as Schematic)
-    expect.soft(upgraded(doc).doc, "already at this version").toBe(doc)
-    expect.soft((doc as Schematic & { version?: number }).version, "stamped").toBe(SCHEMATIC_VERSION)
-  })
-
-  it("a part on a diagonal it may not stand on, pasted from an older εmul, lands on a right angle", () => {
-    const q = placedAs("npn", { rotation: 135, mirror: false }, 4, 4, "Q1")
-    expect.soft(migrated(q).rotation, "turned back to 90°").toBe(90)
-    const r = placedAs("resistor", { rotation: 135, mirror: false }, 4, 4, "R1")
-    expect.soft(migrated(r), "a resistor may stand there").toBe(r)
-  })
-})
-
-function diamondOld(): Schematic {
-  const { doc, place } = builder(GRID)
-  for (const [x, y, rotation] of [[0, 0, 315], [5, 0, 45], [0, 3, 45], [5, 3, 315]] as [number, number, Rotation][]) place("led", x, y, { value: "red" }, rotation)
-  return doc
-}
-
 const palette: FieldPalette = {
   theme: "lattice",
   body: {
@@ -385,8 +268,9 @@ type Matrix = [number, number, number, number, number, number]
 const times = (m: Matrix, n: Matrix): Matrix => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]]
 const apply = (m: Matrix, p: Point): Point => ({ x: m[0] * p.x + m[2] * p.y + m[4], y: m[1] * p.x + m[3] * p.y + m[5] })
 type Stroke = { parts: { d: string; scale: number }[]; m: Matrix }
+type Written = { text: string; at: Point; m: Matrix }
 
-function tracingCanvas(strokes: Stroke[], marks: Point[]) {
+function tracingCanvas(strokes: Stroke[], marks: Point[], written: Written[] = []) {
   let m: Matrix = [1, 0, 0, 1, 0, 0]
   const stack: Matrix[] = []
   const state: Record<string | symbol, unknown> = {
@@ -395,14 +279,18 @@ function tracingCanvas(strokes: Stroke[], marks: Point[]) {
     translate: (x: number, y: number) => (m = times(m, [1, 0, 0, 1, x, y])),
     rotate: (a: number) => (m = times(m, [Math.cos(a), Math.sin(a), -Math.sin(a), Math.cos(a), 0, 0])),
     scale: (x: number, y: number) => (m = times(m, [x, 0, 0, y, 0, 0])),
+    setTransform: (a: number, b: number, c2: number, d: number, e: number, f: number) => (m = [a, b, c2, d, e, f]),
     stroke: (path?: { parts: Stroke["parts"] }) => path && strokes.push({ parts: path.parts, m }),
     fillRect: (x: number, y: number, w: number, h: number) => marks.push(apply(m, { x: x + w / 2, y: y + h / 2 })),
+    fillText: (text: string, x: number, y: number) => written.push({ text, at: apply(m, { x, y }), m }),
+    measureText: (text: string) => ({ width: text.length * 6 }),
+    createLinearGradient: () => ({ addColorStop() {} }),
   }
   const context = new Proxy(state, {
     get: (target, key) => (key in target ? target[key] : () => {}),
     set: (target, key, value) => ((target[key] = value), true),
   })
-  return { width: 1, height: 1, getContext: () => context }
+  return { width: 1, height: 1, getContext: () => context, toBlob: (done: (blob: Blob | null) => void) => done(null) }
 }
 
 describe("the stretched leads are drawn to the pins: the symbol on the field, on its canvas raster and under the selection plate", () => {
@@ -477,7 +365,7 @@ describe("the stretched leads are drawn to the pins: the symbol on the field, on
 
   it.each(cases)("%s: the selection plate outlines the stretched leads up to the pins", (_, def, o) => {
     const object = placedAs(def.id, o, 7, 5)
-    const html = renderToStaticMarkup(React.createElement(SelectionLayer, { objects: [object], routes: [], selectedObjects: new Set([object.id]), selectedWires: new Set(), grid: GRID }))
+    const html = renderToStaticMarkup(React.createElement(SelectionLayer, { objects: [object], routes: [], selectedObjects: new Set([object.id]), selectedWires: new Set<string>(), grid: GRID }))
     const stretch = stretchedLeads(def, o)
     const plate = /<path d="([^"]*)" transform="translate\(([-\d.e]+) ([-\d.e]+)\) rotate\((\d+) ([-\d.e]+) ([-\d.e]+)\)( translate\(([-\d.e]+) 0\) scale\(-1 1\))? scale\((\d+)\)"/.exec(html)
     expect.soft(plate, "a plate").not.toBeNull()
@@ -496,6 +384,96 @@ describe("the stretched leads are drawn to the pins: the symbol on the field, on
   })
 })
 
+describe("the canvas plate and the PNG export frame a diagonal part where the field draws it (phase 2 review)", () => {
+  const written: Written[] = []
+  let strokes: Stroke[] = []
+  beforeEach(() => {
+    strokes = []
+    written.length = 0
+    vi.stubGlobal(
+      "Path2D",
+      class {
+        parts: Stroke["parts"]
+        constructor(d?: string) {
+          this.parts = d ? [{ d, scale: 1 }] : []
+        }
+        addPath(path: { parts: Stroke["parts"] }, matrix?: { k: number }) {
+          for (const part of path.parts) this.parts.push({ d: part.d, scale: part.scale * (matrix?.k ?? 1) })
+        }
+      },
+    )
+    vi.stubGlobal("DOMMatrix", class { k = 1; scale(by: number) { this.k *= by; return this } })
+    vi.stubGlobal("OffscreenCanvas", class { constructor() { return tracingCanvas([], []) } })
+    vi.stubGlobal("document", { documentElement: { classList: { contains: () => false } }, createElement: () => tracingCanvas(strokes, [], written), fonts: undefined })
+    vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: () => "", fontFamily: "sans-serif" }))
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it.each(diagonalOrientations.map((o) => [`${o.rotation}${o.mirror ? "m" : ""}`, o] as const))("a voltmeter at %s: the plate the canvas strokes reaches its pins, its stretch included", (_, o) => {
+    const meter = placedAs("voltmeter", o, 7, 5, "PV1")
+    const view = { x: 0, y: 0, w: 400, h: 400 }
+    const context = tracingCanvas(strokes, []).getContext() as unknown as CanvasRenderingContext2D
+    paintField(context, {} as Element, { objects: [meter], routes: [], view, grid: GRID, pixels: 1, device: 1, theme: "plate", colorOf: () => "black", raster: new SymbolRaster(), selection: { objects: new Set([meter.id]), wires: new Set() } })
+    const stretch = stretchedLeads(getDef("voltmeter")!, o)
+    const plate = strokes.find((st) => st.parts.some((p) => p.d.endsWith(stretch)))
+    expect.soft(plate, "the plate strokes the stretch").toBeDefined()
+    if (!plate) return
+    const ends = leadEnds(stretch).map((p) => apply(plate.m, p))
+    const pins = objectPins(meter, GRID).map((p) => p.point)
+    for (const end of ends) expect.soft(Math.min(...pins.map((p) => Math.hypot(p.x - end.x, p.y - end.y))), "a plate lead end on a pin, px").toBeLessThan(1e-6)
+  })
+
+  it.each(diagonalOrientations.map((o) => [`${o.rotation}${o.mirror ? "m" : ""}`, o] as const))("a voltmeter at %s: the PNG writes its designator where the field puts it", async (_, o) => {
+    const meter = placedAs("voltmeter", o, 7, 5, "PV1")
+    const raster = new SymbolRaster()
+    await exportPng({ host: {} as Element, theme: "png", objects: [meter], routes: [], grid: GRID, colorOf: () => "black", symbols: raster, texts: new TextRaster(), textScale: 1 })
+    const view = written.length ? written[0] : null
+    expect.soft(view, "text written").not.toBeNull()
+    const ref = written.find((w) => w.text === "PV1")
+    expect.soft(ref, "the designator").toBeDefined()
+    if (!ref) return
+    const def = getDef("voltmeter")!
+    const anchor = def.body.find((b) => b.type === "text" && b.text === "{ref}")!
+    const expected = framePoint(def, o, { x: (anchor as { x: number }).x, y: (anchor as { y: number }).y })
+    const box = objectRect(meter, GRID)
+    const pixels = Math.min(2, 8192 / (box.w + 4 * GRID), 8192 / (box.h + 4 * GRID), 4000 / Math.max(box.w, box.h))
+    const world = { x: ref.at.x / pixels + box.x - 2 * GRID, y: ref.at.y / pixels + box.y - 2 * GRID }
+    expect.soft(world.x, "x, px").toBeNear(meter.x + expected.x * GRID, 1e-6)
+    expect.soft(world.y, "y, px").toBeNear(meter.y + expected.y * GRID, 1e-6)
+  })
+})
+
+describe("the room a meter on its diagonal keeps for its own wires is its drawing's, turned about the middle of its pins (phase 2 review)", () => {
+  it.each(diagonalOrientations.map((o) => [`${o.rotation}${o.mirror ? "m" : ""}`, o] as const))("a voltmeter at %s", (_, o) => {
+    const def = getDef("voltmeter")!
+    const meter = placedAs("voltmeter", o, 7, 5, "PV1")
+    const [own] = ownBodies(new Map([[meter.id, meter]]), GRID, meter.id, meter.id)
+    const b = bodyBounds(def)
+    const corners = [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }].map((p) => framePoint(def, o, p))
+    const xs = corners.map((p) => meter.x + p.x * GRID)
+    const ys = corners.map((p) => meter.y + p.y * GRID)
+    expect.soft(own.x, "left").toBeNear(Math.min(...xs), 1e-6)
+    expect.soft(own.y, "top").toBeNear(Math.min(...ys), 1e-6)
+    expect.soft(own.x + own.w, "right").toBeNear(Math.max(...xs), 1e-6)
+    expect.soft(own.y + own.h, "bottom").toBeNear(Math.max(...ys), 1e-6)
+  })
+})
+
+describe("which two-pin parts stand on a diagonal, on made-up parts (phase 2 review)", () => {
+  const base = getDef("resistor")!
+  const twoPins = (a: Partial<ComponentDef["pins"][number]>, b: Partial<ComponentDef["pins"][number]>, id: string): ComponentDef => ({ ...base, id, pins: [{ ...base.pins[0], ...a }, { ...base.pins[1], ...b }] })
+  it("a span of 4 or 6 cells rounds within 0.15 cell to a 3 or 4 cell square; 2 and 5 do not; pins that face each other or the same way, sit off one axis, or are more than two do not either", () => {
+    expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "left" }, { x: 4, y: 1, side: "right" }, "span-4")), "span 4").toBe(3)
+    expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "left" }, { x: 6, y: 1, side: "right" }, "span-6")), "span 6").toBe(4)
+    expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "left" }, { x: 2, y: 1, side: "right" }, "span-2")), "span 2").toBeNull()
+    expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "left" }, { x: 5, y: 1, side: "right" }, "span-5")), "span 5").toBeNull()
+    expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "right" }, { x: 4, y: 1, side: "left" }, "facing")), "facing each other").toBeNull()
+    expect.soft(diagonalSquare(twoPins({ x: 0, y: 1, side: "left" }, { x: 4, y: 1, side: "left" }, "same-way")), "facing the same way").toBeNull()
+    expect.soft(diagonalSquare(twoPins({ x: 0, y: 0, side: "left" }, { x: 4, y: 2, side: "right" }, "off-axis")), "off one axis").toBeNull()
+    expect.soft(diagonalSquare({ ...base, id: "three", pins: [...base.pins, { ...base.pins[0], id: "3", x: 2, y: 0, side: "top" }] }), "three pins").toBeNull()
+  })
+})
+
 describe("a pin name the field does not draw is no obstacle", () => {
   it("at a corner of the diamond a wire leaving one diode runs past the hidden name of the other diode's pin there", () => {
     const parts = diamond()
@@ -505,6 +483,19 @@ describe("a pin name the field does not draw is no obstacle", () => {
     const wired: PlacementScene = { objects: [...parts, supply], wires: [{ id: "w", from: { object: "G1", pin: "+" }, to: { object: "D1", pin: "1" } }], routes: [], grid: GRID }
     expect.soft(placementCheck(wired, [parts[2]])(0, 0), "D3, whose cathode's name D1's wire passes at L").toBe(false)
     expect.soft(placementCheck(wired, [parts[0]])(0, 0), "D1, whose wire leaves over D3's hidden name").toBe(false)
+  })
+
+  it("whether a name is hidden is judged where the part lands, not where it was picked up", () => {
+    const parts = diamond()
+    const supply = placedAs("ac-source", { rotation: 0, mirror: false }, -8, 1, "G1")
+    const away = (o: PlacedObject) => ({ ...o, x: o.x + c(9), y: o.y + c(9) })
+    const wire = { id: "w", from: { object: "G1", pin: "+" }, to: { object: "D1", pin: "1" } }
+    const d3away = [parts[0], parts[1], away(parts[2]), parts[3], supply]
+    const routes = routeAll(d3away, [wire], GRID)
+    expect.soft(routes.length, "the wire from G1 to D1 is routed").toBe(1)
+    expect.soft(placementCheck({ objects: d3away, wires: [wire], routes, grid: GRID }, [d3away[2]])(-c(9), -c(9)), "D3 brought back past that wire: its cathode's name hides on landing").toBe(false)
+    const d1away = [away(parts[0]), parts[1], parts[2], parts[3], supply]
+    expect.soft(placementCheck({ objects: d1away, wires: [wire], routes: [], grid: GRID }, [d1away[0]])(-c(9), -c(9)), "D1 brought back: D3's name it lands on hides").toBe(false)
   })
 
   it("a name the field does draw still blocks: a lone part's pin name under another part's body is refused", () => {

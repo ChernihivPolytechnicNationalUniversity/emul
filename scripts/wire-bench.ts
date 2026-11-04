@@ -1,4 +1,9 @@
+import { GRID } from "@/schematic/geometry"
+import { upgraded } from "@/schematic/migrate"
+import { placementCheck } from "@/schematic/placement"
+import type { PlacedObject, Schematic } from "@/schematic/types"
 import { WireGraph } from "@/schematic/wires/graph"
+import { boardDocuments } from "./lib/stress"
 import { commitEdit, normalise } from "@/schematic/wires/normal-form"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
 
@@ -149,6 +154,15 @@ const results = SIZES.map((n) => {
   return { n, overlap, rails, merge, aligned, sparse, big, copies }
 })
 
+const CHAIN = 512
+const chain = (): Schematic => ({ objects: Array.from({ length: CHAIN }, (_, i): PlacedObject => ({ id: `r${i}`, def: "resistor", x: 3 * i * GRID, y: 3 * i * GRID, rotation: 45, props: { ref: `R${i + 1}` } })), wires: [], parts: {}, version: 2 } as Schematic)
+const lattice = time(() => upgraded(chain()), 3)
+const BOARDS = 400
+const sheet = boardDocuments([BOARDS])[0]
+const carried: PlacedObject = { id: "carried", def: "crystal", x: 38 * GRID, y: 28 * GRID, props: { ref: "Y1" } }
+const dragStart = time(() => placementCheck({ objects: [...sheet.objects, carried], wires: [], routes: [], grid: GRID }, [carried]), 5)
+console.log(`  an old file's ${CHAIN} resistors chained on their diagonals, moved onto the lattice: ${ms(lattice)}; a drag's placement check set up on ${BOARDS} boards: ${ms(dragStart)}`)
+
 console.log("")
 const large = results[results.length - 1]
 check(`${large.n} overlapping segments normalised whole`, large.overlap, 300)
@@ -160,5 +174,7 @@ check(`one edit on ${large.n} sparse rows: normalise`, large.sparse.normalising,
 check(`one edit on ${large.n} sparse rows: graph`, large.sparse.applying, 1)
 check(`a tooth taken off a ${large.n}-segment net: graph`, large.big, 60)
 check(`the graph handed ${2 * large.n} value-equal pins`, large.copies, 2)
-console.log(`\n${9 - failed}/9 checks passed`)
+check(`an old file's ${CHAIN}-part diagonal chain moved onto the lattice`, lattice, 400)
+check(`a drag's placement check set up on ${BOARDS} boards`, dragStart, 30)
+console.log(`\n${11 - failed}/11 checks passed`)
 if (failed) process.exitCode = 1

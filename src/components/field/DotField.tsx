@@ -29,7 +29,7 @@ import { languageOf } from "emul-shared/hdl"
 import type { SourceFile } from "emul-shared/source"
 import { bytesToBase64 } from "@/lib/bytes"
 import { useEvent } from "@/hooks/use-event"
-import { useSchematic, type Clip } from "@/schematic/use-schematic"
+import { clipOnTheLattice, useSchematic, type Clip } from "@/schematic/use-schematic"
 import { contactCheck, designatorRects, fieldRouter, freeSpot, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
 import { toast } from "sonner"
 import { DT } from "@/sim/speeds"
@@ -389,7 +389,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const landed = objects.map((o) => ({ ...o, x: o.x + dx, y: o.y + dy }))
     if (landed.length) reveal(unionOf(landed.flatMap((o) => [objectRect(o, grid), ...designatorRects(o, grid)])), CLEAR_OF_CONTROLS_PX)
   }
-  const pasteFree = useEvent((c: Clip, dx: number, dy: number) => {
+  const pasteFree = useEvent((saved: Clip, dx: number, dy: number) => {
+    const c = clipOnTheLattice(saved)
     const probes = c.objects.map((o) => ({ ...o, id: `paste:${o.id}` }))
     const at = freeSpot(scene(), probes, { x: dx, y: dy })
     pasteClip(c, at.x, at.y)
