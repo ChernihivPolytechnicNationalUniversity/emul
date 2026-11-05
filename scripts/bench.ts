@@ -7,6 +7,7 @@
  *   pnpm bench cube 10         one example (substring of its id), 10 s wall
  *   pnpm bench "" 3 --workers  every core in a worker thread (the browser's arrangement)
  */
+import "./lib/all-parts"
 import { readFileSync } from "node:fs"
 import { basename, join } from "node:path"
 import { builder } from "@/schematic/builder"

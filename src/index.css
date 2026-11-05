@@ -288,3 +288,10 @@
     animation: none;
   }
 }
+
+/* A search on the field: what it did not find, and every wire, fade back (field explorer). */
+[data-slot="dot-field-content"][data-dim] [data-slot="wires"],
+[data-slot="dot-field-content"][data-dim] [data-slot="pins"],
+[data-slot="dot-field-content"][data-dim] [data-slot="field-text"] {
+  opacity: 0.22;
+}

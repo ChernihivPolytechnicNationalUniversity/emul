@@ -1,3 +1,4 @@
+import "./lib/all-parts"
 import { mkdirSync } from "node:fs"
 import { PARTITIONS, partitionDocuments, readFixture, writeFixture } from "../tests/lib/partition-documents"
 

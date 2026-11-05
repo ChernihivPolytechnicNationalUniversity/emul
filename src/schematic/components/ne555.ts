@@ -2,6 +2,8 @@ import { NE555 } from "@/sim/ne555"
 import { TimerIcon } from "../icons"
 import { pinNumbers } from "../pin-numbers"
 import type { ComponentDef, PinDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const W = 10
 const H = 10
@@ -21,9 +23,9 @@ const PINS: PinDef[] = [
 export const ne555: ComponentDef = {
   id: "ne555",
   name: "NE555",
-  description:
-    "Precision timer, PDIP-8 (TI NE555): timing from microseconds to hours, astable or monostable, the period and duty cycle set by the resistors and capacitor wired to it; CONT moves both thresholds (2/3 and 1/3 VCC). 4.5–16 V; the output sinks or sources up to 200 mA. No settings: select it while running to read frequency, period and duty.",
-  category: "Timers",
+  keywords: ["555", "555 timer", "timer", "NE555P", "astable", "monostable", "TI", "PDIP-8", "oscillator"],
+  description: "Precision 555 timer IC",
+  category: "ics",
   icon: TimerIcon,
   prefix: "U",
   width: W,
@@ -56,5 +58,50 @@ export const ne555: ComponentDef = {
     { kind: "R", a: "$lo", b: "GND", value: NE555.divider, hidden: true },
     { kind: "D", anode: "GND", cathode: "VCC", vf: 0.7, hidden: true, limits: { current: 0.05, fail: "short" } },
   ],
-  info: { Package: "PDIP-8", Source: "TI NE555 datasheet SLFS022K (2026), typical characteristics at 25 °C" },
+  // Source (in the datasheet record): "TI NE555 datasheet SLFS022K (2026), typical characteristics at 25 °C"
+  info: { Package: "PDIP-8" },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [ne555]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "ne555": {
+    maker: "Texas Instruments",
+    package: "PDIP-8",
+    docs: [DOCS["ti-slfs022k"]],
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 4.5, max: 16 }, limit: { max: 18 }, cite: { page: 4, at: "§5.3" }, limitCite: { page: 4, at: "§5.1" } },
+      { kind: "outputCurrent", value: { max: 0.2, sym: true }, limit: { max: 0.225, sym: true }, cite: { page: 4, at: "§5.3" }, limitCite: { page: 4, at: "§5.1" } },
+      { kind: "threshold", value: { typ: { rail: "VCC", times: 2 / 3 } }, cite: { page: 5, at: "§5.5" } },
+      { kind: "trigger", value: { typ: { rail: "VCC", times: 1 / 3 } }, cite: { page: 5, at: "§5.5" } },
+      { kind: "outputHigh", value: { typ: { rail: "VCC", offset: -1.7 } }, at: [{ load: { amps: 0.1 } }], cite: { page: 6, at: "§5.5" } },
+      { kind: "supplyCurrent", value: { typ: 3e-3 }, at: [{ supply: 5 }, { state: "outputLow" }], cite: { page: 6, at: "§5.5" } },
+    ],
+    modelled: [
+      { what: "Thresholds at 2/3, 1/3 VCC", cite: { page: 5, at: "§5.5 Electrical Characteristics" }, test: "tests/sim/ne555.test.ts" },
+      { what: "CONT drive moves both thresholds", cite: { page: 3, at: "Table 4-1" }, test: "tests/sim/ne555.test.ts" },
+      { what: "Supply current per the table", cite: { page: 6, at: "§5.5 Electrical Characteristics" }, test: "tests/sim/ne555.test.ts" },
+      { what: "Sink voltage per Figures 5-1–5-3", cite: { page: 8, at: "Figures 5-1 to 5-3" }, test: "tests/sim/ne555.test.ts" },
+      { what: "Darlington drop below VCC", cite: { page: 8, at: "Figure 5-4" }, test: "tests/sim/ne555.test.ts" },
+      { what: "DISCH saturates at 0.15 V", cite: { page: 5, at: "§5.5 Electrical Characteristics" }, test: "tests/sim/ne555.test.ts" },
+      { what: "Low RESET forces output low", cite: { page: 5, at: "§5.5 Electrical Characteristics" }, test: "tests/sim/ne555.test.ts" },
+      { what: "Astable timing independent of VCC", cite: { page: 12, at: "§6.3.2 Astable Operation" }, test: "tests/sim/ne555.test.ts" },
+      { what: "Monostable pulse, not retriggerable", cite: { page: 11, at: "§6.3.1 Monostable Operation" }, test: "tests/sim/ne555.test.ts" },
+      { what: "Dies past 18 V", cite: { page: 4, at: "§5.1, §5.3" }, test: "tests/sim/ne555.test.ts" },
+      { what: "Shorted output destroys it", cite: { page: 4, at: "§5.1, §5.3" }, test: "tests/sim/ne555.test.ts" },
+      { what: "Reversed supply fails short", test: "tests/sim/ne555.test.ts" },
+    ],
+    notModelled: [
+      { what: "Typical values, not min–max", cite: { page: 5, at: "§5.5 Electrical Characteristics" } },
+      { what: "Rise, fall and propagation delay", cite: { page: 7, at: "§5.6 Switching Characteristics" } },
+      { what: "10 µs comparator storage time", cite: { page: 11, at: "§6.3.1 Monostable Operation" } },
+      { what: "Temperature drift and curves", cite: { page: 7, at: "§5.6 Switching Characteristics" } },
+      { what: "Timing's supply-voltage sensitivity", cite: { page: 7, at: "§5.6 Switching Characteristics" } },
+    ],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

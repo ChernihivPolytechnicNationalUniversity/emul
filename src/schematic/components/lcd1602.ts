@@ -10,6 +10,8 @@
  */
 import { CharacterLcdIcon } from "../icons"
 import type { BodyShape, ComponentDef, ModelElement as Element, PinDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const W = 20
 const H = 9
@@ -57,10 +59,9 @@ const parallelPins: PinDef[] = PARALLEL_PINS.map((p, k) => ({ id: p.id, label: p
 export const lcd1602: ComponentDef = {
   id: "lcd-1602",
   name: "LCD 1602 (HD44780)",
-  description:
-    "16 × 2 character LCD, HD44780-compatible controller, 8- or 4-bit parallel bus. Initialise it by instruction, wait out the busy flag (an instruction sent while busy is lost), and set V0 for VDD − V0 ≈ 4.2 V — at 5 V on V0's pot, with V0 on ground the unlit dots darken, and the module is blank on 3.3 V.",
-  category: "Displays",
-  keywords: ["LCD", "1602", "16x2", "HD44780", "character", "KS0066", "ST7066", "LCD1602"],
+  description: "16×2 parallel character LCD",
+  category: "displays",
+  keywords: ["LCD", "1602", "16x2", "HD44780", "character", "KS0066", "ST7066", "LCD1602", "parallel", "4-bit", "8-bit"],
   icon: CharacterLcdIcon,
   prefix: "DS",
   width: W,
@@ -77,7 +78,7 @@ export const lcd1602: ComponentDef = {
     ...["RS", "RW", "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7"].map((node): Element => ({ kind: "R", a: "VDD", b: node, value: 5 / 125e-6, hidden: true, label: `${node} pull-up` })),
     ...backlight("A", "K"),
   ],
-  info: { Source: "Hitachi HD44780U ADE-207-272(Z); Sitronix ST7066U (clear display time); Vishay LCD-016M002B (doc 37217, 01-Oct-02); R8: forum.arduino.cc" },
+  // info Source (in the datasheet record): "Hitachi HD44780U ADE-207-272(Z); Sitronix ST7066U (clear display time); Vishay LCD-016M002B (doc 37217, 01-Oct-02); R8: forum.arduino.cc"
 }
 
 const I2C_W = 20
@@ -86,10 +87,9 @@ const I2C_H = 9
 export const lcd1602I2c: ComponentDef = {
   id: "lcd-1602-i2c",
   name: "LCD 1602 with I²C backpack",
-  description:
-    "The 16 × 2 module on a PCF8574 backpack: P0 RS, P1 R/W, P2 E, P3 backlight, P4–P7 D4–D7, so the controller runs in 4-bit mode. Address 0x27 (0x3F with a PCF8574AT), A0–A2 pads open; 4.7 kΩ pull-ups on SDA and SCL to VCC; 100 kHz. If the glass is blank or shows blocks, turn the contrast pot.",
-  category: "Displays",
-  keywords: ["LCD", "1602", "16x2", "I2C", "IIC", "PCF8574", "backpack", "HD44780", "LCD1602", "0x27", "0x3F"],
+  description: "16×2 character LCD, I²C",
+  category: "displays",
+  keywords: ["LCD", "1602", "16x2", "I2C", "IIC", "PCF8574", "PCF8574AT", "backpack", "HD44780", "LCD1602", "0x27", "0x3F", "character"],
   icon: CharacterLcdIcon,
   prefix: "DS",
   width: I2C_W,
@@ -127,7 +127,86 @@ export const lcd1602I2c: ComponentDef = {
     ...backlight("$a", "$k"),
     { kind: "R", a: "$k", b: "GND", value: 1e9, live: "$bl", label: "Backlight transistor (8050)" },
   ],
-  info: { Source: "NXP PCF8574/74A Rev. 5; TI SCPS068K; backpack schematic as playembedded.org redraws it; module as LCD 1602" },
+  // info Source (in the datasheet record): "NXP PCF8574/74A Rev. 5; TI SCPS068K; backpack schematic as playembedded.org redraws it; module as LCD 1602"
 }
 
 export const lcdModules: ComponentDef[] = [lcd1602, lcd1602I2c]
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = lcdModules
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "lcd-1602": {
+    maker: "Hitachi",
+    docs: [DOCS["hitachi-hd44780u"], DOCS["sitronix-st7066u"], DOCS["vishay-lcd016m002b"]],
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 4.7, max: 5.3 }, limit: { min: -0.3, max: 7 }, cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" }, limitCite: { page: 47, at: "Abs Max" } },
+      { kind: "supplyCurrent", value: { typ: 1.2e-3 }, cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
+      { kind: "contrast", value: { min: 3.8, typ: 4.2, max: 4.6 }, at: [{ temp: 25 }], cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
+      { kind: "forwardVoltage", value: { typ: 4.2 }, cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
+      { kind: "forwardCurrent", value: { typ: 20e-3, max: 40e-3 }, cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
+      { kind: "execution", value: { typ: 37e-6 }, at: [{ freq: 270e3 }], cite: { page: 24, at: "Table 6" } },
+      { kind: "pulse", value: { min: 230e-9 }, cite: { page: 52, at: "Bus Timing" } },
+    ],
+    modelled: [
+      { what: "Instruction set with execution times", cite: { page: 24, at: "Table 6" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "Clear display takes 1.52 ms", cite: { doc: "sitronix-st7066u", page: 17, at: "Instruction Table" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "Busy writes lost, BF readable", cite: { page: 22, at: "Busy Flag (BF)" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "8- and 4-bit buses", cite: { page: 46, at: "Figure 24" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "A00 ROM and CGRAM characters", cite: { page: 17, at: "Table 4 (ROM Code: A00)" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "Function set locks except width", cite: { page: 46, at: "Figure 24" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "Reads return the data register", cite: { page: 9, at: "Data Register (DR)" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "Contrast from VDD − V0", cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "Blank on 3.3 V supply", cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "Power-on reset, rise time warned", cite: { page: 50, at: "Power Supply Conditions Using Internal Reset Circuit" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "Drives D0–D7 only on reads", test: "tests/sim/lcd1602.test.ts" },
+      { what: "Bus timing checked per voltage", cite: { page: 52, at: "Bus Timing Characteristics" } },
+    ],
+    notModelled: [
+      { what: "Oscillator spread (190–350 kHz)", cite: { page: 52, at: "Clock Characteristics" } },
+      { what: "ROM code A02", cite: { page: 18, at: "Table 4 (ROM Code: A02)" } },
+      { what: "5 × 10 font descenders", cite: { page: 17, at: "Table 4 (ROM Code: A00)" } },
+      { what: "Power-off time tOFF", cite: { page: 50, at: "Power Supply Conditions Using Internal Reset Circuit" } },
+      { what: "tAH and E rise/fall", cite: { page: 52, at: "Bus Timing Characteristics" } },
+      { what: "Varying supply current", cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
+      { what: "Ambient outside 0–50 °C", cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
+    ],
+  },
+  "lcd-1602-i2c": {
+    maker: "NXP",
+    docs: [DOCS["nxp-pcf8574"], DOCS["ti-scps068k"], DOCS["hitachi-hd44780u"], DOCS["sitronix-st7066u"], DOCS["vishay-lcd016m002b"]],
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 4.7, max: 5.3 }, limit: { min: -0.5, max: 7 }, cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" }, limitCite: { page: 15, at: "Table 7" } },
+      { kind: "busClock", value: { max: 100e3 }, cite: { page: 17, at: "Table 10" } },
+      { kind: "address", set: [0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f], cite: { page: 5, at: "Tables 4, 5" } },
+      { kind: "contrast", value: { min: 3.8, typ: 4.2, max: 4.6 }, at: [{ temp: 25 }], cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" } },
+    ],
+    modelled: [
+      { what: "Address 0x27, set by pads", cite: { page: 5, at: "Table 4" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "High port latches first write", cite: { page: 10, at: "Power-on reset" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "P0–P3 RS, R/W, E, backlight", test: "tests/sim/lcd1602.test.ts" },
+      { what: "P4–P7 drive D4–D7", test: "tests/sim/lcd1602.test.ts" },
+      { what: "Nibble lost while busy", test: "tests/sim/lcd1602.test.ts" },
+      { what: "SCL checked against 100 kHz", cite: { page: 17, at: "Table 10" }, test: "tests/sim/nucleo-lcd-i2c.test.ts" },
+      { what: "Backlight via P3, jumper removable", test: "tests/sim/nucleo-lcd-i2c.test.ts" },
+      { what: "4.7 kΩ I²C pull-ups", cite: { page: 16, at: "Table 9" }, test: "tests/sim/nucleo-lcd-i2c.test.ts" },
+      { what: "Instruction set with execution times", cite: { doc: "hitachi-hd44780u", page: 24, at: "Table 6" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "Contrast from VDD − V0", cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" }, test: "tests/sim/lcd1602.test.ts" },
+      { what: "Blank on 3.3 V supply", cite: { doc: "vishay-lcd016m002b", page: 1, at: "Electrical specifications" }, test: "tests/sim/lcd1602.test.ts" },
+    ],
+    notModelled: [
+      { what: "INT port-change output", cite: { page: 10, at: "Interrupt output (INT)" } },
+      { what: "I²C timing beyond clock rate", cite: { page: 17, at: "Table 10" } },
+      { what: "Port output valid time tv(Q)", cite: { page: 17, at: "Table 10" } },
+      { what: "1 mA acknowledge pull-up boost", cite: { page: 16, at: "Table 9" } },
+      { what: "Expander power-on reset (VPOR)", cite: { page: 16, at: "Table 9" } },
+      { what: "HD44780 oscillator spread", cite: { doc: "hitachi-hd44780u", page: 52, at: "Clock Characteristics" } },
+      { what: "ROM code A02", cite: { doc: "hitachi-hd44780u", page: 18, at: "Table 4 (ROM Code: A02)" } },
+    ],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

@@ -3,7 +3,7 @@ import { ROOM_ELEMENTS } from "emul-shared/room"
 import { SCHEMATIC_VERSION, upgradedFrom, type SavedSchematic, type Upgrade } from "@/schematic/migrate"
 import type { HdlModule, PartState, PlacedObject, Schematic } from "@/schematic/types"
 import type { WireSegment } from "@/schematic/wires/segment"
-import { withLibrary } from "@/schematic/registry"
+import { defIds, withLibrary } from "@/schematic/registry"
 import { inNormalForm } from "@/schematic/wire-edits"
 
 export const ROOM_VERSION = "version"
@@ -121,6 +121,11 @@ function olderShelf(room: Room): { elements: Y.Map<string>; stamp: string | unde
 }
 
 const shelvedHere = (room: Room) => room.elements.size > 0 || formatOf(room) >= SCHEMATIC_VERSION
+
+export function roomDefIds(room: Room): string[] {
+  const shelf = shelvedHere(room) ? room.elements : olderShelf(room)?.elements
+  return shelf ? defIds(join(new Map(shelf.entries()))) : []
+}
 
 export function readRoom(room: Room): Upgrade {
   if (shelvedHere(room)) {

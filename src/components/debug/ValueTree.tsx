@@ -6,6 +6,7 @@ import { strip, typeName } from "@/debug/types"
 import { children, show, type Env, type Radix, type Shown, type Value } from "@/debug/values"
 import { Pending } from "@/debug/eval"
 import { editText, settable } from "@/debug/assign"
+import { stopUnlessAppCommand } from "@/lib/keymap"
 import { cn } from "@/lib/utils"
 
 /** A top-level entry of a tree: a variable, a watch, a register group. */
@@ -97,7 +98,7 @@ export function ValueTree({ env, before, roots, radix, expanded, onToggle, onPic
             onChange={(e) => setEditing({ key, text: e.target.value })}
             onBlur={() => !edit.busy && setEditing(null)}
             onKeyDown={(e) => {
-              e.stopPropagation()
+              stopUnlessAppCommand(e)
               if (e.key === "Enter") void commit(key, name, value, edit.text)
               else if (e.key === "Escape") setEditing(null)
             }}

@@ -174,6 +174,26 @@ describe("backup line (WS2815 BIN)", () => {
     expect(s.words[0].map((f) => f.value), "our word, the dead chip's skipped").toEqual([0x00, 0xff, 0x00])
   })
 
+  it("draws 10 mA a channel at full white, 2.1 mA idle (WS2815B V1.0, 2018-08-20, p. 3: LED characteristics)", () => {
+    const p = bench(WS2815, 1, 12)
+    send(p, WS2815, byteBits(0xff, 0xff, 0xff))
+    latch(p, WS2815)
+    p.part.tick(p.t + 1e-3)
+    const amps = 12 / p.part.analog(SUPPLY_KEY)!
+    expect(amps * 1e3, "3 × 10 mA + 2.1 mA").toBeCloseTo(32.1, 1)
+  })
+
+  it("takes data at 0.7 × the die's rail and not below (WS2815B V1.0, p. 3: VIH 0.7 VDD, VIL 0.3 VCC)", () => {
+    for (const [high, frames] of [
+      [3.6, 1],
+      [3.4, 0],
+    ] as const) {
+      const p = bench(WS2815, 1, 12, high)
+      send(p, WS2815, byteBits(0xff, 0xff, 0xff))
+      expect(latch(p, WS2815).frames, `${high} V data`).toBe(frames)
+    }
+  })
+
   it("stays on DIN while DIN carries data a word behind BIN", () => {
     const part = new NrzChain("U2", WS2815, 1)
     part.reset()

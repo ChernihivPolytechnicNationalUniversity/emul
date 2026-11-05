@@ -1,3 +1,4 @@
+import { digitPosition, matches, type KeyPress } from "@/lib/keys"
 import type { PinKind } from "./types"
 
 export const WIRE_COLORS = [
@@ -40,11 +41,14 @@ const SHORTCUTS: readonly (readonly [label: string, color: WireColorKey])[] = [
   ["M", "magenta"],
 ]
 
-const codesFor = (label: string) => (/^\d$/.test(label) ? [`Digit${label}`, `Numpad${label}`] : [`Key${label}`])
+const COLOR_BY_DIGIT: ReadonlyMap<string, WireColorKey> = new Map(SHORTCUTS.filter(([label]) => /^\d$/.test(label)))
+const COLOR_LETTERS = SHORTCUTS.filter(([label]) => /^[A-Z]$/.test(label)).map(([label, color]) => [{ key: label.toLowerCase(), shift: "either" } as const, color] as const)
 
-export const WIRE_COLOR_BY_CODE: ReadonlyMap<string, WireColorKey> = new Map(
-  SHORTCUTS.flatMap(([label, color]) => codesFor(label).map((code) => [code, color] as const)),
-)
+export function wireColorFor(e: KeyPress): WireColorKey | undefined {
+  const digit = digitPosition(e)
+  if (digit) return COLOR_BY_DIGIT.get(digit)
+  return COLOR_LETTERS.find(([shortcut]) => matches(e, shortcut))?.[1]
+}
 
 export const WIRE_COLOR_SHORTCUT: Readonly<Record<WireColorKey, string>> = Object.fromEntries(
   SHORTCUTS.map(([label, color]) => [color, label]),

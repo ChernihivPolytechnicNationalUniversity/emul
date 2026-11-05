@@ -1,5 +1,8 @@
 import * as React from "react"
 import type { Rect } from "@/schematic/geometry"
+import { dispatch, ownsKeys, typesAhead } from "@/lib/keys"
+import { KEYMAP } from "@/lib/keymap"
+import { wheelZooms } from "@/lib/pointer"
 import { dotGridStyle } from "./dot-grid"
 import { easeFactor, frameClock } from "./easing"
 
@@ -181,10 +184,10 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   const reset = React.useCallback(() => animateTo({ x: 0, y: 0, scale: 1 }), [animateTo])
   /** Zoom and pan so that a world rectangle fills the view, with some margin. */
   const fitTo = React.useCallback(
-    (r: { x: number; y: number; w: number; h: number }, margin = 48) => {
+    (r: { x: number; y: number; w: number; h: number }, margin = 48, maxScale = MAX_SCALE) => {
       const { width, height } = measure()
       if (!width || !height) return
-      const scale = clamp(Math.min((width - 2 * margin) / r.w, (height - 2 * margin) / r.h), MIN_SCALE, MAX_SCALE)
+      const scale = clamp(Math.min((width - 2 * margin) / r.w, (height - 2 * margin) / r.h, maxScale), MIN_SCALE, MAX_SCALE)
       animateTo({
         scale,
         x: width / 2 - (r.x + r.w / 2) * scale,
@@ -212,6 +215,25 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     },
     [animateTo, measure],
   )
+  /**
+   * Bring a world rectangle into sight the least that will do: nothing if it is on screen clear of
+   * the edges; a pan if it is off; a zoom in only when it would be drawn smaller than `minPx`
+   * (never past `maxScale`), and out only when it does not fit. A found part, a problem's pin.
+   */
+  const show = React.useCallback(
+    (r: Rect, { margin = 48, minPx = 24, maxScale = 1 }: { margin?: number; minPx?: number; maxScale?: number } = {}) => {
+      const { width, height } = measure()
+      if (!width || !height) return
+      const t = target.current
+      let scale = t.scale
+      const side = Math.max(1, Math.min(r.w, r.h))
+      if (side * scale < minPx) scale = Math.max(scale, Math.min(minPx / side, maxScale))
+      scale = clamp(Math.min(scale, (width - 2 * margin) / Math.max(1, r.w), (height - 2 * margin) / Math.max(1, r.h)), MIN_SCALE, MAX_SCALE)
+      if (scale === t.scale) return reveal(r, margin)
+      animateTo({ scale, x: width / 2 - (r.x + r.w / 2) * scale, y: height / 2 - (r.y + r.h / 2) * scale })
+    },
+    [animateTo, measure, reveal],
+  )
   const panBy = React.useCallback(
     (dx: number, dy: number) => setNow((v) => ({ ...v, x: v.x + dx, y: v.y + dy })),
     [setNow],
@@ -235,7 +257,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       const r = el.getBoundingClientRect()
-      if (e.ctrlKey || e.metaKey) {
+      if (wheelZooms(e)) {
         // Mouse wheel notches (|deltaY| ≈ 100) zoom by a fixed step; trackpad pinch sends
         // many small deltas and scales continuously.
         const notch = Math.abs(e.deltaY) >= 50
@@ -255,9 +277,8 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   const [spaceHeld, setSpaceHeld] = React.useState(false)
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null
-      const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
-      if (e.code === "Space" && !e.repeat && !typing) {
+      const typing = ownsKeys(e.target) || typesAhead(e.target) || (e.target as HTMLElement | null)?.tagName === "INPUT"
+      if (e.code === "Space" && !e.repeat && !typing && !e.defaultPrevented) {
         e.preventDefault()
         setSpaceHeld(true)
       }
@@ -406,17 +427,11 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return
-      if (e.key === "=" || e.key === "+") {
-        e.preventDefault()
-        zoomIn()
-      } else if (e.key === "-") {
-        e.preventDefault()
-        zoomOut()
-      } else if (e.key === "0") {
-        e.preventDefault()
-        reset()
-      }
+      dispatch(e, [
+        { keys: KEYMAP.zoomIn, run: zoomIn },
+        { keys: KEYMAP.zoomOut, run: zoomOut },
+        { keys: KEYMAP.zoomReset, run: reset },
+      ])
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -436,6 +451,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     reset,
     fitTo,
     reveal,
+    show,
     toWorld,
     isPanStart,
     startPan,

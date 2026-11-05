@@ -16,7 +16,7 @@ import { allowedRotations, bodyCentre, diagonalSquare, DIR, drawnBody, framePoin
 import { legacyNets as buildNets } from "@/schematic/nets"
 import { rotateSelection } from "@/schematic/orient"
 import { footprint, placementCheck, type PlacementScene } from "@/schematic/placement"
-import { getDef, registry } from "@/schematic/registry"
+import { allDefs, getDef } from "@/schematic/registry"
 import type { ComponentDef, PlacedObject, Rotation, Schematic } from "@/schematic/types"
 import { SimStore } from "@/sim/sim-store"
 import { routesOf } from "../lib/routes"
@@ -37,7 +37,7 @@ const scene = (objects: PlacedObject[]): PlacementScene => ({ objects, routes: [
 const at = (o: PlacedObject, pin: string) => objectPins(o, GRID).find((p) => p.pin.id === pin)!.point
 const cells = (p: Point) => ({ x: p.x / GRID, y: p.y / GRID })
 const leadEnds = (path: string) => [...path.matchAll(/L(-?[\d.e-]+) (-?[\d.e-]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }))
-const diagonalParts = registry.filter((def) => diagonalSquare(def) !== null)
+const diagonalParts = allDefs().filter((def) => diagonalSquare(def) !== null)
 const upright0: Orientation = { rotation: 0, mirror: false }
 const refOf = (doc: Schematic, id: string) => doc.objects.find((o) => o.id === id)?.props?.ref
 
@@ -47,7 +47,7 @@ const HALF_CELL_BOARDS = ["open746i-c", "weact-blackpill-f401cc", "weact-blackpi
 describe("every pin on the lattice, in every orientation a part allows (design.md §4.2, P1)", () => {
   it("every pin of every symbol lies on a whole cell; a board's sockets may lie on half cells, still the lattice a wire connects on", () => {
     const off: string[] = []
-    for (const def of registry)
+    for (const def of allDefs())
       for (const o of orientationsOf(def))
         for (const pin of def.pins) {
           const p = orientPin(pin, def, o)
@@ -58,7 +58,7 @@ describe("every pin on the lattice, in every orientation a part allows (design.m
   })
 
   it("only the Black Pills' SWD header and the Open746I-C's three test pads use the half cell", () => {
-    const halfCell = registry.filter((def) => def.pins.some((pin) => !whole(pin.x) || !whole(pin.y))).map((def) => def.id)
+    const halfCell = allDefs().filter((def) => def.pins.some((pin) => !whole(pin.x) || !whole(pin.y))).map((def) => def.id)
     expect.soft(halfCell.sort(), "definitions with a pin on a half cell").toEqual(HALF_CELL_BOARDS)
     const board = getDef("open746i-c")!
     const pads = board.pins.filter((pin) => !whole(pin.x) || !whole(pin.y)).map((pin) => `${pin.id} (${pin.x}, ${pin.y})`)
@@ -221,7 +221,7 @@ describe("R turns to the next orientation the part allows (design.md §4.3, §6.
   })
 
   it("a run of presses is one turn: two presses on a two-pin part leave it where one right-angle turn would, R then Shift+R gives the very part back, and a full turn never drifts", () => {
-    for (const def of registry) {
+    for (const def of allDefs()) {
       const steps = allowedRotations(def).length
       for (const start of [0, 90, 180, 270] as Rotation[]) {
         const part = placedAs(def.id, { rotation: start, mirror: false }, 10, 10)

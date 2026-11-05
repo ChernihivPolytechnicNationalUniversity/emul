@@ -1,5 +1,5 @@
 import { JUNCTION, wiresAsSegments } from "./migrate-wires"
-import { getDef, withLibrary } from "./registry"
+import { getMeta, withLibrary } from "./registry"
 import type { LegacySchematic, LegacyWire, PartState, PlacedObject, Rotation, Schematic } from "./types"
 import type { WireSegment } from "./wires/segment"
 
@@ -83,7 +83,7 @@ export function builder(grid: number) {
   const state = registered(doc, [], [])
   const counts = new Map<string, number>()
   const place = (def: string, x: number, y: number, props: Record<string, string> = {}, rotation?: Rotation) => {
-    const d = getDef(def)
+    const d = getMeta(def)
     const obj: PlacedObject = { id: crypto.randomUUID(), def, x: x * grid, y: y * grid, props }
     if (rotation) obj.rotation = rotation
     if (d?.prefix && !props.ref) {

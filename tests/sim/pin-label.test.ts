@@ -16,7 +16,7 @@ import {
   type PinLabel,
 } from "@/components/field/pin-label"
 import { allowedRotations, flipped, orientPin, UPRIGHT, type Orientation, type Point } from "@/schematic/geometry"
-import { getDef, registry } from "@/schematic/registry"
+import { getDef, allDefs } from "@/schematic/registry"
 import type { ComponentDef } from "@/schematic/types"
 import { edgeHeaderBoard } from "../lib/edge-board"
 
@@ -175,7 +175,7 @@ describe("names that would run into each other turn to run along their pins", ()
   })
 
   it("no name is ever drawn upside down, in any orientation of any part", () => {
-    for (const d of registry)
+    for (const d of allDefs())
       for (const orientation of orientationsOf(d))
         for (const label of pinLabels(d, orientation)) {
           expect(label.angle, `${d.id} ${label.id}`).toBeGreaterThanOrEqual(-90)
@@ -186,7 +186,7 @@ describe("names that would run into each other turn to run along their pins", ()
   it("no two names of a part overlap in any orientation it allows; on a board or a chip, not even at the largest size", () => {
     const clashes: string[] = []
     const dense = (d: ComponentDef) => d.pins.length >= BOARD_PINS
-    for (const d of [...registry, board]) {
+    for (const d of [...allDefs(), board]) {
       for (const orientation of orientationsOf(d)) {
         const labels = pinLabels(d, orientation)
         for (const size of dense(d) ? SIZES : SIZES.filter((size) => size < MAX_PIN_LABEL_CELLS)) {

@@ -297,17 +297,17 @@ describe("a paste from an older εmul turns a part off a diagonal before it look
 describe("an old file's HDL parts are known while it is upgraded, though the field has not loaded its library yet (phase 2 review)", () => {
   const file = (objects: PlacedObject[]) => JSON.stringify({ objects, wires: [], parts: {}, library: [INVERTER], version: 2 })
 
-  it("a diagonal part next to an HDL part does not land its pin on the HDL part's input", () => {
+  it("a diagonal part next to an HDL part does not land its pin on the HDL part's input", async () => {
     setLibrary([])
-    const { doc } = parseProject(file([{ id: "U1", def: "hdl:inv", x: 0, y: 0, props: { ref: "U1" } }, { id: "R1", def: "resistor", x: c(-3), y: c(-3), rotation: 45, props: { ref: "R1" } }]))!
+    const { doc } = (await parseProject(file([{ id: "U1", def: "hdl:inv", x: 0, y: 0, props: { ref: "U1" } }, { id: "R1", def: "resistor", x: c(-3), y: c(-3), rotation: 45, props: { ref: "R1" } }])))!
     setLibrary([INVERTER])
     expect.soft(connectedNow(doc), "R1 touches nothing of U1").toEqual([])
     setLibrary([])
   })
 
-  it("an HDL part saved on a diagonal turns to a right angle, and its pins are there once the field loads the library", () => {
+  it("an HDL part saved on a diagonal turns to a right angle, and its pins are there once the field loads the library", async () => {
     setLibrary([])
-    const { doc, notes } = parseProject(file([{ id: "U1", def: "hdl:inv", x: 0, y: 0, rotation: 45, props: { ref: "U1" } }, { id: "R1", def: "resistor", x: c(9), y: 0, rotation: 45, props: { ref: "R1" } }]))!
+    const { doc, notes } = (await parseProject(file([{ id: "U1", def: "hdl:inv", x: 0, y: 0, rotation: 45, props: { ref: "U1" } }, { id: "R1", def: "resistor", x: c(9), y: 0, rotation: 45, props: { ref: "R1" } }])))!
     const u1 = doc.objects.find((o) => o.id === "U1")!
     expect.soft((u1.rotation ?? 0) % 90, "U1 on a right angle").toBe(0)
     expect.soft(notes.some((n) => n.startsWith("U1 stood at 45°")), "and named").toBe(true)

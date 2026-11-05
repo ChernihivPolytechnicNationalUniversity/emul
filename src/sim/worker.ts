@@ -4,6 +4,7 @@ import type { Circuit, FlowGraph } from "@/schematic/circuit"
 import type { Failure } from "./engine"
 import type { CoreTransport, FromCore } from "./core-host"
 import { SimLoop, type Probe, type Snapshot } from "./loop"
+import { defIds, defsQueue } from "@/schematic/registry"
 import type { SoundMessage } from "./sound-stream"
 import type { CoreDebugCommand, DebugStop, InspectReply, InspectRequest } from "@/debug/protocol"
 
@@ -111,8 +112,16 @@ function setTimer(on: boolean) {
   }
 }
 
+// The worker loads part files of its own, as the page does: a document goes in once its parts are
+// here, and every message after it waits its turn, so nothing reaches a bench that is not there yet.
+const inOrder = defsQueue()
+
 self.onmessage = (e: MessageEvent<ToWorker>) => {
   const msg = e.data
+  inOrder(msg.t === "circuit" ? defIds(msg.circuit) : [], () => handle(msg))
+}
+
+function handle(msg: ToWorker) {
   switch (msg.t) {
     case "circuit":
       loop.setDoc(msg.circuit)

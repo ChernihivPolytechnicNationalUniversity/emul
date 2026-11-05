@@ -7,6 +7,7 @@ import { monaco, type Editor as CodeEditor } from "@/components/code/monaco"
 import { fetchText, submitSynth, waitForJob } from "@/project/api"
 import { isModified, sourceKey } from "@/schematic/hdl"
 import type { HdlModule } from "@/schematic/types"
+import { stopUnlessAppCommand } from "@/lib/keymap"
 import { cn } from "@/lib/utils"
 import { useEvent } from "@/hooks/use-event"
 import { MOBILE_PANEL, NARROW_PANEL, useIsMobile } from "@/hooks/use-mobile"
@@ -143,7 +144,7 @@ export function HdlPanel({ module, placed, onChange, onDelete, onClose, classNam
       className={cn("relative flex min-h-0 shrink-0 flex-col border-l bg-background", mobile ? MOBILE_PANEL : NARROW_PANEL, className)}
       style={{ ...style, width: mobile ? undefined : width }}
       onPointerDown={(e) => e.stopPropagation()}
-      onKeyDown={(e) => e.stopPropagation()}
+      onKeyDown={stopUnlessAppCommand}
       onCopy={(e) => e.stopPropagation()}
       onCut={(e) => e.stopPropagation()}
       onPaste={(e) => e.stopPropagation()}

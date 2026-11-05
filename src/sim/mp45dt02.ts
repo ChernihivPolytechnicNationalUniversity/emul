@@ -75,15 +75,24 @@ const INTEGRATOR_LIMIT = 4
 const WARNING_HOLD = 0.25
 
 export const NOT_MODELLED: string[] = [
-  "Frequency response (Figure 3): flat; the +1–2 dB rise near 8–10 kHz and the low-frequency roll-off are not modelled",
-  "Distortion (Table 4: <1 % THD+N at 100 dBSPL, <5 % at 115 dBSPL): the model is linear up to the AOP and hard-clips there",
-  "PSR (Table 3, −70 dBFS): supply ripple does not reach the output",
-  "Supply (Table 3: Vdd 1.64–3.6 V, Idd 0.65 mA, IddPdn 20 µA): Vdd is not sensed, the part is assumed powered at the board's 3 V; currents are not drawn",
-  "Input/output levels VIOL/VIOH, short-circuit current (Table 3): the pins are ideal logic",
-  "Absolute maximum ratings, ESD, temperature (Table 6)",
-  "Directivity and acoustic port: the sound is a single pressure at the port",
-  "Sensitivity spread (Table 3: −29…−23 dBFS): the typical −26 dBFS is used",
-  "The real modulator's order and noise shaping (not documented): a 2nd-order 1-bit ΔΣ with white self-noise stands in for it",
+  // Frequency response (Figure 3): flat; the +1–2 dB rise near 8–10 kHz and the low-frequency roll-off are not modelled
+  "Flat frequency response",
+  // Distortion (Table 4: <1 % THD+N at 100 dBSPL, <5 % at 115 dBSPL): the model is linear up to the AOP and hard-clips there
+  "Linear, hard-clips at AOP",
+  // PSR (Table 3, −70 dBFS): supply ripple does not reach the output
+  "Supply ripple never reaches output",
+  // Supply (Table 3: Vdd 1.64–3.6 V, Idd 0.65 mA, IddPdn 20 µA): Vdd is not sensed, the part is assumed powered at the board's 3 V; currents are not drawn
+  "Supply not sensed, no current",
+  // Input/output levels VIOL/VIOH, short-circuit current (Table 3): the pins are ideal logic
+  "Ideal logic pin levels",
+  // Absolute maximum ratings, ESD, temperature (Table 6)
+  "No absolute maximum ratings",
+  // Directivity and acoustic port: the sound is a single pressure at the port
+  "Sound is one port pressure",
+  // Sensitivity spread (Table 3: −29…−23 dBFS): the typical −26 dBFS is used
+  "Typical −26 dBFS sensitivity only",
+  // The real modulator's order and noise shaping (not documented): a 2nd-order 1-bit ΔΣ with white self-noise stands in for it
+  "Generic 2nd-order ΔΣ modulator",
 ]
 
 /** xorshift32 seeded from the object name: the same part on the same bench gives the same bits. */

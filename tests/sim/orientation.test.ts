@@ -4,7 +4,7 @@ import { legacyOf } from "@/schematic/builder"
 import { examples } from "@/schematic/examples"
 import { flipSelection, rotateSelection } from "@/schematic/orient"
 import { footprint } from "@/schematic/placement"
-import { getDef, registry } from "@/schematic/registry"
+import { getDef, allDefs } from "@/schematic/registry"
 import type { PlacedObject, Rotation, Schematic } from "@/schematic/types"
 
 const ROTATIONS: Rotation[] = [0, 45, 90, 135, 180, 225, 270, 315]
@@ -32,13 +32,13 @@ describe("a component mirrors the way schematic editors mirror", () => {
   })
 
   it("a component keeps its place and its box when mirrored", () => {
-    for (const def of registry)
+    for (const def of allDefs())
       for (const o of ORIENTATIONS)
         for (const axis of ["horizontal", "vertical"] as const) expect(objectSize(def, flipped(o, axis).rotation)).toEqual(objectSize(def, o.rotation))
   })
 
   it("mirrored left to right, every pin lands mirrored across the part, at any rotation", () => {
-    for (const def of registry) {
+    for (const def of allDefs()) {
       for (const o of ORIENTATIONS) {
         const box = objectSize(def, o.rotation)
         const mirrored = flipped(o, "horizontal")
@@ -53,7 +53,7 @@ describe("a component mirrors the way schematic editors mirror", () => {
   })
 
   it("mirrored top to bottom, every pin lands mirrored across the part, at any rotation", () => {
-    for (const def of registry) {
+    for (const def of allDefs()) {
       for (const o of ORIENTATIONS) {
         const box = objectSize(def, o.rotation)
         const mirrored = flipped(o, "vertical")
@@ -246,7 +246,7 @@ describe("text on a mirrored or turned component stays readable", () => {
   })
 
   it("no text on any part ever reads upside down, sideways from the top or mirrored", () => {
-    for (const def of registry)
+    for (const def of allDefs())
       for (const o of ORIENTATIONS)
         for (const shape of def.body) if (shape.type === "text") expect([0, -90]).toContain(upright(shape.anchor ?? "middle", shape.rotate ?? 0, o).angle)
   })

@@ -7,11 +7,12 @@ import { useEvent } from "@/hooks/use-event"
 import { announceUpgrade } from "@/hooks/use-projects"
 import type { Point, Schematic } from "@/schematic/types"
 import { SCHEMATIC_VERSION } from "@/schematic/migrate"
-import { formatOf, guestRoom, hostRoom, join, newerPeers, newerThanThis, olderPeers, onNewerFormat, pushTo, roomOf, type NewerSeen } from "./elements"
+import { ensureDefs } from "@/schematic/registry"
+import { formatOf, guestRoom, hostRoom, join, roomDefIds, newerPeers, newerThanThis, olderPeers, onNewerFormat, pushTo, roomOf, type NewerSeen } from "./elements"
 import { anonymousIdentity, withAnimal, type Identity } from "./identity"
 
 export type Move = { ids: string[]; dx: number; dy: number }
-export type Peer = Identity & { clientId: number; cursor: Point | null; moving: Move | null; wire: Point[] | null }
+export type Peer = Identity & { clientId: number; cursor: Point | null; moving: Move | null; wire: Point[] | null; selected: string[] }
 export type LiveStatus = "off" | "connecting" | "live" | "offline"
 
 export type Live = {
@@ -28,6 +29,8 @@ export type Live = {
   onPointer: (point: Point | null) => void
   onMove: (move: Move | null) => void
   onWire: (points: Point[] | null) => void
+  /** What this client has selected: the others' field explorers show it. */
+  onSelect: (ids: string[]) => void
   linkFor: () => string | null
 }
 
@@ -149,6 +152,7 @@ export function useLive(merge: (doc: Schematic) => void): Live {
               moving: (st.moving as Move | null) ?? null,
               wire: (st.wire as Point[] | null) ?? null,
               format: st.format,
+              selected: Array.isArray(st.selected) ? (st.selected as string[]) : [],
             }))
           setPeers(others)
           for (const peer of olderPeers(others)) {
@@ -194,6 +198,8 @@ export function useLive(merge: (doc: Schematic) => void): Live {
     setHost(true)
     setHostedRoom(id)
     s.meta.set("name", name)
+    await ensureDefs(roomDefIds(s))
+    if (session.current !== s) return
     const entered = hostRoom(s, doc)
     if (entered) {
       merge(entered.doc)
@@ -204,6 +210,8 @@ export function useLive(merge: (doc: Schematic) => void): Live {
 
   const joinRoom = useEvent(async (id: string) => {
     const s = await connect(id)
+    await ensureDefs(roomDefIds(s))
+    if (session.current !== s) return null
     const entered = guestRoom(s)
     if (!entered) {
       leave()
@@ -246,7 +254,9 @@ export function useLive(merge: (doc: Schematic) => void): Live {
     [share],
   )
 
+  const onSelect = React.useCallback((ids: string[]) => share("selected", ids.slice(0, MAX_IDS), true), [share])
+
   React.useEffect(() => () => teardown(), [teardown])
 
-  return { room, status, host, me, peers, link: room ? roomLink(room) : null, linkFor: () => (session.current ? roomLink(session.current.room) : null), start, join: joinRoom, leave, onChange, onPointer, onMove, onWire }
+  return { room, status, host, me, peers, link: room ? roomLink(room) : null, linkFor: () => (session.current ? roomLink(session.current.room) : null), start, join: joinRoom, leave, onChange, onPointer, onMove, onWire, onSelect }
 }

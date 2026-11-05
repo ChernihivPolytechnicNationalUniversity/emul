@@ -4,6 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { BoardView } from "@/debug/session"
 import { excName } from "@/mcu/faults"
 import { cn } from "@/lib/utils"
+import { KEYMAP, labelFor } from "@/lib/keymap"
 
 type Props = {
   view: BoardView
@@ -72,31 +73,31 @@ export function DebugToolbar({ view, running, where, instructions, disassembly, 
   return (
     <div data-slot="debug-toolbar" className="flex h-7 shrink-0 items-center gap-0.5 border-b bg-sidebar px-1 text-xs">
       {running ? (
-        <Tool label="Pause the bench" keys="F5" onClick={onPause} disabled={idle}>
+        <Tool label="Pause the bench" keys={labelFor(KEYMAP.continue)} onClick={onPause} disabled={idle}>
           <PauseIcon />
         </Tool>
       ) : (
-        <Tool label="Continue: run the bench" keys="F5" onClick={onContinue} disabled={idle}>
+        <Tool label="Continue: run the bench" keys={labelFor(KEYMAP.continue)} onClick={onContinue} disabled={idle}>
           <PlayIcon className="text-emerald-600" />
         </Tool>
       )}
-      <Tool label={`Step over (one ${unit}, calls run through)`} keys="F10" onClick={onStepOver} disabled={idle || busy}>
+      <Tool label={`Step over (one ${unit}, calls run through)`} keys={labelFor(KEYMAP.stepOver)} onClick={onStepOver} disabled={idle || busy}>
         <RedoDotIcon />
       </Tool>
-      <Tool label={`Step into (one ${unit}, into calls)`} keys="F11" onClick={onStepInto} disabled={idle || busy}>
+      <Tool label={`Step into (one ${unit}, into calls)`} keys={labelFor(KEYMAP.stepInto)} onClick={onStepInto} disabled={idle || busy}>
         <ArrowDownToLineIcon />
       </Tool>
-      <Tool label="Step out (run to the caller)" keys="⇧F11" onClick={onStepOut} disabled={idle || busy}>
+      <Tool label="Step out (run to the caller)" keys={labelFor(KEYMAP.stepOut)} onClick={onStepOut} disabled={idle || busy}>
         <ArrowUpFromLineIcon />
       </Tool>
-      <Tool label="Step one instruction" keys="⌥F11" onClick={onStepInstruction} disabled={idle || busy}>
+      <Tool label="Step one instruction" keys={labelFor(KEYMAP.stepInstruction)} onClick={onStepInstruction} disabled={idle || busy}>
         <CornerDownRightIcon />
       </Tool>
-      <Tool label="Restart the core (the bench keeps its time)" keys="⇧⌘F5" onClick={onRestart} disabled={idle}>
+      <Tool label="Restart the core (the bench keeps its time)" keys={labelFor(KEYMAP.restart)} onClick={onRestart} disabled={idle}>
         <RotateCcwIcon />
       </Tool>
       <div className="mx-1 h-4 w-px bg-border" />
-      <Tool label={disassembly ? "Back to the source" : "Disassembly"} keys="⌘⇧D" onClick={onDisassembly} disabled={idle} active={disassembly}>
+      <Tool label={disassembly ? "Back to the source" : "Disassembly"} keys={labelFor(KEYMAP.disassembly)} onClick={onDisassembly} disabled={idle} active={disassembly}>
         <BinaryIcon />
       </Tool>
       <span

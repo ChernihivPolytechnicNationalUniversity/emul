@@ -1,3 +1,4 @@
+import "./lib/all-parts"
 import { Buffer } from "node:buffer"
 import { existsSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
@@ -131,6 +132,8 @@ async function wiresFollowTheDrag(page: Page) {
   expect("dropped: R2 three cells lower", (await frame.worldOf("R2")).y, 13 * GRID)
   expect("dropped: the wire still reaches R2, no open end", await countOf(page, "[data-dangling]"), 0)
   await shoot(page, "drag-with-wires")
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(300)
   await page.keyboard.down("Alt")
   await dragBy(page, frame.toScreen(cellPoint(22, 14)), frame.toScreen(cellPoint(26, 14)))
   await page.keyboard.up("Alt")
@@ -352,7 +355,12 @@ async function addingLandsInView(page: Page) {
   const zoom = await page.evaluate(() => document.querySelector("[data-slot=zoom-controls]")?.textContent?.match(/(\d+)%/)?.[1])
   console.log(`  zoom ${zoom}%`)
   const before = new Set(await page.evaluate(() => [...document.querySelectorAll("[data-body]")].map((e) => e.getAttribute("data-body")!)))
-  await page.getByRole("button", { name: "Crystal", exact: true }).click()
+  // Groups past the first start folded: unfold the crystal's before clicking it.
+  const crystal = page.getByRole("button", { name: "Crystal", exact: true })
+  if (!(await crystal.isVisible())) await page.getByRole("button", { name: /^ICs & timing/ }).click()
+  // A click arms the part for the pointer; Enter on the focused row is what adds it in view.
+  await crystal.focus()
+  await page.keyboard.press("Enter")
   await page.waitForTimeout(1500)
   const added = (await page.evaluate(() => [...document.querySelectorAll("[data-body]")].map((e) => e.getAttribute("data-body")!))).filter((id) => !before.has(id))
   expect("one part was added", added.length, 1)
@@ -435,9 +443,9 @@ const cursorOnTheEmptyField = (page: Page) =>
 async function cursorsOverARunningBench(page: Page) {
   console.log("\nthe crosshair and the text cursor over a running bench")
   await open(page, "open746-touch")
-  await page.getByRole("button", { name: "Run" }).click()
+  await page.getByRole("button", { name: "Run", exact: true }).click()
   await page.waitForTimeout(1500)
-  expect("the bench is running", await page.getByRole("button", { name: "Pause" }).count(), 1)
+  expect("the bench is running", await page.getByRole("button", { name: "Pause", exact: true }).count(), 1)
   const cursors: Record<string, string | null> = {
     "the empty field": await cursorOnTheEmptyField(page),
     "a pin": await cursorOnTheFirstVisible(page, "[data-slot=pins] [data-pin] circle"),
@@ -446,9 +454,11 @@ async function cursorsOverARunningBench(page: Page) {
   await page.keyboard.press("o")
   await page.waitForTimeout(800)
   cursors["the oscilloscope"] = await cursorOnTheFirstVisible(page, "[data-slot=scope] canvas")
-  cursors["the palette's search box"] = await cursorOnTheFirstVisible(page, 'input[placeholder="Search…"]')
+  cursors["the palette's search box"] = await cursorOnTheFirstVisible(page, 'input[placeholder="Search parts…"]')
   await page.keyboard.press("o")
-  await page.getByRole("button", { name: "New VHDL component" }).click()
+  // The palette's one way in to HDL is a menu: VHDL or Verilog, new or imported.
+  await page.getByRole("button", { name: /^New HDL component/ }).first().click()
+  await page.getByRole("menuitem", { name: "New VHDL component" }).click()
   await page.locator(".monaco-editor .view-lines").first().waitFor({ timeout: 20000 })
   await page.waitForTimeout(1000)
   cursors["the code editor"] = await cursorOnTheFirstVisible(page, ".monaco-editor .view-lines")

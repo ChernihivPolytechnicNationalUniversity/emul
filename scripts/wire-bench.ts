@@ -1,3 +1,4 @@
+import "./lib/all-parts"
 import { builder, connect, connections, legacyOf } from "@/schematic/builder"
 import { examples, lab1Board } from "@/schematic/examples"
 import { circuitOf } from "@/schematic/circuit"

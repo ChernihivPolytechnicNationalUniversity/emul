@@ -29,21 +29,36 @@ export type Cs43l22Options = {
 
 /** What the model leaves out, for the README coverage table and the inspector. */
 export const NOT_MODELLED: string[] = [
-  "Master mode (M/S = 1, §7.5.1): the codec does not drive SCLK/LRCK; serial data is ignored with a warning. SCLK=MCLK (§7.6.1) likewise",
-  "Serial port setup/hold times (40/20/20 ns) and clock duty cycles (p.16); data is sampled at the SCLK edge",
-  "Soft ramp and zero cross (DIGSFT, DIGZC, ANLGSFTx, ANLGZCx, §7.8, §7.11.5–6): every volume change is instant",
-  "Bass/treble shelving (TC_EN, §7.17–7.18), de-emphasis (DEEMPH, §7.11.4) and the limiter (§4.2.2, §7.23–7.25): registers stored, signal passes untouched (warning when enabled)",
-  "Analog passthrough AIN1–AIN4 (PASSxSEL, PASSxVOL, PASSxMUTE, PASSTHRUx, §4.3, §7.7, §7.13): no analog inputs; registers stored",
-  "Class-D speaker path (SPKxVOL, SPKxMUTE, SPKMONO, SPKSWAP, MUTE50/50, short detect, battery compensation, §4.5, §7.12, §7.21, §7.27): speaker outputs are not connected on MB997; registers stored",
-  "Charge pump frequency (0x34, §7.30): stored only",
-  "The meaning of the §4.11 required initialization writes (0x00, 0x47, 0x32 bit 7): stored and tracked as 'init done', no effect invented",
-  "Power-up/down analog behaviour (VQ/FILT+ and charge-pump ramp, pops, the HP amp swinging to +VHP when MCLK stops early, §4.8, §4.10): output starts one LRCK period after the ratio is measured",
-  "DAC filter response, group delay 9/Fs, noise and THD (p.11–15): ideal DAC",
-  "AUTO = 0 clocking with 12/24/27 MHz MCLK (Table 1: VIDEOCLK, RATIO ≠ 00): the ratio is not checked in those settings",
-  "Die temperature monitor (§4.1.4): no register exists for it",
-  "Supply sensing, VL input thresholds other than thresholds(), supply currents (p.19) and absolute maximum ratings",
-  "I²C timing other than the SCL frequency (≤ 100 kHz) and tirs (550 ns): setup/hold, tbuf, rise/fall",
-  "Beep waveform (assumed sine) and its 0 dB reference (assumed digital full scale): the datasheet gives neither",
+  // Master mode (M/S = 1, §7.5.1): the codec does not drive SCLK/LRCK; serial data is ignored with a warning. SCLK=MCLK (§7.6.1) likewise
+  "Master mode not supported",
+  // Serial port setup/hold times (40/20/20 ns) and clock duty cycles (p.16); data is sampled at the SCLK edge
+  "Serial port timing not checked",
+  // Soft ramp and zero cross (DIGSFT, DIGZC, ANLGSFTx, ANLGZCx, §7.8, §7.11.5–6): every volume change is instant
+  "Volume changes are instant",
+  // Bass/treble shelving (TC_EN, §7.17–7.18), de-emphasis (DEEMPH, §7.11.4) and the limiter (§4.2.2, §7.23–7.25): registers stored, signal passes untouched (warning when enabled)
+  "No tone, de-emphasis or limiter",
+  // Analog passthrough AIN1–AIN4 (PASSxSEL, PASSxVOL, PASSxMUTE, PASSTHRUx, §4.3, §7.7, §7.13): no analog inputs; registers stored
+  "No analog passthrough inputs",
+  // Class-D speaker path (SPKxVOL, SPKxMUTE, SPKMONO, SPKSWAP, MUTE50/50, short detect, battery compensation, §4.5, §7.12, §7.21, §7.27): speaker outputs are not connected on MB997; registers stored
+  "Speaker outputs not connected",
+  // Charge pump frequency (0x34, §7.30): stored only
+  "Charge pump frequency stored only",
+  // The meaning of the §4.11 required initialization writes (0x00, 0x47, 0x32 bit 7): stored and tracked as 'init done', no effect invented
+  "Init writes tracked, no effect",
+  // Power-up/down analog behaviour (VQ/FILT+ and charge-pump ramp, pops, the HP amp swinging to +VHP when MCLK stops early, §4.8, §4.10): output starts one LRCK period after the ratio is measured
+  "No power-up pops or ramps",
+  // DAC filter response, group delay 9/Fs, noise and THD (p.11–15): ideal DAC
+  "Ideal DAC filter and noise",
+  // AUTO = 0 clocking with 12/24/27 MHz MCLK (Table 1: VIDEOCLK, RATIO ≠ 00): the ratio is not checked in those settings
+  "Fixed-MCLK ratios not checked",
+  // Die temperature monitor (§4.1.4): no register exists for it
+  "No die temperature monitor",
+  // Supply sensing, VL input thresholds other than thresholds(), supply currents (p.19) and absolute maximum ratings
+  "No supply sensing or ratings",
+  // I²C timing other than the SCL frequency (≤ 100 kHz) and tirs (550 ns): setup/hold, tbuf, rise/fall
+  "I²C timing beyond SCL unchecked",
+  // Beep waveform (assumed sine) and its 0 dB reference (assumed digital full scale): the datasheet gives neither
+  "Beep assumed sine, full scale",
 ]
 
 // --- Register map (§6 Quick Reference p.35–36) ---------------------------------------------------

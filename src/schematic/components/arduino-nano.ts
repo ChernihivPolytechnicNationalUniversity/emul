@@ -6,6 +6,8 @@ import { avrFields, avrMcuModel, AVR_ALT } from "./avr-chip"
 import { LED_COLORS } from "./basic"
 import { crystalStartup } from "./clock"
 import { PITCH } from "./open746i-c-art"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * Arduino Nano 3.x (A000005), from the Arduino schematic "NanoV3.3" (23/01/19), the A000005
@@ -86,6 +88,11 @@ const ICSP: [number, string, string?][] = [
   [5, "RST", "PC6"],
   [6, "GND"],
 ]
+/**
+ * ICSP's names, on the sides the pins' labels go: level over the near row, midway between the
+ * LEDs' names and the box, and under the far row, midway between the box and the board's end.
+ */
+const ICSP_NAME_Y = { even: 34.62, odd: 41.93 }
 
 function kindOf(label: string, mcu?: string): PinKind {
   if (label === "GND") return "gnd"
@@ -155,14 +162,18 @@ const named = (style: TextStyle, extra: Partial<TextStyle>): TextStyle => ({ ...
 /**
  * The layout of the board's top side (USB up), as the A000005 and its copies print it: the pin
  * names stand on end beside their pads, reading away from the USB, which leaves the middle to
- * the chip, the resonator, the RESET switch, the four LEDs and ICSP.
+ * the chip, the resonator, the RESET switch, the four LEDs and ICSP, its six names level over
+ * and under its rows.
  */
 /** Pad centre to the middle of its name. */
 const NAME_FROM_PAD_MM = 1.95
 /** ATmega328P-MUR (the schematic's part): 32 VQFN, a 5 mm body at 45°, pads under its edges. */
 const CHIP = { x: MID_X, y: 15.0, side: 5, pads: 8, pitch: 0.5 }
-/** Y1, the 16 MHz resonator (3.2 × 1.3 mm), lengthways beside the chip. */
-const Y1 = { x: 13.6, y: 19.9, w: 1.3, h: 3.2 }
+/**
+ * Y1, the 16 MHz resonator (3.2 × 1.3 mm), turned 45° to lie along the chip's lower-right edge,
+ * 0.5 mm off its pads and clear of the D5–D7 names; its frequency printed under it.
+ */
+const Y1 = { x: 12.15, y: 17.6, w: 1.3, h: 3.2, labelY: 20.6 }
 /** The RESET switch (SW1), a 6 × 3.5 mm SMD tact switch across the board under the chip. */
 const RESET_AT = { x: MID_X, y: 24.0 }
 const RESET_MM = { w: 6.0, h: 3.5 }
@@ -180,17 +191,17 @@ function turned(x: number, y: number, w: number, h: number, angle: number) {
 
 function boardArt(): BodyShape[] {
   const art = new Artwork(FRAME)
-  // Pin names, on end beside the pads; SDA/SCL beside A4/A5 as the copies print them.
+  // Pin names, on end beside the pads and level over and under ICSP's rows, all one size; SDA/SCL
+  // beside A4/A5 as the copies print them.
   const names = art.grouped()
   const upright = named(TABLE, { rotate: 90 })
   J2.forEach(([pin, label]) => names.text(label, ROW_X.j2 + NAME_FROM_PAD_MM, rowY(pin), upright))
   J1.forEach(([pin, label]) => names.text(label, ROW_X.j1 - NAME_FROM_PAD_MM, rowY(pin), upright))
+  ICSP.forEach(([pin, label]) => names.text(label, ICSP_X[Math.floor((pin - 1) / 2)], pin % 2 === 1 ? ICSP_NAME_Y.odd : ICSP_NAME_Y.even, TABLE))
   const extra = art.grouped()
   extra.text("SDA", ROW_X.j2 + NAME_FROM_PAD_MM + 1.25, rowY(8), named(TABLE, { rotate: 90, size: 0.32 })).text("SCL", ROW_X.j2 + NAME_FROM_PAD_MM + 1.25, rowY(7), named(TABLE, { rotate: 90, size: 0.32 }))
   // Pin 1 of each header: a square pad.
   for (const [px, py] of [[ROW_X.j2, rowY(1)], [ROW_X.j1, rowY(1)], [ICSP_X[0], ICSP_Y.odd]]) art.outline(px - 0.95, py - 0.95, px + 0.95, py + 0.95, 0)
-  // Mounting holes, 1.78 mm, in line with the rows a pitch past each end.
-  for (const x of [ROW_X.j2, ROW_X.j1]) for (const y of [rowY(15) - PITCH, rowY(1) + PITCH]) art.circle("none", x, y, 0.89)
   // Mini-B receptacle, overhanging the USB end: the shell and its mouth.
   art.rect("connector", MID_X - 3.85, -1.3, MID_X + 3.85, 7.0, 0.4)
   art.outline(MID_X - 2.6, -1.3, MID_X + 2.6, 1.2, 0.3)
@@ -211,8 +222,9 @@ function boardArt(): BodyShape[] {
   }
   art.circle("board", CHIP.x, CHIP.y - half * Math.SQRT2 + 1.0, 0.28)
   art.text("MEGA328P", CHIP.x, CHIP.y - 0.15, { size: 0.26, inverse: true }).text("MUR", CHIP.x, CHIP.y + 0.75, { size: 0.2, inverse: true })
-  // Y1.
-  art.rect("connector", Y1.x - Y1.w / 2, Y1.y - Y1.h / 2, Y1.x + Y1.w / 2, Y1.y + Y1.h / 2, 0.2)
+  // Y1, along the chip's edge, and its frequency.
+  art.polygon("connector", turned(Y1.x, Y1.y, Y1.w, Y1.h, turn), 0.2)
+  art.text("16 MHz", Y1.x, Y1.labelY, TABLE)
   // RESET switch body (the cap is the part) and its name under it.
   art.rect("connector", RESET_AT.x - RESET_MM.w / 2, RESET_AT.y - RESET_MM.h / 2, RESET_AT.x + RESET_MM.w / 2, RESET_AT.y + RESET_MM.h / 2, 0.3)
   art.text("RESET", RESET_AT.x, RESET_AT.y + RESET_MM.h / 2 + 1.0, TABLE)
@@ -344,9 +356,10 @@ const hex = (v: number) => `0x${v.toString(16).toUpperCase().padStart(2, "0")}`
 export const arduinoNano: ComponentDef = {
   id: "arduino-nano",
   name: "Arduino Nano",
-  description: "ATmega328P, 16 MHz, USB serial",
+  board: { vendor: "Arduino", mcu: "ATmega328P", mhz: 16, volts: 5, tags: ["breadboard"], photo: "arduino-nano.webp", core: "AVR", memory: "32 KB / 2 KB", onBoard: ["USB serial", "ICSP"] },
+  description: "Arduino Nano board, ATmega328P",
   keywords: ["Arduino", "Nano", "ATmega328P", "AVR", "A000005", "FT232RL", "CH340"],
-  category: "Boards",
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,
@@ -365,12 +378,59 @@ export const arduinoNano: ComponentDef = {
   defaults: { fuseLow: hex(NANO_FUSES.low), fuseHigh: hex(NANO_FUSES.high), fuseExtended: hex(NANO_FUSES.extended), lock: hex(NANO_FUSES.lock), revision: ATMEGA328P.revisions[ATMEGA328P.revisions.length - 1] },
   fields: avrFields(ATMEGA328P, NANO_FUSES, "Arduino"),
   info: {
-    MCU: "ATmega328P (32 VQFN, numbered as the TQFP-32), 16 MHz resonator, 32 KB Flash (2 KB of it the boot section), 2 KB SRAM, 1 KB EEPROM",
-    Power: "USB: 5 V through the 500 mA polyfuse and a Schottky, so +5V sits near 4.7 V. VIN: 7–12 V through the LM1117-5.0 (800 mA). 5V pin: in or out. 3V3: the FT232RL's 3V3OUT, 50 mA",
-    "USB serial": "FT232RL: its TXD → 1 kΩ → D0/RX, D1/TX → 1 kΩ → its RXD; the TX and RX LEDs light while the lines are low. Wire a terminal to the TX/RX pins by the USB connector",
-    ICSP: "J4: 1 MISO (D12), 2 +5V, 3 SCK (D13), 4 MOSI (D11), 5 RESET, 6 GND — the same nets as those header pins",
-    Fuses: "as Arduino programs them: low 0xFF, high 0xDA (BOOTRST, 1024-word boot section), extended 0xFD (BOD 2.7 V), lock 0x0F. A sketch uploaded through the boot loader cannot change them, so an image's .fuse section is ignored here",
-    "Not modelled": "the boot loader: the boot section is empty, so a reset runs through its erased words straight into the sketch (no upload delay, no LED flicker on D13); the USB side of the FT232RL (DTR auto-reset when a port opens, the drivers); the CBUS LEDs' pulse stretch",
-    Source: "Arduino Nano V3.3 schematic (A000005-schematics.pdf), A000005 datasheet",
+    // MCU: ATmega328P (32 VQFN, numbered as the TQFP-32), 16 MHz resonator, 32 KB Flash (2 KB of it the boot section), 2
+    //   KB SRAM, 1 KB EEPROM
+    // Power: USB: 5 V through the 500 mA polyfuse and a Schottky, so +5V sits near 4.7 V. VIN: 7–12 V through the
+    //   LM1117-5.0 (800 mA). 5V pin: in or out. 3V3: the FT232RL's 3V3OUT, 50 mA
+    Power: "USB or VIN 7–12 V",
+    // USB serial: FT232RL: its TXD → 1 kΩ → D0/RX, D1/TX → 1 kΩ → its RXD; the TX and RX LEDs light while the lines are
+    //   low. Wire a terminal to the TX/RX pins by the USB connector
+    "USB serial": "FT232RL on D0/D1",
+    // ICSP: J4: 1 MISO (D12), 2 +5V, 3 SCK (D13), 4 MOSI (D11), 5 RESET, 6 GND — the same nets as those header pins
+    ICSP: "J4, same nets as D11–D13",
+    // Fuses: as Arduino programs them: low 0xFF, high 0xDA (BOOTRST, 1024-word boot section), extended 0xFD (BOD 2.7 V),
+    //   lock 0x0F. A sketch uploaded through the boot loader cannot change them, so an image's .fuse section is ignored here
+    Fuses: "As Arduino programs them",
+    // Not modelled: the boot loader: the boot section is empty, so a reset runs through its erased words straight into the
+    //   sketch (no upload delay, no LED flicker on D13); the USB side of the FT232RL (DTR auto-reset when a port opens, the
+    //   drivers); the CBUS LEDs' pulse stretch
+    // Source: Arduino Nano V3.3 schematic (A000005-schematics.pdf), A000005 datasheet
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [arduinoNano]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "arduino-nano": {
+    maker: "Arduino",
+    docs: [DOCS["arduino-a000005-ds"], DOCS["arduino-a000005-sch"], DOCS["arduino-a000005-pinout"], DOCS["mchp-ds40002061b"], DOCS["ti-snos412q"], DOCS["ftdi-ds-ft232r"], DOCS["vishay-ss1p3l"], DOCS["bourns-mf-msmf"]],
+    specs: [],
+    characteristics: [
+      { kind: "clock", value: { max: 16e6 }, cite: { page: 2, at: "Features" } },
+      { kind: "flash", value: { typ: 32768 }, cite: { page: 2, at: "Features" } },
+      { kind: "ram", value: { typ: 2048 }, cite: { page: 2, at: "Features" } },
+      { kind: "ioLevel", value: { typ: 5 }, limit: { max: 6 }, cite: { page: 7, at: "§3.2" }, limitCite: { doc: "mchp-ds40002061b", page: 308, at: "§29.1 Absolute Maximum Ratings" } },
+      { kind: "input", value: { min: 7, max: 15 }, cite: { page: 2, at: "Features, Power" } },
+      { kind: "ioPins", value: { typ: 20 }, cite: { page: 2, at: "Features, I/O" } },
+      { kind: "pinCurrent", value: { max: 20e-3 }, limit: { max: 40e-3 }, per: "pin", cite: { doc: "arduino-a000005-pinout", page: 1 }, limitCite: { doc: "mchp-ds40002061b", page: 308, at: "§29.1 Absolute Maximum Ratings" } },
+      { kind: "temperature", value: { min: -40, max: 85 }, cite: { page: 5, at: "§2.1" } },
+    ],
+    modelled: [
+      { what: "Sketch runs at 16 MHz", test: "tests/sim/nano-bench.test.ts" },
+      { what: "USB through polyfuse and Schottky", cite: { doc: "arduino-a000005-sch", page: 1 }, test: "tests/sim/nano-bench.test.ts" },
+      { what: "VIN through the LM1117", cite: { doc: "arduino-a000005-sch", page: 1 }, test: "tests/sim/nano-bench.test.ts" },
+      { what: "FT232RL USB serial on D0/D1", cite: { doc: "arduino-a000005-sch", page: 1 }, test: "tests/sim/nano-bench.test.ts" },
+      { what: "3V3 from FT232RL 3V3OUT", cite: { doc: "arduino-a000005-sch", page: 1 }, test: "tests/sim/nano-bench.test.ts" },
+      { what: "L, PWR, TX, RX LEDs", test: "tests/sim/nano-bench.test.ts" },
+      { what: "RESET button restarts the sketch", test: "tests/sim/nano-bench.test.ts" },
+      { what: "Fuses as Arduino programs them", test: "tests/sim/nano-bench.test.ts" },
+      { what: "Shorted AREF is reported", cite: { doc: "mchp-ds40002061b", at: "§24.5.2" }, test: "tests/sim/nano-bench.test.ts" },
+      { what: "Built-in examples and libraries run", test: "tests/sim/nano-popular.test.ts" },
+    ],
+    notModelled: [{ what: "No boot loader" }, { what: "No FT232RL USB side" }, { what: "No DTR auto-reset" }, { what: "The CBUS LEDs' pulse stretch" }, { what: "No ICSP programming" }],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

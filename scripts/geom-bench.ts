@@ -1,3 +1,4 @@
+import "./lib/all-parts"
 import { GRID, objectPins, routeBox, touches } from "@/schematic/geometry"
 import { SpatialIndex } from "@/schematic/spatial"
 import type { PlacedObject, Schematic } from "@/schematic/types"

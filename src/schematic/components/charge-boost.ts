@@ -3,6 +3,8 @@ import { dw03, mt3608, tp4056 } from "../power-model"
 import { parseValue } from "@/sim/units"
 import { LED_COLORS } from "./basic"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 
 const W = 12
@@ -69,9 +71,9 @@ const model: Element[] = [
 export const chargeBoostModule: ComponentDef = {
   id: "lx-lcbst",
   name: "LX-LCBST charger + boost",
-  description:
-    "TP4056 Li-ion charger (1 A from USB-C or IN+, trickle below 2.9 V, stops at C/10), DW03 protection (4.3 V, 2.4 V, 3.5 A, short) and an MT3608 boost to the output set by the trimmer (4.2–28 V).",
-  category: "Power",
+  keywords: ["Li-ion", "lithium", "TP4056", "DW03", "MT3608", "module", "USB-C"],
+  description: "Li-ion charger and boost module",
+  category: "power",
   icon: BatteryIcon,
   prefix: "A",
   defaults: { vout: "5 V" },
@@ -85,11 +87,62 @@ export const chargeBoostModule: ComponentDef = {
   hideIdle: true,
   pinsAreSockets: true,
   info: {
-    Charger: "TP4056, 1 A (R_PROG 1.2 kΩ), 4.2 V ±1 %, trickle 100 mA below 2.9 V, ends at 100 mA, recharges at 4.05 V",
-    Protection: "DW03: overcharge 4.3 V, over-discharge 2.4 V, overcurrent 3.5 A, short circuit 20 A, 40 mΩ",
-    Boost: "MT3608, 4.2–28 V by the trimmer, ~2 A from the cell (5 W)",
+    // Charger: "TP4056, 1 A (R_PROG 1.2 kΩ), 4.2 V ±1 %, trickle 100 mA below 2.9 V, ends at 100 mA, recharges at 4.05 V"
+    Charger: "TP4056, 1 A (1.2 kΩ)",
+    Float: "4.2 V ±1 %",
+    Trickle: "100 mA below 2.9 V",
+    "Charge end": "100 mA, restarts 4.05 V",
+    // Protection: "DW03: overcharge 4.3 V, over-discharge 2.4 V, overcurrent 3.5 A, short circuit 20 A, 40 mΩ"
+    Protection: "DW03, cell 2.4–4.3 V",
+    Overcurrent: "3.5 A, short 20 A",
+    // Boost: "MT3608, 4.2–28 V by the trimmer, ~2 A from the cell (5 W)"
+    Boost: "MT3608, 4.2–28 V, ~2 A",
     Input: "USB-C or IN+/IN−, 4.5–6.5 V",
     Size: "23.5 × 19 mm",
-    Source: "Datasheets: TP4056 (NanJing Top Power), DW03 (PJSEMI), MT3608 (Aerosemi)",
+    // Source (in the datasheet record): "Datasheets: TP4056 (NanJing Top Power), DW03 (PJSEMI), MT3608 (Aerosemi)"
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [chargeBoostModule]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "lx-lcbst": {
+    maker: "NanJing Top Power",
+    docs: [DOCS["toppower-tp4056"], DOCS["pjsemi-dw03"], DOCS["aerosemi-mt3608"]],
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { min: 4, max: 8 }, cite: { page: 5, at: "Electrical Characteristics" } },
+      { kind: "float", value: { min: 4.158, typ: 4.2, max: 4.242 }, cite: { page: 5, at: "VFLOAT" } },
+      { kind: "overcharge", value: { typ: 4.3 }, cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table" } },
+      { kind: "overdischarge", value: { typ: 2.4 }, cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table" } },
+      { kind: "overcurrent", value: { typ: 3.5 }, cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table" } },
+      { kind: "shortCircuit", value: { typ: 20 }, cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table" } },
+      { kind: "output", value: { max: 28 }, cite: { doc: "aerosemi-mt3608", page: 1, at: "Features" } },
+      { kind: "currentLimit", value: { typ: 4 }, cite: { doc: "aerosemi-mt3608", page: 3, at: "SW Current Limit" } },
+    ],
+    modelled: [
+      { what: "1 A charge from USB-C", test: "tests/sim/charge-boost.test.ts" },
+      { what: "CHRG lit while charging", test: "tests/sim/charge-boost.test.ts" },
+      { what: "C/10 trickle below 2.9 V", cite: { page: 5, at: "Electrical Characteristics, VTRIKL" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "Holds 4.2 V until C/10", cite: { page: 9, at: "Charge Termination" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "STDBY lit once charged", cite: { page: 9, at: "Charge Termination" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "Trimmer sets 4.2–28 V output", cite: { doc: "aerosemi-mt3608", page: 6, at: "Setting the Output Voltage" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "Output sags past 2 A", cite: { doc: "aerosemi-mt3608", page: 3, at: "Electrical Characteristics, SW Current Limit" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "Short trips DW03 until charger", cite: { doc: "pjsemi-dw03", page: 6, at: "Overcurrent Condition" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "Cell cut-off at 2.4 V", cite: { doc: "pjsemi-dw03", page: 5, at: "Overdischarge Condition" }, test: "tests/sim/charge-boost.test.ts" },
+      { what: "TP4056 dies past 8 V", cite: { page: 2, at: "Absolute Maximum Ratings" }, test: "tests/sim/charge-boost.test.ts" },
+    ],
+    notModelled: [
+      { what: "TP4056's 1100 V/R_PROG law", cite: { page: 9, at: "Programming Charge Current" } },
+      { what: "TP4056 thermal regulation", cite: { page: 8, at: "Operation" } },
+      { what: "MT3608 1.2 MHz ripple", cite: { doc: "aerosemi-mt3608", page: 3, at: "Electrical Characteristics, Switching Frequency" } },
+      { what: "Efficiency change (fixed 90 %)", cite: { doc: "aerosemi-mt3608", page: 4, at: "Typical Performance Characteristics" } },
+      { what: "The DW03's over-temperature protection", cite: { doc: "pjsemi-dw03", page: 3, at: "Electrical table (printed as a second Absolute Maximum Ratings), TSHD" } },
+      { what: "USB-C CC lines" },
+    ],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

@@ -4,6 +4,8 @@ import { mcuModel } from "../mcu-model"
 import type { BodyShape, ComponentDef, Element, PartDef, PinDef, PinKind, Side } from "../types"
 import { BOUNCE_FIELDS } from "./basic"
 import { boardArt, cellAt, FFC_PINS, FRAME, moduleArt, MODULE_PAD, onModule, PC13_LINK, PITCH, POWER_JMP, SEATS, SMD_MM } from "./open746i-c-art"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 /**
  * Waveshare Open746I-C: the mother board with the Core746I module (STM32F746IGT6, 8 MB SDRAM)
@@ -698,8 +700,10 @@ const model: Element[] = [
 export const open746ic: ComponentDef = {
   id: "open746i-c",
   name: "Open746I-C",
+  board: { vendor: "Waveshare", mcu: "STM32F746IG", mhz: 216, volts: 3.3, tags: ["7\" LCD", "SDRAM"], photo: "open746i-c.webp", core: "Cortex-M7", memory: "1 MB / 320 KB", onBoard: ['7" LCD + touch', "8 MB SDRAM", "4 LEDs", "joystick", "USB serial"], alias: "Open7XXI-C" },
   description: "STM32F746IG · Waveshare",
-  category: "Boards",
+  keywords: ["STM32", "STM32F746IG", "STM32F7", "Cortex-M7", "Waveshare", "Open7XXI-C"],
+  category: "boards",
   icon: BoardIcon,
   prefix: "U",
   width: WIDTH,
@@ -725,21 +729,117 @@ export const open746ic: ComponentDef = {
   // IS42S16400J on FMC SDRAM bank 2: 8 MB at 0xD000_0000, usable once the FMC has set it up.
   mcuMemory: [{ name: "SDRAM", base: 0xd0000000, size: 0x800000, kind: "ram", external: "sdram2" }],
   info: {
-    MCU: "STM32F746IGT6 on the Core746I, Cortex-M7 216 MHz, 1 MB Flash, 320 KB SRAM, 8 MB SDRAM (IS42S16400J, FMC bank 2 at 0xD0000000)",
-    "Pin strips (P18–P21)": "Every I/O of the LQFP176 by its name, 140 in all, on two 2×18 strips either side of the module: P20 above P21 on the left, P19 above P18 on the right. GND and 3.3 V on P18-35/36, 3.3 V on P20-35, 5 V on P21-36. The module's own 2×40 pad rows (P16, P17) are the same nets: the board brings them out to these strips",
-    "USART1": "PA9 → the CP2102's RXD, PA10 ← its TXD, PA11 ↔ its CTS input, PA12 ↔ its RTS output, each through a JMP2 cap (USART1 JMP, a 2 × 4 header with all four caps fitted as shipped); the board does not cross the flow-control pair. The header's bridge-side pins TXD, RXD, CTS and RTS are wireable: with a cap fitted a wire there meets the MCU's pad too, with it off only the bridge. The TX/RX LEDs (1 kΩ from 3.3 V) sit on the bridge's side of the caps. Powered by the USART1 USB, the bridge holds its TXD and RTS high through 233 Ω (VDD − 0.7 V at 3 mA, its datasheet's guaranteed drive; typically stronger), pulls RXD and CTS up with 25 µA, and draws its datasheet's 20 mA (normal operation) from its own 3.3 V regulator, so the 5 V a fitted OTG VBUS cap puts on its RXD (its pins are rated to 5.8 V) cannot lift that rail through the pull-up. With the USART1 USB out the bridge is unpowered and its four pins clamp to its dead supply through their protection (a junction like an ESD diode, 0.7 V at 10 mA), loaded by the same 20 mA equivalent: the TX and RX LEDs light through them, as on the board, and leave PA9 and PA10 near 0.85 V. The datasheet gives no figures for an unpowered CP2102, so that load is an assumption: PA9 and PA10 measured on the board with the module's USB only would settle it",
-    "USER LEDs": "PB6, PB7, PH4, PI8 → 1 kΩ → LED → GND, each behind its JMP3 jumper",
-    Joystick: "A PG2, B PG3, C PD4, D PD5, centre PI11, to GND, each behind its JMP4 jumper; no pull-ups on the board. Its contacts bounce (on as shipped, Joystick contact bounce in the inspector): every press and release is a burst of 3–9 re-strikes lasting up to the bounce time, 6 ms by default after Ganssle's study of 18 switches (A Guide to Debouncing, 2004, rev. 4 2014: 1557 µs on average and 6200 µs the longest over the 16 that were not outliers), the same burst for the same part and press every run; the lab's own joystick has not been measured",
-    WAKEUP: "PA0 through JMP6, active high: 100 nF to ground at the jumper, 10 kΩ on to K1 (3.3 V when pressed) and 10 kΩ from there to ground, so 3.3 V pressed and 20 kΩ to ground released",
-    "OTG JMP (Core746I)": "Three positions; the lab's boards ship with two caps, PWR OUT and FLG, and VBUS empty (two benches checked, 2026-10-13). VBUS, fitted, ties PA9 to the module USB's 5 V (the VBUS LED, through 1 kΩ, sits on that 5 V either way; its 10 µF and 10 nF are decoupling, left out like the rest), so with that USB plugged in PA9 sits at 5 V and as an output it burns, USART1 TX included; PWR OUT puts PE2 on the MIC2025's enable (10 kΩ to 3.3 V); FLG puts PE3 on its open-drain fault flag (10 kΩ to 3.3 V, 100 nF). The pin lab (2026-10-12, board on the USART1 USB, module USB out, the VBUS LED dark) found PE3 sitting at 0.80 V: neither a released flag (3.3 V) nor an asserted one (8–25 Ω, near 0 V), and neither the schematic nor the MIC2025 datasheet explains it. Modelled as a fit: whenever the module's USB is out, the flag's open-drain NMOS is half on, its gate held where it sinks the 249 µA that puts the node at the measured 0.80 V against the 10 kΩ (k from the datasheet's 8 Ω flag at 5 V). A transistor in saturation is a current sink, so the pad driving PE3 high loses only 5 mV to it, as the bench saw (VDD − 2 mV). It is not the whole story: the bench read 1.44 V with the pad's pull-up and 1.06 V with its pull-down after the firmware's own sweeps, the second above the undisturbed level, which no static equivalent gives; the fit gives 1.30 V and 0.64 V",
-    Jumpers: "Switches on the board, as shipped: JMP2 ×4 (USART1), JMP3 ×4 (LEDs), JMP4 ×5 and JMP6 (KEY JMP), JMP5 (caps on PF7–A4 and PF6–A5; the PB9 and PB8 positions empty), and on the module the OTG JMP (PWR OUT and FLG fitted, VBUS empty as shipped) and the POWER JMP's two caps, VBAT and VREF+. JMP1 (card detect ↔ PC13) is not one of them: the schematic draws it as a 2-pin header, but the lab's board has a 0 Ω resistor soldered there, printed PC13, so SDMMC's CD is PC13 for good, like Arduino A1 through the 0 Ω H6",
-    "RESET": "Both buttons short NRST to ground; 10 nF on each side (module and board) with the MCU's internal pull-up",
-    "BOOT switch": "Starts on SYSTEM, as the board is left for flashing through ST's bootloader: Compile programs the board and starts the program, as STM32CubeProgrammer does after a download. Its common reaches BOOT0 through 10 kΩ: SYSTEM lifts it to 3.3 V, so a RESET or a power cycle starts the core in system memory, where the bootloader is not modelled (it idles); FLASH grounds it and the firmware runs from reset",
-    VBAT: "POWER JMP's VBAT cap fitted: from the 3.3 V rail, so a power cut clears the RTC and backup registers; take it off and wire a battery to the VBAT pin to keep them counting through the cut",
-    "VREF+": "POWER JMP's VREF+ cap fitted (as shipped): the ADC and DAC reference is the 3.3 V rail. Take it off and the reference is whatever the VREF+ pin carries: every conversion reads VIN / VREF+ × full scale (RM0385 §15.3), the DAC puts out code / 4095 × VREF+, and the inspector flags a reference outside DS10916 Table 63 (1.7 V to VDDA, within 1.2 V of VDDA). Nothing on it, the pin floats to 0 V (its 1 µF and 100 nF on the module are not modelled) and the ADC's comparator, measuring every input against a zero reference, reads full scale for any input above 0 V; that is the model's assumption, the datasheet guarantees nothing below 1.7 V",
-    "LCD 7inch (P15)": "24-bit RGB on the LTDC, backlight PA3, GT911 touch on PD13/PD12 (I2C4), RST PD11, INT PD7",
-    "USB OTG (Core746I)": "Its VBUS powers the module with SW1 at USB (5Vin from the board's S2 otherwise) and reaches PA9 through the OTG JMP's VBUS position, empty as shipped. D− and D+ go to PA11/PA12 through 22 Ω and ID to PA10 through 330 Ω; nothing behind the connector is modelled, so those resistors carry no current here",
-    "Not modelled": "JTAG/SWD (no debugger; no pull resistors on the module), the 4.3\" LCD header P14 (RGB as P15, XPT2046 touch on PF7/PF8/PF9 with CS PF6, PENIRQ PD7 and BUSY PD11, backlight PA3), the MIC2025's switch from 5 V to the module's USB (its enable polarity, -1 or -2, is not printed), RTS following the PC's terminal (held high, as the bench found it), the fast fall the census found on PA13 and PB3 (the pin lab saw no resistive pull-down on either: pulled up, both read VDD), the PC's 15 kΩ on D−/D+ behind the module USB, PDR_ON's 3-pad solder jumper COMP.J2 (its bridged side is not printed), the module's decoupling",
-    Source: "Waveshare Open746I-C and Core746I schematics",
+    // MCU: STM32F746IGT6 on the Core746I, Cortex-M7 216 MHz, 1 MB Flash, 320 KB SRAM, 8 MB SDRAM (IS42S16400J, FMC bank 2
+    //   at 0xD0000000)
+    // Pin strips (P18–P21): Every I/O of the LQFP176 by its name, 140 in all, on two 2×18 strips either side of the
+    //   module: P20 above P21 on the left, P19 above P18 on the right. GND and 3.3 V on P18-35/36, 3.3 V on P20-35, 5 V on
+    //   P21-36. The module's own 2×40 pad rows (P16, P17) are the same nets: the board brings them out to these strips
+    "Pin strips (P18–P21)": "All 140 I/Os, by name",
+    // USART1: PA9 → the CP2102's RXD, PA10 ← its TXD, PA11 ↔ its CTS input, PA12 ↔ its RTS output, each through a JMP2 cap
+    //   (USART1 JMP, a 2 × 4 header with all four caps fitted as shipped); the board does not cross the flow-control pair.
+    //   The header's bridge-side pins TXD, RXD, CTS and RTS are wireable: with a cap fitted a wire there meets the MCU's pad
+    //   too, with it off only the bridge. The TX/RX LEDs (1 kΩ from 3.3 V) sit on the bridge's side of the caps. Powered by
+    //   the USART1 USB, the bridge holds its TXD and RTS high through 233 Ω (VDD − 0.7 V at 3 mA, its datasheet's guaranteed
+    //   drive; typically stronger), pulls RXD and CTS up with 25 µA, and draws its datasheet's 20 mA (normal operation) from
+    //   its own 3.3 V regulator, so the 5 V a fitted OTG VBUS cap puts on its RXD (its pins are rated to 5.8 V) cannot lift
+    //   that rail through the pull-up. With the USART1 USB out the bridge is unpowered and its four pins clamp to its dead
+    //   supply through their protection (a junction like an ESD diode, 0.7 V at 10 mA), loaded by the same 20 mA equivalent:
+    //   the TX and RX LEDs light through them, as on the board, and leave PA9 and PA10 near 0.85 V. The datasheet gives no
+    //   figures for an unpowered CP2102, so that load is an assumption: PA9 and PA10 measured on the board with the module's
+    //   USB only would settle it
+    USART1: "CP2102 on PA9/PA10 via JMP2",
+    // USER LEDs: PB6, PB7, PH4, PI8 → 1 kΩ → LED → GND, each behind its JMP3 jumper
+    "USER LEDs": "PB6/PB7/PH4/PI8, active high",
+    // Joystick: A PG2, B PG3, C PD4, D PD5, centre PI11, to GND, each behind its JMP4 jumper; no pull-ups on the board.
+    //   Its contacts bounce (on as shipped, Joystick contact bounce in the inspector): every press and release is a burst of
+    //   3–9 re-strikes lasting up to the bounce time, 6 ms by default after Ganssle's study of 18 switches (A Guide to
+    //   Debouncing, 2004, rev. 4 2014: 1557 µs on average and 6200 µs the longest over the 16 that were not outliers), the
+    //   same burst for the same part and press every run; the lab's own joystick has not been measured
+    Joystick: "PG2/PG3/PD4/PD5/PI11, enable pull-ups",
+    // WAKEUP: PA0 through JMP6, active high: 100 nF to ground at the jumper, 10 kΩ on to K1 (3.3 V when pressed) and 10 kΩ
+    //   from there to ground, so 3.3 V pressed and 20 kΩ to ground released
+    WAKEUP: "PA0, active high",
+    // OTG JMP (Core746I): Three positions; the lab's boards ship with two caps, PWR OUT and FLG, and VBUS empty (two
+    //   benches checked, 2026-10-13). VBUS, fitted, ties PA9 to the module USB's 5 V (the VBUS LED, through 1 kΩ, sits on
+    //   that 5 V either way; its 10 µF and 10 nF are decoupling, left out like the rest), so with that USB plugged in PA9
+    //   sits at 5 V and as an output it burns, USART1 TX included; PWR OUT puts PE2 on the MIC2025's enable (10 kΩ to 3.3
+    //   V); FLG puts PE3 on its open-drain fault flag (10 kΩ to 3.3 V, 100 nF). The pin lab (2026-10-12, board on the USART1
+    //   USB, module USB out, the VBUS LED dark) found PE3 sitting at 0.80 V: neither a released flag (3.3 V) nor an asserted
+    //   one (8–25 Ω, near 0 V), and neither the schematic nor the MIC2025 datasheet explains it. Modelled as a fit: whenever
+    //   the module's USB is out, the flag's open-drain NMOS is half on, its gate held where it sinks the 249 µA that puts
+    //   the node at the measured 0.80 V against the 10 kΩ (k from the datasheet's 8 Ω flag at 5 V). A transistor in
+    //   saturation is a current sink, so the pad driving PE3 high loses only 5 mV to it, as the bench saw (VDD − 2 mV). It
+    //   is not the whole story: the bench read 1.44 V with the pad's pull-up and 1.06 V with its pull-down after the
+    //   firmware's own sweeps, the second above the undisturbed level, which no static equivalent gives; the fit gives 1.30
+    //   V and 0.64 V
+    "OTG JMP (Core746I)": "VBUS fitted, PA9 sees 5V",
+    // Jumpers: Switches on the board, as shipped: JMP2 ×4 (USART1), JMP3 ×4 (LEDs), JMP4 ×5 and JMP6 (KEY JMP), JMP5 (caps
+    //   on PF7–A4 and PF6–A5; the PB9 and PB8 positions empty), and on the module the OTG JMP (PWR OUT and FLG fitted, VBUS
+    //   empty as shipped) and the POWER JMP's two caps, VBAT and VREF+. JMP1 (card detect ↔ PC13) is not one of them: the
+    //   schematic draws it as a 2-pin header, but the lab's board has a 0 Ω resistor soldered there, printed PC13, so
+    //   SDMMC's CD is PC13 for good, like Arduino A1 through the 0 Ω H6
+    // RESET: Both buttons short NRST to ground; 10 nF on each side (module and board) with the MCU's internal pull-up
+    // BOOT switch: Starts on SYSTEM, as the board is left for flashing through ST's bootloader: Compile programs the board
+    //   and starts the program, as STM32CubeProgrammer does after a download. Its common reaches BOOT0 through 10 kΩ: SYSTEM
+    //   lifts it to 3.3 V, so a RESET or a power cycle starts the core in system memory, where the bootloader is not
+    //   modelled (it idles); FLASH grounds it and the firmware runs from reset
+    "BOOT switch": "SYSTEM idles, FLASH runs firmware",
+    // VBAT: POWER JMP's VBAT cap fitted: from the 3.3 V rail, so a power cut clears the RTC and backup registers; take it
+    //   off and wire a battery to the VBAT pin to keep them counting through the cut
+    // VREF+: POWER JMP's VREF+ cap fitted (as shipped): the ADC and DAC reference is the 3.3 V rail. Take it off and the
+    //   reference is whatever the VREF+ pin carries: every conversion reads VIN / VREF+ × full scale (RM0385 §15.3), the DAC
+    //   puts out code / 4095 × VREF+, and the inspector flags a reference outside DS10916 Table 63 (1.7 V to VDDA, within
+    //   1.2 V of VDDA). Nothing on it, the pin floats to 0 V (its 1 µF and 100 nF on the module are not modelled) and the
+    //   ADC's comparator, measuring every input against a zero reference, reads full scale for any input above 0 V; that is
+    //   the model's assumption, the datasheet guarantees nothing below 1.7 V
+    "POWER JMP": "VBAT, VREF+ from 3.3V",
+    // LCD 7inch (P15): 24-bit RGB on the LTDC, backlight PA3, GT911 touch on PD13/PD12 (I2C4), RST PD11, INT PD7
+    "LCD 7inch (P15)": "LTDC RGB, GT911 on I2C4",
+    // USB OTG (Core746I): Its VBUS powers the module with SW1 at USB (5Vin from the board's S2 otherwise) and reaches PA9
+    //   through the OTG JMP's VBUS position, empty as shipped. D− and D+ go to PA11/PA12 through 22 Ω and ID to PA10 through
+    //   330 Ω; nothing behind the connector is modelled, so those resistors carry no current here
+    "USB OTG (Core746I)": "PA11/PA12, VBUS powers module",
+    // Not modelled: JTAG/SWD (no debugger; no pull resistors on the module), the 4.3" LCD header P14 (RGB as P15, XPT2046
+    //   touch on PF7/PF8/PF9 with CS PF6, PENIRQ PD7 and BUSY PD11, backlight PA3), the MIC2025's switch from 5 V to the
+    //   module's USB (its enable polarity, -1 or -2, is not printed), RTS following the PC's terminal (held high, as the
+    //   bench found it), the fast fall the census found on PA13 and PB3 (the pin lab saw no resistive pull-down on either:
+    //   pulled up, both read VDD), the PC's 15 kΩ on D−/D+ behind the module USB, PDR_ON's 3-pad solder jumper COMP.J2 (its
+    //   bridged side is not printed), the module's decoupling
+    // Source: Waveshare Open746I-C and Core746I schematics
   },
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [open746ic]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "open746i-c": {
+    maker: "Waveshare",
+    docs: [DOCS["waveshare-open746i-c-um"], DOCS["waveshare-open746i-c-sch"], DOCS["waveshare-core746i-sch"], DOCS["st-ds10916"], DOCS["st-rm0385"], DOCS["silabs-cp2102"], DOCS["mchp-mic2025"]],
+    specs: [],
+    characteristics: [
+      { kind: "clock", value: { max: 216e6 }, cite: { doc: "st-ds10916", page: 16, at: "Table 2" } },
+      { kind: "flash", value: { typ: 1048576 }, cite: { doc: "st-ds10916", page: 15, at: "Table 2" } },
+      { kind: "ram", value: { typ: 327680 }, cite: { doc: "st-ds10916", page: 15, at: "Table 2" } },
+      { kind: "ioLevel", value: { typ: 3.3 }, limit: { max: 4 }, cite: { doc: "waveshare-open746i-c-sch", page: 1, at: "3.3V rail" }, limitCite: { doc: "st-ds10916", page: 102, at: "Table 15" } },
+      { kind: "input", value: { typ: 5 }, cite: { doc: "waveshare-open746i-c-sch", page: 1, at: "5VDC" } },
+      { kind: "ioPins", value: { typ: 140 }, cite: { doc: "st-ds10916", page: 16, at: "Table 2" } },
+    ],
+    modelled: [
+      { what: "Runs from 8 MHz crystal", test: "tests/sim/open746.test.ts" },
+      { what: "Four LEDs behind their jumpers", test: "tests/sim/open746.test.ts" },
+      { what: "Joystick and WAKEUP key", test: "tests/sim/open746.test.ts" },
+      { what: "RESET and BOOT switches", test: "tests/sim/open746.test.ts" },
+      { what: "8 MB SDRAM on FMC", test: "tests/sim/lcd.test.ts" },
+      { what: "7-inch LCD through LTDC", test: "tests/sim/lcd.test.ts" },
+      { what: "GT911 touch on I²C", test: "tests/sim/lcd.test.ts" },
+      { what: "CP2102 USB serial on USART1", test: "tests/sim/lcd.test.ts" },
+      { what: "Backup SRAM kept by CR2032", test: "tests/sim/stm32f746-power.test.ts" },
+      { what: "Peripherals reach pads through strips", test: "tests/sim/open746-peripherals.test.ts" },
+    ],
+    notModelled: [{ what: "No JTAG/SWD debugger" }, { what: "No 4.3\" LCD header P14" }, { what: "No MIC2025 module USB switch" }, { what: "RTS held high" }, { what: "No fast fall on PA13/PB3" }, { what: "No PC USB pull-downs" }, { what: "No PDR_ON jumper COMP.J2" }, { what: "No module decoupling" }],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]

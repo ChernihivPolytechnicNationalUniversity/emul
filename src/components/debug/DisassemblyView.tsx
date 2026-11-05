@@ -5,6 +5,7 @@ import type { BoardView, DebugController } from "@/debug/session"
 import { disassemble, rangeAround, type DisasmLine } from "@/debug/disasm"
 import { MemorySnapshot } from "@/debug/memory"
 import { EM_AVR } from "@/mcu/elf"
+import { stopUnlessAppCommand } from "@/lib/keymap"
 import { cn } from "@/lib/utils"
 
 type Props = {
@@ -77,7 +78,7 @@ export function DisassemblyView({ debug, boardId, view, breakpoints, onToggleBre
           className="h-5 w-56 rounded-sm border bg-transparent px-1 text-[11px] outline-none focus:bg-muted"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDown={stopUnlessAppCommand}
           placeholder="Go to a function or an address"
           aria-label="Function or address"
         />

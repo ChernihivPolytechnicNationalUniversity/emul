@@ -1,12 +1,16 @@
+import { CATEGORIES, OPEN_AT_FIRST } from "@/schematic/categories"
 import * as React from "react"
 
-const KEY = "emul.palette.collapsed-groups"
+// v2: the palette regrouped (2026-11); groups other than the first start folded.
+const KEY = "emul.palette.collapsed-groups.v2"
 
 const NONE: ReadonlySet<string> = new Set()
 
 export function savedCollapsedGroups(): Set<string> {
   try {
-    const saved: unknown = JSON.parse(localStorage.getItem(KEY) ?? "[]")
+    const raw = localStorage.getItem(KEY)
+    if (raw === null) return new Set(CATEGORIES.map((c) => c.id).filter((id) => !OPEN_AT_FIRST.includes(id)))
+    const saved: unknown = JSON.parse(raw)
     return new Set(Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : [])
   } catch {
     return new Set()

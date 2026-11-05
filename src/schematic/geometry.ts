@@ -1,5 +1,5 @@
 import { bodyBounds } from "./body"
-import { getDef } from "./registry"
+import { getDef, getMeta, type PartMeta } from "./registry"
 import { SpatialIndex } from "./spatial"
 import type { BodyShape, ComponentDef, LegacyWire as Wire, PinDef, PinRef, PlacedObject, Point, Rotation, Side } from "./types"
 
@@ -143,8 +143,10 @@ export function nextRotation(def: ComponentDef, rotation: Rotation, turn: Turn, 
   return rotation
 }
 
-export function objectSize(def: ComponentDef, rot: Rotation = 0) {
-  const square = isDiagonal(rot) ? diagonalSquare(def) : null
+const hasPins = (def: ComponentDef | PartMeta): def is ComponentDef => "pins" in def
+
+export function objectSize(def: ComponentDef | PartMeta, rot: Rotation = 0) {
+  const square = isDiagonal(rot) && hasPins(def) ? diagonalSquare(def) : null
   if (square !== null) return { w: square, h: square }
   const i = rot / 45
   const c = Math.abs(COS[i])
@@ -242,7 +244,8 @@ export function unionOf(rects: readonly Rect[]): Rect {
 
 /** World-space bounding box of a placed object. */
 export function objectRect(obj: PlacedObject, grid: number): Rect {
-  const def = getDef(obj.def)
+  // A part still loading has its size from the catalogue: a thumbnail or a fit-to-view is right meanwhile.
+  const def = getDef(obj.def) ?? getMeta(obj.def)
   if (!def) return { x: obj.x, y: obj.y, w: grid, h: grid }
   const { w, h } = objectSize(def, obj.rotation)
   return { x: obj.x, y: obj.y, w: w * grid, h: h * grid }

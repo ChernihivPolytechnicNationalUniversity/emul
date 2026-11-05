@@ -6,6 +6,8 @@
 import { SERVO_SUPPLY_KEY } from "@/sim/servo"
 import { ServoIcon } from "../icons"
 import type { ComponentDef } from "../types"
+import { DOCS } from "../datasheets/docs"
+import type { Datasheet } from "../types"
 
 const W = 9
 const H = 6
@@ -13,9 +15,8 @@ const H = 6
 export const servoSg90: ComponentDef = {
   id: "servo-sg90",
   name: "Servo SG90",
-  description:
-    "TowerPro SG90 9 g micro servo: 20 ms (50 Hz) pulses, 1.5 ms the middle, ~1 ms all the way left (−90°), ~2 ms all the way right (+90°); 0.1 s/60° at 4.8 V; dead band 10 µs. Past ±90° the horn stalls on its stop and draws the stall current.",
-  category: "Motors",
+  description: "9 g micro hobby servo",
+  category: "sound",
   keywords: ["servo", "SG90", "TowerPro", "Tower Pro", "micro servo", "PWM"],
   icon: ServoIcon,
   prefix: "M",
@@ -38,5 +39,52 @@ export const servoSg90: ComponentDef = {
     { kind: "R", a: "VCC", b: "GND", value: 1e9, live: SERVO_SUPPLY_KEY, label: "Motor and electronics" },
     { kind: "GPIO", node: "SIG", vddNode: "VCC", gndNode: "GND" },
   ],
-  info: { Source: "TowerPro SG90 sheet (components101 / FriendlyWire copies); Rapid 37-1330 (Version 1, October 2013); currents: vendor spec sheet and RobotShop" },
+  // info Source (in the datasheet record): "TowerPro SG90 sheet (components101 / FriendlyWire copies); Rapid 37-1330 (Version 1, October 2013); currents: vendor spec sheet and RobotShop"
 }
+
+/** This file's parts, in palette order: the catalogue loads them from here. */
+export const defs: ComponentDef[] = [servoSg90]
+
+// Datasheet records: the documents this file's parts cite, and what their models leave out (the notes above, item by item).
+// The key numbers with their pages are still to be added (specs).
+const RECORDS: Record<string, Datasheet> = {
+  "servo-sg90": {
+    maker: "TowerPro",
+    docs: [DOCS["towerpro-sg90"], DOCS["rapid-37-1330"]],
+    specs: [],
+    characteristics: [
+      { kind: "supply", value: { typ: 4.8 }, cite: { page: 1, at: "Specifications" } },
+      { kind: "pulseWidth", value: { min: 1e-3, typ: 1.5e-3, max: 2e-3, approx: true }, cite: { page: 2 } },
+      { kind: "speed", value: { typ: 0.1 }, at: [{ supply: 4.8 }], cite: { doc: "rapid-37-1330", page: 1 } },
+      { kind: "torque", value: { typ: 0.1765 }, at: [{ supply: 4.8 }, { state: "stall" }], cite: { doc: "rapid-37-1330", page: 1 } },
+      { kind: "deadBand", value: { typ: 10e-6 }, cite: { page: 1, at: "Specifications" } },
+      { kind: "temperature", value: { min: 0, max: 55 }, cite: { page: 1, at: "Specifications" } },
+    ],
+    modelled: [
+      { what: "Pulse width sets the angle", cite: { page: 2 }, test: "tests/sim/servo.test.ts" },
+      { what: "1–2 ms linear over ±90°", cite: { page: 2 }, test: "tests/sim/servo.test.ts" },
+      { what: "Horn travels at 0.1 s/60°", cite: { page: 1, at: "Specifications" }, test: "tests/sim/servo.test.ts" },
+      { what: "10 µs dead band", cite: { page: 1, at: "Specifications" }, test: "tests/sim/servo.test.ts" },
+      { what: "Past ±90° stalls on stop", test: "tests/sim/servo.test.ts" },
+      { what: "Stall draws vendor's 750 mA", test: "tests/sim/servo.test.ts" },
+      { what: "4 mA at rest", test: "tests/sim/servo.test.ts" },
+      { what: "90 mA while moving", test: "tests/sim/servo.test.ts" },
+      { what: "Follows firmware timer PWM pulses", test: "tests/sim/nucleo-servo.test.ts" },
+      { what: "No pulses, horn stays put", test: "tests/sim/servo.test.ts" },
+      { what: "Dead below 3 V" },
+      { what: "3 V minimum from SG92R" },
+    ],
+    notModelled: [
+      { what: "Nothing loads the horn", cite: { page: 1, at: "Specifications" } },
+      { what: "No 1.8 kgf·cm stall torque", cite: { page: 1, at: "Specifications" } },
+      { what: "Always the 4.8 V figures", cite: { doc: "rapid-37-1330", page: 1 } },
+      { what: "No acceleration, overshoot or hunting" },
+      { what: "No current pulses or noise" },
+      { what: "Stall or overvoltage heating, wear" },
+      { what: "Pulse period not checked" },
+      { what: "Follows periods to ~40 ms" },
+      { what: "Operating temperature range", cite: { page: 1, at: "Specifications" } },
+    ],
+  },
+}
+for (const def of defs) def.datasheet ??= RECORDS[def.id]
