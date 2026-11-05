@@ -3,6 +3,8 @@ import { ROOM_ELEMENTS } from "emul-shared/room"
 import { SCHEMATIC_VERSION, upgradedFrom, type SavedSchematic, type Upgrade } from "@/schematic/migrate"
 import type { HdlModule, PartState, PlacedObject, Schematic } from "@/schematic/types"
 import type { WireSegment } from "@/schematic/wires/segment"
+import { withLibrary } from "@/schematic/registry"
+import { inNormalForm } from "@/schematic/wire-edits"
 
 export const ROOM_VERSION = "version"
 
@@ -49,8 +51,7 @@ export function split(doc: Schematic): Map<string, string> {
 }
 
 type Ordered<T> = T & { z: number }
-const byZ = <T>(a: Ordered<T>, b: Ordered<T>) => a.z - b.z
-const byZThenId = (a: Ordered<WireSegment>, b: Ordered<WireSegment>) => a.z - b.z || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+const byZThenId = <T extends { id: string }>(a: Ordered<T>, b: Ordered<T>) => a.z - b.z || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 const unz = <T>(o: Ordered<T>): T => {
   const copy: Partial<Ordered<T>> = { ...o }
   delete copy.z
@@ -83,7 +84,7 @@ export function join(elements: ReadonlyMap<string, string>): Schematic {
     else if (kind === "m") library.push(value as Ordered<HdlModule>)
   }
   const doc: Schematic = {
-    objects: objects.sort(byZ).map((o) => {
+    objects: objects.sort(byZThenId).map((o) => {
       const { firmware, ...x } = extra.get(o.id) ?? {}
       const object = unz(o)
       return { ...object, ...x, props: { ...object.props, ...firmware } }
@@ -91,7 +92,7 @@ export function join(elements: ReadonlyMap<string, string>): Schematic {
     wires: wires.sort(byZThenId).map(unz),
     parts,
   }
-  if (library.length) doc.library = library.sort(byZ).map(unz)
+  if (library.length) doc.library = library.sort(byZThenId).map(unz)
   return doc
 }
 
@@ -122,7 +123,10 @@ function olderShelf(room: Room): { elements: Y.Map<string>; stamp: string | unde
 const shelvedHere = (room: Room) => room.elements.size > 0 || formatOf(room) >= SCHEMATIC_VERSION
 
 export function readRoom(room: Room): Upgrade {
-  if (shelvedHere(room)) return { doc: join(new Map(room.elements.entries())), notes: [] }
+  if (shelvedHere(room)) {
+    const doc = join(new Map(room.elements.entries()))
+    return { doc: withLibrary(doc.library, () => inNormalForm(doc)), notes: [] }
+  }
   const older = olderShelf(room)
   if (!older) return { doc: join(new Map()), notes: [] }
   const { upgraded: _upgraded, ...read } = onThisVersion(join(new Map(older.elements.entries())) as unknown as SavedSchematic, older.stamp)

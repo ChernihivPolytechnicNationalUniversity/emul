@@ -246,6 +246,30 @@ describe("found by phase 3's reviews", () => {
     expect.soft(normalFormViolations(fromLeft.wires, []), "normal").toEqual([])
     expect.soft(fromRight.wires, "the same drawing, ids and all, in both tabs").toEqual(fromLeft.wires)
     expect.soft(inNormalForm(fromLeft), "and already normal stays as it is").toBe(fromLeft)
+    for (const [side, room] of [["left", left], ["right", right]] as const) {
+      const entered = guestRoom(room)!.doc
+      expect.soft(normalFormViolations(entered.wires, []), `a guest entering by the ${side} tab gets a normal drawing (verification V3)`).toEqual([])
+      expect.soft(entered.wires, `the same drawing as the tabs already in (${side})`).toEqual(fromLeft.wires)
+    }
+  })
+
+  it("two tabs that each add a part to an older tab's room upgrade it alike, so the shelf gets each segment once (verification V4)", async () => {
+    const old = await rawOld("power-supply.emul")
+    const left = roomAnOlderTabFilled(old)
+    const right = emptyRoom()
+    Y.applyUpdate(right.ydoc, Y.encodeStateAsUpdate(left.ydoc))
+    const z = old.objects.length
+    const ground = (id: string, x: number) => JSON.stringify({ id, def: "ground", x: x * GRID, y: 60 * GRID, props: { ref: id }, z })
+    left.ydoc.getMap<string>(shelfName(SCHEMATIC_VERSION - 1)).set("o:extra-a", ground("extra-a", 0))
+    right.ydoc.getMap<string>(shelfName(SCHEMATIC_VERSION - 1)).set("o:extra-b", ground("extra-b", 20))
+    Y.applyUpdate(left.ydoc, Y.encodeStateAsUpdate(right.ydoc))
+    Y.applyUpdate(right.ydoc, Y.encodeStateAsUpdate(left.ydoc))
+    const fromLeft = guestRoom(left)!.doc
+    const fromRight = guestRoom(right)!.doc
+    expect.soft(fromRight.objects.map((o) => o.id), "the parts in one order").toEqual(fromLeft.objects.map((o) => o.id))
+    expect.soft(fromRight.wires, "the same segments under the same ids").toEqual(fromLeft.wires)
+    Y.applyUpdate(left.ydoc, Y.encodeStateAsUpdate(right.ydoc))
+    expect.soft([...left.elements.keys()].filter((k) => k.startsWith("w:")).length, "each segment once on the shelf").toBe(fromLeft.wires.length)
   })
 
   it("a room keeps a part's firmware, project, debugger settings and part state, and the wires in their order, through the shelf (findings 3.R12, 3.L13)", () => {

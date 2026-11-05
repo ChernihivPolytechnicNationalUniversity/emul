@@ -8,7 +8,7 @@ type Built = { doc: Schematic; hubs: PlacedObject[]; connections: LegacyWire[]; 
 const built = new WeakMap<Schematic, Built>()
 
 const fingerprint = (state: Built) =>
-  `${state.doc.objects.map((o) => `${o.id}|${o.def}|${o.x}|${o.y}|${o.rotation ?? 0}|${o.mirror ? 1 : 0}|${o.props?.ref ?? ""}|${o.props?.value ?? ""}`).join(";")}#${state.hubs.map((o) => `${o.x},${o.y}`).join(";")}#${state.connections.map((w) => `${w.id}|${w.from.object}:${w.from.pin}|${w.to.object}:${w.to.pin}|${(w.points ?? []).map((p) => `${p.x},${p.y}`).join(" ")}|${w.color ?? ""}`).join(",")}#${(state.doc.library ?? []).map((m) => `${m.id}:${m.built}`).join(",")}`
+  `${state.doc.objects.map((o) => `${o.id}|${o.def}|${o.x}|${o.y}|${o.rotation ?? 0}|${o.mirror ? 1 : 0}|${o.props?.ref ?? ""}|${o.props?.value ?? ""}`).join(";")}#${state.hubs.map((o) => `${o.x},${o.y}`).join(";")}#${state.connections.map((w) => `${w.id}|${w.from.object}:${w.from.pin}|${w.to.object}:${w.to.pin}|${(w.points ?? []).map((p) => `${p.x},${p.y}`).join(" ")}|${w.color ?? ""}`).join(",")}#${(state.doc.library ?? []).map((m) => `${m.id}:${m.built}:${m.name}`).join(",")}`
 
 function frozen(state: Built): readonly WireSegment[] {
   const key = fingerprint(state)
@@ -16,6 +16,9 @@ function frozen(state: Built): readonly WireSegment[] {
   let piece = 0
   const { doc, notes, faithful } = withLibrary(state.doc.library, () => wiresAsSegments({ objects: [...state.doc.objects, ...state.hubs], wires: state.connections, parts: {}, library: state.doc.library }, () => `~${piece++}`))
   if (!faithful) throw new Error(`the wiring drawn cannot be laid without changing the circuit: ${notes.filter((n) => !n.includes("laid again")).join(" ")}`)
+  const placed = new Map(state.doc.objects.map((o) => [o.id, o]))
+  const moved = doc.objects.filter((o) => placed.has(o.id) && (placed.get(o.id)!.x !== o.x || placed.get(o.id)!.y !== o.y))
+  if (moved.length) throw new Error(`the drawing places parts where no wire can end on their pins: ${moved.map((o) => o.props?.ref ?? o.id).join(", ")}`)
   state.key = key
   state.wires = Object.freeze(doc.wires)
   return state.wires

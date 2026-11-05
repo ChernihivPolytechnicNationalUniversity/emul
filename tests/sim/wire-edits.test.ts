@@ -6,7 +6,7 @@ import { withLibrary } from "@/schematic/registry"
 import { normalise } from "@/schematic/wires/normal-form"
 import counter from "./hdl/counter.json"
 import counter2 from "./hdl/counter2.json"
-import { clipOf, connectPins, moved, nearestOn, placedObject, recoloured, removed, reoriented, tapWireAt, travellingWires, wiringOf, withModule } from "@/schematic/wire-edits"
+import { clipOf, connectPins, moved, nearestOn, placedObject, recoloured, removed, reoriented, tapWireAt, travellingWires, wiringOf, withModule, type Wiring } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
 import { danglingEnds, junctionsOf, wireNets } from "@/schematic/wires/graph"
 import { wirePins } from "@/schematic/migrate-wires"
@@ -224,6 +224,13 @@ describe("found by phase 3's reviews", () => {
     expect.soft(plain.wires.length, "a wire laid").toBeGreaterThan(withR4.wires.length)
     expect.soft(connectPins(withR4, { object: "R4", pin: "2" }, { object: "R2", pin: "2" }, [], undefined, ids(), known).wires, "the same with the store's wiring").toEqual(plain.wires)
     expect.soft(connectPins(withR4, { object: "R4", pin: "2" }, { object: "R2", pin: "2" }, [], undefined, ids(), stale).wires, "the same with a wiring of another document").toEqual(plain.wires)
+    let consulted = 0
+    const spied: Wiring = { ...known, view: new Proxy(known.view, { get: (target, key) => (consulted++, Reflect.get(target, key)) }) }
+    connectPins(withR4, { object: "R4", pin: "2" }, { object: "R2", pin: "2" }, [], undefined, ids(), spied)
+    expect.soft(consulted, "connecting reads the store's graph rather than building its own").toBeGreaterThan(0)
+    consulted = 0
+    tapWireAt(withR4, "a", withR4.wires[0].a, { object: "R4", pin: "2" }, [], undefined, ids(), spied)
+    expect.soft(consulted, "so does tapping").toBeGreaterThan(0)
     const tapped = tapWireAt(withR4, "a", withR4.wires[0].a, { object: "R4", pin: "2" }, [], undefined, ids())
     expect.soft(tapWireAt(withR4, "a", withR4.wires[0].a, { object: "R4", pin: "2" }, [], undefined, ids(), known).wires, "a tap the same with the store's wiring").toEqual(tapped.wires)
   })

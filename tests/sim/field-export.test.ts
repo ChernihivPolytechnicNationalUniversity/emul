@@ -4,13 +4,16 @@ import { printedNameLayout, printedNames } from "@/components/field/printed-name
 import { SymbolRaster, TextRaster } from "@/components/field/symbol-raster"
 import { bodyBounds } from "@/schematic/body"
 import { examples } from "@/schematic/examples"
-import { orientationOf, type Point } from "@/schematic/geometry"
+import { objectPins, orientationOf, type Point } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
-import type { PlacedObject } from "@/schematic/types"
+import type { PlacedObject, Schematic } from "@/schematic/types"
+import { wiringOf } from "@/schematic/wire-edits"
+import { WireGraph } from "@/schematic/wires/graph"
+import { wireMarks } from "@/components/field/wire-marks"
 
 const GRID = 24
 
-type Recording = { texts: string[]; closedPaths: number }
+type Recording = { texts: string[]; closedPaths: number; arcs: number }
 
 let canvases: Recording[] = []
 
@@ -20,6 +23,7 @@ function recordingContext(recording: Recording): CanvasRenderingContext2D {
     get(target, key) {
       if (key === "fillText") return (text: string) => recording.texts.push(text)
       if (key === "closePath") return () => recording.closedPaths++
+      if (key === "arc") return () => recording.arcs++
       if (key === "measureText") return (text: string) => ({ width: text.length * 6 })
       if (key === "createLinearGradient") return () => ({ addColorStop() {} })
       if (key in target) return target[key]
@@ -33,7 +37,7 @@ function recordingContext(recording: Recording): CanvasRenderingContext2D {
 }
 
 function fakeCanvas(width = 1, height = 1) {
-  const recording: Recording = { texts: [], closedPaths: 0 }
+  const recording: Recording = { texts: [], closedPaths: 0, arcs: 0 }
   canvases.push(recording)
   const context = recordingContext(recording)
   return { width, height, getContext: () => context, toBlob: (done: (blob: Blob | null) => void) => done(null) }
@@ -67,7 +71,7 @@ async function painted(objects: readonly PlacedObject[]): Promise<Recording> {
     texts: new TextRaster(),
     textScale: 1,
   })
-  return { texts: canvases.flatMap((c) => c.texts), closedPaths: canvases.reduce((sum, c) => sum + c.closedPaths, 0) }
+  return { texts: canvases.flatMap((c) => c.texts), closedPaths: canvases.reduce((sum, c) => sum + c.closedPaths, 0), arcs: canvases.reduce((sum, c) => sum + c.arcs, 0) }
 }
 
 function missingFrom(painting: readonly string[], expected: readonly string[]) {
@@ -121,5 +125,21 @@ describe("the PNG export leaves out the names a docked 7\" LCD covers, as the fi
     expect.soft(missingFrom(over.texts, apart), "left out").toEqual([])
     expect.soft(missingFrom(apart, over.texts), "added").toEqual([])
     expect.soft(over.closedPaths, "plates").toBe(alone.closedPaths + lcd.closedPaths)
+  })
+})
+
+describe("the PNG export paints the wiring's marks through the field's own painter (findings 3.R5; verification)", () => {
+  it("a T's dot and a dangling end reach the exported picture", async () => {
+    const r1: PlacedObject = { id: "R1", def: "resistor", x: 0, y: 0, props: { ref: "R1" } }
+    const r2: PlacedObject = { id: "R2", def: "resistor", x: 12 * GRID, y: 0, props: { ref: "R2" } }
+    const pin = (o: PlacedObject, id: string) => objectPins(o, GRID).find((p) => p.pin.id === id)!.point
+    const a = pin(r1, "2")
+    const b = pin(r2, "1")
+    const mid = { x: (a.x + b.x) / 2, y: a.y }
+    const doc: Schematic = { objects: [r1, r2], wires: [{ id: "l", a, b: mid }, { id: "r", a: mid, b }, { id: "s", a: mid, b: { x: mid.x, y: mid.y + 3 * GRID } }], parts: {} }
+    const w = wiringOf(new WireGraph(), doc)
+    canvases = []
+    await exportPng({ host: {} as Element, theme: `export-${exported++}`, objects: doc.objects, routes: w.routes, grid: GRID, colorOf: () => "black", symbols: new SymbolRaster(), texts: new TextRaster(), textScale: 1, marks: wireMarks(w.routes, w.dots, w.dangling, w.corners, () => "black", true) })
+    expect.soft(canvases.reduce((sum, c) => sum + c.arcs, 0), "the dot, its casing and the open end").toBe(3)
   })
 })

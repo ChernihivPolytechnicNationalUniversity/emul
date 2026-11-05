@@ -5,13 +5,15 @@ import { openedFile, projectFile, readProjectFile } from "@/project/project-stor
 import { builder, connect, connections, legacyOf, rewire } from "@/schematic/builder"
 import { examples, lab1Board } from "@/schematic/examples"
 import { GRID, objectPins, type Point } from "@/schematic/geometry"
-import { getDef } from "@/schematic/registry"
+import { getDef, withLibrary } from "@/schematic/registry"
+import type { HdlNetlist } from "emul-shared/hdl"
+import counter from "./hdl/counter.json"
 import { legacyUpgraded, SCHEMATIC_VERSION, upgraded, versionOf } from "@/schematic/migrate"
 import { corners, frozenCandidates, wiresAsSegments, wirePins } from "@/schematic/migrate-wires"
 import { laidAgain } from "@/schematic/freeze"
 import { Conductors } from "@/schematic/wires/conductors"
 import { fieldRouter } from "@/schematic/placement"
-import type { LegacySchematic, LegacyWire, PlacedObject, Schematic } from "@/schematic/types"
+import type { HdlModule, LegacySchematic, LegacyWire, PlacedObject, Schematic } from "@/schematic/types"
 import { junctionsOf, wireNets } from "@/schematic/wires/graph"
 import { buildNetlist, GROUND, type Netlist } from "@/sim/netlist"
 import { SimLoop } from "@/sim/loop"
@@ -390,6 +392,31 @@ describe("documents drawn in code go through the same freeze (design.md §10)", 
     expect.soft(endsOnPin(), "mirrored").toBe(true)
   })
 
+  it("the builder refuses a part placed off the grid rather than move it under its own wires (verification V5)", () => {
+    const { doc, place, wire } = builder(GRID)
+    const r1 = place("resistor", 0.25, 0)
+    const r2 = place("resistor", 10, 0)
+    wire(r1, "2", r2, "1")
+    expect.soft(() => doc.wires, "refused, naming the part").toThrow(/no wire can end on their pins: R1/)
+  })
+
+  it("an HDL module renamed after the first read is wired again to where its pins now stand (verification V6)", () => {
+    const named = (name: string): HdlModule => ({ id: "hdl:cnt", name, files: [], netlist: counter as unknown as HdlNetlist, built: "b1" })
+    const { doc, place, wire } = builder(GRID)
+    doc.library = [named("cnt")]
+    const u = withLibrary(doc.library, () => place("hdl:cnt", 0, 0))
+    const g = place("ground", 0, 12)
+    wire(u, "GND", g, "GND")
+    const endsOnGnd = () =>
+      withLibrary(doc.library, () => {
+        const pin = objectPins(doc.objects[0], GRID).find((p) => p.pin.id === "GND")!.point
+        return doc.wires.some((s) => (s.a.x === pin.x && s.a.y === pin.y) || (s.b.x === pin.x && s.b.y === pin.y))
+      })
+    expect.soft(endsOnGnd(), "drawn").toBe(true)
+    doc.library = [named("a_module_name_that_is_long_enough_to_change_the_symbol_width")]
+    expect.soft(endsOnGnd(), "renamed: still on the pin").toBe(true)
+  })
+
   it("a wire to a junction made with node() ends on its point, which is a dot", () => {
     const { doc, place, wire, node } = builder(GRID)
     const r1 = place("resistor", 0, 0)
@@ -409,7 +436,7 @@ describe("every old file still opens, and the same way in every tab (findings 3.
   it("a part whose pin sat on a pad marked not connected that another net's wire uses moves off it, says so and keeps its circuit (findings 3.L2)", async () => {
     const read = await open("nc-touched-and-wired")
     const r1 = read.doc.objects.find((o) => o.id === "R1")!
-    expect.soft(read.notes, "said").toEqual([expect.stringMatching(/^R1 moved 1 cell: its pin 1 sat on U1 CN8-1, a pad marked not connected that another net's wire uses/)])
+    expect.soft(read.notes, "said").toEqual([expect.stringMatching(/^R1 moved 1 cell: its pin 1 sat on U1 CN8-1, a pad marked not connected that joins it to another net/)])
     const net = buildNetlist(read.doc).pinNet
     expect.soft(net.get("R1:1"), "R1 1 left out of R2's net, as it was").not.toBe(net.get("R2:1"))
     const board = read.doc.objects.find((o) => o.id === "U1")!
@@ -432,7 +459,7 @@ describe("every old file still opens, and the same way in every tab (findings 3.
     const net = buildNetlist(doc).pinNet
     expect.soft(net.get("R1:2"), "R1 2 still on the ground it touched").toBe(net.get(`G1:${objectPins(groundProbe, GRID)[0].pin.id}`))
     expect.soft(net.get("R1:1"), "and off R2's net").not.toBe(net.get("R2:1"))
-    expect.soft(notes.some((n) => n.startsWith("R1 2 and ") && n.endsWith("touched where they stood before; a wire joins them now.")), `told: ${JSON.stringify(notes)}`).toBe(true)
+    expect.soft(notes.some((n) => n.includes("R1 2") && n.endsWith("touched where they stood before; a wire joins them now.")), `told: ${JSON.stringify(notes)}`).toBe(true)
   })
 
   it("a part saved off the grid moves onto it, the least it can, says so and keeps its circuit", async () => {

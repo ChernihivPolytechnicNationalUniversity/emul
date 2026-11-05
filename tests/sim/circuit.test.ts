@@ -12,6 +12,7 @@ import type { HdlModule, PlacedObject, Schematic } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
 import { FlowSolver, wireCurrents } from "@/sim/flow"
+import { referenceWireCurrents } from "../lib/flow-reference"
 import counter from "./hdl/counter.json"
 
 const c = (x: number, y: number) => ({ x: x * GRID, y: y * GRID })
@@ -168,6 +169,35 @@ describe("found by phase 3's reviews", () => {
     expect.soft(gate.latest(wiringOf(graph, branched).circuit.flow), "a branch is sent").not.toBe(first)
   })
 
+  it("on random graphs the solver built once gives what the solver it replaced gave, for every terminal and for any injection (findings 3.L6; verification)", () => {
+    let seed = 7
+    const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+    for (let round = 0; round < 200; round++) {
+      const vertices = Array.from({ length: 2 + Math.floor(next() * 10) }, (_, i) => `v${i}`)
+      const runs = Array.from({ length: 1 + Math.floor(next() * 14) }, (_, i) => ({ id: `r${i}`, a: vertices[Math.floor(next() * vertices.length)], b: vertices[Math.floor(next() * vertices.length)] }))
+      const pins: Record<string, string> = {}
+      const pinNet = new Map<string, number>()
+      const ground = new Set<string>()
+      for (let k = 0; k < 1 + Math.floor(next() * 6); k++) {
+        const key = `P${k}:1`
+        pins[key] = vertices[Math.floor(next() * vertices.length)]
+        if (next() < 0.85) pinNet.set(key, k)
+        if (next() < 0.25) ground.add(key)
+      }
+      const flow: FlowGraph = { runs, pins }
+      const solver = new FlowSolver(flow, pinNet, ground)
+      const injection = new Map(Object.keys(pins).map((key) => [key, Math.round((next() * 4 - 2) * 100) / 100]))
+      const terminal = (key: string) => injection.get(key) ?? 0
+      const reference = referenceWireCurrents(flow, pinNet, ground, terminal)
+      const now = solver.currents(terminal)
+      for (const [id, amps] of reference) expect.soft(now.get(id), `round ${round}, ${id}, every terminal at once`).toBeNear(amps, 1e-9)
+      for (const key of Object.keys(pins)) {
+        const unit = solver.unit(key)
+        for (const [id, amps] of referenceWireCurrents(flow, pinNet, ground, (k) => (k === key ? 1 : 0))) expect.soft(unit.get(id) ?? 0, `round ${round}, ${key} → ${id}`).toBeNear(amps, 1e-9)
+      }
+    }
+  })
+
   it("the currents the solver builds once per terminal equal the ones solved for every terminal afresh (findings 3.L6)", () => {
     const doc = examples.find((e) => e.id === "power-supply")!.build(GRID)
     const circuit = circuitOf(doc)
@@ -176,7 +206,7 @@ describe("found by phase 3's reviews", () => {
     const keys = Object.keys(circuit.flow.pins).filter((key) => net.pinNet.has(key))
     expect.soft(keys.length, "terminals to try").toBeGreaterThan(5)
     for (const key of keys) {
-      const afresh = [...wireCurrents(circuit.flow, net.pinNet, net.groundKeys, (k) => (k === key ? 1 : 0))].filter(([, amps]) => Math.abs(amps) > 1e-12)
+      const afresh = [...referenceWireCurrents(circuit.flow, net.pinNet, net.groundKeys, (k) => (k === key ? 1 : 0))].filter(([, amps]) => Math.abs(amps) > 1e-12)
       const once = [...solver.unit(key)].filter(([, amps]) => Math.abs(amps) > 1e-12)
       expect.soft(once.map(([id]) => id).sort(), `${key}: the runs it drives`).toEqual(afresh.map(([id]) => id).sort())
       for (const [id, amps] of afresh) expect.soft(solver.unit(key).get(id), `${key} → ${id}`).toBeNear(amps, 1e-9)
