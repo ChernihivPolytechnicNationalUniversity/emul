@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@11.1.2",
   "scripts": {
-    "prepare": "husky",
+    "prepare": "node -e \"import('husky').then((h) => process.stdout.write(h.default()), (e) => { if (e.code !== 'ERR_MODULE_NOT_FOUND') throw e })\"",
     "dev": "vite",
     "api": "pnpm --filter emul-api dev",
     "collab": "pnpm --filter emul-api collab:dev",
