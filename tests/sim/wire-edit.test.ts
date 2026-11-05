@@ -482,3 +482,22 @@ describe("found by phase 4's review (Claude)", () => {
     expect.soft("refused" in result && result.refused, "a socket under the crossing").toBe("no-crossing")
   })
 })
+
+describe("found by the verification of phase 4's fixes (Codex)", () => {
+  it("a one-part paste whose wire's free end lands on an existing wire is a join, and it is named (design.md §6.7)", () => {
+    const doc = docOf([resistor("A", 0, 4), resistor("B", 8, 4)], [seg(at(4, 5), at(8, 5))])
+    const clip = { objects: [resistor("P", 0, 0)], wires: [seg(at(4, 1), at(6, 1)), seg(at(6, 1), at(6, 4))], parts: {} }
+    const idOf = (old: string) => `copy${old}`
+    const after = pastedInto(doc, clip, 0, c(1), idOf, newId)
+    expect.soft(netChanges([...wiringFor(doc).circuit.nets, ...clipNets(clip, idOf)], wiringFor(after).circuit.nets).joined.length, "reported").toBe(1)
+  })
+
+  it("Backspace after a flipped posture from a pin restores both the flip and the axis (design.md §6.1)", () => {
+    const doc = docOf([resistor("A", 0, 0)])
+    const { wiring, d } = drawing(doc, at(4, 1))
+    const flipped = flipPosture(pointerAt(d, at(8, 4)))
+    const clicked = withCorner(doc, wiring, flipped, at(8, 4))
+    if (isRefusal(clicked)) throw new Error("refused")
+    expect.soft(previewOf(doc, wiring, pointerAt(withoutCorner(clicked), at(10, 5))).points, "down from the pin first, as flipped").toEqual([at(4, 1), at(4, 5), at(10, 5)])
+  })
+})

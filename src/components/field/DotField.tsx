@@ -65,7 +65,7 @@ import { FieldReadout, type RunEnds, ProbeReadout, type HoverTarget } from "./Re
 import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
 import { FieldCanvas } from "./FieldCanvas"
-import { wireMarks } from "./wire-marks"
+import { marksBesideTheBand, wireMarks } from "./wire-marks"
 import { exportPng } from "./export-image"
 import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
@@ -373,7 +373,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     },
     [runById, nets, autoColor],
   )
-  const staticMarks = React.useMemo(() => wireMarks(staticRoutes, wiring.dots, wiring.dangling, wiring.corners, colorOf, true), [staticRoutes, wiring.dots, wiring.dangling, wiring.corners, colorOf])
+  const bandPoints = React.useMemo(() => {
+    const points = new Set<string>()
+    for (const id of bandRuns) for (const p of runById.get(id)?.points ?? []) points.add(`${p.x},${p.y}`)
+    return points
+  }, [bandRuns, runById])
+  const staticMarks = React.useMemo(() => marksBesideTheBand(wireMarks(staticRoutes, wiring.dots, wiring.dangling, wiring.corners, colorOf, true), bandPoints), [staticRoutes, wiring.dots, wiring.dangling, wiring.corners, colorOf, bandPoints])
   const liftedMarks = React.useMemo(() => wireMarks(liftedRoutes, wiring.dots, wiring.dangling, wiring.corners, colorOf, false), [liftedRoutes, wiring.dots, wiring.dangling, wiring.corners, colorOf])
   const pinNetColor = React.useCallback(
     (key: string) => {

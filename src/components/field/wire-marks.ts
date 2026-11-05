@@ -28,3 +28,12 @@ export function wireMarks(routes: readonly RoutedWire[], dots: readonly Point[],
     corners: withoutWires ? corners : [],
   }
 }
+
+export function marksBesideTheBand(marks: WireMarks, band: ReadonlySet<string>): WireMarks {
+  if (!band.size) return marks
+  return {
+    dots: marks.dots.filter((d) => !band.has(key(d.at))),
+    open: marks.open.filter((d) => !band.has(key(d.at))),
+    corners: marks.corners.filter((c) => !band.has(key(c.at))),
+  }
+}

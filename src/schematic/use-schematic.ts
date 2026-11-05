@@ -139,7 +139,8 @@ export function pasteLanding(scene: PlacementScene, saved: Clip, offset: Point, 
 
 export function clipNets(clip: Clip, idOf: (old: string) => string): PinGroup[] {
   const renamed = (key: string) => `${idOf(key.slice(0, key.indexOf(":")))}${key.slice(key.indexOf(":"))}`
-  return wiringOf(new Graph(), { objects: clip.objects, wires: clip.wires }).circuit.nets.map((g) => g.map(renamed).sort())
+  const view = wiringOf(new Graph(), { objects: clip.objects, wires: clip.wires }).view
+  return view.nets.map((net) => view.pinsOf(net)).filter((pins) => pins.length > 0).map((pins) => pins.map(renamed).sort())
 }
 
 export function pastedInto(doc: Schematic, clip: Clip, dx: number, dy: number, idOf: (old: string) => string, newId: () => string): Schematic {

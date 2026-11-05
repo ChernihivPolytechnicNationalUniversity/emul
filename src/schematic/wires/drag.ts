@@ -823,23 +823,36 @@ class FrameBuilder {
   foreignContacts(pieces: readonly DragPiece[], removed: ReadonlySet<string>, joined: ReadonlySet<string>): Set<DragPiece> {
     const out = new Set<DragPiece>()
     const allowed = (a: string, b: string) => a === b || joined.has(a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`)
-    const onIt = (a: Point, b: Point, p: Point) =>
-      a.y === b.y ? p.y === a.y && p.x >= Math.min(a.x, b.x) && p.x <= Math.max(a.x, b.x) : p.x === a.x && p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y)
     const isEnd = (a: Point, b: Point, p: Point) => samePoint(a, p) || samePoint(b, p)
+    const spanOf = (q: { a: Point; b: Point }) => (q.a.y === q.b.y ? [Math.min(q.a.x, q.b.x), Math.max(q.a.x, q.b.x)] : [Math.min(q.a.y, q.b.y), Math.max(q.a.y, q.b.y)])
     const byLine = new Map<LineCode, DragPiece[]>()
-    const byEnd = new Map<number, DragPiece[]>()
-    for (const p of pieces) {
-      if (samePoint(p.a, p.b)) continue
-      const line = lineCodeOf(p)
-      byLine.set(line, [...(byLine.get(line) ?? []), p])
-      for (const end of [p.a, p.b]) byEnd.set(pointCode(end), [...(byEnd.get(pointCode(end)) ?? []), p])
+    const add = <T>(map: Map<LineCode, T[]>, line: LineCode, item: T) => {
+      const list = map.get(line)
+      if (list) list.push(item)
+      else map.set(line, [item])
+    }
+    for (const p of pieces) if (!samePoint(p.a, p.b)) add(byLine, lineCodeOf(p), p)
+    const targetsByLine = new Map<LineCode, { at: Point; pin: WirePin }[]>()
+    for (const [key, at] of this.pinTargets) {
+      const pin = this.sheet.pin(key)!
+      add(targetsByLine, rowCode(at.y), { at, pin })
+      add(targetsByLine, columnCode(at.x), { at, pin })
+    }
+    const piecesThrough = (at: Point): DragPiece[] => {
+      const found: DragPiece[] = []
+      for (const line of [rowCode(at.y), columnCode(at.x)])
+        for (const q of byLine.get(line) ?? []) {
+          const [lo, hi] = spanOf(q)
+          const along = line === rowCode(at.y) && q.a.y === q.b.y ? at.x : at.y
+          if ((line === rowCode(at.y)) === (q.a.y === q.b.y) && along >= lo && along <= hi) found.push(q)
+        }
+      return found
     }
     for (const p of pieces) {
       if (samePoint(p.a, p.b)) continue
       const horizontal = p.a.y === p.b.y
       const line = lineCodeOf(p)
-      const lo = horizontal ? Math.min(p.a.x, p.b.x) : Math.min(p.a.y, p.b.y)
-      const hi = horizontal ? Math.max(p.a.x, p.b.x) : Math.max(p.a.y, p.b.y)
+      const [lo, hi] = spanOf(p)
       const bad = (net: string) => !allowed(p.net, net)
       let found = false
       for (const s of this.sheet.along(line, lo, hi)) if (!removed.has(s.id) && bad(this.plan.netOfSegment(s)) && Math.min(hi, highOf(s)) - Math.max(lo, lowOf(s)) > 0) found = true
@@ -851,15 +864,18 @@ class FrameBuilder {
       for (const end of [p.a, p.b]) for (const s of this.sheet.through(end)) if (!removed.has(s.id) && bad(this.plan.netOfSegment(s))) found = true
       for (const q of byLine.get(line) ?? []) {
         if (q === p || !bad(q.net)) continue
-        const qlo = horizontal ? Math.min(q.a.x, q.b.x) : Math.min(q.a.y, q.b.y)
-        const qhi = horizontal ? Math.max(q.a.x, q.b.x) : Math.max(q.a.y, q.b.y)
+        const [qlo, qhi] = spanOf(q)
         if (Math.min(hi, qhi) - Math.max(lo, qlo) >= 0) found = true
       }
-      for (const end of [p.a, p.b]) for (const q of byEnd.get(pointCode(end)) ?? []) if (q !== p && bad(q.net)) found = true
-      for (const q of pieces) if (q !== p && bad(q.net) && !samePoint(q.a, q.b) && (lineCodeOf(q) !== line) && (onIt(p.a, p.b, q.a) || onIt(p.a, p.b, q.b) || onIt(q.a, q.b, p.a) || onIt(q.a, q.b, p.b))) found = true
-      for (const [key, at] of this.pinTargets) {
-        const pin = this.sheet.pin(key)!
-        if (onIt(p.a, p.b, at) && (!pin.socket || isEnd(p.a, p.b, at)) && bad(this.plan.netOfPin(pin))) found = true
+      for (const end of [p.a, p.b])
+        for (const q of piecesThrough(end))
+          if (q !== p && bad(q.net)) {
+            found = true
+            out.add(q)
+          }
+      for (const { at, pin } of targetsByLine.get(line) ?? []) {
+        const along = horizontal ? at.x : at.y
+        if (along >= lo && along <= hi && (!pin.socket || isEnd(p.a, p.b, at)) && bad(this.plan.netOfPin(pin))) found = true
       }
       if (found) out.add(p)
     }
@@ -1024,6 +1040,7 @@ class FrameBuilder {
       const rigid = split.movingRigid ? split.movingAfter : undefined
       let placed = false
       const clear = (pieces: readonly DragPiece[]) => !pieces.some((p) => this.plan.avoids(p.a, p.b))
+      let settled: readonly DragPiece[] = []
       for (const pass of [true, false]) {
         for (const t of split.candidates) {
           const pieces = this.splitPieces(split, t)
@@ -1032,9 +1049,15 @@ class FrameBuilder {
           if (!touches) continue
           this.settle(pieces, touches)
           placed = true
+          settled = pass ? [] : pieces
           break
         }
         if (placed) break
+      }
+      if (placed && settled.length && this.plan.reroutesConflicts) {
+        const { run, end } = this.privateRun(split)
+        const leave = run.length ? this.sheet.pinsAt(end).map((p) => this.plan.headingOf(p.key)).find((h) => h) : split.leave
+        this.reroutes.push({ soft: true, from: end, to: split.movingAfter, net: split.net, pieces: settled.map((p) => p.id), run, color: split.source.color, source: split.source.id, leave, arrive: split.arrive })
       }
       if (placed) continue
       const pieces = this.splitPieces(split, split.candidates[0] ?? (split.horizontal ? split.fixedAfter.x : split.fixedAfter.y))

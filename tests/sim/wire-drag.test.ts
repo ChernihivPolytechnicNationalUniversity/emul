@@ -903,3 +903,48 @@ describe("found by phase 4's review (Claude)", () => {
     expect.soft(unexplainedJoins(bridge, done.doc, new Set([r3.id])), "and nothing joined").toEqual([])
   })
 })
+
+describe("a turned chip's wires go round it (found on the morning sheet after the review fixes)", () => {
+  it("no wire of a 555 turned by R runs through its drawn body when a way round exists, and its circuit is kept (ГОСТ 2.701-84; design.md §5.1)", async () => {
+    const { unexplainedJoins } = await import("../lib/explained-joins")
+    const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
+    let n = 0
+    const wire = (a: Point, b: Point): WireSegment => ({ id: `q${++n}`, a, b })
+    const chain = (...pts: Point[]) => pts.slice(1).map((p, i) => wire(pts[i], p))
+    const part = (id: string, def: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def, x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
+    const doc = inNormalForm({
+      objects: [part("U1", "ne555", 0, 0), part("V1", "supply", 6, -6), part("G1", "ground", 3, 11), part("R1", "resistor", 12, 4), part("R2", "resistor", -4, -1, 90)],
+      wires: [wire(at(7, -4), at(7, 1)), ...chain(at(4, 1), at(4, -1), at(7, -1)), wire(at(4, 9), at(4, 11)), wire(at(9, 5), at(12, 5)), ...chain(at(1, 5), at(-1, 5), at(-1, 7), at(1, 7)), wire(at(1, 3), at(-3, 3))],
+      parts: {},
+    })
+    const done = new TurnRun(doc, wiringOf(new WireGraph(), doc), new Set(["U1"])).turned(1, counter("g"))
+    expect.soft(done.refused, "turned").toBeUndefined()
+    const body = footprint(done.doc.objects.find((o) => o.id === "U1")!, GRID)!.box
+    const through = done.doc.wires.filter((s) => Math.max(s.a.x, s.b.x) > body.x && Math.min(s.a.x, s.b.x) < body.x + body.w && Math.max(s.a.y, s.b.y) > body.y && Math.min(s.a.y, s.b.y) < body.y + body.h)
+    expect.soft(through.map((s) => [s.a.x / GRID, s.a.y / GRID, s.b.x / GRID, s.b.y / GRID]), "no piece through the 555's drawn body").toEqual([])
+    expect.soft(unexplainedJoins(doc, done.doc, new Set(["U1"])), "nothing joined").toEqual([])
+  })
+})
+
+describe("found by the verification of phase 4's fixes (Codex)", () => {
+  it("a far drop whose blocked wires cannot all be laid is still taken where it was dropped, the wires that could not follow kept where they were and named (design.md §13.19 Q9)", async () => {
+    const { examples } = await import("@/schematic/examples")
+    const { unexplainedJoins } = await import("../lib/explained-joins")
+    const doc = examples.find((e) => e.id === "battery-life")!.build(GRID)
+    const bt1 = doc.objects.find((o) => o.props?.ref === "BT1")!
+    const landed = new PartDrag(doc, wiringOf(new WireGraph(), doc), { objects: new Set([bt1.id]) }).landed(-2 * GRID, -12 * GRID, counter("v"))
+    expect.soft(landed.refused, "not refused").toBeUndefined()
+    expect.soft(landed.at, "where it was dropped").toEqual({ x: -2 * GRID, y: -12 * GRID })
+    expect.soft(landed.unlaid.length > 0 && landed.unlaid.every((u) => u.kept), "some wires left where they were, each named").toBe(true)
+    expect.soft(unexplainedJoins(doc, landed.doc, new Set([bt1.id])), "nothing joined").toEqual([])
+  })
+
+  it("on the zoomed-out canvas the marks of the runs the band redraws leave the static picture: no ghost dot where a dragged branch was", async () => {
+    const { wireMarks, marksBesideTheBand } = await import("@/components/field/wire-marks")
+    const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
+    const marks = wireMarks([], [at(4, 1)], [at(6, -2)], [], () => "black", true)
+    const band = new Set([`${at(4, 1).x},${at(4, 1).y}`, `${at(6, -2).x},${at(6, -2).y}`])
+    expect.soft(marksBesideTheBand(marks, band).dots, "the old dot gone").toEqual([])
+    expect.soft(marksBesideTheBand(marks, new Set()).dots.length, "kept without a band").toBe(1)
+  })
+})
