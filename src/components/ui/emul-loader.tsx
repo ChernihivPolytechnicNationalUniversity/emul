@@ -1,3 +1,5 @@
+import { EPSILON } from "@/components/menu/Logo"
+import { bootLoopSource } from "@/lib/boot-splash"
 import { cn } from "@/lib/utils"
 
 /**
@@ -6,8 +8,8 @@ import { cn } from "@/lib/utils"
  * The clip is white-on-black and composited rather than alpha-keyed: inverted + multiply on
  * light, screen on dark, so its plate vanishes on whatever is behind it — and Safari, which has
  * no VP9 alpha, gets the H.264 fallback with the same result. The same recipe as the boot splash
- * in index.html, which can't use this component because it shows before React exists.
- * Reduced motion gets the still mark instead.
+ * in index.html, whose inlined WebM it reuses, so showing it fetches nothing. Reduced motion gets
+ * the still mark — inline, since a hidden <img> would still be downloaded.
  */
 export function EmulLoader({ className }: { className?: string }) {
   return (
@@ -21,10 +23,12 @@ export function EmulLoader({ className }: { className?: string }) {
         disablePictureInPicture
         preload="auto"
       >
-        <source src="/loader/emul-loader.webm" type="video/webm; codecs=vp9" />
+        <source src={bootLoopSource()} type="video/webm; codecs=vp9" />
         <source src="/loader/emul-loader.mp4" type="video/mp4" />
       </video>
-      <img className="absolute inset-[22%] hidden opacity-85 motion-reduce:block dark:invert" src="/mark.svg" alt="" />
+      <svg viewBox="5.9 -54.4 51.5 58.3" fill="currentColor" className="absolute inset-[25%] hidden opacity-85 motion-reduce:block">
+        <path d={EPSILON} />
+      </svg>
     </span>
   )
 }

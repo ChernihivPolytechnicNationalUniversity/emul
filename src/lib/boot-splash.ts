@@ -5,9 +5,24 @@
  * yet visible at all on a warm load) — a CSS transition can't do that off a keyframe animation.
  * Idempotent: StrictMode's double effects or a second call are no-ops.
  */
+/** The loop's WebM as the document carried it — a data: URI in a build, the plain URL in dev. */
+const LOOP_URL = "/loader/emul-loader.webm"
+let loopSource: string | undefined
+
+/**
+ * Where in-app loaders should take the loop from. The build inlines it into the splash, so
+ * reusing that source costs no request — one would otherwise start just as the loader is shown,
+ * queued (media is low priority) behind the very chunks it is waiting for.
+ */
+export function bootLoopSource(): string {
+  return loopSource ?? LOOP_URL
+}
+
 export function dismissBootSplash(): void {
   const boot = document.getElementById("boot")
   if (!boot || boot.dataset.leaving !== undefined) return
+  // Before the splash leaves the DOM; the string stays (it's the one the parser already holds).
+  loopSource = boot.querySelector('source[type^="video/webm"]')?.getAttribute("src") ?? undefined
   boot.dataset.leaving = ""
 
   // The build loads the app's stylesheet non-blocking (vite.config.ts, inlineBootLoader), so the
