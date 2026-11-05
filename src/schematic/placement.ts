@@ -103,12 +103,14 @@ export function designatorRects(object: PlacedObject, grid: number): readonly Re
 
 export const fieldRouter = () => new Router(designatorRects)
 
-export function footprints(object: PlacedObject, grid: number): { body: Quad; contour: Quad[]; labels: Quad[] } | null {
+export type Lead = readonly [Point, Point]
+
+export function footprints(object: PlacedObject, grid: number): { body: Quad; contour: Quad[]; leads: readonly Lead[]; labels: Quad[] } | null {
   const body = footprint(object, grid)
   const def = getDef(object.def)
   if (!body || !def || body.box.w <= 0 || body.box.h <= 0) return null
   const names = outsideBody(object, pinNameRects(object, def, grid), grid).map((r): Quad => ({ ...rectQuad(r), ...(r.names && { names: r.names }) }))
-  return { body, contour: contourOf(def).map((r) => quadOf(object, def, r, grid)), labels: [...designatorRects(object, grid).map(rectQuad), ...names] }
+  return { body, contour: contourOf(def).map((r) => quadOf(object, def, r, grid)), leads: [], labels: [...designatorRects(object, grid).map(rectQuad), ...names] }
 }
 
 const holds = (outer: Rect, inner: Rect) =>

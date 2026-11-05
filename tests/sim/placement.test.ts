@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { examples } from "@/schematic/examples"
 import { GRID, intersects, objectPins, objectRect, Router, snap } from "@/schematic/geometry"
-import { bodyBounds, contactCheck, contourOf, designatorRects, freeOffset, freeSpot, landingOffset, nearestFreeWithin, placementCheck, ringsToClear, type PlacementScene } from "@/schematic/placement"
-import { getDef } from "@/schematic/registry"
+import { bodyBounds, contactCheck, contourOf, designatorRects, footprints, freeOffset, freeSpot, landingOffset, nearestFreeWithin, placementCheck, ringsToClear, type PlacementScene } from "@/schematic/placement"
+import { allDefs, getDef } from "@/schematic/registry"
 import type { LegacyWire as Wire, PlacedObject } from "@/schematic/types"
 import type { WireSegment } from "@/schematic/wires/segment"
 import { routesOf } from "../lib/routes"
@@ -26,6 +26,105 @@ describe("a part takes the room it draws, not its whole box", () => {
   })
 })
 
+const turned = (id: string, def: string, x: number, y: number, rotation: 90 | 180 | 270): PlacedObject => ({ ...part(id, def, x, y), rotation })
+
+const TWO_TERMINAL = ["resistor", "capacitor", "inductor", "diode", "led", "zener"] as const
+
+const cellsOf = (p: { x: number; y: number }) => ({ x: p.x / GRID, y: p.y / GRID })
+
+describe("a part occupies its drawn body and its leads, nothing else (design.md §5.1)", () => {
+  it("a resistor's footprint is its body and two leads as lines: the body box stops where the leads begin, inset by the 0.1-cell clearance", () => {
+    const f = footprints(part("r", "resistor", 0, 0), GRID)!
+    const box = f.body.box
+    expect.soft([box.x, box.y, box.x + box.w, box.y + box.h].map((v) => Math.round((v / GRID) * 100) / 100), "1.1–2.9 × 0.7–1.3 cells").toEqual([1.1, 0.7, 2.9, 1.3])
+    expect.soft(f.leads.map(([p, q]) => [cellsOf(p), cellsOf(q)]), "the two leads, pin to body").toEqual([
+      [{ x: 0, y: 1 }, { x: 1, y: 1 }],
+      [{ x: 4, y: 1 }, { x: 3, y: 1 }],
+    ])
+  })
+
+  it("a diode's body holds its triangle and bar and no lead; the leads run from the pins to the body (design.md §5.1)", () => {
+    const f = footprints(part("d", "diode", 0, 0), GRID)!
+    const box = f.body.box
+    expect.soft([box.x, box.x + box.w].map((v) => Math.round((v / GRID) * 100) / 100), "1.7–2.3 cells across").toEqual([1.7, 2.3])
+    expect.soft(f.leads.map(([p, q]) => [cellsOf(p), cellsOf(q)]), "pin to body").toEqual([
+      [{ x: 0, y: 1 }, { x: 1.6, y: 1 }],
+      [{ x: 4, y: 1 }, { x: 2.4, y: 1 }],
+    ])
+  })
+
+  it("no text is part of any footprint: the footprint of every part is the same with its designator, value and pin names emptied (design.md §5.1)", () => {
+    const named = (o: PlacedObject): PlacedObject => ({ ...o, props: { ...o.props, ref: "R123456789", value: "1234567890 kΩ" } })
+    const offenders: string[] = []
+    for (const def of allDefs()) {
+      if (!def.pins.length) continue
+      const o = part("x", def.id, 0, 0)
+      const plain = footprints(o, GRID)
+      const labelled = footprints(named(o), GRID)
+      if (JSON.stringify(plain && { body: plain.body, contour: plain.contour, leads: plain.leads }) !== JSON.stringify(labelled && { body: labelled.body, contour: labelled.contour, leads: labelled.leads })) offenders.push(def.id)
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it("any two of resistor, capacitor, inductor, diode, LED and Zener, one upright and one lying, butted pin to pin at a right angle, may be placed in all four corners: the leads are lines that meet at the pin (design.md §5.1; findings 2.D12, 4.U12; KiCad, OrCAD)", () => {
+    for (const upright of TWO_TERMINAL) {
+      for (const lying of TWO_TERMINAL) {
+        const corners = [
+          { name: "upright below, lying to the right", u: part("u", upright, 0, 0), l: part("l", lying, 1, -1) },
+          { name: "upright below, lying to the left", u: part("u", upright, 0, 0), l: part("l", lying, -3, -1) },
+          { name: "upright above, lying to the right", u: part("u", upright, 0, -4), l: part("l", lying, 1, -1) },
+          { name: "upright above, lying to the left", u: part("u", upright, 0, -4), l: part("l", lying, -3, -1) },
+        ]
+        for (const { name, u, l } of corners) {
+          const up = { ...u, rotation: 90 as const }
+          const s = scene([up, l])
+          expect.soft(contactCheck(s, [l])(0, 0), `${upright} upright, ${lying} lying, ${name}: the two pins meet`).toBe(true)
+          expect.soft(placementCheck(s, [l])(0, 0), `${upright} upright, ${lying} lying, ${name}: the lying part may stand there`).toBe(false)
+          expect.soft(placementCheck(s, [up])(0, 0), `${upright} upright, ${lying} lying, ${name}: and so may the upright one`).toBe(false)
+        }
+      }
+    }
+  })
+
+  it("a transistor's base lead butted at a right angle onto an upright diode's pin may be placed: a three-pin part's lead is a line too (design.md §5.1; plan.md phase 5)", () => {
+    const q = part("q", "npn", 1, -2)
+    const d = turned("d", "diode", 0, -4, 90)
+    const s = scene([q, d])
+    expect.soft(contactCheck(s, [d])(0, 0), "the diode's lower pin on the base").toBe(true)
+    expect.soft(placementCheck(s, [d])(0, 0), "allowed").toBe(false)
+  })
+
+  it("a pin landing on another part's lead, not on its pin, is refused: a symbol's own lines are not branch points (ГОСТ 2.721-74 note 3; design.md §5.1)", () => {
+    const d = part("d", "diode", 0, 0)
+    const r = turned("r", "resistor", 0, 1, 90)
+    const s = scene([d, r])
+    expect.soft(contactCheck(s, [r])(0, 0), "no pin under the resistor's top pin").toBe(false)
+    expect.soft(placementCheck(s, [r])(0, 0), "its pin on the diode's lead at x = 1: refused").toBe(true)
+  })
+
+  it("a pin landing on another part's body is refused (design.md §5.1)", () => {
+    const a = part("a", "resistor", 0, 0)
+    const b = turned("b", "resistor", 1, 1, 90)
+    expect(placementCheck(scene([a, b]), [b])(0, 0)).toBe(true)
+  })
+
+  it("two leads crossing away from any pin are refused: a footprint overlap that would read as a crossing of wires (design.md §5.1)", () => {
+    const a = part("a", "diode", 0, 0)
+    const b = turned("b", "diode", 0, -2, 90)
+    const s = scene([a, b])
+    expect.soft(contactCheck(s, [b])(0, 0), "no pin on a pin").toBe(false)
+    expect.soft(placementCheck(s, [b])(0, 0), "refused").toBe(true)
+  })
+
+  it("no stub zone: a pin one cell from another part's pin at a right angle, not touching it, is allowed (design.md §4.1, §5.1; acceptance 2)", () => {
+    const a = part("a", "resistor", 0, 0)
+    const b = turned("b", "resistor", 4, 1, 90)
+    const s = scene([a, b])
+    expect.soft(contactCheck(s, [b])(0, 0), "the pins do not touch").toBe(false)
+    expect.soft(placementCheck(s, [b])(0, 0), "allowed").toBe(false)
+  })
+})
+
 describe("parts do not pile onto each other", () => {
   it("two resistors two rows apart fit, and one dropped onto the other does not", () => {
     const a = part("a", "resistor", 0, 0)
@@ -35,17 +134,17 @@ describe("parts do not pile onto each other", () => {
     expect(check(c(1), c(-2))).toBe(true)
   })
 
-  it("a designator or value landing on another part counts as piling on", () => {
+  it("a designator or value landing on another part does not block it: text never blocks anything, it is moved, not the part (design.md §5.1; KiCad fields, Altium parameters)", () => {
     const a = part("a", "resistor", 0, 0)
     const b = part("b", "resistor", 0, 1)
-    expect(placementCheck(scene([a, b]), [b])(0, 0)).toBe(true)
+    expect(placementCheck(scene([a, b]), [b])(0, 0)).toBe(false)
   })
 
-  it("a pin name landing on another part's value counts too", () => {
+  it("a pin name landing on another part's value does not block it either (design.md §5.1: no text in the footprint)", () => {
     const q = part("q", "crystal", 0, 0)
     const g = part("g", "oscillator", 0, 2)
-    expect(placementCheck(scene([q, g]), [g])(0, 0)).toBe(true)
-    expect(placementCheck(scene([q, g]), [g])(0, c(2))).toBe(false)
+    expect.soft(placementCheck(scene([q, g]), [g])(0, 0), "the oscillator's pin names over the crystal's frequency").toBe(false)
+    expect.soft(placementCheck(scene([q, g]), [g])(0, c(2)), "and further down").toBe(false)
   })
 
   it("parts touching pin to pin are allowed", () => {
@@ -103,14 +202,14 @@ describe("parts do not pile onto each other", () => {
     expect(placementCheck(scene([a, q]), [q])(0, 0)).toBe(true)
   })
 
-  it("a part cannot land on a wire that is not its own", () => {
+  it("a part may be dropped across a wire that is not its own: a wire is no part's footprint; the checker flags the wire through its body (design.md §5.1, §6.8; KiCad allows it)", () => {
     const a = part("a", "resistor", 0, 0)
     const b = part("b", "resistor", 12, 0)
     const wire: Wire = { id: "w", from: { object: "a", pin: "2" }, to: { object: "b", pin: "1" } }
     const crystal = part("q", "crystal", 6, 4)
     const check = placementCheck(scene([a, b, crystal], [wire]), [crystal])
-    expect(check(0, 0)).toBe(false)
-    expect(check(0, c(-4))).toBe(true)
+    expect.soft(check(0, 0), "clear of the wire").toBe(false)
+    expect.soft(check(0, c(-4)), "across the wire").toBe(false)
   })
 
   it("a part's own wires do not stop it", () => {

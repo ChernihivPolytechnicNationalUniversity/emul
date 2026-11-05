@@ -599,6 +599,8 @@ export type PinRef = { object: string; pin: string }
 /** Clockwise rotation in degrees, in 45° steps so components can sit on a diagonal. */
 export type Rotation = 0 | 45 | 90 | 135 | 180 | 225 | 270 | 315
 
+export type FieldMiddleInDefinitionCells = { x: number; y: number }
+
 export type PlacedObject = {
   id: string
   /** ComponentDef id. */
@@ -611,6 +613,7 @@ export type PlacedObject = {
   mirror?: boolean
   /** ref, value and other per-instance props. */
   props?: Record<string, string>
+  fieldAt?: Partial<Record<"ref" | "value", FieldMiddleInDefinitionCells>>
   /**
    * Firmware sources of a board or chip (a def with `chip`), as the build service takes them.
    * Edited outside the undo history, like part state: ⌘Z on the field never touches the code.

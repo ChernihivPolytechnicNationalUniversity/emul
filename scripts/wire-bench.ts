@@ -177,6 +177,14 @@ const BOARDS = 400
 const sheet = boardDocuments([BOARDS])[0]
 const carried: PlacedObject = { id: "carried", def: "crystal", x: 38 * GRID, y: 28 * GRID, props: { ref: "Y1" } }
 const dragStart = time(() => placementCheck({ objects: [...sheet.objects, carried], routes: [], grid: GRID }, [carried]), 5)
+const firstGestures: number[] = []
+for (let i = 0; i < 5; i++) {
+  const loaded = wiringOf(new WireGraph(), sheet)
+  const started = performance.now()
+  void new PartDrag(sheet, loaded, { objects: new Set([sheet.objects[0].id]) })
+  firstGestures.push(performance.now() - started)
+}
+const firstGesture = median(firstGestures)
 const FENCE = 60
 const FENCED = 40
 const fenced = (): Schematic => ({
@@ -384,7 +392,8 @@ check(`a part's drag set up on ${stand.objects.length} objects, the field's inde
 check(`a drag frame on ${stand.objects.length} objects, one part carried`, standFrame, 0.3)
 check(`a part's drop on ${stand.objects.length} objects`, standLanded, 8)
 check(`a press of R on ${stand.objects.length} objects`, pressed, 7)
-check(`the next press of a run on ${stand.objects.length} objects`, pressedAgain, 180)
+check(`the next press of a run on ${stand.objects.length} objects`, pressedAgain, 10)
+check(`the first drag after loading ${BOARDS} boards`, firstGesture, 20)
 check(`a drawing's preview on ${stand.objects.length} objects`, previewed, 2)
 check(`a preview over a target pin on ${stand.objects.length} objects, each move after the first`, hoverRouted ? hovering : Infinity, 2)
 console.log(`\n${checked - failed}/${checked} checks passed`)

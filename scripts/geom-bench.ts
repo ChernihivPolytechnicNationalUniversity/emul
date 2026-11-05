@@ -20,6 +20,12 @@ const BUDGET_MS: Record<number, { move: number; moveAll: number }> = {
   5010: { move: 40, moveAll: 175 },
 }
 
+const BOARD_BUDGET_MS: Record<number, { load: number; moveAll: number }> = {
+  1700: { load: 60, moveAll: 60 },
+}
+
+const FIXED_EDIT_GROWTH = 2
+
 const REFERENCE_MS = 18
 
 function reference() {
@@ -212,6 +218,19 @@ for (const r of rows) {
   if (!budget) continue
   atMost(`${r.doc.objects.length} objects: one object moved`, r.move.total, budget.move * speed)
   atMost(`${r.doc.objects.length} objects: whole schematic moved`, r.moveAll.total, budget.moveAll * speed)
+}
+
+const smallest = rows[0]
+const largest = rows[rows.length - 1]
+if (smallest && largest && smallest !== largest) {
+  const what = boards ? "board" : "object"
+  atMost(`a fixed-size edit costs no more on ${largest.doc.objects.length} ${what}s than on ${smallest.doc.objects.length}: one ${what} moved, within ${FIXED_EDIT_GROWTH}× (plan.md phase 5)`, largest.move.total, FIXED_EDIT_GROWTH * smallest.move.total)
+}
+for (const r of rows) {
+  const budget = boards ? BOARD_BUDGET_MS[r.doc.objects.length] : undefined
+  if (!budget) continue
+  atMost(`${r.doc.objects.length} boards: the sheet loaded`, r.load.total, budget.load * speed)
+  atMost(`${r.doc.objects.length} boards: the whole sheet moved`, r.moveAll.total, budget.moveAll * speed)
 }
 
 console.log(`\n${total - failed}/${total} checks passed`)
