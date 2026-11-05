@@ -27,6 +27,8 @@ export const CONTACT_OPENED = { title: "contact opened", why: "No wire could joi
 
 export const TURN_REFUSED = { title: "Not turned", why: "Turning it would put a pin on a crossing of two wires or on another net's wire, so nothing changed." }
 
+export const WIRE_MOVE_REFUSED = { title: "Wire not moved", why: "There it would lie along another net's wire or end on another net's pin, so it stayed where it was." }
+
 export const DRAG_REFUSED = { title: "Nowhere clean to put it", why: "Every place near the drop puts a pin on a crossing of two wires or lays a wire along another net's wire." }
 
 const ZERO: Point = { x: 0, y: 0 }

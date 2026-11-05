@@ -297,6 +297,17 @@ async function morningChecks(page: Page) {
   await page.keyboard.press("Alt+r")
   await page.waitForTimeout(600)
   expect("Alt+R turns the part alone: the wire stays where it was", await page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire] path[data-base]")].map((e) => e.getAttribute("d"))), [`M${4 * GRID} ${GRID} L${10 * GRID} ${GRID}`])
+  await open(page, "nucleo-74hc595")
+  const n = await fieldFrame(page)
+  const onRow = n.toScreen(cellPoint(32, 17))
+  const rowBelow = n.toScreen(cellPoint(32, 18))
+  await page.mouse.move(onRow.x, onRow.y)
+  await page.mouse.down()
+  await page.mouse.move(rowBelow.x, rowBelow.y, { steps: 6 })
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+  const toasts = await page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].map((e) => e.textContent ?? ""))
+  expect("a wire dragged where it would lie along another net's wire is refused in the words of a wire, not of a dropped part", toasts.some((t) => t.startsWith("Wire not moved")) && !toasts.some((t) => t.includes("Nowhere clean to put it")), true)
 }
 
 async function zoomAcrossPinDetail(page: Page) {

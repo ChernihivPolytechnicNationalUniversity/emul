@@ -32,7 +32,7 @@ import { addsToSelection, primaryClick } from "@/lib/pointer"
 import { useEvent } from "@/hooks/use-event"
 import { clipboardDefIds, clipboardText, clipFromClipboard, pasteLanding, useSchematic, type Clip } from "@/schematic/use-schematic"
 import { nearestOn, travellingWires } from "@/schematic/wire-edits"
-import { CONTACT_OPENED, DRAG_REFUSED, PartDrag, SegmentDrag, TURN_REFUSED, UNLAID, WIRES_REFUSED, type Landed } from "@/schematic/rubber-band"
+import { CONTACT_OPENED, DRAG_REFUSED, PartDrag, SegmentDrag, TURN_REFUSED, UNLAID, WIRE_MOVE_REFUSED, WIRES_REFUSED, type Landed } from "@/schematic/rubber-band"
 import { DRAW_REFUSED, PASTE_REFUSED, laysClear, drawEndAt, flipPosture, isRefusal, pointerAt, previewOf, startDrawing, withCorner, withoutCorner, type DrawEnd, type Drawing, type DrawRefusal } from "@/schematic/wire-draw"
 import { NO_CROSSING } from "@/schematic/junction-tool"
 import { changeMessage, netChanges } from "@/schematic/net-names"
@@ -629,9 +629,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
 
   const [unlaid, setUnlaid] = React.useState<{ at: readonly Point[]; edits: number } | null>(null)
-  const reportLanding = useEvent((landed: Landed, gesture: "drop" | "turn" = "drop") => {
+  const reportLanding = useEvent((landed: Landed, gesture: "drop" | "turn" | "wire" = "drop") => {
     if (landed.refused) {
-      const text = landed.refused.length ? (gesture === "turn" ? TURN_REFUSED : DRAG_REFUSED) : WIRES_REFUSED
+      const text = landed.refused.length ? { drop: DRAG_REFUSED, turn: TURN_REFUSED, wire: WIRE_MOVE_REFUSED }[gesture] : WIRES_REFUSED
       toast.error(text.title, { description: text.why })
     }
     if (!landed.unlaid.length) return
@@ -886,7 +886,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (!done || (!done.dx && !done.dy)) return
     if (kind?.kind === "segment") {
       const landed = kind.drag.landed(done.dx, done.dy)
-      reportLanding(landed)
+      reportLanding(landed, "wire")
       sch.land(kind.base, landed)
       return
     }
