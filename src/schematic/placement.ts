@@ -78,7 +78,7 @@ export const fieldRouter = () => new Router(designatorRects)
 
 export type { Lead }
 
-export type Footprint = { body: Quad; contour: Quad[]; leads: readonly Lead[]; labels: Quad[] }
+export type Footprint = { body: Quad; contour: Quad[]; outline: readonly (readonly Point[])[]; leads: readonly Lead[]; labels: Quad[] }
 
 const occupiedContours = new WeakMap<ComponentDef, readonly Rect[]>()
 
@@ -107,7 +107,10 @@ export function footprints(object: PlacedObject, grid: number): Footprint | null
   if (!def) return null
   const body = quadOf(object, def, bodyAndLeads(def).box, grid)
   if (body.box.w <= 0 || body.box.h <= 0) return null
-  return { body, contour: occupiedContour(def).map((r) => quadOf(object, def, r, grid)), leads: placedLeads(object, def, grid), labels: [] }
+  const contour = occupiedContour(def).map((r) => quadOf(object, def, r, grid))
+  const housed = occupiedContour(def)[0] !== bodyAndLeads(def).box
+  const outline = housed ? contour.map((q) => q.corners) : [bodyAndLeads(def).hull.map(frameOf(object, def, grid))]
+  return { body, contour, outline, leads: placedLeads(object, def, grid), labels: [] }
 }
 
 const holds = (outer: Rect, inner: Rect) =>
@@ -215,6 +218,8 @@ export type PlacementScene = {
 
 type Placed = { object: PlacedObject; contour: Quad[]; leads: readonly Lead[]; box: Rect }
 
+const NO_CONNECT_MARK = "no-connect"
+
 const isJunction = (object: PlacedObject) => {
   const pins = getDef(object.def)?.pins ?? []
   return pins.length > 0 && pins.every((pin) => pin.kind === "node")
@@ -275,7 +280,7 @@ const shiftedPoint = (p: Point, dx: number, dy: number): Point => ({ x: p.x + dx
 export function placementCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
   const ids = new Set(moving.map((o) => o.id))
   const place = (object: PlacedObject): Placed | null => {
-    if (isJunction(object)) return null
+    if (isJunction(object) || object.def === NO_CONNECT_MARK) return null
     const f = footprints(object, scene.grid)
     if (!f) return null
     const leadBoxes = f.leads.map(([p, q]) => ({ x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) }))

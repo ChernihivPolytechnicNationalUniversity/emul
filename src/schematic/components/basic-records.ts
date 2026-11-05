@@ -164,6 +164,7 @@ export const BASIC_RECORDS: Record<string, NoDatasheet> = {
   },
   ground: { basis: "ideal", none: IDEAL, modelled: [{ what: "The circuit's 0 V reference" }], notModelled: [] },
   junction: { basis: "ideal", none: IDEAL, modelled: [{ what: "Joins wires drawn to it" }], notModelled: [] },
+  "no-connect": { basis: "ideal", none: IDEAL, modelled: [{ what: "Quiets the checker there" }], notModelled: [{ what: "Any electrical connection" }] },
   supply: {
     basis: "ideal",
     none: IDEAL,

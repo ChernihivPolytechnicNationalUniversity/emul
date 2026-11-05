@@ -145,6 +145,13 @@ export const TransformerIcon = make(
   <path d="M7 2v2.5a2.5 2.5 0 0 1 0 5a2.5 2.5 0 0 1 0 5a2.5 2.5 0 0 1 0 5V22M17 2v2.5a2.5 2.5 0 0 0 0 5a2.5 2.5 0 0 0 0 5a2.5 2.5 0 0 0 0 5V22M11.25 4v16M12.75 4v16" />,
 )
 
+export const NoConnectIcon = make(
+  "NoConnectIcon",
+  <>
+    <path d="M2 12h10M7 7l10 10M17 7L7 17" />
+  </>,
+)
+
 export const JunctionIcon = make(
   "JunctionIcon",
   <>

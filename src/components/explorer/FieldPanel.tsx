@@ -357,6 +357,7 @@ function ProblemRow({ problem, active, byId, onClick, onHover }: { problem: Prob
     <button
       type="button"
       role="option"
+      data-problem={problem.key}
       aria-selected={active}
       onClick={onClick}
       onPointerEnter={() => onHover(problem.object ?? null)}

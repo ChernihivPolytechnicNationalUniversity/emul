@@ -118,6 +118,7 @@ export const CATALOGUE: CatalogueEntry[] = [
   {"id":"pulse-source","name":"Pulse source","description":"Square-wave pulse source","category":"power","keywords":["square wave","PWM","function generator","signal generator","clock"],"icon":"PulseSourceIcon","width":2,"height":4,"prefix":"G","file":"basic"},
   {"id":"transformer","name":"Transformer","description":"Single-phase power transformer","category":"power","keywords":["mains transformer","step-down","coil"],"icon":"TransformerIcon","width":4,"height":4,"prefix":"T","file":"basic"},
   {"id":"ground","name":"Ground","category":"basics","keywords":["GND","0V","earth"],"icon":"GroundIcon","width":2,"height":2,"file":"basic"},
+  {"id":"no-connect","name":"No-connect mark","description":"Marks an opening as meant","category":"basics","keywords":["NC","no connect","not connected","open","flag"],"icon":"NoConnectIcon","width":2,"height":2,"file":"basic"},
   {"id":"junction","name":"Junction","description":"Wire junction dot","category":"basics","keywords":["node","dot","connection"],"icon":"JunctionIcon","width":2,"height":2,"file":"basic"},
   {"id":"supply","name":"Power rail","category":"basics","keywords":["VCC","VDD","5V","3.3V","+5V","power","rail","supply"],"icon":"SupplyIcon","width":2,"height":2,"file":"basic"},
   {"id":"logic-state","name":"Logic state","description":"Toggle 0/1 level source","category":"instruments","keywords":["logic level","toggle","high","low","digital input"],"icon":"LogicStateIcon","width":3,"height":2,"prefix":"LS","file":"basic"},

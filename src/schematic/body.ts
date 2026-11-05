@@ -174,7 +174,29 @@ function atLeastThick(r: Rect): Rect {
   return { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w, h }
 }
 
-export type BodyAndLeads = { box: Rect; leads: readonly Lead[] }
+export type BodyAndLeads = { box: Rect; hull: readonly Point[]; leads: readonly Lead[] }
+
+function convexHull(points: readonly Point[]): Point[] {
+  const sorted = [...points].sort((a, b) => a.x - b.x || a.y - b.y)
+  const turn = (o: Point, a: Point, b: Point) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+  const half = (list: readonly Point[]) => {
+    const out: Point[] = []
+    for (const p of list) {
+      while (out.length >= 2 && turn(out[out.length - 2], out[out.length - 1], p) <= EPS) out.pop()
+      out.push(p)
+    }
+    out.pop()
+    return out
+  }
+  return [...half(sorted), ...half([...sorted].reverse())]
+}
+
+const rectCorners = (r: Rect): Point[] => [
+  { x: r.x, y: r.y },
+  { x: r.x + r.w, y: r.y },
+  { x: r.x + r.w, y: r.y + r.h },
+  { x: r.x, y: r.y + r.h },
+]
 
 const bodies = new WeakMap<ComponentDef, BodyAndLeads>()
 
@@ -193,7 +215,8 @@ export function bodyAndLeads(def: ComponentDef): BodyAndLeads {
   const xs = points.map((p) => p.x)
   const ys = points.map((p) => p.y)
   const box = points.length ? atLeastThick({ x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }) : bodyBounds(def)
-  const found = { box, leads }
+  const hull = convexHull(points)
+  const found = { box, hull: hull.length >= 3 && box.w > THINNEST_BODY && box.h > THINNEST_BODY ? hull : rectCorners(box), leads }
   bodies.set(def, found)
   return found
 }

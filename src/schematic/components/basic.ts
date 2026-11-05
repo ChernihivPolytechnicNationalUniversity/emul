@@ -10,6 +10,7 @@ import {
   GroundIcon,
   InductorIcon,
   JunctionIcon,
+  NoConnectIcon,
   LedIcon,
   NmosIcon,
   NpnIcon,
@@ -746,6 +747,20 @@ export const junction: ComponentDef = {
   body: [{ type: "circle", cx: 1, cy: 1, r: 0.6, fill: "grip" }],
 }
 
+export const noConnect: ComponentDef = {
+  id: "no-connect",
+  name: "No-connect mark",
+  description: "Marks an opening as meant",
+  keywords: ["NC", "no connect", "not connected", "open", "flag"],
+  category: "basics",
+  icon: NoConnectIcon,
+  width: 2,
+  height: 2,
+  parts: [],
+  pins: [],
+  body: [{ type: "path", d: "M0.6 0.6 L1.4 1.4 M1.4 0.6 L0.6 1.4" }],
+}
+
 export const ground: ComponentDef = {
   id: "ground",
   name: "Ground",
@@ -894,6 +909,7 @@ export const basicComponents: ComponentDef[] = [
   pulseSource,
   transformer,
   ground,
+  noConnect,
   junction,
   supply,
   logicState,

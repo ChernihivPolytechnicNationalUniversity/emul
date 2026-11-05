@@ -87,7 +87,9 @@ import { useSelection, type Rect } from "./use-selection"
 import { useViewport } from "./use-viewport"
 import { FieldPanel, FieldToggle, type FieldTarget, type PeerSelection } from "@/components/explorer/FieldPanel"
 import { fieldEntries, searchField, type FieldHit } from "@/components/explorer/field-index"
-import { runtimeProblems, sortProblems, staticProblems } from "@/components/explorer/problems"
+import { checkProblems, runtimeProblems, sortProblems, staticProblems } from "@/components/explorer/problems"
+import { checked } from "@/schematic/checker"
+import { CheckMarks } from "./check-marks"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useSizeClass } from "@/hooks/use-size-class"
 import { useSampled } from "@/hooks/use-sampled"
@@ -1108,6 +1110,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return drawEndAt(wiring, snapPoint(world))
   }
 
+  const markNoConnectUnderPointer = useEvent(() => {
+    const pointer = pointerClient.current
+    if (pointer) sch.markNoConnect(endUnder(pointer.x, pointer.y).at)
+  })
+
   const openEndNear = (clientX: number, clientY: number): DrawEnd | null => {
     const world = toWorld(clientX, clientY)
     const reach = WIRE_HIT_PX / 2 / scale
@@ -1475,6 +1482,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       e.preventDefault()
       return joinUnderPointer(pointer)
     }
+    if (!pending && pointer && plain && (e.key.toLowerCase() === "q" || e.code === "KeyQ")) {
+      e.preventDefault()
+      return markNoConnectUnderPointer()
+    }
     const selected = () => sch.selectedObjects.size > 0
     const turnable = () => selected() || sch.selectedWires.size > 0
     dispatch(e, [
@@ -1584,9 +1595,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const lit = React.useMemo(() => (searching ? new Set(hits.map((h) => h.object)) : null), [searching, hits])
   const objectById = React.useMemo(() => new Map(docObjects.map((o) => [o.id, o])), [docObjects])
   const staticFound = React.useMemo(() => staticProblems(docObjects, nets), [docObjects, nets])
+  const findings = React.useMemo(() => checked(schDoc, wiring), [schDoc, wiring])
+  const checkFound = React.useMemo(() => checkProblems(findings), [findings])
   // The solver reports many times a second; the list follows a few times a second.
   const runtimeSim = useSampled(sim, 250)
-  const problems = React.useMemo(() => sortProblems([...staticFound, ...runtimeProblems(docObjects, runtimeSim)], docObjects), [staticFound, docObjects, runtimeSim])
+  const problems = React.useMemo(() => sortProblems([...staticFound, ...checkFound, ...runtimeProblems(docObjects, runtimeSim)], docObjects), [staticFound, checkFound, docObjects, runtimeSim])
   const [activeProblem, setActiveProblem] = React.useState<string | null>(null)
   /** The pointer on an explorer row: the field rings the object, the camera stays. */
   const [hoverObject, setHoverObject] = React.useState<string | null>(null)
@@ -1633,6 +1646,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (!p) return
     setActiveProblem(key)
     if (p.object) goTo({ object: p.object, pin: p.pin })
+    else if (p.at) show({ x: p.at.x - 2 * grid, y: p.at.y - 2 * grid, w: 4 * grid, h: 4 * grid }, { minPx: 24 })
   })
   /** F8 / Shift+F8: the next or previous problem, round the list. */
   const stepProblem = useEvent((delta: 1 | -1) => {
@@ -1871,6 +1885,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               />
               )}
               {labelsOnCanvas && <TextCanvas objects={labelledObjects} view={view} grid={grid} scale={scale} text={sheetText} raster={textRaster} />}
+              {!detail.canvas && <CheckMarks findings={findings} active={activeProblem} grid={grid} />}
               <svg data-slot="rubber-band" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
                 <g />
               </svg>

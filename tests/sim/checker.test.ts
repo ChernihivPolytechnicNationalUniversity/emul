@@ -171,10 +171,10 @@ describe("fields over wires, bodies and each other (design.md §5.2, §6.8: a fi
   it("a wire through a part's designator is a finding naming the field's part; clear of it, none", () => {
     const r1 = resistor("R1", 0, 0, { props: { ref: "R1", value: "" } })
     const ref = placedFields(r1, GRID).find((f) => f.key === "ref")!
-    const wire = seg(at(2, -4), at(2, -0.5))
-    expect.soft(ref.box.x < c(2) && ref.box.x + ref.box.w > c(2) && ref.box.y < c(-0.5) && ref.box.y + ref.box.h > c(-4), "set up: the wire runs through the designator").toBe(true)
+    const wire = seg(at(2, -4), at(2, 0.5))
+    expect.soft(ref.box.x < c(2) && ref.box.x + ref.box.w > c(2) && ref.box.y < c(0.5) && ref.box.y + ref.box.h > c(-4), "set up: the wire runs through the designator").toBe(true)
     expect.soft(of(checked(docOf([r1], [wire])), "field-on-wire").map((f) => f.objects.join()), "one finding, R1's").toEqual(["R1"])
-    expect.soft(of(checked(docOf([r1], [seg(at(6, -4), at(6, -0.5))])), "field-on-wire"), "a wire beside it").toEqual([])
+    expect.soft(of(checked(docOf([r1], [seg(at(6, -4), at(6, 0.5))])), "field-on-wire"), "a wire beside it").toEqual([])
   })
 
   it("a field over another part's pin is a finding: the pin is part of what that part occupies (design.md §5.1)", () => {
@@ -197,7 +197,8 @@ describe("fields over wires, bodies and each other (design.md §5.2, §6.8: a fi
 
   it("another part's body under a field is a finding; apart, none", () => {
     const doc = docOf([resistor("R1", 0, 0, { props: { ref: "R1", value: "1 kΩ" } }), resistor("R2", 0, -1, { props: { ref: "R2", value: "" } })])
-    expect.soft(of(checked(doc), "field-on-body").filter((f) => f.objects.includes("R1")), "each of R1's two fields over R2's body, one finding a field").toHaveLength(2)
+    const onR2 = of(checked(doc), "field-on-body").filter((f) => f.objects.includes("R1"))
+    expect.soft(onR2.map((f) => f.text), "R1's value over R2's body: one finding for that field (its designator above clears R2's body)").toEqual(["R1's value lies on R2"])
     const apart = docOf([resistor("R1", 0, 0, { props: { ref: "R1", value: "1 kΩ" } }), resistor("R2", 0, -4, { props: { ref: "R2", value: "" } })])
     expect.soft(of(checked(apart), "field-on-body"), "four rows apart").toEqual([])
   })
