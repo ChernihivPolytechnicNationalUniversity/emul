@@ -326,22 +326,32 @@ async function phaseFiveChecks(page: Page) {
     wires: [{ id: "w1", a: cellPoint(14, 11), b: cellPoint(26, 11) }],
     parts: {},
   })
-  const spans = () =>
+  const runs = () =>
     page.evaluate(() =>
-      [...document.querySelectorAll("[data-slot=wires] [data-wire] path[data-base]")].map((e) => (e.getAttribute("d") ?? "").match(/-?[\d.]+/g)!.map(Number)),
+      [...document.querySelectorAll("[data-slot=wires] [data-wire][data-points]")]
+        .map((e) => (e.getAttribute("data-points") ?? "").split(" ").map((p) => p.split(",").map(Number)))
+        .map((pts) => pts.flat())
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1]),
     )
-  const covered = (all: number[][], x: number, y: number) => all.some(([x1, y1, x2, y2]) => y1 === y && y2 === y && Math.min(x1, x2) < x && Math.max(x1, x2) > x)
+  const along = (y: number, from: number, to: number) => [from * GRID, y * GRID, to * GRID, y * GRID]
   await openDoc(page, "splice", spliceDoc())
   f = await fieldFrame(page)
   await dragBy(page, f.toScreen(cellPoint(18, 17)), f.toScreen(cellPoint(18, 11)))
   expect("R3 dropped onto the R1–R2 wire lands there (findings 4.U8)", await f.worldOf("R3"), { x: 16 * GRID, y: 10 * GRID })
-  expect("and the wire is cut under its body: nothing drawn across its middle, the halves end on its pins with no open end (design.md §5.3)", [covered(await spans(), 18 * GRID, 11 * GRID), await countOf(page, "[data-dangling]")], [false, 0])
+  expect("and the wire is cut under its body: exactly two halves, R1 to R3 and R3 to R2, no open end (design.md §5.3)", [await runs(), await countOf(page, "[data-dangling]")], [[along(11, 14, 16), along(11, 20, 26)], 0])
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(500)
+  expect("one Undo takes back the drop and the cut together: R3 home, the wire whole (junctions.md principle 2)", [await f.worldOf("R3"), await runs()], [{ x: 16 * GRID, y: 16 * GRID }, [along(11, 14, 26)]])
+  await page.keyboard.press("Control+Shift+z")
+  await page.waitForTimeout(500)
+  expect("one Redo puts both back", [await f.worldOf("R3"), await runs()], [{ x: 16 * GRID, y: 10 * GRID }, [along(11, 14, 16), along(11, 20, 26)]])
   await openDoc(page, "splice-alt", spliceDoc())
   f = await fieldFrame(page)
   await page.keyboard.down("Alt")
   await dragBy(page, f.toScreen(cellPoint(18, 17)), f.toScreen(cellPoint(18, 11)))
   await page.keyboard.up("Alt")
-  expect("with Alt held R3 lands on the wire and the wire stays whole under it (design.md §5.3: Alt suppresses)", [await f.worldOf("R3"), covered(await spans(), 18 * GRID, 11 * GRID)], [{ x: 16 * GRID, y: 10 * GRID }, true])
+  const whole = (await runs()).filter((r) => r[1] === 11 * GRID && r[r.length - 1] === 11 * GRID)
+  expect("with Alt held R3 lands on the wire and the wire runs on from R1 to R2 under it (design.md §5.3: Alt suppresses)", [await f.worldOf("R3"), whole.length > 0 && Math.min(...whole.map((r) => r[0])) === 14 * GRID && Math.max(...whole.map((r) => r[r.length - 2])) === 26 * GRID && !(await runs()).some((r) => r[0] === 20 * GRID)], [{ x: 16 * GRID, y: 10 * GRID }, true])
 
   await openDoc(page, "fields", { objects: [{ ...resistorAt("R1", 10, 10), props: { ref: "R1", value: "1 kΩ" } }], wires: [], parts: {} })
   f = await fieldFrame(page)
@@ -349,25 +359,50 @@ async function phaseFiveChecks(page: Page) {
   const before = await fieldBox()
   const body = await box(page, "R1")
   expect("R1's designator is a field of its own, drawn above the lying resistor (design.md §5.2)", !!before && before.y + before.height <= body.y + body.height / 2, true)
-  if (!before) expect("a field dragged by hand moves three cells, the part stays", "no field to drag", [3, 10 * GRID])
+  if (!before) expect("a field dragged by hand follows the pointer and lands three cells right, the part stays", "no field to drag", "a field")
   else {
     const cell = (await f.toScreen(cellPoint(1, 0))).x - (await f.toScreen(cellPoint(0, 0))).x
-    await dragBy(page, { x: before.x + before.width / 2, y: before.y + before.height / 2 }, { x: before.x + before.width / 2 + 3 * cell, y: before.y + before.height / 2 })
-    const after = await fieldBox()
-    expect("a field dragged by hand moves three cells, the part stays", [Math.round(((after?.x ?? 0) - before.x) / cell), (await f.worldOf("R1")).x], [3, 10 * GRID])
+    const grip = { x: before.x + before.width / 2, y: before.y + before.height / 2 }
+    const moved = (b: { x: number; y: number } | null) => (b ? [Math.round(((b.x - before.x) / cell) * 1000), Math.round(((b.y - before.y) / cell) * 1000)] : null)
+    await dragBy(page, grip, { x: grip.x + 3 * cell, y: grip.y }, false)
+    expect("held, the field follows the pointer three cells right and the part stays", [moved(await fieldBox()), await f.worldOf("R1")], [[3000, 0], { x: 10 * GRID, y: 10 * GRID }])
+    await page.mouse.up()
+    await page.waitForTimeout(500)
+    expect("dropped, the field is three cells right, not a hair up or down, and the part has not moved", [moved(await fieldBox()), await f.worldOf("R1")], [[3000, 0], { x: 10 * GRID, y: 10 * GRID }])
+    await page.keyboard.press("Control+z")
+    await page.waitForTimeout(500)
+    expect("one Undo puts the field back", moved(await fieldBox()), [0, 0])
   }
 
-  await openDoc(page, "checker", { objects: [resistorAt("R1", 10, 10), resistorAt("R2", 10, 16)], wires: [{ id: "w", a: cellPoint(14, 11), b: cellPoint(20, 11) }, { id: "w2", a: cellPoint(10, 11), b: cellPoint(10, 17) }], parts: {} })
+  await openDoc(page, "checker", {
+    objects: [resistorAt("R1", 10, 10), resistorAt("R2", 10, 16)],
+    wires: [
+      { id: "w", a: cellPoint(14, 11), b: cellPoint(20, 11) },
+      { id: "w2", a: cellPoint(10, 11), b: cellPoint(10, 17) },
+      { id: "w3", a: cellPoint(14, 17), b: cellPoint(20, 17) },
+    ],
+    parts: {},
+  })
   f = await fieldFrame(page)
   const findings = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=checker] [data-finding]")].map((e) => e.getAttribute("data-finding")))
-  expect("the checker lists the dangling end in the panel (design.md §6.8)", (await findings()).includes("dangling-end"), true)
-  expect("and marks it on the field", await countOf(page, "[data-slot=check-marks] [data-finding='dangling-end']"), 1)
-  const had = (await findings()).includes("dangling-end")
+  const marks = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=check-marks] [data-finding='dangling-end']")].map((e) => e.getAttribute("data-at")).sort())
+  expect("the checker lists both dangling ends in the panel (design.md §6.8)", (await findings()).filter((k) => k === "dangling-end").length, 2)
+  expect("and marks both on the field, where they are", await marks(), [`${20 * GRID},${11 * GRID}`, `${20 * GRID},${17 * GRID}`])
   const free = await f.toScreen(cellPoint(20, 11))
   await page.mouse.move(free.x, free.y)
   await page.keyboard.press("q")
   await page.waitForTimeout(500)
-  expect("Q over the end puts a no-connect mark there and the finding goes (KiCad's no-connect flag, its key)", [had, (await findings()).includes("dangling-end")], [true, false])
+  expect(
+    "Q over one end puts one no-connect mark there; only that finding goes, in the panel and on the field (KiCad's no-connect flag, its key)",
+    [await countOf(page, "[data-body] [data-slot=component][data-def='no-connect']"), (await findings()).filter((k) => k === "dangling-end").length, await marks()],
+    [1, 1, [`${20 * GRID},${17 * GRID}`]],
+  )
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(500)
+  expect("one Undo takes the mark away and both findings are back", [await countOf(page, "[data-body] [data-slot=component][data-def='no-connect']"), await marks()], [0, [`${20 * GRID},${11 * GRID}`, `${20 * GRID},${17 * GRID}`]])
+  const r2 = await f.toScreen(cellPoint(12, 17))
+  await dragBy(page, r2, { x: r2.x, y: r2.y + (await f.toScreen(cellPoint(0, 3))).y - (await f.toScreen(cellPoint(0, 0))).y })
+  expect("an ordinary edit goes through while findings stand: the checker never blocks", (await f.worldOf("R2")).y, 19 * GRID)
 }
 
 async function zoomAcrossPinDetail(page: Page) {

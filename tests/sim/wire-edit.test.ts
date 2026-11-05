@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { GRID, objectRect, type Point } from "@/schematic/geometry"
+import { GRID, objectPins, objectRect, type Point } from "@/schematic/geometry"
 import { junctionAt, junctionJoins } from "@/schematic/junction-tool"
 import { changeMessage, netChanges, netName, NO_CHANGE } from "@/schematic/net-names"
 import type { PlacedObject, Schematic } from "@/schematic/types"
@@ -523,6 +523,47 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
     expect.soft(normalFormViolations(landed.doc.wires, wirePins(landed.doc.objects)), "normal form").toEqual([])
   })
 
+  it("every two-terminal symbol splices the same way: capacitor, inductor, diode, LED, Zener (design.md §5.3: a two-terminal part)", () => {
+    for (const def of ["capacitor", "inductor", "diode", "led", "zener"]) {
+      const doc = docOf([resistor("R1", 0, 0), resistor("R2", 16, 0), { id: "X3", def, x: c(6), y: c(4), props: { ref: "X3" } }], [seg(at(4, 1), at(16, 1))])
+      const landed = dropped(doc, "X3", 0, -4)
+      expect.soft(geometryOf(landed.doc.wires), `${def}: cut under its body`).toEqual(geometryOf([seg(at(4, 1), at(6, 1)), seg(at(10, 1), at(16, 1))]))
+      expect.soft(partition(landed.doc), `${def}: in series`).toEqual([
+        ["R1:2", "X3:1"],
+        ["R2:1", "X3:2"],
+      ])
+    }
+  })
+
+  it("a vertical wire is cut the same way, whichever way the segment was drawn", () => {
+    for (const reversed of [false, true]) {
+      const wire = reversed ? seg(at(1, 16), at(1, 4)) : seg(at(1, 4), at(1, 16))
+      const doc = docOf([resistor("R1", 0, 0, 90), resistor("R2", 0, 16, 90), resistor("R3", 6, 6, 90)], [wire])
+      const landed = dropped(doc, "R3", -6, 0)
+      expect.soft(geometryOf(landed.doc.wires), `${reversed ? "drawn upwards" : "drawn downwards"}: cut between (1, 6) and (1, 10)`).toEqual(geometryOf([seg(at(1, 4), at(1, 6)), seg(at(1, 10), at(1, 16))]))
+      expect.soft(partition(landed.doc), "in series").toEqual([
+        ["R1:2", "R3:1"],
+        ["R2:1", "R3:2"],
+      ])
+    }
+  })
+
+  it("pins landing on the wire's own two ends take the whole wire: the part replaces it, butted to both neighbours; with one pin on an end one half is left", () => {
+    const whole = dropped(docOf([resistor("R1", 0, 0), resistor("R2", 8, 0), resistor("R3", 4, 4)], [seg(at(4, 1), at(8, 1))]), "R3", 0, -4)
+    expect.soft(whole.doc.wires, "no wire left").toEqual([])
+    expect.soft(partition(whole.doc), "R1–R3–R2 butted").toEqual([
+      ["R1:2", "R3:1"],
+      ["R2:1", "R3:2"],
+    ])
+    const half = dropped(docOf([resistor("R1", 0, 0), resistor("R2", 12, 0), resistor("R3", 4, 4)], [seg(at(4, 1), at(12, 1))]), "R3", 0, -4)
+    expect.soft(geometryOf(half.doc.wires), "the half from (8, 1) to R2").toEqual(geometryOf([seg(at(8, 1), at(12, 1))]))
+    expect.soft(partition(half.doc), "in series").toEqual([
+      ["R1:2", "R3:1"],
+      ["R2:1", "R3:2"],
+    ])
+    expect.soft(normalFormViolations(half.doc.wires, wirePins(half.doc.objects)), "normal form").toEqual([])
+  })
+
   it("added from the palette onto the wire, the part splices the same way (design.md §5.3: when a two-terminal part is released)", () => {
     const doc = docOf([resistor("R1", 0, 0), resistor("R2", 16, 0)], [seg(at(4, 1), at(16, 1))])
     const added = placedObject(doc, resistor("R3", 6, 0), newId)
@@ -548,10 +589,12 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
   })
 
   it("a part with three pins is not spliced, even with two of them on the wire (design.md §5.3: a two-terminal part)", () => {
-    const doc = docOf([resistor("R1", 0, -8, 90), resistor("R2", 8, 8, 90), { id: "Q1", def: "npn", x: c(12), y: c(-6), props: { ref: "Q1" } }], [seg(at(9, -4), at(9, 8))])
+    const doc = docOf([resistor("R1", 8, -8, 90), resistor("R2", 8, 8, 90), { id: "Q1", def: "npn", x: c(12), y: c(-6), props: { ref: "Q1" } }], [seg(at(9, -4), at(9, 8))])
     const landed = dropped(doc, "Q1", -6, 5)
-    expect.soft(landed.at, "set up: dropped where let go, collector and emitter on the wire").toEqual({ x: c(-6), y: c(5) })
-    expect.soft(landed.doc.wires.filter((s) => s.a.x === c(9) && s.b.x === c(9)).reduce((sum, s) => sum + Math.abs(s.b.y - s.a.y), 0), "the wire stays as long as it was").toBe(c(12))
+    const pins = Object.fromEntries(objectPins(landed.doc.objects.find((o) => o.id === "Q1")!, GRID).map((p) => [p.pin.id, p.point]))
+    expect.soft([landed.at, pins.C, pins.E], "set up: dropped where let go, collector and emitter on the wire").toEqual([{ x: c(-6), y: c(5) }, at(9, -1), at(9, 3)])
+    expect.soft(geometryOf(landed.doc.wires), "the wire whole, split only at the two pins").toEqual(geometryOf([seg(at(9, -4), at(9, -1)), seg(at(9, -1), at(9, 3)), seg(at(9, 3), at(9, 8))]))
+    expect.soft(partition(landed.doc), "collector, emitter and both resistors on one net").toEqual([["Q1:C", "Q1:E", "R1:2", "R2:1"]])
   })
 
   it("a wire with a branch between the two pins is not cut: the branch would be left under the body (taken by default, findings.md phase 5)", () => {
@@ -559,9 +602,16 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
     const landed = dropped(doc, "R3", 0, 6)
     expect.soft(covers(landed.doc, at(4, 1), at(16, 1)), "the spine stays whole").toBe(true)
     expect.soft(sortedPoints(junctionsOf(viewOf(landed.doc))).some((p) => p.x === c(8) && p.y === c(1)), "and so does the branch's dot").toBe(true)
+    expect.soft(landed.doc.wires.some((s) => s.a.x === c(8) && s.b.x === c(8) && Math.min(s.a.y, s.b.y) === c(1) && Math.max(s.a.y, s.b.y) === c(6)), "the whole branch down to R4").toBe(true)
+    expect.soft(partition(landed.doc).find((g) => g.includes("R4:1")), "R4 still on the spine").toEqual(["R1:2", "R2:1", "R3:1", "R3:2", "R4:1"])
   })
 
-  it("the halves keep their colours: a wire red on one side of a colour boundary and blue on the other (design.md §5.3; N4's colour exception)", () => {
+  it("the halves keep their colour, and a cut inside one colour leaves the boundary where it was", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 16, 0), resistor("R3", 6, 4)], [seg(at(4, 1), at(12, 1), "red"), seg(at(12, 1), at(16, 1), "blue")])
+    expect(geometryOf(dropped(doc, "R3", 0, -4).doc.wires)).toEqual(geometryOf([seg(at(4, 1), at(6, 1), "red"), seg(at(10, 1), at(12, 1), "red"), seg(at(12, 1), at(16, 1), "blue")]))
+  })
+
+  it("both pins on one straight run across a change of colour, nothing else meeting it between them: cut, each half keeping its colour (taken by default, findings 5.2: a run crosses a change of colour, design.md §6.2; N4 keeps the boundary)", () => {
     const doc = docOf([resistor("R1", 0, 0), resistor("R2", 16, 0), resistor("R3", 10, 4)], [seg(at(4, 1), at(12, 1), "red"), seg(at(12, 1), at(16, 1), "blue")])
     const landed = dropped(doc, "R3", 0, -4)
     expect.soft(geometryOf(landed.doc.wires), "cut between (10, 1) and (14, 1)").toEqual(geometryOf([seg(at(4, 1), at(10, 1), "red"), seg(at(14, 1), at(16, 1), "blue")]))

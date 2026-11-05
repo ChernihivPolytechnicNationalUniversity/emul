@@ -53,17 +53,17 @@ describe("a part occupies its drawn body and its leads, nothing else (design.md 
     ])
   })
 
-  it("no text is part of any footprint: the footprint of every part is the same with its designator, value and pin names emptied (design.md §5.1)", () => {
+  it("no text is part of any footprint: no definition's footprint holds a text box, and its body, contour and leads do not change with a long designator and value (design.md §5.1)", () => {
     const named = (o: PlacedObject): PlacedObject => ({ ...o, props: { ...o.props, ref: "R123456789", value: "1234567890 kΩ" } })
     const offenders: string[] = []
     for (const def of allDefs()) {
-      if (!def.pins.length) continue
       const o = part("x", def.id, 0, 0)
       const plain = footprints(o, GRID)
       const labelled = footprints(named(o), GRID)
-      if (JSON.stringify(plain && { body: plain.body, contour: plain.contour, leads: plain.leads }) !== JSON.stringify(labelled && { body: labelled.body, contour: labelled.contour, leads: labelled.leads })) offenders.push(def.id)
+      if (labelled && labelled.labels.length) offenders.push(`${def.id}: ${labelled.labels.length} text boxes`)
+      if (JSON.stringify(plain && { body: plain.body, contour: plain.contour, leads: plain.leads }) !== JSON.stringify(labelled && { body: labelled.body, contour: labelled.contour, leads: labelled.leads })) offenders.push(`${def.id}: moves with its text`)
     }
-    expect(offenders).toEqual([])
+    expect(offenders.slice(0, 30)).toEqual([])
   })
 
   it("any two of resistor, capacitor, inductor, diode, LED and Zener, one upright and one lying, butted pin to pin at a right angle, may be placed in all four corners: the leads are lines that meet at the pin (design.md §5.1; findings 2.D12, 4.U12; KiCad, OrCAD)", () => {
@@ -94,7 +94,7 @@ describe("a part occupies its drawn body and its leads, nothing else (design.md 
     expect.soft(placementCheck(s, [d])(0, 0), "allowed").toBe(false)
   })
 
-  it("a pin landing on another part's lead, not on its pin, is refused: a symbol's own lines are not branch points (ГОСТ 2.721-74 note 3; design.md §5.1)", () => {
+  it("a pin landing on another part's lead, not on its pin, is refused (design.md §5.1's rule; ГОСТ 2.721-74 item 6 note 3: a symbol's own graphical elements are not branch points)", () => {
     const d = part("d", "diode", 0, 0)
     const r = turned("r", "resistor", 0, 1, 90)
     const s = scene([d, r])

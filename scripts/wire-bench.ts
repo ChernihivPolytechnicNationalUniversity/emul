@@ -178,11 +178,13 @@ const sheet = boardDocuments([BOARDS])[0]
 const carried: PlacedObject = { id: "carried", def: "crystal", x: 38 * GRID, y: 28 * GRID, props: { ref: "Y1" } }
 const dragStart = time(() => placementCheck({ objects: [...sheet.objects, carried], routes: [], grid: GRID }, [carried]), 5)
 const firstGestures: number[] = []
-for (let i = 0; i < 5; i++) {
+for (let i = 0; i < 6; i++) {
   const loaded = wiringOf(new WireGraph(), sheet)
+  const fieldIndex = new SpatialIndex(sheet.objects, GRID)
   const started = performance.now()
-  void new PartDrag(sheet, loaded, { objects: new Set([sheet.objects[0].id]) })
-  firstGestures.push(performance.now() - started)
+  const drag = new PartDrag(sheet, loaded, { objects: new Set([sheet.objects[0].id]) }, { index: fieldIndex })
+  drag.frame(GRID, GRID)
+  if (i > 0) firstGestures.push(performance.now() - started)
 }
 const firstGesture = median(firstGestures)
 const FENCE = 60
@@ -355,8 +357,9 @@ for (let i = 0; i < 7; i++) {
   const first = run.turned(1)
   void wiringOf(storeGraph, first.doc).sheet
   const started = performance.now()
-  run.turned(1)
-  secondPresses.push(performance.now() - started)
+  const next = run.turned(1)
+  void wiringOf(storeGraph, next.doc).sheet
+  secondPresses.push(next.doc === first.doc ? Infinity : performance.now() - started)
 }
 const pressedAgain = median(secondPresses.slice(1))
 const standPin = standWiring.pins.find((p) => p.key.startsWith(`${standPart.id}:`))!

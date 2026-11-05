@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { CHECK_KINDS, checked, NO_CONNECT, type CheckKind, type Finding } from "@/schematic/checker"
 import { examples } from "@/schematic/examples"
-import { placedFields } from "@/schematic/fields"
 import { GRID, objectPins, type Point } from "@/schematic/geometry"
+import { placedFields, withFieldMoved } from "@/schematic/fields"
+import { junctionsOf, pinPartition, WireGraph } from "@/schematic/wires/graph"
 import type { PlacedObject, Schematic } from "@/schematic/types"
-import { inNormalForm } from "@/schematic/wire-edits"
+import { inNormalForm, wiringOf } from "@/schematic/wire-edits"
 import type { WireSegment } from "@/schematic/wires/segment"
 
 const c = (v: number) => v * GRID
@@ -19,8 +20,15 @@ const of = (findings: readonly Finding[], kind: CheckKind) => findings.filter((f
 const points = (findings: readonly Finding[]) => findings.map((f) => ({ x: f.at.x / GRID, y: f.at.y / GRID })).sort((a, b) => a.x - b.x || a.y - b.y)
 
 describe("the checker: a light ERC that never blocks (design.md §6.8)", () => {
-  it("checks exactly the design's list: dangling ends, unconnected pins, four-way connections, a wire through a body, a field over a wire or a body, two fields overlapping; two ends of different nets on one point cannot happen (N5) and is no check", () => {
-    expect(CHECK_KINDS).toEqual(["dangling-end", "unconnected-pin", "four-way", "wire-through-body", "field-on-wire", "field-on-body", "fields-overlap"])
+  it("checks exactly the design's list: dangling ends, unconnected pins, four-way connections, a wire through a body, a field over a wire or a body, two fields overlapping (§6.8), parallel runs closer than one cell (§5.4); two ends of different nets on one point cannot happen (N5) and is no check", () => {
+    expect(CHECK_KINDS).toEqual(["dangling-end", "unconnected-pin", "four-way", "wire-through-body", "field-on-wire", "field-on-body", "fields-overlap", "parallel-too-close"])
+  })
+
+  it("gives the same findings from the store's kept wiring as from a fresh one", () => {
+    for (const example of examples.slice(0, 10)) {
+      const doc = example.build(GRID)
+      expect.soft(checked(doc, wiringOf(new WireGraph(), doc)), example.id).toEqual(checked(doc))
+    }
   })
 
   it("reads the document and changes nothing in it", () => {
@@ -52,6 +60,16 @@ describe("dangling wire ends (design.md §6.8, §3.3; Altium Unconnected Wire, K
     const doc = docOf([resistor("R1", 0, 0), resistor("R2", 0, 4), noConnect("N1", at(8, 1))], [seg(at(4, 1), at(8, 1)), seg(at(0, 1), at(0, 5))])
     expect(of(checked(doc), "dangling-end")).toEqual([])
   })
+
+  it("a no-connect mark silences only its own point: of two open ends the other stays, and a mark half a cell off silences neither", () => {
+    const wires = [seg(at(4, 1), at(8, 1)), seg(at(0, 1), at(0, 5)), seg(at(4, 5), at(8, 5))]
+    const parts = [resistor("R1", 0, 0), resistor("R2", 0, 4)]
+    expect.soft(points(of(checked(docOf([...parts, noConnect("N1", at(8, 1))], wires)), "dangling-end")), "the other end").toEqual([{ x: 8, y: 5 }])
+    expect.soft(points(of(checked(docOf([...parts, noConnect("N1", at(8.5, 1))], wires)), "dangling-end")), "half a cell off").toEqual([
+      { x: 8, y: 1 },
+      { x: 8, y: 5 },
+    ])
+  })
 })
 
 describe("unconnected pins of parts that have a model (design.md §6.8; KiCad pin-not-connected ERC)", () => {
@@ -78,12 +96,26 @@ describe("unconnected pins of parts that have a model (design.md §6.8; KiCad pi
     expect(points(found)).toEqual([{ x: 4, y: 1 }])
   })
 
+  it("a no-connect mark is electrically nothing: on a pin with three wires it changes no net and no dot, the four-way finding stays, and the mark itself is no unconnected part", () => {
+    const wires = [seg(at(4, 1), at(8, 1)), seg(at(4, 1), at(4, 5)), seg(at(4, 1), at(4, -3))]
+    const unmarked = docOf([resistor("R1", 0, 0)], wires)
+    const marked = docOf([resistor("R1", 0, 0), noConnect("N1", at(4, 1))], wires)
+    expect.soft(pinPartition(wiringOf(new WireGraph(), marked).view), "the nets").toEqual(pinPartition(wiringOf(new WireGraph(), unmarked).view))
+    expect.soft(junctionsOf(wiringOf(new WireGraph(), marked).view), "the dots").toEqual(junctionsOf(wiringOf(new WireGraph(), unmarked).view))
+    expect.soft(points(of(checked(marked), "four-way")), "still four conductors there").toEqual([{ x: 4, y: 1 }])
+    expect.soft(checked(marked).filter((f) => f.objects.includes("N1")), "nothing about the mark").toEqual([])
+  })
+
   it("a part with no model is not checked: a crystal is drawn for the board's clock, not simulated", () => {
     expect(of(checked(docOf([part("Y1", "crystal", 0, 0)])), "unconnected-pin")).toEqual([])
   })
 
-  it("a board's unused header sockets are not findings: a socket connects only by a wire's end, and most stay empty (the jumper rule, design.md §4.5)", () => {
+  it("unused board sockets are excluded from unconnected-pin findings (project default, findings 5.1: every board has a model and most of its sockets stay empty)", () => {
     expect(of(checked(docOf([part("U1", "open746i-c", 0, 0)])), "unconnected-pin")).toEqual([])
+  })
+
+  it("a chip is not a board: a 74HC595 on its own has all sixteen pins unconnected", () => {
+    expect(of(checked(docOf([part("U1", "hc595", 0, 0)])), "unconnected-pin")).toHaveLength(16)
   })
 })
 
@@ -107,13 +139,21 @@ describe("four-way connections (design.md §6.8; junctions.md 13, 14; KiCad four
   })
 })
 
-describe("a wire through a body (design.md §5.1, §6.8; ГОСТ 2.701-84: lines do not pass through symbols; IEC 61082-1: connecting lines should not interfere with other symbols)", () => {
+describe("a wire through a body (design.md §5.1, §6.8; inferred from ГОСТ 2.701-84's clearances, research/standards.md; IEC 61082-1 via a secondary source: connecting lines should not interfere with other symbols)", () => {
   it("a wire across a resistor's body that meets none of its pins is a finding naming the part and the wire", () => {
     const wire = seg(at(2, -3), at(2, 5))
     const doc = docOf([resistor("R1", 0, 0)], [wire])
     const found = of(checked(doc), "wire-through-body")
     expect.soft(found.map((f) => f.objects.join()), "R1").toEqual(["R1"])
     expect.soft(found[0]?.segments, "that wire").toEqual([wire.id])
+  })
+
+  it("a wire through both of a resistor's pins runs along its leads and body: the piece between the pins is a finding (an uncut wire, as Alt leaves it)", () => {
+    const doc = docOf([resistor("R1", 0, 0)], [seg(at(-4, 1), at(8, 1))])
+    const central = doc.wires.find((s) => Math.min(s.a.x, s.b.x) === 0 && Math.max(s.a.x, s.b.x) === c(4))!
+    const found = of(checked(doc), "wire-through-body")
+    expect.soft(central, "set up: the wire split at both pins").toBeDefined()
+    expect.soft(found.map((f) => [f.objects.join(), f.segments.join()]), "R1, the piece between its pins").toEqual([["R1", central?.id]])
   })
 
   it("a wire that ends on the part's pin runs along nothing of its body: no finding", () => {
@@ -128,25 +168,58 @@ describe("a wire through a body (design.md §5.1, §6.8; ГОСТ 2.701-84: line
 })
 
 describe("fields over wires, bodies and each other (design.md §5.2, §6.8: a finding, never a refusal)", () => {
-  it("a wire through a part's designator is a finding naming the field's part", () => {
-    const r1 = resistor("R1", 0, 0, { props: { ref: "R1", value: "1 kΩ" } })
+  it("a wire through a part's designator is a finding naming the field's part; clear of it, none", () => {
+    const r1 = resistor("R1", 0, 0, { props: { ref: "R1", value: "" } })
     const ref = placedFields(r1, GRID).find((f) => f.key === "ref")!
-    const y = ref.box.y + ref.box.h / 2
-    const doc = docOf([r1], [seg({ x: c(-4), y }, { x: c(8), y })])
-    const found = of(checked(doc), "field-on-wire")
-    expect(found.map((f) => f.objects.join())).toEqual(["R1"])
+    const wire = seg(at(2, -4), at(2, -0.5))
+    expect.soft(ref.box.x < c(2) && ref.box.x + ref.box.w > c(2) && ref.box.y < c(-0.5) && ref.box.y + ref.box.h > c(-4), "set up: the wire runs through the designator").toBe(true)
+    expect.soft(of(checked(docOf([r1], [wire])), "field-on-wire").map((f) => f.objects.join()), "one finding, R1's").toEqual(["R1"])
+    expect.soft(of(checked(docOf([r1], [seg(at(6, -4), at(6, -0.5))])), "field-on-wire"), "a wire beside it").toEqual([])
   })
 
-  it("another part's body under a field is a finding", () => {
+  it("a field over another part's pin is a finding: the pin is part of what that part occupies (design.md §5.1)", () => {
+    const r1 = resistor("R1", 0, 0, { props: { ref: "R1", value: "" } })
+    const q1 = part("Q1", "npn", 10, 0, { props: { ref: "Q1", value: "" } })
+    const base = objectPins(q1, GRID).find((p) => p.pin.id === "B")!.point
+    const ref = placedFields(r1, GRID).find((f) => f.key === "ref")!
+    const moved = withFieldMoved(r1, "ref", base.x - ref.at.x, base.y - ref.at.y, GRID)
+    expect.soft(of(checked(docOf([moved, q1])), "field-on-body").map((f) => f.objects.includes("R1")), "R1's designator over Q1's base pin").toEqual([true])
+    expect.soft(of(checked(docOf([r1, q1])), "field-on-body"), "autoplaced, clear").toEqual([])
+  })
+
+  it("two fields of one part moved onto each other are a finding (design.md §5.2)", () => {
+    const r1 = resistor("R1", 0, 0, { props: { ref: "R1", value: "1 kΩ" } })
+    const f = Object.fromEntries(placedFields(r1, GRID).map((x) => [x.key, x]))
+    const onto = withFieldMoved(r1, "ref", f.value.at.x - f.ref.at.x, f.value.at.y - f.ref.at.y, GRID)
+    expect.soft(of(checked(docOf([onto])), "fields-overlap"), "one finding").toHaveLength(1)
+    expect.soft(of(checked(docOf([r1])), "fields-overlap"), "autoplaced: none").toEqual([])
+  })
+
+  it("another part's body under a field is a finding; apart, none", () => {
     const doc = docOf([resistor("R1", 0, 0, { props: { ref: "R1", value: "1 kΩ" } }), resistor("R2", 0, -1, { props: { ref: "R2", value: "" } })])
-    expect(of(checked(doc), "field-on-body").map((f) => f.objects.join())).toContain("R1")
+    expect.soft(of(checked(doc), "field-on-body").filter((f) => f.objects.includes("R1")), "each of R1's two fields over R2's body, one finding a field").toHaveLength(2)
+    const apart = docOf([resistor("R1", 0, 0, { props: { ref: "R1", value: "1 kΩ" } }), resistor("R2", 0, -4, { props: { ref: "R2", value: "" } })])
+    expect.soft(of(checked(apart), "field-on-body"), "four rows apart").toEqual([])
   })
 
   it("two parts' fields overlapping are a finding", () => {
     const long = "4.7 kΩ 1% 0.25 W metal film resistor"
     const doc = docOf([resistor("R1", 0, 0, { props: { ref: "R1", value: long } }), resistor("R2", 4, 0, { props: { ref: "R2", value: long } })])
-    const overlapping = of(checked(doc), "fields-overlap")
-    expect(overlapping.length).toBeGreaterThan(0)
+    expect.soft(of(checked(doc), "fields-overlap"), "the two values").toHaveLength(1)
+    const short = docOf([resistor("R1", 0, 0, { props: { ref: "R1", value: "1 kΩ" } }), resistor("R2", 4, 0, { props: { ref: "R2", value: "1 kΩ" } })])
+    expect.soft(of(checked(short), "fields-overlap"), "short values side by side: none").toEqual([])
+  })
+})
+
+describe("parallel runs closer than one cell (design.md §5.4; ГОСТ 2.701-84 §2.3.4: at least 3 mm between parallel lines)", () => {
+  it("two horizontal wires half a cell apart along each other are one finding; one cell apart, none", () => {
+    expect.soft(of(checked(docOf([], [seg(at(0, 0), at(8, 0)), seg(at(0, 0.5), at(8, 0.5))])), "parallel-too-close"), "half a cell").toHaveLength(1)
+    expect.soft(of(checked(docOf([], [seg(at(0, 0), at(8, 0)), seg(at(0, 1), at(8, 1))])), "parallel-too-close"), "a cell").toEqual([])
+  })
+
+  it("the same for vertical wires, and two wires half a cell apart that do not run alongside each other are none", () => {
+    expect.soft(of(checked(docOf([], [seg(at(0, 0), at(0, 8)), seg(at(0.5, 0), at(0.5, 8))])), "parallel-too-close"), "vertical, half a cell").toHaveLength(1)
+    expect.soft(of(checked(docOf([], [seg(at(0, 0), at(4, 0)), seg(at(6, 0.5), at(10, 0.5))])), "parallel-too-close"), "end to end, not alongside").toEqual([])
   })
 })
 

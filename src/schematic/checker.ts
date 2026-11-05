@@ -4,9 +4,9 @@ import type { Wiring } from "./wire-edits"
 
 export const NO_CONNECT = "no-connect"
 
-export type CheckKind = "dangling-end" | "unconnected-pin" | "four-way" | "wire-through-body" | "field-on-wire" | "field-on-body" | "fields-overlap"
+export type CheckKind = "dangling-end" | "unconnected-pin" | "four-way" | "wire-through-body" | "field-on-wire" | "field-on-body" | "fields-overlap" | "parallel-too-close"
 
-export const CHECK_KINDS: readonly CheckKind[] = ["dangling-end", "unconnected-pin", "four-way", "wire-through-body", "field-on-wire", "field-on-body", "fields-overlap"]
+export const CHECK_KINDS: readonly CheckKind[] = ["dangling-end", "unconnected-pin", "four-way", "wire-through-body", "field-on-wire", "field-on-body", "fields-overlap", "parallel-too-close"]
 
 export type Finding = { kind: CheckKind; at: Point; objects: readonly string[]; segments: readonly string[]; text: string }
 

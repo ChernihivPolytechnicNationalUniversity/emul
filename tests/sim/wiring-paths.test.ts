@@ -141,3 +141,44 @@ describe("the sheet index the rubber band reads is kept up by each commit's delt
     expect.soft(after.sheet, "the index built at the first drag, updated in place by the next commit").toBe(sheet)
   })
 })
+
+describe("phase 5's edits keep the store's wiring and sheet equal to fresh ones (design.md §11; plan.md phase 5: the commit's indexes checked kept-up against fresh)", () => {
+  const line = (): Schematic => ({
+    objects: [
+      { id: "R1", def: "resistor", x: 0, y: 0, props: { ref: "R1" } },
+      { id: "R2", def: "resistor", x: 16 * GRID, y: 0, props: { ref: "R2" } },
+      { id: "R3", def: "resistor", x: 6 * GRID, y: 4 * GRID, props: { ref: "R3", value: "1 kΩ" } },
+    ],
+    wires: [{ id: "w", a: { x: 4 * GRID, y: GRID }, b: { x: 16 * GRID, y: GRID } }],
+    parts: {},
+  })
+
+  it("a splice, then undo and redo through the same kept graph", () => {
+    const before = line()
+    const graph = new WireGraph()
+    const known = wiringOf(graph, before)
+    void known.sheet
+    let n = 0
+    const after = new PartDrag(before, known, { objects: new Set(["R3"]) }).landed(0, -4 * GRID, () => `s${n++}`).doc
+    expect.soft(after.wires.length, "set up: the wire cut in two").toBe(2)
+    for (const [name, doc] of [["after the splice", after], ["undone", before], ["redone", after]] as const) {
+      const kept = wiringOf(graph, doc)
+      const fresh = wiringOf(new WireGraph(), doc)
+      expect.soft(shape(kept), `${name}: the wiring`).toEqual(shape(fresh))
+      expect.soft(sheetShape(kept.sheet, doc.wires, kept.pins), `${name}: the sheet`).toEqual(sheetShape(WireSheet.of(doc.wires, kept.pins), doc.wires, kept.pins))
+    }
+  })
+
+  it("a field moved by hand leaves the wiring as it was, kept and fresh", async () => {
+    const { withFieldMoved } = await import("@/schematic/fields")
+    const before = line()
+    const graph = new WireGraph()
+    const known = wiringOf(graph, before)
+    const after: Schematic = { ...before, objects: before.objects.map((o) => (o.id === "R3" ? withFieldMoved(o, "ref", 3 * GRID, -GRID, GRID) : o)) }
+    const kept = wiringOf(graph, after)
+    expect.soft(after.objects.find((o) => o.id === "R3")!.fieldAt, "set up: the field moved").toBeDefined()
+    expect.soft(shape(kept), "the wiring, kept").toEqual(shape(wiringOf(new WireGraph(), after)))
+    expect.soft(shape(kept), "and unchanged by the move").toEqual(shape(known))
+  })
+})
+

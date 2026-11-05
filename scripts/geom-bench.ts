@@ -4,6 +4,8 @@ import { SpatialIndex } from "@/schematic/spatial"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import { autoNetColor, type WireColorKey } from "@/schematic/wire-colors"
 import { moved, wiringOf, type Wiring } from "@/schematic/wire-edits"
+import { PartDrag } from "@/schematic/rubber-band"
+import { checked } from "@/schematic/checker"
 import { WireGraph } from "@/schematic/wires/graph"
 import { pointKey } from "@/schematic/wires/segment"
 import { boardDocuments, stressDocuments } from "./lib/stress"
@@ -99,7 +101,7 @@ const check = (what: string, ok: boolean, detail: string) => {
   console.log(`  ${ok ? "✓" : "✗"} ${what.padEnd(44)} ${detail}`)
 }
 const ms = (value: number) => `${value.toFixed(2)} ms`
-const atMost = (what: string, got: number, limit: number) => check(what, got <= limit, `${ms(got).padStart(10)}   at most ${ms(limit)}`)
+const atMost = (what: string, got: number, limit: number) => check(what, Number.isFinite(got) && got <= limit, `${ms(got).padStart(10)}   at most ${ms(limit)}`)
 
 function table(header: string[], rows: string[][]) {
   const widths = header.map((cell, column) => Math.max(cell.length, ...rows.map((row) => row[column].length)))
@@ -122,9 +124,12 @@ const speed = (() => {
 
 const boards = process.argv.includes("boards")
 const requested = process.argv.slice(2).map(Number).filter(Number.isFinite)
-const documents = (boards ? boardDocuments() : stressDocuments()).filter(
-  (doc) => requested.length === 0 || requested.includes(doc.objects.length),
-)
+const ANCHOR: PlacedObject = { id: "anchor", def: "resistor", x: -400 * GRID, y: -400 * GRID, props: { ref: "R0" } }
+const anchored = (doc: Schematic): Schematic => ({ ...doc, objects: [...doc.objects, ANCHOR] })
+const documents = (boards ? boardDocuments() : stressDocuments())
+  .filter((doc) => requested.length === 0 || requested.includes(doc.objects.length))
+  .map((doc) => (boards ? anchored(doc) : doc))
+const counted = (doc: Schematic) => doc.objects.filter((o) => o !== ANCHOR).length
 
 type Row = {
   doc: Schematic
@@ -133,6 +138,7 @@ type Row = {
   load: Breakdown
   move: Breakdown
   moveAll: Breakdown
+  drop: Breakdown & { checker: number }
   clone: number
   serialise: number
 }
@@ -167,6 +173,32 @@ for (const doc of documents) {
   }
   const move = runOn(one)
   const moveAll = runOn(all)
+  const drops = (() => {
+    const graph = new WireGraph()
+    let current = doc
+    let known = wiringOf(graph, current)
+    const runs: (Breakdown & { checker: number })[] = []
+    for (let i = 0; i < WARMUP + ITERATIONS; i++) {
+      const drag = new PartDrag(current, known, { objects: one })
+      const dx = i % 2 ? -GRID : GRID
+      drag.frame(dx, 0)
+      const started = performance.now()
+      const landed = drag.landed(dx, 0, newId)
+      const { taken, wiring } = commit(graph, landed.doc, view, performance.now() - started)
+      const checking = performance.now()
+      let checker = Infinity
+      try {
+        checked(landed.doc, wiring)
+        checker = performance.now() - checking
+      } catch {
+        checker = Infinity
+      }
+      current = landed.doc
+      known = wiring
+      if (i >= WARMUP) runs.push({ ...taken, checker, total: taken.total + checker })
+    }
+    return runs
+  })()
 
   const topology = { objects: doc.objects, wires: doc.wires, parts: {} }
   const clone = time(() => void structuredClone(topology), 11)
@@ -186,6 +218,7 @@ for (const doc of documents) {
     load: pick(loads),
     move: pick(move),
     moveAll: pick(moveAll),
+    drop: { ...pick(drops), checker: drops.reduce((sum, r) => sum + r.checker, 0) / drops.length, total: drops.reduce((sum, r) => sum + r.total, 0) / drops.length },
     clone,
     serialise,
   })
@@ -206,6 +239,12 @@ for (const [name, of] of [
   )
 }
 
+console.log("\none part dropped by the rubber band, the commit and the checker after it (the field's real drop)")
+table(
+  ["objects/segments/pins", "drop", "wiring", "index", "derived", "checker", "total"],
+  rows.map((r) => [size(r), ms(r.drop.edit), ms(r.drop.wiring), ms(r.drop.index), ms(r.drop.derived), ms(r.drop.checker), ms(r.drop.total)]),
+)
+
 console.log("\nThe document leaving the main thread")
 table(
   ["objects/segments/pins", "dots", "structuredClone", "JSON.stringify"],
@@ -224,13 +263,14 @@ const smallest = rows[0]
 const largest = rows[rows.length - 1]
 if (smallest && largest && smallest !== largest) {
   const what = boards ? "board" : "object"
-  atMost(`a fixed-size edit costs no more on ${largest.doc.objects.length} ${what}s than on ${smallest.doc.objects.length}: one ${what} moved, within ${FIXED_EDIT_GROWTH}× (plan.md phase 5)`, largest.move.total, FIXED_EDIT_GROWTH * smallest.move.total)
+  atMost(`a fixed-size edit costs no more on ${counted(largest.doc)} ${what}s than on ${counted(smallest.doc)}: one ${what} moved, within ${FIXED_EDIT_GROWTH}× (plan.md phase 5)`, largest.move.total, FIXED_EDIT_GROWTH * smallest.move.total)
+  atMost(`the same for one ${what} dropped by the rubber band, the checker included`, largest.drop.total, FIXED_EDIT_GROWTH * smallest.drop.total)
 }
 for (const r of rows) {
-  const budget = boards ? BOARD_BUDGET_MS[r.doc.objects.length] : undefined
+  const budget = boards ? BOARD_BUDGET_MS[counted(r.doc)] : undefined
   if (!budget) continue
-  atMost(`${r.doc.objects.length} boards: the sheet loaded`, r.load.total, budget.load * speed)
-  atMost(`${r.doc.objects.length} boards: the whole sheet moved`, r.moveAll.total, budget.moveAll * speed)
+  atMost(`${counted(r.doc)} boards: the sheet loaded`, r.load.total, budget.load * speed)
+  atMost(`${counted(r.doc)} boards: the whole sheet moved`, r.moveAll.total, budget.moveAll * speed)
 }
 
 console.log(`\n${total - failed}/${total} checks passed`)

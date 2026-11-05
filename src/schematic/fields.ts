@@ -23,7 +23,7 @@ export function autoplaceSide(_def: ComponentDef, _orientation: Orientation): Fi
   throw new Error(NOT_BUILT)
 }
 
-export function placedFields(_object: PlacedObject, _grid: number): readonly PlacedField[] {
+export function placedFields(_object: PlacedObject, _grid: number, _def?: ComponentDef): readonly PlacedField[] {
   throw new Error(NOT_BUILT)
 }
 
