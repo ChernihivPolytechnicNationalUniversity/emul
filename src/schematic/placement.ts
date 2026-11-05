@@ -1,10 +1,9 @@
-import { framePoint, intersects, objectPins, objectRect, orientationOf, placedText, routeBox, Router, standsOnItsDiagonal, touches, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
+import { framePoint, intersects, objectPins, objectRect, orientationOf, placedText, routeBox, Router, standsOnItsDiagonal, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
 import { getDef } from "./registry"
 import { BoxIndex, BUCKET_CELLS } from "./spatial"
 import { PointGrid } from "./contacts"
-import { bodyBounds } from "./body"
+import { bodyAndLeads, bodyBounds, type Lead } from "./body"
 import { blocksOf } from "./printed-text"
-import { boundsOf, boxCorners, labelFrame, labelKnockout, PIN_LABEL_CELLS, pinLabelById, pinLabels } from "@/components/field/pin-label"
 import type { ComponentDef, PlacedObject } from "./types"
 
 export { bodyBounds }
@@ -23,16 +22,6 @@ function frameOf(object: PlacedObject, def: ComponentDef, grid: number) {
     const at = framePoint(def, orientation, p)
     return { x: object.x + at.x * grid, y: object.y + at.y * grid }
   }
-}
-
-function rectQuad(r: Rect): Quad {
-  const corners = [
-    { x: r.x, y: r.y },
-    { x: r.x + r.w, y: r.y },
-    { x: r.x + r.w, y: r.y + r.h },
-    { x: r.x, y: r.y + r.h },
-  ]
-  return { corners, box: r }
 }
 
 const inside = (a: Rect, b: Rect) => a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h
@@ -68,23 +57,6 @@ function textRectsOf(object: PlacedObject, def: ComponentDef, grid: number): Rec
   return rects
 }
 
-type PinName = Rect & { names?: Point }
-
-function pinNameRects(object: PlacedObject, def: ComponentDef, grid: number): PinName[] {
-  const inset = TEXT_INSET_CELLS
-  const labels = pinLabelById(pinLabels(def, orientationOf(object)))
-  const rects: PinName[] = []
-  for (const { pin, point } of objectPins(object, grid)) {
-    const label = labels.get(pin.id)
-    if (!label) continue
-    const { text } = labelKnockout(label.text, label.anchor, PIN_LABEL_CELLS)
-    const inner = { x: text.x + inset, y: text.y + inset, w: text.w - inset * 2, h: text.h - inset * 2 }
-    const box = boundsOf(boxCorners(inner, labelFrame(label, PIN_LABEL_CELLS)))
-    rects.push({ x: point.x + box.x * grid, y: point.y + box.y * grid, w: box.w * grid, h: box.h * grid, ...(pin.kind !== "nc" && { names: point }) })
-  }
-  return rects
-}
-
 const outsideBody = <R extends Rect>(object: PlacedObject, rects: readonly R[], grid: number): R[] => {
   const body = footprint(object, grid)
   return body ? rects.filter((r) => r.w > 0 && r.h > 0 && !inside(r, body.box)) : []
@@ -103,14 +75,38 @@ export function designatorRects(object: PlacedObject, grid: number): readonly Re
 
 export const fieldRouter = () => new Router(designatorRects)
 
-export type Lead = readonly [Point, Point]
+export type { Lead }
 
-export function footprints(object: PlacedObject, grid: number): { body: Quad; contour: Quad[]; leads: readonly Lead[]; labels: Quad[] } | null {
-  const body = footprint(object, grid)
+export type Footprint = { body: Quad; contour: Quad[]; leads: readonly Lead[]; labels: Quad[] }
+
+const occupiedContours = new WeakMap<ComponentDef, readonly Rect[]>()
+
+function occupiedContour(def: ComponentDef): readonly Rect[] {
+  let found = occupiedContours.get(def)
+  if (!found) {
+    const outline = contourOf(def)
+    const drawsItsWhole = outline.length === 1 && outline[0] === bodyBounds(def)
+    occupiedContours.set(def, (found = drawsItsWhole ? [bodyAndLeads(def).box] : outline))
+  }
+  return found
+}
+
+function placedLeads(object: PlacedObject, def: ComponentDef, grid: number): readonly Lead[] {
+  if (!bodyAndLeads(def).leads.length) return []
+  const at = frameOf(object, def, grid)
+  const pins = objectPins(object, grid)
+  return bodyAndLeads(def).leads.map(([pin, body]) => {
+    const id = def.pins.find((p) => Math.abs(p.x - pin.x) < EPSILON && Math.abs(p.y - pin.y) < EPSILON)?.id
+    return [pins.find((p) => p.pin.id === id)?.point ?? at(pin), at(body)] as const
+  })
+}
+
+export function footprints(object: PlacedObject, grid: number): Footprint | null {
   const def = getDef(object.def)
-  if (!body || !def || body.box.w <= 0 || body.box.h <= 0) return null
-  const names = outsideBody(object, pinNameRects(object, def, grid), grid).map((r): Quad => ({ ...rectQuad(r), ...(r.names && { names: r.names }) }))
-  return { body, contour: contourOf(def).map((r) => quadOf(object, def, r, grid)), leads: [], labels: [...designatorRects(object, grid).map(rectQuad), ...names] }
+  if (!def) return null
+  const body = quadOf(object, def, bodyAndLeads(def).box, grid)
+  if (body.box.w <= 0 || body.box.h <= 0) return null
+  return { body, contour: occupiedContour(def).map((r) => quadOf(object, def, r, grid)), leads: placedLeads(object, def, grid), labels: [] }
 }
 
 const holds = (outer: Rect, inner: Rect) =>
@@ -216,7 +212,7 @@ export type PlacementScene = {
   grid: number
 }
 
-type Placed = { object: PlacedObject; body: Quad; contour: Quad[]; labels: Quad[]; box: Rect }
+type Placed = { object: PlacedObject; contour: Quad[]; leads: readonly Lead[]; box: Rect }
 
 const isJunction = (object: PlacedObject) => {
   const pins = getDef(object.def)?.pins ?? []
@@ -229,86 +225,70 @@ const pinGridOf = (objects: Iterable<PlacedObject>, grid: number) => {
   return pins
 }
 
-type OwnedPin = Point & { owner: string }
-
-const ownedPins = (o: PlacedObject, grid: number): OwnedPin[] => objectPins(o, grid).flatMap(({ pin, point }) => (pin.kind === "nc" ? [] : [{ x: point.x, y: point.y, owner: o.id }]))
-
-const overhangs = new WeakMap<ComponentDef, number>()
-
-function pinOverhang(def: ComponentDef | undefined): number {
-  if (!def) return 0
-  let overhang = overhangs.get(def)
-  if (overhang === undefined) {
-    overhang = 0
-    for (const pin of def.pins) overhang = Math.max(overhang, -pin.x, pin.x - def.width, -pin.y, pin.y - def.height)
-    overhangs.set(def, overhang)
-  }
-  return overhang
-}
-
-function pinsTouching(objects: readonly PlacedObject[], grid: number) {
-  let index: BoxIndex<PlacedObject> | null = null
-  let reach = 0
-  const pins = new PointGrid<OwnedPin>()
-  const indexed = new Set<string>()
-  return (at: Point, owner: string | null) => {
-    if (!index) {
-      for (const def of new Set(objects.map((o) => getDef(o.def)))) reach = Math.max(reach, pinOverhang(def))
-      reach = (reach + 1) * grid
-      index = new BoxIndex(objects, (o) => objectRect(o, grid), BUCKET_CELLS * grid)
-    }
-    index.some({ x: at.x - reach, y: at.y - reach, w: reach * 2, h: reach * 2 }, (o) => {
-      if (!indexed.has(o.id)) {
-        indexed.add(o.id)
-        pins.add(ownedPins(o, grid))
-      }
-      return false
-    })
-    return pins.at(at.x, at.y).some((p) => p.owner !== owner)
-  }
-}
-
-const drawnNames = (placed: Placed, touching: (at: Point, owner: string) => boolean): Placed => {
-  const labels = placed.labels.filter((q) => !q.names || !touching(q.names, placed.object.id))
-  return labels.length === placed.labels.length ? placed : { ...placed, labels }
-}
-
 type Socket = Point & { connector?: string }
 
-const segmentBox = ([p, q]: readonly Point[]): Rect => ({ x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) })
+const samePoint = (a: Point, b: Point) => Math.abs(a.x - b.x) < EPSILON && Math.abs(a.y - b.y) < EPSILON
+
+const minus = (a: Point, b: Point): Point => ({ x: a.x - b.x, y: a.y - b.y })
+
+const crossOf = (a: Point, b: Point) => a.x * b.y - a.y * b.x
+
+function onLead(p: Point, [pin, body]: Lead) {
+  if (samePoint(p, pin)) return false
+  if (Math.abs(crossOf(minus(body, pin), minus(p, pin))) > EPSILON * Math.hypot(body.x - pin.x, body.y - pin.y)) return false
+  const along = (p.x - pin.x) * (body.x - pin.x) + (p.y - pin.y) * (body.y - pin.y)
+  return along > -EPSILON && along < (body.x - pin.x) ** 2 + (body.y - pin.y) ** 2 + EPSILON
+}
+
+function leadsClash([p, q]: Lead, [r, t]: Lead) {
+  const e = minus(q, p)
+  const f = minus(t, r)
+  const lengthA = Math.hypot(e.x, e.y)
+  const lengthB = Math.hypot(f.x, f.y)
+  const touchingAt = (at: Point) => !(samePoint(at, p) && samePoint(at, r))
+  const d = crossOf(e, f)
+  if (Math.abs(d) > EPSILON * lengthA * lengthB) {
+    const w = minus(r, p)
+    const s = crossOf(w, f) / d
+    const u = crossOf(w, e) / d
+    if (s < -EPSILON || s > 1 + EPSILON || u < -EPSILON || u > 1 + EPSILON) return false
+    return touchingAt({ x: p.x + e.x * s, y: p.y + e.y * s })
+  }
+  if (Math.abs(crossOf(minus(r, p), e)) > EPSILON * lengthA) return false
+  const axis = { x: e.x / lengthA, y: e.y / lengthA }
+  const along = (o: Point) => (o.x - p.x) * axis.x + (o.y - p.y) * axis.y
+  const lo = Math.max(0, Math.min(along(r), along(t)))
+  const hi = Math.min(lengthA, Math.max(along(r), along(t)))
+  if (hi < lo - EPSILON) return false
+  if (hi - lo > EPSILON) return true
+  return touchingAt({ x: p.x + axis.x * lo, y: p.y + axis.y * lo })
+}
+
+const shiftedLead = ([p, q]: Lead, dx: number, dy: number): Lead => [
+  { x: p.x + dx, y: p.y + dy },
+  { x: q.x + dx, y: q.y + dy },
+]
+
+const shiftedPoint = (p: Point, dx: number, dy: number): Point => ({ x: p.x + dx, y: p.y + dy })
 
 export function placementCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
   const ids = new Set(moving.map((o) => o.id))
   const place = (object: PlacedObject): Placed | null => {
     if (isJunction(object)) return null
     const f = footprints(object, scene.grid)
-    return f ? { object, ...f, box: unionOf([f.body.box, ...f.labels.map((q) => q.box)]) } : null
+    if (!f) return null
+    const leadBoxes = f.leads.map(([p, q]) => ({ x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) }))
+    return { object, contour: f.contour, leads: f.leads, box: unionOf([...f.contour.map((q) => q.box), ...leadBoxes]) }
   }
-  const touchingFixed = pinsTouching(scene.objects.filter((o) => !ids.has(o.id)), scene.grid)
-  const carriedPins = new PointGrid<OwnedPin>()
-  for (const o of moving) carriedPins.add(ownedPins(o, scene.grid))
-  const touchingCarried = (at: Point, owner: string | null) => carriedPins.at(at.x, at.y).some((p) => p.owner !== owner)
-  const movers = moving.map(place).filter((p): p is Placed => p !== null).map((p) => drawnNames(p, touchingCarried))
+  const pinsOf = (object: PlacedObject) => objectPins(object, scene.grid).map((p) => p.point)
+  const movers = moving.map(place).filter((p): p is Placed => p !== null)
   const others = scene.objects.filter((o) => !ids.has(o.id)).map(place).filter((p): p is Placed => p !== null)
-  const drawnOf = new Map<Placed, readonly Quad[]>()
-  const labelsOf = (other: Placed) => {
-    let labels = drawnOf.get(other)
-    if (!labels) drawnOf.set(other, (labels = drawnNames(other, touchingFixed).labels))
-    return labels
-  }
-  const movingAt = new Set(moving.flatMap((o) => objectPins(o, scene.grid).map((p) => `${p.point.x},${p.point.y}`)))
-  const endsOnMover = (route: RoutedWire) => [route.pts[0], route.pts[route.pts.length - 1]].map((p) => !!p && movingAt.has(`${p.x},${p.y}`))
-  const routes = scene.routes.filter((r) => !endsOnMover(r).some(Boolean)).map((route) => ({ route, box: routeBox(route) }))
-  const carried: Point[][] = []
-  for (const route of scene.routes) if (endsOnMover(route).every(Boolean)) for (let i = 1; i < route.pts.length; i++) carried.push([route.pts[i - 1], route.pts[i]])
-  if (!movers.length || (!others.length && !routes.length)) return () => false
-  const area = unionOf(movers.map((m) => m.box))
+  if (!movers.length || !others.length) return () => false
   const nearby = new BoxIndex(others, (o) => o.box, BUCKET_CELLS * scene.grid)
-  const carriedBox = carried.length ? boxOf(carried.flat()) : null
-  const carriedReach = carriedBox && { x: carriedBox.x - 1, y: carriedBox.y - 1, w: carriedBox.w + 2, h: carriedBox.h + 2 }
   const hit = (a: Quad, b: Quad) => intersects(a.box, b.box) && overlap(a.corners, b.corners)
   const hitsAny = (a: readonly Quad[], list: readonly Quad[]) => a.some((q) => list.some((b) => hit(q, b)))
   const insideAny = (contour: readonly Quad[], p: Point) => contour.some((q) => strictlyInside(q.corners, p))
+  const leadThrough = (lead: Lead, contour: readonly Quad[]) => contour.some((q) => overlap(lead, q.corners))
   const sockets = new Map<string, { pins: readonly Socket[]; grid: PointGrid<Socket> }>()
   const socketsOf = (object: PlacedObject) => {
     let found = sockets.get(object.id)
@@ -319,10 +299,6 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
       sockets.set(object.id, (found = { pins, grid }))
     }
     return found
-  }
-  const touchingAt = (m: PlacedObject, o: PlacedObject, dx: number, dy: number) => {
-    const fixed = socketsOf(o).grid
-    return socketsOf(m).pins.some((p) => fixed.has(p.x + dx, p.y + dy))
   }
   const plugsInto = (plug: PlacedObject, plugAt: Point, socket: PlacedObject, socketAt: Point, socketBody: readonly Quad[]) => {
     const plugs = socketsOf(plug)
@@ -343,18 +319,10 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
     return whollyPlugged && whollyFilled
   }
   return (dx, dy) => {
-    const reach = shiftedRect(area, dx, dy)
     const bodies: Quad[][] = []
     const bodyAt = (i: number) => (bodies[i] ??= movers[i].contour.map((q) => moved(q, dx, dy)))
-    const shownOnMover = (q: Quad) => !q.names || !touchingFixed({ x: q.names.x + dx, y: q.names.y + dy }, null)
-    const shownOnOther = (q: Quad) => !q.names || !carriedPins.has(q.names.x - dx, q.names.y - dy)
-    const labelOn = (i: number, hits: (label: Quad) => boolean, box: Rect) =>
-      movers[i].labels.some((q) => touches(shiftedRect(q.box, dx, dy), box) && shownOnMover(q) && hits(moved(q, dx, dy)))
-    const labelOnBody = (i: number, contour: readonly Quad[]) => contour.some((body) => labelOn(i, (label) => overlap(label.corners, body.corners), body.box))
-    const segmentOnMover = (i: number, segment: Point[]) => {
-      const box = segmentBox(segment)
-      return (touches(box, shiftedRect(movers[i].body.box, dx, dy)) && bodyAt(i).some((q) => touches(box, q.box) && overlap(segment, q.corners))) || labelOn(i, (label) => overlap(segment, label.corners), box)
-    }
+    const leadsAt = (i: number) => movers[i].leads.map((lead) => shiftedLead(lead, dx, dy))
+    const pinsAt = (i: number) => pinsOf(movers[i].object).map((p) => shiftedPoint(p, dx, dy))
     const docked = (i: number, o: Placed) => {
       const m = movers[i].object
       const offset = { x: dx, y: dy }
@@ -363,34 +331,17 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
     }
     const collides = (i: number, other: Placed) => {
       const m = movers[i]
-      const box = shiftedRect(m.box, dx, dy)
-      if (!intersects(box, other.box)) return false
-      if (hitsAny(bodyAt(i), other.contour)) return !bothSocketed(m.object, other.object) || !docked(i, other)
-      if (!hitsAny(bodyAt(i), labelsOf(other).filter(shownOnOther)) && !labelOnBody(i, other.contour)) return false
-      return !touchingAt(m.object, other.object, dx, dy)
+      if (!intersects(shiftedRect(m.box, dx, dy), other.box)) return false
+      const body = bodyAt(i)
+      if (hitsAny(body, other.contour)) return !bothSocketed(m.object, other.object) || !docked(i, other)
+      const leads = leadsAt(i)
+      if (leads.some((lead) => leadThrough(lead, other.contour)) || other.leads.some((lead) => leadThrough(lead, body))) return true
+      if (leads.some((a) => other.leads.some((b) => leadsClash(a, b)))) return true
+      const pins = pinsAt(i)
+      if (pins.some((p) => insideAny(other.contour, p) || other.leads.some((lead) => onLead(p, lead)))) return true
+      return pinsOf(other.object).some((p) => insideAny(body, p) || leads.some((lead) => onLead(p, lead)))
     }
     for (let i = 0; i < movers.length; i++) if (nearby.some(shiftedRect(movers[i].box, dx, dy), (other) => collides(i, other))) return true
-    if (carriedReach) {
-      const crosses = (other: Placed) =>
-        carried.some(([p, q]) => {
-          const segment = [
-            { x: p.x + dx, y: p.y + dy },
-            { x: q.x + dx, y: q.y + dy },
-          ]
-          const box = segmentBox(segment)
-          return labelsOf(other).some((l) => touches(box, l.box) && shownOnOther(l) && overlap(segment, l.corners)) || other.contour.some((q) => touches(box, q.box) && overlap(segment, q.corners))
-        })
-      if (nearby.some(shiftedRect(carriedReach, dx, dy), crosses)) return true
-    }
-    for (const { route, box } of routes) {
-      if (!intersects(box, reach)) continue
-      for (let i = 0; i < movers.length; i++) {
-        if (!intersects(box, shiftedRect(movers[i].box, dx, dy))) continue
-        for (let j = 1; j < route.pts.length; j++) {
-          if (segmentOnMover(i, [route.pts[j - 1], route.pts[j]])) return true
-        }
-      }
-    }
     return false
   }
 }

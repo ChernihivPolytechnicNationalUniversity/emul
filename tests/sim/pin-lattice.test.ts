@@ -544,15 +544,15 @@ describe("a pin name the field does not draw is no obstacle", () => {
     const [d1, , d3] = diamond()
     const beside = placedAs("capacitor", { rotation: 90, mirror: false }, -2, 1, "C1")
     expect.soft(placementCheck(scene([d1, d3, beside]), [beside])(0, 0), "a capacitor beside the corner where D1 and D3 meet").toBe(false)
-    expect.soft(placementCheck(scene([d3, beside]), [beside])(0, 0), "…but over D3's cathode name when D3 stands alone").toBe(true)
+    expect.soft(placementCheck(scene([d3, beside]), [beside])(0, 0), "…and over D3's cathode name when D3 stands alone: a drawn name does not block either (design.md §5.1, phase 5)").toBe(false)
     expect.soft(placementCheck(scene([d1, d3, beside]), [d1, d3])(0, 0), "D1 and D3 carried together past the capacitor").toBe(false)
-    expect.soft(placementCheck(scene([d3, beside]), [d3])(0, 0), "…but D3 carried alone").toBe(true)
+    expect.soft(placementCheck(scene([d3, beside]), [d3])(0, 0), "…and D3 carried alone (design.md §5.1, phase 5)").toBe(false)
   })
 
-  it("a name the field does draw still blocks: a lone part's pin name under another part's body is refused", () => {
+  it("a name the field does draw does not block either: since phase 5 no text is part of a footprint (design.md §5.1)", () => {
     const q = placedAs("crystal", { rotation: 0, mirror: false }, 0, 0, "Y1")
     const g = placedAs("oscillator", { rotation: 0, mirror: false }, 0, 2, "G1")
-    expect.soft(placementCheck(scene([q, g]), [g])(0, 0), "the oscillator's names on the crystal's value").toBe(true)
+    expect.soft(placementCheck(scene([q, g]), [g])(0, 0), "the oscillator's names on the crystal's value").toBe(false)
   })
 })
 

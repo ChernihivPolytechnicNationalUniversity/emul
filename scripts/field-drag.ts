@@ -587,22 +587,22 @@ async function noPluggingIntoHeaders(page: Page) {
 
 async function freedSlotTakesTheDrop(page: Page) {
   console.log("\na crystal dropped half on a neighbour beside a freed slot")
-  const pitch = { x: 5, y: 4 }
+  const pitch = { x: 5, y: 2 }
   const block: PlacedObject[] = []
   for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) if (row !== 1 || col !== 1) block.push(crystal(`q${row}${col}`, col * pitch.x, row * pitch.y, `ZQ${block.length + 1}`))
   const mover = crystal("mover", 40, 20, "ZQ9")
   await openDoc(page, "slot", { objects: [...block, mover], wires: [], parts: {} })
   const frame = await fieldFrame(page)
   const slot = { x: pitch.x * GRID, y: pitch.y * GRID }
-  const drop = { x: slot.x + 2 * GRID, y: slot.y + GRID }
+  const drop = { x: slot.x + 2 * GRID, y: slot.y }
   await dragBy(page, frame.toScreen(crystalMiddle(mover)), frame.toScreen(crystalMiddle({ ...mover, ...drop })), false)
-  expect("two cells right of the slot and one down it is on its neighbour: red", await blockedNow(page, mover.id), true)
+  expect("two cells right of the slot its lead lies along its neighbour's: red", await blockedNow(page, mover.id), true)
   await page.mouse.up()
   await page.waitForTimeout(800)
   const landed = await frame.worldOf(mover.id)
   const cells = (p: Point) => ({ x: p.x / GRID, y: p.y / GRID })
   expect("released: not left where it was blocked", landed.x === drop.x && landed.y === drop.y, false)
-  expect("…but in the freed slot, a cell below the drop, the nearest spot it fits", cells(landed), cells({ x: drop.x, y: drop.y + GRID }))
+  expect("…but a cell below the drop, the nearest spot it fits, nearer home of the two (design.md §5.1: bodies and leads only)", cells(landed), cells({ x: drop.x, y: drop.y + GRID }))
   await shoot(page, "freed-slot")
 }
 

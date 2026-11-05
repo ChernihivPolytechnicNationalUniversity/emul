@@ -30,7 +30,7 @@ const turned = (id: string, def: string, x: number, y: number, rotation: 90 | 18
 
 const TWO_TERMINAL = ["resistor", "capacitor", "inductor", "diode", "led", "zener"] as const
 
-const cellsOf = (p: { x: number; y: number }) => ({ x: p.x / GRID, y: p.y / GRID })
+const cellsOf = (p: { x: number; y: number }) => ({ x: Math.round((p.x / GRID) * 1e6) / 1e6, y: Math.round((p.y / GRID) * 1e6) / 1e6 })
 
 describe("a part occupies its drawn body and its leads, nothing else (design.md §5.1)", () => {
   it("a resistor's footprint is its body and two leads as lines: the body box stops where the leads begin, inset by the 0.1-cell clearance", () => {
@@ -323,11 +323,11 @@ describe("parts do not pile onto each other", () => {
     const refuse = refusals(scene([a, b]), [b])
     const at = landingOffset(refuse, c(10), 0, GRID)
     expect.soft(refuse.some((r) => r(at.x, at.y)), "the spot is free").toBe(false)
-    expect.soft(Math.hypot(at.x - c(10), at.y) / GRID, "…two rows off the drop, not five cells back the way it came").toBe(2)
+    expect.soft(Math.hypot(at.x - c(10), at.y) / GRID, "…one row off the drop, not five cells back the way it came (its words no longer block, design.md §5.1)").toBe(1)
   })
 
   it("a freed slot in a crowded block takes a part dropped half on its neighbour, instead of sending it home", () => {
-    const pitch = { x: 5, y: 4 }
+    const pitch = { x: 5, y: 2 }
     const block: PlacedObject[] = []
     const crystal = (id: string, x: number, y: number, ref: string) => ({ ...part(id, "crystal", x, y), props: { ref } })
     for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) if (row !== 1 || col !== 1) block.push(crystal(`q${row}${col}`, col * pitch.x, row * pitch.y, `ZQ${block.length + 1}`))
@@ -336,8 +336,8 @@ describe("parts do not pile onto each other", () => {
     const refuse = refusals(s, [carried])
     const slot = { x: c(pitch.x - 40), y: c(pitch.y - 20) }
     expect.soft(refuse.some((r) => r(slot.x, slot.y)), "the freed slot fits a crystal").toBe(false)
-    const dropped = { x: slot.x + c(2), y: slot.y + c(1) }
-    expect.soft(refuse.some((r) => r(dropped.x, dropped.y)), "dropped two cells right and one down, it sits on a neighbour").toBe(true)
+    const dropped = { x: slot.x + c(2), y: slot.y }
+    expect.soft(refuse.some((r) => r(dropped.x, dropped.y)), "dropped two cells right, its lead lies along its neighbour's").toBe(true)
     const at = landingOffset(refuse, dropped.x, dropped.y, GRID)
     expect.soft(refuse.some((r) => r(at.x, at.y)), "it lands free").toBe(false)
     expect.soft(Math.max(Math.abs(at.x - slot.x), Math.abs(at.y - slot.y)) / GRID, "…in the slot, not 40 cells away at home").toBeLessThanOrEqual(2)
@@ -345,8 +345,8 @@ describe("parts do not pile onto each other", () => {
 
   it("with no free spot nearer than where it started, a part goes home", () => {
     const a = part("a", "resistor", 0, 0)
-    const b = part("b", "resistor", 0, 2)
-    expect.soft(landingOffset(refusals(scene([a, b]), [b]), 0, c(-1), GRID), "a cell up, onto its neighbour's words").toEqual({ x: 0, y: 0 })
+    const b = part("b", "resistor", 0, 1)
+    expect.soft(landingOffset(refusals(scene([a, b]), [b]), 0, c(-1), GRID), "a cell up, onto its neighbour's body").toEqual({ x: 0, y: 0 })
     const doc = examples.find((e) => e.id === "lab1-running-light")!.build(GRID)
     const board = objectRect(doc.objects.find((o) => o.def === "open746i-c")!, GRID)
     const below = part("q", "crystal", 42, (board.y + board.h) / GRID - 4)
