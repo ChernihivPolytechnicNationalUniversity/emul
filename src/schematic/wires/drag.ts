@@ -35,6 +35,7 @@ export type DragContact = "along" | "over" | "end" | "pin" | "crossing"
 export type DragConflict = { readonly at: Point; readonly reason: DragContact; readonly piece?: string; readonly pin?: string; readonly nets: readonly [string, string] }
 
 export type DragReroute = {
+  readonly soft?: boolean
   readonly from: Point
   readonly to: Point
   readonly net: string
@@ -290,6 +291,14 @@ export class DragPlan {
     return { pins: this.carriedPins.size, points: this.moving.size, rigid: this.rigid.length, farEnds: this.farEnds.size }
   }
 
+  get reach(): ReadonlySet<string> {
+    const out = new Set<string>()
+    for (const s of this.rigid) out.add(s.id)
+    for (const point of this.moving.values()) for (const s of point.loose) out.add(s.id)
+    for (const far of this.farEnds.values()) for (const s of far.segments) out.add(s.id)
+    return out
+  }
+
   frame(move: Point | DragMove): DragFrame {
     return new FrameBuilder(this, asMove(move)).build()
   }
@@ -324,24 +333,63 @@ export class DragPlan {
     const rerouted: WireSegment[] = []
     const kept = new Set<string>()
     const unlaid: DragUnlaid[] = []
-    const waiting = new Set(frame.reroutes.flatMap((r) => r.pieces))
-    for (const reroute of frame.reroutes) {
-      for (const id of reroute.pieces) waiting.delete(id)
-      const routed = builder.reroute(reroute, pieces.filter((p) => !waiting.has(p.id)))
-      const gone = new Set(reroute.pieces)
-      if (routed) {
-        pieces = [...pieces.filter((p) => !gone.has(p.id)), ...routed]
-        rerouted.push(...reroute.run)
-        continue
-      }
-      if (!keepUnlaid) return null
-      pieces = pieces.filter((p) => !gone.has(p.id))
+    const hard = frame.reroutes.filter((r) => !r.soft)
+    const waiting = new Set(hard.flatMap((r) => r.pieces))
+    const laid = new Map<DragReroute, readonly DragPiece[]>()
+    const fail = (reroute: DragReroute): boolean => {
+      if (reroute.soft) return true
+      if (!keepUnlaid) return false
       const source = reroute.source !== undefined ? this.sheet.segment(reroute.source) : undefined
       const stay = [...(source ? [source] : []), ...reroute.run]
       const clean = stay.length > 0 && builder.clearInPlace(stay, pieces.filter((p) => !waiting.has(p.id)))
-      if (clean) for (const s of stay) kept.add(s.id)
-      else rerouted.push(...reroute.run)
+      if (stay.length && !clean) return false
+      for (const s of stay) kept.add(s.id)
       unlaid.push({ at: reroute.to, from: reroute.from, net: reroute.net, kept: clean })
+      return true
+    }
+    for (const reroute of [...hard, ...frame.reroutes.filter((r) => r.soft)]) {
+      for (const id of reroute.pieces) waiting.delete(id)
+      const routed = builder.reroute(reroute, pieces.filter((p) => !waiting.has(p.id)), reroute.soft ? reroute.run : [])
+      const gone = new Set(reroute.pieces)
+      if (reroute.soft && !routed) continue
+      if (routed) {
+        pieces = [...pieces.filter((p) => !gone.has(p.id)), ...routed]
+        rerouted.push(...reroute.run)
+        laid.set(reroute, routed)
+        continue
+      }
+      pieces = pieces.filter((p) => !gone.has(p.id))
+      if (!fail(reroute)) return null
+    }
+    const joined = new Set(frame.joins.map(([a, b]) => `${a}\u0000${b}`))
+    for (let round = 0; round < 8; round++) {
+      const removed = new Set([...[...frame.replaced].filter((id) => !kept.has(id)), ...rerouted.filter((s) => !kept.has(s.id)).map((s) => s.id)])
+      const touching = builder.foreignContacts(pieces, removed, joined)
+      if (!touching.size) break
+      if (!keepUnlaid) return null
+      const culprits = [...laid].filter(([, routed]) => routed.some((p) => touching.has(p)))
+      for (const [reroute, routed] of culprits) {
+        laid.delete(reroute)
+        const drop = new Set(routed)
+        pieces = pieces.filter((p) => !drop.has(p))
+        for (const s of reroute.run) {
+          const at = rerouted.indexOf(s)
+          if (at >= 0) rerouted.splice(at, 1)
+        }
+        if (reroute.soft) pieces = [...pieces, ...frame.pieces.filter((p) => reroute.pieces.includes(p.id))]
+        else if (!fail(reroute)) return null
+      }
+      const owned = new Set([...laid.values()].flat())
+      for (const piece of touching) {
+        if (owned.has(piece) || !pieces.includes(piece)) continue
+        const source = piece.source !== undefined ? this.sheet.segment(piece.source) : undefined
+        pieces = pieces.filter((p) => p !== piece && (source === undefined || p.source !== source.id))
+        const clean = !!source && builder.clearInPlace([source], pieces)
+        if (source && !clean) return null
+        if (clean) kept.add(source.id)
+        const target = [...frame.pins.values()].find((at) => samePoint(at, piece.a) || samePoint(at, piece.b)) ?? piece.b
+        unlaid.push({ at: target, from: samePoint(target, piece.a) ? piece.b : piece.a, net: piece.net, kept: clean })
+      }
     }
     return { frame, pieces, rerouted, kept, unlaid }
   }
@@ -471,6 +519,7 @@ class FrameBuilder {
     this.placeStays()
     this.placeShaped()
     this.joinAnchors()
+    this.joinSiblings()
     this.placeSplits()
     return this.result()
   }
@@ -731,10 +780,11 @@ class FrameBuilder {
   private placeOrReroute(piece: DragPiece, rigidA: boolean, rigidB: boolean) {
     if (samePoint(piece.a, piece.b)) return
     const verdict = this.examine(this.probeOf(piece, rigidA, rigidB))
-    if (!verdict.conflicts.length) {
+    const soft = !verdict.conflicts.length
+    if (soft) {
       for (const t of verdict.touches) this.touch(t.at, t.own, t.net)
       this.keep(piece)
-      return
+      if (!this.plan.avoids(piece.a, piece.b)) return
     }
     const [near, to] = rigidA && !rigidB ? [piece.b, piece.a] : [piece.a, piece.b]
     const source = piece.source !== undefined ? this.sheet.segment(piece.source) : undefined
@@ -744,6 +794,10 @@ class FrameBuilder {
     const leave = fixedPins.map((p) => this.plan.headingOf(p.key)).find((h) => h)
     const carriedAt = [...this.pinTargets].find(([, at]) => samePoint(at, to))
     const arrive = carriedAt ? this.headingAfter(this.sheet.pin(carriedAt[0])!) : undefined
+    if (soft) {
+      this.reroutes.push({ soft, from, to, net: piece.net, pieces: [piece.id], run, color: piece.color, source: piece.source, leave, arrive })
+      return
+    }
     for (const s of run) this.gone.add(s)
     this.pieces.push(piece)
     this.reroutes.push({ from, to, net: piece.net, pieces: [piece.id], run, color: piece.color, source: piece.source, leave, arrive })
@@ -764,6 +818,52 @@ class FrameBuilder {
       end = otherEnd(next, end)
     }
     return { run, end }
+  }
+
+  foreignContacts(pieces: readonly DragPiece[], removed: ReadonlySet<string>, joined: ReadonlySet<string>): Set<DragPiece> {
+    const out = new Set<DragPiece>()
+    const allowed = (a: string, b: string) => a === b || joined.has(a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`)
+    const onIt = (a: Point, b: Point, p: Point) =>
+      a.y === b.y ? p.y === a.y && p.x >= Math.min(a.x, b.x) && p.x <= Math.max(a.x, b.x) : p.x === a.x && p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y)
+    const isEnd = (a: Point, b: Point, p: Point) => samePoint(a, p) || samePoint(b, p)
+    const byLine = new Map<LineCode, DragPiece[]>()
+    const byEnd = new Map<number, DragPiece[]>()
+    for (const p of pieces) {
+      if (samePoint(p.a, p.b)) continue
+      const line = lineCodeOf(p)
+      byLine.set(line, [...(byLine.get(line) ?? []), p])
+      for (const end of [p.a, p.b]) byEnd.set(pointCode(end), [...(byEnd.get(pointCode(end)) ?? []), p])
+    }
+    for (const p of pieces) {
+      if (samePoint(p.a, p.b)) continue
+      const horizontal = p.a.y === p.b.y
+      const line = lineCodeOf(p)
+      const lo = horizontal ? Math.min(p.a.x, p.b.x) : Math.min(p.a.y, p.b.y)
+      const hi = horizontal ? Math.max(p.a.x, p.b.x) : Math.max(p.a.y, p.b.y)
+      const bad = (net: string) => !allowed(p.net, net)
+      let found = false
+      for (const s of this.sheet.along(line, lo, hi)) if (!removed.has(s.id) && bad(this.plan.netOfSegment(s)) && Math.min(hi, highOf(s)) - Math.max(lo, lowOf(s)) > 0) found = true
+      for (const mark of this.sheet.marks(line, lo, hi)) {
+        if (mark.segment) {
+          if (!removed.has(mark.segment.id) && bad(this.plan.netOfSegment(mark.segment))) found = true
+        } else if (mark.pin && !this.plan.isCarried(mark.pin) && (!mark.pin.socket || isEnd(p.a, p.b, mark.at)) && bad(this.plan.netOfPin(mark.pin))) found = true
+      }
+      for (const end of [p.a, p.b]) for (const s of this.sheet.through(end)) if (!removed.has(s.id) && bad(this.plan.netOfSegment(s))) found = true
+      for (const q of byLine.get(line) ?? []) {
+        if (q === p || !bad(q.net)) continue
+        const qlo = horizontal ? Math.min(q.a.x, q.b.x) : Math.min(q.a.y, q.b.y)
+        const qhi = horizontal ? Math.max(q.a.x, q.b.x) : Math.max(q.a.y, q.b.y)
+        if (Math.min(hi, qhi) - Math.max(lo, qlo) >= 0) found = true
+      }
+      for (const end of [p.a, p.b]) for (const q of byEnd.get(pointCode(end)) ?? []) if (q !== p && bad(q.net)) found = true
+      for (const q of pieces) if (q !== p && bad(q.net) && !samePoint(q.a, q.b) && (lineCodeOf(q) !== line) && (onIt(p.a, p.b, q.a) || onIt(p.a, p.b, q.b) || onIt(q.a, q.b, p.a) || onIt(q.a, q.b, p.b))) found = true
+      for (const [key, at] of this.pinTargets) {
+        const pin = this.sheet.pin(key)!
+        if (onIt(p.a, p.b, at) && (!pin.socket || isEnd(p.a, p.b, at)) && bad(this.plan.netOfPin(pin))) found = true
+      }
+      if (found) out.add(p)
+    }
+    return out
   }
 
   clearInPlace(segments: readonly WireSegment[], pieces: readonly DragPiece[]): boolean {
@@ -973,6 +1073,35 @@ class FrameBuilder {
     }
   }
 
+  private joinSiblings() {
+    for (const point of this.plan.points) {
+      if (point.pins.length < 2) continue
+      const first = this.pinTargets.get(point.pins[0].key)!
+      const seen = new Set<number>([pointCode(first)])
+      for (const pin of point.pins.slice(1)) {
+        const target = this.pinTargets.get(pin.key)!
+        if (seen.has(pointCode(target))) continue
+        seen.add(pointCode(target))
+        const net = this.plan.netOfPin(pin)
+        const heading = this.headingAfter(point.pins[0])
+        const paths = preferred(this.anchorPaths(first, target, heading), heading)
+        let placed = false
+        for (const path of paths) {
+          const pieces = this.jointPieces(point, path, net, undefined).map((p) => ({ ...p, id: `${p.id}~${pin.key}` }))
+          const touches = this.trial(pieces, undefined)
+          if (!touches) continue
+          this.settle(pieces, touches)
+          placed = true
+          break
+        }
+        if (placed) continue
+        const pieces = this.jointPieces(point, paths[0], net, undefined).map((p) => ({ ...p, id: `${p.id}~${pin.key}` }))
+        this.pieces.push(...pieces)
+        this.reroutes.push({ from: first, to: target, net, pieces: pieces.map((p) => p.id), run: [], leave: heading, arrive: this.headingAfter(pin) })
+      }
+    }
+  }
+
   private privateRun(split: Split): { run: WireSegment[]; end: Point } {
     const run: WireSegment[] = []
     let end = split.fixedAfter
@@ -1004,11 +1133,13 @@ class FrameBuilder {
     return paths
   }
 
-  reroute(reroute: DragReroute, pieces: readonly DragPiece[]): DragPiece[] | null {
+  reroute(reroute: DragReroute, pieces: readonly DragPiece[], replacing: readonly WireSegment[] = []): DragPiece[] | null {
     const gone = new Set(reroute.pieces)
     const others = pieces.filter((p) => !gone.has(p.id))
     const box = latticeBoxAround([reroute.from, reroute.to], 10 * GRID)
+    for (const s of replacing) this.gone.add(s)
     const flags = this.latticeFlags(box, reroute.net, others, [reroute.from, reroute.to])
+    for (const s of replacing) this.gone.delete(s)
     const path = routeOnLattice({ from: reroute.from, to: reroute.to, leave: reroute.leave, arrive: reroute.arrive }, { box, flags })
     if (!path) return null
     const out: DragPiece[] = []

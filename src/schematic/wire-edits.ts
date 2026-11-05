@@ -175,10 +175,10 @@ export function inNormalForm(doc: Schematic): Schematic {
 
 const knownFor = (doc: Pick<Schematic, "objects" | "wires">, known?: Wiring) => (known && known.source.objects === doc.objects && known.source.wires === doc.wires ? known : undefined)
 
-function travelling(doc: Schematic, carried: ReadonlySet<string>, known?: Wiring): Set<string> {
-  const wiring = knownFor(doc, known)
+function travelling(doc: Schematic, carried: ReadonlySet<string>, known?: Wiring, given?: WireNets): Set<string> {
+  const wiring = given ? undefined : knownFor(doc, known)
   const pins = pinsOf(doc.objects.filter((o) => carried.has(o.id)))
-  const view = wiring?.view ?? viewOf(doc)
+  const view = given ?? wiring?.view ?? viewOf(doc)
   const carriedPins = new Set<string>()
   const carriedAt = new Set<string>()
   const nets = new Set<string>()
@@ -206,6 +206,19 @@ function travelling(doc: Schematic, carried: ReadonlySet<string>, known?: Wiring
 }
 
 export const travellingWires = (doc: Schematic, carried: ReadonlySet<string>, known?: Wiring): ReadonlySet<string> => travelling(doc, carried, known)
+
+export const travellingIn = (doc: Schematic, carried: ReadonlySet<string>, view: WireNets): ReadonlySet<string> => travelling(doc, carried, undefined, view)
+
+export function detachedMove(doc: Schematic, from: ReadonlyMap<string, Point>, dx: number, dy: number, newId: NewId = randomId): Schematic {
+  if (!dx && !dy) return doc
+  const before = doc.objects.filter((o) => from.has(o.id))
+  const objects = doc.objects.map((o) => {
+    const p = from.get(o.id)
+    return p ? { ...o, x: p.x + dx, y: p.y + dy } : o
+  })
+  const after = objects.filter((o) => from.has(o.id))
+  return withSegments({ ...doc, objects }, [], [], [...pinPoints(before), ...pinPoints(after)], newId)
+}
 
 const shiftedBy = (p: Readonly<Point>, dx: number, dy: number): Point => ({ x: p.x + dx, y: p.y + dy })
 

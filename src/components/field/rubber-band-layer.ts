@@ -20,10 +20,12 @@ export class RubberBandLayer {
   private readonly look: RubberLook
   private readonly hidden = new Map<string, { element: SVGElement; display: string }[]>()
   private layer: SVGGElement | null = null
+  private readonly always: ReadonlySet<string>
 
-  constructor(root: ParentNode, look: RubberLook) {
+  constructor(root: ParentNode, look: RubberLook, always: ReadonlySet<string> = new Set()) {
     this.root = root
     this.look = look
+    this.always = always
   }
 
   private host(): SVGGElement | null {
@@ -34,6 +36,10 @@ export class RubberBandLayer {
 
   show(frame: DragFrame) {
     const runs = new Map<string, Run>()
+    for (const id of this.always) {
+      const run = this.look.runOf(id)
+      if (run) runs.set(run.id, run)
+    }
     for (const id of frame.replaced) {
       const run = this.look.runOf(id)
       if (run) runs.set(run.id, run)

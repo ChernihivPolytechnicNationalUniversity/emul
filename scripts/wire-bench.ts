@@ -337,17 +337,54 @@ for (let round = 0; round < 25; round++)
 const standFrame = median(standFrames)
 const standLanded = time(() => standDrag.landed(CELL, 2 * CELL), 9)
 const pressed = time(() => new TurnRun(stand, standWiring, carriedPart.objects, standIndex).turned(1), 9)
+const storeGraph = new WireGraph()
+const secondPresses: number[] = []
+for (let i = 0; i < 7; i++) {
+  const live = wiringOf(storeGraph, stand)
+  void live.sheet
+  const run = new TurnRun(stand, live, carriedPart.objects, standIndex)
+  const first = run.turned(1)
+  void wiringOf(storeGraph, first.doc).sheet
+  const started = performance.now()
+  run.turned(1)
+  secondPresses.push(performance.now() - started)
+}
+const pressedAgain = median(secondPresses.slice(1))
 const standPin = standWiring.pins.find((p) => p.key.startsWith(`${standPart.id}:`))!
 const started = startDrawing(standWiring, drawEndAt(standWiring, standPin.at))
 const drawing = isRefusal(started) ? null : started
 const previewed = drawing ? time(() => previewOf(stand, standWiring, pointerAt(drawing, { x: standPin.at.x + 5 * CELL, y: standPin.at.y + 3 * CELL })), 25) : Infinity
+const hovered: Schematic = {
+  ...stand,
+  objects: [
+    ...stand.objects,
+    { id: "hoverA", def: "resistor", x: -40 * CELL, y: 0, props: { ref: "RA" } },
+    { id: "hoverBlock", def: "resistor", x: -33 * CELL, y: -1 * CELL, rotation: 90, props: { ref: "RX" } },
+    { id: "hoverB", def: "resistor", x: -30 * CELL, y: 0, props: { ref: "RB" } },
+  ],
+}
+const hoverWiring = wiringOf(new WireGraph(), hovered)
+const hoverIndex = new SpatialIndex(hovered.objects, CELL)
+const hoverStart = startDrawing(hoverWiring, drawEndAt(hoverWiring, { x: -36 * CELL, y: CELL }))
+const hoverTarget = drawEndAt(hoverWiring, { x: -30 * CELL, y: CELL })
+const hoverDrawing = isRefusal(hoverStart) ? null : pointerAt(hoverStart, { x: -30 * CELL, y: CELL })
+let firstHover = Infinity
+if (hoverDrawing) {
+  const started = performance.now()
+  previewOf(hovered, hoverWiring, hoverDrawing, hoverTarget, (area) => hoverIndex.query(area))
+  firstHover = performance.now() - started
+}
+const hoverRouted = hoverDrawing ? previewOf(hovered, hoverWiring, hoverDrawing, hoverTarget, (area) => hoverIndex.query(area)).routed : false
+const hovering = hoverDrawing ? time(() => previewOf(hovered, hoverWiring, hoverDrawing, hoverTarget, (area) => hoverIndex.query(area)), 25) : Infinity
 console.log(`\nEditing on a sheet of ${stand.objects.length} objects and ${stand.wires.length} segments (median of warm runs)\n`)
-console.log(`  a part's drag set up: ${ms(dragBuilt)} with the field's index (${ms(dragBuiltAlone)} building its own); a frame: ${ms(standFrame)}; the drop: ${ms(standLanded)}; a press of R: ${ms(pressed)}; a drawing's preview: ${ms(previewed)}`)
+console.log(`  a part's drag set up: ${ms(dragBuilt)} with the field's index (${ms(dragBuiltAlone)} building its own); a frame: ${ms(standFrame)}; the drop: ${ms(standLanded)}; a press of R: ${ms(pressed)}, the next press of the same run once the store took the first: ${ms(pressedAgain)}; a drawing's preview: ${ms(previewed)}; over a target pin whose plain L crosses a body${hoverRouted ? "" : " (NOT ROUTED)"}: ${ms(hovering)} each move after the first (${ms(firstHover)})`)
 console.log("")
 check(`a part's drag set up on ${stand.objects.length} objects, the field's index given`, dragBuilt, 2)
 check(`a drag frame on ${stand.objects.length} objects, one part carried`, standFrame, 0.3)
 check(`a part's drop on ${stand.objects.length} objects`, standLanded, 8)
 check(`a press of R on ${stand.objects.length} objects`, pressed, 7)
+check(`the next press of a run on ${stand.objects.length} objects`, pressedAgain, 180)
 check(`a drawing's preview on ${stand.objects.length} objects`, previewed, 2)
+check(`a preview over a target pin on ${stand.objects.length} objects, each move after the first`, hoverRouted ? hovering : Infinity, 2)
 console.log(`\n${checked - failed}/${checked} checks passed`)
 if (failed) process.exitCode = 1

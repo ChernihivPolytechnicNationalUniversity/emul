@@ -268,3 +268,23 @@
 [data-slot="field-drag-layer"][data-blocked]:has([data-slot="field-canvas"]) {
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--destructive) 55%, transparent));
 }
+@keyframes wire-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+[data-slot="wires"] [data-flash] {
+  animation: wire-flash 0.45s ease-in-out 3;
+}
+[data-slot="wires"] [data-flash] [data-base] {
+  stroke-width: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="wires"] [data-flash] {
+    animation: none;
+  }
+}

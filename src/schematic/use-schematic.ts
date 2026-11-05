@@ -4,7 +4,7 @@ import { isNetlist } from "emul-shared/hdl"
 import { normalizeFiles } from "@/project/files"
 import { normalizeDebug } from "@/debug/saved"
 import { GRID, objectPins, snap, type FlipAxis, type Point, type Rect, type Turn } from "./geometry"
-import { freeSpot, type PlacementScene } from "./placement"
+import { freeSpot, placementCheck, type PlacementScene } from "./placement"
 import { getDef, withLibrary } from "./registry"
 import { migrated, SCHEMATIC_VERSION, upgradedFrom, type SavedSchematic } from "./migrate"
 import {
@@ -21,7 +21,9 @@ import { isHdlDef } from "./hdl"
 import type { WireColorKey } from "./wire-colors"
 import { clipOf, connectPins, moved, inNormalForm, placedObject, recoloured, removed, tapWireAt, wiringOf, withModule, withSegments } from "./wire-edits"
 import { flippedWithWires, TurnRun, type Landed } from "./rubber-band"
-import { drawnTo, isRefusal, type DrawEnd, type Drawing, type DrawRefusal } from "./wire-draw"
+import { drawnTo, isRefusal, type DrawEnd, type Drawing, type DrawRefusal, type Near } from "./wire-draw"
+import type { PinGroup } from "./net-names"
+import { WireGraph as Graph } from "./wires/graph"
 import { junctionAt, type JunctionRefusal } from "./junction-tool"
 import { inRect } from "./wire-select"
 import type { SpatialIndex } from "./spatial"
@@ -116,9 +118,28 @@ export function clipFromClipboard(text: string | undefined): ClipIn | null {
   return clipOfThisVersion(parsed.emul, typeof parsed.version === "number" ? parsed.version : undefined)
 }
 
-export function pasteLanding(scene: PlacementScene, saved: Clip, offset: Point): { clip: Clip; at: Point } {
+const PASTE_REACH = 24
+
+export function pasteLanding(scene: PlacementScene, saved: Clip, offset: Point, wiresClear?: (clip: Clip, at: Point) => boolean): { clip: Clip; at: Point; clear: boolean } {
   const clip = clipOnTheLattice(saved)
-  return { clip, at: freeSpot(scene, clip.objects.map((o) => ({ ...o, id: `paste:${o.id}` })), offset) }
+  const objects = clip.objects.map((o) => ({ ...o, id: `paste:${o.id}` }))
+  const at = freeSpot(scene, objects, offset)
+  if (!wiresClear || !clip.wires.length || wiresClear(clip, at)) return { clip, at, clear: true }
+  const bodies = placementCheck(scene, objects)
+  for (let ring = 1; ring <= PASTE_REACH; ring++) {
+    const around: Point[] = []
+    for (let dx = -ring; dx <= ring; dx++)
+      for (let dy = -ring; dy <= ring; dy++) if (Math.max(Math.abs(dx), Math.abs(dy)) === ring) around.push({ x: at.x + dx * scene.grid, y: at.y + dy * scene.grid })
+    around.sort((p, q) => Math.hypot(p.x - at.x, p.y - at.y) - Math.hypot(q.x - at.x, q.y - at.y))
+    const found = around.find((p) => !bodies(p.x, p.y) && wiresClear(clip, p))
+    if (found) return { clip, at: found, clear: true }
+  }
+  return { clip, at, clear: false }
+}
+
+export function clipNets(clip: Clip, idOf: (old: string) => string): PinGroup[] {
+  const renamed = (key: string) => `${idOf(key.slice(0, key.indexOf(":")))}${key.slice(key.indexOf(":"))}`
+  return wiringOf(new Graph(), { objects: clip.objects, wires: clip.wires }).circuit.nets.map((g) => g.map(renamed).sort())
 }
 
 export function pastedInto(doc: Schematic, clip: Clip, dx: number, dy: number, idOf: (old: string) => string, newId: () => string): Schematic {
@@ -157,6 +178,12 @@ export function useSchematic(grid: number) {
   const [selectedObjects, setSelectedObjects] = React.useState<ReadonlySet<string>>(() => new Set())
   const [selectedWires, setSelectedWires] = React.useState<ReadonlySet<string>>(() => new Set())
   const edits = history.edits
+  const pastedNets = React.useRef<PinGroup[]>([])
+  const takePastedNets = React.useCallback(() => {
+    const groups = pastedNets.current
+    pastedNets.current = []
+    return groups
+  }, [])
   const turning = React.useRef<{ ids: string; run: TurnRun; doc: Schematic } | null>(null)
 
   const setDoc = React.useCallback(
@@ -393,8 +420,8 @@ export function useSchematic(grid: number) {
   )
 
   const draw = React.useCallback(
-    (drawing: Drawing, target: DrawEnd): DrawRefusal | null => {
-      const next = drawnTo(doc, wiring, drawing, target)
+    (drawing: Drawing, target: DrawEnd, near?: Near): DrawRefusal | null => {
+      const next = drawnTo(doc, wiring, drawing, target, undefined, near)
       if (isRefusal(next)) return next
       commitFrom(doc, next)
       setSelectedWires(new Set())
@@ -466,6 +493,7 @@ export function useSchematic(grid: number) {
   const paste = React.useCallback(
     (clip: Clip, dx: number, dy: number) => {
       const ids = new Map(clip.objects.map((o) => [o.id, crypto.randomUUID()]))
+      pastedNets.current = clipNets(clip, (old) => ids.get(old) ?? old)
       setDoc((d) => pastedInto(d, clip, snap(dx, grid), snap(dy, grid), (old) => ids.get(old)!, () => crypto.randomUUID()))
       setSelectedObjects(new Set(ids.values()))
       setSelectedWires(new Set())
@@ -513,5 +541,6 @@ export function useSchematic(grid: number) {
     canRedo,
     copySelected,
     paste,
+    takePastedNets,
   }
 }

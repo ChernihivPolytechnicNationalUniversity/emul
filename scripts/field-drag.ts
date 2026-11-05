@@ -3,7 +3,7 @@ import { existsSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { chromium, type Page } from "playwright-core"
-import { examples } from "@/schematic/examples"
+import { examples, lab1Stand } from "@/schematic/examples"
 import { bodyCentre, GRID, objectPins, objectRect, orientationOf, type Point, type Turn } from "@/schematic/geometry"
 import { SCHEMATIC_VERSION, stamped } from "@/schematic/migrate"
 import { rotateSelection } from "@/schematic/orient"
@@ -170,6 +170,51 @@ async function drawFromAWire(page: Page) {
   await page.waitForTimeout(400)
   expect("Esc drops the wire being drawn: nothing added", [await countOf(page, "[data-slot=pending-wire-route]"), await countOf(page, "[data-dangling]")], [0, 1])
   await shoot(page, "draw-from-wire")
+}
+
+async function farDropAndWireCopy(page: Page) {
+  console.log("\na far drop with nowhere clean near it, and copying a wire alone (review of phase 4)")
+  const stand = lab1Stand.build(GRID)
+  await openDoc(page, "far-drop", stand)
+  const chip = stand.objects.find((o) => o.def === "stm32f746ig")!
+  const frame = await fieldFrame(page)
+  const before = await frame.worldOf(chip.id)
+  const middle = { x: chip.x + objectRect(chip, GRID).w / 2, y: chip.y + objectRect(chip, GRID).h / 2 }
+  await dragBy(page, frame.toScreen(middle), frame.toScreen({ x: middle.x + 13 * GRID, y: middle.y + 7 * GRID }))
+  const after = await frame.worldOf(chip.id)
+  expect("a chip dragged 13 cells with every wire blocked near the drop still moves", after.x !== before.x || after.y !== before.y, true)
+  await openDoc(page, "copy-a-wire", wiredPair())
+  const wired = await fieldFrame(page)
+  const onWire = wired.toScreen(cellPoint(16, 11))
+  await page.mouse.click(onWire.x, onWire.y)
+  await page.keyboard.press("Control+c")
+  await page.keyboard.press("Control+v")
+  await page.waitForTimeout(700)
+  expect("Ctrl+C and Ctrl+V on a selected segment alone paste it: two new open ends", await countOf(page, "[data-dangling]"), 2)
+  const twoNets: Schematic = {
+    objects: [resistorAt("R1", 10, 10), resistorAt("R2", 20, 10), resistorAt("R4", 10, 16), resistorAt("R5", 20, 16)],
+    wires: [{ id: "a", a: cellPoint(14, 11), b: cellPoint(20, 11) }, { id: "b", a: cellPoint(14, 17), b: cellPoint(20, 17) }],
+    parts: {},
+  }
+  await openDoc(page, "merge-flash", twoNets)
+  const joining = await fieldFrame(page)
+  const fromWire = joining.toScreen(cellPoint(17, 11))
+  await page.mouse.move(fromWire.x, fromWire.y)
+  await page.keyboard.press("w")
+  const toWire = joining.toScreen(cellPoint(17, 17))
+  await page.mouse.move(toWire.x, toWire.y, { steps: 6 })
+  await page.mouse.click(toWire.x, toWire.y)
+  await page.waitForTimeout(250)
+  expect("two nets joined by a drawn wire: the merged net flashes on the field", await page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-flash]")].map((e) => getComputedStyle(e).animationName)), ["wire-flash"])
+  const shift = examples.find((e) => e.id === "nucleo-74hc595")!.build(GRID)
+  await openDoc(page, "turn-refused", shift)
+  const u2 = shift.objects.find((o) => o.props?.ref === "U2")!
+  const chipFrame = await fieldFrame(page)
+  const u2Middle = chipFrame.toScreen({ x: u2.x + objectRect(u2, GRID).w / 2, y: u2.y + objectRect(u2, GRID).h / 2 })
+  await page.mouse.click(u2Middle.x, u2Middle.y)
+  await page.keyboard.press("r")
+  await page.waitForTimeout(900)
+  expect("R on a chip whose wires cannot follow is refused, and says so", await page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].some((e) => e.textContent?.includes("Not done"))), true)
 }
 
 async function zoomAcrossPinDetail(page: Page) {
@@ -455,6 +500,7 @@ try {
   await contactsFollowTheDrag(page)
   await wiresFollowTheDrag(page)
   await drawFromAWire(page)
+  await farDropAndWireCopy(page)
   await bridgeBuiltByHand(page)
   await noPluggingIntoHeaders(page)
   await freedSlotTakesTheDrop(page)

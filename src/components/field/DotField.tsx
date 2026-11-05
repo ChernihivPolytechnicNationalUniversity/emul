@@ -30,8 +30,8 @@ import { bytesToBase64 } from "@/lib/bytes"
 import { useEvent } from "@/hooks/use-event"
 import { clipboardText, clipFromClipboard, pasteLanding, useSchematic, type Clip } from "@/schematic/use-schematic"
 import { nearestOn, travellingWires } from "@/schematic/wire-edits"
-import { DRAG_REFUSED, PartDrag, SegmentDrag, UNLAID, type Landed } from "@/schematic/rubber-band"
-import { DRAW_REFUSED, drawEndAt, flipPosture, isRefusal, pointerAt, previewOf, startDrawing, withCorner, withoutCorner, type DrawEnd, type Drawing, type DrawRefusal } from "@/schematic/wire-draw"
+import { CONTACT_OPENED, DRAG_REFUSED, PartDrag, SegmentDrag, TURN_REFUSED, UNLAID, WIRES_REFUSED, type Landed } from "@/schematic/rubber-band"
+import { DRAW_REFUSED, PASTE_REFUSED, laysClear, drawEndAt, flipPosture, isRefusal, pointerAt, previewOf, startDrawing, withCorner, withoutCorner, type DrawEnd, type Drawing, type DrawRefusal } from "@/schematic/wire-draw"
 import { NO_CROSSING } from "@/schematic/junction-tool"
 import { changeMessage, netChanges } from "@/schematic/net-names"
 import { chainOf, segmentNearest } from "@/schematic/wire-select"
@@ -314,6 +314,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   const dragLayerRef = React.useRef<HTMLDivElement>(null)
   const [lifted, setLifted] = React.useState<ReadonlySet<string>>(() => new Set())
+  const [banded, setBanded] = React.useState<ReadonlySet<string>>(() => new Set())
   const liftedObjects = React.useMemo(() => (lifted.size ? visibleObjects.filter((o) => lifted.has(o.id)) : []), [visibleObjects, lifted])
   const staticObjects = React.useMemo(() => (lifted.size ? visibleObjects.filter((o) => !lifted.has(o.id)) : visibleObjects), [visibleObjects, lifted])
   const liftedWires = React.useMemo(() => {
@@ -326,7 +327,15 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return ids
   }, [sch.doc, wiring, lifted])
   const liftedRoutes = React.useMemo(() => (liftedWires.size ? visibleRoutes.filter((r) => liftedWires.has(r.id)) : []), [visibleRoutes, liftedWires])
-  const staticRoutes = React.useMemo(() => (liftedWires.size ? visibleRoutes.filter((r) => !liftedWires.has(r.id)) : visibleRoutes), [visibleRoutes, liftedWires])
+  const bandRuns = React.useMemo(() => {
+    const ids = new Set<string>()
+    for (const id of banded) {
+      const run = wiring.runBySegment.get(id)
+      if (run) ids.add(run.id)
+    }
+    return ids
+  }, [banded, wiring])
+  const staticRoutes = React.useMemo(() => (liftedWires.size || bandRuns.size ? visibleRoutes.filter((r) => !liftedWires.has(r.id) && !bandRuns.has(r.id)) : visibleRoutes), [visibleRoutes, liftedWires, bandRuns])
 
   const [textRaster] = React.useState(() => new TextRaster())
   const [symbolRaster] = React.useState(() => new SymbolRaster())
@@ -378,10 +387,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const [lit, setLit] = React.useState<ReadonlySet<string>>(EMPTY_IDS)
   const [flash, setFlash] = React.useState<ReadonlySet<string>>(EMPTY_IDS)
   const pointerAtClient = React.useRef<{ x: number; y: number } | null>(null)
+  const { takePastedNets } = sch
   const seenNets = React.useRef(wiring.circuit.nets)
   const seenEdits = React.useRef(sch.edits)
   React.useEffect(() => {
-    const before = seenNets.current
+    const before = [...seenNets.current, ...takePastedNets()]
     seenNets.current = wiring.circuit.nets
     if (seenEdits.current === sch.edits) return
     seenEdits.current = sch.edits
@@ -395,7 +405,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     setFlash(flashing)
     const timer = setTimeout(() => setFlash(EMPTY_IDS), FLASH_MS)
     return () => clearTimeout(timer)
-  }, [wiring, sch.edits, sch.doc.objects, nets])
+  }, [wiring, sch.edits, sch.doc.objects, nets, takePastedNets])
   const hoveredNet = hoveredWire === null ? null : (nets.netOfWire(hoveredWire) ?? null)
   const [flow] = React.useState(() => new WireFlow())
   React.useEffect(() => () => flow.dispose(), [flow])
@@ -421,7 +431,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (landed.length) reveal(unionOf(landed.flatMap((o) => [objectRect(o, grid), ...designatorRects(o, grid)])), CLEAR_OF_CONTROLS_PX)
   }
   const pasteFree = useEvent((saved: Clip, dx: number, dy: number) => {
-    const { clip: c, at } = pasteLanding(scene(), saved, { x: dx, y: dy })
+    const shifted = (clip: Clip, at: Point) => clip.wires.map((s) => ({ a: { x: s.a.x + at.x, y: s.a.y + at.y }, b: { x: s.b.x + at.x, y: s.b.y + at.y } }))
+    const { clip: c, at, clear } = pasteLanding(scene(), saved, { x: dx, y: dy }, (clip, at) => laysClear(wiring, shifted(clip, at)))
+    if (!clear) {
+      toast.error(PASTE_REFUSED.title, { description: PASTE_REFUSED.why })
+      return
+    }
     pasteClip(c, at.x, at.y)
     revealPlaced(c.objects, snap(at.x, grid), snap(at.y, grid))
   })
@@ -500,21 +515,29 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
 
   const [unlaid, setUnlaid] = React.useState<{ at: readonly Point[]; edits: number } | null>(null)
-  const reportLanding = useEvent((landed: Landed) => {
-    if (landed.refused?.length) toast.error(DRAG_REFUSED.title, { description: DRAG_REFUSED.why })
+  const reportLanding = useEvent((landed: Landed, gesture: "drop" | "turn" = "drop") => {
+    if (landed.refused) {
+      const text = landed.refused.length ? (gesture === "turn" ? TURN_REFUSED : DRAG_REFUSED) : WIRES_REFUSED
+      toast.error(text.title, { description: text.why })
+    }
     if (!landed.unlaid.length) return
-    const names = landed.unlaid.map((u) => (u.pin ? pinName(landed.doc.objects, keyRef(u.pin)) : "a wire"))
-    toast.warning(`${names.join(", ")}: ${UNLAID.title}`, { description: UNLAID.why })
+    for (const kept of [true, false]) {
+      const some = landed.unlaid.filter((u) => u.kept === kept)
+      if (!some.length) continue
+      const names = some.map((u) => (u.pin ? pinName(landed.doc.objects, keyRef(u.pin)) : "a wire"))
+      const text = kept ? UNLAID : CONTACT_OPENED
+      toast.warning(`${names.join(", ")}: ${text.title}`, { description: text.why })
+    }
     setUnlaid({ at: landed.unlaid.map((u) => u.at), edits: sch.edits + 1 })
   })
 
   const turn = useEvent((direction: Turn) => {
     const landed = sch.rotate(sch.selectedObjects, direction, index)
-    if (landed) reportLanding(landed)
+    if (landed) reportLanding(landed, "turn")
   })
   const mirror = useEvent((axis: FlipAxis) => {
     const landed = sch.flip(sch.selectedObjects, axis, index)
-    if (landed) reportLanding(landed)
+    if (landed) reportLanding(landed, "turn")
   })
   const { load } = sch
   React.useImperativeHandle(
@@ -624,7 +647,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       return run ? colorOf(run) : DEFAULT_SIGNAL_COLOR
     },
   }))
-  const dragging = React.useRef<{ kind: "parts"; drag: PartDrag; base: Schematic; detach: boolean } | { kind: "segment"; drag: SegmentDrag; base: Schematic } | null>(null)
+  const dragging = React.useRef<{ kind: "parts"; drag: PartDrag; base: Schematic; detach: boolean; bodies: (dx: number, dy: number) => boolean } | { kind: "segment"; drag: SegmentDrag; base: Schematic } | null>(null)
   const litBy = React.useRef("")
   const lightJoins = useEvent((joins: readonly (readonly [string, string])[]) => {
     const key = joins.map((j) => j.join("+")).join(" ")
@@ -632,8 +655,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     litBy.current = key
     setLit(joins.length ? new Set(joins.flat()) : EMPTY_IDS)
   })
-  const rubberFor = (content: ParentNode, frameAt: (dx: number, dy: number) => DragFrame) => {
-    const layer = new RubberBandLayer(content, rubberLook())
+  const rubberNow = React.useRef<RubberBandLayer | null>(null)
+  const rubberFor = (content: ParentNode, frameAt: (dx: number, dy: number) => DragFrame, always: ReadonlySet<string> = EMPTY_IDS) => {
+    const layer = new RubberBandLayer(content, rubberLook(), always)
+    rubberNow.current = layer
+    const still = frameAt(0, 0)
     return {
       show: (dx: number, dy: number) => {
         const frame = frameAt(dx, dy)
@@ -641,10 +667,15 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         lightJoins(frame.joins)
       },
       clear: () => {
-        layer.clear()
+        if (always.size) layer.show(still)
+        else layer.clear()
         lightJoins([])
       },
     }
+  }
+  const endRubber = () => {
+    rubberNow.current?.clear()
+    rubberNow.current = null
   }
   const beginMove = useEvent((e: React.PointerEvent, id: string, toggle: boolean) => {
     flushSync(() => sch.selectObject(id, toggle))
@@ -657,16 +688,18 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const pinsDrawn = detail.pins && !detail.canvas
     const detach = e.altKey
     const partDrag = new PartDrag(sch.doc, wiring, { objects: moving }, { detach, index })
-    dragging.current = { kind: "parts", drag: partDrag, base: sch.doc, detach }
     const bodies = placementCheck(scene(), docObjects.filter((o) => moving.has(o.id)))
+    dragging.current = { kind: "parts", drag: partDrag, base: sch.doc, detach, bodies }
+    const band = detail.canvas && !detach ? partDrag.touched : EMPTY_IDS
+    if (band.size) setBanded(band)
     drag.begin({
-      ...planMove(content, docObjects, detach || moving.size === docObjects.length ? liftedRunsOf(moving) : EMPTY_IDS, moving, toWorld(e.clientX, e.clientY), grid, {
+      ...planMove(content, docObjects, !detach && moving.size === docObjects.length ? liftedRunsOf(moving) : EMPTY_IDS, moving, toWorld(e.clientX, e.clientY), grid, {
         element: detail.canvas || labelsOnCanvas ? dragLayerRef.current : null,
         whole: detail.canvas,
       }),
       blocked: (dx, dy) => bodies(dx, dy) || partDrag.blocked(dx, dy),
       contacts: pinsDrawn ? new ContactPreview(content, contactsAfterMove(docObjects, moving, grid, (area) => index.query(area)), { grid, wired: (key: string) => nets.connected(key), netColor: pinNetColor }) : undefined,
-      rubber: detach ? undefined : rubberFor(content, (dx, dy) => partDrag.frame(dx, dy)),
+      rubber: detach ? undefined : rubberFor(content, (dx, dy) => partDrag.frame(dx, dy), band),
     })
   })
 
@@ -675,9 +708,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (!content) return
     const segmentDrag = new SegmentDrag(sch.doc, wiring, segment, index)
     dragging.current = { kind: "segment", drag: segmentDrag, base: sch.doc }
+    const band = detail.canvas ? segmentDrag.touched : EMPTY_IDS
+    if (band.size) setBanded(band)
     drag.begin({
       ...planMove(content, docObjects, EMPTY_IDS, EMPTY_IDS, toWorld(e.clientX, e.clientY), grid),
-      rubber: rubberFor(content, (dx, dy) => segmentDrag.frame(dx, dy)),
+      rubber: rubberFor(content, (dx, dy) => segmentDrag.frame(dx, dy), band),
     })
   })
 
@@ -687,10 +722,25 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (move) onMovePreview?.(move)
   })
 
+  const abandonDrag = useEvent(() => {
+    if (!dragging.current) return
+    dragging.current = null
+    drag.clearAndFinish()
+    endRubber()
+    onMovePreview?.(null)
+    if (lifted.size) setLifted(EMPTY_IDS)
+    if (banded.size) setBanded(EMPTY_IDS)
+  })
+  React.useLayoutEffect(() => {
+    if (dragging.current && dragging.current.base !== sch.doc) abandonDrag()
+  }, [sch.doc, abandonDrag])
+
   const endMove = useEvent(() => {
     onMovePreview?.(null)
     if (lifted.size) setLifted(EMPTY_IDS)
+    if (banded.size) setBanded(EMPTY_IDS)
     const done = drag.clearAndFinish()
+    endRubber()
     const kind = dragging.current
     dragging.current = null
     if (!done || (!done.dx && !done.dy)) return
@@ -700,12 +750,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       sch.land(kind.base, landed)
       return
     }
-    const blocked = done.plan.blocked
+    const blocked = kind?.kind === "parts" && !kind.detach ? kind.bodies : done.plan.blocked
     const landNearest = (refuse: (dx: number, dy: number) => boolean) =>
       landingOffset([refuse, contactCheck(scene(), docObjects.filter((o) => done.plan.startPositions.has(o.id)))], done.dx, done.dy, grid)
     const at = blocked?.(done.dx, done.dy) ? landNearest(blocked) : { x: done.dx, y: done.dy }
     if (!at.x && !at.y) return
-    if (!kind || kind.detach) {
+    if (!kind) {
       sch.moveTo(done.plan.startPositions, at.x, at.y)
       return
     }
@@ -818,7 +868,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   // --- wiring: drag from pin to pin, or click bend by bend ------------------
   const [pending, setPending] = React.useState<Pending | null>(null)
-  const preview = React.useMemo(() => (pending ? previewOf(sch.doc, wiring, pending.d, pending.target ?? undefined) : null), [pending, sch.doc, wiring])
+  const preview = React.useMemo(() => (pending ? previewOf(sch.doc, wiring, pending.d, pending.target ?? undefined, (area) => index.query(area)) : null), [pending, sch.doc, wiring, index])
   React.useEffect(() => {
     onWirePreview?.(preview ? [...preview.points] : null)
   }, [preview, onWirePreview])
@@ -903,7 +953,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const finish = (target: DrawEnd): boolean => {
     if (!pending) return false
     if (target.kind === "pin" && pending.d.from.kind === "pin" && pending.d.from.key === target.key && !pending.d.corners.length) return false
-    const refusal = sch.draw(pending.d, target)
+    const refusal = sch.draw(pending.d, target, (area) => index.query(area))
     if (refusal) {
       refuse(refusal)
       setPending({ ...pending, mode: "click", target: null })
@@ -1031,11 +1081,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const tap = React.useRef<Point | null>(null)
   // A second finger turns whatever the first one started into a pinch: nothing it began lands.
   const cancelGesture = useEvent(() => {
-    if (drag.active) {
-      drag.clearAndFinish()
-      onMovePreview?.(null)
-      if (lifted.size) setLifted(EMPTY_IDS)
-    }
+    if (drag.active) abandonDrag()
     dragging.current = null
     wirePress.current = null
     if (pending?.mode === "drag") setPending(null)
@@ -1203,12 +1249,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
   // Cut/copy/paste ride the native events so the system clipboard sees them too.
   const onCopy = useEvent((e: ClipboardEvent) => {
-    if (inTextField(e) || !sch.selectedObjects.size) return
+    if (inTextField(e) || (!sch.selectedObjects.size && !sch.selectedWires.size)) return
     e.preventDefault()
     copy()
   })
   const onCut = useEvent((e: ClipboardEvent) => {
-    if (inTextField(e) || !sch.selectedObjects.size) return
+    if (inTextField(e) || (!sch.selectedObjects.size && !sch.selectedWires.size)) return
     e.preventDefault()
     cut()
   })
@@ -1554,11 +1600,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           <ContextMenuShortcut>⇧⌘Z</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem disabled={!hasObjects} onClick={cut}>
+        <ContextMenuItem disabled={!hasSelection} onClick={cut}>
           Cut
           <ContextMenuShortcut>⌘X</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem disabled={!hasObjects} onClick={copy}>
+        <ContextMenuItem disabled={!hasSelection} onClick={copy}>
           Copy
           <ContextMenuShortcut>⌘C</ContextMenuShortcut>
         </ContextMenuItem>

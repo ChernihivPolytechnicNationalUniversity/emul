@@ -563,6 +563,8 @@ async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChe
     const drag = await measure(page, () => sweep(page, target))
     const moved = Math.abs((await componentOrigins(page)) - settled) > 1
     console.log(phaseLine("drag", drag))
+    await page.keyboard.press("Escape")
+    await page.waitForTimeout(300)
     const wiredIds = doc.objects.filter((o) => o.def === "resistor" || o.def === "led").map((o) => o.id)
     const small = await wiredPartInView(page, wiredIds)
     const wired = small ? await measure(page, () => sweep(page, small)) : null
