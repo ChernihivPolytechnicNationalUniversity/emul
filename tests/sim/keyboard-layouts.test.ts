@@ -24,7 +24,7 @@ function virtualKey(layout: Layout, code: string): number {
   return 0
 }
 
-function press(layout: Layout, code: string, level: number, platform: Platform, mod: boolean): KeyPress {
+function press(layout: Layout, code: string, level: number, platform: Platform, mod: boolean, alt = false): KeyPress {
   const altGraph = level === ALT_GRAPH
   const typed = platform === "mac" && mod && !latinLayout(layout) ? LAYOUTS.us[code][level] : layout[code][level]
   return {
@@ -33,7 +33,7 @@ function press(layout: Layout, code: string, level: number, platform: Platform, 
     keyCode: virtualKey(layout, code),
     ctrlKey: (platform === "pc" && mod) || altGraph,
     metaKey: platform === "mac" && mod,
-    altKey: altGraph,
+    altKey: altGraph || alt,
     shiftKey: level === SHIFTED,
     getModifierState: (name) => name === "AltGraph" && altGraph,
   }
@@ -85,7 +85,7 @@ describe("shortcuts on 22 keyboard layouts, as libxkbcommon types them", () => {
         const levels = shortcut.shift === "either" ? [PLAIN, SHIFTED] : [shortcut.shift ? SHIFTED : PLAIN]
         const reachable = levels.map((level) => ({ level, code: labelledKey(layout, shortcut.key, level) })).filter((p) => p.code)
         if (!reachable.length) continue
-        if (!reachable.some(({ code, level }) => matches(press(layout, code!, level, "pc", !!shortcut.mod), shortcut))) missed.push(`${name} ${binding} ${shortcut.key}`)
+        if (!reachable.some(({ code, level }) => matches(press(layout, code!, level, "pc", !!shortcut.mod, !!shortcut.alt), shortcut))) missed.push(`${name} ${binding} ${shortcut.key}`)
       }
     }
     expect.soft(missed, "shortcuts that no key on the layout reaches").toEqual([])

@@ -11,6 +11,8 @@ import { WireLayer } from "@/components/field/WireLayer"
 import { WireFlow } from "@/components/field/wire-flow"
 import { wireMarks } from "@/components/field/wire-marks"
 import { WIRE_PX } from "@/components/field/wire-style"
+import { bandMarks, type BandPiece } from "@/components/field/rubber-band-layer"
+import { WireSheet } from "@/schematic/wires/sheet"
 import { PIN_MARK_CELLS } from "@/components/field/symbol-raster"
 
 const c = (v: number) => v * GRID
@@ -188,5 +190,47 @@ describe("junction dots, open ends and turns at pins are drawn wherever the grap
     const covers = (at: Point) => squares.some((q) => q.style === "casing" && q.x <= at.x - mark && q.y <= at.y - mark && q.x + q.w >= at.x + mark && q.y + q.h >= at.y + mark)
     expect.soft(covers(turn.pin), "the turned pin's square is covered").toBe(true)
     expect.soft(covers(corner.at), "the corner's square is covered").toBe(true)
+  })
+})
+
+describe("the rubber band's own marks: a dragged wire carries its open ends and dots (the user's picture 13)", () => {
+  const p = (x: number, y: number): Point => ({ x: c(x), y: c(y) })
+  const piece = (a: Point, b: Point): BandPiece => ({ a, b, color: "red" })
+  const keys = (marks: readonly { at: Point }[]) => marks.map(({ at }) => `${at.x / GRID},${at.y / GRID}`).sort()
+
+  it("a free L moved whole: a ring on each of its new ends, nothing at its corner, nothing where it was", () => {
+    const sheet = WireSheet.of([seg("h", p(2, 4), p(9, 4)), seg("v", p(9, 4), p(9, 1))], [])
+    const marks = bandMarks([piece(p(5, 7), p(12, 7)), piece(p(12, 7), p(12, 4))], sheet, new Set(["h", "v"]), new Map())
+    expect.soft(keys(marks.open), "the two new ends").toEqual(["12,4", "5,7"])
+    expect.soft(marks.dots, "no dot").toEqual([])
+  })
+
+  it("an end dropped on another wire's middle, on a pin, or on a carried pin is not open; on the middle it is a T with a dot", () => {
+    const sheet = WireSheet.of([seg("bus", p(0, 10), p(20, 10)), seg("w", p(5, 0), p(5, 4))], [{ key: "R1:1", at: p(8, 0) }, { key: "R2:2", at: p(3, 3) }])
+    const hidden = new Set(["w"])
+    const onBus = bandMarks([piece(p(5, 0), p(5, 10))], sheet, hidden, new Map())
+    expect.soft(keys(onBus.dots), "a T on the bus").toEqual(["5,10"])
+    expect.soft(keys(onBus.open), "the far end, still open").toEqual(["5,0"])
+    const onPin = bandMarks([piece(p(8, 0), p(8, 4))], sheet, hidden, new Map())
+    expect.soft(keys(onPin.open), "the end on R1's pin is not open").toEqual(["8,4"])
+    const onCarried = bandMarks([piece(p(5, 0), p(5, 6))], sheet, hidden, new Map([["R2:2", p(5, 6)]]))
+    expect.soft(keys(onCarried.open), "the end on the carried pin where it lands is not open").toEqual(["5,0"])
+    const leftByCarried = bandMarks([piece(p(3, 0), p(3, 3))], sheet, hidden, new Map([["R2:2", p(9, 9)]]))
+    expect.soft(keys(leftByCarried.open), "a pin carried away leaves the end open").toEqual(["3,0", "3,3"])
+  })
+
+  it("three dragged ends meeting get a dot; the wire hidden by the band does not count", () => {
+    const sheet = WireSheet.of([seg("a", p(0, 0), p(4, 0)), seg("b", p(4, 0), p(8, 0)), seg("c", p(4, 0), p(4, 4))], [])
+    const marks = bandMarks([piece(p(0, 2), p(4, 2)), piece(p(4, 2), p(8, 2)), piece(p(4, 2), p(4, 6))], sheet, new Set(["a", "b", "c"]), new Map())
+    expect.soft(keys(marks.dots), "the moved T").toEqual(["4,2"])
+    expect.soft(keys(marks.open), "its three open ends").toEqual(["0,2", "4,6", "8,2"])
+  })
+
+  it("a dragged branch ending on the middle of a dragged bus is a T; one ending where a dragged-away wire passed is open", () => {
+    const sheet = WireSheet.of([seg("bus", p(0, 0), p(8, 0)), seg("w", p(5, 0), p(5, 10))], [])
+    const tee = bandMarks([piece(p(0, 2), p(8, 2)), piece(p(4, 2), p(4, 6))], sheet, new Set(["bus"]), new Map())
+    expect.soft(keys(tee.dots), "the T on the band's own bus").toEqual(["4,2"])
+    const left = bandMarks([piece(p(1, 5), p(5, 5))], sheet, new Set(["w"]), new Map())
+    expect.soft(keys(left.open), "the wire it touched is the one being dragged").toEqual(["1,5", "5,5"])
   })
 })

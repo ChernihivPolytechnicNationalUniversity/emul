@@ -17,6 +17,7 @@ export type DragRequest = {
   readonly avoid?: (a: Point, b: Point) => boolean
   readonly solid?: (box: DragBox) => readonly DragBox[]
   readonly rerouteConflicts?: boolean
+  readonly keepFarEnds?: boolean
 }
 
 export type DragMove = {
@@ -62,6 +63,8 @@ export type DragUnlaid = { readonly at: Point; readonly from: Point; readonly ne
 export type DragCommit = { readonly edit: WireEdit; readonly pins: readonly WirePin[]; readonly joins: readonly (readonly [string, string])[]; readonly unlaid: readonly DragUnlaid[] }
 
 const ZERO: Point = { x: 0, y: 0 }
+const REROUTE_MARGIN = 10
+const WIDER_REROUTE = 24
 const plus = (p: Point, q: Point): Point => ({ x: p.x + q.x, y: p.y + q.y })
 const minus = (p: Point, q: Point): Point => ({ x: p.x - q.x, y: p.y - q.y })
 const dot = (p: Point, q: Point) => p.x * q.x + p.y * q.y
@@ -340,11 +343,16 @@ export class DragPlan {
       if (reroute.soft) return true
       if (!keepUnlaid) return false
       const source = reroute.source !== undefined ? this.sheet.segment(reroute.source) : undefined
-      const stay = [...(source ? [source] : []), ...reroute.run]
-      const clean = stay.length > 0 && builder.clearInPlace(stay, pieces.filter((p) => !waiting.has(p.id)))
-      if (stay.length && !clean) return false
+      const whole = [...(source ? [source] : []), ...reroute.run]
+      const others = pieces.filter((p) => !waiting.has(p.id))
+      let cut = 0
+      while (cut < whole.length && !builder.clearInPlace(whole.slice(cut), others)) cut++
+      if (whole.length && cut === whole.length) return false
+      const stay = whole.slice(cut)
       for (const s of stay) kept.add(s.id)
-      unlaid.push({ at: reroute.to, from: reroute.from, net: reroute.net, kept: clean })
+      for (const s of whole.slice(0, cut)) if (s !== source) rerouted.push(s)
+      builder.keepInPlace(stay)
+      unlaid.push({ at: reroute.to, from: reroute.from, net: reroute.net, kept: stay.length > 0 })
       return true
     }
     for (const reroute of [...hard, ...frame.reroutes.filter((r) => r.soft)]) {
@@ -376,8 +384,18 @@ export class DragPlan {
           const at = rerouted.indexOf(s)
           if (at >= 0) rerouted.splice(at, 1)
         }
-        if (reroute.soft) pieces = [...pieces, ...frame.pieces.filter((p) => reroute.pieces.includes(p.id))]
-        else if (!fail(reroute)) return null
+        if (reroute.soft) {
+          pieces = [...pieces, ...frame.pieces.filter((p) => reroute.pieces.includes(p.id))]
+          continue
+        }
+        const wider = builder.reroute(reroute, pieces, [], WIDER_REROUTE)
+        if (wider && !builder.foreignContacts([...pieces, ...wider], new Set([...[...frame.replaced].filter((id) => !kept.has(id)), ...rerouted.filter((s) => !kept.has(s.id)).map((s) => s.id), ...reroute.run.map((s) => s.id)]), joined).size) {
+          pieces = [...pieces, ...wider]
+          rerouted.push(...reroute.run)
+          laid.set(reroute, wider)
+          continue
+        }
+        if (!fail(reroute)) return null
       }
       const owned = new Set([...laid.values()].flat())
       for (const piece of touching) {
@@ -386,7 +404,10 @@ export class DragPlan {
         pieces = pieces.filter((p) => p !== piece && (source === undefined || p.source !== source.id))
         const clean = !!source && builder.clearInPlace([source], pieces)
         if (source && !clean) return null
-        if (clean) kept.add(source.id)
+        if (clean) {
+          kept.add(source.id)
+          builder.keepInPlace([source])
+        }
         const target = [...frame.pins.values()].find((at) => samePoint(at, piece.a) || samePoint(at, piece.b)) ?? piece.b
         unlaid.push({ at: target, from: samePoint(target, piece.a) ? piece.b : piece.a, net: piece.net, kept: clean })
       }
@@ -449,7 +470,11 @@ export class DragPlan {
   }
 
   get reroutesConflicts(): boolean {
-    return !!this.request.rerouteConflicts
+    return !!this.request.rerouteConflicts || !!this.request.keepFarEnds
+  }
+
+  get keepsFarEnds(): boolean {
+    return !!this.request.keepFarEnds
   }
 
   get points(): Iterable<MovingPoint> {
@@ -639,6 +664,7 @@ class FrameBuilder {
   }
 
   private shiftFarEnds() {
+    if (this.plan.keepsFarEnds) return
     for (const point of this.plan.points) {
       if (!this.follows.has(point.key)) continue
       const moved = minus(this.targetOf(point), point.at)
@@ -731,13 +757,15 @@ class FrameBuilder {
       const b = plus(s.b, this.displacement(s, s.b))
       const net = this.plan.netOfSegment(s)
       if (samePoint(a, b)) continue
+      const landsA = this.landing(s.a)
+      const landsB = this.landing(s.b)
       if (a.x === b.x || a.y === b.y) {
-        this.place(pieceOf(s.id, a, b, "moved", net, s.color, s.id), true, true)
+        this.place(pieceOf(s.id, a, b, "moved", net, s.color, s.id), landsA, landsB)
         continue
       }
       const corner = isHorizontal(s) ? { x: b.x, y: a.y } : { x: a.x, y: b.y }
-      this.place(pieceOf(s.id, a, corner, "moved", net, s.color, s.id), true, false)
-      this.place(pieceOf(`${s.id}~turn`, corner, b, "moved", net, s.color, s.id), false, true)
+      this.place(pieceOf(s.id, a, corner, "moved", net, s.color, s.id), landsA, false)
+      this.place(pieceOf(`${s.id}~turn`, corner, b, "moved", net, s.color, s.id), false, landsB)
     }
   }
 
@@ -786,6 +814,10 @@ class FrameBuilder {
       this.keep(piece)
       if (!this.plan.avoids(piece.a, piece.b)) return
     }
+    this.reroutePiece(piece, rigidA, rigidB, soft)
+  }
+
+  private reroutePiece(piece: DragPiece, rigidA: boolean, rigidB: boolean, soft: boolean) {
     const [near, to] = rigidA && !rigidB ? [piece.b, piece.a] : [piece.a, piece.b]
     const source = piece.source !== undefined ? this.sheet.segment(piece.source) : undefined
     const unshifted = source && (samePoint(source.a, near) || samePoint(source.b, near))
@@ -1068,6 +1100,11 @@ class FrameBuilder {
     }
   }
 
+  private landing(end: Point): boolean {
+    const point = this.plan.movingAt(pointCode(end))
+    return !point || point.pins.length > 0 || point.kind !== "anchored"
+  }
+
   private joinAnchors() {
     for (const point of this.plan.points) {
       if (point.kind !== "anchored") continue
@@ -1083,7 +1120,7 @@ class FrameBuilder {
       const ordered = [...preferred(paths.filter((path) => tidy(path) === 0), anchorHeading), ...preferred(paths.filter((path) => tidy(path) === 1), anchorHeading)]
       for (const path of ordered) {
         const pieces = this.jointPieces(point, path, net, color)
-        const touches = this.trial(pieces, target)
+        const touches = this.trial(pieces, point.pins.length ? target : undefined)
         if (!touches) continue
         this.settle(pieces, touches)
         placed = true
@@ -1156,10 +1193,14 @@ class FrameBuilder {
     return paths
   }
 
-  reroute(reroute: DragReroute, pieces: readonly DragPiece[], replacing: readonly WireSegment[] = []): DragPiece[] | null {
+  keepInPlace(segments: readonly WireSegment[]) {
+    for (const s of segments) this.gone.delete(s)
+  }
+
+  reroute(reroute: DragReroute, pieces: readonly DragPiece[], replacing: readonly WireSegment[] = [], margin = REROUTE_MARGIN): DragPiece[] | null {
     const gone = new Set(reroute.pieces)
     const others = pieces.filter((p) => !gone.has(p.id))
-    const box = latticeBoxAround([reroute.from, reroute.to], 10 * GRID)
+    const box = latticeBoxAround([reroute.from, reroute.to], margin * GRID)
     for (const s of replacing) this.gone.add(s)
     const flags = this.latticeFlags(box, reroute.net, others, [reroute.from, reroute.to])
     for (const s of replacing) this.gone.delete(s)

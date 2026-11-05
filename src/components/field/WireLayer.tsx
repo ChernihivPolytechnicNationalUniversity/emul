@@ -3,12 +3,11 @@ import { cn } from "@/lib/utils"
 import { toPath, trimRouteEnds, type Point, type RoutedWire } from "@/schematic/geometry"
 import { runPath, towards, type PinCorner } from "@/schematic/wire-look"
 import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
-import { CASING_PX, casingTrim, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
+import { CASING_PX, casingTrim, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_HIT_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
 import { wireMarks } from "./wire-marks"
 import type { WireFlow } from "./wire-flow"
 
 
-const HIT_PX = 14
 const HANDLE_CELLS = 0.15
 const HANDLE_MIN_PX = 2.5
 const HANDLE_MAX_PX = 4
@@ -151,7 +150,7 @@ export const WireLayer = React.memo(function WireLayer({
                   d={d}
                   fill="none"
                   stroke="transparent"
-                  strokeWidth={HIT_PX}
+                  strokeWidth={WIRE_HIT_PX}
                   vectorEffect="non-scaling-stroke"
                   className="pointer-events-auto cursor-pointer"
                   onPointerDown={(e) => onWirePointerDown(e, route.id)}

@@ -68,6 +68,7 @@ import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
 import { FieldCanvas } from "./FieldCanvas"
 import { marksBesideTheBand, wireMarks } from "./wire-marks"
+import { dotRadius, OPEN_END_CELLS, WIRE_HIT_PX } from "./wire-style"
 import { exportPng } from "./export-image"
 import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
@@ -644,12 +645,20 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     setUnlaid({ at: landed.unlaid.map((u) => u.at), edits: sch.edits + 1 })
   })
 
-  const turn = useEvent((direction: Turn) => {
-    const landed = sch.rotate(sch.selectedObjects, direction, index)
+  const turn = useEvent((direction: Turn, alone = false) => {
+    if (alone) {
+      sch.rotateAlone(sch.selectedObjects, direction)
+      return
+    }
+    const landed = sch.rotate(sch.selectedObjects, direction, index, sch.selectedWires)
     if (landed) reportLanding(landed, "turn")
   })
-  const mirror = useEvent((axis: FlipAxis) => {
-    const landed = sch.flip(sch.selectedObjects, axis, index)
+  const mirror = useEvent((axis: FlipAxis, alone = false) => {
+    if (alone) {
+      sch.flipAlone(sch.selectedObjects, axis)
+      return
+    }
+    const landed = sch.flip(sch.selectedObjects, axis, index, sch.selectedWires)
     if (landed) reportLanding(landed, "turn")
   })
 
@@ -764,6 +773,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
     return ids
   }
+  const bandDotRadius = useEvent(() => dotRadius(grid, scale))
+  const bandPixel = useEvent(() => 1 / scale)
   const rubberLook = useEvent((): RubberLook => ({
     runOf: (segment) => wiring.runBySegment.get(segment),
     colorOfRun: colorOf,
@@ -771,6 +782,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       const run = nets.wiresOf(net)[0]
       return run ? colorOf(run) : DEFAULT_SIGNAL_COLOR
     },
+    sheet: wiring.sheet,
+    ringRadius: OPEN_END_CELLS * grid,
+    dotRadius: bandDotRadius,
+    pixel: bandPixel,
   }))
   const dragging = React.useRef<{ kind: "parts"; drag: PartDrag; base: Schematic; detach: boolean; bodies: (dx: number, dy: number) => boolean } | { kind: "segment"; drag: SegmentDrag; base: Schematic } | null>(null)
   const litBy = React.useRef("")
@@ -993,6 +1008,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   // --- wiring: drag from pin to pin, or click bend by bend ------------------
   const [pending, setPending] = React.useState<Pending | null>(null)
+  const [wireArmed, setWireArmed] = React.useState<Point | null>(null)
   const preview = React.useMemo(() => (pending ? previewOf(sch.doc, wiring, pending.d, pending.target ?? undefined, (area) => index.query(area)) : null), [pending, sch.doc, wiring, index])
   React.useEffect(() => {
     onWirePreview?.(preview ? [...preview.points] : null)
@@ -1059,7 +1075,15 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return drawEndAt(wiring, snapPoint(world))
   }
 
+  const openEndNear = (clientX: number, clientY: number): DrawEnd | null => {
+    const world = toWorld(clientX, clientY)
+    const reach = WIRE_HIT_PX / 2 / scale
+    const end = wiring.dangling.find((q) => Math.abs(q.x - world.x) <= reach && Math.abs(q.y - world.y) <= reach)
+    return end ? drawEndAt(wiring, end) : null
+  }
+
   const refuse = (refusal: DrawRefusal) => {
+    if (refusal.refused === "nothing") return
     const text = DRAW_REFUSED[refusal.refused]
     toast.error(text.title, { description: text.why })
   }
@@ -1097,7 +1121,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const releaseDrawing = (clientX: number, clientY: number) => {
     if (pending?.mode !== "drag") return
     const under = endUnder(clientX, clientY)
-    const own = under.kind === "pin" && pending.d.from.kind === "pin" && under.key === pending.d.from.key
+    const own = samePoint(under.at, pending.d.from.at) || (under.kind === "pin" && pending.d.from.kind === "pin" && under.key === pending.d.from.key)
     if (under.kind !== "field" && !own && finish(under)) return
     if (!pending.moved || own || samePoint(under.at, pending.d.from.at)) {
       setPending({ ...pending, mode: "click", target: null })
@@ -1243,6 +1267,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         beginMove(e, onCanvas, addsToSelection(e))
         return
       }
+      const end = openEndNear(e.clientX, e.clientY)
+      if (end) {
+        e.currentTarget.setPointerCapture(e.pointerId)
+        startAt(end, "drag")
+        return
+      }
       // A finger on bare field pans, the way every map does; a tap clears the selection.
       if (e.pointerType === "touch") {
         tap.current = { x: e.clientX, y: e.clientY }
@@ -1269,6 +1299,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
     if (pending) {
       follow(e.clientX, e.clientY)
+      return
+    }
+    if (wireArmed) {
+      setWireArmed(endUnder(e.clientX, e.clientY).at)
       return
     }
     updateHover(e)
@@ -1347,7 +1381,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
     if (pending && e.key === "Enter") {
       e.preventDefault()
-      return finish(pending.target ?? { kind: "field", at: snapPoint(pending.d.cursor) })
+      const last = pending.d.corners.at(-1)
+      return finish(last ? { kind: "field", at: last } : (pending.target ?? { kind: "field", at: snapPoint(pending.d.cursor) }))
     }
     if (pending && !e.ctrlKey && !e.metaKey && (e.key === "/" || e.code === "Slash")) {
       e.preventDefault()
@@ -1363,6 +1398,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       if (measure.active) measure.stop()
       sch.deselectAll()
       setPending(null)
+      setWireArmed(null)
       setHoveredWire(null)
       return
     }
@@ -1400,21 +1436,26 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const plain = !e.ctrlKey && !e.metaKey && !e.altKey
     if (!pending && pointer && plain && (e.key.toLowerCase() === "w" || e.code === "KeyW")) {
       e.preventDefault()
-      return startAt(endUnder(pointer.x, pointer.y), "click")
+      return setWireArmed(endUnder(pointer.x, pointer.y).at)
     }
     if (!pending && pointer && plain && (e.key.toLowerCase() === "j" || e.code === "KeyJ")) {
       e.preventDefault()
       return joinUnderPointer(pointer)
     }
     const selected = () => sch.selectedObjects.size > 0
+    const turnable = () => selected() || sch.selectedWires.size > 0
     dispatch(e, [
       { keys: KEYMAP.measure, run: () => measure.toggle() },
       { keys: KEYMAP.scope, run: () => setScopeOpen((o) => !o) },
       { keys: KEYMAP.logic, run: () => setLogicOpen((o) => !o) },
-      { keys: KEYMAP.rotate, when: selected, run: () => turn(1) },
-      { keys: KEYMAP.rotateBack, when: selected, run: () => turn(-1) },
-      { keys: KEYMAP.flipHorizontal, when: selected, run: () => mirror("horizontal") },
-      { keys: KEYMAP.flipVertical, when: selected, run: () => mirror("vertical") },
+      { keys: KEYMAP.rotate, when: turnable, run: () => turn(1) },
+      { keys: KEYMAP.rotateBack, when: turnable, run: () => turn(-1) },
+      { keys: KEYMAP.flipHorizontal, when: turnable, run: () => mirror("horizontal") },
+      { keys: KEYMAP.flipVertical, when: turnable, run: () => mirror("vertical") },
+      { keys: KEYMAP.rotateAlone, when: selected, run: () => turn(1, true) },
+      { keys: KEYMAP.rotateBackAlone, when: selected, run: () => turn(-1, true) },
+      { keys: KEYMAP.flipHorizontalAlone, when: selected, run: () => mirror("horizontal", true) },
+      { keys: KEYMAP.flipVerticalAlone, when: selected, run: () => mirror("vertical", true) },
       { keys: KEYMAP.zoomToSelection, run: () => explorerKeys.current?.zoomToSelection() },
       { keys: KEYMAP.nextProblem, run: () => explorerKeys.current?.nextProblem() },
       { keys: KEYMAP.previousProblem, run: () => explorerKeys.current?.previousProblem() },
@@ -1710,9 +1751,23 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             className={cn("absolute inset-0 touch-none select-none", cursor)}
             onPointerDownCapture={(e) => {
               // A long press opens the field menu without a contextmenu event on iOS: add there.
-              if (e.pointerType !== "touch") return
-              menuPoint.current = toWorld(e.clientX, e.clientY)
-              menuClient.current = { x: e.clientX, y: e.clientY }
+              if (e.pointerType === "touch") {
+                menuPoint.current = toWorld(e.clientX, e.clientY)
+                menuClient.current = { x: e.clientX, y: e.clientY }
+              }
+              wirePress.current = null
+              if (!primaryClick(e)) return
+              if (drag.active) {
+                e.stopPropagation()
+                endMove()
+              } else if (pending?.mode === "drag") {
+                e.stopPropagation()
+                releaseDrawing(e.clientX, e.clientY)
+              } else if (wireArmed) {
+                e.stopPropagation()
+                setWireArmed(null)
+                startAt(endUnder(e.clientX, e.clientY), "click")
+              }
             }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -1817,6 +1872,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               {pinRect && (
                 <div data-slot="field-pin-mark" className="pointer-events-none absolute rounded-full border-amber-500 motion-safe:animate-pulse" style={{ left: pinRect.x + pinRect.w / 2 - 10 / scale, top: pinRect.y + pinRect.h / 2 - 10 / scale, width: 20 / scale, height: 20 / scale, borderWidth: 3 / scale }} />
               )}
+              {wireArmed && <PendingWireLayer pending={{ points: [wireArmed], corners: [], color: DEFAULT_SIGNAL_COLOR, refused: false, landing: false }} grid={grid} scale={scale} part="marks" />}
               {ghosts && ghosts.length > 0 && (
                 <GhostLayer ghosts={ghosts} objects={docObjects} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} />
               )}
