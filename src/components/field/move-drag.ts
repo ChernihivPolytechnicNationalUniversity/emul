@@ -15,6 +15,7 @@ export type MovePlan = {
   rigidWires: RigidWire[]
   blocked?: (dx: number, dy: number) => boolean
   contacts?: { show: (dx: number, dy: number) => void }
+  rubber?: { show: (dx: number, dy: number) => void; clear: () => void }
 }
 
 const HANDLE_ATTRIBUTES = ["data-pins", "data-plate"] as const
@@ -161,6 +162,8 @@ export class MoveDrag {
     const blocked = moved && (plan.blocked?.(dx, dy) ?? false)
     for (const element of [...plan.bodies, ...plan.svgGroups]) element.toggleAttribute("data-blocked", blocked)
     plan.contacts?.show(dx, dy)
+    if (moved) plan.rubber?.show(dx, dy)
+    else plan.rubber?.clear()
 
     for (const wire of plan.rigidWires) for (const element of wire.elements) element.setAttribute("transform", svgTranslate)
   }

@@ -10,7 +10,11 @@ import { upgraded } from "@/schematic/migrate"
 import { placementCheck } from "@/schematic/placement"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import { WireGraph } from "@/schematic/wires/graph"
-import { boardDocuments } from "./lib/stress"
+import { boardDocuments, stressDocuments } from "./lib/stress"
+import { PartDrag, TurnRun } from "@/schematic/rubber-band"
+import { SpatialIndex } from "@/schematic/spatial"
+import { drawEndAt, isRefusal, pointerAt, previewOf, startDrawing } from "@/schematic/wire-draw"
+import { wiringOf } from "@/schematic/wire-edits"
 import { commitEdit, normalise } from "@/schematic/wires/normal-form"
 import { planDrag } from "@/schematic/wires/drag"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
@@ -314,5 +318,36 @@ check(`a drag frame on ${gridWires.length} segments, ${carriedParts.length} part
 check(`a drag's release turned into an edit on ${gridWires.length} segments`, releaseEdit, 0.5)
 check(`the sheet index taking a release's delta on ${gridWires.length} segments`, sheetDelta, 1)
 check(`the sheet index built for ${large.n} overlapping segments on one line`, onOneLine, 200)
+const [stand] = stressDocuments([67])
+const standWiring = wiringOf(new WireGraph(), stand)
+void standWiring.sheet
+const standIndex = new SpatialIndex(stand.objects, CELL)
+const standPart = stand.objects.find((o) => o.def === "resistor")!
+const carriedPart = { objects: new Set([standPart.id]) }
+const dragBuilt = time(() => new PartDrag(stand, standWiring, carriedPart, { index: standIndex }), 15)
+const dragBuiltAlone = time(() => new PartDrag(stand, standWiring, carriedPart), 15)
+const standDrag = new PartDrag(stand, standWiring, carriedPart, { index: standIndex })
+const standFrames: number[] = []
+for (let round = 0; round < 25; round++)
+  for (let dx = -4; dx <= 4; dx++) {
+    const started = performance.now()
+    standDrag.frame(dx * CELL, (round % 5) * CELL + CELL)
+    if (round >= 5) standFrames.push(performance.now() - started)
+  }
+const standFrame = median(standFrames)
+const standLanded = time(() => standDrag.landed(CELL, 2 * CELL), 9)
+const pressed = time(() => new TurnRun(stand, standWiring, carriedPart.objects, standIndex).turned(1), 9)
+const standPin = standWiring.pins.find((p) => p.key.startsWith(`${standPart.id}:`))!
+const started = startDrawing(standWiring, drawEndAt(standWiring, standPin.at))
+const drawing = isRefusal(started) ? null : started
+const previewed = drawing ? time(() => previewOf(stand, standWiring, pointerAt(drawing, { x: standPin.at.x + 5 * CELL, y: standPin.at.y + 3 * CELL })), 25) : Infinity
+console.log(`\nEditing on a sheet of ${stand.objects.length} objects and ${stand.wires.length} segments (median of warm runs)\n`)
+console.log(`  a part's drag set up: ${ms(dragBuilt)} with the field's index (${ms(dragBuiltAlone)} building its own); a frame: ${ms(standFrame)}; the drop: ${ms(standLanded)}; a press of R: ${ms(pressed)}; a drawing's preview: ${ms(previewed)}`)
+console.log("")
+check(`a part's drag set up on ${stand.objects.length} objects, the field's index given`, dragBuilt, 2)
+check(`a drag frame on ${stand.objects.length} objects, one part carried`, standFrame, 0.3)
+check(`a part's drop on ${stand.objects.length} objects`, standLanded, 8)
+check(`a press of R on ${stand.objects.length} objects`, pressed, 7)
+check(`a drawing's preview on ${stand.objects.length} objects`, previewed, 2)
 console.log(`\n${checked - failed}/${checked} checks passed`)
 if (failed) process.exitCode = 1

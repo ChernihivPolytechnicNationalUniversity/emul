@@ -2,15 +2,10 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 import { toPath, trimRouteEnds, type Point, type RoutedWire } from "@/schematic/geometry"
 import { runPath, towards, type PinCorner } from "@/schematic/wire-look"
-import type { SpatialIndex } from "@/schematic/spatial"
-import type { PlacedObject } from "@/schematic/types"
 import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
 import { CASING_PX, casingTrim, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
 import { wireMarks } from "./wire-marks"
-import { pendingPoints, type PendingWire } from "./pending-wire"
 import type { WireFlow } from "./wire-flow"
-
-export type { PendingWire }
 
 
 const HIT_PX = 14
@@ -24,6 +19,8 @@ type WireLayerProps = {
   scale: number
   selected: ReadonlySet<string>
   hoveredNet: string | null
+  lit?: ReadonlySet<string>
+  flash?: ReadonlySet<string>
   colorOf: (wireId: string) => WireColorKey
   netOfWire: (wireId: string) => string | undefined
   dots: readonly Point[]
@@ -49,6 +46,8 @@ export const WireLayer = React.memo(function WireLayer({
   scale,
   selected,
   hoveredNet,
+  lit,
+  flash,
   colorOf,
   netOfWire,
   dots,
@@ -98,7 +97,8 @@ export const WireLayer = React.memo(function WireLayer({
         <g
           key={net}
           data-net={net}
-          className={cn(hoveredNet !== null && net !== hoveredNet && "opacity-25")}
+          data-flash={flash?.has(net) ? "" : undefined}
+          className={cn(lit?.size ? !lit.has(net) && "opacity-25" : hoveredNet !== null && net !== hoveredNet && "opacity-25")}
           style={{ transition: "opacity 120ms" }}
         >
           {wires.map(
@@ -180,11 +180,13 @@ export const WireLayer = React.memo(function WireLayer({
 
 type PendingPart = "route" | "marks"
 
-export function PendingWireLayer({ objects, index, pending, grid, scale, part }: { objects: readonly PlacedObject[]; index: SpatialIndex; pending: PendingWire | null; grid: number; scale: number; part: PendingPart }) {
-  if (!pending) return null
+export type PendingLook = { points: readonly Point[]; corners: readonly Point[]; color: WireColorKey; refused: boolean; landing: boolean }
+
+export function PendingWireLayer({ pending, grid, scale, part }: { pending: PendingLook | null; grid: number; scale: number; part: PendingPart }) {
+  if (!pending || pending.points.length < 1) return null
   return (
-    <svg data-slot={`pending-wire-${part}`} className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
-      <Pending objects={objects} index={index} pending={pending} grid={grid} radius={wireCornerRadius(grid)} handleR={handleRadius(grid, scale)} part={part} />
+    <svg data-slot={`pending-wire-${part}`} data-refused={pending.refused ? "" : undefined} className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
+      <Pending pending={pending} grid={grid} radius={wireCornerRadius(grid)} handleR={handleRadius(grid, scale)} part={part} />
     </svg>
   )
 }
@@ -204,31 +206,30 @@ function handleRadius(grid: number, scale: number) {
   return Math.min(Math.max(HANDLE_CELLS * grid, HANDLE_MIN_PX / scale), HANDLE_MAX_PX / scale)
 }
 
-function Pending({ objects, index, pending, grid, radius, handleR, part }: { objects: readonly PlacedObject[]; index: SpatialIndex; pending: PendingWire; grid: number; radius: number; handleR: number; part: PendingPart }) {
-  const pts = pendingPoints(objects, index, pending, grid)
-  if (!pts) return null
-  const d = toPath(pts, radius)
-  const color = wireColorVar(pending.color)
+function Pending({ pending, grid, radius, handleR, part }: { pending: PendingLook; grid: number; radius: number; handleR: number; part: PendingPart }) {
+  const pts = pending.points
+  const d = toPath([...pts], radius)
+  const color = pending.refused ? "var(--destructive)" : wireColorVar(pending.color)
   const end = pts[pts.length - 1]
   if (part === "marks") {
     return (
       <g pointerEvents="none">
-        {pending.points.map((p, idx) => (
+        {pending.corners.map((p, idx) => (
           <circle key={idx} cx={p.x} cy={p.y} r={handleR} fill={color} stroke="var(--background)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
         ))}
-        <circle cx={end.x} cy={end.y} r={pending.target ? handleR * 1.4 : handleR} fill={pending.target ? color : "var(--background)"} stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+        <circle cx={end.x} cy={end.y} r={pending.landing ? handleR * 1.4 : handleR} fill={pending.landing ? color : "var(--background)"} stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
       </g>
     )
   }
   return (
     <g pointerEvents="none">
-      <path d={toPath(trimRouteEnds(pts, casingTrim(grid)), radius)} fill="none" stroke="var(--background)" strokeWidth={WIRE_PX + CASING_PX} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+      <path d={toPath(trimRouteEnds([...pts], casingTrim(grid)), radius)} fill="none" stroke="var(--background)" strokeWidth={WIRE_PX + CASING_PX} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
       <path
         d={d}
         fill="none"
         stroke={color}
         strokeWidth={WIRE_PX}
-        strokeDasharray={pending.target ? undefined : `${WIRE_PX * 3} ${WIRE_PX * 2.5}`}
+        strokeDasharray={pending.landing ? undefined : `${WIRE_PX * 3} ${WIRE_PX * 2.5}`}
         strokeLinejoin="round"
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
@@ -236,4 +237,3 @@ function Pending({ objects, index, pending, grid, radius, handleR, part }: { obj
     </g>
   )
 }
-

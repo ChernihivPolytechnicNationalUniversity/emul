@@ -1,60 +1,329 @@
-import type { FlipAxis, Turn } from "./geometry"
-import type { Point, Schematic } from "./types"
-import type { NewId, Wiring } from "./wire-edits"
-import type { DragConflict, DragFrame } from "./wires/drag"
+import { GRID, objectRect, snap, type FlipAxis, type Rect, type Turn } from "./geometry"
+import { flipLine, flipSelection, selectionStep, turnedAbout, turnedSelection, turnPivot } from "./orient"
+import { designatorRects } from "./placement"
+import { SpatialIndex } from "./spatial"
+import type { PlacedObject, Point, Schematic } from "./types"
+import { moved, pinsOf, travellingWires, wiringOf, withSegments, type NewId, type Wiring } from "./wire-edits"
+import { normalOffset, planDrag, translate, type DragBox, type DragCommit, type DragConflict, type DragFrame, type DragMove, type DragPlan } from "./wires/drag"
+import { WireGraph } from "./wires/graph"
+import { HALF_CELL, samePoint, type WirePin, type WireSegment } from "./wires/segment"
+import type { WireSheet } from "./wires/sheet"
 
 export type Carried = { readonly objects: ReadonlySet<string>; readonly wires?: ReadonlySet<string> }
 
-export type Unlaid = { readonly at: Point; readonly net: string; readonly pin?: string }
+export type Unlaid = { readonly at: Point; readonly net: string; readonly pin?: string; readonly kept: boolean }
 
 export type Landed = { readonly doc: Schematic; readonly unlaid: readonly Unlaid[]; readonly at: Point; readonly refused?: readonly DragConflict[] }
 
-export type DragOptions = { readonly detach?: boolean }
+export type DragOptions = { readonly detach?: boolean; readonly index?: SpatialIndex }
 
-const unbuilt = (what: string): never => {
-  throw new Error(`${what} is not built yet`)
+const randomId: NewId = () => crypto.randomUUID()
+
+export const UNLAID = { title: "wire left where it was", why: "Laying it to the new place would have touched another net's wire or pin, so nothing was joined: the wire stays where it was and the pin is open. Draw it again or move the part." }
+
+export const DRAG_REFUSED = { title: "Nowhere clean to put it", why: "Every place near the drop puts a pin on a crossing of two wires or lays a wire along another net's wire." }
+
+const ZERO: Point = { x: 0, y: 0 }
+
+const EMPTY_FRAME: DragFrame = { pieces: [], replaced: new Set(), pins: new Map(), blocked: false, conflicts: [], reroutes: [], joins: [] }
+
+const objectOf = (key: string) => key.slice(0, key.indexOf(":"))
+
+function isCurrent(doc: Schematic, wiring: Wiring | undefined): wiring is Wiring {
+  if (!wiring || wiring.source.objects !== doc.objects || wiring.source.wires !== doc.wires) return false
+  try {
+    void wiring.view.nets
+    return true
+  } catch {
+    return false
+  }
+}
+
+export const currentWiring = (doc: Schematic, wiring?: Wiring): Wiring => (isCurrent(doc, wiring) ? wiring : wiringOf(new WireGraph(), doc))
+
+const axisAligned = (p: Point | undefined) => (p && (p.x === 0) !== (p.y === 0) ? p : undefined)
+
+const otherEnd = (s: WireSegment, p: Point) => (samePoint(s.a, p) ? s.b : s.a)
+
+function hangingRuns(sheet: WireSheet, pins: readonly WirePin[]): Set<string> {
+  const out = new Set<string>()
+  for (const pin of pins)
+    for (const first of sheet.endsAt(pin.at)) {
+      const chain = [first]
+      let at = otherEnd(first, pin.at)
+      let through = first
+      for (;;) {
+        if (sheet.pinsAt(at).length) break
+        const ends = sheet.endsAt(at)
+        if (ends.length === 1) {
+          for (const s of chain) out.add(s.id)
+          break
+        }
+        if (ends.length !== 2) break
+        through = ends[0] === through ? ends[1] : ends[0]
+        if (chain.includes(through)) break
+        chain.push(through)
+        at = otherEnd(through, at)
+      }
+    }
+  return out
+}
+
+const crosses = (a: Point, b: Point, r: Rect) => Math.max(a.x, b.x) > r.x && Math.min(a.x, b.x) < r.x + r.w && Math.max(a.y, b.y) > r.y && Math.min(a.y, b.y) < r.y + r.h
+
+class Surroundings {
+  private index: SpatialIndex | undefined
+  private readonly objects: readonly PlacedObject[]
+  private readonly carried: ReadonlySet<string>
+  private readonly extra: readonly Rect[]
+
+  constructor(doc: Schematic, carried: ReadonlySet<string>, extra: readonly Rect[] = [], index?: SpatialIndex) {
+    this.index = index
+    this.objects = doc.objects
+    this.carried = carried
+    this.extra = extra
+  }
+
+  private query(box: Rect): PlacedObject[] {
+    this.index ??= new SpatialIndex(this.objects, GRID)
+    return this.index.query(box).filter((o) => !this.carried.has(o.id))
+  }
+
+  private near(a: Point, b: Point): readonly PlacedObject[] {
+    const x = Math.min(a.x, b.x) - 3 * GRID
+    const y = Math.min(a.y, b.y) - 3 * GRID
+    return this.query({ x, y, w: Math.abs(a.x - b.x) + 6 * GRID, h: Math.abs(a.y - b.y) + 6 * GRID })
+  }
+
+  avoid = (a: Point, b: Point): boolean => {
+    for (const o of this.near(a, b)) if (crosses(a, b, objectRect(o, GRID)) || designatorRects(o, GRID).some((r) => crosses(a, b, r))) return true
+    return this.extra.some((r) => crosses(a, b, r))
+  }
+
+  solid = (box: DragBox): readonly DragBox[] => [...this.query(box).map((o) => objectRect(o, GRID)), ...this.extra]
+}
+
+function carriedPins(doc: Schematic, objects: ReadonlySet<string>): WirePin[] {
+  return pinsOf(doc.objects.filter((o) => objects.has(o.id)))
+}
+
+function unlaidOf(commit: DragCommit, pinAt: (at: Point) => string | undefined): Unlaid[] {
+  return commit.unlaid.map((u) => {
+    const pin = pinAt(u.at)
+    return { at: u.at, net: u.net, kept: u.kept, ...(pin && { pin }) }
+  })
+}
+
+function committed(doc: Schematic, objects: PlacedObject[], commit: DragCommit, newId: NewId): Schematic {
+  const { add = [], remove = [], points = [] } = commit.edit
+  return withSegments({ ...doc, objects }, add, remove, points, newId)
+}
+
+function nearestWhere(offset: Point, clean: (at: Point) => boolean, reach = 4, axis?: "x" | "y"): Point | null {
+  const candidates: { at: Point; rank: number }[] = []
+  for (let dx = -reach; dx <= reach; dx++)
+    for (let dy = -reach; dy <= reach; dy++) {
+      if ((axis === "x" && dy) || (axis === "y" && dx)) continue
+      const at = { x: offset.x + dx * GRID, y: offset.y + dy * GRID }
+      candidates.push({ at, rank: (dx * dx + dy * dy) * 1e9 + Math.hypot(at.x, at.y) })
+    }
+  candidates.sort((p, q) => p.rank - q.rank)
+  return candidates.find(({ at }) => clean(at))?.at ?? null
 }
 
 export class PartDrag {
-  constructor(_doc: Schematic, _wiring: Wiring, _carried: Carried, _options: DragOptions = {}) {}
+  private readonly doc: Schematic
+  private readonly wiring: Wiring
+  private readonly from: ReadonlyMap<string, Point>
+  private readonly plan: DragPlan | null
+  private readonly relaying: () => DragPlan
+  private readonly detach: boolean
+  private readonly whole: boolean
+  private last: { key: string; frame: DragFrame } | null = null
 
-  frame(_dx: number, _dy: number): DragFrame {
-    return unbuilt("PartDrag.frame")
+  constructor(doc: Schematic, wiring: Wiring | undefined, carried: Carried, options: DragOptions = {}) {
+    this.doc = doc
+    this.wiring = currentWiring(doc, wiring)
+    this.from = new Map(doc.objects.filter((o) => carried.objects.has(o.id)).map((o) => [o.id, { x: o.x, y: o.y }] as const))
+    this.detach = !!options.detach
+    this.whole = this.from.size === doc.objects.length && !carried.wires?.size
+    if (this.detach || this.whole || !this.from.size) {
+      this.plan = null
+      this.relaying = () => {
+        throw new Error("this drag lays no wires")
+      }
+      return
+    }
+    const sheet = this.wiring.sheet
+    const pins = carriedPins(doc, carried.objects)
+    const wires = new Set([...travellingWires(doc, carried.objects, this.wiring), ...(carried.wires ?? []), ...hangingRuns(sheet, pins)])
+    const rects = new Map(doc.objects.filter((o) => carried.objects.has(o.id)).map((o) => [o.id, objectRect(o, GRID)] as const))
+    const around = new Surroundings(doc, carried.objects, [], options.index)
+    const request = {
+      pins: pins.map((p) => p.key),
+      wires,
+      heading: (key: string) => axisAligned(sheet.pin(key)?.out),
+      body: (key: string) => rects.get(objectOf(key)),
+      avoid: around.avoid,
+      solid: around.solid,
+    }
+    this.plan = planDrag(sheet, this.wiring.view, request)
+    let relaying: DragPlan | null = null
+    this.relaying = () => (relaying ??= planDrag(sheet, this.wiring.view, { ...request, rerouteConflicts: true }))
   }
 
-  blocked(_dx: number, _dy: number): boolean {
-    return unbuilt("PartDrag.blocked")
+  frame(dx: number, dy: number): DragFrame {
+    if (!this.plan) return EMPTY_FRAME
+    const key = `${dx},${dy}`
+    if (this.last?.key !== key) this.last = { key, frame: this.plan.frame({ x: dx, y: dy }) }
+    return this.last.frame
   }
 
-  landed(_dx: number, _dy: number, _newId?: NewId): Landed {
-    return unbuilt("PartDrag.landed")
+  blocked(dx: number, dy: number): boolean {
+    return this.frame(dx, dy).blocked
+  }
+
+  landed(dx: number, dy: number, newId: NewId = randomId): Landed {
+    const plan = this.plan
+    if (!plan) return { doc: moved(this.doc, this.from, dx, dy, newId, this.wiring), unlaid: [], at: { x: dx, y: dy } }
+    const asked = { x: dx, y: dy }
+    const clean = this.blocked(dx, dy) ? nearestWhere(asked, (p) => !this.blocked(p.x, p.y)) : asked
+    const at = clean ?? asked
+    if (!at.x && !at.y) return { doc: this.doc, unlaid: [], at }
+    const commit = clean ? plan.commit(translate(at), newId, { keepUnlaid: true }) : this.relaying().commit(translate(at), newId, { keepUnlaid: true })
+    if (!commit) return { doc: this.doc, unlaid: [], at: ZERO, refused: this.frame(dx, dy).conflicts }
+    const objects = this.doc.objects.map((o) => {
+      const p = this.from.get(o.id)
+      return p ? { ...o, x: p.x + at.x, y: p.y + at.y } : o
+    })
+    const targets = new Map(commit.pins.map((p) => [`${p.at.x},${p.at.y}`, p.key] as const))
+    return { doc: committed(this.doc, objects, commit, newId), unlaid: unlaidOf(commit, (p) => targets.get(`${p.x},${p.y}`)), at }
   }
 }
 
 export class SegmentDrag {
-  constructor(_doc: Schematic, _wiring: Wiring, _segment: string) {}
+  private readonly doc: Schematic
+  private readonly segment: WireSegment | undefined
+  private readonly plan: DragPlan | null
+  private last: { key: string; frame: DragFrame } | null = null
 
-  frame(_dx: number, _dy: number): DragFrame {
-    return unbuilt("SegmentDrag.frame")
+  constructor(doc: Schematic, wiring: Wiring | undefined, segment: string, index?: SpatialIndex) {
+    this.doc = doc
+    const current = currentWiring(doc, wiring)
+    const sheet = current.sheet
+    this.segment = sheet.segment(segment)
+    const around = new Surroundings(doc, new Set(), [], index)
+    this.plan = this.segment ? planDrag(sheet, current.view, { pins: [], wires: [segment], heading: (key) => axisAligned(sheet.pin(key)?.out), avoid: around.avoid, solid: around.solid }) : null
   }
 
-  landed(_dx: number, _dy: number, _newId?: NewId): Landed {
-    return unbuilt("SegmentDrag.landed")
+  offsetOf(dx: number, dy: number): Point {
+    return this.segment ? normalOffset(this.segment, { x: dx, y: dy }) : ZERO
   }
+
+  frame(dx: number, dy: number): DragFrame {
+    if (!this.plan) return EMPTY_FRAME
+    const offset = this.offsetOf(dx, dy)
+    const key = `${offset.x},${offset.y}`
+    if (this.last?.key !== key) this.last = { key, frame: this.plan.frame(offset) }
+    return this.last.frame
+  }
+
+  landed(dx: number, dy: number, newId: NewId = randomId): Landed {
+    const plan = this.plan
+    const asked = this.offsetOf(dx, dy)
+    if (!plan || !this.segment || (!asked.x && !asked.y)) return { doc: this.doc, unlaid: [], at: ZERO }
+    const axis = asked.x ? "x" : "y"
+    const at = this.frame(dx, dy).blocked ? nearestWhere(asked, (p) => !plan.frame(p).blocked && (p.x !== 0 || p.y !== 0), 4, axis) : asked
+    if (!at) return { doc: this.doc, unlaid: [], at: ZERO, refused: this.frame(dx, dy).conflicts }
+    const commit = plan.commit(at, newId, { keepUnlaid: true })
+    if (!commit) return { doc: this.doc, unlaid: [], at: ZERO, refused: plan.frame(at).conflicts }
+    return { doc: committed(this.doc, this.doc.objects, commit, newId), unlaid: unlaidOf(commit, () => undefined), at }
+  }
+}
+
+const onHalfCell = (p: Point): Point => ({ x: snap(p.x, HALF_CELL), y: snap(p.y, HALF_CELL) })
+
+function reshaped(base: Schematic, wiring: Wiring, ids: ReadonlySet<string>, target: Schematic, point: (at: Point) => Point, newId: NewId, index?: SpatialIndex): Landed {
+  const sheet = wiring.sheet
+  const pins = carriedPins(base, ids)
+  const after = new Map(pinsOf(target.objects.filter((o) => ids.has(o.id))).map((p) => [p.key, p] as const))
+  const wires = new Set([...travellingWires(base, ids, wiring), ...hangingRuns(sheet, pins)])
+  const targetRects = target.objects.filter((o) => ids.has(o.id)).map((o) => objectRect(o, GRID))
+  const around = new Surroundings(base, ids, targetRects, index)
+  const plan = planDrag(sheet, wiring.view, {
+    pins: pins.map((p) => p.key),
+    wires,
+    heading: (key) => axisAligned(sheet.pin(key)?.out),
+    avoid: around.avoid,
+    solid: around.solid,
+    rerouteConflicts: true,
+  })
+  const move: DragMove = {
+    pin: (key, at) => after.get(key)?.at ?? at,
+    point: (at) => onHalfCell(point(at)),
+    heading: (key, heading) => axisAligned(after.get(key)?.out) ?? heading,
+  }
+  const commit = plan.commit(move, newId, { keepUnlaid: true })
+  if (!commit) return { doc: base, unlaid: [], at: ZERO, refused: plan.frame(move).conflicts }
+  const targets = new Map(commit.pins.map((p) => [`${p.at.x},${p.at.y}`, p.key] as const))
+  return { doc: committed(base, target.objects, commit, newId), unlaid: unlaidOf(commit, (p) => targets.get(`${p.x},${p.y}`)), at: ZERO }
 }
 
 export class TurnRun {
-  constructor(_doc: Schematic, _wiring: Wiring, _ids: ReadonlySet<string>) {}
+  private readonly start: Schematic
+  private readonly live: Wiring | undefined
+  private own: Wiring | null = null
+  private readonly ids: ReadonlySet<string>
+  private steps = 0
+  private last: Landed
 
-  get base(): Schematic {
-    return unbuilt("TurnRun.base")
+  private readonly index: SpatialIndex | undefined
+
+  constructor(doc: Schematic, wiring: Wiring | undefined, ids: ReadonlySet<string>, index?: SpatialIndex) {
+    this.start = doc
+    this.live = wiring
+    this.ids = ids
+    this.index = index
+    this.last = { doc, unlaid: [], at: ZERO }
   }
 
-  turned(_turn: Turn, _newId?: NewId): Landed {
-    return unbuilt("TurnRun.turned")
+  private wiring(): Wiring {
+    if (this.own) return this.own
+    if (isCurrent(this.start, this.live)) return this.live
+    return (this.own = wiringOf(new WireGraph(), this.start))
+  }
+
+  get base(): Schematic {
+    return this.start
+  }
+
+  get doc(): Schematic {
+    return this.last.doc
+  }
+
+  turned(turn: Turn, newId: NewId = randomId): Landed {
+    const steps = this.steps + turn
+    if (steps === 0) {
+      this.steps = 0
+      this.last = { doc: this.start, unlaid: [], at: ZERO }
+      return this.last
+    }
+    const pivot = turnPivot(this.start, this.ids, GRID)
+    if (!pivot) return this.last
+    const target = turnedSelection(this.start, this.ids, steps, GRID)
+    const degrees = steps * selectionStep(this.start, this.ids)
+    const landed = reshaped(this.start, this.wiring(), this.ids, target, (at) => turnedAbout(at, pivot, degrees), newId, this.index)
+    if (landed.refused) return { ...this.last, refused: landed.refused }
+    this.steps = steps
+    this.last = landed
+    return landed
   }
 }
 
-export function flippedWithWires(_doc: Schematic, _wiring: Wiring, _ids: ReadonlySet<string>, _axis: FlipAxis, _newId?: NewId): Landed {
-  return unbuilt("flippedWithWires")
+export function flippedWithWires(doc: Schematic, wiring: Wiring | undefined, ids: ReadonlySet<string>, axis: FlipAxis, newId: NewId = randomId, index?: SpatialIndex): Landed {
+  const line = flipLine(doc, ids, axis, GRID)
+  if (line === null) return { doc, unlaid: [], at: ZERO }
+  const target = flipSelection(doc, ids, axis, GRID)
+  const mirrored = (at: Point): Point => (axis === "horizontal" ? { x: line - at.x, y: at.y } : { x: at.x, y: line - at.y })
+  return reshaped(doc, currentWiring(doc, wiring), ids, target, mirrored, newId, index)
 }

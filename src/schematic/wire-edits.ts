@@ -97,6 +97,13 @@ export function connectPins(doc: Schematic, from: PinRef, to: PinRef, points: re
   return withSegments(doc, segmentsAlong(pts, color, newId), [], [], newId)
 }
 
+export function pinToPinPoints(doc: Schematic, from: PinRef, to: PinRef, points: readonly Point[] = [], known?: Wiring): Point[] | null {
+  const wiring = knownFor(doc, known)
+  const view = wiring?.view ?? viewOf(doc)
+  const own = new Set([netOrSelf(view, `${from.object}:${from.pin}`), netOrSelf(view, `${to.object}:${to.pin}`)])
+  return laid(doc, { id: "wire", from, to, points: [...points] }, own, doc.objects, view, wiring?.pins ?? pinsOf(doc.objects))
+}
+
 export function nearestOn(s: WireSegment, at: Point): Point {
   const horizontal = s.a.y === s.b.y
   const lo = horizontal ? Math.min(s.a.x, s.b.x) : Math.min(s.a.y, s.b.y)
@@ -170,13 +177,12 @@ const knownFor = (doc: Pick<Schematic, "objects" | "wires">, known?: Wiring) => 
 
 function travelling(doc: Schematic, carried: ReadonlySet<string>, known?: Wiring): Set<string> {
   const wiring = knownFor(doc, known)
-  const pins = wiring?.pins ?? pinsOf(doc.objects)
+  const pins = pinsOf(doc.objects.filter((o) => carried.has(o.id)))
   const view = wiring?.view ?? viewOf(doc)
   const carriedPins = new Set<string>()
   const carriedAt = new Set<string>()
   const nets = new Set<string>()
   for (const p of pins) {
-    if (!carried.has(p.key.slice(0, p.key.indexOf(":")))) continue
     carriedPins.add(p.key)
     carriedAt.add(pointKey(p.at))
     const net = view.netOfPin(p.key)
@@ -235,10 +241,11 @@ export function reoriented(before: Schematic, after: Schematic, ids: ReadonlySet
 
 export type Clip = { objects: PlacedObject[]; wires: WireSegment[]; parts: Record<string, PartState> }
 
-export function clipOf(doc: Schematic, ids: ReadonlySet<string>, known?: Wiring, _segments?: ReadonlySet<string>): Clip | null {
-  if (!ids.size) return null
+export function clipOf(doc: Schematic, ids: ReadonlySet<string>, known?: Wiring, segments: ReadonlySet<string> = new Set()): Clip | null {
+  if (!ids.size && !segments.size) return null
   const objects = doc.objects.filter((o) => ids.has(o.id))
-  const wires = travelling(doc, ids, known)
+  const wires = ids.size ? travelling(doc, ids, known) : new Set<string>()
+  for (const id of segments) wires.add(id)
   const parts = Object.fromEntries(Object.entries(doc.parts).filter(([k]) => ids.has(k.split(":")[0])))
   return { objects, wires: doc.wires.filter((s) => wires.has(s.id)), parts }
 }
@@ -257,7 +264,8 @@ export type Wiring = {
   dots: readonly Point[]
   dangling: readonly Point[]
   corners: readonly PinCorner[]
-  sheet: WireSheet
+  readonly sheet: WireSheet
+  graph: WireGraph
 }
 
 type NetLook = {
@@ -424,6 +432,53 @@ function derivedWiring(graph: WireGraph, doc: Pick<Schematic, "objects" | "wires
     dots: view.junctions(),
     dangling: view.dangling(),
     corners,
-    sheet: WireSheet.of(doc.wires, pins),
+    graph,
+    get sheet() {
+      return sheetOf(graph, doc.wires, pins)
+    },
   }
 }
+
+type KeptSheet = { sheet: WireSheet; wires: readonly WireSegment[]; pins: readonly WirePin[] }
+
+const sheets = new WeakMap<WireGraph, KeptSheet>()
+
+const SHEET_STEPS = 16
+
+function editsBetween(from: readonly WireSegment[], to: readonly WireSegment[]): Committed[] | null {
+  const steps: Committed[] = []
+  for (let at = to; at !== from; ) {
+    const edit = committed.get(at)
+    if (!edit || steps.length >= SHEET_STEPS) return null
+    steps.push(edit)
+    at = edit.from
+  }
+  return steps.reverse()
+}
+
+export function sheetOf(graph: WireGraph, wires: readonly WireSegment[], pins: readonly WirePin[]): WireSheet {
+  const kept = sheets.get(graph)
+  if (kept && kept.wires === wires && kept.pins === pins) return kept.sheet
+  const steps = kept && kept.pins.length === pins.length ? editsBetween(kept.wires, wires) : null
+  if (!kept || !steps) {
+    const sheet = WireSheet.of(wires, pins)
+    sheets.set(graph, { sheet, wires, pins })
+    return sheet
+  }
+  for (const step of steps) kept.sheet.apply({ added: step.added, removed: step.removed })
+  if (kept.pins !== pins) {
+    const pinsAdded: WirePin[] = []
+    const pinsRemoved: WirePin[] = []
+    for (let i = 0; i < pins.length; i++) {
+      if (pins[i] === kept.pins[i]) continue
+      pinsRemoved.push(kept.pins[i])
+      pinsAdded.push(pins[i])
+    }
+    kept.sheet.apply({ pinsAdded, pinsRemoved })
+  }
+  kept.wires = wires
+  kept.pins = pins
+  return kept.sheet
+}
+
+export const sheetReflects = (graph: WireGraph, wires: readonly WireSegment[]) => sheets.get(graph)?.wires === wires

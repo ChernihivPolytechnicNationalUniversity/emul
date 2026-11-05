@@ -46,7 +46,7 @@ const GRAB_MARGIN = { left: 120, right: 260, top: 120, bottom: 160 }
 type FieldProbe = { frames: number[]; longTasks: number[]; previous: number; sample: FrameRequestCallback }
 type Phase = { frames: number; median: number; p95: number; worst: number; longTasks: number; blocked: number; wall: number }
 type FieldNodes = { total: number; path: number; circle: number; text: number }
-type Measured = { objects: number; wires: number; pins: number; zoom: number; nodes: FieldNodes; mountMs: number; moved: boolean; drag: Phase; pan: Phase; wheelZoom: Phase; idle: Phase }
+type Measured = { objects: number; wires: number; pins: number; zoom: number; nodes: FieldNodes; mountMs: number; moved: boolean; drag: Phase; wired: Phase | null; pan: Phase; wheelZoom: Phase; idle: Phase }
 
 const buildRevision = (directory: string) => Number(directory.split("-")[1])
 
@@ -225,6 +225,24 @@ const largestComponentInView = (page: Page) =>
     }
     return null
   }, GRAB_MARGIN)
+
+const wiredPartInView = (page: Page, ids: readonly string[]) =>
+  page.evaluate(
+    ({ ids, margin }) => {
+      const safe = { left: margin.left, right: innerWidth - margin.right, top: margin.top, bottom: innerHeight - margin.bottom }
+      for (const id of ids) {
+        const element = document.querySelector(`[data-body="${CSS.escape(id)}"] [data-slot=component]`)
+        if (!element) continue
+        const box = element.getBoundingClientRect()
+        const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+        if (point.x < safe.left || point.x > safe.right || point.y < safe.top || point.y > safe.bottom) continue
+        if (document.elementFromPoint(point.x, point.y)?.closest("[data-slot=component]") !== element) continue
+        return point
+      }
+      return null
+    },
+    { ids, margin: GRAB_MARGIN },
+  )
 
 async function instrument(page: Page) {
   await page.evaluate(() => {
@@ -545,6 +563,10 @@ async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChe
     const drag = await measure(page, () => sweep(page, target))
     const moved = Math.abs((await componentOrigins(page)) - settled) > 1
     console.log(phaseLine("drag", drag))
+    const wiredIds = doc.objects.filter((o) => o.def === "resistor" || o.def === "led").map((o) => o.id)
+    const small = await wiredPartInView(page, wiredIds)
+    const wired = small ? await measure(page, () => sweep(page, small)) : null
+    if (wired) console.log(phaseLine("drag with wires", wired))
     const pan = await measure(page, () => panWithSpaceHeld(page))
     console.log(phaseLine("pan", pan))
     const wheelZoom = await measure(page, () => pinchZoom(page))
@@ -553,7 +575,7 @@ async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChe
     console.log(phaseLine("idle", idle))
 
     await stillShows(page, shown)
-    return { objects: doc.objects.length, wires: doc.wires.length, pins, zoom, nodes, mountMs, moved, drag, pan, wheelZoom, idle }
+    return { objects: doc.objects.length, wires: doc.wires.length, pins, zoom, nodes, mountMs, moved, drag, wired, pan, wheelZoom, idle }
   } finally {
     await page.close()
   }
@@ -579,12 +601,13 @@ function report(results: Measured[]) {
 
   console.log("\nWhat a frame costs while the pointer is down")
   table(
-    ["objects", "drag p95", "drag worst", "drag blocked", "pan p95", "pan blocked", "zoom p95", "zoom blocked", "idle p95"],
+    ["objects", "drag p95", "drag worst", "drag blocked", "wired p95", "pan p95", "pan blocked", "zoom p95", "zoom blocked", "idle p95"],
     results.map((r) => [
       String(r.objects),
       ms(r.drag.p95),
       ms(r.drag.worst),
       blocked(r.drag),
+      r.wired ? ms(r.wired.p95) : "—",
       ms(r.pan.p95),
       blocked(r.pan),
       ms(r.wheelZoom.p95),
@@ -653,6 +676,8 @@ for (const result of results) {
   check(`${result.objects} objects: the view was normalised`, result.zoom >= WORKING_ZOOM, `zoomed to ${zoom}, wanted ${Math.round(WORKING_ZOOM * 100)}% or more`)
   check(`${result.objects} objects: the drag moved a component`, result.moved, result.moved ? "moved" : "nothing was grabbed")
   atMost(`${result.objects} objects: drag p95`, result.drag.p95, limit.dragP95)
+  if (result.wired) atMost(`${result.objects} objects: drag with wires p95`, result.wired.p95, limit.dragP95)
+  else if (!boards) check(`${result.objects} objects: a wired part was dragged`, false, "no resistor or LED in view")
   atMost(`${result.objects} objects: pan p95`, result.pan.p95, limit.panP95)
   atMost(`${result.objects} objects: zoom p95`, result.wheelZoom.p95, limit.zoomP95)
 }

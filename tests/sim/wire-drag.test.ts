@@ -708,3 +708,63 @@ describe("turning and mirroring with wires (design.md §6.6, §13.17, §13.19 Q1
     expect.soft(normalFormViolations(done.doc.wires, wirePins(done.doc.objects)), "normal form").toEqual([])
   })
 })
+
+describe("a run of presses in the store (found on the field, 2026-11-05)", () => {
+  it("the second press of a run turns from the drawing before the first even after the store's graph has taken the first press", () => {
+    const doc = inNormalForm({ objects: [{ id: "D1", def: "diode", x: 0, y: 0, props: { ref: "D1" } }], wires: [], parts: {} })
+    const graph = new WireGraph()
+    const run = new TurnRun(doc, wiringOf(graph, doc), new Set(["D1"]))
+    const first = run.turned(-1)
+    wiringOf(graph, first.doc)
+    const second = run.turned(-1)
+    expect.soft(second.refused, "not refused").toBeUndefined()
+    expect.soft(second.doc.objects[0].rotation, "two 45° steps back from where it started").toBe(270)
+  })
+})
+
+describe("a module plugged into a header (found on the field, 2026-11-05)", () => {
+  it("lifted off, it unplugs like the real header: no wire grows from the sockets and no two of its nets join; put back, the circuit is the one it started with", async () => {
+    const { examples } = await import("@/schematic/examples")
+    const doc = examples.find((e) => e.id === "open746-lcd")!.build(GRID)
+    const lcd = doc.objects.find((o) => o.def === "lcd7-f")!
+    const before = wiringOf(new WireGraph(), doc)
+    const away = new PartDrag(doc, before, { objects: new Set([lcd.id]) }).landed(0, 60 * GRID)
+    const lifted = wiringOf(new WireGraph(), away.doc)
+    expect.soft(away.doc.wires.length, "no wire grown").toBe(doc.wires.length)
+    expect.soft(netChanges(before.circuit.nets, lifted.circuit.nets).joined, "no net joined").toEqual([])
+    expect.soft(lifted.circuit.nets.some((g) => g.some((k) => k.startsWith(`${lcd.id}:`))), "the LCD on no net").toBe(false)
+    const back = new PartDrag(away.doc, lifted, { objects: new Set([lcd.id]) }).landed(0, -60 * GRID)
+    expect.soft(pinPartition(wireNets(back.doc.wires, wirePins(back.doc.objects))), "plugged back: the circuit it started with").toEqual(pinPartition(wireNets(doc.wires, wirePins(doc.objects))))
+  })
+})
+
+describe("a far drop with nowhere clean near it (found on the field, 2026-11-05)", () => {
+  it("a chip with many wires dragged 13 cells lands where it was dropped, its wires laid again, and no two nets join but where one of its own pins lands on a conductor (design.md §13.19 Q9, §6.7)", async () => {
+    const { stressDocuments } = await import("../../scripts/lib/stress")
+    const [doc] = stressDocuments([16])
+    const chip = doc.objects.find((o) => o.def === "stm32f746ig")!
+    const before = wiringOf(new WireGraph(), doc)
+    const offset = { x: 13 * GRID, y: 7 * GRID }
+    const drag = new PartDrag(doc, before, { objects: new Set([chip.id]) })
+    expect.soft(drag.blocked(offset.x, offset.y), "the offset itself is blocked").toBe(true)
+    const landed = drag.landed(offset.x, offset.y)
+    expect.soft(landed.at, "kept where it was dropped").toEqual(offset)
+    expect.soft(landed.refused, "not refused").toBeUndefined()
+    const pins = wirePins(landed.doc.objects)
+    expect.soft(normalFormViolations(landed.doc.wires, pins), "normal form").toEqual([])
+    const groupOf = new Map<string, number>()
+    before.circuit.nets.forEach((g, i) => g.forEach((k) => groupOf.set(k, i)))
+    const parent = before.circuit.nets.map((_, i) => i)
+    const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])))
+    const contains = (s: WireSegment, p: Point) => (s.a.y === s.b.y ? p.y === s.a.y && p.x >= Math.min(s.a.x, s.b.x) && p.x <= Math.max(s.a.x, s.b.x) : p.x === s.a.x && p.y >= Math.min(s.a.y, s.b.y) && p.y <= Math.max(s.a.y, s.b.y))
+    const beforePins = wirePins(doc.objects)
+    for (const p of pins.filter((q) => q.key.startsWith(`${chip.id}:`))) {
+      const own = groupOf.get(p.key)
+      const there = [...beforePins.filter((q) => !q.key.startsWith(`${chip.id}:`) && q.at.x === p.at.x && q.at.y === p.at.y).map((q) => groupOf.get(q.key)), ...doc.wires.filter((s) => contains(s, p.at)).map((s) => before.view.netOfSegment(s.id)).map((net) => (net === undefined ? undefined : groupOf.get(before.view.pinsOf(net)[0])))]
+      for (const g of there) if (own !== undefined && g !== undefined) parent[find(own)] = find(g)
+    }
+    const after = wiringOf(new WireGraph(), landed.doc)
+    const silent = netChanges(before.circuit.nets, after.circuit.nets).joined.filter((j) => new Set(j.from.map((g) => find(groupOf.get(g[0])!))).size > 1)
+    expect.soft(silent.map((j) => j.from.map((g) => g[0])), "no join that a landing pin does not explain").toEqual([])
+  })
+})

@@ -135,8 +135,9 @@ describe("the sheet index the rubber band reads is kept up by each commit's delt
     const doc: Schematic = { ...examples.find((e) => e.id === "system-exam")!.build(GRID) }
     const graph = new WireGraph()
     const before = wiringOf(graph, doc)
+    const sheet = before.sheet
     const one = doc.objects.find((o) => o.def === "resistor")!
     const after = wiringOf(graph, moved(doc, new Map([[one.id, { x: one.x, y: one.y }]]), GRID, 0, () => "m", before))
-    expect.soft(after.sheet, "the same index object, updated in place").toBe(before.sheet)
+    expect.soft(after.sheet, "the index built at the first drag, updated in place by the next commit").toBe(sheet)
   })
 })

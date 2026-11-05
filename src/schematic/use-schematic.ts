@@ -3,8 +3,7 @@ import { isOptLevel, type SourceFile } from "emul-shared/source"
 import { isNetlist } from "emul-shared/hdl"
 import { normalizeFiles } from "@/project/files"
 import { normalizeDebug } from "@/debug/saved"
-import { GRID, intersects, objectPins, objectRect, snap, type FlipAxis, type Point, type Rect, type Turn } from "./geometry"
-import { flipSelection, rotateSelection } from "./orient"
+import { GRID, objectPins, snap, type FlipAxis, type Point, type Rect, type Turn } from "./geometry"
 import { freeSpot, type PlacementScene } from "./placement"
 import { getDef, withLibrary } from "./registry"
 import { migrated, SCHEMATIC_VERSION, upgradedFrom, type SavedSchematic } from "./migrate"
@@ -20,7 +19,12 @@ import {
 } from "./types"
 import { isHdlDef } from "./hdl"
 import type { WireColorKey } from "./wire-colors"
-import { clipOf, connectPins, moved, inNormalForm, placedObject, recoloured, removed, reoriented, tapWireAt, wiringOf, withModule, withSegments } from "./wire-edits"
+import { clipOf, connectPins, moved, inNormalForm, placedObject, recoloured, removed, tapWireAt, wiringOf, withModule, withSegments } from "./wire-edits"
+import { flippedWithWires, TurnRun, type Landed } from "./rubber-band"
+import { drawnTo, isRefusal, type DrawEnd, type Drawing, type DrawRefusal } from "./wire-draw"
+import { junctionAt, type JunctionRefusal } from "./junction-tool"
+import { inRect } from "./wire-select"
+import type { SpatialIndex } from "./spatial"
 import { WireGraph } from "./wires/graph"
 import type { WireSegment } from "./wires/segment"
 
@@ -59,7 +63,7 @@ function nextRef(objects: readonly PlacedObject[], prefix: string): string {
 /** Undo depth; enough for a long session without keeping every drag frame forever. */
 const HISTORY_LIMIT = 100
 
-type History = { past: Schematic[]; present: Schematic; future: Schematic[] }
+type History = { past: Schematic[]; present: Schematic; future: Schematic[]; edits: number }
 
 /** A history entry made present again, carrying over what is live now (parts, projects, build and debugger settings). */
 function keepLive(target: Schematic, current: Schematic): Schematic {
@@ -141,7 +145,7 @@ export function pastedInto(doc: Schematic, clip: Clip, dx: number, dy: number, i
 
 /** Schematic document plus selection and undo history. All coordinates are world px. */
 export function useSchematic(grid: number) {
-  const [history, setHistory] = React.useState<History>(() => ({ past: [], present: emptySchematic(), future: [] }))
+  const [history, setHistory] = React.useState<History>(() => ({ past: [], present: emptySchematic(), future: [], edits: 0 }))
   const doc = history.present
   const [graph] = React.useState(() => new WireGraph())
   const { objects: docObjects, wires: docWires, library: docLibrary } = doc
@@ -152,6 +156,8 @@ export function useSchematic(grid: number) {
   }, [wiring])
   const [selectedObjects, setSelectedObjects] = React.useState<ReadonlySet<string>>(() => new Set())
   const [selectedWires, setSelectedWires] = React.useState<ReadonlySet<string>>(() => new Set())
+  const edits = history.edits
+  const turning = React.useRef<{ ids: string; run: TurnRun; doc: Schematic } | null>(null)
 
   const setDoc = React.useCallback(
     (fn: (d: Schematic) => Schematic, opts: { silent?: boolean } = {}) => {
@@ -159,11 +165,13 @@ export function useSchematic(grid: number) {
         const present = fn(h.present)
         if (present === h.present) return h
         if (opts.silent) return { ...h, present }
-        return { past: [...h.past.slice(1 - HISTORY_LIMIT), h.present], present, future: [] }
+        return { past: [...h.past.slice(1 - HISTORY_LIMIT), h.present], present, future: [], edits: h.edits + 1 }
       })
     },
     [],
   )
+
+  const commitFrom = React.useCallback((base: Schematic, next: Schematic) => setDoc((d) => (d === base ? next : d)), [setDoc])
 
   /** Selection survives undo only for things that still exist. */
   const pruneSelection = React.useCallback((d: Schematic) => {
@@ -181,7 +189,7 @@ export function useSchematic(grid: number) {
       if (!prev) return h
       const present = keepLive(prev, h.present)
       pruneSelection(present)
-      return { past: h.past.slice(0, -1), present, future: [h.present, ...h.future] }
+      return { past: h.past.slice(0, -1), present, future: [h.present, ...h.future], edits: h.edits + 1 }
     })
   }, [pruneSelection])
 
@@ -191,7 +199,7 @@ export function useSchematic(grid: number) {
       if (!next) return h
       const present = keepLive(next, h.present)
       pruneSelection(present)
-      return { past: [...h.past, h.present], present, future: h.future.slice(1) }
+      return { past: [...h.past, h.present], present, future: h.future.slice(1), edits: h.edits + 1 }
     })
   }, [pruneSelection])
 
@@ -260,7 +268,7 @@ export function useSchematic(grid: number) {
   const load = React.useCallback((next: Schematic) => {
     const { library, ...rest } = next
     const modules = checkedLibrary(library)
-    setHistory({ past: [], present: { ...rest, objects: next.objects.map(checked), ...(modules && { library: modules }) }, future: [] })
+    setHistory((h) => ({ past: [], present: { ...rest, objects: next.objects.map(checked), ...(modules && { library: modules }) }, future: [], edits: h.edits }))
     setSelectedObjects(new Set())
     setSelectedWires(new Set())
   }, [])
@@ -303,12 +311,11 @@ export function useSchematic(grid: number) {
   const selectInRect = React.useCallback(
     (rect: Rect | null) => {
       if (!rect) return
-      setSelectedObjects(
-        new Set(doc.objects.filter((o) => intersects(objectRect(o, grid), rect)).map((o) => o.id)),
-      )
-      setSelectedWires(new Set())
+      const picked = inRect(doc, rect, grid)
+      setSelectedObjects(new Set(picked.objects))
+      setSelectedWires(new Set(picked.wires))
     },
-    [doc.objects, grid],
+    [doc, grid],
   )
 
   const moveTo = React.useCallback(
@@ -361,14 +368,52 @@ export function useSchematic(grid: number) {
   }, [setDoc])
 
   const rotate = React.useCallback(
-    (ids: ReadonlySet<string>, turn: Turn) => setDoc((d) => reoriented(d, rotateSelection(d, ids, turn, grid), ids)),
-    [grid, setDoc],
+    (ids: ReadonlySet<string>, turn: Turn, index?: SpatialIndex): Landed | null => {
+      if (!ids.size) return null
+      const key = [...ids].sort().join("\u0000")
+      const known = turning.current
+      const run = known && known.ids === key && known.doc === doc ? known.run : new TurnRun(doc, wiring, ids, index)
+      const landed = run.turned(turn)
+      if (landed.refused) return landed
+      turning.current = { ids: key, run, doc: landed.doc }
+      commitFrom(doc, landed.doc)
+      return landed
+    },
+    [doc, wiring, commitFrom],
   )
 
   const flip = React.useCallback(
-    (ids: ReadonlySet<string>, axis: FlipAxis) => setDoc((d) => reoriented(d, flipSelection(d, ids, axis, grid), ids)),
-    [grid, setDoc],
+    (ids: ReadonlySet<string>, axis: FlipAxis, index?: SpatialIndex): Landed | null => {
+      if (!ids.size) return null
+      const landed = flippedWithWires(doc, wiring, ids, axis, undefined, index)
+      if (!landed.refused) commitFrom(doc, landed.doc)
+      return landed
+    },
+    [doc, wiring, commitFrom],
   )
+
+  const draw = React.useCallback(
+    (drawing: Drawing, target: DrawEnd): DrawRefusal | null => {
+      const next = drawnTo(doc, wiring, drawing, target)
+      if (isRefusal(next)) return next
+      commitFrom(doc, next)
+      setSelectedWires(new Set())
+      return null
+    },
+    [doc, wiring, commitFrom],
+  )
+
+  const junction = React.useCallback(
+    (at: Point): JunctionRefusal | null => {
+      const next = junctionAt(doc, wiring, at)
+      if ("refused" in next) return next
+      commitFrom(doc, next)
+      return null
+    },
+    [doc, wiring, commitFrom],
+  )
+
+  const land = React.useCallback((base: Schematic, landed: Landed) => commitFrom(base, landed.doc), [commitFrom])
 
   const addWire = React.useCallback(
     (from: PinRef, to: PinRef, points: Point[] = [], color?: WireColorKey): boolean => {
@@ -412,7 +457,7 @@ export function useSchematic(grid: number) {
   // --- clipboard ------------------------------------------------------------
 
   /** The selected objects with the wires that run between them, ready to paste. */
-  const copySelected = React.useCallback((): Clip | null => clipOf(doc, selectedObjects, wiringNow.current), [doc, selectedObjects])
+  const copySelected = React.useCallback((): Clip | null => clipOf(doc, selectedObjects, wiringNow.current, selectedWires), [doc, selectedObjects, selectedWires])
 
   /**
    * Add a clip's contents shifted by (dx, dy), under fresh ids and free designators, and
@@ -431,6 +476,7 @@ export function useSchematic(grid: number) {
   return {
     doc,
     wiring,
+    edits,
     selectedObjects,
     selectedWires,
     add,
@@ -446,6 +492,10 @@ export function useSchematic(grid: number) {
     moveTo,
     rotate,
     flip,
+    draw,
+    junction,
+    land,
+    commitFrom,
     setProps,
     setProject,
     setBuild,

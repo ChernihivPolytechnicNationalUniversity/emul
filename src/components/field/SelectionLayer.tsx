@@ -1,15 +1,14 @@
 import * as React from "react"
-import { orientationOf, stretchedLeads, toPath, type RoutedWire } from "@/schematic/geometry"
+import { orientationOf, stretchedLeads } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject } from "@/schematic/types"
 import { placementOf, SELECTION_BANDS, selectionOutline, type Outline } from "./selection-geometry"
-import { SELECTED_WIRE_PX, wireCornerRadius } from "./wire-style"
+import { SELECTED_WIRE_PX } from "./wire-style"
 
 type SelectionLayerProps = {
   objects: readonly PlacedObject[]
-  routes: readonly RoutedWire[]
+  segments: readonly { id: string; run: string; a: { x: number; y: number }; b: { x: number; y: number } }[]
   selectedObjects: ReadonlySet<string>
-  selectedWires: ReadonlySet<string>
   grid: number
 }
 
@@ -30,10 +29,9 @@ function platesOf(objects: readonly PlacedObject[], selected: ReadonlySet<string
   return plates
 }
 
-export const SelectionLayer = React.memo(function SelectionLayer({ objects, routes, selectedObjects, selectedWires, grid }: SelectionLayerProps) {
-  if (selectedObjects.size === 0 && selectedWires.size === 0) return null
-  const radius = wireCornerRadius(grid)
-  const wires = routes.filter((route) => selectedWires.has(route.id)).map((route) => ({ id: route.id, d: toPath(route.pts, radius) }))
+export const SelectionLayer = React.memo(function SelectionLayer({ objects, segments, selectedObjects, grid }: SelectionLayerProps) {
+  if (selectedObjects.size === 0 && segments.length === 0) return null
+  const wires = segments.map((s) => ({ id: s.id, run: s.run, d: `M${s.a.x} ${s.a.y} L${s.b.x} ${s.b.y}` }))
   const plates = platesOf(objects, selectedObjects, grid)
   return (
     <svg data-slot="selection" aria-hidden="true" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
@@ -41,7 +39,7 @@ export const SelectionLayer = React.memo(function SelectionLayer({ objects, rout
         {SELECTION_BANDS.map(({ margin, color }) => (
           <g key={margin}>
             {wires.map((wire) => (
-              <path key={wire.id} data-wire={wire.id} d={wire.d} stroke={color} strokeWidth={SELECTED_WIRE_PX + margin * 2} vectorEffect="non-scaling-stroke" />
+              <path key={wire.id} data-wire={wire.run} data-segment={wire.id} d={wire.d} stroke={color} strokeWidth={SELECTED_WIRE_PX + margin * 2} vectorEffect="non-scaling-stroke" />
             ))}
             {plates.map((plate) => (
               <g key={plate.id} data-plate={plate.id}>
