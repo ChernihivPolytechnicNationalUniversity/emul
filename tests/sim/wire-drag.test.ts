@@ -1010,6 +1010,19 @@ describe("the user's checks on the running app (2026-11-05 morning)", () => {
     expect.soft(segmentsOf(done.doc), "upright through the old middle").toEqual([[6, 0, 6, 8]])
   })
 
+  it("R or a mirror on one piece of a wire attached to nothing turns the whole wire, the way a drag moves it whole: an L stays an L", () => {
+    const doc = docOf([part("R9", "resistor", 20, 20)], chain(at(2, 4), at(9, 4), at(9, 10)))
+    const turnedL = [[8, 4, 8, 11], [8, 11, 2, 11]]
+    const both = new TurnRun(doc, wiringFor(doc), new Set(), undefined, new Set(doc.wires.map((w) => w.id))).turned(1, counter("l"))
+    expect.soft(segmentsOf(both.doc), "both pieces selected").toEqual(turnedL)
+    for (const piece of doc.wires) {
+      const one = new TurnRun(doc, wiringFor(doc), new Set(), undefined, new Set([piece.id])).turned(1, counter("m"))
+      expect.soft(segmentsOf(one.doc), `only ${piece.id} selected`).toEqual(turnedL)
+    }
+    const mirrored = flippedWithWires(doc, wiringFor(doc), new Set(), "horizontal", counter("f"), undefined, new Set([doc.wires[1].id]))
+    expect.soft(geometryOf(mirrored.doc.wires), "mirrored whole: the L opens the other way").toEqual(geometryOf(chain(at(9, 4), at(2, 4), at(2, 10))))
+  })
+
   it("the 74HC595 turned four times in a row never joins two nets and never refuses (the user's picture 3)", async () => {
     const { examples } = await import("@/schematic/examples")
     const { unexplainedJoins } = await import("../lib/explained-joins")

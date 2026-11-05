@@ -98,6 +98,17 @@ function freeChain(sheet: WireSheet, first: WireSegment): WireSegment[] | null {
   return chain
 }
 
+function withWholeFreeChains(sheet: WireSheet, wires: ReadonlySet<string>): ReadonlySet<string> {
+  if (!wires.size) return wires
+  const whole = new Set(wires)
+  for (const id of wires) {
+    const segment = sheet.segment(id)
+    const chain = segment && freeChain(sheet, segment)
+    if (chain) for (const s of chain) whole.add(s.id)
+  }
+  return whole
+}
+
 const drawnBody = (o: PlacedObject): Rect => footprint(o, GRID)?.box ?? objectRect(o, GRID)
 
 const crosses = (a: Point, b: Point, r: Rect) => Math.max(a.x, b.x) > r.x && Math.min(a.x, b.x) < r.x + r.w && Math.max(a.y, b.y) > r.y && Math.min(a.y, b.y) < r.y + r.h
@@ -356,7 +367,7 @@ export class TurnRun {
     this.live = wiring
     this.ids = ids
     this.index = index
-    this.wires = wires
+    this.wires = withWholeFreeChains(this.wiring().sheet, wires)
     this.last = { doc, unlaid: [], at: ZERO }
   }
 
@@ -397,12 +408,14 @@ export class TurnRun {
 }
 
 export function flippedWithWires(doc: Schematic, wiring: Wiring | undefined, ids: ReadonlySet<string>, axis: FlipAxis, newId: NewId = randomId, index?: SpatialIndex, wires: ReadonlySet<string> = new Set()): Landed {
-  const boxes = wireBoxes(doc, wires)
+  const base = currentWiring(doc, wiring)
+  const whole = withWholeFreeChains(base.sheet, wires)
+  const boxes = wireBoxes(doc, whole)
   const line = flipLine(doc, ids, axis, GRID, boxes)
   if (line === null) return { doc, unlaid: [], at: ZERO }
   const target = flipSelection(doc, ids, axis, GRID, boxes.length ? line : undefined)
   const mirrored = (at: Point): Point => (axis === "horizontal" ? { x: line - at.x, y: at.y } : { x: at.x, y: line - at.y })
-  return reshaped(doc, currentWiring(doc, wiring), ids, target, mirrored, newId, index, { wires })
+  return reshaped(doc, base, ids, target, mirrored, newId, index, { wires: whole })
 }
 
 function wireBoxes(doc: Schematic, wires: ReadonlySet<string>): Rect[] {

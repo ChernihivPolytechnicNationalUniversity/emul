@@ -66,6 +66,7 @@ import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
 import { FieldCanvas } from "./FieldCanvas"
 import { marksBesideTheBand, wireMarks } from "./wire-marks"
+import { WIRE_HIT_PX } from "./wire-style"
 import { exportPng } from "./export-image"
 import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
@@ -948,6 +949,13 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return drawEndAt(wiring, snapPoint(world))
   }
 
+  const openEndNear = (clientX: number, clientY: number): DrawEnd | null => {
+    const world = toWorld(clientX, clientY)
+    const reach = WIRE_HIT_PX / 2 / scale
+    const end = wiring.dangling.find((q) => Math.abs(q.x - world.x) <= reach && Math.abs(q.y - world.y) <= reach)
+    return end ? drawEndAt(wiring, end) : null
+  }
+
   const refuse = (refusal: DrawRefusal) => {
     if (refusal.refused === "nothing") return
     const text = DRAW_REFUSED[refusal.refused]
@@ -1125,6 +1133,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       if (onCanvas) {
         e.currentTarget.setPointerCapture(e.pointerId)
         beginMove(e, onCanvas, e.shiftKey || e.ctrlKey || e.metaKey)
+        return
+      }
+      const end = openEndNear(e.clientX, e.clientY)
+      if (end) {
+        e.currentTarget.setPointerCapture(e.pointerId)
+        startAt(end, "drag")
         return
       }
       // A finger on bare field pans, the way every map does; a tap clears the selection.
