@@ -1,3 +1,4 @@
+import { NO_CONNECT } from "@/schematic/checker"
 import { GRID } from "@/schematic/geometry"
 import { wirePins } from "@/schematic/migrate-wires"
 import { legacyNets } from "@/schematic/nets"
@@ -34,7 +35,7 @@ export function stableNames(objects: readonly PlacedObject[]): ReadonlyMap<strin
 export function inventory(objects: readonly PlacedObject[]): string[] {
   const names = stableNames(objects)
   return objects
-    .filter((o) => !isJunctionObject(o))
+    .filter((o) => !isJunctionObject(o) && o.def !== NO_CONNECT)
     .map((o) => `${names.get(o.id)} (${o.def})`)
     .sort(byKey)
 }

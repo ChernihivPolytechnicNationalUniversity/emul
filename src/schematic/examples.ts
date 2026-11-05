@@ -1,6 +1,6 @@
 import { BatteryMediumIcon, CircleDashedIcon, CpuIcon, NetworkIcon, ZapIcon } from "lucide-react"
 import type { OptLevel } from "emul-shared/source"
-import { builder } from "./builder"
+import { builder, placedByHand } from "./builder"
 import { need } from "./registry"
 import { systemExam } from "./exam"
 import { transistorLogic } from "./logic"
@@ -617,7 +617,10 @@ export const nucleoI2c: Example = {
     wire(mem, "A1", gnd, "GND", [[48, 12]])
     wire(mem, "A2", gnd, "GND", [[48, 13]])
     wire(mem, "WP", gnd, "GND", [[39, 14], [39, 18], [43, 18]])
-    return doc
+    return placedByHand(doc, grid, [
+      ["R1", "ref", 36.45, 4.75, "end"],
+      ["R1", "value", 36.45, 5.25, "end"],
+    ])
   },
 }
 

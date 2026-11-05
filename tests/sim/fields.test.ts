@@ -48,7 +48,6 @@ function crossesSegment(r: Rect, [p, q]: readonly [{ x: number; y: number }, { x
 
 const byKey = (fields: readonly PlacedField[]) => Object.fromEntries(fields.map((f) => [f.key, f]))
 
-const middleOf = (r: Rect) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 })
 
 const inCells = (p: Point) => ({ x: Math.round((p.x / GRID) * 1000) / 1000, y: Math.round((p.y / GRID) * 1000) / 1000 })
 
@@ -265,15 +264,16 @@ describe("fields move by hand, and keep where they were put (design.md §5.2; Ki
       const turned = turnedSelection(doc, ids, 2, GRID)
       const pinsBefore = objectPins(doc.objects[0], GRID).map((p) => turnedAbout(p.point, pivot, 90))
       expect.soft(objectPins(turned.objects[0], GRID).map((p) => p.point), "set up: the part's pins turned about the pivot by a quarter").toEqual(pinsBefore)
-      const centre = middleOf(byKey(placedFields(doc.objects[0], GRID))[key].box)
+      const centre = byKey(placedFields(doc.objects[0], GRID))[key].at
       const want = turnedAbout(centre, pivot, 90)
       const after = byKey(placedFields(turned.objects[0], GRID))[key]
-      expect.soft(inCells(middleOf(after.box)), `${key}: turned with the part`).toEqual(inCells(want))
+      expect.soft(inCells(after.at), `${key}: its anchor turned with the part, its justification kept`).toEqual(inCells(want))
+      expect.soft(after.anchor, `${key}: justification`).toBe(byKey(placedFields(doc.objects[0], GRID))[key].anchor)
       expect.soft([after.moved, turned.objects[0].fieldAt], `${key}: still moved, the offset untouched`).toEqual([true, doc.objects[0].fieldAt])
       const round = turnedSelection(turnedSelection(turned, ids, 2, GRID), ids, 4, GRID)
-      expect.soft(inCells(middleOf(byKey(placedFields(round.objects[0], GRID))[key].box)), `${key}: a full turn brings it back`).toEqual(inCells(centre))
+      expect.soft(inCells(byKey(placedFields(round.objects[0], GRID))[key].at), `${key}: a full turn brings it back`).toEqual(inCells(centre))
       const twice = flipSelection(flipSelection(doc, ids, "horizontal", GRID), ids, "horizontal", GRID)
-      expect.soft(inCells(middleOf(byKey(placedFields(twice.objects[0], GRID))[key].box)), `${key}: two mirrors bring it back`).toEqual(inCells(centre))
+      expect.soft(inCells(byKey(placedFields(twice.objects[0], GRID))[key].at), `${key}: two mirrors bring it back`).toEqual(inCells(centre))
     }
   })
 
@@ -291,7 +291,7 @@ describe("fields move by hand, and keep where they were put (design.md §5.2; Ki
       const input = JSON.parse(JSON.stringify(stamped(built)))
       const reopened = upgraded(input).doc
       for (const o of reopened.objects) placedFields(o, GRID)
-      expect.soft(reopened.objects.filter((o) => o.fieldAt).map((o) => o.id), `${example.id}: no offset stored`).toEqual([])
+      expect.soft(reopened.objects.map((o) => o.fieldAt ?? null), `${example.id}: no offset stored but the ones its drawing places by hand (the user, design.md §13.21)`).toEqual(built.objects.map((o) => o.fieldAt ?? null))
       expect.soft(JSON.stringify(reopened.objects), `${example.id}: the parts as saved`).toBe(JSON.stringify(built.objects))
       expect.soft(pinPartition(wiringOf(new WireGraph(), reopened).view), `${example.id}: the circuit`).toEqual(pinPartition(wiringOf(new WireGraph(), built).view))
     }

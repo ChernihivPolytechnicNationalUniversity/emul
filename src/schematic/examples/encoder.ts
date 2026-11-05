@@ -1,5 +1,5 @@
 import { CpuIcon } from "lucide-react"
-import { builder } from "../builder"
+import { builder, placedByHand } from "../builder"
 import { nucleoApp } from "../projects"
 
 /**
@@ -35,6 +35,6 @@ export const nucleoEncoder = {
     // board above the terminal and the USB cable, nested so they do not cross.
     wire(u, "CN8-7", ky, "VCC", [[-2, 20], [-2, -10], [32, -10], [32, 31]])
     wire(u, "CN8-11", ky, "GND", [[-3, 22], [-3, -11], [33, -11], [33, 30]])
-    return doc
+    return placedByHand(doc, grid, [["TERM1", "ref", 28.5, -9.45]])
   },
 }

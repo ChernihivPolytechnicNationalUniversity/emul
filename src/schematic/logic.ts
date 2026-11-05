@@ -1,5 +1,5 @@
 import { BinaryIcon } from "lucide-react"
-import { builder } from "./builder"
+import { builder, placedByHand } from "./builder"
 import type { Example } from "./examples"
 import type { PlacedObject, Schematic } from "./types"
 
@@ -204,5 +204,13 @@ export const transistorLogic: Example = {
   name: "Transistor logic",
   description: "CMOS NOT, NAND and NOR gates from discrete MOSFETs, and a half adder built out of them. Flip the switches, watch the LEDs.",
   icon: BinaryIcon,
-  build: (grid) => buildLogic(grid).doc,
+  build: (grid) =>
+    placedByHand(buildLogic(grid).doc, grid, [
+      ["Q9", "ref", 77.5, 17, "start"],
+      ["Q9", "value", 77.5, 17.5, "start"],
+      ["Q17", "ref", 19.5, 79, "start"],
+      ["Q17", "value", 19.5, 79.5, "start"],
+      ["Q23", "ref", 65.5, 66, "start"],
+      ["Q23", "value", 65.5, 66.5, "start"],
+    ]),
 }

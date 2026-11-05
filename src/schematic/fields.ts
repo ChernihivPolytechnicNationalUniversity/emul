@@ -14,7 +14,6 @@ export type PlacedField = { object: string; key: FieldKey; text: string; at: Poi
 const KEYS: readonly FieldKey[] = ["ref", "value"]
 const FIELD_TEXT = /\{(ref|value)\}/
 const DEFAULT_SIZE = 0.4
-const TEXT_ADVANCE_EM = 0.55
 const HPADDING = 0.25
 const VPADDING = 0.15
 const FIELD_GRID = 0.5
@@ -136,7 +135,20 @@ const roundAway = (v: number, up: boolean) => {
 
 const roundedUp = (h: number) => Math.ceil(h / FIELD_GRID - 1e-9) * FIELD_GRID
 
-const widthOf = (text: string, size: number) => text.length * TEXT_ADVANCE_EM * size
+const NARROW = new Set([..."iljI.,:;'|!"])
+const WIDE_LETTERS = new Set([..."mwMW"])
+const GAP = new Set([" ", "\u2009", "\u00a0"])
+
+function advanceOf(char: string): number {
+  if (GAP.has(char) || NARROW.has(char)) return 0.28
+  if (WIDE_LETTERS.has(char)) return 0.88
+  if (/[A-Z]/.test(char)) return 0.7
+  if (/[0-9]/.test(char)) return 0.62
+  if (/[a-z]/.test(char)) return 0.56
+  return 0.72
+}
+
+export const widthOf = (text: string, size: number) => [...text].reduce((sum, char) => sum + advanceOf(char), 0) * size
 
 function propsOf(def: ComponentDef, object: PlacedObject): Record<string, string> {
   const props = { ...def.defaults, ...object.props }
@@ -219,7 +231,7 @@ export function placedFields(object: PlacedObject, grid: number, def: ComponentD
   const fields = sized.map((f, i): PlacedField => {
     const moved = object.fieldAt?.[f.template.key]
     const local = moved ? framePoint(def, orientation, moved) : automatic[i].at
-    const anchor = moved ? "middle" : automatic[i].anchor
+    const anchor = moved ? (moved.anchor ?? "middle") : automatic[i].anchor
     const at = { x: object.x + local.x * grid, y: object.y + local.y * grid }
     return { object: object.id, key: f.template.key, text: f.text, at, box: boxAt(at, anchor, f.w * grid, f.h * grid), angle: 0, anchor, side: automatic[i].side, moved: !!moved }
   })
@@ -227,16 +239,17 @@ export function placedFields(object: PlacedObject, grid: number, def: ComponentD
   return fields
 }
 
-export function withFieldAt(object: PlacedObject, key: FieldKey, middle: Point, grid: number, def: ComponentDef): PlacedObject {
-  const local = { x: (middle.x - object.x) / grid, y: (middle.y - object.y) / grid }
+export function withFieldAt(object: PlacedObject, key: FieldKey, at: Point, grid: number, def: ComponentDef, anchor: TextAnchor = "middle"): PlacedObject {
+  const local = { x: (at.x - object.x) / grid, y: (at.y - object.y) / grid }
   const orientation = orientationOf(object)
   const frame = framePoint(def, orientation, { x: def.width / 2, y: def.height / 2 })
   const back = unorientOffset({ x: local.x - frame.x, y: local.y - frame.y }, orientation)
-  return { ...object, fieldAt: { ...object.fieldAt, [key]: { x: def.width / 2 + back.x, y: def.height / 2 + back.y } } }
+  const placed = { x: def.width / 2 + back.x, y: def.height / 2 + back.y, ...(anchor !== "middle" && { anchor }) }
+  return { ...object, fieldAt: { ...object.fieldAt, [key]: placed } }
 }
 
 export function withFieldMoved(object: PlacedObject, key: FieldKey, dx: number, dy: number, grid: number, def: ComponentDef | undefined = getDef(object.def)): PlacedObject {
   const field = def && placedFields(object, grid, def).find((f) => f.key === key)
   if (!def || !field) return object
-  return withFieldAt(object, key, { x: field.box.x + field.box.w / 2 + dx, y: field.box.y + field.box.h / 2 + dy }, grid, def)
+  return withFieldAt(object, key, { x: field.at.x + dx, y: field.at.y + dy }, grid, def, field.anchor)
 }

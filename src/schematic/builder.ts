@@ -1,6 +1,7 @@
 import { JUNCTION, wiresAsSegments } from "./migrate-wires"
 import { getMeta, need, withLibrary } from "./registry"
 import { withFieldAt, type FieldKey } from "./fields"
+import type { TextAnchor } from "./geometry"
 import type { LegacySchematic, LegacyWire, PartState, PlacedObject, Rotation, Schematic } from "./types"
 import type { WireSegment } from "./wires/segment"
 
@@ -78,6 +79,13 @@ export function copied(doc: Schematic): Schematic {
 }
 
 /** Small DSL over the document: place components by cell, wire them by pin. */
+export type HandPlacedField = readonly [ref: string, key: FieldKey, x: number, y: number, anchor?: TextAnchor]
+
+export function placedByHand(doc: Schematic, grid: number, fields: readonly HandPlacedField[]): Schematic {
+  for (const o of doc.objects) for (const [ref, key, x, y, anchor] of fields) if (o.props?.ref === ref) o.fieldAt = withFieldAt(o, key, { x: x * grid, y: y * grid }, grid, need(o.def), anchor).fieldAt
+  return doc
+}
+
 export function builder(grid: number) {
   const parts: Record<string, PartState> = {}
   const doc = { objects: [], parts } as unknown as Schematic

@@ -1,5 +1,5 @@
 import { AudioWaveformIcon, LightbulbIcon } from "lucide-react"
-import { builder } from "../builder"
+import { builder, placedByHand } from "../builder"
 import type { Example } from "../examples"
 import type { PlacedObject, Rotation } from "../types"
 
@@ -101,7 +101,10 @@ export const opampFlasher: Example = {
     join([r2, "2"], [gnd(16, 24), "GND"])
     join([rail(21, 4, 9), "V"], [u1, "V+"])
     join([rail(21, 14, -9), "V"], [u1, "V-"])
-    return doc
+    return placedByHand(doc, grid, [
+      ["LED1", "ref", 32.35, 12.1, "end"],
+      ["LED1", "value", 32.35, 12.6, "end"],
+    ])
   },
 }
 

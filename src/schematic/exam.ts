@@ -1,5 +1,5 @@
 import { ClipboardCheckIcon } from "lucide-react"
-import { builder } from "./builder"
+import { builder, placedByHand } from "./builder"
 import type { Example } from "./examples"
 import type { PlacedObject, Schematic } from "./types"
 
@@ -236,5 +236,8 @@ export const systemExam: Example = {
   name: "System exam",
   description: "Nine textbook circuits with known answers: regulator, amplifier, filters, rectifier, LED, overload, current mirror, MOSFET switches.",
   icon: ClipboardCheckIcon,
-  build: (grid) => buildExam(grid).doc,
+  build: (grid) => placedByHand(buildExam(grid).doc, grid, [
+      ["Q4", "ref", 77.5, 10.5, "start"],
+      ["Q4", "value", 77.5, 11, "start"],
+    ]),
 }
