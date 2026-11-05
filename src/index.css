@@ -288,3 +288,6 @@
     animation: none;
   }
 }
+[data-slot="rubber-band"] > g[data-blocked] {
+  filter: drop-shadow(0 0 2px var(--destructive)) drop-shadow(0 0 6px color-mix(in srgb, var(--destructive) 60%, transparent));
+}

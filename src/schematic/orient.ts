@@ -1,4 +1,4 @@
-import { diagonalSquare, flipped, nextRotation, objectRect, objectSize, orientationOf, snap, unionOf, type FlipAxis, type Point, type Step, type Turn } from "./geometry"
+import { diagonalSquare, flipped, nextRotation, objectRect, objectSize, orientationOf, snap, unionOf, type FlipAxis, type Point, type Rect, type Step, type Turn } from "./geometry"
 import { getDef } from "./registry"
 import type { ComponentDef, PlacedObject, Schematic } from "./types"
 
@@ -8,16 +8,16 @@ function reoriented(object: PlacedObject, axis: FlipAxis): PlacedObject {
   return { ...rest, ...(rotation && { rotation }), ...(mirror && { mirror }) }
 }
 
-export function flipSelection(doc: Schematic, ids: ReadonlySet<string>, axis: FlipAxis, grid: number): Schematic {
+export function flipSelection(doc: Schematic, ids: ReadonlySet<string>, axis: FlipAxis, grid: number, line?: number): Schematic {
   const chosen = doc.objects.filter((o) => ids.has(o.id) && getDef(o.def))
   if (chosen.length === 0) return doc
-  if (chosen.length === 1) return { ...doc, objects: doc.objects.map((o) => (o === chosen[0] ? reoriented(o, axis) : o)) }
+  if (chosen.length === 1 && line === undefined) return { ...doc, objects: doc.objects.map((o) => (o === chosen[0] ? reoriented(o, axis) : o)) }
 
   const horizontal = axis === "horizontal"
   const rects = new Map(chosen.map((o) => [o.id, objectRect(o, grid)]))
   const starts = [...rects.values()].map((r) => (horizontal ? r.x : r.y))
   const ends = [...rects.values()].map((r) => (horizontal ? r.x + r.w : r.y + r.h))
-  const across = snap(Math.min(...starts) + Math.max(...ends), grid)
+  const across = line ?? snap(Math.min(...starts) + Math.max(...ends), grid)
   return {
     ...doc,
     objects: doc.objects.map((o) => {
@@ -36,8 +36,8 @@ const standsOnADiagonal = (o: PlacedObject, ids: ReadonlySet<string>) => {
   return !ids.has(o.id) || !def || diagonalSquare(def) !== null
 }
 
-export function selectionStep(doc: Schematic, ids: ReadonlySet<string>): Step {
-  return doc.objects.every((o) => standsOnADiagonal(o, ids)) ? 45 : 90
+export function selectionStep(doc: Schematic, ids: ReadonlySet<string>, withWires = false): Step {
+  return !withWires && doc.objects.every((o) => standsOnADiagonal(o, ids)) ? 45 : 90
 }
 
 const pivotOf = (o: PlacedObject, def: ComponentDef, grid: number): Point => {
@@ -45,11 +45,11 @@ const pivotOf = (o: PlacedObject, def: ComponentDef, grid: number): Point => {
   return { x: o.x + cell.x * grid, y: o.y + cell.y * grid }
 }
 
-export function turnPivot(doc: Schematic, ids: ReadonlySet<string>, grid: number): Point | null {
+export function turnPivot(doc: Schematic, ids: ReadonlySet<string>, grid: number, extra: readonly Rect[] = []): Point | null {
   const chosen = doc.objects.filter((o) => ids.has(o.id) && getDef(o.def))
-  if (!chosen.length) return null
-  if (chosen.length === 1) return pivotOf(chosen[0], getDef(chosen[0].def)!, grid)
-  const box = unionOf(chosen.map((o) => objectRect(o, grid)))
+  if (!chosen.length && !extra.length) return null
+  if (chosen.length === 1 && !extra.length) return pivotOf(chosen[0], getDef(chosen[0].def)!, grid)
+  const box = unionOf([...chosen.map((o) => objectRect(o, grid)), ...extra])
   return { x: snap(box.x, grid) + Math.floor(Math.round(box.w / grid) / 2) * grid, y: snap(box.y, grid) + Math.floor(Math.round(box.h / grid) / 2) * grid }
 }
 
@@ -62,10 +62,10 @@ export function turnedAbout(p: Point, pivot: Point, degrees: number): Point {
   return { x: pivot.x + dx * cos - dy * sin, y: pivot.y + dx * sin + dy * cos }
 }
 
-export function turnedSelection(doc: Schematic, ids: ReadonlySet<string>, steps: number, grid: number): Schematic {
-  const pivot = turnPivot(doc, ids, grid)
+export function turnedSelection(doc: Schematic, ids: ReadonlySet<string>, steps: number, grid: number, about?: { pivot: Point; step: Step }): Schematic {
+  const pivot = about?.pivot ?? turnPivot(doc, ids, grid)
   if (!pivot || !steps) return doc
-  const step = selectionStep(doc, ids)
+  const step = about?.step ?? selectionStep(doc, ids)
   const turn: Turn = steps > 0 ? 1 : -1
   const objects = doc.objects.map((o) => {
     if (!ids.has(o.id)) return o
@@ -82,12 +82,12 @@ export function turnedSelection(doc: Schematic, ids: ReadonlySet<string>, steps:
 
 export const rotateSelection = (doc: Schematic, ids: ReadonlySet<string>, turn: Turn, grid: number): Schematic => turnedSelection(doc, ids, turn, grid)
 
-export function flipLine(doc: Schematic, ids: ReadonlySet<string>, axis: FlipAxis, grid: number): number | null {
+export function flipLine(doc: Schematic, ids: ReadonlySet<string>, axis: FlipAxis, grid: number, extra: readonly Rect[] = []): number | null {
   const chosen = doc.objects.filter((o) => ids.has(o.id) && getDef(o.def))
-  if (!chosen.length) return null
+  if (!chosen.length && !extra.length) return null
   const horizontal = axis === "horizontal"
-  const rects = chosen.map((o) => objectRect(o, grid))
-  if (chosen.length === 1) return horizontal ? 2 * rects[0].x + rects[0].w : 2 * rects[0].y + rects[0].h
+  const rects = [...chosen.map((o) => objectRect(o, grid)), ...extra]
+  if (rects.length === 1 && chosen.length === 1) return horizontal ? 2 * rects[0].x + rects[0].w : 2 * rects[0].y + rects[0].h
   const starts = rects.map((r) => (horizontal ? r.x : r.y))
   const ends = rects.map((r) => (horizontal ? r.x + r.w : r.y + r.h))
   return snap(Math.min(...starts) + Math.max(...ends), grid)

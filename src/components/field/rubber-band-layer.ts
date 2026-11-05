@@ -3,7 +3,7 @@ import type { Point } from "@/schematic/geometry"
 import { wireColorVar, type WireColorKey } from "@/schematic/wire-colors"
 import type { DragFrame } from "@/schematic/wires/drag"
 import type { WireSegment } from "@/schematic/wires/segment"
-import { CASING_PX, WIRE_PX } from "./wire-style"
+import { CASING_PX, SELECTED_WIRE_PX, WIRE_PX } from "./wire-style"
 
 const SVG_NS = "http://www.w3.org/2000/svg"
 
@@ -82,7 +82,7 @@ export class RubberBandLayer {
         path.setAttribute("d", `M${a.x} ${a.y} L${b.x} ${b.y}`)
         path.setAttribute("fill", "none")
         path.setAttribute("stroke", casing ? "var(--background)" : blocked ? "var(--destructive)" : wireColorVar(color))
-        path.setAttribute("stroke-width", String(casing ? WIRE_PX + CASING_PX : WIRE_PX))
+        path.setAttribute("stroke-width", String(casing ? WIRE_PX + CASING_PX : blocked ? SELECTED_WIRE_PX : WIRE_PX))
         path.setAttribute("stroke-linecap", casing ? "butt" : "round")
         path.setAttribute("vector-effect", "non-scaling-stroke")
         if (!casing) path.setAttribute("data-piece", `${a.x} ${a.y} ${b.x} ${b.y}`)

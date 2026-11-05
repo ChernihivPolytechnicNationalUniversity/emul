@@ -9,6 +9,7 @@ import { rotateSelection } from "@/schematic/orient"
 import type { PlacedObject, Point, Schematic } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
 import { type DragConflict, type DragFrame, type DragMove, normalOffset, planDrag } from "@/schematic/wires/drag"
+import { turnedSelection } from "@/schematic/orient"
 import { danglingEnds, junctionsOf, pinPartition, type WireNets, WireGraph, wireNets } from "@/schematic/wires/graph"
 import { commitEdit, normalise } from "@/schematic/wires/normal-form"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
@@ -946,5 +947,97 @@ describe("found by the verification of phase 4's fixes (Codex)", () => {
     const band = new Set([`${at(4, 1).x},${at(4, 1).y}`, `${at(6, -2).x},${at(6, -2).y}`])
     expect.soft(marksBesideTheBand(marks, band).dots, "the old dot gone").toEqual([])
     expect.soft(marksBesideTheBand(marks, new Set()).dots.length, "kept without a band").toBe(1)
+  })
+})
+
+describe("the user's checks on the running app (2026-11-05 morning)", () => {
+  const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
+  const part = (id: string, def: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def, x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
+  let n = 0
+  const wire = (a: Point, b: Point): WireSegment => ({ id: `u${++n}`, a, b })
+  const chain = (...pts: Point[]) => pts.slice(1).map((p, i) => wire(pts[i], p))
+  const docOf = (objects: PlacedObject[], wires: WireSegment[] = []): Schematic => inNormalForm({ objects, wires, parts: {} })
+  const wiringFor = (doc: Schematic) => wiringOf(new WireGraph(), doc)
+  const nets = (doc: Schematic) => pinPartition(wireNets(doc.wires, wirePins(doc.objects)))
+  const segmentsOf = (doc: Schematic) => doc.wires.map((s) => [s.a.x / GRID, s.a.y / GRID, s.b.x / GRID, s.b.y / GRID])
+
+  it("a wire dragged sideways does not land the end it keeps on a pin onto another part's pin: nothing joins (design.md §6.7)", () => {
+    const doc = docOf([part("R1", "resistor", 0, 0), part("R2", "resistor", 0, 2)], [wire(at(4, 1), at(10, 1))])
+    const landed = new SegmentDrag(doc, wiringFor(doc), doc.wires[0].id).landed(0, 2 * GRID)
+    expect.soft(nets(landed.doc), "R1 and R2 kept apart").toEqual([])
+    expect.soft(normalFormViolations(landed.doc.wires, wirePins(landed.doc.objects)), "normal form").toEqual([])
+  })
+
+  it("a wire attached to nothing moves freely, along as well as across itself", () => {
+    const doc = docOf([part("R9", "resistor", 20, 20)], [wire(at(6, 2), at(6, 10))])
+    const landed = new SegmentDrag(doc, wiringFor(doc), doc.wires[0].id).landed(2 * GRID, -3 * GRID)
+    expect.soft(segmentsOf(landed.doc), "the whole wire two right and three up").toEqual([[8, -1, 8, 7]])
+  })
+
+  it("a diode turned by 45° carries the wire hanging from its pin by translation: no slant pieces, no dots, the same shape (the user's picture 9)", () => {
+    const tail = chain(at(4, 1), at(12, 1), at(12, -3), at(18, -3), at(18, 5), at(26, 5), at(26, 3))
+    const doc = docOf([part("D1", "diode", 0, 0)], tail)
+    const done = new TurnRun(doc, wiringFor(doc), new Set(["D1"])).turned(-1, counter("h"))
+    const view = wireNets(done.doc.wires, wirePins(done.doc.objects))
+    expect.soft(done.refused, "turned").toBeUndefined()
+    expect.soft(junctionsOf(view), "no dots").toEqual([])
+    expect.soft(done.doc.wires.length, "the same seven pieces").toBe(doc.wires.length)
+    expect.soft(normalFormViolations(done.doc.wires, wirePins(done.doc.objects)), "normal form, every piece orthogonal").toEqual([])
+    expect.soft(nets(done.doc), "the wire still on D1's pin").toEqual([])
+    expect.soft(danglingEnds(view).length, "one open end, the tail's").toBe(1)
+  })
+
+  it("two resistors joined by an L stopped at 45°: the wire between them is pulled by the rubber band, not turned into a staircase", () => {
+    const doc = docOf([part("R1", "resistor", 0, 0), part("R2", "resistor", 9, 4, 90)], chain(at(4, 1), at(10, 1), at(10, 4)))
+    const half = new TurnRun(doc, wiringFor(doc), new Set(["R1", "R2"])).turned(1, counter("l"))
+    expect.soft(geometryOf(half.doc.wires), "one corner, on whole cells").toEqual(geometryOf(chain(at(7, 2), at(9, 2), at(9, 8))))
+  })
+
+  it("two wired resistors stopped at 45° keep their wire orthogonal and joined; two presses give the right-angle turn (design.md §6.6)", () => {
+    const doc = docOf([part("R1", "resistor", 0, 0), part("R2", "resistor", 6, 0)], [wire(at(4, 1), at(6, 1))])
+    const run = new TurnRun(doc, wiringFor(doc), new Set(["R1", "R2"]))
+    const half = run.turned(1, counter("q"))
+    expect.soft(half.refused, "the 45° stop is taken").toBeUndefined()
+    expect.soft(normalFormViolations(half.doc.wires, wirePins(half.doc.objects)), "orthogonal at the stop").toEqual([])
+    expect.soft(nets(half.doc), "still one net at the stop").toEqual([["R1:2", "R2:1"]])
+    const whole = run.turned(1, counter("q"))
+    expect.soft(geometryOf(whole.doc.wires), "the wire turned with them").toEqual(geometryOf([wire(at(5, 0), at(5, 2))]))
+  })
+
+  it("R on selected wires alone turns them a quarter about their middle", () => {
+    const doc = docOf([part("R9", "resistor", 20, 20)], [wire(at(2, 4), at(10, 4))])
+    const done = new TurnRun(doc, wiringFor(doc), new Set(), undefined, new Set([doc.wires[0].id])).turned(1, counter("w"))
+    expect.soft(segmentsOf(done.doc), "upright through the old middle").toEqual([[6, 0, 6, 8]])
+  })
+
+  it("the 74HC595 turned four times in a row never joins two nets and never refuses (the user's picture 3)", async () => {
+    const { examples } = await import("@/schematic/examples")
+    const { unexplainedJoins } = await import("../lib/explained-joins")
+    const doc = examples.find((e) => e.id === "nucleo-74hc595")!.build(GRID)
+    const u2 = doc.objects.find((o) => o.props?.ref === "U2")!
+    const run = new TurnRun(doc, wiringFor(doc), new Set([u2.id]))
+    for (const turn of [-1, -1, -1, 1] as const) {
+      const landed = run.turned(turn, counter("s"))
+      expect.soft(landed.refused, `turned ${turn}`).toBeUndefined()
+      expect.soft(unexplainedJoins(doc, landed.doc, new Set([u2.id])), `turned ${turn}: nothing joined`).toEqual([])
+      expect.soft(normalFormViolations(landed.doc.wires, wirePins(landed.doc.objects)), `turned ${turn}: normal form`).toEqual([])
+    }
+  })
+
+  it("the fallback for a chip the rubber band cannot turn keeps the far ends where they are and lays the conflicting wires again; a wire that cannot be is cut back, never joined", async () => {
+    const { examples } = await import("@/schematic/examples")
+    const { unexplainedJoins } = await import("../lib/explained-joins")
+    const doc = examples.find((e) => e.id === "nucleo-74hc595")!.build(GRID)
+    const u2 = doc.objects.find((o) => o.props?.ref === "U2")!
+    const wiring = wiringFor(doc)
+    const pins = wirePins(doc.objects).filter((p) => p.key.startsWith(`${u2.id}:`))
+    const turned = turnedSelection(doc, new Set([u2.id]), 2, GRID)
+    const after = new Map(wirePins(turned.objects).map((p) => [p.key, p] as const))
+    const plan = planDrag(wiring.sheet, wiring.view, { pins: pins.map((p) => p.key), heading: (key) => wiring.sheet.pin(key)?.out, keepFarEnds: true })
+    const commit = plan.commit({ pin: (key, p) => after.get(key)?.at ?? p, point: (p) => p, heading: (key, h) => after.get(key)?.out ?? h }, counter("x"), { keepUnlaid: true })
+    expect.soft(commit, "laid").not.toBeNull()
+    if (!commit) return
+    const result = inNormalForm({ ...doc, objects: turned.objects, wires: [...commitEdit(doc.wires, wirePins(turned.objects), commit.edit, counter("y")).wires] })
+    expect.soft(unexplainedJoins(doc, result, new Set([u2.id])), "nothing joined").toEqual([])
   })
 })

@@ -51,8 +51,10 @@ const axisAligned = (p: Point | undefined) => (p && (p.x === 0) !== (p.y === 0) 
 
 const otherEnd = (s: WireSegment, p: Point) => (samePoint(s.a, p) ? s.b : s.a)
 
-function hangingRuns(sheet: WireSheet, pins: readonly WirePin[]): Set<string> {
-  const out = new Set<string>()
+type Hanging = { readonly pin: WirePin; readonly segments: readonly WireSegment[] }
+
+function hangingChains(sheet: WireSheet, pins: readonly WirePin[]): Hanging[] {
+  const out: Hanging[] = []
   for (const pin of pins)
     for (const first of sheet.endsAt(pin.at)) {
       const chain = [first]
@@ -62,7 +64,7 @@ function hangingRuns(sheet: WireSheet, pins: readonly WirePin[]): Set<string> {
         if (sheet.pinsAt(at).length) break
         const ends = sheet.endsAt(at)
         if (ends.length === 1) {
-          for (const s of chain) out.add(s.id)
+          out.push({ pin, segments: chain })
           break
         }
         if (ends.length !== 2) break
@@ -73,6 +75,27 @@ function hangingRuns(sheet: WireSheet, pins: readonly WirePin[]): Set<string> {
       }
     }
   return out
+}
+
+const hangingRuns = (sheet: WireSheet, pins: readonly WirePin[]): Set<string> => new Set(hangingChains(sheet, pins).flatMap((h) => h.segments.map((s) => s.id)))
+
+function freeChain(sheet: WireSheet, first: WireSegment): WireSegment[] | null {
+  const chain = [first]
+  for (const start of [first.a, first.b]) {
+    let at = start
+    let through = first
+    for (;;) {
+      if (sheet.pinsAt(at).length) return null
+      const ends = sheet.endsAt(at)
+      if (ends.length === 1) break
+      if (ends.length !== 2) return null
+      through = ends[0] === through ? ends[1] : ends[0]
+      if (chain.includes(through)) return null
+      chain.push(through)
+      at = otherEnd(through, at)
+    }
+  }
+  return chain
 }
 
 const drawnBody = (o: PlacedObject): Rect => footprint(o, GRID)?.box ?? objectRect(o, GRID)
@@ -223,6 +246,7 @@ export class SegmentDrag {
   private readonly doc: Schematic
   private readonly segment: WireSegment | undefined
   private readonly plan: DragPlan | null
+  private readonly free: boolean
   private last: { key: string; frame: DragFrame } | null = null
 
   private readonly wiring: Wiring
@@ -241,12 +265,16 @@ export class SegmentDrag {
     this.wiring = current
     const sheet = current.sheet
     this.segment = sheet.segment(segment)
+    const chain = this.segment ? freeChain(sheet, this.segment) : null
+    this.free = chain !== null
     const around = new Surroundings(doc, new Set(), [], index)
-    this.plan = this.segment ? planDrag(sheet, current.view, { pins: [], wires: [segment], heading: (key) => axisAligned(sheet.pin(key)?.out), avoid: around.avoid, solid: around.solid }) : null
+    const wires = chain ? chain.map((s) => s.id) : [segment]
+    this.plan = this.segment ? planDrag(sheet, current.view, { pins: [], wires, heading: (key) => axisAligned(sheet.pin(key)?.out), avoid: around.avoid, solid: around.solid }) : null
   }
 
   offsetOf(dx: number, dy: number): Point {
-    return this.segment ? normalOffset(this.segment, { x: dx, y: dy }) : ZERO
+    if (!this.segment) return ZERO
+    return this.free ? { x: snap(dx, GRID), y: snap(dy, GRID) } : normalOffset(this.segment, { x: dx, y: dy })
   }
 
   frame(dx: number, dy: number): DragFrame {
@@ -262,7 +290,7 @@ export class SegmentDrag {
     const asked = this.offsetOf(dx, dy)
     if (!plan || !this.segment || (!asked.x && !asked.y)) return { doc: this.doc, unlaid: [], at: ZERO }
     if (this.stale) return { doc: this.doc, unlaid: [], at: ZERO, refused: [] }
-    const axis = asked.x ? "x" : "y"
+    const axis = this.free ? undefined : asked.x ? "x" : "y"
     const at = this.frame(dx, dy).blocked ? nearestWhere(asked, (p) => !plan.frame(p).blocked && (p.x !== 0 || p.y !== 0), 4, axis) : asked
     if (!at) return { doc: this.doc, unlaid: [], at: ZERO, refused: this.frame(dx, dy).conflicts }
     const commit = plan.commit(at, newId, { keepUnlaid: true })
@@ -275,27 +303,38 @@ const onHalfCell = (p: Point): Point => ({ x: snap(p.x, HALF_CELL), y: snap(p.y,
 
 type Base = { readonly view: WireNets; readonly sheet: WireSheet }
 
-function reshaped(base: Schematic, wiring: Base, ids: ReadonlySet<string>, target: Schematic, point: (at: Point) => Point, newId: NewId, index?: SpatialIndex): Landed {
+type Shape = { readonly degrees?: number; readonly wires?: ReadonlySet<string> }
+
+function reshaped(base: Schematic, wiring: Base, ids: ReadonlySet<string>, target: Schematic, point: (at: Point) => Point, newId: NewId, index?: SpatialIndex, shape: Shape = {}): Landed {
   const sheet = wiring.sheet
   const pins = carriedPins(base, ids)
   const after = new Map(pinsOf(target.objects.filter((o) => ids.has(o.id))).map((p) => [p.key, p] as const))
-  const wires = new Set([...travellingIn(base, ids, wiring.view), ...hangingRuns(sheet, pins)])
+  const square = shape.degrees === undefined || shape.degrees % 90 === 0
+  const hanging = hangingChains(sheet, pins)
+  const tail = new Map<string, Point>()
+  for (const { pin, segments } of hanging) {
+    const to = after.get(pin.key)?.at ?? pin.at
+    const d = { x: to.x - pin.at.x, y: to.y - pin.at.y }
+    for (const s of segments) for (const p of [s.a, s.b]) tail.set(`${p.x},${p.y}`, { x: p.x + d.x, y: p.y + d.y })
+  }
+  const wires = new Set([...(square ? travellingIn(base, ids, wiring.view) : []), ...hanging.flatMap((h) => h.segments.map((s) => s.id)), ...(shape.wires ?? [])])
   const targetRects = target.objects.filter((o) => ids.has(o.id)).map(drawnBody)
   const around = new Surroundings(base, ids, targetRects, index)
-  const plan = planDrag(sheet, wiring.view, {
+  const request = {
     pins: pins.map((p) => p.key),
     wires,
-    heading: (key) => axisAligned(sheet.pin(key)?.out),
+    heading: (key: string) => axisAligned(sheet.pin(key)?.out),
     avoid: around.avoid,
     solid: around.solid,
     rerouteConflicts: true,
-  })
+  }
   const move: DragMove = {
     pin: (key, at) => after.get(key)?.at ?? at,
-    point: (at) => onHalfCell(point(at)),
+    point: (at) => tail.get(`${at.x},${at.y}`) ?? onHalfCell(point(at)),
     heading: (key, heading) => axisAligned(after.get(key)?.out) ?? heading,
   }
-  const commit = plan.commit(move, newId, { keepUnlaid: true })
+  const plan = planDrag(sheet, wiring.view, request)
+  const commit = plan.commit(move, newId, { keepUnlaid: true }) ?? planDrag(sheet, wiring.view, { ...request, keepFarEnds: true }).commit(move, newId, { keepUnlaid: true })
   if (!commit) return { doc: base, unlaid: [], at: ZERO, refused: plan.frame(move).conflicts }
   const targets = new Map(commit.pins.map((p) => [`${p.at.x},${p.at.y}`, p.key] as const))
   return { doc: committed(base, target.objects, commit, newId), unlaid: unlaidOf(commit, (p) => targets.get(`${p.x},${p.y}`)), at: ZERO }
@@ -310,12 +349,14 @@ export class TurnRun {
   private last: Landed
 
   private readonly index: SpatialIndex | undefined
+  private readonly wires: ReadonlySet<string>
 
-  constructor(doc: Schematic, wiring: Wiring | undefined, ids: ReadonlySet<string>, index?: SpatialIndex) {
+  constructor(doc: Schematic, wiring: Wiring | undefined, ids: ReadonlySet<string>, index?: SpatialIndex, wires: ReadonlySet<string> = new Set()) {
     this.start = doc
     this.live = wiring
     this.ids = ids
     this.index = index
+    this.wires = wires
     this.last = { doc, unlaid: [], at: ZERO }
   }
 
@@ -341,11 +382,13 @@ export class TurnRun {
       this.last = { doc: this.start, unlaid: [], at: ZERO }
       return this.last
     }
-    const pivot = turnPivot(this.start, this.ids, GRID)
+    const boxes = wireBoxes(this.start, this.wires)
+    const pivot = turnPivot(this.start, this.ids, GRID, boxes)
     if (!pivot) return this.last
-    const target = turnedSelection(this.start, this.ids, steps, GRID)
-    const degrees = steps * selectionStep(this.start, this.ids)
-    const landed = reshaped(this.start, this.wiring(), this.ids, target, (at) => turnedAbout(at, pivot, degrees), newId, this.index)
+    const step = selectionStep(this.start, this.ids, this.wires.size > 0)
+    const target = turnedSelection(this.start, this.ids, steps, GRID, { pivot, step })
+    const degrees = steps * step
+    const landed = reshaped(this.start, this.wiring(), this.ids, target, (at) => turnedAbout(at, pivot, degrees), newId, this.index, { degrees, wires: this.wires })
     if (landed.refused) return { ...this.last, refused: landed.refused }
     this.steps = steps
     this.last = landed
@@ -353,10 +396,16 @@ export class TurnRun {
   }
 }
 
-export function flippedWithWires(doc: Schematic, wiring: Wiring | undefined, ids: ReadonlySet<string>, axis: FlipAxis, newId: NewId = randomId, index?: SpatialIndex): Landed {
-  const line = flipLine(doc, ids, axis, GRID)
+export function flippedWithWires(doc: Schematic, wiring: Wiring | undefined, ids: ReadonlySet<string>, axis: FlipAxis, newId: NewId = randomId, index?: SpatialIndex, wires: ReadonlySet<string> = new Set()): Landed {
+  const boxes = wireBoxes(doc, wires)
+  const line = flipLine(doc, ids, axis, GRID, boxes)
   if (line === null) return { doc, unlaid: [], at: ZERO }
-  const target = flipSelection(doc, ids, axis, GRID)
+  const target = flipSelection(doc, ids, axis, GRID, boxes.length ? line : undefined)
   const mirrored = (at: Point): Point => (axis === "horizontal" ? { x: line - at.x, y: at.y } : { x: at.x, y: line - at.y })
-  return reshaped(doc, currentWiring(doc, wiring), ids, target, mirrored, newId, index)
+  return reshaped(doc, currentWiring(doc, wiring), ids, target, mirrored, newId, index, { wires })
+}
+
+function wireBoxes(doc: Schematic, wires: ReadonlySet<string>): Rect[] {
+  if (!wires.size) return []
+  return doc.wires.filter((s) => wires.has(s.id)).map((s) => ({ x: Math.min(s.a.x, s.b.x), y: Math.min(s.a.y, s.b.y), w: Math.abs(s.a.x - s.b.x), h: Math.abs(s.a.y - s.b.y) }))
 }

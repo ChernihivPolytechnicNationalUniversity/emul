@@ -536,12 +536,20 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     setUnlaid({ at: landed.unlaid.map((u) => u.at), edits: sch.edits + 1 })
   })
 
-  const turn = useEvent((direction: Turn) => {
-    const landed = sch.rotate(sch.selectedObjects, direction, index)
+  const turn = useEvent((direction: Turn, alone = false) => {
+    if (alone) {
+      sch.rotateAlone(sch.selectedObjects, direction)
+      return
+    }
+    const landed = sch.rotate(sch.selectedObjects, direction, index, sch.selectedWires)
     if (landed) reportLanding(landed, "turn")
   })
-  const mirror = useEvent((axis: FlipAxis) => {
-    const landed = sch.flip(sch.selectedObjects, axis, index)
+  const mirror = useEvent((axis: FlipAxis, alone = false) => {
+    if (alone) {
+      sch.flipAlone(sch.selectedObjects, axis)
+      return
+    }
+    const landed = sch.flip(sch.selectedObjects, axis, index, sch.selectedWires)
     if (landed) reportLanding(landed, "turn")
   })
   const { load } = sch
@@ -873,6 +881,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   // --- wiring: drag from pin to pin, or click bend by bend ------------------
   const [pending, setPending] = React.useState<Pending | null>(null)
+  const [armed, setArmed] = React.useState<Point | null>(null)
   const preview = React.useMemo(() => (pending ? previewOf(sch.doc, wiring, pending.d, pending.target ?? undefined, (area) => index.query(area)) : null), [pending, sch.doc, wiring, index])
   React.useEffect(() => {
     onWirePreview?.(preview ? [...preview.points] : null)
@@ -940,6 +949,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   }
 
   const refuse = (refusal: DrawRefusal) => {
+    if (refusal.refused === "nothing") return
     const text = DRAW_REFUSED[refusal.refused]
     toast.error(text.title, { description: text.why })
   }
@@ -977,7 +987,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const releaseDrawing = (clientX: number, clientY: number) => {
     if (pending?.mode !== "drag") return
     const under = endUnder(clientX, clientY)
-    const own = under.kind === "pin" && pending.d.from.kind === "pin" && under.key === pending.d.from.key
+    const own = samePoint(under.at, pending.d.from.at) || (under.kind === "pin" && pending.d.from.kind === "pin" && under.key === pending.d.from.key)
     if (under.kind !== "field" && !own && finish(under)) return
     if (!pending.moved || own || samePoint(under.at, pending.d.from.at)) {
       setPending({ ...pending, mode: "click", target: null })
@@ -1144,6 +1154,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       follow(e.clientX, e.clientY)
       return
     }
+    if (armed) {
+      setArmed(endUnder(e.clientX, e.clientY).at)
+      return
+    }
     updateHover(e)
     marquee.move(e)
   }
@@ -1200,7 +1214,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       setPending({ ...pending, d: withoutCorner(pending.d) })
     } else if (pending && e.key === "Enter") {
       e.preventDefault()
-      finish(pending.target ?? { kind: "field", at: snapPoint(pending.d.cursor) })
+      const last = pending.d.corners.at(-1)
+      finish(last ? { kind: "field", at: last } : (pending.target ?? { kind: "field", at: snapPoint(pending.d.cursor) }))
     } else if (pending && !mod && (e.key === "/" || e.code === "Slash")) {
       e.preventDefault()
       setPending({ ...pending, d: flipPosture(pending.d) })
@@ -1210,6 +1225,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       if (measure.active) measure.stop()
       sch.deselectAll()
       setPending(null)
+      setArmed(null)
       setHoveredWire(null)
     } else if (!mod && !e.altKey && WIRE_COLOR_BY_CODE.has(e.code) && (pending || sch.selectedWires.size > 0)) {
       const color = WIRE_COLOR_BY_CODE.get(e.code)
@@ -1219,7 +1235,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       else paintSelected(color, e.shiftKey)
     } else if (!mod && !e.altKey && !pending && (key === "w" || e.code === "KeyW") && pointer) {
       e.preventDefault()
-      startAt(endUnder(pointer.x, pointer.y), "click")
+      setArmed(endUnder(pointer.x, pointer.y).at)
     } else if (!mod && !e.altKey && !pending && (key === "j" || e.code === "KeyJ") && pointer) {
       e.preventDefault()
       const refusal = sch.junction(snapPoint(toWorld(pointer.x, pointer.y)))
@@ -1246,10 +1262,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       setScopeOpen((o) => !o)
     } else if (!mod && !e.altKey && key === "l") {
       setLogicOpen((o) => !o)
-    } else if (!mod && !e.altKey && key === "r") {
-      if (sch.selectedObjects.size) turn(e.shiftKey ? -1 : 1)
-    } else if (!mod && !e.altKey && (key === "x" || key === "y")) {
-      if (sch.selectedObjects.size) mirror(key === "x" ? "horizontal" : "vertical")
+    } else if (!mod && e.code === "KeyR") {
+      e.preventDefault()
+      if (sch.selectedObjects.size || (!e.altKey && sch.selectedWires.size)) turn(e.shiftKey ? -1 : 1, e.altKey)
+    } else if (!mod && (e.code === "KeyX" || e.code === "KeyY")) {
+      e.preventDefault()
+      if (sch.selectedObjects.size || (!e.altKey && sch.selectedWires.size)) mirror(e.code === "KeyX" ? "horizontal" : "vertical", e.altKey)
     }
   })
   // Cut/copy/paste ride the native events so the system clipboard sees them too.
@@ -1361,6 +1379,19 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onPointerDownCapture={(e) => {
               // A long press opens the field menu without a contextmenu event on iOS: add there.
               if (e.pointerType === "touch") menuPoint.current = toWorld(e.clientX, e.clientY)
+              wirePress.current = null
+              if (e.button !== 0) return
+              if (drag.active) {
+                e.stopPropagation()
+                endMove()
+              } else if (pending?.mode === "drag") {
+                e.stopPropagation()
+                releaseDrawing(e.clientX, e.clientY)
+              } else if (armed) {
+                e.stopPropagation()
+                setArmed(null)
+                startAt(endUnder(e.clientX, e.clientY), "click")
+              }
             }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -1452,6 +1483,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 onPinPointerUp={onPinPointerUp}
               />
               <PendingWireLayer pending={pendingLook} grid={grid} scale={scale} part="marks" />
+              {armed && <PendingWireLayer pending={{ points: [armed], corners: [], color: DEFAULT_SIGNAL_COLOR, refused: false, landing: false }} grid={grid} scale={scale} part="marks" />}
               {ghosts && ghosts.length > 0 && (
                 <GhostLayer ghosts={ghosts} objects={docObjects} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} />
               )}

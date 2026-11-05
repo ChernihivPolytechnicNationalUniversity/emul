@@ -19,7 +19,8 @@ import {
 } from "./types"
 import { isHdlDef } from "./hdl"
 import type { WireColorKey } from "./wire-colors"
-import { clipOf, connectPins, moved, inNormalForm, placedObject, recoloured, removed, tapWireAt, wiringOf, withModule, withSegments } from "./wire-edits"
+import { clipOf, connectPins, moved, inNormalForm, placedObject, recoloured, removed, reoriented, tapWireAt, wiringOf, withModule, withSegments } from "./wire-edits"
+import { flipSelection, rotateSelection } from "./orient"
 import { flippedWithWires, TurnRun, type Landed } from "./rubber-band"
 import { drawnTo, isRefusal, type DrawEnd, type Drawing, type DrawRefusal, type Near } from "./wire-draw"
 import type { PinGroup } from "./net-names"
@@ -396,11 +397,11 @@ export function useSchematic(grid: number) {
   }, [setDoc])
 
   const rotate = React.useCallback(
-    (ids: ReadonlySet<string>, turn: Turn, index?: SpatialIndex): Landed | null => {
-      if (!ids.size) return null
-      const key = [...ids].sort().join("\u0000")
+    (ids: ReadonlySet<string>, turn: Turn, index?: SpatialIndex, wires: ReadonlySet<string> = new Set()): Landed | null => {
+      if (!ids.size && !wires.size) return null
+      const key = [...[...ids].sort(), "|", ...[...wires].sort()].join("\u0000")
       const known = turning.current
-      const run = known && known.ids === key && known.doc === doc ? known.run : new TurnRun(doc, wiring, ids, index)
+      const run = known && known.ids === key && known.doc === doc ? known.run : new TurnRun(doc, wiring, ids, index, wires)
       const landed = run.turned(turn)
       if (landed.refused) return landed
       turning.current = { ids: key, run, doc: landed.doc }
@@ -411,13 +412,29 @@ export function useSchematic(grid: number) {
   )
 
   const flip = React.useCallback(
-    (ids: ReadonlySet<string>, axis: FlipAxis, index?: SpatialIndex): Landed | null => {
-      if (!ids.size) return null
-      const landed = flippedWithWires(doc, wiring, ids, axis, undefined, index)
+    (ids: ReadonlySet<string>, axis: FlipAxis, index?: SpatialIndex, wires: ReadonlySet<string> = new Set()): Landed | null => {
+      if (!ids.size && !wires.size) return null
+      const landed = flippedWithWires(doc, wiring, ids, axis, undefined, index, wires)
       if (!landed.refused) commitFrom(doc, landed.doc)
       return landed
     },
     [doc, wiring, commitFrom],
+  )
+
+  const rotateAlone = React.useCallback(
+    (ids: ReadonlySet<string>, turn: Turn) => {
+      if (!ids.size) return
+      commitFrom(doc, reoriented(doc, rotateSelection(doc, ids, turn, grid), ids))
+    },
+    [doc, grid, commitFrom],
+  )
+
+  const flipAlone = React.useCallback(
+    (ids: ReadonlySet<string>, axis: FlipAxis) => {
+      if (!ids.size) return
+      commitFrom(doc, reoriented(doc, flipSelection(doc, ids, axis, grid), ids))
+    },
+    [doc, grid, commitFrom],
   )
 
   const draw = React.useCallback(
@@ -521,6 +538,8 @@ export function useSchematic(grid: number) {
     moveTo,
     rotate,
     flip,
+    rotateAlone,
+    flipAlone,
     draw,
     junction,
     land,
