@@ -2,6 +2,7 @@ import * as React from "react"
 import { FlameIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { bodyCentre, drawnBody, orientationOf, placedText, type Orientation } from "@/schematic/geometry"
+import { drawsAsField, fieldTemplates, placedFields, type FieldKey } from "@/schematic/fields"
 import { getDef, partInitial } from "@/schematic/registry"
 import { partKey, type BodyShape, type ComponentDef, type Damage, type Fill, type PartDef, type PartState, type PlacedObject } from "@/schematic/types"
 import { LED_COLORS } from "@/schematic/led-colors"
@@ -55,6 +56,8 @@ export type PinPointerHandler = (e: React.PointerEvent<SVGElement>, objectId: st
 
 export type BodyPointerHandler = (e: React.PointerEvent<SVGSVGElement>, objectId: string) => void
 
+export type FieldPointerHandler = (e: React.PointerEvent<SVGTextElement>, objectId: string, key: FieldKey) => void
+
 type ComponentViewProps = {
   object: PlacedObject
   grid: number
@@ -68,6 +71,7 @@ type ComponentViewProps = {
   onBodyPointerUp: BodyPointerHandler
   onBodyContextMenu: (objectId: string) => void
   onPartChange: (objectId: string, partId: string, patch: PartState) => void
+  onFieldPointerDown?: FieldPointerHandler
 }
 
 /** Generic renderer: draws any ComponentDef from its body shapes, pins and parts. */
@@ -84,6 +88,7 @@ export const ComponentView = React.memo(function ComponentView({
   onBodyPointerUp,
   onBodyContextMenu,
   onPartChange,
+  onFieldPointerDown,
 }: ComponentViewProps) {
   const live = useObjectSim(sim, object.id)
   const def = getDef(object.def)
@@ -104,8 +109,10 @@ export const ComponentView = React.memo(function ComponentView({
   const top = object.y + centre.y * grid - h / 2
 
   return (
+    <>
     <svg
       data-slot="component"
+      data-def={def.id}
       data-selected={selected || undefined}
       data-damaged={damage ? "" : undefined}
       className="absolute cursor-move overflow-visible select-none"
@@ -121,7 +128,7 @@ export const ComponentView = React.memo(function ComponentView({
       {damage && <title>{`${props.ref ?? def.name} burnt: ${damage.reason}`}</title>}
       <g className={cn("body", damage && "opacity-50 saturate-0")}>
         <HollowBackdrop def={def} grid={grid} />
-        {drawnBody(def, orientation).map((s, i) => (
+        {drawnBody(def, orientation).filter((s) => !drawsAsField(s)).map((s, i) => (
           <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} boost={detail.textBoost} growth={growth.get(s)} sheeted={sheeted} props={props} orientation={orientation} />
         ))}
       </g>
@@ -173,8 +180,38 @@ export const ComponentView = React.memo(function ComponentView({
         </g>
       )}
     </svg>
+    {detail.labels && <Fields object={object} def={def} grid={grid} boost={detail.textBoost} onPointerDown={onFieldPointerDown} />}
+    </>
   )
 })
+
+function Fields({ object, def, grid, boost, onPointerDown }: { object: PlacedObject; def: ComponentDef; grid: number; boost: number; onPointerDown?: FieldPointerHandler }) {
+  const fields = placedFields(object, grid, def)
+  if (!fields.length) return null
+  const templates = fieldTemplates(def)
+  return (
+    <svg data-slot="fields" className="pointer-events-none absolute top-0 left-0 overflow-visible select-none" width={1} height={1}>
+      {fields.map((f) => {
+        const template = templates.find((t) => t.key === f.key)!
+        return (
+          <text
+            key={f.key}
+            data-field={`${object.id}:${f.key}`}
+            x={f.at.x}
+            y={f.at.y}
+            fontSize={template.size * grid * boost}
+            textAnchor={f.anchor}
+            dominantBaseline="middle"
+            className={cn("pointer-events-auto cursor-move stroke-none font-sans", template.muted ? "fill-muted-foreground" : "fill-foreground")}
+            onPointerDown={onPointerDown && ((e) => onPointerDown(e, object.id, f.key))}
+          >
+            {f.text}
+          </text>
+        )
+      })}
+    </svg>
+  )
+}
 
 /**
  * A meter's live readout: the operating point of one of its model elements (voltage across,

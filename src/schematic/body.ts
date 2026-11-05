@@ -1,4 +1,4 @@
-import type { BodyShape, ComponentDef, PinDef, Point } from "./types"
+import type { BodyShape, ComponentDef, PartDef, PinDef, Point } from "./types"
 
 type Rect = { x: number; y: number; w: number; h: number }
 
@@ -158,6 +158,22 @@ function shapeExtent(shape: BodyShape, pins: readonly PinDef[]): { leads: Lead[]
   return { leads, points: pathPoints(shape.d).filter((p) => !leads.some((lead) => onLeadPastItsBody(p, lead))) }
 }
 
+const PART_REACH = 0.5
+const SWITCH_THROW = 0.4
+const THINNEST_BODY = 0.4
+
+function partExtent(part: PartDef): Point[] {
+  if ("w" in part && "h" in part && typeof part.w === "number" && typeof part.h === "number") return [{ x: part.x, y: part.y }, { x: part.x + part.w, y: part.y + part.h }]
+  if ("span" in part && typeof part.span === "number") return [{ x: part.x, y: part.y - SWITCH_THROW }, { x: part.x + part.span, y: part.y + SWITCH_THROW }]
+  return [{ x: part.x - PART_REACH, y: part.y - PART_REACH }, { x: part.x + PART_REACH, y: part.y + PART_REACH }]
+}
+
+function atLeastThick(r: Rect): Rect {
+  const w = Math.max(r.w, THINNEST_BODY)
+  const h = Math.max(r.h, THINNEST_BODY)
+  return { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w, h }
+}
+
 export type BodyAndLeads = { box: Rect; leads: readonly Lead[] }
 
 const bodies = new WeakMap<ComponentDef, BodyAndLeads>()
@@ -173,9 +189,10 @@ export function bodyAndLeads(def: ComponentDef): BodyAndLeads {
     points.push(...extent.points)
   }
   for (const pin of def.pins) if (!leads.some(([at]) => samePoint(at, pin))) points.push({ x: pin.x, y: pin.y })
+  for (const part of def.parts) points.push(...partExtent(part))
   const xs = points.map((p) => p.x)
   const ys = points.map((p) => p.y)
-  const box = points.length ? { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) } : bodyBounds(def)
+  const box = points.length ? atLeastThick({ x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }) : bodyBounds(def)
   const found = { box, leads }
   bodies.set(def, found)
   return found

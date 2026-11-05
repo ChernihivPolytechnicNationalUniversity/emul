@@ -28,6 +28,7 @@ import type { PinGroup } from "./net-names"
 import { WireGraph as Graph } from "./wires/graph"
 import { junctionAt, type JunctionRefusal } from "./junction-tool"
 import { inRect } from "./wire-select"
+import { withFieldMoved, type FieldKey } from "./fields"
 import type { SpatialIndex } from "./spatial"
 import { WireGraph } from "./wires/graph"
 import type { WireSegment } from "./wires/segment"
@@ -372,6 +373,10 @@ export function useSchematic(grid: number) {
     }))
   }, [setDoc])
 
+  const moveField = React.useCallback((id: string, key: FieldKey, dx: number, dy: number) => {
+    setDoc((d) => ({ ...d, objects: d.objects.map((o) => (o.id === id ? withFieldMoved(o, key, dx, dy, grid) : o)) }))
+  }, [setDoc, grid])
+
   /**
    * Swap a part for another variant of its family. The variants share their pins, so the wires
    * stay; props the new variant has no use for, or a choice it does not offer, are dropped.
@@ -566,6 +571,7 @@ export function useSchematic(grid: number) {
     land,
     commitFrom,
     setProps,
+    moveField,
     setVariant,
     setProject,
     setBuild,

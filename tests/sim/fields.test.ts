@@ -19,6 +19,25 @@ const FIELD_TEXT = /\{(ref|value)\}/
 
 const strictlyOverlap = (a: Rect, b: Rect) => a.x < b.x + b.w - 1e-6 && b.x < a.x + a.w - 1e-6 && a.y < b.y + b.h - 1e-6 && b.y < a.y + a.h - 1e-6
 
+function overlapsQuad(r: Rect, corners: readonly Point[]) {
+  const box = [
+    { x: r.x, y: r.y },
+    { x: r.x + r.w, y: r.y },
+    { x: r.x + r.w, y: r.y + r.h },
+    { x: r.x, y: r.y + r.h },
+  ]
+  const axes = [{ x: 1, y: 0 }, { x: 0, y: 1 }, ...corners.map((p, i) => {
+    const q = corners[(i + 1) % corners.length]
+    return { x: -(q.y - p.y), y: q.x - p.x }
+  })]
+  return axes.every((axis) => {
+    const along = (list: readonly Point[]) => list.map((p) => p.x * axis.x + p.y * axis.y)
+    const a = along(box)
+    const b = along(corners)
+    return Math.max(...a) > Math.min(...b) + 1e-6 && Math.max(...b) > Math.min(...a) + 1e-6
+  })
+}
+
 const holdsPoint = (r: Rect, p: { x: number; y: number }) => p.x > r.x + 1e-6 && p.x < r.x + r.w - 1e-6 && p.y > r.y + 1e-6 && p.y < r.y + r.h - 1e-6
 
 function crossesSegment(r: Rect, [p, q]: readonly [{ x: number; y: number }, { x: number; y: number }]) {
@@ -174,7 +193,7 @@ describe("fields are autoplaced as KiCad's autoplacer does on place and turn (de
           for (const field of fields) {
             if (!(field.box.w > 0 && field.box.h > 0 && Number.isFinite(field.box.x) && Number.isFinite(field.box.y))) offenders.push(`${where}: ${field.key} has no box`)
             if (field.angle !== 0) offenders.push(`${where}: ${field.key} not horizontal`)
-            if (f && f.contour.some((q) => strictlyOverlap(field.box, q.box))) offenders.push(`${where}: ${field.key} over the body`)
+            if (f && f.contour.some((q) => overlapsQuad(field.box, q.corners))) offenders.push(`${where}: ${field.key} over the body`)
             if (objectPins(o, GRID).some((p) => holdsPoint(field.box, p.point))) offenders.push(`${where}: ${field.key} over a pin`)
             if (f && f.leads.some((lead) => crossesSegment(field.box, lead))) offenders.push(`${where}: ${field.key} over a lead`)
           }
@@ -186,7 +205,8 @@ describe("fields are autoplaced as KiCad's autoplacer does on place and turn (de
   })
 
   it("autoplacing is a function of the part alone: the same part placed anywhere gets the same two fields relative to it", () => {
-    const at = (x: number, y: number) => placedFields(named("R1", "resistor", x, y), GRID).map((f) => ({ ...f, box: { ...f.box, x: f.box.x - c(x), y: f.box.y - c(y) }, at: { x: f.at.x - c(x), y: f.at.y - c(y) } }))
+    const fine = (v: number) => Math.round((v / GRID) * 1e6) / 1e6
+    const at = (x: number, y: number) => placedFields(named("R1", "resistor", x, y), GRID).map((f) => ({ ...f, box: { x: fine(f.box.x - c(x)), y: fine(f.box.y - c(y)), w: fine(f.box.w), h: fine(f.box.h) }, at: { x: fine(f.at.x - c(x)), y: fine(f.at.y - c(y)) } }))
     expect.soft(at(0, 0).map((f) => f.key), "both fields").toEqual(["ref", "value"])
     expect.soft(at(37, -12), "the same relative to the part").toEqual(at(0, 0))
   })
@@ -289,7 +309,7 @@ describe("fields never block (design.md §5.1, §5.2)", () => {
   })
 
   it("a field moved by hand over another part blocks nothing either", () => {
-    const a = withFieldMoved(named("R1", "resistor", 0, 0), "ref", c(10), c(1), GRID)
+    const a = withFieldMoved(named("R1", "resistor", 0, 0), "ref", c(9), c(1.5), GRID)
     const b = part("R2", "resistor", 9, 0)
     const s = { objects: [a, b], routes: routesOf([a, b], []), grid: GRID }
     expect.soft(strictlyOverlap(byKey(placedFields(a, GRID)).ref.box, footprints(b, GRID)!.body.box), "set up: R1's designator over R2's body").toBe(true)

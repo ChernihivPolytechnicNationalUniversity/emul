@@ -12,6 +12,7 @@ import { MODULE_PAD } from "@/schematic/components/open746i-c-art"
 import { examples } from "@/schematic/examples"
 import { blocksOf } from "@/schematic/printed-text"
 import { bodyBounds } from "@/schematic/body"
+import { placedFields } from "@/schematic/fields"
 import { allowedRotations, bodyCentre, diagonalSquare, DIR, drawnBody, framePoint, GRID, isDiagonal, objectPins, objectRect, objectSize, orientPin, ownBodies, stretchedLeads, type Orientation, type Point, type Turn } from "@/schematic/geometry"
 import { legacyNets as buildNets } from "@/schematic/nets"
 import { rotateSelection } from "@/schematic/orient"
@@ -448,14 +449,12 @@ describe("the canvas plate and the PNG export frame a diagonal part where the fi
     const ref = written.find((w) => w.text === "PV1")
     expect.soft(ref, "the designator").toBeDefined()
     if (!ref) return
-    const def = getDef("voltmeter")!
-    const anchor = def.body.find((b) => b.type === "text" && b.text === "{ref}")!
-    const expected = framePoint(def, o, { x: (anchor as { x: number }).x, y: (anchor as { y: number }).y })
+    const field = placedFields(meter, GRID).find((f) => f.key === "ref")!
     const box = objectRect(meter, GRID)
     const pixels = Math.min(2, 8192 / (box.w + 4 * GRID), 8192 / (box.h + 4 * GRID), 4000 / Math.max(box.w, box.h))
     const world = { x: ref.at.x / pixels + box.x - 2 * GRID, y: ref.at.y / pixels + box.y - 2 * GRID }
-    expect.soft(world.x, "x, px").toBeNear(meter.x + expected.x * GRID, 1e-6)
-    expect.soft(world.y, "y, px").toBeNear(meter.y + expected.y * GRID, 1e-6)
+    expect.soft(world.x, "x, px: where the field draws it (phase 5: designators are fields)").toBeNear(field.at.x, 1e-6)
+    expect.soft(world.y, "y, px").toBeNear(field.at.y, 1e-6)
   })
 })
 

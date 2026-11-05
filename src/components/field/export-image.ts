@@ -1,3 +1,4 @@
+import { drawsAsField, fieldTemplates, placedFields } from "@/schematic/fields"
 import { pinContacts } from "@/schematic/contacts"
 import { bodyCentre, objectRect, orientationOf, orientOffset, placedText, routeBox, type Rect, type RoutedWire } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
@@ -47,8 +48,18 @@ function paintLabels(context: CanvasRenderingContext2D, host: Element, objects: 
     const centre = bodyCentre(def, orientation)
     const cx = object.x + centre.x * grid
     const cy = object.y + centre.y * grid
+    for (const field of placedFields(object, grid, def)) {
+      const template = fieldTemplates(def).find((t) => t.key === field.key)!
+      context.save()
+      context.translate((field.at.x - view.x) * pixels, (field.at.y - view.y) * pixels)
+      context.font = `${template.size * textScale * grid * pixels}px ${family}`
+      context.textAlign = ALIGN[field.anchor]
+      context.fillStyle = template.muted ? colors.muted : colors.foreground
+      context.fillText(field.text, 0, 0)
+      context.restore()
+    }
     for (const shape of def.body) {
-      if (shape.type !== "text" || fixedText(shape.text)) continue
+      if (shape.type !== "text" || fixedText(shape.text) || drawsAsField(shape)) continue
       const text = shape.text.replace(/\{(\w+)\}/g, (_, k: string) => props[k] ?? "")
       if (!text) continue
       const placed = placedText(shape.anchor ?? "middle", shape.rotate ?? 0, orientation)

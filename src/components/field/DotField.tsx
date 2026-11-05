@@ -15,6 +15,7 @@ import { paletteDrag } from "@/components/palette/palette-actions"
 import { QuickInsert } from "@/components/palette/QuickInsert"
 import { opensQuickInsert, type KeyTarget, type Rect as ScreenRect } from "@/components/palette/quick-insert"
 import { GRID as FIELD_GRID, objectPins, objectRect, resolvePin, routeBox, snap, touches, unionOf, type FlipAxis, type Point, type Turn } from "@/schematic/geometry"
+import type { FieldKey } from "@/schematic/fields"
 import { SpatialIndex } from "@/schematic/spatial"
 import { fieldDetail } from "./detail"
 import { savedTextScale, saveTextScale } from "./text-scale"
@@ -929,6 +930,38 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
   const onBodyContextMenu = useEvent((id: string) => sch.selectObject(id))
 
+  const onFieldPointerDown = useEvent((e: React.PointerEvent<SVGTextElement>, id: string, key: FieldKey) => {
+    if (!primaryClick(e) || spaceHeld) return
+    e.stopPropagation()
+    const text = e.currentTarget
+    const start = toWorld(e.clientX, e.clientY)
+    const step = grid / 2
+    let offset = { x: 0, y: 0 }
+    text.setPointerCapture(e.pointerId)
+    const moveTo = (ev: PointerEvent) => {
+      const at = toWorld(ev.clientX, ev.clientY)
+      offset = { x: snap(at.x - start.x, step), y: snap(at.y - start.y, step) }
+      text.setAttribute("transform", `translate(${offset.x} ${offset.y})`)
+    }
+    const finish = (commit: boolean) => {
+      text.removeEventListener("pointermove", moveTo)
+      text.removeEventListener("pointerup", release)
+      text.removeEventListener("pointercancel", cancel)
+      text.removeAttribute("transform")
+      if (!commit) return
+      if (offset.x || offset.y) sch.moveField(id, key, offset.x, offset.y)
+      else sch.selectObject(id)
+    }
+    const release = (ev: PointerEvent) => {
+      moveTo(ev)
+      finish(true)
+    }
+    const cancel = () => finish(false)
+    text.addEventListener("pointermove", moveTo)
+    text.addEventListener("pointerup", release)
+    text.addEventListener("pointercancel", cancel)
+  })
+
   // --- measuring: readout under the cursor, probe tips on click ---------------
   const [hover, setHover] = React.useState<{
     target: HoverTarget
@@ -1663,10 +1696,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onBodyPointerUp={onBodyPointerUp}
             onBodyContextMenu={onBodyContextMenu}
             onPartChange={setPart}
+            onFieldPointerDown={onFieldPointerDown}
           />
         </div>
       )),
-    [visibleObjects, grid, detail, labelsOnCanvas, sheeted, selectedObjects, schDoc.parts, simStore, onBodyPointerDown, onBodyPointerMove, onBodyPointerUp, onBodyContextMenu, setPart, lit],
+    [visibleObjects, grid, detail, labelsOnCanvas, sheeted, selectedObjects, schDoc.parts, simStore, onBodyPointerDown, onBodyPointerMove, onBodyPointerUp, onBodyContextMenu, setPart, onFieldPointerDown, lit],
   )
   const across = (a: ProbePoint, b: ProbePoint | null) => `${a.label} → ${b ? b.label : "ground"}`
   const scopeChannels = [

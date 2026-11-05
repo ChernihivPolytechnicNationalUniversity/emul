@@ -4,6 +4,7 @@ import { BoxIndex, BUCKET_CELLS } from "./spatial"
 import { PointGrid } from "./contacts"
 import { bodyAndLeads, bodyBounds, type Lead } from "./body"
 import { blocksOf } from "./printed-text"
+import { drawsAsField, placedFields } from "./fields"
 import type { ComponentDef, PlacedObject } from "./types"
 
 export { bodyBounds }
@@ -38,7 +39,7 @@ function textRectsOf(object: PlacedObject, def: ComponentDef, grid: number): Rec
   const inset = TEXT_INSET_CELLS * grid
   const rects: Rect[] = []
   for (const shape of def.body) {
-    if (shape.type !== "text") continue
+    if (shape.type !== "text" || drawsAsField(shape)) continue
     const text = shape.text.replace(/\{(\w+)\}/g, (_, key: string) => props[key] ?? "")
     if (!text.trim()) continue
     const size = (shape.size ?? 0.4) * grid
@@ -68,7 +69,7 @@ export function designatorRects(object: PlacedObject, grid: number): readonly Re
   const cached = labelCache.get(object)
   if (cached && cached.grid === grid) return cached.rects
   const def = getDef(object.def)
-  const rects = def && !isJunction(object) ? outsideBody(object, textRectsOf(object, def, grid), grid) : []
+  const rects = def && !isJunction(object) ? [...placedFields(object, grid, def).map((f) => f.box), ...outsideBody(object, textRectsOf(object, def, grid), grid)] : []
   labelCache.set(object, { grid, rects })
   return rects
 }

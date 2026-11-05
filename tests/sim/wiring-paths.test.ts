@@ -178,7 +178,8 @@ describe("phase 5's edits keep the store's wiring and sheet equal to fresh ones 
     const kept = wiringOf(graph, after)
     expect.soft(after.objects.find((o) => o.id === "R3")!.fieldAt, "set up: the field moved").toBeDefined()
     expect.soft(shape(kept), "the wiring, kept").toEqual(shape(wiringOf(new WireGraph(), after)))
-    expect.soft(shape(kept), "and unchanged by the move").toEqual(shape(known))
+    const electrical = (w: Wiring) => ({ ...shape(w), circuit: { nets: w.circuit.nets, wired: w.circuit.wired, flow: w.circuit.flow } })
+    expect.soft(electrical(kept), "and the wiring, the nets and the flow unchanged by the move (the circuit carries the parts themselves, the moved field with them)").toEqual(electrical(known))
   })
 })
 
