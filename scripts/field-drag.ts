@@ -350,8 +350,9 @@ async function phaseFiveChecks(page: Page) {
   await page.keyboard.down("Alt")
   await dragBy(page, f.toScreen(cellPoint(18, 17)), f.toScreen(cellPoint(18, 11)))
   await page.keyboard.up("Alt")
-  const whole = (await runs()).filter((r) => r[1] === 11 * GRID && r[r.length - 1] === 11 * GRID)
-  expect("with Alt held R3 lands on the wire and the wire runs on from R1 to R2 under it (design.md §5.3: Alt suppresses)", [await f.worldOf("R3"), whole.length > 0 && Math.min(...whole.map((r) => r[0])) === 14 * GRID && Math.max(...whole.map((r) => r[r.length - 2])) === 26 * GRID && !(await runs()).some((r) => r[0] === 20 * GRID)], [{ x: 16 * GRID, y: 10 * GRID }, true])
+  const onTheRow = (await runs()).filter((r) => r.every((v, k) => k % 2 === 0 || v === 11 * GRID)).map((r) => [Math.min(...r.filter((_, k) => k % 2 === 0)), Math.max(...r.filter((_, k) => k % 2 === 0))]).sort((a, b) => a[0] - b[0])
+  const covers = onTheRow.reduce((reach, [lo, hi]) => (lo <= reach ? Math.max(reach, hi) : reach), 14 * GRID) >= 26 * GRID && onTheRow[0]?.[0] === 14 * GRID
+  expect("with Alt held R3 lands on the wire and the wire runs on from R1 to R2 under it, nothing cut (design.md §5.3: Alt suppresses)", [await f.worldOf("R3"), covers], [{ x: 16 * GRID, y: 10 * GRID }, true])
 
   await openDoc(page, "fields", { objects: [{ ...resistorAt("R1", 10, 10), props: { ref: "R1", value: "1 kΩ" } }], wires: [], parts: {} })
   f = await fieldFrame(page)

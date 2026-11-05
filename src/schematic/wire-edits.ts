@@ -11,6 +11,7 @@ import { clearOf, Conductors } from "./wires/conductors"
 import { WireGraph, type WireNets } from "./wires/graph"
 import { WireSheet } from "./wires/sheet"
 import { commitEdit, normalise, normaliseEdit } from "./wires/normal-form"
+import { splicedAt } from "./splice"
 import { contains, pointKey, samePoint, seededIds, type WirePin, type WireSegment } from "./wires/segment"
 
 const pinCache = new WeakMap<PlacedObject, { def: ComponentDef | undefined; pins: readonly WirePin[] }>()
@@ -153,7 +154,7 @@ export function removed(doc: Schematic, objectIds: ReadonlySet<string>, segmentI
 }
 
 export function placedObject(doc: Schematic, object: PlacedObject, newId: NewId = randomId): Schematic {
-  return withSegments({ ...doc, objects: [...doc.objects, object] }, [], [], pinPoints([object]), newId)
+  return splicedAt(withSegments({ ...doc, objects: [...doc.objects, object] }, [], [], pinPoints([object]), newId), [object.id], newId)
 }
 
 export function withModule(doc: Schematic, module: HdlModule, newId: NewId = randomId): Schematic {

@@ -123,7 +123,7 @@ export const WireLayer = React.memo(function WireLayer({
             const colorKey = colorOf(route.id)
             const color = wireColorVar(colorKey)
             return (
-              <g key={route.id} data-wire={route.id} className="group/wire">
+              <g key={route.id} data-wire={route.id} data-points={route.pts.map((p) => `${p.x},${p.y}`).join(" ")} className="group/wire">
                 <path
                   ref={flow.bodyRef(route.id)}
                   data-base={width}

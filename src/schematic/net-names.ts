@@ -79,10 +79,24 @@ function listed(names: readonly Named[]): string {
   return ordered.length < 2 ? (ordered[0] ?? "") : `${ordered.slice(0, -1).join(", ")} and ${ordered.at(-1)}`
 }
 
+function putInSeries(objects: readonly PlacedObject[], split: NetSplit): string | null {
+  if (split.into.length !== 2) return null
+  const before = new Set(split.from)
+  const ownersIn = (group: PinGroup) => new Set(group.filter((key) => !before.has(key)).map((key) => refOf(key).object))
+  const [left, right] = split.into.map(ownersIn)
+  const bridging = [...left].filter((id) => right.has(id))
+  if (bridging.length !== 1) return null
+  const [part] = bridging
+  const object = objects.find((o) => o.id === part)
+  const sides = split.into.map((g) => g.filter((key) => refOf(key).object !== part))
+  if (!object || sides.some((side) => !side.length)) return null
+  return `${object.props?.ref || part} put in series between ${listed(sides.map((side) => named(objects, side)))}`
+}
+
 export function changeMessage(objects: readonly PlacedObject[], change: NetChange): string | null {
   const lines = [
     ...change.joined.map((j) => `${listed(j.from.map((g) => named(objects, g)))} joined`),
-    ...change.split.map((s) => `${listed(s.into.map((g) => named(objects, g)))} split apart`),
+    ...change.split.map((s) => putInSeries(objects, s) ?? `${listed(s.into.map((g) => named(objects, g)))} split apart`),
   ]
   return lines.length ? lines.join("; ") : null
 }

@@ -1,3 +1,4 @@
+import { splicedAt } from "./splice"
 import { GRID, objectRect, snap, type FlipAxis, type Rect, type Turn } from "./geometry"
 import { flipLine, flipSelection, selectionStep, turnedAbout, turnedSelection, turnPivot } from "./orient"
 import { designatorRects, footprint } from "./placement"
@@ -251,7 +252,7 @@ export class PartDrag {
       return p ? { ...o, x: p.x + at.x, y: p.y + at.y } : o
     })
     const targets = new Map(commit.pins.map((p) => [`${p.at.x},${p.at.y}`, p.key] as const))
-    return { doc: committed(this.doc, objects, commit, newId), unlaid: unlaidOf(commit, (p) => targets.get(`${p.x},${p.y}`)), at }
+    return { doc: splicedAt(committed(this.doc, objects, commit, newId), this.from.keys(), newId), unlaid: unlaidOf(commit, (p) => targets.get(`${p.x},${p.y}`)), at }
   }
 }
 

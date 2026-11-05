@@ -523,6 +523,13 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
     expect.soft(normalFormViolations(landed.doc.wires, wirePins(landed.doc.objects)), "normal form").toEqual([])
   })
 
+  it("a splice is named as what it is, a part put in series, not as a net split apart (design.md §6.7: every merge and split is named; findings 5.4)", () => {
+    const doc = line()
+    const landed = dropped(doc, "R3", 0, -4)
+    const change = netChanges(wiringFor(doc).circuit.nets, wiringFor(landed.doc).circuit.nets)
+    expect(changeMessage(landed.doc.objects, change)).toBe("R3 put in series between R1.2 and R2.1")
+  })
+
   it("every two-terminal symbol splices the same way: capacitor, inductor, diode, LED, Zener (design.md §5.3: a two-terminal part)", () => {
     for (const def of ["capacitor", "inductor", "diode", "led", "zener"]) {
       const doc = docOf([resistor("R1", 0, 0), resistor("R2", 16, 0), { id: "X3", def, x: c(6), y: c(4), props: { ref: "X3" } }], [seg(at(4, 1), at(16, 1))])
