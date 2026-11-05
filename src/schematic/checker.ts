@@ -13,6 +13,19 @@ export type CheckKind = "dangling-end" | "unconnected-pin" | "four-way" | "wire-
 
 export const CHECK_KINDS: readonly CheckKind[] = ["dangling-end", "unconnected-pin", "four-way", "wire-through-body", "field-on-wire", "field-on-body", "fields-overlap", "parallel-too-close"]
 
+export type CheckLevel = "warning" | "note"
+
+export const LEVEL_OF: Record<CheckKind, CheckLevel> = {
+  "dangling-end": "warning",
+  "unconnected-pin": "warning",
+  "wire-through-body": "warning",
+  "four-way": "note",
+  "field-on-wire": "note",
+  "field-on-body": "note",
+  "fields-overlap": "note",
+  "parallel-too-close": "note",
+}
+
 export type Finding = { kind: CheckKind; at: Point; objects: readonly string[]; segments: readonly string[]; text: string; pin?: string }
 
 const HALF = GRID / 2
@@ -140,7 +153,7 @@ function unconnectedPins(doc: Schematic, wiring: Wiring, marked: ReadonlySet<str
   const pinsByKey = new Map(wiring.pins.map((p) => [p.key, p]))
   for (const o of doc.objects) {
     const def = getDef(o.def)
-    if (!def || !def.model?.length || def.pinsAreSockets || isMark(o)) continue
+    if (!def || !def.model?.length || def.pinsAreSockets || def.chip || isMark(o)) continue
     for (const pin of def.pins) {
       if (pin.kind === "nc" || pin.kind === "node") continue
       const key = `${o.id}:${pin.id}`

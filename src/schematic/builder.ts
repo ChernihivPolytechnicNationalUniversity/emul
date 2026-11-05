@@ -1,5 +1,6 @@
 import { JUNCTION, wiresAsSegments } from "./migrate-wires"
-import { getMeta, withLibrary } from "./registry"
+import { getMeta, need, withLibrary } from "./registry"
+import { withFieldAt, type FieldKey } from "./fields"
 import type { LegacySchematic, LegacyWire, PartState, PlacedObject, Rotation, Schematic } from "./types"
 import type { WireSegment } from "./wires/segment"
 
@@ -110,5 +111,8 @@ export function builder(grid: number) {
     state.connections.push(w)
     return w
   }
-  return { doc, place, wire, node }
+  const field = (o: PlacedObject, key: FieldKey, x: number, y: number) => {
+    Object.assign(o, withFieldAt(o, key, { x: x * grid, y: y * grid }, grid, need(o.def)))
+  }
+  return { doc, place, wire, node, field }
 }

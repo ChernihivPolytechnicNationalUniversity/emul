@@ -98,6 +98,7 @@ export function buildMetronome(grid: number, opts: { tempo?: string; pitch?: str
   join([clkPull, "2"], j(latch), [q1, "C"])
 
   const u4 = place("hc595", 60, 8, { ref: "U4" })
+  for (const y of [14, 15, 16, 17, 19]) place("no-connect", 66, y - 1)
   const dec4 = C(70, 1, "100 nF")
   join(j(tapClock), [u4, "SRCLK"])
   join(j(latch), [u4, "RCLK"])

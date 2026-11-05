@@ -639,6 +639,7 @@ export const nucleoWs2812: Example = {
     // D6 (CN10-4) ends at (28,25); the stick's DIN sits at (33,25), its 5V on top at (39,23),
     // GND below at (39,27). +5V is CN8-9 on the far side, (0,17).
     const stick = place("led-stick-8", 32, 23, { value: "WS2812B-V5" })
+    place("no-connect", 45, 24)
     wire(u, "CN10-4", stick, "DIN")
     wire(u, "CN8-9", stick, "VDD", [[-2, 17], [-2, -3], [39, -3]])
     wire(u, "CN10-22", stick, "GND", [[39, 34]])

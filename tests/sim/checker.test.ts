@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { CHECK_KINDS, checked, NO_CONNECT, type CheckKind, type Finding } from "@/schematic/checker"
+import { CHECK_KINDS, checked, LEVEL_OF, NO_CONNECT, type CheckKind, type Finding } from "@/schematic/checker"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, type Point } from "@/schematic/geometry"
 import { placedFields, withFieldMoved } from "@/schematic/fields"
@@ -114,6 +114,10 @@ describe("unconnected pins of parts that have a model (design.md §6.8; KiCad pi
     expect(of(checked(docOf([part("U1", "open746i-c", 0, 0)])), "unconnected-pin")).toEqual([])
   })
 
+  it("a microcontroller's pins are not checked: its free GPIOs are the firmware's to give (the user, design.md §13.21)", () => {
+    expect(of(checked(docOf([part("U1", "stm32f746ig", 0, 0)])), "unconnected-pin")).toEqual([])
+  })
+
   it("a chip is not a board: a 74HC595 on its own has all sixteen pins unconnected", () => {
     expect(of(checked(docOf([part("U1", "hc595", 0, 0)])), "unconnected-pin")).toHaveLength(16)
   })
@@ -224,11 +228,15 @@ describe("parallel runs closer than one cell (design.md §5.4; ГОСТ 2.701-84
   })
 })
 
-describe("every example is clean (plan.md acceptance 5, phase 5)", () => {
+describe("every example is clean: no warning and no note but a four-way point, which ГОСТ allows and the bridge keeps (plan.md acceptance 5; the user, design.md §13.18, §13.21)", () => {
   for (const example of examples) {
     it(example.id, () => {
-      const found = checked(example.build(GRID))
+      const found = checked(example.build(GRID)).filter((f) => f.kind !== "four-way")
       expect(found.map((f) => `${f.kind} at (${f.at.x / GRID}, ${f.at.y / GRID}): ${f.text}`)).toEqual([])
     })
   }
+
+  it("a four-way point is a note, never a warning (the user, design.md §13.21)", () => {
+    expect(LEVEL_OF["four-way"]).toBe("note")
+  })
 })

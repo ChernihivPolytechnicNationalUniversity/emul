@@ -3,7 +3,7 @@ import type { NetMap } from "@/schematic/nets"
 import { pinKey, type Damage, type PinDef, type PlacedObject } from "@/schematic/types"
 import type { McuStatus } from "@/sim/loop"
 import { compareRefs } from "./field-index"
-import type { CheckKind, Finding } from "@/schematic/checker"
+import { LEVEL_OF, type CheckKind, type Finding } from "@/schematic/checker"
 
 // What is wrong on the field, one flat list, worst first. Two kinds of check:
 //   static — read from the bench itself, always on: a chip with no supply or no ground wired, a
@@ -77,16 +77,7 @@ export function staticProblems(objects: readonly PlacedObject[], nets: Pick<NetM
   return out
 }
 
-const CHECK_SEVERITY: Record<CheckKind, Severity> = {
-  "dangling-end": "warning",
-  "unconnected-pin": "warning",
-  "wire-through-body": "warning",
-  "four-way": "info",
-  "field-on-wire": "info",
-  "field-on-body": "info",
-  "fields-overlap": "info",
-  "parallel-too-close": "info",
-}
+const severityOf = (kind: CheckKind): Severity => (LEVEL_OF[kind] === "warning" ? "warning" : "info")
 
 const CHECK_FIX: Record<CheckKind, string> = {
   "dangling-end": "Connect it, delete the wire, or press Q on it to mark it as meant to stay open.",
@@ -113,12 +104,12 @@ const CHECK_DETAIL: Record<CheckKind, string> = {
 /** The schematic checker's findings (design.md §6.8), as problems of the field. */
 export const checkKeyOf = (f: Finding) => `check:${f.kind}:${f.at.x},${f.at.y}:${f.objects.join("+")}:${f.segments.join("+")}`
 
-export const isWarning = (f: Finding) => CHECK_SEVERITY[f.kind] === "warning"
+export const isWarning = (f: Finding) => LEVEL_OF[f.kind] === "warning"
 
 export function checkProblems(findings: readonly Finding[]): Problem[] {
   return findings.map((f) => ({
     key: checkKeyOf(f),
-    severity: CHECK_SEVERITY[f.kind],
+    severity: severityOf(f.kind),
     ...(f.objects.length === 1 && f.kind !== "four-way" && { object: f.objects[0] }),
     ...(f.kind === "unconnected-pin" && f.pin && { pin: f.pin }),
     title: f.text,

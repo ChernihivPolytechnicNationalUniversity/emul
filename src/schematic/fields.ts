@@ -227,13 +227,16 @@ export function placedFields(object: PlacedObject, grid: number, def: ComponentD
   return fields
 }
 
+export function withFieldAt(object: PlacedObject, key: FieldKey, middle: Point, grid: number, def: ComponentDef): PlacedObject {
+  const local = { x: (middle.x - object.x) / grid, y: (middle.y - object.y) / grid }
+  const orientation = orientationOf(object)
+  const frame = framePoint(def, orientation, { x: def.width / 2, y: def.height / 2 })
+  const back = unorientOffset({ x: local.x - frame.x, y: local.y - frame.y }, orientation)
+  return { ...object, fieldAt: { ...object.fieldAt, [key]: { x: def.width / 2 + back.x, y: def.height / 2 + back.y } } }
+}
+
 export function withFieldMoved(object: PlacedObject, key: FieldKey, dx: number, dy: number, grid: number, def: ComponentDef | undefined = getDef(object.def)): PlacedObject {
   const field = def && placedFields(object, grid, def).find((f) => f.key === key)
   if (!def || !field) return object
-  const middle = { x: (field.box.x + field.box.w / 2 + dx - object.x) / grid, y: (field.box.y + field.box.h / 2 + dy - object.y) / grid }
-  const orientation = orientationOf(object)
-  const frame = framePoint(def, orientation, { x: def.width / 2, y: def.height / 2 })
-  const back = unorientOffset({ x: middle.x - frame.x, y: middle.y - frame.y }, orientation)
-  const at = { x: def.width / 2 + back.x, y: def.height / 2 + back.y }
-  return { ...object, fieldAt: { ...object.fieldAt, [key]: at } }
+  return withFieldAt(object, key, { x: field.box.x + field.box.w / 2 + dx, y: field.box.y + field.box.h / 2 + dy }, grid, def)
 }
