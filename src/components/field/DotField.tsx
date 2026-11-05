@@ -66,7 +66,7 @@ import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
 import { FieldCanvas } from "./FieldCanvas"
 import { marksBesideTheBand, wireMarks } from "./wire-marks"
-import { WIRE_HIT_PX } from "./wire-style"
+import { dotRadius, OPEN_END_CELLS, WIRE_HIT_PX } from "./wire-style"
 import { exportPng } from "./export-image"
 import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
@@ -653,6 +653,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
     return ids
   }
+  const bandDotRadius = useEvent(() => dotRadius(grid, scale))
+  const bandPixel = useEvent(() => 1 / scale)
   const rubberLook = useEvent((): RubberLook => ({
     runOf: (segment) => wiring.runBySegment.get(segment),
     colorOfRun: colorOf,
@@ -660,6 +662,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       const run = nets.wiresOf(net)[0]
       return run ? colorOf(run) : DEFAULT_SIGNAL_COLOR
     },
+    sheet: wiring.sheet,
+    ringRadius: OPEN_END_CELLS * grid,
+    dotRadius: bandDotRadius,
+    pixel: bandPixel,
   }))
   const dragging = React.useRef<{ kind: "parts"; drag: PartDrag; base: Schematic; detach: boolean; bodies: (dx: number, dy: number) => boolean } | { kind: "segment"; drag: SegmentDrag; base: Schematic } | null>(null)
   const litBy = React.useRef("")
