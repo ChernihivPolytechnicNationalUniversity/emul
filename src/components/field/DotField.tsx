@@ -77,7 +77,7 @@ import { labelArea, labelCanvasFits, SymbolRaster, TextRaster } from "./symbol-r
 import { PendingWireLayer, WireLayer, type PendingLook } from "./WireLayer"
 import { RubberBandLayer, type RubberLook } from "./rubber-band-layer"
 import { GhostLayer, PlacementGhost, type Ghost } from "./GhostLayer"
-import { MoveDrag, planMove } from "./move-drag"
+import { hideWhileMoving, MoveDrag, planMove, staleWhileMoving } from "./move-drag"
 import { ContactPreview } from "./contact-preview"
 import { contactsAfterMove } from "@/schematic/contacts"
 import { WireFlow } from "./wire-flow"
@@ -939,13 +939,16 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const start = toWorld(e.clientX, e.clientY)
     const step = grid / 2
     let offset = { x: 0, y: 0 }
+    let shown: (() => void) | null = null
     text.setPointerCapture(e.pointerId)
     const moveTo = (ev: PointerEvent) => {
       const at = toWorld(ev.clientX, ev.clientY)
       offset = { x: snap(at.x - start.x, step), y: snap(at.y - start.y, step) }
+      if (!shown && (offset.x || offset.y) && contentRef.current) shown = hideWhileMoving(staleWhileMoving(contentRef.current))
       text.setAttribute("transform", `translate(${offset.x} ${offset.y})`)
     }
     const finish = (commit: boolean) => {
+      shown?.()
       text.removeEventListener("pointermove", moveTo)
       text.removeEventListener("pointerup", release)
       text.removeEventListener("pointercancel", cancel)
