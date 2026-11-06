@@ -12,6 +12,10 @@ import { clipOf, inNormalForm, wiringOf } from "@/schematic/wire-edits"
 import { pastedInto } from "@/schematic/use-schematic"
 import { pinPartition, WireGraph } from "@/schematic/wires/graph"
 import { routesOf } from "../lib/routes"
+import { sourceCallback } from "../lib/source-callback"
+import { documentPins, editedObjects } from "@/schematic/pin-index"
+import { FieldState } from "@/schematic/field-state"
+import type { FieldKey } from "@/schematic/fields"
 
 const c = (v: number) => v * GRID
 const part = (id: string, def: string, x: number, y: number, extra: Partial<PlacedObject> = {}): PlacedObject => ({ id, def, x: c(x), y: c(y), props: { ref: id }, ...extra })
@@ -54,6 +58,29 @@ const inCells = (p: Point) => ({ x: Math.round((p.x / GRID) * 1000) / 1000, y: M
 const named = (id: string, def: string, x: number, y: number, extra: Partial<PlacedObject> = {}) => part(id, def, x, y, { ...extra, props: { ref: id, value: "1 kΩ" } })
 
 const fieldTexts = (def: ComponentDef) => def.body.filter((s) => s.type === "text" && FIELD_TEXT.test(s.text))
+
+it.each([30, 300, 5010])("moving one field among %s objects copies at most one spatial page", (count) => {
+  let doc: Schematic = { objects: Array.from({ length: count }, (_, i) => part(`R${i}`, "resistor", i * 64, 0, { props: { ref: `R${i}`, value: "1k" } })), wires: [], parts: {} }
+  const graph = new WireGraph()
+  const field = new FieldState()
+  let known = wiringOf(graph, doc)
+  field.commit(doc, known)
+  const moveField = sourceCallback<(id: string, key: FieldKey, dx: number, dy: number) => void>("src/schematic/use-schematic.ts", "moveField", {
+    documentPins, editedObjects, withFieldMoved, grid: GRID,
+    setDoc: (fn: (d: Schematic) => Schematic) => { doc = fn(doc) },
+  })
+  const pages = (w: ReturnType<typeof wiringOf>) => (w.index.spatial as unknown as { rects: readonly (readonly Rect[])[] }).rects
+  for (const dx of [GRID, -GRID, GRID]) {
+    const previous = known
+    const unchanged = previous.index.pin("R1:1")
+    moveField("R0", "ref", dx, 0)
+    known = wiringOf(graph, doc)
+    field.commit(doc, known)
+    const allocated = pages(known).reduce((sum, page, i) => sum + (page === pages(previous)[i] ? 0 : page.length), 0)
+    expect.soft(allocated, "new object-bound slots stay within one 64-slot page").toBeLessThanOrEqual(Math.min(count, 64))
+    expect.soft(known.index.pin("R1:1"), "untouched pin data is retained").toBe(unchanged)
+  }
+})
 
 const synthetic = (base: string, id: string, pins: PinDef[], more: Partial<ComponentDef> = {}): ComponentDef => ({ ...getDef(base)!, id, pins, ...more })
 

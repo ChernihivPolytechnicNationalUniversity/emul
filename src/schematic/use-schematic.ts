@@ -33,6 +33,7 @@ import { NO_CONNECT } from "./checker"
 import type { SpatialIndex } from "./spatial"
 import { WireGraph } from "./wires/graph"
 import type { WireSegment } from "./wires/segment"
+import { documentPins, editedObjects } from "./pin-index"
 
 /** A board as a file brings it: its project, build options and debugger settings re-checked. */
 function checked(saved: PlacedObject): PlacedObject {
@@ -382,7 +383,16 @@ export function useSchematic(grid: number) {
   }, [setDoc, grid])
 
   const moveField = React.useCallback((id: string, key: FieldKey, dx: number, dy: number) => {
-    setDoc((d) => ({ ...d, objects: d.objects.map((o) => (o.id === id ? withFieldMoved(o, key, dx, dy, grid) : o)) }))
+    setDoc((d) => {
+      const index = documentPins(d.objects)
+      const object = index.objects.get(id)
+      if (!object) return d
+      const moved = withFieldMoved(object, key, dx, dy, grid)
+      if (moved === object) return d
+      const objects = d.objects.slice()
+      objects[index.rank(object)] = moved
+      return { ...d, objects: editedObjects(d.objects, objects, [id]) }
+    })
   }, [setDoc, grid])
 
   /**

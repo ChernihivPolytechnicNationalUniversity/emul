@@ -23,6 +23,8 @@ import { WireGraph } from "@/schematic/wires/graph"
 import { PartDrag, SegmentDrag, TurnRun } from "@/schematic/rubber-band"
 import { lineCodeOf, WireSheet, type SheetMark } from "@/schematic/wires/sheet"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
+import type { FieldKey } from "@/schematic/fields"
+import { sourceCallback } from "../lib/source-callback"
 
 function random(seed: number) {
   let s = seed >>> 0
@@ -220,17 +222,29 @@ describe("phase 5's edits keep the store's wiring and sheet equal to fresh ones 
     }
   })
 
-  it("a field moved by hand leaves the wiring as it was, kept and fresh", async () => {
-    const { withFieldMoved } = await import("@/schematic/fields")
+  it("a field moved through the store leaves the wiring as it was, kept and fresh through undo and redo", () => {
     const before = line()
     const graph = new WireGraph()
     const known = wiringOf(graph, before)
-    const after: Schematic = { ...before, objects: before.objects.map((o) => (o.id === "R3" ? withFieldMoved(o, "ref", 3 * GRID, -GRID, GRID) : o)) }
+    let after = before
+    const moveField = sourceCallback<(id: string, key: FieldKey, dx: number, dy: number) => void>("src/schematic/use-schematic.ts", "moveField", {
+      documentPins, editedObjects, withFieldMoved, grid: GRID,
+      setDoc: (fn: (d: Schematic) => Schematic) => { after = fn(after) },
+    })
+    moveField("R3", "ref", 3 * GRID, -GRID)
     const kept = wiringOf(graph, after)
     expect.soft(after.objects.find((o) => o.id === "R3")!.fieldAt, "set up: the field moved").toBeDefined()
     expect.soft(shape(kept), "the wiring, kept").toEqual(shape(wiringOf(new WireGraph(), after)))
     const electrical = (w: Wiring) => ({ ...shape(w), circuit: { nets: w.circuit.nets, wired: w.circuit.wired, flow: w.circuit.flow } })
     expect.soft(electrical(kept), "and the wiring, the nets and the flow unchanged by the move (the circuit carries the parts themselves, the moved field with them)").toEqual(electrical(known))
+    const checker = new KeptChecker()
+    for (const doc of [after, before, after]) {
+      const current = wiringOf(graph, doc)
+      const fresh = wiringOf(new WireGraph(), structuredClone(doc))
+      expect.soft(shape(current), "the store's field edit through history").toEqual(shape(fresh))
+      expect.soft(checker.update(doc, current), "the moved field's findings through history").toEqual(checked(structuredClone(doc)))
+      expect.soft(sheetShape(current.sheet, doc.wires, current.pins), "the field edit's sheet through history").toEqual(sheetShape(fresh.sheet, doc.wires, fresh.pins))
+    }
   })
 })
 
