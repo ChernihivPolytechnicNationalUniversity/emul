@@ -247,7 +247,7 @@ export function useSchematic(grid: number) {
 
   /** Place a component centered at a world point, snapped to the grid. */
   const add = React.useCallback(
-    (defId: string, center: Point) => {
+    (defId: string, center: Point, options: { suppressSplice?: boolean } = {}) => {
       const def = getDef(defId)
       if (!def) return
       const obj: PlacedObject = {
@@ -258,7 +258,7 @@ export function useSchematic(grid: number) {
       }
       setDoc((d) => {
         if (def.prefix) obj.props = { ref: nextRef(d.objects, def.prefix) }
-        return placedObject(d, obj)
+        return placedObject(d, obj, undefined, options)
       })
       setSelectedObjects(new Set([obj.id]))
       setSelectedWires(new Set())

@@ -358,8 +358,9 @@ export function removed(doc: Schematic, objectIds: ReadonlySet<string>, segmentI
   return withSegments(remaining, [], doc.wires.filter((s) => segmentIds.has(s.id)), pinPoints(gone), newId)
 }
 
-export function placedObject(doc: Schematic, object: PlacedObject, newId: NewId = randomId): Schematic {
-  return splicedAt(withSegments({ ...doc, objects: [...doc.objects, object] }, [], [], pinPoints([object]), newId), [object.id], newId)
+export function placedObject(doc: Schematic, object: PlacedObject, newId: NewId = randomId, options: { suppressSplice?: boolean } = {}): Schematic {
+  const next = withSegments({ ...doc, objects: [...doc.objects, object] }, [], [], pinPoints([object]), newId)
+  return options.suppressSplice ? next : splicedAt(next, [object.id], newId)
 }
 
 export function withModule(doc: Schematic, module: HdlModule, newId: NewId = randomId): Schematic {

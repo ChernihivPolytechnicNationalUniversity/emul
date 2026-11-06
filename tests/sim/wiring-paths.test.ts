@@ -18,7 +18,7 @@ import { circuitOf } from "@/schematic/circuit"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, routeBox, touches, type Point } from "@/schematic/geometry"
 import type { HdlModule, PlacedObject, Schematic } from "@/schematic/types"
-import { moved, recoloured, removed, travellingWires, withModule, withSegments, wireOrder, wiringOf, type Wiring } from "@/schematic/wire-edits"
+import { moved, placedObject, recoloured, removed, travellingWires, withModule, withSegments, wireOrder, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
 import { PartDrag, SegmentDrag, TurnRun } from "@/schematic/rubber-band"
 import { lineCodeOf, WireSheet, type SheetMark } from "@/schematic/wires/sheet"
@@ -185,6 +185,21 @@ describe("phase 5's edits keep the store's wiring and sheet equal to fresh ones 
       const fresh = wiringOf(new WireGraph(), doc)
       expect.soft(shape(kept), `${name}: the wiring`).toEqual(shape(fresh))
       expect.soft(sheetShape(kept.sheet, doc.wires, kept.pins), `${name}: the sheet`).toEqual(sheetShape(WireSheet.of(doc.wires, kept.pins), doc.wires, kept.pins))
+    }
+  })
+
+  it.each([true, false])("palette insertion with splice suppression %s stays fresh through undo and redo", (suppressSplice) => {
+    const base = line()
+    const before = { ...base, objects: base.objects.slice(0, 2) }
+    const graph = new WireGraph()
+    wiringOf(graph, before)
+    const after = placedObject(before, { ...base.objects[2], y: 0 }, undefined, { suppressSplice })
+    for (const doc of [after, before, after]) {
+      const kept = wiringOf(graph, doc)
+      const fresh = wiringOf(new WireGraph(), structuredClone(doc))
+      expect.soft(shape(kept), "the inserted part's wiring").toEqual(shape(fresh))
+      expect.soft(checked(doc, kept), "the inserted part's findings").toEqual(checked(structuredClone(doc)))
+      expect.soft(sheetShape(kept.sheet, doc.wires, kept.pins), "the inserted part's sheet").toEqual(sheetShape(fresh.sheet, doc.wires, fresh.pins))
     }
   })
 

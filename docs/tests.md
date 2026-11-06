@@ -1,5 +1,7 @@
 # Tests
 
+`tests/lib/source-callback.ts` executes named production callbacks with explicit dependencies, so palette and store regressions cover the real handlers without a browser.
+
 `pnpm test` runs every test under vitest, a file per worker: `tests/sim` needs only the repository, `tests/firmware` needs the images `pnpm firmware` builds (GNU Arm 14.2 and ST's HAL under `~/tools`, as CI stages them with `backend/worker/toolchain/stage-st.sh`). `pnpm test:sim` runs the first alone, `pnpm vitest run tests/sim/wires.test.ts` one file, `pnpm test:watch` watches.
 
 | Command | What it checks |

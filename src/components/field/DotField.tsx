@@ -515,12 +515,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const placed = useEvent((defId: string) => onPlaced?.(defId))
   /** The armed part where the pointer is: the spot is the student's, nothing is nudged. */
   const placeArmed = useEvent((e: React.PointerEvent, defId: string) => {
-    // Read the event now: a part still loading is placed when its file is here.
     const at = toWorld(e.clientX, e.clientY)
     const more = e.shiftKey
+    const suppressSplice = e.altKey
     if (!more) onArmedChange?.(null)
     afterDefs([defId], () => {
-      const added = sch.add(defId, at)
+      const added = sch.add(defId, at, { suppressSplice })
       if (!added) return
       sch.selectObject(added.id)
       placed(defId)

@@ -13,6 +13,9 @@ import { wirePins } from "@/schematic/migrate-wires"
 import { danglingEnds, junctionsOf, pinPartition, WireGraph, wireNets } from "@/schematic/wires/graph"
 import type { WireSegment } from "@/schematic/wires/segment"
 import { geometryOf, normalFormViolations, sortedPoints } from "../lib/wire-reference"
+import { sourceCallback } from "../lib/source-callback"
+import { getDef } from "@/schematic/registry"
+import { snap } from "@/schematic/geometry"
 
 const c = (v: number) => v * GRID
 const at = (x: number, y: number): Point => ({ x: c(x), y: c(y) })
@@ -585,6 +588,30 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
     const landed = dropped(line(), "R3", 0, -4, true)
     expect.soft(covers(landed.doc, at(4, 1), at(16, 1)), "the wire still runs from R1 to R2").toBe(true)
     expect.soft(partition(landed.doc), "R3 on the wire at both pins").toEqual([["R1:2", "R2:1", "R3:1", "R3:2"]])
+  })
+
+  it("an armed palette click preserves Alt while the definition loads and still normalises pins", () => {
+    for (const altKey of [true, false]) {
+      let doc = docOf([resistor("R1", 0, 0), resistor("R2", 16, 0)], [seg(at(4, 1), at(16, 1))])
+      const add = sourceCallback<(def: string, center: Point) => PlacedObject>("src/schematic/use-schematic.ts", "add", {
+        getDef, snap, grid: GRID, crypto: { randomUUID: () => "R3" }, placedObject,
+        setDoc: (fn: (d: Schematic) => Schematic) => { doc = fn(doc) },
+        nextRef: () => "R3", setSelectedObjects: () => {}, setSelectedWires: () => {},
+      })
+      let loaded = () => {}
+      const click = sourceCallback<(e: { clientX: number; clientY: number; shiftKey: boolean; altKey: boolean }, def: string) => void>("src/components/field/DotField.tsx", "placeArmed", {
+        toWorld: (x: number, y: number) => ({ x, y }), onArmedChange: () => {},
+        afterDefs: (_ids: string[], fn: () => void) => { loaded = fn },
+        sch: { add, selectObject: () => {} }, placed: () => {}, cannotLoad: () => {},
+      })
+      const event = { clientX: c(8), clientY: c(1), shiftKey: false, altKey }
+      click(event, "resistor")
+      event.altKey = !altKey
+      loaded()
+      expect.soft(doc.wires.reduce((sum, s) => sum + Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y), 0), `Alt ${altKey}: continuous or spliced length`).toBeNear(c(altKey ? 12 : 8), 1e-6)
+      expect.soft(normalFormViolations(doc.wires, wirePins(doc.objects)), `Alt ${altKey}: split at every pin`).toEqual([])
+      expect.soft(partition(doc), `Alt ${altKey}: the intended connectivity`).toEqual(altKey ? [["R1:2", "R2:1", "R3:1", "R3:2"]] : [["R1:2", "R3:1"], ["R2:1", "R3:2"]])
+    }
   })
 
   it("with one pin on the wire the part just connects there: the wire is split at the pin, a dot, nothing cut (design.md §5.3; junctions.md 25)", () => {
