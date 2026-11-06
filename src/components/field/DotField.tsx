@@ -1,3 +1,4 @@
+import { FieldState as FieldCommit } from "@/schematic/field-state"
 import * as React from "react"
 import { createPortal, flushSync } from "react-dom"
 import { cn } from "@/lib/utils"
@@ -14,9 +15,8 @@ import { WirePalette } from "@/components/inspector/WirePalette"
 import { paletteDrag } from "@/components/palette/palette-actions"
 import { QuickInsert } from "@/components/palette/QuickInsert"
 import { opensQuickInsert, type KeyTarget, type Rect as ScreenRect } from "@/components/palette/quick-insert"
-import { GRID as FIELD_GRID, objectPins, objectRect, resolvePin, routeBox, snap, touches, unionOf, type FlipAxis, type Point, type Turn } from "@/schematic/geometry"
+import { GRID as FIELD_GRID, objectPins, objectRect, resolvePin, snap, unionOf, type FlipAxis, type Point, type Turn } from "@/schematic/geometry"
 import type { FieldKey } from "@/schematic/fields"
-import { SpatialIndex } from "@/schematic/spatial"
 import { fieldDetail } from "./detail"
 import { savedTextScale, saveTextScale } from "./text-scale"
 import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, wireColorFor, type WireColorKey } from "@/schematic/wire-colors"
@@ -88,7 +88,6 @@ import { useViewport } from "./use-viewport"
 import { FieldPanel, FieldToggle, type FieldTarget, type PeerSelection } from "@/components/explorer/FieldPanel"
 import { fieldEntries, searchField, type FieldHit } from "@/components/explorer/field-index"
 import { checkProblems, runtimeProblems, sortProblems, staticProblems } from "@/components/explorer/problems"
-import { checked } from "@/schematic/checker"
 import { CheckMarks } from "./check-marks"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useSizeClass } from "@/hooks/use-size-class"
@@ -331,7 +330,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const { objects: docObjects, wires: docWires } = sch.doc
   const { wiring } = sch
   const nets = wiring.nets
-  const { sim, simStore, restart, started, sendSerial, debug: debugApi } = useSimulation(sch.doc, wiring.circuit, simRunning, {
+  const [fieldState] = React.useState(() => new FieldCommit())
+  const committedField = React.useMemo(() => fieldState.commit(sch.doc, wiring), [fieldState, sch.doc, wiring])
+  const { sim, simStore, restart, started, sendSerial, debug: debugApi } = useSimulation(sch.doc, committedField.circuit, simRunning, {
     speed,
     probes: measure.probes,
     onFailure,
@@ -343,10 +344,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     onRunning: setSimRunning,
   })
   React.useLayoutEffect(() => debug.attach(debugApi), [debug, debugApi])
-  const index = React.useMemo(() => new SpatialIndex(docObjects, grid), [docObjects, grid])
-  const routes = wiring.routes
-  const wireById = React.useMemo(() => new Map(docWires.map((w) => [w.id, w])), [docWires])
-  const runById = React.useMemo(() => new Map(wiring.runs.map((r) => [r.id, r])), [wiring.runs])
+  const index = committedField.index
+  const wireById = wiring.segmentsById
+  const runById = wiring.runById
   const selectedRuns = React.useMemo(() => {
     const ids = new Set<string>()
     for (const id of sch.selectedWires) {
@@ -356,8 +356,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return ids
   }, [sch.selectedWires, wiring.runBySegment])
 
-  const visibleObjects = React.useMemo(() => (view.w > 0 ? index.query(view) : docObjects), [index, view, docObjects])
-  const visibleRoutes = React.useMemo(() => (view.w > 0 ? routes.filter((r) => touches(routeBox(r), view)) : routes), [routes, view])
+  const visible = React.useMemo(() => view.w > 0 ? committedField.visible(view) : { objects: docObjects, routes: wiring.routes }, [committedField, view, docObjects, wiring])
+  const visibleObjects: readonly PlacedObject[] = visible.objects
+  const visibleRoutes = visible.routes
   const detail = React.useMemo(() => fieldDetail(grid, scale, visibleObjects.length, textScale), [grid, scale, visibleObjects, textScale])
   const sheetText = React.useMemo(() => ({ boost: detail.textBoost, pinSize: detail.pinLabelSize }), [detail.textBoost, detail.pinLabelSize])
 
@@ -408,11 +409,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     [labelsOnCanvas, liftedObjects, sheeted],
   )
   const liftedArea = React.useMemo(() => labelArea(liftedLabels, grid), [liftedLabels, grid])
-  const autoColor = React.useMemo(() => {
-    const m = new Map<string, WireColorKey>()
-    for (const net of nets.nets) m.set(net, autoNetColor(nets.kindsOf(net)))
-    return m
-  }, [nets])
+  const autoColor = committedField.autoColor
   const colorOf = React.useCallback(
     (runId: string): WireColorKey => {
       const chosen = runById.get(runId)?.segments[0].color
@@ -478,7 +475,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const pasted = React.useRef(0)
 
   const { copySelected, paste: pasteClip } = sch
-  const scene = useEvent((): PlacementScene => ({ objects: docObjects, routes, grid }))
+  const scene = useEvent((): PlacementScene => ({ objects: docObjects, routes: wiring.routes, grid }))
   const revealPlaced = (objects: readonly PlacedObject[], dx: number, dy: number) => {
     const landed = objects.map((o) => ({ ...o, x: o.x + dx, y: o.y + dy }))
     if (landed.length) reveal(unionOf(landed.flatMap((o) => [objectRect(o, grid), ...designatorRects(o, grid)])), CLEAR_OF_CONTROLS_PX)
@@ -628,7 +625,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const exportImage = useEvent(async () => {
     const host = containerRef.current
     if (!host) return null
-    return exportPng({ host, theme, objects: docObjects, routes, grid, colorOf, symbols: symbolRaster, texts: textRaster, textScale, marks: wireMarks(routes, wiring.dots, wiring.dangling, wiring.corners, colorOf, true) })
+    return exportPng({ host, theme, objects: docObjects, routes: wiring.routes, grid, colorOf, symbols: symbolRaster, texts: textRaster, textScale, marks: wireMarks(wiring.routes, wiring.dots, wiring.dangling, wiring.corners, colorOf, true) })
   })
 
   const [unlaid, setUnlaid] = React.useState<{ at: readonly Point[]; edits: number } | null>(null)
@@ -1598,7 +1595,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const lit = React.useMemo(() => (searching ? new Set(hits.map((h) => h.object)) : null), [searching, hits])
   const objectById = React.useMemo(() => new Map(docObjects.map((o) => [o.id, o])), [docObjects])
   const staticFound = React.useMemo(() => staticProblems(docObjects, nets), [docObjects, nets])
-  const findings = React.useMemo(() => checked(schDoc, wiring), [schDoc, wiring])
+  const findings = committedField.findings
   const checkFound = React.useMemo(() => checkProblems(findings), [findings])
   // The solver reports many times a second; the list follows a few times a second.
   const runtimeSim = useSampled(sim, 250)

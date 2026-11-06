@@ -15,6 +15,16 @@ const documents = await partitionDocuments()
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 
 describe("the pin partition every later phase must keep: the groups of pins on one net, by designator and pin", () => {
+  it("no-connect annotations leave the physical parts and pin partition unchanged, but a missing resistor does not", () => {
+    const resistor: PlacedObject = { id: "R1", def: "resistor", x: 0, y: 0, props: { ref: "R1" } }
+    const mark: PlacedObject = { id: "N1", def: "no-connect", x: -GRID, y: 0 }
+    const before = { objects: [resistor], wires: [], parts: {} }
+    const marked = { ...before, objects: [resistor, mark] }
+    expect.soft(inventory(marked.objects)).toEqual(inventory(before.objects))
+    expect.soft(pinPartition(marked)).toEqual(pinPartition(before))
+    expect.soft(inventory([mark])).not.toEqual(inventory(before.objects))
+  })
+
   it("every example and every .emul under tests/data has its partition frozen, and today's model still gives exactly that", () => {
     for (const { name, doc } of documents) {
       const fixture = readFixture(name)

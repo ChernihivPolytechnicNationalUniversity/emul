@@ -38,6 +38,12 @@ class Line {
   private reach: number[] = []
   private reachStale = false
 
+  copy(): Line {
+    const line = new Line()
+    line.load(this.runs, this.placed)
+    return line
+  }
+
   get empty() {
     return this.runs.length === 0 && this.placed.length === 0
   }
@@ -95,12 +101,15 @@ class Line {
 const NONE: readonly never[] = []
 
 export class WireSheet {
-  private readonly segments = new Map<string, WireSegment>()
-  private readonly pins = new Map<string, WirePin>()
-  private readonly ends = new Map<number, WireSegment[]>()
-  private readonly pinsAtPoint = new Map<number, WirePin[]>()
-  private readonly lines = new Map<LineCode, Line>()
-  private readonly placed = new Map<WireSegment | WirePin, Placed[]>()
+  pinSource?: { pin(key: string): WirePin | undefined; at(point: Point): readonly WirePin[]; within(box: { x: number; y: number; w: number; h: number }): readonly WirePin[] }
+  segmentSource?: ReadonlyMap<string, WireSegment>
+  private offset = { x: 0, y: 0 }
+  private segments = new Map<string, WireSegment>()
+  private pins = new Map<string, WirePin>()
+  private ends = new Map<number, WireSegment[]>()
+  private pinsAtPoint = new Map<number, WirePin[]>()
+  private lines = new Map<LineCode, Line>()
+  private placed = new Map<WireSegment | WirePin, Placed[]>()
 
   static of(wires: readonly WireSegment[], pins: readonly WirePin[]): WireSheet {
     const sheet = new WireSheet()
@@ -140,11 +149,57 @@ export class WireSheet {
     return sheet
   }
 
+  private shared = false
+  private ownedMaps = true
+  private ownedLines = new Set<LineCode>()
+
+  snapshot(): WireSheet {
+    const copy = new WireSheet()
+    copy.segments = this.segments
+    copy.pins = this.pins
+    copy.ends = this.ends
+    copy.pinsAtPoint = this.pinsAtPoint
+    copy.lines = this.lines
+    copy.placed = this.placed
+    copy.pinSource = this.pinSource
+    copy.segmentSource = this.segmentSource
+    copy.offset = this.offset
+    copy.shared = this.shared = true
+    copy.ownedMaps = this.ownedMaps = false
+    this.ownedLines = new Set()
+    return copy
+  }
+
+  private ownMaps() {
+    if (this.ownedMaps) return
+    this.segments = new Map(this.segments)
+    this.pins = new Map(this.pins)
+    this.ends = new Map(this.ends)
+    this.pinsAtPoint = new Map(this.pinsAtPoint)
+    this.lines = new Map(this.lines)
+    this.placed = new Map(this.placed)
+    this.ownedMaps = true
+  }
+
   get size() {
     return this.segments.size
   }
 
+  shift(x: number, y: number): this {
+    this.offset = { x: this.offset.x + x, y: this.offset.y + y }
+    return this
+  }
+
+  private local(p: Point): Point { return { x: p.x - this.offset.x, y: p.y - this.offset.y } }
+  private world(p: Point): Point { return { x: p.x + this.offset.x, y: p.y + this.offset.y } }
+
   apply(delta: WireDelta): this {
+    this.ownMaps()
+    if (this.offset.x || this.offset.y) delta = {
+      ...delta,
+      added: delta.added?.map((s) => ({ ...s, a: this.local(s.a), b: this.local(s.b) })),
+      pinsAdded: delta.pinsAdded?.map((p) => ({ ...p, at: this.local(p.at) })),
+    }
     for (const s of delta.removed ?? []) this.detachSegment(s)
     for (const p of delta.pinsRemoved ?? []) this.detachPin(p)
     for (const s of delta.added ?? []) this.attachSegment(s)
@@ -153,43 +208,69 @@ export class WireSheet {
   }
 
   segment(id: string): WireSegment | undefined {
-    return this.segments.get(id)
+    return this.segmentSource?.get(id) ?? this.segments.get(id)
   }
 
   pin(key: string): WirePin | undefined {
-    return this.pins.get(key)
+    return this.pinSource?.pin(key) ?? this.pins.get(key)
   }
 
   endsAt(p: Point): readonly WireSegment[] {
-    return this.ends.get(pointCode(p)) ?? NONE
+    return this.segmentSource || this.offset.x || this.offset.y ? (this.ends.get(pointCode(this.local(p))) ?? NONE).map((s) => this.segment(s.id)!) : this.ends.get(pointCode(p)) ?? NONE
   }
 
   pinsAt(p: Point): readonly WirePin[] {
-    return this.pinsAtPoint.get(pointCode(p)) ?? NONE
+    return this.pinSource?.at(p) ?? this.pinsAtPoint.get(pointCode(this.local(p))) ?? NONE
   }
 
   along(line: LineCode, lo: number, hi: number): WireSegment[] {
     const out: WireSegment[] = []
-    this.lines.get(line)?.overlapping(lo, hi, out)
-    return out
+    const horizontal = line % 2 === 0
+    const along = horizontal ? this.offset.x : this.offset.y
+    const code = horizontal ? rowCode(line / 2 - this.offset.y) : columnCode((line - 1) / 2 - this.offset.x)
+    this.lines.get(code)?.overlapping(lo - along, hi - along, out)
+    return this.segmentSource || this.offset.x || this.offset.y ? out.map((s) => this.segment(s.id)!) : out
   }
 
   through(p: Point): WireSegment[] {
-    const out: WireSegment[] = []
-    this.lines.get(rowCode(p.y))?.overlapping(p.x, p.x, out)
-    this.lines.get(columnCode(p.x))?.overlapping(p.y, p.y, out)
-    return out
+    return [...this.along(rowCode(p.y), p.x, p.x), ...this.along(columnCode(p.x), p.y, p.y)]
+  }
+
+  segmentsMarked(line: LineCode, lo: number, hi: number): WireSegment[] {
+    const out: SheetMark[] = []
+    const horizontal = line % 2 === 0
+    const along = horizontal ? this.offset.x : this.offset.y
+    const code = horizontal ? rowCode(line / 2 - this.offset.y) : columnCode((line - 1) / 2 - this.offset.x)
+    this.lines.get(code)?.within(lo - along, hi - along, out)
+    const mapped = !!this.segmentSource || !!this.offset.x || !!this.offset.y
+    const segments: WireSegment[] = []
+    for (const mark of out) if (mark.segment) segments.push(mapped ? this.segment(mark.segment.id)! : mark.segment)
+    return segments
   }
 
   marks(line: LineCode, lo: number, hi: number): SheetMark[] {
     const out: SheetMark[] = []
-    this.lines.get(line)?.within(lo, hi, out)
+    const horizontal = line % 2 === 0
+    const along = horizontal ? this.offset.x : this.offset.y
+    const code = horizontal ? rowCode(line / 2 - this.offset.y) : columnCode((line - 1) / 2 - this.offset.x)
+    this.lines.get(code)?.within(lo - along, hi - along, out)
+    if (this.segmentSource || this.offset.x || this.offset.y) for (let i = 0; i < out.length; i++) {
+      const mark = out[i]
+      out[i] = mark.segment ? { at: this.world(mark.at), segment: this.segment(mark.segment.id)! } : { at: this.world(mark.at), pin: this.pin(mark.pin!.key)! }
+    }
+    if (this.pinSource) {
+      const horizontal = line % 2 === 0
+      const at = horizontal ? line / 2 : (line - 1) / 2
+      const box = horizontal ? { x: lo, y: at, w: hi - lo, h: 0 } : { x: at, y: lo, w: 0, h: hi - lo }
+      for (const pin of this.pinSource.within(box)) if (!this.pins.has(pin.key)) out.push({ at: pin.at, pin })
+    }
     return out
   }
 
   private line(code: LineCode): Line {
     let line = this.lines.get(code)
     if (!line) this.lines.set(code, (line = new Line()))
+    else if (this.shared && !this.ownedLines.has(code)) { this.lines.set(code, line = line.copy()); this.ownedLines.add(code) }
     return line
   }
 
@@ -213,7 +294,7 @@ export class WireSheet {
     if (!entries) return
     this.placed.delete(owner)
     for (const placed of entries) {
-      this.lines.get(placed.line)?.removeMark(placed)
+      this.line(placed.line).removeMark(placed)
       this.release(placed.line)
     }
   }
@@ -226,8 +307,7 @@ export class WireSheet {
     for (const end of [s.a, s.b]) {
       const code = pointCode(end)
       const list = this.ends.get(code)
-      if (list) list.push(s)
-      else this.ends.set(code, [s])
+      this.ends.set(code, list ? [...list, s] : [s])
       this.mark(s, end, { at: end, segment: s })
     }
   }
@@ -237,7 +317,7 @@ export class WireSheet {
     if (!held) return
     this.segments.delete(s.id)
     const code = lineCodeOf(held)
-    this.lines.get(code)?.removeRun(held)
+    this.line(code).removeRun(held)
     this.release(code)
     for (const end of [held.a, held.b]) {
       const at = pointCode(end)
@@ -254,8 +334,7 @@ export class WireSheet {
     this.pins.set(p.key, p)
     const code = pointCode(p.at)
     const list = this.pinsAtPoint.get(code)
-    if (list) list.push(p)
-    else this.pinsAtPoint.set(code, [p])
+    this.pinsAtPoint.set(code, list ? [...list, p] : [p])
     this.mark(p, p.at, { at: p.at, pin: p })
   }
 

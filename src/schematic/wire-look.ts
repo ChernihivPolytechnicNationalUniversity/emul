@@ -1,6 +1,6 @@
 import type { Run } from "./circuit"
 import { GRID, toPath, type Point } from "./geometry"
-import { pointKey, type WirePin } from "./wires/segment"
+import { exactPointCode, type PointCode, type WirePin } from "./wires/segment"
 
 const LEAD_CELLS = 0.3
 
@@ -13,17 +13,21 @@ export type TurnPins = { leads: Map<string, { start?: string; end?: string }>; c
 export const leadEnd = (pin: WirePin): Point => ({ x: pin.at.x - pin.out!.x * LEAD_CELLS * GRID, y: pin.at.y - pin.out!.y * LEAD_CELLS * GRID })
 
 export function turnsAtPins(runs: readonly Run[], pins: readonly WirePin[]): { leads: Map<string, Leads>; corners: PinCorner[]; pins: TurnPins } {
-  const pinsAt = new Map<string, WirePin[]>()
+  const pinsAt = new Map<PointCode, WirePin[]>()
   for (const p of pins) {
-    const key = pointKey(p.at)
+    const key = exactPointCode(p.at)
     const list = pinsAt.get(key)
     if (list) list.push(p)
     else pinsAt.set(key, [p])
   }
-  const endsAt = new Map<string, number>()
-  for (const run of runs) for (const s of run.segments) for (const p of [s.a, s.b]) endsAt.set(pointKey(p), (endsAt.get(pointKey(p)) ?? 0) + 1)
+  const endsAt = new Map<PointCode, number>()
+  const count = (p: Point) => {
+    const code = exactPointCode(p)
+    endsAt.set(code, (endsAt.get(code) ?? 0) + 1)
+  }
+  for (const run of runs) for (const s of run.segments) { count(s.a); count(s.b) }
   const leadAt = (at: Point, next: Point): WirePin | undefined => {
-    const key = pointKey(at)
+    const key = exactPointCode(at)
     const here = pinsAt.get(key)
     if (here?.length !== 1 || endsAt.get(key) !== 1) return undefined
     const pin = here[0]

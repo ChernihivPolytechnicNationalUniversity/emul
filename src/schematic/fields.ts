@@ -63,7 +63,14 @@ const sidesOfDirection = (direction: Direction): FieldSide[] => {
 
 type Placement = { def: ComponentDef; orientation: Orientation; body: Rect; pins: { at: Point; inner: Point; sides: FieldSide[] }[] }
 
+const placementCache = new WeakMap<ComponentDef, Map<string, Placement>>()
+
 function placementOf(def: ComponentDef, orientation: Orientation): Placement {
+  const key = `${orientation.rotation}:${orientation.mirror}`
+  let variants = placementCache.get(def)
+  if (!variants) placementCache.set(def, variants = new Map())
+  const cached = variants.get(key)
+  if (cached) return cached
   const { box, leads } = bodyAndLeads(def)
   const corners = [
     { x: box.x, y: box.y },
@@ -80,7 +87,9 @@ function placementOf(def: ComponentDef, orientation: Orientation): Placement {
     const inner = lead ? framePoint(def, orientation, lead[1]) : { x: placed.x, y: placed.y }
     return { at: { x: placed.x, y: placed.y }, inner, sides: sidesOfDirection(placed.side) }
   })
-  return { def, orientation, body, pins }
+  const placement = { def, orientation, body, pins }
+  variants.set(key, placement)
+  return placement
 }
 
 const isPowerSymbol = (def: ComponentDef) => def.pins.length === 1 && (def.pins[0].kind === "gnd" || def.pins[0].kind === "power")
@@ -115,11 +124,19 @@ function preferredSides(p: Placement): FieldSide[] {
 
 const pinsOn = (p: Placement, side: FieldSide) => p.pins.filter((pin) => pin.sides.includes(side))
 
-function chosenSide(p: Placement): { side: SideVector; pins: number } {
+type SideChoice = { side: SideVector; pins: number; maxX: number; minY: number }
+
+const sideChoices = new WeakMap<Placement, SideChoice>()
+
+function chosenSide(p: Placement): SideChoice {
+  const cached = sideChoices.get(p)
+  if (cached) return cached
   const order = preferredSides(p).map((name) => ({ side: SIDES[name], pins: pinsOn(p, name).length }))
-  const empty = order.find((s) => s.pins === 0)
-  if (empty) return empty
-  return order.reduce((best, s) => (s.pins < best.pins ? s : best))
+  const best = order.find((s) => s.pins === 0) ?? order.reduce((chosen, s) => s.pins < chosen.pins ? s : chosen)
+  const points = pinsOn(p, best.side.name).flatMap((pin) => [pin.at, pin.inner])
+  const choice = { ...best, maxX: Math.max(...points.map((point) => point.x)), minY: Math.min(...points.map((point) => point.y)) }
+  sideChoices.set(p, choice)
+  return choice
 }
 
 export function autoplaceSide(def: ComponentDef, orientation: Orientation): FieldSide {
@@ -160,7 +177,7 @@ type Sized = { template: FieldTemplate; text: string; w: number; h: number }
 const boxAt = (at: Point, anchor: TextAnchor, w: number, h: number): Rect => ({ x: anchor === "start" ? at.x : anchor === "end" ? at.x - w : at.x - w / 2, y: at.y - h / 2, w, h })
 
 function autoplaced(p: Placement, fields: readonly Sized[]): Placed[] {
-  const { side, pins } = chosenSide(p)
+  const { side, pins, maxX, minY } = chosenSide(p)
   const width = Math.max(...fields.map((f) => f.w))
   const height = fields.reduce((sum, f) => sum + roundedUp(f.h), 0)
   const centre = { x: p.body.x + p.body.w / 2, y: p.body.y + p.body.h / 2 }
@@ -169,10 +186,8 @@ function autoplaced(p: Placement, fields: readonly Sized[]): Placed[] {
   let x = centre.x + side.x * offsetX - width / 2
   let y = centre.y + side.y * offsetY - height / 2
   if (pins > 0) {
-    const onSide = pinsOn(p, side.name)
-    const points = onSide.flatMap((pin) => [pin.at, pin.inner])
-    if (side.y) x = Math.max(...points.map((q) => q.x)) + HPADDING * 2
-    else y = Math.min(...points.map((q) => q.y)) - (height + VPADDING * 2)
+    if (side.y) x = maxX + HPADDING * 2
+    else y = minY - (height + VPADDING * 2)
   }
   const justified: TextAnchor = pins > 0 ? (side.y ? "start" : "middle") : side.x > 0 ? "start" : side.x < 0 ? "end" : "middle"
   let top = y
@@ -217,10 +232,19 @@ function besideTheDiagonal(def: ComponentDef, orientation: Orientation, fields: 
 
 const placedCache = new WeakMap<PlacedObject, { grid: number; def: ComponentDef; fields: readonly PlacedField[] }>()
 
-export function placedFields(object: PlacedObject, grid: number, def: ComponentDef | undefined = getDef(object.def)): readonly PlacedField[] {
-  if (!def) return []
-  const cached = placedCache.get(object)
-  if (cached && cached.grid === grid && cached.def === def) return cached.fields
+type FieldLayout = { key: FieldKey; text: string; w: number; h: number; local: Point; anchor: TextAnchor; side: FieldSide; moved: boolean }
+
+type LaidOut = { def: ComponentDef; rotation: PlacedObject["rotation"]; mirror: PlacedObject["mirror"]; fieldAt: PlacedObject["fieldAt"]; layout: readonly FieldLayout[] }
+
+const layouts = new WeakMap<object, LaidOut[]>()
+
+const LAYOUTS_KEPT = 8
+
+function layoutOf(object: PlacedObject, def: ComponentDef): readonly FieldLayout[] {
+  const owner = object.props ?? def
+  const known = layouts.get(owner)
+  const same = known?.find((l) => l.def === def && l.rotation === object.rotation && l.mirror === object.mirror && l.fieldAt === object.fieldAt)
+  if (same) return same.layout
   const props = propsOf(def, object)
   const sized = fieldTemplates(def).flatMap((template): Sized[] => {
     const text = template.text.replace(/\{(\w+)\}/g, (_, key: string) => props[key] ?? "")
@@ -228,12 +252,22 @@ export function placedFields(object: PlacedObject, grid: number, def: ComponentD
   })
   const orientation = orientationOf(object)
   const automatic: Placed[] = !sized.length ? [] : standsOnItsDiagonal(def, orientation.rotation) && def.pins.length === 2 ? besideTheDiagonal(def, orientation, sized) : autoplaced(placementOf(def, orientation), sized)
-  const fields = sized.map((f, i): PlacedField => {
+  const layout = sized.map((f, i): FieldLayout => {
     const moved = object.fieldAt?.[f.template.key]
-    const local = moved ? framePoint(def, orientation, moved) : automatic[i].at
-    const anchor = moved ? (moved.anchor ?? "middle") : automatic[i].anchor
-    const at = { x: object.x + local.x * grid, y: object.y + local.y * grid }
-    return { object: object.id, key: f.template.key, text: f.text, at, box: boxAt(at, anchor, f.w * grid, f.h * grid), angle: 0, anchor, side: automatic[i].side, moved: !!moved }
+    return { key: f.template.key, text: f.text, w: f.w, h: f.h, local: moved ? framePoint(def, orientation, moved) : automatic[i].at, anchor: moved ? (moved.anchor ?? "middle") : automatic[i].anchor, side: automatic[i].side, moved: !!moved }
+  })
+  const entry = { def, rotation: object.rotation, mirror: object.mirror, fieldAt: object.fieldAt, layout }
+  layouts.set(owner, [entry, ...(known ?? []).slice(0, LAYOUTS_KEPT - 1)])
+  return layout
+}
+
+export function placedFields(object: PlacedObject, grid: number, def: ComponentDef | undefined = getDef(object.def)): readonly PlacedField[] {
+  if (!def) return []
+  const cached = placedCache.get(object)
+  if (cached && cached.grid === grid && cached.def === def) return cached.fields
+  const fields = layoutOf(object, def).map((f): PlacedField => {
+    const at = { x: object.x + f.local.x * grid, y: object.y + f.local.y * grid }
+    return { object: object.id, key: f.key, text: f.text, at, box: boxAt(at, f.anchor, f.w * grid, f.h * grid), angle: 0, anchor: f.anchor, side: f.side, moved: f.moved }
   })
   placedCache.set(object, { grid, def, fields })
   return fields

@@ -10,7 +10,10 @@ import {
   lineOf,
   lowOf,
   onLattice,
-  pointKey,
+  exactPointCode,
+  isHorizontalLine,
+  lineCoordinate,
+  type PointCode,
   pointOnLine,
   samePoint,
   verticalLine,
@@ -38,7 +41,7 @@ type Span = { lo: number; hi: number }
 class WireIndex {
   readonly byLine = new Map<LineKey, number[]>()
   readonly cutsOnLine = new Map<LineKey, number[]>()
-  readonly pinsAt = new Map<string, number>()
+  readonly pinsAt = new Map<PointCode, number>()
   readonly wires: readonly WireSegment[]
   private readonly indexed = new Set<number>()
 
@@ -50,13 +53,17 @@ class WireIndex {
     if (this.indexed.has(i)) return
     this.indexed.add(i)
     const s = this.wires[i]
-    push(this.byLine, lineOf(s), i)
-    this.cut(s.a)
-    this.cut(s.b)
+    const line = lineOf(s)
+    push(this.byLine, line, i)
+    const horizontal = isHorizontal(s)
+    push(this.cutsOnLine, horizontal ? line : horizontalLine(s.a.y), s.a.x)
+    push(this.cutsOnLine, horizontal ? verticalLine(s.a.x) : line, s.a.y)
+    push(this.cutsOnLine, horizontal ? line : horizontalLine(s.b.y), s.b.x)
+    push(this.cutsOnLine, horizontal || s.b.x !== s.a.x ? verticalLine(s.b.x) : line, s.b.y)
   }
 
   addPin(pin: WirePin) {
-    const key = pointKey(pin.at)
+    const key = exactPointCode(pin.at)
     this.pinsAt.set(key, (this.pinsAt.get(key) ?? 0) + 1)
     if (!pin.socket) this.cut(pin.at)
   }
@@ -77,7 +84,7 @@ class WireIndex {
       for (const i of order) furthest.push(Math.max(furthest[furthest.length - 1] ?? -Infinity, highOf(this.wires[i])))
       this.reach.set(line, (known = { starts, furthest }))
     }
-    const at = line[0] === "h" ? p.x : p.y
+    const at = isHorizontalLine(line) ? p.x : p.y
     let lo = 0
     let hi = known.starts.length
     while (lo < hi) {
@@ -132,7 +139,7 @@ function spansOf(wires: readonly WireSegment[], members: ReadonlySet<number>): M
 function aroundRuns(index: WireIndex, pins: readonly WirePin[], spans: ReadonlyMap<LineKey, Span>) {
   const rows: number[] = []
   const columns: number[] = []
-  for (const [line, span] of spans) (line[0] === "h" ? rows : columns).push(Number(line.slice(1)), span.lo, span.hi)
+  for (const [line, span] of spans) (isHorizontalLine(line) ? rows : columns).push(lineCoordinate(line), span.lo, span.hi)
   const wires = index.wires
   for (let i = 0; i < wires.length; i++) {
     const { a, b } = wires[i]
@@ -152,7 +159,7 @@ function aroundRuns(index: WireIndex, pins: readonly WirePin[], spans: ReadonlyM
   }
   const rowSpans = new Map<number, Span>()
   const columnSpans = new Map<number, Span>()
-  for (const [line, span] of spans) (line[0] === "h" ? rowSpans : columnSpans).set(Number(line.slice(1)), span)
+  for (const [line, span] of spans) (isHorizontalLine(line) ? rowSpans : columnSpans).set(lineCoordinate(line), span)
   for (const pin of pins) {
     const { x, y } = pin.at
     const row = rowSpans.get(y)
@@ -176,21 +183,48 @@ function assertUniqueIds(wires: readonly WireSegment[]) {
   }
 }
 
+function hitsThrough(index: WireIndex, points: readonly Point[]): (number[] | undefined)[] {
+  const wires = index.wires
+  const rows = new Map<number, number[]>()
+  const columns = new Map<number, number[]>()
+  points.forEach((p, k) => {
+    push(rows, p.y, k)
+    push(columns, p.x, k)
+  })
+  const across: (number[] | undefined)[] = []
+  const down: (number[] | undefined)[] = []
+  const gather = (lines: Map<number, number[]>, key: (at: number) => LineKey, into: (number[] | undefined)[]) => {
+    for (const [at, group] of lines) {
+      const onLine = index.byLine.get(key(at))
+      if (!onLine) continue
+      for (const i of onLine) for (const k of group) if (contains(wires[i], points[k])) (into[k] ??= []).push(i)
+    }
+  }
+  gather(rows, horizontalLine, across)
+  gather(columns, verticalLine, down)
+  return points.map((_, k) => across[k] && down[k] ? [...across[k], ...down[k]] : across[k] ?? down[k])
+}
+
 function affected(index: WireIndex, touched: Touched): Set<number> {
   const out = new Set<number>()
   const wires = index.wires
-  const through = (p: Point) => {
-    for (const line of [horizontalLine(p.y), verticalLine(p.x)]) for (const i of index.byLine.get(line) ?? []) if (contains(wires[i], p)) out.add(i)
+  const segments = touched.segments ?? []
+  const queries: Point[] = [...(touched.points ?? [])]
+  const firstEnd = queries.length
+  for (const t of segments) queries.push(t.a, t.b)
+  const hits = hitsThrough(index, queries)
+  const through = (k: number) => {
+    for (const i of hits[k] ?? []) out.add(i)
   }
-  for (const p of touched.points ?? []) through(p)
-  for (const t of touched.segments ?? []) {
-    through(t.a)
-    through(t.b)
-    if (isZeroLength(t) || !isOrthogonal(t)) continue
+  for (let k = 0; k < firstEnd; k++) through(k)
+  segments.forEach((t, n) => {
+    through(firstEnd + 2 * n)
+    through(firstEnd + 2 * n + 1)
+    if (isZeroLength(t) || !isOrthogonal(t)) return
     const lo = lowOf(t)
     const hi = highOf(t)
     for (const i of index.byLine.get(lineOf(t)) ?? []) if (lowOf(wires[i]) <= hi && highOf(wires[i]) >= lo) out.add(i)
-  }
+  })
   return out
 }
 
@@ -199,7 +233,7 @@ type Run = { line: LineKey; lo: number; hi: number; primary: number; color: Wire
 function mergeable(index: WireIndex, run: Run, at: number, next: WireSegment): boolean {
   if (run.color !== next.color) return false
   const p = pointOnLine(run.line, at)
-  if (index.pinsAt.has(pointKey(p))) return false
+  if (index.pinsAt.has(exactPointCode(p))) return false
   return !index.passesThrough(p, crossLineThrough(run.line, p))
 }
 
@@ -273,7 +307,7 @@ function runsOnLine(index: WireIndex, line: LineKey, members: readonly number[],
     const hi = stops[k + 1]
     while (next < byStart.length && lowOf(wires[byStart[next]]) <= lo) open.push(byStart[next++])
     while (open.size && highOf(wires[open.peek()]) <= lo) open.pop()
-    if (open.size && offLattice.has(lo)) throw new Error(`a pin at ${lo} on ${line} lies on a wire but off the half-cell lattice`)
+    if (open.size && offLattice.has(lo)) throw new Error(`a pin at ${lo} on ${isHorizontalLine(line) ? "h" : "v"}${lineCoordinate(line)} lies on a wire but off the half-cell lattice`)
     if (!open.size) {
       if (run) emit(run)
       run = null
