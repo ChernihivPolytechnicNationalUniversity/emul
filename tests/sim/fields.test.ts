@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { join, split } from "@/collab/elements"
 import { examples } from "@/schematic/examples"
-import { autoplaceSide, bodyWithoutFields, fieldTemplates, placedFields, withFieldMoved, type FieldSide, type PlacedField } from "@/schematic/fields"
+import { autoplaceSide, bodyWithoutFields, fieldTemplates, placedFields, widthOf, withFieldMoved, type FieldSide, type PlacedField } from "@/schematic/fields"
 import { allowedRotations, GRID, intersects, objectPins, type Point, type Rect } from "@/schematic/geometry"
 import { stamped, upgraded } from "@/schematic/migrate"
 import { flipSelection, turnedAbout, turnedSelection, turnPivot } from "@/schematic/orient"
@@ -58,6 +58,17 @@ const inCells = (p: Point) => ({ x: Math.round((p.x / GRID) * 1000) / 1000, y: M
 const named = (id: string, def: string, x: number, y: number, extra: Partial<PlacedObject> = {}) => part(id, def, x, y, { ...extra, props: { ref: id, value: "1 kΩ" } })
 
 const fieldTexts = (def: ComponentDef) => def.body.filter((s) => s.type === "text" && FIELD_TEXT.test(s.text))
+
+it("field text metrics preserve every character class and numeric widths independently of layout", () => {
+  const classes: [string, number][] = [[" \u2009\u00a0iljI.,:;'|!", 0.28], ["mwMW", 0.88], ["ABCDEFGHJKLNOPQRSTUVXYZ", 0.7], ["0123456789", 0.62], ["abcdefghknopqrstuvxyz", 0.56], ["Ωµ−Ж😀", 0.72]]
+  for (const [characters, advance] of classes) for (const character of characters) {
+    expect.soft(widthOf(character, 1), `advance of ${JSON.stringify(character)}`).toBeNear(advance, 1e-12)
+    expect.soft(widthOf(character, 0.3), `scaled advance of ${JSON.stringify(character)}`).toBeNear(advance * 0.3, 1e-12)
+  }
+  expect.soft(widthOf("100000", 0.3), "six digits at the resistor value's size").toBeNear(1.116, 1e-12)
+  expect.soft(widthOf("R100000", 0.3), "a capital followed by six digits").toBeNear(1.326, 1e-12)
+  expect.soft(widthOf("", 0.3), "empty text").toBeNear(0, 1e-12)
+})
 
 it.each([30, 300, 5010])("moving one field among %s objects copies at most one spatial page", (count) => {
   let doc: Schematic = { objects: Array.from({ length: count }, (_, i) => part(`R${i}`, "resistor", i * 64, 0, { props: { ref: `R${i}`, value: "1k" } })), wires: [], parts: {} }

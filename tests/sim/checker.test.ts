@@ -208,6 +208,18 @@ describe("a wire through a body (design.md §5.1, §6.8; inferred from ГОСТ 
 })
 
 describe("fields over wires, bodies and each other (design.md §5.2, §6.8: a finding, never a refusal)", () => {
+  it("a numeric value collides with a wire inside its independently calculated box and clears one outside", () => {
+    const label = withFieldAt(resistor("R1", 100, 100, { props: { ref: "", value: "100000" } }), "value", at(12, 12), GRID, getDef("resistor")!)
+    const box = { x: c(11.442), y: c(11.85), w: c(1.116), h: c(0.3) }
+    const actual = placedFields(label, GRID).find((f) => f.key === "value")!.box
+    for (const key of ["x", "y", "w", "h"] as const) expect.soft(actual[key], `the fixed numeric box's ${key}`).toBeNear(box[key], 1e-9)
+    for (const x of [12.5, 13]) {
+      const wire = seg(at(x, 11), at(x, 13))
+      const intersects = wire.a.x > box.x && wire.a.x < box.x + box.w && wire.a.y < box.y && wire.b.y > box.y + box.h
+      expect.soft(intersects, `fixed-box control at x=${x}`).toBe(x === 12.5)
+      expect.soft(of(checked(docOf([label], [wire])), "field-on-wire").map((f) => f.fields), `numeric collision at x=${x}`).toEqual(x === 12.5 ? [["R1:value"]] : [])
+    }
+  })
 
   it("a field over several bodies names its owners in canonical order", () => {
     const label = withFieldAt(resistor("label", 100, 100, { props: { ref: "I", value: "" } }), "ref", at(1.5, 1), GRID, getDef("resistor")!)
