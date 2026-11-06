@@ -226,7 +226,7 @@ class Heap {
   }
 }
 
-const CROSSING = 1e8
+const CROSSING_IN_BENDS = 1.5
 
 export function bestShape(doc: Schematic, from: Point, to: Point, order: Order = "bends before length"): Shape | null {
   if (same(from, to)) return { crossings: 0, bends: 0, length: 0 }
@@ -268,7 +268,7 @@ export function bestShape(doc: Schematic, from: Point, to: Point, order: Order =
       const arrival = arrive(scene, here, d)
       if (arrival.fault) continue
       const nextShape = { crossings: shape.crossings + (arrival.crossing ? 1 : 0), bends: shape.bends + (turned ? 1 : 0), length: shape.length + 1, straightOnly: arrival.straightOnly }
-      const nextCost = nextShape.crossings * CROSSING + nextShape.bends * bendWeight + nextShape.length * lengthWeight
+      const nextCost = (nextShape.crossings * CROSSING_IN_BENDS + nextShape.bends) * bendWeight + nextShape.length * lengthWeight
       const nextState = at * 5 + step
       if (nextCost >= (best.get(nextState) ?? Infinity)) continue
       best.set(nextState, nextCost)

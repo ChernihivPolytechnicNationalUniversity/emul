@@ -226,6 +226,12 @@ describe("parallel runs closer than one cell (design.md §5.4; ГОСТ 2.701-84
     expect.soft(of(checked(docOf([], [seg(at(0, 0), at(0, 8)), seg(at(0.5, 0), at(0.5, 8))])), "parallel-too-close"), "vertical, half a cell").toHaveLength(1)
     expect.soft(of(checked(docOf([], [seg(at(0, 0), at(4, 0)), seg(at(6, 0.5), at(10, 0.5))])), "parallel-too-close"), "end to end, not alongside").toEqual([])
   })
+
+  it("the approved half-cell slip is no finding: on the Nucleo's CN8, D45's wire runs half a cell beside RESET's between the two outer sockets because the user chose that picture (design.md §13.5: «takes the half-cell slip, and only it»; §13.9; boards/row-taken-half.png)", () => {
+    const run = (...points: Point[]) => points.slice(1).map((p, i) => seg(points[i], p))
+    const doc = docOf([part("U1", "nucleo-f429zi", 0, 0), resistor("R1", -6, 18), resistor("R4", -12, 19)], [...run(at(5, 19), at(-2, 19)), ...run(at(6, 19), at(6, 19.5), at(3, 19.5), at(3, 20), at(-8, 20))])
+    expect.soft(of(checked(doc), "parallel-too-close"), "RESET's wire and D45's slip").toEqual([])
+  })
 })
 
 describe("every example is clean: no warning and no note but a four-way point, which ГОСТ allows and the bridge keeps (plan.md acceptance 5; the user, design.md §13.18, §13.21)", () => {

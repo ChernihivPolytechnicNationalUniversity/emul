@@ -7,8 +7,9 @@ import { runsOf } from "@/schematic/circuit"
 import { upgraded, type SavedSchematic } from "@/schematic/migrate"
 import { wirePins, wiresAsSegments } from "@/schematic/migrate-wires"
 import { placementCheck } from "@/schematic/placement"
+import { isPrintedName, printedBox, printedGrowth } from "@/schematic/printed-text"
 import { allDefs, getDef } from "@/schematic/registry"
-import type { LegacySchematic, PinDef, PlacedObject, Rotation, Schematic } from "@/schematic/types"
+import type { BodyShape, LegacySchematic, PinDef, PlacedObject, Rotation, Schematic } from "@/schematic/types"
 import { drawEndAt, drawnTo, isRefusal, pointerAt, previewOf, startDrawing, type Drawing } from "@/schematic/wire-draw"
 import { inNormalForm, removed, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { danglingEnds, junctionsOf, pinPartition, WireGraph, wireNets } from "@/schematic/wires/graph"
@@ -221,6 +222,26 @@ describe("the cost order (design.md §7: «crossing a body …, leaving or enter
     expect.soft(cells(routeBetween(doc, pin("R1", "2"), pin("R3", "1"))), "down from R1's pin, then across to R3's top: the L that does not cross the wire at x = 7").toEqual([
       [4, 1],
       [4, 5],
+      [10, 5],
+    ])
+  })
+
+  it("a straight wire through one crossing stays straight rather than going round the crossed wire with two bends: a crossing weighs less than two bends (design.md §13.22, question 5 B: «a crossing weighs more than one bend and less than two»; «a straight wire stays straight»)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 12, 0)], [seg(at(8, -3), at(8, 5))])
+    const route = routeBetween(doc, pin("R1", "2"), pin("R2", "1"))
+    expect.soft(cells(route), "straight along row 1, across the wire at x = 8").toEqual([
+      [4, 1],
+      [12, 1],
+    ])
+    expect.soft(route && partition(laid(doc, route)), "the crossing joins nothing").toEqual([["R1:2", "R2:1"]])
+  })
+
+  it("when both Ls would cross another net's wire, the route takes one bend more and crosses nothing: a crossing weighs more than one bend (design.md §13.22, question 5 B)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R3", 9, 5, 90)], [seg(at(7, -1), at(7, 6))])
+    expect.soft(cells(routeBetween(doc, pin("R1", "2"), pin("R3", "1"))), "up from R1's pin, over the wire's top end, down onto R3's top pin").toEqual([
+      [4, 1],
+      [4, -2],
+      [10, -2],
       [10, 5],
     ])
   })
@@ -447,6 +468,81 @@ describe("the board's escape direction is a cost, not a reserved length (design.
   })
 })
 
+type Printed = Extract<BodyShape, { type: "text" }>
+
+const outerPins = (def: string, connector: string) => getDef(def)!.pins.filter((p) => p.connector === connector && p.labelAt === p.side)
+
+function columnClearOfNames(def: string, pins: readonly PinDef[]): number {
+  const d = getDef(def)!
+  const growth = printedGrowth(d)
+  const names = d.body.filter((s): s is Printed => isPrintedName(s))
+  const outward = OUT[pins[0].side].x
+  const edges = pins.map((p) => {
+    const name = names.find((s) => s.text === p.label && Math.abs(s.y - p.y) < 0.5 && (s.x - p.x) * outward > 0 && Math.abs(s.x - p.x) < 2)
+    if (!outward || OUT[p.side].x !== outward || !name) throw new Error(`${def} ${p.id}: no printed name beside it on the header's left or right side`)
+    const box = printedBox(name, growth.get(name) ?? 1)
+    return outward < 0 ? box.x : box.x + box.w
+  })
+  return outward < 0 ? Math.ceil(Math.min(...edges)) - 1 : Math.floor(Math.max(...edges)) + 1
+}
+
+const FAN = [
+  { inner: "CN9-2", row: 26 },
+  { inner: "CN9-8", row: 29 },
+  { inner: "CN9-16", row: 33 },
+  { inner: "CN9-22", row: 36 },
+]
+
+describe("a wire leaving a header turns onto its final row at the first whole column clear of that header side's longest printed name (design.md §13.22, questions 3, 4 and 6; mockups/phase6-questions.png 4 and 6)", () => {
+  it("guard: the names, read from the Nucleo's own art — CN8's longest (RESET, IOREF) and CN9's (D72 … D65, GND) clear at x = 3, where both approved CN8 pictures turn; A0 with A1 and A3 with A4 alone would clear at x = 4, so the fan-out below tells question 4's B from A", () => {
+    const nucleo = getDef("nucleo-f429zi")!
+    const byLabel = (connector: string, ...labels: string[]) => outerPins("nucleo-f429zi", connector).filter((p) => labels.includes(p.label))
+    expect.soft(columnClearOfNames("nucleo-f429zi", outerPins("nucleo-f429zi", "CN8")), "CN8's left side").toBe(3)
+    expect.soft(columnClearOfNames("nucleo-f429zi", outerPins("nucleo-f429zi", "CN9")), "CN9's left side").toBe(3)
+    expect.soft(columnClearOfNames("nucleo-f429zi", byLabel("CN9", "A0", "A1")), "A0 and A1 alone (reading A)").toBe(4)
+    expect.soft(columnClearOfNames("nucleo-f429zi", byLabel("CN9", "A3", "A4")), "A3 and A4 alone (reading A)").toBe(4)
+    expect.soft(FAN.map((f) => nucleo.pins.find((p) => p.id === f.inner)!).map((p) => [p.label, p.x, p.y]), "the fan's four inner pins").toEqual([
+      ["D51", 6, 26],
+      ["D54", 6, 29],
+      ["D57", 6, 33],
+      ["D60", 6, 36],
+    ])
+  })
+
+  it("question 4, the fan-out: four wires from CN9's inner row — D51, D54, D57, D60, over the free A0, A3, D71, D68 — to four parts a row lower all turn on one column, the first whole column clear of CN9's longest printed name, not each after its own name (the user: B, «every wire of one header bends on one column»)", () => {
+    const parts = FAN.map((f, i) => resistor(`R${i + 1}`, -3 - 2 * i, f.row - 3, 90))
+    const column = columnClearOfNames("nucleo-f429zi", outerPins("nucleo-f429zi", "CN9"))
+    let doc = docOf([board("nucleo-f429zi"), ...parts])
+    const got = FAN.map((f, i) => {
+      const route = routeBetween(doc, pin("U1", f.inner), pin(`R${i + 1}`, "2"))
+      if (route) doc = laid(doc, route)
+      return cells(route)
+    })
+    expect.soft(got, `out over the outer socket, down a row at x = ${column}, along to the part's bottom pin; the parts stand across the inner rows, so no one-corner route exists`).toEqual(
+      FAN.map((f, i) => [
+        [6, f.row],
+        [column, f.row],
+        [column, f.row + 1],
+        [-2 - 2 * i, f.row + 1],
+      ]),
+    )
+    expect.soft(partition(doc), "four nets, no outer socket joined").toEqual(FAN.map((f, i) => [`R${i + 1}:2`, `U1:${f.inner}`]))
+  })
+
+  it("question 6, the jumper: RESET to A0, both on CN8's and CN9's outer column x = 5, goes out past the names and back — two bends, the upright leg on the first whole column clear of both headers' names — never along the column over +3V3, +5V, GND, GND and VIN (design.md §13.22: «a U, never along the column over the sockets between»)", () => {
+    const doc = docOf([board("nucleo-f429zi")])
+    const column = Math.min(columnClearOfNames("nucleo-f429zi", outerPins("nucleo-f429zi", "CN8")), columnClearOfNames("nucleo-f429zi", outerPins("nucleo-f429zi", "CN9")))
+    const route = routeBetween(doc, pin("U1", "CN8-5"), pin("U1", "CN9-1"))
+    expect.soft(cells(route), `(5, 19) → (${column}, 19) → (${column}, 26) → (5, 26)`).toEqual([
+      [5, 19],
+      [column, 19],
+      [column, 26],
+      [5, 26],
+    ])
+    expect.soft(route && partition(laid(doc, route)), "RESET and A0, no socket between").toEqual([["U1:CN8-5", "U1:CN9-1"]])
+  })
+})
+
 describe("the completion while drawing is the router's route (design.md §6.1: «the router (§7) proposes its path as the preview»)", () => {
   it("over a target pin, when the plain L would cross a body, the preview is exactly routeBetween's route", () => {
     const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 4), resistor("R9", 6, -2, 90)])
@@ -456,6 +552,48 @@ describe("the completion while drawing is the router's route (design.md §6.1: �
     const preview = previewOf(doc, wiring, pointerAt(started, at(10, 5)), drawEndAt(wiring, at(10, 5)))
     expect.soft(preview.routed, "routed").toBe(true)
     expect.soft(cells(preview.points), "the router's path").toEqual(cells(routeBetween(doc, pin("R1", "2"), pin("R2", "1"))))
+  })
+
+  function offered(doc: Schematic, from: Point, to: Point, ends: [RouteEnd, RouteEnd], plainL: string): readonly Point[] | null {
+    const wiring = wiringFor(doc)
+    const started = startDrawing(wiring, drawEndAt(wiring, from))
+    if (isRefusal(started)) throw new Error(started.refused)
+    const d = pointerAt(started, to)
+    const target = drawEndAt(wiring, to)
+    const preview = previewOf(doc, wiring, d, target)
+    expect.soft(preview.refused?.refused ?? null, `${plainL}: the router's path is offered instead of a refusal`).toBeNull()
+    expect.soft(preview.routed, "routed").toBe(true)
+    const route = routeBetween(doc, ...ends)
+    expect.soft(cells(preview.points), "the preview is exactly routeBetween's route").toEqual(cells(route))
+    const after = drawnTo(doc, wiring, d, target, newId)
+    expect.soft(isRefusal(after) ? after.refused : geometryOf(after.wires), "the click lays it").toEqual(route && geometryOf([...doc.wires, ...path(...route)]))
+    return route
+  }
+
+  it("over a target pin, when the plain L would run along another net's wire (refused `along`), the preview is routeBetween's route and the click lays it (design.md §13.22, question 7 A: «offered whenever the plain L would be refused (along, over, corner), not only when it crosses a body»)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 12, 0)], [seg(at(6, 1), at(10, 1))])
+    offered(doc, at(4, 1), at(12, 1), [pin("R1", "2"), pin("R2", "1")], "the straight row runs along a dangling wire")
+  })
+
+  it("over a target pin, when the plain L would pass over another net's pin (refused `over`), the preview is routeBetween's route — the approved picture, under R3's pin — and the click lays it (design.md §13.22, question 7 A; mockups/phase6-questions.png 7, A)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 0), resistor("R3", 6, -3, 90)])
+    const route = offered(doc, at(4, 1), at(10, 1), [pin("R1", "2"), pin("R2", "1")], "the straight row passes over R3's bottom pin")
+    expect.soft(cells(route), "down a row, along under R3's pin, back up").toEqual([
+      [4, 1],
+      [4, 2],
+      [10, 2],
+      [10, 1],
+    ])
+  })
+
+  it("over a target pin, when the plain L would bend on another net's pin (refused `corner`), the preview is routeBetween's route — the other L — and the click lays it (design.md §13.22, question 7 A)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R5", 10, 0), resistor("R3", 9, 5, 90)])
+    const route = offered(doc, at(4, 1), at(10, 5), [pin("R1", "2"), pin("R3", "1")], "the plain L turns on R5's left pin")
+    expect.soft(cells(route), "down from R1's pin, across to R3's top pin").toEqual([
+      [4, 1],
+      [4, 5],
+      [10, 5],
+    ])
   })
 })
 
@@ -638,7 +776,48 @@ describe("re-route a run (design.md §7: «the “re-route” command on a selec
   })
 })
 
-describe("the migration's fallback is the router (design.md §7: used in migration; §10 item 4; plan.md phase 6)", () => {
+describe("ties with no header involved: the first leg along the start pin's axis (design.md §13.22, question 3: «its first leg runs along the start pin's axis, the start being the pin drawn from, or for re-route and the migration the run's end whose pin key sorts first»)", () => {
+  it("of two one-corner routes of one length, the one whose first leg runs along the start pin's axis: R1 → R2 of close-parts-hooks bends beside R2's pin, R2 → R1 beside R1's; to a pin facing up, the corner above it from either end (mockups/phase6-questions.png 3a, A)", () => {
+    const hooks = docOf([resistor("R1", 0, 0), resistor("R2", 5, 1)])
+    expect.soft(cells(routeBetween(hooks, pin("R1", "2"), pin("R2", "1"))), "from R1: along its row first").toEqual([
+      [4, 1],
+      [5, 1],
+      [5, 2],
+    ])
+    expect.soft(cells(routeBetween(hooks, pin("R2", "1"), pin("R1", "2"))), "from R2: along its row first").toEqual([
+      [5, 2],
+      [4, 2],
+      [4, 1],
+    ])
+    const upright = docOf([resistor("R1", 0, 0), resistor("R2", 4, 2, 90)])
+    expect.soft(cells(routeBetween(upright, pin("R1", "2"), pin("R2", "1"))), "from R1: across first").toEqual([
+      [4, 1],
+      [5, 1],
+      [5, 2],
+    ])
+    expect.soft(cells(routeBetween(upright, pin("R2", "1"), pin("R1", "2"))), "from R2, facing up: up first").toEqual([
+      [5, 2],
+      [5, 1],
+      [4, 1],
+    ])
+  })
+
+  it("re-route starts from the run's end whose pin key sorts first, whichever L the run had: R1:2 sorts before R2:1, so the corner goes beside R2; with the left part named R9, R2:1 sorts first and the corner goes beside R9", () => {
+    const stored = docOf([resistor("R1", 0, 0), resistor("R2", 5, 1)], path(at(4, 1), at(4, 2), at(5, 2)))
+    const first = rerouted(stored, stored.wires[0].id, newId)
+    expect.soft(isRerouteRefusal(first) ? first.refused : geometryOf(first.wires), "from R1:2").toEqual(geometryOf(path(at(4, 1), at(5, 1), at(5, 2))))
+    const renamed = docOf([resistor("R9", 0, 0), resistor("R2", 5, 1)], path(at(4, 1), at(5, 1), at(5, 2)))
+    const second = rerouted(renamed, renamed.wires[0].id, newId)
+    expect.soft(isRerouteRefusal(second) ? second.refused : geometryOf(second.wires), "from R2:1").toEqual(geometryOf(path(at(5, 2), at(4, 2), at(4, 1))))
+  })
+
+  it("the migration starts from the end whose pin key sorts first, not the end the old file drew from: a wire saved from R2:1 to R1:2 opens bending beside R2's pin", () => {
+    const saved: SavedSchematic = { objects: [resistor("R1", 0, 0), resistor("R2", 5, 1)], wires: [{ id: "w", from: { object: "R2", pin: "1" }, to: { object: "R1", pin: "2" } }], parts: {} }
+    expect.soft(geometryOf(upgraded(saved).doc.wires), "from R1:2: along its row, down onto R2's pin").toEqual(geometryOf(path(at(4, 1), at(5, 1), at(5, 2))))
+  })
+})
+
+describe("the migration's fallback: the router first, today's half-cell search only as the last resort (design.md §7: used in migration; §10 item 4; §13.22, question 2 A: «falls back to today's half-cell search (clear-path.ts), so no circuit changes»; plan.md phase 6)", () => {
   const two = (): LegacySchematic => ({
     objects: [resistor("A1", 0, 0), resistor("A2", 20, 0), resistor("B1", 0, 6), resistor("B2", 20, 6)],
     wires: [
@@ -676,6 +855,19 @@ describe("the migration's fallback is the router (design.md §7: used in migrati
       ["R4:2", "U1:CN8-6"],
     ])
   })
+
+  it("guard: the last resort keeps the circuit — a wire to R2's pin, boxed in by three other nets' pins where no whole-cell route reaches, opens laid on half cells, joining R2 and R8 and nothing else", () => {
+    const saved: SavedSchematic = {
+      objects: [resistor("R2", 8, 0), resistor("R5", 3, 0), resistor("R6", 7, -4, 90), resistor("R7", 7, 2, 90), resistor("R8", 9, 4, 90)],
+      wires: [{ id: "boxed", from: { object: "R2", pin: "1" }, to: { object: "R8", pin: "1" } }],
+      parts: {},
+    }
+    expect.soft(bestShape(docOf(saved.objects), at(8, 1), at(10, 4)), "no whole-cell route: the router alone would leave the wire out").toBeNull()
+    const { doc } = upgraded(saved)
+    expect.soft(partition(doc), "the circuit the file had").toEqual([["R2:1", "R8:1"]])
+    expect.soft(danglingEnds(viewOf(doc)), "no open end").toEqual([])
+    expect.soft(normalFormViolations(doc.wires, wirePins(doc.objects)), "normal form").toEqual([])
+  })
 })
 
 describe("the reference this suite measures against (tests/lib/route-reference.ts)", () => {
@@ -697,6 +889,13 @@ describe("the reference this suite measures against (tests/lib/route-reference.t
     const length = bestShape(doc, at(4, 1), at(14, 7), "length before bends")
     expect.soft(bends && [bends.bends, bends.length], "bends first").toEqual([2, 18])
     expect.soft(length && [length.bends, length.length], "length first").toEqual([3, 16])
+  })
+
+  it("guard: it weighs a crossing as more than one bend and less than two (design.md §13.22, question 5 B) — straight through one crossing rather than round with two bends, round with two bends rather than an L through a crossing", () => {
+    const straight = docOf([resistor("R1", 0, 0), resistor("R2", 12, 0)], [seg(at(8, -3), at(8, 5))])
+    const bothLsCross = docOf([resistor("R1", 0, 0), resistor("R3", 9, 5, 90)], [seg(at(7, -1), at(7, 6))])
+    expect.soft(bestShape(straight, at(4, 1), at(12, 1)), "one crossing, no bend").toEqual({ crossings: 1, bends: 0, length: 8 })
+    expect.soft(bestShape(bothLsCross, at(4, 1), at(10, 5)), "no crossing, two bends").toEqual({ crossings: 0, bends: 2, length: 16 })
   })
 
   it("guard: it finds phase 5's frozen R6 → R7 hook wanting — two corners where one will do", () => {
