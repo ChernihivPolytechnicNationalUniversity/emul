@@ -37,7 +37,7 @@ import { CONTACT_OPENED, DRAG_REFUSED, PartDrag, SegmentDrag, TURN_REFUSED, UNLA
 import { DRAW_REFUSED, PASTE_REFUSED, laysClear, drawEndAt, flipPosture, isRefusal, pointerAt, previewOf, startDrawing, withCorner, withoutCorner, type DrawEnd, type Drawing, type DrawRefusal } from "@/schematic/wire-draw"
 import { NO_CROSSING } from "@/schematic/junction-tool"
 import { changeMessage, netChanges } from "@/schematic/net-names"
-import { chainOf, segmentNearest } from "@/schematic/wire-select"
+import { segmentNearest } from "@/schematic/wire-select"
 import type { DragFrame } from "@/schematic/wires/drag"
 import { samePoint } from "@/schematic/wires/segment"
 import { announceUpgrade } from "@/hooks/use-projects"
@@ -1144,6 +1144,13 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return true
   }
 
+  const joinOrStartAt = (clientX: number, clientY: number) => {
+    marquee.clear()
+    const under = endUnder(clientX, clientY)
+    if (!sch.junction(under.at)) return
+    startAt(under, "click")
+  }
+
   const finishAtLastPoint = (): boolean => {
     if (!pending) return false
     const last = pending.d.corners.at(-1)
@@ -1232,9 +1239,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (!run) return
     const toggle = addsToSelection(e)
     if (pressedTwice()) {
-      const chain = chainOf(wiring, segmentNearest(run, toWorld(e.clientX, e.clientY)))
-      sch.selectWires([...chain], toggle)
-      marquee.clear()
+      joinOrStartAt(e.clientX, e.clientY)
       return
     }
     const segment = segmentNearest(run, toWorld(e.clientX, e.clientY))
@@ -1324,8 +1329,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         return
       }
       if (pressedTwice() && e.pointerType !== "touch") {
-        marquee.clear()
-        startAt(endUnder(e.clientX, e.clientY), "click")
+        joinOrStartAt(e.clientX, e.clientY)
         return
       }
       // A finger on bare field pans, the way every map does; a tap clears the selection.
@@ -1861,9 +1865,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               </div>
               {detail.canvas ? (
                 <>
-                  <FieldCanvas objects={staticObjects} routes={staticRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} marks={staticMarks} lit={lit} />
+                  <FieldCanvas objects={staticObjects} routes={staticRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} netOf={nets.netOfWire} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} marks={staticMarks} lit={lit} />
                   <div ref={dragLayerRef} data-slot="field-drag-layer" className="pointer-events-none absolute top-0 left-0">
-                    {lifted.size > 0 && <FieldCanvas objects={liftedObjects} routes={liftedRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} marks={liftedMarks} />}
+                    {lifted.size > 0 && <FieldCanvas objects={liftedObjects} routes={liftedRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} netOf={nets.netOfWire} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} marks={liftedMarks} />}
                   </div>
                 </>
               ) : (

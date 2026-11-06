@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils"
 import { toPath, trimRouteEnds, type Point, type RoutedWire } from "@/schematic/geometry"
 import { runPath, towards, type PinCorner } from "@/schematic/wire-look"
 import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
-import { CASING_PX, casingTrim, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_HIT_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
+import { CASING_PX, casingTrim, casingWidth, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_HIT_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
 import { wireMarks } from "./wire-marks"
 import type { WireFlow } from "./wire-flow"
 
@@ -100,23 +100,20 @@ export const WireLayer = React.memo(function WireLayer({
           className={cn(lit?.size ? !lit.has(net) && "opacity-25" : hoveredNet !== null && net !== hoveredNet && "opacity-25")}
           style={{ transition: "opacity 120ms" }}
         >
-          {wires.map(
-            (route) =>
-              !selected.has(route.id) && (
-                <path
-                  key={route.id}
-                  data-wire={route.id}
-                  data-casing=""
-                  d={casingOf(route.id)}
-                  fill="none"
-                  stroke="var(--background)"
-                  strokeWidth={WIRE_PX + CASING_PX}
-                  strokeLinejoin="round"
-                  strokeLinecap="butt"
-                  vectorEffect="non-scaling-stroke"
-                />
-              ),
-          )}
+          {wires.map((route) => (
+            <path
+              key={route.id}
+              data-wire={route.id}
+              data-casing=""
+              d={casingOf(route.id)}
+              fill="none"
+              stroke={selected.has(route.id) ? "var(--selection-tint)" : "var(--background)"}
+              strokeWidth={casingWidth(widthOf(route.id))}
+              strokeLinejoin="round"
+              strokeLinecap="butt"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
           {wires.map((route) => {
             const d = pathOf(route.id)
             const width = widthOf(route.id)
@@ -222,7 +219,7 @@ function Pending({ pending, grid, radius, handleR, part }: { pending: PendingLoo
   }
   return (
     <g pointerEvents="none">
-      <path d={toPath(trimRouteEnds([...pts], casingTrim(grid)), radius)} fill="none" stroke="var(--background)" strokeWidth={WIRE_PX + CASING_PX} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+      <path d={toPath(trimRouteEnds([...pts], casingTrim(grid)), radius)} fill="none" stroke="var(--background)" strokeWidth={casingWidth(WIRE_PX)} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
       <path
         d={d}
         fill="none"

@@ -4,6 +4,9 @@ const CASING_TRIM = 0.25
 export const WIRE_PX = 2
 export const SELECTED_WIRE_PX = 3
 export const CASING_PX = 3
+export const CROSSING_GAP_PX = 3
+
+export const casingWidth = (wirePx: number) => wirePx + 2 * CROSSING_GAP_PX
 export const WIRE_HIT_PX = 14
 
 export const wireCornerRadius = (grid: number) => CORNER * grid
