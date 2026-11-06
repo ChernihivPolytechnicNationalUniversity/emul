@@ -1,10 +1,11 @@
+import { editedObjects } from "./pin-index"
 import { splicedAt } from "./splice"
 import { GRID, objectRect, snap, type FlipAxis, type Rect, type Turn } from "./geometry"
 import { flipLine, flipSelection, selectionStep, turnedAbout, turnedSelection, turnPivot } from "./orient"
 import { designatorRects, footprint } from "./placement"
 import { SpatialIndex } from "./spatial"
 import type { PlacedObject, Point, Schematic } from "./types"
-import { detachedMove, moved, pinsOf, travellingIn, travellingWires, wiringOf, withSegments, type NewId, type Wiring } from "./wire-edits"
+import { keepSheet, detachedMove, moved, pinsOf, travellingIn, travellingWires, wiringOf, withSegments, type NewId, type Wiring } from "./wire-edits"
 import { normalOffset, planDrag, translate, type DragBox, type DragCommit, type DragConflict, type DragFrame, type DragMove, type DragPlan } from "./wires/drag"
 import { WireGraph, type WireNets } from "./wires/graph"
 import { HALF_CELL, samePoint, type WirePin, type WireSegment } from "./wires/segment"
@@ -161,7 +162,7 @@ function unlaidOf(commit: DragCommit, pinAt: (at: Point) => string | undefined):
 
 function committed(doc: Schematic, objects: PlacedObject[], commit: DragCommit, newId: NewId): Schematic {
   const { add = [], remove = [], points = [] } = commit.edit
-  return withSegments({ ...doc, objects }, add, remove, points, newId)
+  return withSegments({ ...doc, objects: editedObjects(doc.objects, objects, objects.flatMap((o, i) => o === doc.objects[i] ? [] : [o.id])) }, add, remove, points, newId)
 }
 
 function nearestWhere(offset: Point, clean: (at: Point) => boolean, reach = 4, axis?: "x" | "y"): Point | null {
@@ -404,6 +405,10 @@ export class TurnRun {
     const degrees = steps * step
     const landed = reshaped(this.start, this.wiring(), this.ids, target, (at) => turnedAbout(at, pivot, degrees), newId, this.index, { degrees, wires: this.wires })
     if (landed.refused) return { ...this.last, refused: landed.refused }
+    if (!this.own && this.live && isCurrent(this.start, this.live)) {
+      this.own = { view: this.live.graph.snapshot(), sheet: this.live.sheet.snapshot() }
+      keepSheet(this.start.wires, this.own.sheet)
+    }
     this.steps = steps
     this.last = landed
     return landed

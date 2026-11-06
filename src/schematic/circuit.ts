@@ -17,6 +17,11 @@ export const isCircuit = (doc: Schematic | Circuit): doc is Circuit => "nets" in
 const other = (s: WireSegment, p: Point) => (samePoint(s.a, p) ? s.b : s.a)
 
 export function runsOf(wires: readonly WireSegment[], pins: readonly WirePin[]): Run[] {
+  if (wires.length === 1) {
+    const segment = wires[0]
+    const points = [segment.a, segment.b]
+    return [{ id: segment.id, segments: [segment], points: backwards(points) ? points.reverse() : points }]
+  }
   const ends = new Map<string, WireSegment[]>()
   for (const s of wires)
     for (const p of [s.a, s.b]) {

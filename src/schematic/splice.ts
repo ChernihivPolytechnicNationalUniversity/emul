@@ -1,7 +1,9 @@
-import { GRID, objectPins, objectRect, type Point, type Rect } from "./geometry"
+import { GRID, objectPins, type Point, type Rect } from "./geometry"
+import { documentPins } from "./pin-index"
+import { columnCode, rowCode } from "./wires/sheet"
 import { getDef } from "./registry"
 import type { PlacedObject, Schematic } from "./types"
-import { withSegments, type NewId } from "./wire-edits"
+import { segmentsOnLine, withSegments, type NewId } from "./wire-edits"
 import type { WireSegment } from "./wires/segment"
 
 const randomId: NewId = () => crypto.randomUUID()
@@ -29,10 +31,9 @@ const pointAt = (line: Line, along: number): Point => (line.along === "x" ? { x:
 
 const boxOf = (line: Line): Rect => (line.along === "x" ? { x: line.lo, y: line.at, w: line.hi - line.lo, h: 0 } : { x: line.at, y: line.lo, w: 0, h: line.hi - line.lo })
 
-const meets = (r: Rect, box: Rect) => r.x <= box.x + box.w && box.x <= r.x + r.w && r.y <= box.y + box.h && box.y <= r.y + r.h
-
 function stretchUnder(doc: Schematic, part: PlacedObject, line: Line): WireSegment[] | null {
-  const under = doc.wires.filter((s) => {
+  const code = line.along === "x" ? rowCode(line.at) : columnCode(line.at)
+  const under = segmentsOnLine(doc.wires, code, line.lo, line.hi).filter((s) => {
     if (!onLine(s, line)) return false
     const [lo, hi] = extent(s, line)
     return hi > line.lo && lo < line.hi
@@ -49,16 +50,13 @@ function stretchUnder(doc: Schematic, part: PlacedObject, line: Line): WireSegme
   const inside = new Set(sorted.slice(1).map((s) => extent(s, line)[0]))
   for (const along of inside) {
     const p = pointAt(line, along)
-    const ends = doc.wires.filter((s) => (s.a.x === p.x && s.a.y === p.y) || (s.b.x === p.x && s.b.y === p.y))
+    const ends = [...segmentsOnLine(doc.wires, rowCode(p.y), p.x, p.x), ...segmentsOnLine(doc.wires, columnCode(p.x), p.y, p.y)].filter((s) => (s.a.x === p.x && s.a.y === p.y) || (s.b.x === p.x && s.b.y === p.y))
     if (ends.length !== 2 || ends.some((s) => !under.includes(s))) return null
   }
   const box = boxOf(line)
-  for (const o of doc.objects) {
-    if (o.id === part.id || !meets(objectRect(o, GRID), box)) continue
-    for (const { point } of objectPins(o, GRID)) {
-      if (point[line.across] !== line.at) continue
-      if (point[line.along] > line.lo && point[line.along] < line.hi) return null
-    }
+  for (const p of documentPins(doc.objects).within(box)) {
+    if (p.key.startsWith(`${part.id}:`)) continue
+    if (p.at[line.across] === line.at && p.at[line.along] > line.lo && p.at[line.along] < line.hi) return null
   }
   return under
 }

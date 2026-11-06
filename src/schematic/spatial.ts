@@ -1,3 +1,4 @@
+import { OverlayMap } from "./wires/overlay-map"
 import { intersects, objectRect, type Rect } from "./geometry"
 import type { PlacedObject } from "./types"
 
@@ -13,16 +14,47 @@ export class SpatialIndex {
   private readonly bucket: number
   private readonly objects: readonly PlacedObject[]
   private readonly rects: Rect[]
-  private readonly cells = new Map<number, number[]>()
+  private readonly cells: ReadonlyMap<number, readonly number[]>
+  private readonly rectOf: ((object: PlacedObject) => Rect) | undefined
   private readonly returnedOn: Int32Array
   private visits = 0
 
-  constructor(objects: readonly PlacedObject[], grid: number) {
+  constructor(objects: readonly PlacedObject[], grid: number, previous?: SpatialIndex, changedIndices?: readonly number[], rectOf?: (object: PlacedObject) => Rect) {
+    this.rectOf = rectOf
+    const bounds = rectOf ?? ((object: PlacedObject) => objectRect(object, grid))
     this.bucket = BUCKET_CELLS * grid
     this.objects = objects
-    this.rects = objects.map((o) => objectRect(o, grid))
     this.returnedOn = new Int32Array(objects.length)
-    for (let i = 0; i < objects.length; i++) this.bucketise(i, this.rects[i])
+    if (previous && previous.objects.length === objects.length && previous.bucket === this.bucket && previous.rectOf === rectOf) {
+      this.rects = previous.rects.slice()
+      const changed = new Map<number, number[]>()
+      const cell = (key: number) => {
+        let list = changed.get(key)
+        if (!list) changed.set(key, list = [...previous.cells.get(key) ?? []])
+        return list
+      }
+      for (const i of changedIndices ?? objects.keys()) {
+        if (objects[i] === previous.objects[i]) continue
+        for (const key of this.keys(this.rects[i])) { const list = cell(key); const at = list.indexOf(i); if (at >= 0) list.splice(at, 1) }
+        this.rects[i] = bounds(objects[i])
+        for (const key of this.keys(this.rects[i])) {
+          const list = cell(key)
+          let at = 0
+          while (at < list.length && list[at] < i) at++
+          list.splice(at, 0, i)
+        }
+      }
+      this.cells = new OverlayMap(previous.cells, changed, new Set())
+    } else {
+      this.rects = objects.map(bounds)
+      const cells = new Map<number, number[]>()
+      for (let i = 0; i < objects.length; i++) for (const key of this.keys(this.rects[i])) {
+        const list = cells.get(key)
+        if (list) list.push(i)
+        else cells.set(key, [i])
+      }
+      this.cells = cells
+    }
   }
 
   query(rect: Rect): readonly PlacedObject[] {
@@ -41,6 +73,16 @@ export class SpatialIndex {
   }
 
   private sweep(rect: Rect, visit: (index: number) => boolean | void) {
+    const columns = Math.floor((rect.x + rect.w) / this.bucket) - Math.floor(rect.x / this.bucket) + 1
+    const rows = Math.floor((rect.y + rect.h) / this.bucket) - Math.floor(rect.y / this.bucket) + 1
+    if (columns * rows > this.objects.length * 8) {
+      for (let i = 0; i < this.objects.length; i++) {
+        const r = this.rects[i]
+        if (Math.floor(r.x / this.bucket) > Math.floor((rect.x + rect.w) / this.bucket) || Math.floor(rect.x / this.bucket) > Math.floor((r.x + r.w) / this.bucket) || Math.floor(r.y / this.bucket) > Math.floor((rect.y + rect.h) / this.bucket) || Math.floor(rect.y / this.bucket) > Math.floor((r.y + r.h) / this.bucket)) continue
+        if (visit(i)) return
+      }
+      return
+    }
     const at = this.nextVisit()
     const x1 = Math.floor((rect.x + rect.w) / this.bucket)
     const y1 = Math.floor((rect.y + rect.h) / this.bucket)
@@ -57,17 +99,11 @@ export class SpatialIndex {
     }
   }
 
-  private bucketise(i: number, rect: Rect) {
-    const x1 = Math.floor((rect.x + rect.w) / this.bucket)
-    const y1 = Math.floor((rect.y + rect.h) / this.bucket)
-    for (let cx = Math.floor(rect.x / this.bucket); cx <= x1; cx++) {
-      for (let cy = Math.floor(rect.y / this.bucket); cy <= y1; cy++) {
-        const key = bucketKey(cx, cy)
-        const list = this.cells.get(key)
-        if (list) list.push(i)
-        else this.cells.set(key, [i])
-      }
-    }
+  private keys(rect: Rect): number[] {
+    const keys: number[] = []
+    for (let cx = Math.floor(rect.x / this.bucket); cx <= Math.floor((rect.x + rect.w) / this.bucket); cx++)
+      for (let cy = Math.floor(rect.y / this.bucket); cy <= Math.floor((rect.y + rect.h) / this.bucket); cy++) keys.push(bucketKey(cx, cy))
+    return keys
   }
 
   private nextVisit(): number {

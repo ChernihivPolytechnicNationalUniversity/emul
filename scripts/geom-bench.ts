@@ -1,11 +1,9 @@
+import { FieldState } from "@/schematic/field-state"
 import "./lib/all-parts"
-import { GRID, objectPins, routeBox, touches } from "@/schematic/geometry"
-import { SpatialIndex } from "@/schematic/spatial"
+import { GRID, objectPins } from "@/schematic/geometry"
 import type { PlacedObject, Schematic } from "@/schematic/types"
-import { autoNetColor, type WireColorKey } from "@/schematic/wire-colors"
 import { moved, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { PartDrag } from "@/schematic/rubber-band"
-import { checked } from "@/schematic/checker"
 import { WireGraph } from "@/schematic/wires/graph"
 import { pointKey } from "@/schematic/wires/segment"
 import { boardDocuments, stressDocuments } from "./lib/stress"
@@ -64,24 +62,18 @@ function moveTo(doc: Schematic, moving: ReadonlySet<string>, dx: number, dy: num
 
 type Breakdown = { edit: number; wiring: number; index: number; derived: number; total: number }
 
-function derived(wiring: Wiring, index: SpatialIndex, view: { x: number; y: number; w: number; h: number }) {
-  const visibleObjects = index.query(view)
-  const visibleRoutes = wiring.routes.filter((r) => touches(routeBox(r), view))
-  const visiblePins = visibleObjects.reduce((sum, o) => sum + objectPins(o, GRID).length, 0)
-  const autoColor = new Map<string, WireColorKey>()
-  for (const net of wiring.nets.nets) autoColor.set(net, autoNetColor(wiring.nets.kindsOf(net)))
-  return { visibleObjects, visibleRoutes, visiblePins, autoColor }
-}
+const fields = new WeakMap<WireGraph, FieldState>()
 
-function commit(graph: WireGraph, doc: Schematic, view: { x: number; y: number; w: number; h: number }, edit = 0): { taken: Breakdown; wiring: Wiring } {
+function commit(graph: WireGraph, doc: Schematic, view: { x: number; y: number; w: number; h: number }, edit = 0): { taken: Breakdown & { checker: number }; wiring: Wiring } {
   const t0 = performance.now()
   const wiring = wiringOf(graph, doc)
   const t1 = performance.now()
-  const index = new SpatialIndex(doc.objects, GRID)
-  const t2 = performance.now()
-  derived(wiring, index, view)
+  let state = fields.get(graph)
+  if (!state) fields.set(graph, state = new FieldState())
+  const field = state.commit(doc, wiring)
+  field.visible(view)
   const t3 = performance.now()
-  return { taken: { edit, wiring: t1 - t0, index: t2 - t1, derived: t3 - t2, total: edit + t3 - t0 }, wiring }
+  return { taken: { edit, wiring: t1 - t0, index: 0, derived: t3 - t1 - field.checkedIn, checker: field.checkedIn, total: edit + t3 - t0 }, wiring }
 }
 
 const mean = (runs: Breakdown[], of: keyof Breakdown) => runs.reduce((sum, r) => sum + r[of], 0) / runs.length
@@ -160,7 +152,7 @@ for (const doc of documents) {
   const runOn = (moving: ReadonlySet<string>) => {
     const graph = new WireGraph()
     let current = doc
-    let known = wiringOf(graph, current)
+    let known = commit(graph, current, view).wiring
     const runs: Breakdown[] = []
     for (let i = 0; i < WARMUP + ITERATIONS; i++) {
       const started = performance.now()
@@ -176,26 +168,18 @@ for (const doc of documents) {
   const drops = (() => {
     const graph = new WireGraph()
     let current = doc
-    let known = wiringOf(graph, current)
+    let known = commit(graph, current, view).wiring
     const runs: (Breakdown & { checker: number })[] = []
     for (let i = 0; i < WARMUP + ITERATIONS; i++) {
-      const drag = new PartDrag(current, known, { objects: one })
+      const drag = new PartDrag(current, known, { objects: one }, { index: known.index.spatial })
       const dx = i % 2 ? -GRID : GRID
       drag.frame(dx, 0)
       const started = performance.now()
       const landed = drag.landed(dx, 0, newId)
       const { taken, wiring } = commit(graph, landed.doc, view, performance.now() - started)
-      const checking = performance.now()
-      let checker = Infinity
-      try {
-        checked(landed.doc, wiring)
-        checker = performance.now() - checking
-      } catch {
-        checker = Infinity
-      }
       current = landed.doc
       known = wiring
-      if (i >= WARMUP) runs.push({ ...taken, checker, total: taken.total + checker })
+      if (i >= WARMUP) runs.push(taken)
     }
     return runs
   })()

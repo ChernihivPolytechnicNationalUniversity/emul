@@ -64,7 +64,14 @@ const sidesOfDirection = (direction: Direction): FieldSide[] => {
 
 type Placement = { def: ComponentDef; orientation: Orientation; body: Rect; pins: { at: Point; inner: Point; sides: FieldSide[] }[] }
 
+const placementCache = new WeakMap<ComponentDef, Map<string, Placement>>()
+
 function placementOf(def: ComponentDef, orientation: Orientation): Placement {
+  const key = `${orientation.rotation}:${orientation.mirror}`
+  let variants = placementCache.get(def)
+  if (!variants) placementCache.set(def, variants = new Map())
+  const cached = variants.get(key)
+  if (cached) return cached
   const { box, leads } = bodyAndLeads(def)
   const corners = [
     { x: box.x, y: box.y },
@@ -81,7 +88,9 @@ function placementOf(def: ComponentDef, orientation: Orientation): Placement {
     const inner = lead ? framePoint(def, orientation, lead[1]) : { x: placed.x, y: placed.y }
     return { at: { x: placed.x, y: placed.y }, inner, sides: sidesOfDirection(placed.side) }
   })
-  return { def, orientation, body, pins }
+  const placement = { def, orientation, body, pins }
+  variants.set(key, placement)
+  return placement
 }
 
 const isPowerSymbol = (def: ComponentDef) => def.pins.length === 1 && (def.pins[0].kind === "gnd" || def.pins[0].kind === "power")
@@ -116,11 +125,19 @@ function preferredSides(p: Placement): FieldSide[] {
 
 const pinsOn = (p: Placement, side: FieldSide) => p.pins.filter((pin) => pin.sides.includes(side))
 
-function chosenSide(p: Placement): { side: SideVector; pins: number } {
+type SideChoice = { side: SideVector; pins: number; maxX: number; minY: number }
+
+const sideChoices = new WeakMap<Placement, SideChoice>()
+
+function chosenSide(p: Placement): SideChoice {
+  const cached = sideChoices.get(p)
+  if (cached) return cached
   const order = preferredSides(p).map((name) => ({ side: SIDES[name], pins: pinsOn(p, name).length }))
-  const empty = order.find((s) => s.pins === 0)
-  if (empty) return empty
-  return order.reduce((best, s) => (s.pins < best.pins ? s : best))
+  const best = order.find((s) => s.pins === 0) ?? order.reduce((chosen, s) => s.pins < chosen.pins ? s : chosen)
+  const points = pinsOn(p, best.side.name).flatMap((pin) => [pin.at, pin.inner])
+  const choice = { ...best, maxX: Math.max(...points.map((point) => point.x)), minY: Math.min(...points.map((point) => point.y)) }
+  sideChoices.set(p, choice)
+  return choice
 }
 
 export function autoplaceSide(def: ComponentDef, orientation: Orientation): FieldSide {
@@ -148,7 +165,7 @@ type Sized = { template: FieldTemplate; text: string; w: number; h: number }
 const boxAt = (at: Point, anchor: TextAnchor, w: number, h: number): Rect => ({ x: anchor === "start" ? at.x : anchor === "end" ? at.x - w : at.x - w / 2, y: at.y - h / 2, w, h })
 
 function autoplaced(p: Placement, fields: readonly Sized[]): Placed[] {
-  const { side, pins } = chosenSide(p)
+  const { side, pins, maxX, minY } = chosenSide(p)
   const width = Math.max(...fields.map((f) => f.w))
   const height = fields.reduce((sum, f) => sum + roundedUp(f.h), 0)
   const centre = { x: p.body.x + p.body.w / 2, y: p.body.y + p.body.h / 2 }
@@ -157,10 +174,8 @@ function autoplaced(p: Placement, fields: readonly Sized[]): Placed[] {
   let x = centre.x + side.x * offsetX - width / 2
   let y = centre.y + side.y * offsetY - height / 2
   if (pins > 0) {
-    const onSide = pinsOn(p, side.name)
-    const points = onSide.flatMap((pin) => [pin.at, pin.inner])
-    if (side.y) x = Math.max(...points.map((q) => q.x)) + HPADDING * 2
-    else y = Math.min(...points.map((q) => q.y)) - (height + VPADDING * 2)
+    if (side.y) x = maxX + HPADDING * 2
+    else y = minY - (height + VPADDING * 2)
   }
   const justified: TextAnchor = pins > 0 ? (side.y ? "start" : "middle") : side.x > 0 ? "start" : side.x < 0 ? "end" : "middle"
   let top = y
