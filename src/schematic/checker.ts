@@ -376,10 +376,16 @@ const KIND_ORDER = new Map(CHECK_KINDS.map((k, i) => [k, i]))
 
 const inReadingOrder = (a: Finding, b: Finding) => KIND_ORDER.get(a.kind)! - KIND_ORDER.get(b.kind)! || a.at.x - b.at.x || a.at.y - b.at.y
 
+const MARK_PLACES_PER_UNIT = 1e6
+
+const settled = (v: number) => Math.round(v * MARK_PLACES_PER_UNIT) / MARK_PLACES_PER_UNIT
+
+const placedAt = (f: Finding, x: number, y: number): Finding => ({ ...f, at: { x: settled(x), y: settled(y) } })
+
 export function checked(doc: Schematic, wiring: Wiring = wiringOf(new WireGraph(), doc)): readonly Finding[] {
   const marked = new Set(doc.objects.filter(isMark).map((o) => codeOf(markAt(o))))
   const bodies = bodyBuckets(bodiesOf(doc.objects))
-  return [...danglingEnds(doc, wiring, marked), ...unconnectedPins(doc, wiring, marked), ...fourWays(doc, wiring), ...wiresThroughBodies(doc, bodies), ...fieldFindings(doc, bodies), ...parallelRuns(doc)].sort(inReadingOrder)
+  return [...danglingEnds(doc, wiring, marked), ...unconnectedPins(doc, wiring, marked), ...fourWays(doc, wiring), ...wiresThroughBodies(doc, bodies), ...fieldFindings(doc, bodies), ...parallelRuns(doc)].map((f) => placedAt(f, f.at.x, f.at.y)).sort(inReadingOrder)
 }
 
 
@@ -430,7 +436,7 @@ export class KeptChecker {
     const shift = translationOf(doc.objects, doc.wires)
     if (shift && shift.from === this.source?.objects && shift.fromWires === this.source.wires) {
       this.offset = { x: this.offset.x + shift.x, y: this.offset.y + shift.y }
-      this.findings = this.findings.map((f) => ({ ...f, at: { x: f.at.x + shift.x, y: f.at.y + shift.y } }))
+      this.findings = this.findings.map((f) => placedAt(f, f.at.x + shift.x, f.at.y + shift.y))
       this.source = doc
       return this.findings
     }
