@@ -6,7 +6,7 @@ import { commitEdit, normalise } from "@/schematic/wires/normal-form"
 import { SpatialIndex } from "@/schematic/spatial"
 import { checked, KeptChecker } from "@/schematic/checker"
 import { FieldState } from "@/schematic/field-state"
-import { placedFields, withFieldMoved } from "@/schematic/fields"
+import { placedFields, withFieldAt, withFieldMoved } from "@/schematic/fields"
 import { documentPins, editedObjects, pinsOf } from "@/schematic/pin-index"
 import { describe, expect, it, vi } from "vitest"
 import { retainedAfterCommits } from "../lib/wiring-retention"
@@ -218,6 +218,18 @@ describe("phase 5's edits keep the store's wiring and sheet equal to fresh ones 
 })
 
 describe("the maintained field commit has the same findings and queries as a fresh field", () => {
+
+  it("circular body collisions stay fresh across a field edit, undo and redo", () => {
+    const label: PlacedObject = { id: "R1", def: "resistor", x: 100 * GRID, y: 100 * GRID, props: { ref: "I", value: "" } }
+    const before: Schematic = { objects: [{ id: "V1", def: "voltmeter", x: 0, y: 0 }, label, ...Array.from({ length: 65 }, (_, i) => ({ id: `mark${i}`, def: "no-connect", x: (200 + i * 4) * GRID, y: 0 }))], wires: [{ id: "cross", a: { x: 1.5 * GRID, y: 1.5 * GRID }, b: { x: 1.5 * GRID, y: 3 * GRID } }], parts: {} }
+    const after = { ...before, objects: editedObjects(before.objects, before.objects.map((o) => o === label ? withFieldAt(o, "ref", { x: 1.5 * GRID, y: 1.5 * GRID }, GRID, getDef(o.def)!) : o), [label.id]) }
+    const graph = new WireGraph()
+    const checker = new KeptChecker()
+    for (const doc of [before, after, before, after]) {
+      const kept = wiringOf(graph, doc)
+      expect.soft(checker.update(doc, kept), "wire and field collisions with the circle").toEqual(checked(structuredClone(doc)))
+    }
+  })
 
   it("editing an interior pin's wire keeps directional body findings fresh through undo and redo", () => {
     const at = (x: number, y: number) => ({ x: x * GRID, y: y * GRID })

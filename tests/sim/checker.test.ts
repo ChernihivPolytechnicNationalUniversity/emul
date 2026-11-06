@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest"
 import { CHECK_KINDS, checked, LEVEL_OF, NO_CONNECT, type CheckKind, type Finding } from "@/schematic/checker"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, type Point } from "@/schematic/geometry"
-import { placedFields, withFieldMoved } from "@/schematic/fields"
+import { placedFields, withFieldAt, withFieldMoved } from "@/schematic/fields"
+import { getDef } from "@/schematic/registry"
 import { junctionsOf, pinPartition, WireGraph } from "@/schematic/wires/graph"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import { inNormalForm, wiringOf } from "@/schematic/wire-edits"
@@ -152,6 +153,21 @@ describe("four-way connections (design.md §6.8; junctions.md 13, 14; KiCad four
 })
 
 describe("a wire through a body (design.md §5.1, §6.8; inferred from ГОСТ 2.701-84's clearances, research/standards.md; IEC 61082-1 via a secondary source: connecting lines should not interfere with other symbols)", () => {
+  it("circular bodies catch wires and fields in every quadrant and clear their exterior", () => {
+    for (const def of ["voltmeter", "ammeter"]) for (const dx of [-1, 1]) for (const dy of [-1, 1]) {
+      const meter = part("M1", def, 0, 0, { props: { ref: "", value: "" } })
+      const x = 2 + dx * 0.5
+      const crossing = docOf([meter], [seg(at(x, 1 + dy * 0.5), at(x, 1 + dy * 2))])
+      const clear = docOf([meter], [seg(at(x, 1 + dy * 2), at(x, 1 + dy * 3))])
+      expect.soft(of(checked(crossing), "wire-through-body"), `${def}: wire in quadrant ${dx},${dy}`).toHaveLength(1)
+      expect.soft(of(checked(clear), "wire-through-body"), `${def}: exterior wire ${dx},${dy}`).toEqual([])
+      const label = part("R1", "resistor", 100, 100, { props: { ref: "I", value: "" } })
+      for (const radius of [0.5, 2]) {
+        const moved = withFieldAt(label, "ref", at(2 + dx * radius, 1 + dy * radius), GRID, getDef("resistor")!)
+        expect.soft(of(checked(docOf([meter, moved])), "field-on-body").filter((f) => f.objects.includes("R1")), `${def}: field radius ${radius}, quadrant ${dx},${dy}`).toHaveLength(radius === 0.5 ? 1 : 0)
+      }
+    }
+  })
 
   it("an interior pin exempts only the exit towards its outward side, at either segment end", () => {
     for (const reverse of [false, true]) for (const x of [0, 8]) {

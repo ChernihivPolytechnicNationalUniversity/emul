@@ -54,6 +54,127 @@ function shapePoints(shape: BodyShape): Point[] {
   return pathPoints(shape.d)
 }
 
+const OUTLINE_TOLERANCE = 0.005
+
+function ellipsePoints(center: Point, rx: number, ry: number, angle: number, start: number, span: number): Point[] {
+  const step = 2 * Math.acos(Math.max(-1, 1 - OUTLINE_TOLERANCE / Math.max(rx, ry, OUTLINE_TOLERANCE)))
+  const count = Math.max(4, Math.ceil(Math.abs(span) / step / 4) * 4)
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  return Array.from({ length: count + 1 }, (_, i) => {
+    const t = start + span * i / count
+    const x = rx * Math.cos(t)
+    const y = ry * Math.sin(t)
+    return { x: center.x + cos * x - sin * y, y: center.y + sin * x + cos * y }
+  })
+}
+
+function arcPoints(from: Point, to: Point, radiusX: number, radiusY: number, degrees: number, large: number, sweep: number): Point[] {
+  let rx = Math.abs(radiusX)
+  let ry = Math.abs(radiusY)
+  if (!rx || !ry || from.x === to.x && from.y === to.y) return [to]
+  const angle = degrees * Math.PI / 180
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  const dx = (from.x - to.x) / 2
+  const dy = (from.y - to.y) / 2
+  const x = cos * dx + sin * dy
+  const y = -sin * dx + cos * dy
+  const scale = Math.max(1, Math.hypot(x / rx, y / ry))
+  rx *= scale
+  ry *= scale
+  const factor = (large === sweep ? -1 : 1) * Math.sqrt(Math.max(0, (rx * ry) ** 2 - (rx * y) ** 2 - (ry * x) ** 2) / ((rx * y) ** 2 + (ry * x) ** 2))
+  const cx = factor * rx * y / ry
+  const cy = -factor * ry * x / rx
+  const center = { x: cos * cx - sin * cy + (from.x + to.x) / 2, y: sin * cx + cos * cy + (from.y + to.y) / 2 }
+  const start = Math.atan2((y - cy) / ry, (x - cx) / rx)
+  let span = Math.atan2((-y - cy) / ry, (-x - cx) / rx) - start
+  if (sweep && span < 0) span += 2 * Math.PI
+  if (!sweep && span > 0) span -= 2 * Math.PI
+  return [...ellipsePoints(center, rx, ry, angle, start, span), to]
+}
+
+function curvePoints(points: readonly Point[]): Point[] {
+  const a = points[0]
+  const b = points[points.length - 1]
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const length2 = dx * dx + dy * dy
+  const flat = points.slice(1, -1).every((p) => {
+    const t = length2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / length2)) : 0
+    return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy) <= OUTLINE_TOLERANCE
+  })
+  if (flat) return [a, b]
+  const left = [a]
+  const right = [b]
+  let row = [...points]
+  while (row.length > 1) {
+    row = row.slice(1).map((p, i) => ({ x: (row[i].x + p.x) / 2, y: (row[i].y + p.y) / 2 }))
+    left.push(row[0])
+    right.push(row[row.length - 1])
+  }
+  return [...curvePoints(left), ...curvePoints(right.reverse())]
+}
+
+function pathOutline(d: string): Point[] {
+  const tokens = d.match(COMMAND) ?? []
+  const points: Point[] = []
+  let at = { x: 0, y: 0 }
+  let start = at
+  let control = at
+  let previous = ""
+  let command = "M"
+  let i = 0
+  const number = () => Number(tokens[i++])
+  while (i < tokens.length) {
+    if (/[A-Za-z]/.test(tokens[i])) command = tokens[i++]
+    const upper = command.toUpperCase()
+    const base = command !== upper ? at : { x: 0, y: 0 }
+    const point = () => ({ x: base.x + number(), y: base.y + number() })
+    const reflected = () => ({ x: 2 * at.x - control.x, y: 2 * at.y - control.y })
+    if (upper === "Z") at = start
+    else if (upper === "H") at = { x: base.x + number(), y: at.y }
+    else if (upper === "V") at = { x: at.x, y: base.y + number() }
+    else if (upper === "A") {
+      const rx = number()
+      const ry = number()
+      const angle = number()
+      const large = number()
+      const sweep = number()
+      const end = point()
+      points.push(...arcPoints(at, end, rx, ry, angle, large, sweep))
+      at = end
+    } else if (upper === "C" || upper === "S") {
+      const first = upper === "C" ? point() : previous === "C" || previous === "S" ? reflected() : at
+      const second = point()
+      const end = point()
+      points.push(...curvePoints([at, first, second, end]))
+      control = second
+      at = end
+    } else if (upper === "Q" || upper === "T") {
+      const first = upper === "Q" ? point() : previous === "Q" || previous === "T" ? reflected() : at
+      const end = point()
+      points.push(...curvePoints([at, first, end]))
+      control = first
+      at = end
+    } else at = point()
+    points.push(at)
+    if (upper === "M") {
+      start = at
+      command = command === "m" ? "l" : "L"
+    }
+    previous = upper
+  }
+  return points
+}
+
+function outlinePoints(shape: BodyShape): Point[] {
+  if (shape.type === "text") return []
+  if (shape.type === "circle") return ellipsePoints({ x: shape.cx, y: shape.cy }, shape.r, shape.r, 0, 0, 2 * Math.PI)
+  if (shape.type === "path" || shape.type === "art") return pathOutline(shape.d)
+  return rectCorners(shape)
+}
+
 const bounds = new WeakMap<ComponentDef, Rect>()
 
 export function bodyBounds(def: ComponentDef): Rect {
@@ -153,9 +274,9 @@ function onLeadPastItsBody(p: Point, [pin, body]: Lead) {
 }
 
 function shapeExtent(shape: BodyShape, pins: readonly PinDef[]): { leads: Lead[]; points: Point[] } {
-  if (shape.type !== "path") return { leads: [], points: shapePoints(shape) }
+  if (shape.type !== "path") return { leads: [], points: outlinePoints(shape) }
   const leads = subpathsOf(shape.d).flatMap((subpath) => leadsOf(subpath, pins))
-  return { leads, points: pathPoints(shape.d).filter((p) => !leads.some((lead) => onLeadPastItsBody(p, lead))) }
+  return { leads, points: outlinePoints(shape).filter((p) => !leads.some((lead) => onLeadPastItsBody(p, lead))) }
 }
 
 const PART_REACH = 0.5
@@ -163,9 +284,9 @@ const SWITCH_THROW = 0.4
 const THINNEST_BODY = 0.4
 
 function partExtent(part: PartDef): Point[] {
-  if ("w" in part && "h" in part && typeof part.w === "number" && typeof part.h === "number") return [{ x: part.x, y: part.y }, { x: part.x + part.w, y: part.y + part.h }]
-  if ("span" in part && typeof part.span === "number") return [{ x: part.x, y: part.y - SWITCH_THROW }, { x: part.x + part.span, y: part.y + SWITCH_THROW }]
-  return [{ x: part.x - PART_REACH, y: part.y - PART_REACH }, { x: part.x + PART_REACH, y: part.y + PART_REACH }]
+  if ("w" in part && "h" in part && typeof part.w === "number" && typeof part.h === "number") return rectCorners({ x: part.x, y: part.y, w: part.w, h: part.h })
+  if ("span" in part && typeof part.span === "number") return rectCorners({ x: part.x, y: part.y - SWITCH_THROW, w: part.span, h: 2 * SWITCH_THROW })
+  return rectCorners({ x: part.x - PART_REACH, y: part.y - PART_REACH, w: 2 * PART_REACH, h: 2 * PART_REACH })
 }
 
 function atLeastThick(r: Rect): Rect {
