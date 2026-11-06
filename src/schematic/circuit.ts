@@ -100,7 +100,7 @@ export function flowVertices(runs: readonly Run[], pins: readonly WirePin[]): { 
 
 export function flowGraph(runs: readonly Run[], pins: readonly WirePin[]): FlowGraph {
   const vertices = flowVertices(runs, pins)
-  return { runs: vertices.runs, pins: Object.fromEntries(vertices.pins) }
+  return { runs: vertices.runs.sort((a, b) => a.id.localeCompare(b.id)), pins: Object.fromEntries(vertices.pins) }
 }
 
 export function circuitOf(doc: Pick<Schematic, "objects" | "wires" | "library">): Circuit {

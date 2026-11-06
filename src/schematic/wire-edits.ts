@@ -733,7 +733,7 @@ function derivedWiring(graph: WireGraph, doc: Pick<Schematic, "objects" | "wires
   const collections: CircuitCollections = {
     nets: !groupsChanged ? previous!.collections.nets : new Deferred(() => [...lookByNet.values()].flatMap((look) => look.group ? [look.group] : []).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
     wired: !wiredChanged ? previous!.collections.wired : new Deferred(() => [...lookByNet.values()].flatMap((look) => look.wired).sort()),
-    flow: !flowChanged ? previous!.collections.flow : new Deferred(() => ({ runs: orderedRuns().runs.map((run) => lookByNet.get(netByRun.get(run.id)!)!.flowOf.get(run.id)!), pins: Object.fromEntries([...lookByNet.values()].flatMap((look) => look.pinVertex)) })),
+    flow: !flowChanged ? previous!.collections.flow : new Deferred(() => ({ runs: orderedRuns().runs.map((run) => lookByNet.get(netByRun.get(run.id)!)!.flowOf.get(run.id)!).sort((a, b) => a.id.localeCompare(b.id)), pins: Object.fromEntries([...lookByNet.values()].flatMap((look) => look.pinVertex)) })),
   }
   const makeCircuit = (): Circuit => ({ objects: doc.objects, library: doc.library, get nets() { return collections.nets.read() }, get wired() { return collections.wired.read() }, get flow() { return collections.flow.read() } })
   const corners = previous ? [...previous.wiring.corners.filter((corner) => !removedCorners.has(corner)), ...changedCorners] : changedCorners

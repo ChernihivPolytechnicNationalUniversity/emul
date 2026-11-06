@@ -59,6 +59,23 @@ function shape(w: Wiring) {
 }
 
 describe("the wiring kept up to date across edits is the wiring built afresh (design.md §11: the commit touches only what changed)", () => {
+  it.each([true, false])("reordering wires preserves canonical flow with an early collection read of %s", (early) => {
+    const before: Schematic = { objects: [], wires: [{ id: "b", a: { x: 0, y: 0 }, b: { x: 2 * GRID, y: 0 } }, { id: "a", a: { x: 0, y: 2 * GRID }, b: { x: 2 * GRID, y: 2 * GRID } }], parts: {} }
+    const graph = new WireGraph()
+    const first = wiringOf(graph, before)
+    if (early) void first.circuit.flow
+    const after = { ...before, wires: [...before.wires].reverse() }
+    const second = wiringOf(graph, after)
+    const third = wiringOf(graph, before)
+    const original = first.circuit.flow
+    for (const [doc, kept] of [[before, first], [after, second], [before, third]] as const) {
+      const fresh = circuitOf(structuredClone(doc))
+      expect.soft(kept.circuit.flow.runs.map((run) => run.id), "run identity determines flow order").toEqual(["a", "b"])
+      expect.soft(kept.circuit, "kept equals independently fresh after a reorder").toEqual(fresh)
+      expect.soft(kept.circuit.flow, "a harmless reorder reuses the flow collection").toBe(original)
+    }
+  })
+
   it.each(["metronome", "nucleo-74hc595", "system-exam", "power-supply"])("%s: forty random moves, translations, deletions and recolourings", (id) => {
     const rng = random(id.length * 7919)
     let doc: Schematic = { ...examples.find((e) => e.id === id)!.build(GRID) }
