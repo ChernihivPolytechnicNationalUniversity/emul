@@ -13,7 +13,7 @@ import { OverlayMap } from "./wires/overlay-map"
 import { lineCodeOf, columnCode, rowCode, WireSheet } from "./wires/sheet"
 import { commitEdit, normalise, normaliseEdit } from "./wires/normal-form"
 import { splicedAt } from "./splice"
-import { contains, exactPointCode, highOf, lowOf, pointKey, samePoint, seededIds, type PointCode, type WirePin, type WireSegment } from "./wires/segment"
+import { contains, exactPointCode, highOf, lowOf, samePoint, seededIds, type PointCode, type WirePin, type WireSegment } from "./wires/segment"
 
 export { pinsOf } from "./pin-index"
 import { documentPins, editedObjects, translatedObjects, translationOf, pinsOf, type PinState } from "./pin-index"
@@ -64,12 +64,26 @@ function laid(doc: Schematic, wire: LegacyWire, own: ReadonlySet<string>, object
 
 const netOrSelf = (view: WireNets, key: string) => view.netOfPin(key) ?? `pin:${key}`
 
-type Committed = { from: readonly WireSegment[]; added: readonly WireSegment[]; removed: readonly WireSegment[] }
+type Committed = { added: readonly WireSegment[]; removed: readonly WireSegment[] }
+type Revision = { previous?: WeakRef<Revision>; edit?: Committed }
 
-const committed = new WeakMap<readonly WireSegment[], Committed>()
+const committed = new WeakMap<readonly WireSegment[], Revision>()
+
+function revisionOf(wires: readonly WireSegment[]): Revision {
+  let revision = committed.get(wires)
+  if (!revision) committed.set(wires, revision = {})
+  return revision
+}
+
 const wireOrders = new WeakMap<readonly WireSegment[], ReadonlyMap<WireSegment, number>>()
+const orderParents = new WeakMap<ReadonlyMap<WireSegment, number>, object>()
+const orderIdentities = new WeakMap<ReadonlyMap<WireSegment, number>, object>()
 
-const orderParents = new WeakMap<ReadonlyMap<WireSegment, number>, ReadonlyMap<WireSegment, number>>()
+function orderIdentity(order: ReadonlyMap<WireSegment, number>): object {
+  let identity = orderIdentities.get(order)
+  if (!identity) orderIdentities.set(order, identity = {})
+  return identity
+}
 
 export function wireOrder(wires: readonly WireSegment[]): ReadonlyMap<WireSegment, number> {
   let order = wireOrders.get(wires)
@@ -77,7 +91,7 @@ export function wireOrder(wires: readonly WireSegment[]): ReadonlyMap<WireSegmen
   return order
 }
 
-export const keepsRanks = (order: ReadonlyMap<WireSegment, number>, previous: ReadonlyMap<WireSegment, number>) => order === previous || orderParents.get(order) === previous
+export const keepsRanks = (order: ReadonlyMap<WireSegment, number>, previous: ReadonlyMap<WireSegment, number>) => order === previous || orderParents.get(order) === orderIdentity(previous)
 
 export function withSegments(doc: Schematic, add: readonly WireSegment[], remove: readonly WireSegment[] = [], points: readonly Point[] = [], newId: NewId = randomId): Schematic {
   if (!add.length && !remove.length && !points.length) return doc
@@ -86,28 +100,29 @@ export function withSegments(doc: Schematic, add: readonly WireSegment[], remove
   if (!result.added.length && !result.removed.length && !add.length && !remove.length) return doc
   if (result.wires === doc.wires) return doc
   const wires = result.wires as WireSegment[]
-  committed.set(wires, { from: doc.wires, added: result.added, removed: result.removed })
+  committed.set(wires, { previous: new WeakRef(revisionOf(doc.wires)), edit: { added: result.added, removed: result.removed } })
   return { ...doc, wires }
 }
 
-const latestSheets = new WeakMap<readonly WireSegment[], { sheet: WireSheet; wires: readonly WireSegment[] }>()
-const sheetSources = new WeakMap<WireSheet, readonly WireSegment[]>()
+const latestSheets = new WeakMap<Revision, WireSheet>()
+const sheetSources = new WeakMap<WireSheet, Revision>()
 
 export function keepSheet(wires: readonly WireSegment[], sheet: WireSheet) {
-  latestSheets.set(wires, { sheet, wires })
-  sheetSources.set(sheet, wires)
+  const revision = revisionOf(wires)
+  latestSheets.set(revision, sheet)
+  sheetSources.set(sheet, revision)
 }
 
 function nearbySheet(wires: readonly WireSegment[]) {
-  let source = wires
+  let source = revisionOf(wires)
   const steps: Committed[] = []
   for (let i = 0; i < 16; i++) {
     const held = latestSheets.get(source)
-    if (held && sheetSources.get(held.sheet) === source) return { sheet: held.sheet, steps: steps.reverse() }
-    const edit = committed.get(source)
-    if (!edit) return undefined
-    steps.push(edit)
-    source = edit.from
+    if (held && sheetSources.get(held) === source) return { sheet: held, steps: steps.reverse() }
+    const previous = source.previous?.deref()
+    if (!source.edit || !previous) return undefined
+    steps.push(source.edit)
+    source = previous
   }
 }
 
@@ -271,7 +286,7 @@ function localCommit(doc: Schematic, add: readonly WireSegment[], remove: readon
   if (ordered) {
     const next = new OverlayMap(order, ranks, new Set([...remove, ...result.removed]))
     wireOrders.set(wires, next)
-    orderParents.set(next, order)
+    orderParents.set(next, orderIdentity(order))
   }
   return { wires, added: result.added, removed: result.removed }
 }
@@ -573,11 +588,12 @@ function lookOf(view: WireNets, net: string): NetLook {
     get runs() { return flowOf ??= new Map(flow().runs.map((r) => [r.id, r])) },
     get pins() { return runs.length ? flow().pins : [] },
   }
-  const ends = new Set(segments.flatMap((t) => [pointKey(t.a), pointKey(t.b)]))
-  const firstAt = new Map<string, string>()
+  const ends = new Set<PointCode>()
+  for (const s of segments) { ends.add(exactPointCode(s.a)); ends.add(exactPointCode(s.b)) }
+  const firstAt = new Map<PointCode, string>()
   const contacts: (readonly [string, string])[] = []
   for (const pin of pins) {
-    const at = pointKey(pin.at)
+    const at = exactPointCode(pin.at)
     const first = firstAt.get(at)
     if (first === undefined) firstAt.set(at, pin.key)
     else {
@@ -592,7 +608,7 @@ function lookOf(view: WireNets, net: string): NetLook {
     get flowOf() { return electrical.runs },
     runIds: runs.map((r) => r.id),
     get pinVertex() { return electrical.pins },
-    wired: pins.filter((pin) => ends.has(pointKey(pin.at))).map((pin) => pin.key),
+    wired: pins.filter((pin) => ends.has(exactPointCode(pin.at))).map((pin) => pin.key),
     group: pins.length > 1 ? pins.map((pin) => pin.key).sort() : null,
     contacts,
     corners: turns.corners,
@@ -635,7 +651,7 @@ function derivedWiring(graph: WireGraph, doc: Pick<Schematic, "objects" | "wires
     for (const s of step.removed) { if (!additions.delete(s)) removals.add(s) }
     for (const s of step.added) { if (!removals.delete(s)) additions.add(s) }
   }
-  const edit = steps ? { from: previous!.wiring.source.wires, added: [...additions], removed: [...removals] } : committed.get(doc.wires)
+  const edit = steps ? { from: previous!.wiring.source.wires, added: [...additions], removed: [...removals] } : undefined
   const active = index.active(doc.wires, previous?.wiring.index, edit, previous?.pins, previous?.wiring.source.wires)
   let pins: readonly WirePin[] | undefined
   const delta = previous && steps && index.pinDelta ? { added: edit!.added, removed: edit!.removed, pinsAdded: index.pinDelta.added, pinsRemoved: index.pinDelta.removed } : undefined
@@ -793,24 +809,29 @@ const sheets = new WeakMap<WireGraph, KeptSheet>()
 const SHEET_STEPS = 16
 
 function editsBetween(from: readonly WireSegment[], to: readonly WireSegment[]): Committed[] | null {
-  const ancestors = new Map<readonly WireSegment[], Committed[]>()
-  let source = from
+  if (from === to) return []
+  const sourceRevision = revisionOf(from)
+  const targetRevision = revisionOf(to)
+  if (targetRevision.edit && targetRevision.previous?.deref() === sourceRevision) return [targetRevision.edit]
+  if (sourceRevision.edit && sourceRevision.previous?.deref() === targetRevision) return [{ added: sourceRevision.edit.removed, removed: sourceRevision.edit.added }]
+  const ancestors = new Map<Revision, number>()
+  let source = sourceRevision
   const backwards: Committed[] = []
   for (let i = 0; i <= SHEET_STEPS; i++) {
-    ancestors.set(source, [...backwards])
-    const edit = committed.get(source)
-    if (!edit) break
-    backwards.push({ from: source, added: edit.removed, removed: edit.added })
-    source = edit.from
+    ancestors.set(source, backwards.length)
+    const previous = source.previous?.deref()
+    if (!source.edit || !previous) break
+    backwards.push({ added: source.edit.removed, removed: source.edit.added })
+    source = previous
   }
   const forward: Committed[] = []
-  for (let target = to; forward.length <= SHEET_STEPS;) {
+  for (let target = targetRevision; forward.length <= SHEET_STEPS;) {
     const before = ancestors.get(target)
-    if (before) return [...before, ...forward.reverse()]
-    const edit = committed.get(target)
-    if (!edit) return null
-    forward.push(edit)
-    target = edit.from
+    if (before !== undefined) return [...backwards.slice(0, before), ...forward.reverse()]
+    const previous = target.previous?.deref()
+    if (!target.edit || !previous) return null
+    forward.push(target.edit)
+    target = previous
   }
   return null
 }

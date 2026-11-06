@@ -10,7 +10,10 @@ import {
   lineOf,
   lowOf,
   onLattice,
-  pointKey,
+  exactPointCode,
+  isHorizontalLine,
+  lineCoordinate,
+  type PointCode,
   pointOnLine,
   samePoint,
   verticalLine,
@@ -38,7 +41,7 @@ type Span = { lo: number; hi: number }
 class WireIndex {
   readonly byLine = new Map<LineKey, number[]>()
   readonly cutsOnLine = new Map<LineKey, number[]>()
-  readonly pinsAt = new Map<string, number>()
+  readonly pinsAt = new Map<PointCode, number>()
   readonly wires: readonly WireSegment[]
   private readonly indexed = new Set<number>()
 
@@ -60,7 +63,7 @@ class WireIndex {
   }
 
   addPin(pin: WirePin) {
-    const key = pointKey(pin.at)
+    const key = exactPointCode(pin.at)
     this.pinsAt.set(key, (this.pinsAt.get(key) ?? 0) + 1)
     if (!pin.socket) this.cut(pin.at)
   }
@@ -81,7 +84,7 @@ class WireIndex {
       for (const i of order) furthest.push(Math.max(furthest[furthest.length - 1] ?? -Infinity, highOf(this.wires[i])))
       this.reach.set(line, (known = { starts, furthest }))
     }
-    const at = line[0] === "h" ? p.x : p.y
+    const at = isHorizontalLine(line) ? p.x : p.y
     let lo = 0
     let hi = known.starts.length
     while (lo < hi) {
@@ -136,7 +139,7 @@ function spansOf(wires: readonly WireSegment[], members: ReadonlySet<number>): M
 function aroundRuns(index: WireIndex, pins: readonly WirePin[], spans: ReadonlyMap<LineKey, Span>) {
   const rows: number[] = []
   const columns: number[] = []
-  for (const [line, span] of spans) (line[0] === "h" ? rows : columns).push(Number(line.slice(1)), span.lo, span.hi)
+  for (const [line, span] of spans) (isHorizontalLine(line) ? rows : columns).push(lineCoordinate(line), span.lo, span.hi)
   const wires = index.wires
   for (let i = 0; i < wires.length; i++) {
     const { a, b } = wires[i]
@@ -156,7 +159,7 @@ function aroundRuns(index: WireIndex, pins: readonly WirePin[], spans: ReadonlyM
   }
   const rowSpans = new Map<number, Span>()
   const columnSpans = new Map<number, Span>()
-  for (const [line, span] of spans) (line[0] === "h" ? rowSpans : columnSpans).set(Number(line.slice(1)), span)
+  for (const [line, span] of spans) (isHorizontalLine(line) ? rowSpans : columnSpans).set(lineCoordinate(line), span)
   for (const pin of pins) {
     const { x, y } = pin.at
     const row = rowSpans.get(y)
@@ -230,7 +233,7 @@ type Run = { line: LineKey; lo: number; hi: number; primary: number; color: Wire
 function mergeable(index: WireIndex, run: Run, at: number, next: WireSegment): boolean {
   if (run.color !== next.color) return false
   const p = pointOnLine(run.line, at)
-  if (index.pinsAt.has(pointKey(p))) return false
+  if (index.pinsAt.has(exactPointCode(p))) return false
   return !index.passesThrough(p, crossLineThrough(run.line, p))
 }
 
@@ -304,7 +307,7 @@ function runsOnLine(index: WireIndex, line: LineKey, members: readonly number[],
     const hi = stops[k + 1]
     while (next < byStart.length && lowOf(wires[byStart[next]]) <= lo) open.push(byStart[next++])
     while (open.size && highOf(wires[open.peek()]) <= lo) open.pop()
-    if (open.size && offLattice.has(lo)) throw new Error(`a pin at ${lo} on ${line} lies on a wire but off the half-cell lattice`)
+    if (open.size && offLattice.has(lo)) throw new Error(`a pin at ${lo} on ${isHorizontalLine(line) ? "h" : "v"}${lineCoordinate(line)} lies on a wire but off the half-cell lattice`)
     if (!open.size) {
       if (run) emit(run)
       run = null

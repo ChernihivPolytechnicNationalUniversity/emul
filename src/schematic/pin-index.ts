@@ -187,6 +187,31 @@ function pinState(wires: readonly WireSegment[], byOwner: PinState["byOwner"], e
   return { wires, byOwner, ends, get pins() { return pins ??= [...byOwner.values()].flat() } }
 }
 
+class PositionedObjects implements ReadonlyMap<string, PlacedObject> {
+  private readonly source: readonly PlacedObject[]
+  private readonly positions: ReadonlyMap<string, number>
+
+  constructor(source: readonly PlacedObject[], positions: ReadonlyMap<string, number>) {
+    this.source = source
+    this.positions = positions
+  }
+
+  get(id: string): PlacedObject | undefined {
+    const position = this.positions.get(id)
+    return position === undefined ? undefined : this.source[position]
+  }
+
+  has(id: string) { return this.positions.has(id) }
+  get size() { return this.source.length }
+  keys() { return this.positions.keys() }
+  values() { return this.source.values() }
+  entries() { return this.source.map((object) => [object.id, object] as [string, PlacedObject]).values() }
+  [Symbol.iterator]() { return this.entries() }
+  forEach(callback: (value: PlacedObject, key: string, map: ReadonlyMap<string, PlacedObject>) => void, thisArg?: unknown) {
+    for (const object of this.source) callback.call(thisArg, object, object.id, this)
+  }
+}
+
 export class DocumentPins {
   readonly version = `${getDefsVersion()}:${getLibraryVersion()}`
   readonly objects: ReadonlyMap<string, PlacedObject>
@@ -204,7 +229,13 @@ export class DocumentPins {
   constructor(source: readonly PlacedObject[], previous?: DocumentPins) {
     this.source = source
     const edit = objectEdits.get(source)
-    if (previous && edit?.from.deref() === previous.source && source.length === previous.source.length) {
+    const shift = translations.get(source)
+    if (previous && shift?.from.deref() === previous.source) {
+      this.positions = previous.positions
+      this.objects = new PositionedObjects(source, this.positions)
+      this.spatial = new SpatialIndex(source, GRID, previous.spatial, [], undefined, shift)
+      this.pinSpatial = new SpatialIndex(source, GRID, previous.pinSpatial, [], pinBounds, shift)
+    } else if (previous && edit?.from.deref() === previous.source && source.length === previous.source.length) {
       const changed = new Map<string, PlacedObject>()
       const indices: number[] = []
       for (const id of edit.ids) {

@@ -15,7 +15,11 @@ export class OverlayMap<K, V> implements ReadonlyMap<K, V> {
         const older = layers.pop()!
         const merged = new Map(older.changes)
         const deleted = new Set(older.removed)
-        for (const key of newer.removed) { merged.delete(key); deleted.add(key) }
+        for (const key of newer.removed) {
+          merged.delete(key)
+          if (this.base.has(key) || layers.some((layer) => layer.changes.has(key))) deleted.add(key)
+          else deleted.delete(key)
+        }
         for (const [key, value] of newer.changes) merged.set(key, value)
         layers.push({ changes: merged, removed: deleted, weight: older.weight + newer.weight })
       }

@@ -2,13 +2,18 @@ import { tiled } from "../../scripts/lib/stress"
 import type { HdlNetlist } from "emul-shared/hdl"
 import counter from "./hdl/counter.json"
 import { getDef, setLibrary } from "@/schematic/registry"
-import { commitEdit } from "@/schematic/wires/normal-form"
+import { commitEdit, normalise } from "@/schematic/wires/normal-form"
 import { SpatialIndex } from "@/schematic/spatial"
 import { checked, KeptChecker } from "@/schematic/checker"
 import { FieldState } from "@/schematic/field-state"
 import { placedFields, withFieldMoved } from "@/schematic/fields"
 import { documentPins, editedObjects, pinsOf } from "@/schematic/pin-index"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { retainedAfterCommits } from "../lib/wiring-retention"
+import * as segmentKeys from "@/schematic/wires/segment"
+import { OverlayMap } from "@/schematic/wires/overlay-map"
+import { runsOf, flowVertices } from "@/schematic/circuit"
+import { turnsAtPins } from "@/schematic/wire-look"
 import { circuitOf } from "@/schematic/circuit"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, routeBox, touches, type Point } from "@/schematic/geometry"
@@ -504,4 +509,207 @@ it("a part's fields, laid out once for its definition, orientation and text, equ
       expect.soft(placedFields(o, GRID), `${part.id} step ${step}`).toEqual(fresh(o))
     }
   }
+})
+
+
+describe("commit allocation stays bounded by the changed region", () => {
+  it("old wire lists and transient wire ranks can be collected while the latest wiring is kept", async () => {
+    const result = await retainedAfterCommits()
+    expect.soft(result.latest).toBe(250)
+    expect.soft(result.lists, "only the latest commit's predecessor is needed by the field").toBeLessThanOrEqual(2)
+    expect.soft(result.segments, "rank ancestry must not retain every replaced segment").toBeLessThanOrEqual(8)
+  })
+
+  it("recording a wire edit creates no weak reference to a whole wire list", () => {
+    const before: Schematic = { objects: [], wires: [{ id: "s", a: { x: 0, y: 0 }, b: { x: GRID, y: 0 } }], parts: {} }
+    const NativeWeakRef = globalThis.WeakRef
+    let lists = 0
+    class TrackedWeakRef extends NativeWeakRef<object> {
+      constructor(value: object) {
+        super(value)
+        if (Array.isArray(value)) lists++
+      }
+    }
+    vi.stubGlobal("WeakRef", TrackedWeakRef)
+    let after: Schematic
+    try {
+      after = withSegments(before, [{ ...before.wires[0], b: { x: 2 * GRID, y: 0 } }], before.wires)
+      expect.soft(lists, "a weak target stays alive until the current JavaScript task ends").toBe(0)
+    } finally { vi.stubGlobal("WeakRef", NativeWeakRef) }
+    expect.soft(after!.wires[0].b.x).toBe(2 * GRID)
+  })
+
+  it("a direct commit and undo read at most eight weak predecessors after a long edit history", () => {
+    let doc: Schematic = { objects: [], wires: [{ id: "s", a: { x: 0, y: 0 }, b: { x: GRID, y: 0 } }], parts: {} }
+    const graph = new WireGraph()
+    for (let i = 0; i < 80; i++) {
+      wiringOf(graph, doc)
+      doc = withSegments(doc, [{ ...doc.wires[0], b: { x: (i + 2) * GRID, y: 0 } }], doc.wires)
+    }
+    wiringOf(graph, doc)
+    const after = withSegments(doc, [{ ...doc.wires[0], b: { x: 100 * GRID, y: 0 } }], doc.wires)
+    for (const current of [after, doc, after]) {
+      const reads = vi.spyOn(WeakRef.prototype, "deref")
+      let known: Wiring
+      try {
+        known = wiringOf(graph, current)
+        expect.soft(reads.mock.calls.length, "the adjacent edit needs no ancestor table").toBeLessThanOrEqual(8)
+      } finally { reads.mockRestore() }
+      expect.soft(shape(known!)).toEqual(shape(wiringOf(new WireGraph(), current)))
+    }
+  })
+
+  it("a thousand insertions and deletions retain no tombstones for keys absent from the base or earlier layers", () => {
+    const base = new Map([["base", 1]])
+    let kept: ReadonlyMap<string, number> = base
+    const snapshots: ReadonlyMap<string, number>[] = []
+    for (let i = 0; i < 1024; i++) {
+      kept = new OverlayMap(kept, new Map([[`temporary${i}`, i]]), new Set(i ? [`temporary${i - 1}`] : []))
+      if (i % 128 === 0) snapshots.push(kept)
+    }
+    expect.soft([...kept]).toEqual([["base", 1], ["temporary1023", 1023]])
+    const layers = Reflect.get(kept, "layers") as { removed: ReadonlySet<string> }[]
+    expect.soft(layers.reduce((n, layer) => n + layer.removed.size, 0), "deleting a transient key cancels its insertion").toBe(0)
+    for (let i = 0; i < snapshots.length; i++) expect.soft([...snapshots[i]]).toEqual([["base", 1], [`temporary${i * 128}`, i * 128]])
+    const deleted = new OverlayMap(kept, new Map(), new Set(["base"]))
+    const restored = new OverlayMap(deleted, new Map([["base", 2]]), new Set())
+    expect.soft([...restored]).toEqual([["temporary1023", 1023], ["base", 2]])
+  })
+
+  it("one moved part copies fewer than 256 rectangle slots and shares visitation storage across readable snapshots", () => {
+    const objects: PlacedObject[] = Array.from({ length: 5010 }, (_, i) => ({ id: `R${i}`, def: "resistor", x: i * 32 * GRID, y: 0 }))
+    const before = new SpatialIndex(objects, GRID)
+    const next = objects.slice()
+    next[65] = { ...next[65], x: -64 * GRID }
+    const after = new SpatialIndex(next, GRID, before, [65])
+    const oldPages = Reflect.get(before, "rects") as readonly (readonly unknown[])[]
+    const pages = Reflect.get(after, "rects") as readonly (readonly unknown[])[]
+    const allocated = pages.length + pages.reduce((n, page, i) => n + (page === oldPages[i] ? 0 : Array.isArray(page) ? page.length : 1), 0)
+    expect.soft(allocated).toBeLessThan(256)
+    expect.soft(Reflect.get(after, "returned")).toBeDefined()
+    expect.soft(Reflect.get(after, "returned")).toBe(Reflect.get(before, "returned"))
+    const fresh = new SpatialIndex(next, GRID)
+    for (const box of [{ x: -65 * GRID, y: -GRID, w: 8 * GRID, h: 8 * GRID }, { x: 0, y: -GRID, w: 200000 * GRID, h: 8 * GRID }]) {
+      const ids = (items: readonly PlacedObject[]) => items.map((o) => o.id).sort()
+      for (let i = 0; i < 3; i++) {
+        expect.soft(ids(after.meeting(box))).toEqual(ids(fresh.meeting(box)))
+        expect.soft(ids(before.meeting(box))).toEqual(ids(new SpatialIndex(objects, GRID).meeting(box)))
+        expect.soft(after.overlaps(box)).toBe(fresh.overlaps(box))
+      }
+    }
+    Reflect.get(after, "returned").visits = 0x7fffffff
+    expect.soft(after.meeting({ x: -65 * GRID, y: -GRID, w: 8 * GRID, h: 8 * GRID })).toContain(next[65])
+  })
+
+  it("a whole translation shares rectangle pages, then local edits and old snapshots answer as fresh indexes", () => {
+    const objects: PlacedObject[] = Array.from({ length: 130 }, (_, i) => ({ id: `R${i}`, def: "resistor", x: i * GRID * 8, y: (i % 3) * GRID }))
+    let reads = 0
+    const bounds = (object: PlacedObject) => { reads++; return { x: object.x, y: object.y, w: 3 * GRID, h: 2 * GRID } }
+    const initial = new SpatialIndex(objects, GRID, undefined, undefined, bounds)
+    const translated = objects.map((o) => ({ ...o, x: o.x - 65 * GRID, y: o.y + 33 * GRID }))
+    reads = 0
+    const shifted = new SpatialIndex(translated, GRID, initial, [], bounds, { x: -65 * GRID, y: 33 * GRID })
+    expect.soft(reads, "translation allocates no per-object bounds").toBe(0)
+    expect.soft(Reflect.get(shifted, "rects")).toBe(Reflect.get(initial, "rects"))
+    const next = translated.slice()
+    next[65] = { ...next[65], x: -150 * GRID, y: -50 * GRID }
+    const edited = new SpatialIndex(next, GRID, shifted, [65], bounds)
+    const states = [[objects, initial], [translated, shifted], [next, edited]] as const
+    for (const [source, index] of states) {
+      const fresh = new SpatialIndex(source, GRID, undefined, undefined, bounds)
+      for (const box of [{ x: -200 * GRID, y: -100 * GRID, w: 400 * GRID, h: 200 * GRID }, { x: -1e9, y: -1e9, w: 2e9, h: 2e9 }, { x: 0, y: 33 * GRID, w: 10 * GRID, h: 10 * GRID }]) {
+        const ids = (list: readonly PlacedObject[]) => list.map((o) => o.id).sort()
+        expect.soft(ids(index.query(box))).toEqual(ids(fresh.query(box)))
+        expect.soft(ids(index.meeting(box))).toEqual(ids(fresh.meeting(box)))
+        expect.soft(index.overlaps(box)).toBe(fresh.overlaps(box))
+      }
+    }
+    const doc: Schematic = { objects, wires: [], parts: {} }
+    const graph = new WireGraph()
+    const before = wiringOf(graph, doc)
+    const movedDoc = moved(doc, new Map(objects.map((o) => [o.id, { x: o.x, y: o.y }])), -65 * GRID, 33 * GRID, undefined, before)
+    const kept = wiringOf(graph, movedDoc)
+    expect.soft(Reflect.get(kept.index.spatial, "rects"), "the document index uses the shared translation").toBe(Reflect.get(before.index.spatial, "rects"))
+    expect.soft(Reflect.get(kept.index.objects, "source")).toBe(movedDoc.objects)
+    expect.soft(Reflect.get(kept.index.objects, "positions")).toBe(Reflect.get(before.index, "positions"))
+    expect.soft([...kept.index.objects]).toEqual(movedDoc.objects.map((o) => [o.id, o]))
+    expect.soft([...kept.index.objects.keys()]).toEqual(objects.map((o) => o.id))
+    expect.soft([...kept.index.objects.values()]).toEqual(movedDoc.objects)
+    expect.soft(kept.index.objects.size).toBe(objects.length)
+    const visited: PlacedObject[] = []
+    kept.index.objects.forEach((o, id, map) => { expect.soft(map.get(id)).toBe(o); visited.push(o) })
+    expect.soft(visited).toEqual(movedDoc.objects)
+    expect.soft(kept.index.objects.has("R65")).toBe(true)
+    expect.soft(kept.index.objects.get("absent")).toBeUndefined()
+    expect.soft(kept.index.within({ x: -1000 * GRID, y: -1000 * GRID, w: 3000 * GRID, h: 3000 * GRID })).toEqual(documentPins([...movedDoc.objects]).within({ x: -1000 * GRID, y: -1000 * GRID, w: 3000 * GRID, h: 3000 * GRID }))
+  })
+
+  it("net derivation builds no point-key strings for integer coordinates", () => {
+    const wires: WireSegment[] = [{ id: "a", a: { x: 0, y: 0 }, b: { x: 16, y: 0 } }, { id: "b", a: { x: 16, y: 0 }, b: { x: 16, y: 16 } }]
+    const pins: WirePin[] = [{ key: "R:1", at: wires[0].a, out: { x: 0, y: 1 } }]
+    const strings = vi.spyOn(segmentKeys, "pointKey")
+    try {
+      const runs = runsOf(wires, pins)
+      expect.soft(runs).toHaveLength(1)
+      expect.soft(flowVertices(runs, pins).pins).toEqual([["R:1", "p:R:1"]])
+      expect.soft(turnsAtPins(runs, pins).leads.size).toBe(1)
+      const derived = wiringOf(new WireGraph(), { objects: [], wires })
+      expect.soft(derived.circuit.flow.runs).toHaveLength(1)
+      expect.soft(strings, "integer net derivation allocates no coordinate strings").not.toHaveBeenCalled()
+    } finally { strings.mockRestore() }
+  })
+
+  it("numeric line keys preserve the off-lattice pin diagnostic", () => {
+    const wire: WireSegment = { id: "s", a: { x: 0, y: 0 }, b: { x: GRID, y: 0 } }
+    expect(() => normalise([wire], [{ key: "off:1", at: { x: GRID / 4, y: 0 } }])).toThrow(`a pin at ${GRID / 4} on h0 lies on a wire but off the half-cell lattice`)
+  })
+
+  it.each([-(2 ** 24), -16, 0, 16, 2 ** 24, 0.5, -0.5, Number.MAX_SAFE_INTEGER])("line keys round-trip %s without colliding with the other axis", (at) => {
+    const row = segmentKeys.horizontalLine(at)
+    const column = segmentKeys.verticalLine(at)
+    expect.soft(row).not.toBe(column)
+    expect.soft(segmentKeys.pointOnLine(row, 24)).toEqual({ x: 24, y: at })
+    expect.soft(segmentKeys.pointOnLine(column, 24)).toEqual({ x: at, y: 24 })
+    expect.soft(segmentKeys.crossLineThrough(row, { x: at, y: at })).toBe(column)
+    expect.soft(segmentKeys.crossLineThrough(column, { x: at, y: at })).toBe(row)
+    if (Number.isInteger(at) && Math.abs(at) <= 2 ** 24) {
+      expect.soft(typeof row, "lattice line keys allocate no strings").toBe("number")
+      expect.soft(typeof column).toBe("number")
+    }
+  })
+
+  it.each([0.25, -(2 ** 25), 2 ** 25, 2 ** 30])("runs and flow retain distinct endpoints outside the numeric point-code range at %s", (offset) => {
+    const wires: WireSegment[] = [{ id: "a", a: { x: offset, y: 0 }, b: { x: offset + 24, y: 0 } }, { id: "b", a: { x: offset + 24, y: 0 }, b: { x: offset + 24, y: 24 } }, { id: "c", a: { x: offset, y: 0.5 }, b: { x: offset + 24, y: 0.5 } }]
+    const pins: WirePin[] = [{ key: "A:1", at: wires[0].a }, { key: "B:1", at: wires[2].a }]
+    const runs = runsOf(wires, pins)
+    expect.soft(runs.map((run) => run.segments.map((segment) => segment.id))).toEqual([["a", "b"], ["c"]])
+    expect.soft(flowVertices(runs, pins).runs).toEqual([{ id: "a", a: "p:A:1", b: "r:a:b" }, { id: "c", a: "p:B:1", b: "r:c:b" }])
+  })
+
+  it("160 commits, every undo and every redo restore fresh wiring, sheets, spatial queries and checker findings", () => {
+    const graph = new WireGraph()
+    const field = new FieldState()
+    let doc = examples.find((e) => e.id === "power-supply")!.build(GRID)
+    let known = wiringOf(graph, doc)
+    const states = [doc]
+    let serial = 0
+    for (let i = 0; i < 160; i++) {
+      const source = doc.wires[i % doc.wires.length]
+      doc = withSegments(doc, [{ ...source, color: i % 2 ? "red" : "blue" }], [source], [], () => `history${serial++}`)
+      states.push(doc)
+      known = wiringOf(graph, doc)
+      field.commit(doc, known)
+    }
+    const view = { x: -10 * GRID, y: -10 * GRID, w: 100 * GRID, h: 100 * GRID }
+    for (const [step, state] of [...states].reverse().concat(states).entries()) {
+      known = wiringOf(graph, state)
+      const fresh = wiringOf(new WireGraph(), state)
+      expect.soft(shape(known), `history state ${step}`).toEqual(shape(fresh))
+      expect.soft(sheetShape(known.sheet, state.wires, known.pins), `history sheet ${step}`).toEqual(sheetShape(fresh.sheet, state.wires, fresh.pins))
+      const committed = field.commit(state, known)
+      expect.soft(committed.findings, `history checker ${step}`).toEqual(checked(state))
+      expect.soft(committed.visible(view).routes, `history visible ${step}`).toEqual(fresh.routes.filter((route) => touches(routeBox(route), view)))
+      expect.soft(known.index.spatial.meeting(view), `history spatial ${step}`).toEqual(fresh.index.spatial.meeting(view))
+    }
+  })
 })
