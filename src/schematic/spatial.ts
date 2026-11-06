@@ -63,6 +63,15 @@ export class SpatialIndex {
     return candidates
   }
 
+  meeting(rect: Rect): PlacedObject[] {
+    const found: PlacedObject[] = []
+    this.sweep(rect, (i) => {
+      const r = this.rects[i]
+      if (r.x <= rect.x + rect.w && rect.x <= r.x + r.w && r.y <= rect.y + rect.h && rect.y <= r.y + r.h) found.push(this.objects[i])
+    })
+    return found
+  }
+
   overlaps(rect: Rect): boolean {
     let found = false
     this.sweep(rect, (i) => {

@@ -225,6 +225,8 @@ describe("the maintained field commit has the same findings and queries as a fre
         for (const o of current.objects.slice(0, 3)) {
           const box = { x: o.x - GRID, y: o.y - GRID, w: 12 * GRID, h: 12 * GRID }
           expect.soft(known.index.within(box).map((p) => p.key).sort(), `${id} ${step}: local pin query`).toEqual(fresh.within(box).map((p) => p.key).sort())
+          for (const p of objectPins(o, GRID).slice(0, 4)) for (const line of [{ x: p.point.x - 40 * GRID, y: p.point.y, w: 80 * GRID, h: 0 }, { x: p.point.x, y: p.point.y - 40 * GRID, w: 0, h: 80 * GRID }, { ...p.point, w: 0, h: 0 }])
+            expect.soft(known.index.within(line).map((q) => q.key), `${id} ${step}: pins on a line through ${p.key}`).toEqual(fresh.within(line).map((q) => q.key))
         }
       }
     }

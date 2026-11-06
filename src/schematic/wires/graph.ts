@@ -1,5 +1,5 @@
 import type { PinKind, Point } from "../types"
-import { pointKey, type WirePin, type WireSegment } from "./segment"
+import { exactPointCode, type PointCode, type WirePin, type WireSegment } from "./segment"
 
 export type WireNets = {
   readonly nets: readonly string[]
@@ -45,12 +45,12 @@ export class WireGraph {
   changedNets: ReadonlySet<string> = new Set()
   private segments = new Map<string, WireSegment>()
   private pins = new Map<string, WirePin>()
-  private vertices = new Map<string, Vertex>()
+  private vertices = new Map<PointCode, Vertex>()
   private netOfSegment = new Map<string, string>()
   private netOfPin = new Map<string, string>()
   private members = new Map<string, Net>()
-  private junctionPoints = new Map<string, Point>()
-  private danglingPoints = new Map<string, Point>()
+  private junctionPoints = new Map<PointCode, Point>()
+  private danglingPoints = new Map<PointCode, Point>()
   private nextNet = 0
   private version = 0
   private moved: Point = { x: 0, y: 0 }
@@ -144,7 +144,7 @@ export class WireGraph {
     const by = (p: Point): Point => ({ x: p.x + shift.x, y: p.y + shift.y })
     this.segments = new Map(wires.map((s) => [s.id, s]))
     this.pins = new Map(pins.map((p) => [p.key, p]))
-    const shifted = (points: Map<string, Point>) => new Map([...points].map(([key, point]) => [key, by(point)] as const))
+    const shifted = (points: Map<PointCode, Point>) => new Map([...points].map(([key, point]) => [key, by(point)] as const))
     this.junctionPoints = shifted(this.junctionPoints)
     this.danglingPoints = shifted(this.danglingPoints)
     this.moved = by(this.moved)
@@ -188,7 +188,7 @@ export class WireGraph {
     if (!added.length && !removed.length && !pinsAdded.length && !pinsRemoved.length) { this.changedNets = new Set(); return this.view }
 
     const dirtyNets = new Set<string>()
-    const dirtyPoints = new Map<string, Point>()
+    const dirtyPoints = new Map<PointCode, Point>()
     for (const s of removed) {
       const net = this.netOfSegment.get(s.id)
       if (net) dirtyNets.add(net)
@@ -260,7 +260,7 @@ export class WireGraph {
     }
   }
 
-  private keyAt(p: Point): string { return this.moved.x || this.moved.y ? pointKey({ x: p.x - this.moved.x, y: p.y - this.moved.y }) : pointKey(p) }
+  private keyAt(p: Point): PointCode { return this.moved.x || this.moved.y ? exactPointCode({ x: p.x - this.moved.x, y: p.y - this.moved.y }) : exactPointCode(p) }
 
   private vertexAt(p: Point): Vertex {
     const key = this.keyAt(p)
@@ -269,12 +269,12 @@ export class WireGraph {
     return v
   }
 
-  private release(key: string) {
+  private release(key: PointCode) {
     const v = this.vertices.get(key)
     if (v && v.ends.size === 0 && v.pins.size === 0) this.vertices.delete(key)
   }
 
-  private attachSegment(s: WireSegment, dirty: Map<string, Point>) {
+  private attachSegment(s: WireSegment, dirty: Map<PointCode, Point>) {
     this.segments.set(s.id, s)
     for (const p of [s.a, s.b]) {
       this.vertexAt(p).ends.add(s.id)
@@ -282,7 +282,7 @@ export class WireGraph {
     }
   }
 
-  private detachSegment(s: WireSegment, dirty: Map<string, Point>) {
+  private detachSegment(s: WireSegment, dirty: Map<PointCode, Point>) {
     this.segments.delete(s.id)
     this.netOfSegment.delete(s.id)
     for (const p of [s.a, s.b]) {
@@ -293,13 +293,13 @@ export class WireGraph {
     }
   }
 
-  private attachPin(p: WirePin, dirty: Map<string, Point>) {
+  private attachPin(p: WirePin, dirty: Map<PointCode, Point>) {
     this.pins.set(p.key, p)
     this.vertexAt(p.at).pins.add(p.key)
     dirty.set(this.keyAt(p.at), p.at)
   }
 
-  private detachPin(p: WirePin, dirty: Map<string, Point>) {
+  private detachPin(p: WirePin, dirty: Map<PointCode, Point>) {
     const held = this.pins.get(p.key) ?? p
     this.pins.delete(p.key)
     this.netOfPin.delete(p.key)
@@ -309,14 +309,14 @@ export class WireGraph {
     this.release(key)
   }
 
-  private flood(start: Vertex, visited: Set<string>): { net: Net; olds: Set<string> } {
+  private flood(start: Vertex, visited: Set<PointCode>): { net: Net; olds: Set<string> } {
     const net: Net = { segments: new Set(), pins: new Set() }
     const olds = new Set<string>()
     const note = (old: string | undefined) => {
       if (old !== undefined) olds.add(old)
     }
     const stack = [start]
-    visited.add(pointKey(start.at))
+    visited.add(exactPointCode(start.at))
     while (stack.length) {
       const v = stack.pop()!
       for (const key of v.pins) {
@@ -340,9 +340,9 @@ export class WireGraph {
   }
 
   private reflood(starts: readonly Vertex[]) {
-    const visited = new Set<string>()
+    const visited = new Set<PointCode>()
     const found: { net: Net; olds: Set<string> }[] = []
-    for (const start of starts) if (!visited.has(pointKey(start.at))) found.push(this.flood(start, visited))
+    for (const start of starts) if (!visited.has(exactPointCode(start.at))) found.push(this.flood(start, visited))
     for (const { olds } of found) for (const old of olds) this.members.delete(old)
     const claimed = new Set<string>()
     for (const { net, olds } of found) {
@@ -364,7 +364,7 @@ export class WireGraph {
     }
   }
 
-  private restatus(key: string, point: Point) {
+  private restatus(key: PointCode, point: Point) {
     const v = this.vertices.get(key)
     if (v && isJunction(v)) this.junctionPoints.set(key, point)
     else this.junctionPoints.delete(key)

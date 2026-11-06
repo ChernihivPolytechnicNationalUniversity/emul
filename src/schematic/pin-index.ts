@@ -4,7 +4,7 @@ import { getDef, getDefsVersion, getLibraryVersion } from "./registry"
 import { SpatialIndex } from "./spatial"
 import type { ComponentDef, PlacedObject } from "./types"
 import { OverlayMap } from "./wires/overlay-map"
-import { pointKey, type WirePin, type WireSegment } from "./wires/segment"
+import { exactPointCode, pointKey, type PointCode, type WirePin, type WireSegment } from "./wires/segment"
 
 const cachedPins = new WeakMap<PlacedObject, { def: ComponentDef | undefined; pins: readonly WirePin[] }>()
 
@@ -42,24 +42,73 @@ function duplicatesOf(object: PlacedObject): ReadonlySet<string> {
   return duplicates
 }
 
-const pinMaps = new WeakMap<PlacedObject, { pins: readonly WirePin[]; at: Map<string, WirePin[]>; keys: Map<string, WirePin> }>()
+class PinMaps {
+  readonly pins: readonly WirePin[]
+  private codeList: PointCode[] | undefined
+  private atCode: Map<PointCode, WirePin[]> | undefined
+  private byKey: Map<string, WirePin> | undefined
 
-function mapsOf(o: PlacedObject) {
+  constructor(pins: readonly WirePin[]) {
+    this.pins = pins
+  }
+
+  get codes(): readonly PointCode[] {
+    return (this.codeList ??= this.pins.map((p) => exactPointCode(p.at)))
+  }
+
+  at(code: PointCode): readonly WirePin[] | undefined {
+    if (!this.atCode) {
+      this.atCode = new Map()
+      const codes = this.codes
+      for (let i = 0; i < this.pins.length; i++) {
+        const list = this.atCode.get(codes[i])
+        if (list) list.push(this.pins[i])
+        else this.atCode.set(codes[i], [this.pins[i]])
+      }
+    }
+    return this.atCode.get(code)
+  }
+
+  pin(key: string): WirePin | undefined {
+    if (!this.byKey) {
+      this.byKey = new Map()
+      for (const p of this.pins) this.byKey.set(p.key, p)
+    }
+    return this.byKey.get(key)
+  }
+
+  within(box: Rect): WirePin[] {
+    const inside = (p: WirePin) => p.at.x >= box.x && p.at.x <= box.x + box.w && p.at.y >= box.y && p.at.y <= box.y + box.h
+    if (this.pins.length < LINED || (box.w && box.h)) return this.pins.filter(inside)
+    const lined = box.h ? (this.columns ??= linedUp(this.pins, (p) => p.at.x)).get(box.x) : (this.rows ??= linedUp(this.pins, (p) => p.at.y)).get(box.y)
+    return lined ? lined.filter(inside) : []
+  }
+
+  private rows: Map<number, WirePin[]> | undefined
+  private columns: Map<number, WirePin[]> | undefined
+}
+
+const LINED = 16
+
+function linedUp(pins: readonly WirePin[], at: (p: WirePin) => number): Map<number, WirePin[]> {
+  const lines = new Map<number, WirePin[]>()
+  for (const p of pins) {
+    const line = lines.get(at(p))
+    if (line) line.push(p)
+    else lines.set(at(p), [p])
+  }
+  return lines
+}
+
+const pinMaps = new WeakMap<PlacedObject, PinMaps>()
+
+function mapsOf(o: PlacedObject): PinMaps {
   const pins = pinsForObject(o)
   const cached = pinMaps.get(o)
   if (cached?.pins === pins) return cached
-  const at = new Map<string, WirePin[]>()
-  const keys = new Map<string, WirePin>()
-  for (const p of pins) {
-    keys.set(p.key, p)
-    const key = pointKey(p.at)
-    const list = at.get(key)
-    if (list) list.push(p)
-    else at.set(key, [p])
-  }
-  const result = { pins, at, keys }
-  pinMaps.set(o, result)
-  return result
+  const maps = new PinMaps(pins)
+  pinMaps.set(o, maps)
+  return maps
 }
 
 const pinExtents = new WeakMap<ComponentDef, Map<number, Rect>>()
@@ -97,7 +146,6 @@ function pinBounds(object: PlacedObject): Rect {
   return box
 }
 
-const meets = (a: Rect, b: Rect) => a.x <= b.x + b.w && b.x <= a.x + a.w && a.y <= b.y + b.h && b.y <= a.y + a.h
 const translations = new WeakMap<readonly PlacedObject[], { from: WeakRef<readonly PlacedObject[]>; fromWires: WeakRef<readonly WireSegment[]>; wires: WeakRef<readonly WireSegment[]>; x: number; y: number }>()
 
 export function translatedObjects(before: readonly PlacedObject[], after: PlacedObject[], x: number, y: number, fromWires: readonly WireSegment[], wires: readonly WireSegment[]): PlacedObject[] {
@@ -125,7 +173,7 @@ export function editedObjects(before: readonly PlacedObject[], after: PlacedObje
 
 const indices = new WeakMap<readonly PlacedObject[], { version: string; index: DocumentPins }>()
 
-type PinEnds = { wires: readonly WireSegment[]; counts: Map<string, number>; offset: Point }
+type PinEnds = { wires: readonly WireSegment[]; counts: Map<PointCode, number>; offset: Point }
 
 export type PinState = {
   wires: readonly WireSegment[]
@@ -185,20 +233,24 @@ export class DocumentPins {
 
   pin(key: string): WirePin | undefined {
     const object = this.objects.get(key.slice(0, key.indexOf(":")))
-    return object && mapsOf(object).keys.get(key)
+    return object && mapsOf(object).pin(key)
   }
 
   within(box: Rect): WirePin[] {
-    return this.pinSpatial.query(box).flatMap((o) => meets(pinBounds(o), box) ? pinsForObject(o).filter((p) => p.at.x >= box.x && p.at.x <= box.x + box.w && p.at.y >= box.y && p.at.y <= box.y + box.h) : [])
+    return this.pinSpatial.meeting(box).flatMap((o) => mapsOf(o).within(box))
   }
 
-  at(point: Point): WirePin[] {
-    return this.pinSpatial.query({ ...point, w: 0, h: 0 }).flatMap((o) => meets(pinBounds(o), { ...point, w: 0, h: 0 }) ? mapsOf(o).at.get(pointKey(point)) ?? [] : [])
+  at(point: Point, code?: PointCode): WirePin[] {
+    const found: WirePin[] = []
+    for (const o of this.pinSpatial.meeting({ x: point.x, y: point.y, w: 0, h: 0 })) {
+      const here = mapsOf(o).at(code ??= exactPointCode(point))
+      if (here) found.push(...here)
+    }
+    return found
   }
 
   touching(object: PlacedObject): readonly PlacedObject[] {
-    const box = pinBounds(object)
-    return this.pinSpatial.query(box).filter((o) => o.id !== object.id && meets(pinBounds(o), box))
+    return this.pinSpatial.meeting(pinBounds(object)).filter((o) => o.id !== object.id)
   }
 
   active(wires: readonly WireSegment[], previous?: DocumentPins, delta?: { added: readonly WireSegment[]; removed: readonly WireSegment[] }, previousState?: PinState, previousWires?: readonly WireSegment[]): PinState {
@@ -221,11 +273,16 @@ export class DocumentPins {
       const changed = new Set([...changes.before, ...changes.after].map((o) => o.id))
       if (changed.size < this.source.length / 2) {
         const affected = new Set(changed)
+        const nearbyOf = new Map<string, readonly PlacedObject[]>()
         for (const id of changed) {
           const before = previous.objects.get(id)
           const after = this.objects.get(id)
           if (before) for (const o of previous.touching(before)) affected.add(o.id)
-          if (after) for (const o of this.touching(after)) affected.add(o.id)
+          if (after) {
+            const nearby = this.touching(after)
+            nearbyOf.set(id, nearby)
+            for (const o of nearby) affected.add(o.id)
+          }
         }
         let wireChanges: readonly WireSegment[] = []
         if (wires !== previous.activeCache.wires) {
@@ -236,15 +293,24 @@ export class DocumentPins {
             wireChanges = [...previous.activeCache.wires, ...wires].filter((s) => beforeWires.get(s.id) !== afterWires.get(s.id))
           }
         }
-        for (const s of wireChanges) for (const end of [s.a, s.b]) for (const p of [...previous.at(end), ...this.at(end)]) affected.add(p.key.slice(0, p.key.indexOf(":")))
+        const touched = new Set<PointCode>()
+        for (const o of changes.before) for (const code of mapsOf(o).codes) touched.add(code)
+        for (const o of changes.after) for (const code of mapsOf(o).codes) touched.add(code)
+        const wireEnds = new Map<PointCode, Point>()
+        for (const s of wireChanges) for (const end of [s.a, s.b]) {
+          const code = exactPointCode(end)
+          if (!wireEnds.has(code)) wireEnds.set(code, end)
+        }
+        for (const [code, end] of wireEnds) {
+          touched.add(code)
+          for (const p of this.at(end, code)) affected.add(p.key.slice(0, p.key.indexOf(":")))
+        }
         const removed = [...affected].flatMap((id) => previous.activeCache!.byOwner.get(id) ?? [])
-        const touched = new Set([...changes.before, ...changes.after].flatMap((o) => pinsForObject(o).map((p) => pointKey(p.at))))
-        for (const s of wireChanges) { touched.add(pointKey(s.a)); touched.add(pointKey(s.b)) }
         let ends = previous.activeCache.ends
         if (wires !== previous.activeCache.wires) {
           if (delta && ends.wires === previous.activeCache.wires) {
             for (const [list, amount] of [[delta.removed, -1], [delta.added, 1]] as const) for (const s of list) for (const end of [s.a, s.b]) {
-              const key = pointKey({ x: end.x - ends.offset.x, y: end.y - ends.offset.y })
+              const key = exactPointCode({ x: end.x - ends.offset.x, y: end.y - ends.offset.y })
               const count = (ends.counts.get(key) ?? 0) + amount
               if (count) ends.counts.set(key, count)
               else ends.counts.delete(key)
@@ -253,18 +319,27 @@ export class DocumentPins {
           } else ends = this.endsOf(wires)
         }
         const added: WirePin[] = []
+        const settled = !ends.offset.x && !ends.offset.y
         for (const id of affected) {
           const o = this.objects.get(id)
           if (!o) continue
           const moved = changed.has(id)
-          const nearby = moved ? this.touching(o) : []
-          if (moved && !nearby.length && !wires.length && !duplicatesOf(o).size) continue
-          if (!moved) for (const p of previous.activeCache.byOwner.get(id) ?? []) if (!touched.has(pointKey(p.at))) added.push(p)
-          const points = moved ? new Set(pinsOf(nearby).map((p) => pointKey(p.at))) : undefined
-          for (const p of pinsForObject(o)) {
-            const key = pointKey(p.at)
-            if (!moved && !touched.has(key)) continue
-            if (ends.counts.get(pointKey({ x: p.at.x - ends.offset.x, y: p.at.y - ends.offset.y })) || duplicatesOf(o).has(p.key.slice(p.key.indexOf(":") + 1)) || (points ? points.has(key) : this.at(p.at).length > 1)) added.push(p)
+          const nearby = moved ? nearbyOf.get(id) ?? this.touching(o) : []
+          const duplicates = duplicatesOf(o)
+          if (moved && !nearby.length && !wires.length && !duplicates.size) continue
+          if (!moved) for (const p of previous.activeCache.byOwner.get(id) ?? []) if (!touched.has(exactPointCode(p.at))) added.push(p)
+          let points: Set<PointCode> | undefined
+          if (moved) {
+            points = new Set()
+            for (const n of nearby) for (const code of mapsOf(n).codes) points.add(code)
+          }
+          const maps = mapsOf(o)
+          const codes = maps.codes
+          for (let i = 0; i < maps.pins.length; i++) {
+            const p = maps.pins[i]
+            const code = codes[i]
+            if (!moved && !touched.has(code)) continue
+            if (ends.counts.get(settled ? code : exactPointCode({ x: p.at.x - ends.offset.x, y: p.at.y - ends.offset.y })) || (duplicates.size && duplicates.has(p.key.slice(p.key.indexOf(":") + 1))) || (points ? points.has(code) : this.at(p.at, code).length > 1)) added.push(p)
           }
         }
         const removedPins = new Set(removed)
@@ -316,10 +391,10 @@ export class DocumentPins {
     return map
   }
 
-  private endsOf(wires: readonly WireSegment[]): { wires: readonly WireSegment[]; counts: Map<string, number>; offset: Point } {
-    const ends = new Map<string, number>()
+  private endsOf(wires: readonly WireSegment[]): PinEnds {
+    const ends = new Map<PointCode, number>()
     for (const s of wires) for (const end of [s.a, s.b]) {
-      const key = pointKey(end)
+      const key = exactPointCode(end)
       ends.set(key, (ends.get(key) ?? 0) + 1)
     }
     return { wires, counts: ends, offset: { x: 0, y: 0 } }

@@ -12,6 +12,12 @@ export type LineKey = string
 
 export const pointKey = (p: Point) => `${p.x},${p.y}`
 
+export type PointCode = number | string
+
+const CODED = 2 ** 25
+
+export const exactPointCode = (p: Point): PointCode => Number.isInteger(p.x) && Number.isInteger(p.y) && Math.abs(p.x) < CODED && Math.abs(p.y) < CODED ? (p.x + CODED) * 2 ** 26 + (p.y + CODED) : pointKey(p)
+
 export const samePoint = (p: Point, q: Point) => p.x === q.x && p.y === q.y
 
 export const onLattice = (p: Point) => Number.isInteger(p.x / HALF_CELL) && Number.isInteger(p.y / HALF_CELL)
