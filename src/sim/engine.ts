@@ -21,7 +21,7 @@ import { nextPulseEdge, pulseHigh, pulseTiming } from "./pulse"
 
 const VT = 0.025852
 /** Leak from every node to ground; keeps floating nodes solvable. */
-const GMIN = 1e-10
+export const GMIN = 1e-10
 /**
  * An arc across open contacts: struck when the gap voltage reaches the switch's strike voltage
  * (an inductive load whose current has nowhere else to go), it then drops V_ARC — the minimum
@@ -1683,10 +1683,15 @@ export class Engine {
     const tc = this.termCurrent
     const base = i * TERM_SLOTS
     tc[this.termOf[base]] += cur
-    if (st === GPIO_VOLTS) return
-    const high = st === 1 || st === 3
-    if (high && el.vddNet !== undefined) tc[this.termOf[base + 1]] -= cur
-    if (!high && el.gndNet !== undefined) tc[this.termOf[base + 2]] -= cur
+    const back = this.padReturnSlot(i, el, st)
+    if (back >= 0) tc[back] -= cur
+  }
+
+  private padReturnSlot(i: number, el: Pad, st: number): number {
+    const base = i * TERM_SLOTS
+    const fromSupply = (st === 1 || st === 3) && el.vddNet !== undefined
+    const slot = this.termOf[fromSupply ? base + 1 : base + 2]
+    return slot === this.termOf[base] ? -1 : slot
   }
 
   /**
@@ -3098,9 +3103,11 @@ export class Engine {
             this.record(el, i, dt, 0, vn, 0, rated, voltageMax)
             break
           }
+          const back = this.padReturnSlot(i, el, st)
           if (st === GPIO_VOLTS) {
             const cur = (vn - this.gpioVolts[i]) / R_DAC
             tc[this.termOf[base]] += cur
+            if (back >= 0) tc[back] -= cur
             this.record(el, i, dt, cur, vn, Math.abs(cur * cur * R_DAC), rated, voltageMax)
             break
           }
@@ -3109,8 +3116,7 @@ export class Engine {
           const rail = high ? (el.vddNet !== undefined ? this.vol(el.vddNet, this.v) : el.vdd) : el.gndNet !== undefined ? this.vol(el.gndNet, this.v) : 0
           const cur = (vn - rail) / r
           tc[this.termOf[base]] += cur
-          if (high && el.vddNet !== undefined) tc[this.termOf[base + 1]] -= cur
-          if (!high && el.gndNet !== undefined) tc[this.termOf[base + 2]] -= cur
+          if (back >= 0) tc[back] -= cur
           this.record(el, i, dt, cur, vn, Math.abs(cur * cur * r), rated, voltageMax)
           break
         }

@@ -1,7 +1,7 @@
 import { GRID } from "@/schematic/geometry"
 import { pinContacts } from "@/schematic/contacts"
 import { getDef } from "@/schematic/registry"
-import { pinKey, type Damage, type Element, type Limits, type NodeRef, type PlacedObject, type ProtChip, type Schematic, type Value } from "@/schematic/types"
+import { pinKey, type ComponentDef, type Damage, type Element, type Limits, type NodeRef, type PlacedObject, type ProtChip, type Schematic, type Value } from "@/schematic/types"
 import { chemistryById, defaultResistance, type Chemistry } from "./battery"
 import { JUNCTION_VT as VT, saturationCurrent } from "./junction"
 import { opampSpec, type OpampSpec } from "./opamp"
@@ -119,10 +119,14 @@ export type Netlist = {
   pinNet: Map<string, number>
   nodeNet: Map<string, number>
   /** Node keys tied to the reference node by GND elements (current sinks for wire flow). */
-  groundKeys: Set<string>
+  groundTies: ReadonlyMap<string, GroundTie>
   /** Pins joined by touching another pin rather than by a wire, keyed to their group. */
   contacts: ReadonlyMap<string, string>
+  conductorOf: ReadonlyMap<string, string>
+  partShorts: readonly (readonly string[])[]
 }
+
+export type GroundTie = "schematic" | "reference"
 
 /** Contact resistance of a switch that does not state its own. */
 const SW_RON = 0.05
@@ -168,6 +172,36 @@ class UnionFind {
     const rb = this.find(b)
     if (ra !== rb) this.parent.set(ra, rb)
   }
+  classes(): Map<string, string[]> {
+    const out = new Map<string, string[]>()
+    for (const k of this.parent.keys()) {
+      const root = this.find(k)
+      const list = out.get(root)
+      if (list) list.push(k)
+      else out.set(root, [k])
+    }
+    return out
+  }
+}
+
+const tiesByDef = new WeakMap<ComponentDef, ReadonlyMap<NodeRef, GroundTie>>()
+
+export function groundTiesOf(def: ComponentDef): ReadonlyMap<NodeRef, GroundTie> {
+  const known = tiesByDef.get(def)
+  if (known) return known
+  const model = def.model ?? []
+  const inside = new UnionFind()
+  for (const el of model) if (el.kind === "SHORT") for (const n of el.nodes) inside.union(el.nodes[0], n)
+  const ties = new Map<NodeRef, GroundTie>()
+  for (const el of model) {
+    if (el.kind !== "GND") continue
+    const conductor = inside.find(el.node)
+    const wireable = def.pins.some((p) => inside.find(p.id) === conductor)
+    const hasOtherPins = def.pins.some((p) => inside.find(p.id) !== conductor)
+    ties.set(el.node, wireable && hasOtherPins ? "reference" : "schematic")
+  }
+  tiesByDef.set(def, ties)
+  return ties
 }
 
 const GND_KEY = "\0gnd"
@@ -273,24 +307,38 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
 
   type Pending = { obj: PlacedObject; el: Element; index: number; props: Record<string, string> }
   const pending: Pending[] = []
-  const groundKeys = new Set<string>()
+  const groundTies = new Map<string, GroundTie>()
+  const ownGround = new Map<string, string>()
+  const conductors = new UnionFind()
+  for (const [key, group] of contacts.groups) conductors.union(key, group)
+  const partShorts: string[][] = []
   for (const obj of doc.objects) {
     const def = getDef(obj.def)
     if (!def?.model) continue
     const props = { ...def.defaults, ...obj.props }
+    const ties = groundTiesOf(def)
+    const shorts = new UnionFind()
     def.model.forEach((raw, index) => {
       const el = damaged(raw, index, damage[obj.id])
       if (!el) return
       if (el.kind === "SHORT") {
-        for (let i = 1; i < el.nodes.length; i++) uf.union(node(obj, el.nodes[0]), node(obj, el.nodes[i]))
+        for (let i = 1; i < el.nodes.length; i++) {
+          uf.union(node(obj, el.nodes[0]), node(obj, el.nodes[i]))
+          conductors.union(node(obj, el.nodes[0]), node(obj, el.nodes[i]))
+          shorts.union(node(obj, el.nodes[0]), node(obj, el.nodes[i]))
+        }
       } else if (el.kind === "GND") {
         uf.union(node(obj, el.node), GND_KEY)
-        groundKeys.add(node(obj, el.node))
+        groundTies.set(node(obj, el.node), ties.get(el.node) ?? "schematic")
+        if (!ownGround.has(obj.id)) ownGround.set(obj.id, node(obj, el.node))
       } else {
         pending.push({ obj, el, index, props })
       }
     })
+    for (const group of shorts.classes().values()) if (group.length > 1) partShorts.push(group)
   }
+  const conductorOf = new Map<string, string>()
+  for (const [root, keys] of conductors.classes()) for (const key of keys) conductorOf.set(key, root)
 
   // Nets that need a matrix row: touched by a conducting element.
   const active = new Set<string>()
@@ -548,7 +596,8 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
         if (!active.has(uf.find(node(obj, el.node)))) break
         if (obj.def === "serial-terminal" && hostRoots.has(uf.find(node(obj, el.node)))) base.limits = undefined
         const pin = node(obj, el.node)
-        const keys = [pin, el.vddNode ? node(obj, el.vddNode) : pin, el.gndNode ? node(obj, el.gndNode) : pin]
+        const groundKey = el.gndNode ? node(obj, el.gndNode) : (ownGround.get(obj.id) ?? GND_KEY)
+        const keys = [pin, el.vddNode ? node(obj, el.vddNode) : pin, el.gndNode || ownGround.has(obj.id) ? groundKey : pin]
         const ohms = el.drive ? resolveValue(el.drive.ohms, props) : NaN
         const at = el.drive?.at !== undefined ? resolveValue(el.drive.at, props) : NaN
         const pull = el.pull === undefined ? NaN : resolveValue(el.pull, props)
@@ -567,7 +616,6 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
           keys,
         })
         const ground = el.gndNode ? netOf(obj, el.gndNode) : GROUND
-        const groundKey = el.gndNode ? node(obj, el.gndNode) : GND_KEY
         if (el.capacitance && el.capacitance > 0)
           elements.push({ ...base, id: `${base.id}$cio`, kind: "C", a: netOf(obj, el.node), b: ground, value: el.capacitance, euler: true, hidden: true, limits: undefined, keys: [pin, groundKey] })
         const injection = el.clamp ? resolveValue(el.clamp.injection, props) : NaN
@@ -720,5 +768,5 @@ export function buildNetlist(doc: Schematic, damage: Record<string, Damage> = {}
     }
   }
 
-  return { nodes, sources, elements, pinNet, nodeNet, groundKeys, contacts: contacts.groups }
+  return { nodes, sources, elements, pinNet, nodeNet, groundTies, contacts: contacts.groups, conductorOf, partShorts }
 }
