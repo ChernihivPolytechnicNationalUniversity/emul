@@ -2,7 +2,7 @@ import { placedFields, type PlacedField } from "./fields"
 import { GRID, type Point, type Rect } from "./geometry"
 import { footprints, type Lead } from "./placement"
 import { getDef, pinName } from "./registry"
-import type { PlacedObject, Schematic } from "./types"
+import type { ComponentDef, PlacedObject, Schematic } from "./types"
 import { wiringOf, type Wiring } from "./wire-edits"
 import { WireGraph } from "./wires/graph"
 import type { WireSegment } from "./wires/segment"
@@ -148,14 +148,19 @@ function danglingEnds(doc: Schematic, wiring: Wiring, marked: ReadonlySet<string
   return wiring.dangling.filter((p) => !marked.has(keyOf(p))).map((at) => ({ kind: "dangling-end", at, objects: [], segments: endsAt.get(keyOf(at)) ?? [], text: "A wire end that meets nothing" }))
 }
 
+const MOST_PINS_ALL_NEEDED = 3
+
+const electricalPins = (def: ComponentDef) => def.pins.filter((pin) => pin.kind !== "nc" && pin.kind !== "node")
+
 function unconnectedPins(doc: Schematic, wiring: Wiring, marked: ReadonlySet<string>): Finding[] {
   const found: Finding[] = []
   const pinsByKey = new Map(wiring.pins.map((p) => [p.key, p]))
   for (const o of doc.objects) {
     const def = getDef(o.def)
     if (!def || !def.model?.length || def.pinsAreSockets || def.chip || isMark(o)) continue
-    for (const pin of def.pins) {
-      if (pin.kind === "nc" || pin.kind === "node") continue
+    const pins = electricalPins(def)
+    if (pins.length > MOST_PINS_ALL_NEEDED) continue
+    for (const pin of pins) {
       const key = `${o.id}:${pin.id}`
       const placed = pinsByKey.get(key)
       if (!placed || marked.has(keyOf(placed.at))) continue

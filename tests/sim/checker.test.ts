@@ -118,8 +118,16 @@ describe("unconnected pins of parts that have a model (design.md §6.8; KiCad pi
     expect(of(checked(docOf([part("U1", "stm32f746ig", 0, 0)])), "unconnected-pin")).toEqual([])
   })
 
-  it("a chip is not a board: a 74HC595 on its own has all sixteen pins unconnected", () => {
-    expect(of(checked(docOf([part("U1", "hc595", 0, 0)])), "unconnected-pin")).toHaveLength(16)
+  it("a part with more than three pins is not checked: an IC or a module leaves pins free by design (the user, 2026-11-06)", () => {
+    for (const def of ["hc595", "opamp-lm358", "ne555", "lcd-1602", "oled-ssd1306-i2c", "ws2812b", "rgb-led", "tp4056"]) {
+      expect.soft(of(checked(docOf([part("U1", def, 0, 0)])), "unconnected-pin"), def).toEqual([])
+    }
+  })
+
+  it("a part with at most three pins is checked: none of them is spare", () => {
+    for (const [def, pins] of [["npn", 3], ["nmos", 3], ["potentiometer", 3], ["ncp1117", 3], ["diode", 2], ["led", 2]] as const) {
+      expect.soft(of(checked(docOf([part("U1", def, 0, 0)])), "unconnected-pin"), def).toHaveLength(pins)
+    }
   })
 })
 
