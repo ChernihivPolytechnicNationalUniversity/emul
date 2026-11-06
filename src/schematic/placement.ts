@@ -92,14 +92,26 @@ function occupiedContour(def: ComponentDef): readonly Rect[] {
   return found
 }
 
+const leadPins = new WeakMap<ComponentDef, readonly number[]>()
+
+function leadPinsOf(def: ComponentDef): readonly number[] {
+  let found = leadPins.get(def)
+  if (!found) {
+    found = bodyAndLeads(def).leads.map(([pin]) => {
+      const id = def.pins.find((p) => Math.abs(p.x - pin.x) < EPSILON && Math.abs(p.y - pin.y) < EPSILON)?.id
+      return def.pins.findIndex((p) => p.id === id)
+    })
+    leadPins.set(def, found)
+  }
+  return found
+}
+
 function placedLeads(object: PlacedObject, def: ComponentDef, grid: number): readonly Lead[] {
   if (!bodyAndLeads(def).leads.length) return []
   const at = frameOf(object, def, grid)
   const pins = objectPins(object, grid)
-  return bodyAndLeads(def).leads.map(([pin, body]) => {
-    const id = def.pins.find((p) => Math.abs(p.x - pin.x) < EPSILON && Math.abs(p.y - pin.y) < EPSILON)?.id
-    return [pins.find((p) => p.pin.id === id)?.point ?? at(pin), at(body)] as const
-  })
+  const owners = leadPinsOf(def)
+  return bodyAndLeads(def).leads.map(([pin, body], i) => [pins[owners[i]]?.point ?? at(pin), at(body)] as const)
 }
 
 export function footprints(object: PlacedObject, grid: number): Footprint | null {

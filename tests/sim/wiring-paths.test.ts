@@ -489,3 +489,19 @@ it("visible routes kept from the last frame are ranked again when the commit ren
   const known = wiringOf(graph, after)
   expect.soft(field.commit(after, known).visible(view).routes.map((route) => route.id), "the field's visible routes, in the document's order").toEqual(known.routes.filter((route) => touches(routeBox(route), view)).map((route) => route.id))
 })
+
+it("a part's fields, laid out once for its definition, orientation and text, equal a fresh layout after moves, turns and field moves", () => {
+  const parts = ["system-exam", "power-supply", "nucleo-74hc595"].flatMap((id) => examples.find((e) => e.id === id)!.build(GRID).objects.filter((o) => placedFields(o, GRID).length).slice(0, 6))
+  expect.soft(parts.length, "parts with fields to lay out").toBeGreaterThan(4)
+  const fresh = (o: PlacedObject) => placedFields(structuredClone(o), GRID)
+  for (const part of parts) {
+    let o = part
+    for (let step = 0; step < 10; step++) {
+      if (step % 4 === 1) o = { ...o, rotation: (((o.rotation ?? 0) + 90) % 360) as PlacedObject["rotation"] }
+      else if (step % 4 === 2) o = withFieldMoved(o, "ref", GRID, -GRID, GRID)
+      else if (step % 4 === 3) o = { ...o, mirror: !o.mirror }
+      o = { ...o, x: o.x + (step - 4) * GRID, y: o.y - step * GRID }
+      expect.soft(placedFields(o, GRID), `${part.id} step ${step}`).toEqual(fresh(o))
+    }
+  }
+})

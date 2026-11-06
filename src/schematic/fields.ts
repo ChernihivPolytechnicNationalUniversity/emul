@@ -220,10 +220,19 @@ function besideTheDiagonal(def: ComponentDef, orientation: Orientation, fields: 
 
 const placedCache = new WeakMap<PlacedObject, { grid: number; def: ComponentDef; fields: readonly PlacedField[] }>()
 
-export function placedFields(object: PlacedObject, grid: number, def: ComponentDef | undefined = getDef(object.def)): readonly PlacedField[] {
-  if (!def) return []
-  const cached = placedCache.get(object)
-  if (cached && cached.grid === grid && cached.def === def) return cached.fields
+type FieldLayout = { key: FieldKey; text: string; w: number; h: number; local: Point; anchor: TextAnchor; side: FieldSide; moved: boolean }
+
+type LaidOut = { def: ComponentDef; rotation: PlacedObject["rotation"]; mirror: PlacedObject["mirror"]; fieldAt: PlacedObject["fieldAt"]; layout: readonly FieldLayout[] }
+
+const layouts = new WeakMap<object, LaidOut[]>()
+
+const LAYOUTS_KEPT = 8
+
+function layoutOf(object: PlacedObject, def: ComponentDef): readonly FieldLayout[] {
+  const owner = object.props ?? def
+  const known = layouts.get(owner)
+  const same = known?.find((l) => l.def === def && l.rotation === object.rotation && l.mirror === object.mirror && l.fieldAt === object.fieldAt)
+  if (same) return same.layout
   const props = propsOf(def, object)
   const sized = fieldTemplates(def).flatMap((template): Sized[] => {
     const text = template.text.replace(/\{(\w+)\}/g, (_, key: string) => props[key] ?? "")
@@ -231,12 +240,22 @@ export function placedFields(object: PlacedObject, grid: number, def: ComponentD
   })
   const orientation = orientationOf(object)
   const automatic: Placed[] = !sized.length ? [] : standsOnItsDiagonal(def, orientation.rotation) && def.pins.length === 2 ? besideTheDiagonal(def, orientation, sized) : autoplaced(placementOf(def, orientation), sized)
-  const fields = sized.map((f, i): PlacedField => {
+  const layout = sized.map((f, i): FieldLayout => {
     const moved = object.fieldAt?.[f.template.key]
-    const local = moved ? framePoint(def, orientation, moved) : automatic[i].at
-    const anchor = moved ? "middle" : automatic[i].anchor
-    const at = { x: object.x + local.x * grid, y: object.y + local.y * grid }
-    return { object: object.id, key: f.template.key, text: f.text, at, box: boxAt(at, anchor, f.w * grid, f.h * grid), angle: 0, anchor, side: automatic[i].side, moved: !!moved }
+    return { key: f.template.key, text: f.text, w: f.w, h: f.h, local: moved ? framePoint(def, orientation, moved) : automatic[i].at, anchor: moved ? "middle" : automatic[i].anchor, side: automatic[i].side, moved: !!moved }
+  })
+  const entry = { def, rotation: object.rotation, mirror: object.mirror, fieldAt: object.fieldAt, layout }
+  layouts.set(owner, [entry, ...(known ?? []).slice(0, LAYOUTS_KEPT - 1)])
+  return layout
+}
+
+export function placedFields(object: PlacedObject, grid: number, def: ComponentDef | undefined = getDef(object.def)): readonly PlacedField[] {
+  if (!def) return []
+  const cached = placedCache.get(object)
+  if (cached && cached.grid === grid && cached.def === def) return cached.fields
+  const fields = layoutOf(object, def).map((f): PlacedField => {
+    const at = { x: object.x + f.local.x * grid, y: object.y + f.local.y * grid }
+    return { object: object.id, key: f.key, text: f.text, at, box: boxAt(at, f.anchor, f.w * grid, f.h * grid), angle: 0, anchor: f.anchor, side: f.side, moved: f.moved }
   })
   placedCache.set(object, { grid, def, fields })
   return fields
