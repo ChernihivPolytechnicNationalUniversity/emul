@@ -218,6 +218,20 @@ describe("phase 5's edits keep the store's wiring and sheet equal to fresh ones 
 })
 
 describe("the maintained field commit has the same findings and queries as a fresh field", () => {
+  it.each([0, 65])("a field crossing two wire buckets stays exactly fresh after translation and local edits, with %s distant marks", (count) => {
+    const at = (x: number, y: number) => ({ x: x * GRID, y: y * GRID })
+    const label = withFieldAt({ id: "R1", def: "resistor", ...at(100, 100), props: { ref: "R1234567890", value: "" } }, "ref", at(-0.5, 0), GRID, getDef("resistor")!)
+    const before: Schematic = { objects: [label, ...Array.from({ length: count }, (_, i) => ({ id: `mark${i}`, def: "no-connect", ...at(200 + i * 4, 0) }))], wires: [{ id: "right", a: at(0, -1), b: at(0, 1) }, { id: "left", a: at(-1, -1), b: at(-1, 1) }], parts: {} }
+    const graph = new WireGraph()
+    const checker = new KeptChecker()
+    const known = wiringOf(graph, before)
+    checker.update(before, known)
+    const after = moved(before, new Map(before.objects.map((o) => [o.id, { x: o.x, y: o.y }])), 2 * GRID, 0, undefined, known)
+    const edited = { ...after, objects: editedObjects(after.objects, after.objects.map((o) => o.id === label.id ? withFieldMoved(o, "ref", 0, GRID / 2, GRID) : o), [label.id]) }
+    for (const doc of [after, edited, after, before, after]) {
+      expect.soft(checker.update(doc, wiringOf(graph, doc)), "canonical findings survive bucket changes, undo and redo").toEqual(checked(structuredClone(doc)))
+    }
+  })
 
   it("board field findings stay fresh when a label enters the housing and the edit is undone", () => {
     const label: PlacedObject = { id: "R1", def: "resistor", x: 100 * GRID, y: 100 * GRID, props: { ref: "I", value: "" } }

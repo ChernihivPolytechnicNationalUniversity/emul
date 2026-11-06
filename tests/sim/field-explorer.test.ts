@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { FieldPanel } from "@/components/explorer/FieldPanel"
 import { CheckMarks } from "@/components/field/check-marks"
 import { checked } from "@/schematic/checker"
+import type { Finding } from "@/schematic/checker"
 import { withFieldAt } from "@/schematic/fields"
 import { builder } from "@/schematic/builder"
 import { wiringOf } from "@/schematic/wire-edits"
@@ -45,6 +46,12 @@ it("coincident designator and value findings have distinct problem, list and mar
   const circles = marks.props.children as React.ReactElement<{ strokeWidth: number }>[]
   expect.soft(new Set(circles.map((circle) => circle.key)).size, "both circles have distinct React keys").toBe(2)
   expect.soft(circles.filter((circle) => circle.props.strokeWidth === 3), "only the chosen field's mark is active").toHaveLength(1)
+})
+
+it("finding keys are independent of object, segment and field membership order", () => {
+  const finding: Finding = { kind: "fields-overlap", at: { x: 0, y: 0 }, objects: ["R2", "R1"], segments: ["right", "left"], fields: ["R2:value", "R1:ref"], text: "Overlapping fields" }
+  const reversed = { ...finding, objects: [...finding.objects].reverse(), segments: [...finding.segments].reverse(), fields: [...finding.fields!].reverse() }
+  expect.soft(checkKeyOf(finding), "the same finding despite bucket traversal order").toBe(checkKeyOf(reversed))
 })
 
 // The field explorer: rows for what is on the bench, the search that finds a part or one of its

@@ -209,13 +209,21 @@ describe("a wire through a body (design.md §5.1, §6.8; inferred from ГОСТ 
 
 describe("fields over wires, bodies and each other (design.md §5.2, §6.8: a finding, never a refusal)", () => {
 
+  it("a field over several bodies names its owners in canonical order", () => {
+    const label = withFieldAt(resistor("label", 100, 100, { props: { ref: "I", value: "" } }), "ref", at(1.5, 1), GRID, getDef("resistor")!)
+    const doc = docOf([resistor("Z", -1, 0), resistor("A", 0, 0), label])
+    const finding = of(checked(doc), "field-on-body").find((f) => f.fields?.includes("label:ref"))!
+    expect.soft(finding.text, "body names follow object identity").toBe("I's designator lies on A, Z")
+    expect.soft(finding.objects, "membership uses the same order").toEqual(["A", "Z", "label"])
+  })
+
   it("fields over a board's housing or socket are findings while exterior fields and wires over the board remain clear", () => {
     const board = part("B", "open746i-c", 0, 0)
     const label = resistor("R1", 100, 100, { props: { ref: "I", value: "" } })
     const socket = objectPins(board, GRID)[0].point
     for (const target of [at(36.5, 26.5), socket]) {
       const moved = withFieldAt(label, "ref", target, GRID, getDef("resistor")!)
-      expect.soft(of(checked(docOf([board, moved])), "field-on-body").map((f) => f.objects), `field at ${target.x},${target.y}`).toEqual([["R1", "B"]])
+      expect.soft(of(checked(docOf([board, moved])), "field-on-body").map((f) => f.objects), `field at ${target.x},${target.y}`).toEqual([["B", "R1"]])
     }
     const clear = docOf([board, label], [seg(at(-4, 20), at(80, 20))])
     expect.soft(of(checked(clear), "field-on-body"), "exterior label").toEqual([])

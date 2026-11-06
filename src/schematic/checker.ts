@@ -329,7 +329,7 @@ function fieldFindings(doc: Schematic, near: Buckets<Body>): Finding[] {
     if (crossed.length) found.push({ kind: "field-on-wire", at: middleOf(f.box), objects: [f.object], segments: crossed.map((s) => s.id), fields: [`${f.object}:${f.key}`], text: `${named(f)} lies on a wire` })
     const under = [...near.near(f.box)].filter(
       (b) => boxesMeet(f.box, b.box) && (b.contour.some((corners) => fieldCrossesContour(f.box, corners)) || b.pins.some((p) => holds(f.box, p.at)) || b.leads.some((lead) => fieldCrossesLead(f.box, lead))),
-    )
+    ).sort((a, b) => a.object.id.localeCompare(b.object.id))
     if (under.length) found.push({ kind: "field-on-body", at: middleOf(f.box), objects: [f.object, ...under.map((b) => b.object.id).filter((id) => id !== f.object)], segments: [], fields: [`${f.object}:${f.key}`], text: `${named(f)} lies on ${under.map((b) => refOf(b.object)).join(", ")}` })
   }
   const placed = new Buckets<PlacedField>(BUCKET)
@@ -377,7 +377,9 @@ function parallelRuns(doc: Schematic): Finding[] {
 
 const KIND_ORDER = new Map(CHECK_KINDS.map((k, i) => [k, i]))
 
-const inReadingOrder = (a: Finding, b: Finding) => KIND_ORDER.get(a.kind)! - KIND_ORDER.get(b.kind)! || a.at.x - b.at.x || a.at.y - b.at.y
+const membershipOf = (f: Finding) => JSON.stringify([f.objects, f.segments, f.fields, f.pin])
+
+const inReadingOrder = (a: Finding, b: Finding) => KIND_ORDER.get(a.kind)! - KIND_ORDER.get(b.kind)! || a.at.x - b.at.x || a.at.y - b.at.y || membershipOf(a).localeCompare(membershipOf(b))
 
 const MARK_PLACES_PER_UNIT = 1e6
 
@@ -385,10 +387,12 @@ const settled = (v: number) => Math.round(v * MARK_PLACES_PER_UNIT) / MARK_PLACE
 
 const placedAt = (f: Finding, x: number, y: number): Finding => ({ ...f, at: { x: settled(x), y: settled(y) } })
 
+const canonical = (f: Finding): Finding => ({ ...f, objects: [...f.objects].sort(), segments: [...f.segments].sort() })
+
 export function checked(doc: Schematic, wiring: Wiring = wiringOf(new WireGraph(), doc)): readonly Finding[] {
   const marked = new Set(doc.objects.filter(isMark).map((o) => codeOf(markAt(o))))
   const bodies = bodyBuckets(bodiesOf(doc.objects))
-  return [...danglingEnds(doc, wiring, marked), ...unconnectedPins(doc, wiring, marked), ...fourWays(doc, wiring), ...wiresThroughBodies(doc, bodies), ...fieldFindings(doc, bodies), ...parallelRuns(doc)].map((f) => placedAt(f, f.at.x, f.at.y)).sort(inReadingOrder)
+  return [...danglingEnds(doc, wiring, marked), ...unconnectedPins(doc, wiring, marked), ...fourWays(doc, wiring), ...wiresThroughBodies(doc, bodies), ...fieldFindings(doc, bodies), ...parallelRuns(doc)].map((f) => canonical(placedAt(f, f.at.x, f.at.y))).sort(inReadingOrder)
 }
 
 
