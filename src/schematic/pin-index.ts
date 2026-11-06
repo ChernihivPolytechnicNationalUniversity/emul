@@ -293,17 +293,19 @@ export class DocumentPins {
             wireChanges = [...previous.activeCache.wires, ...wires].filter((s) => beforeWires.get(s.id) !== afterWires.get(s.id))
           }
         }
-        const touched = new Set<PointCode>()
-        for (const o of changes.before) for (const code of mapsOf(o).codes) touched.add(code)
-        for (const o of changes.after) for (const code of mapsOf(o).codes) touched.add(code)
         const wireEnds = new Map<PointCode, Point>()
         for (const s of wireChanges) for (const end of [s.a, s.b]) {
           const code = exactPointCode(end)
           if (!wireEnds.has(code)) wireEnds.set(code, end)
         }
-        for (const [code, end] of wireEnds) {
-          touched.add(code)
-          for (const p of this.at(end, code)) affected.add(p.key.slice(0, p.key.indexOf(":")))
+        for (const [code, end] of wireEnds) for (const p of this.at(end, code)) affected.add(p.key.slice(0, p.key.indexOf(":")))
+        let touchedCodes: Set<PointCode> | undefined
+        const touched = () => {
+          if (touchedCodes) return touchedCodes
+          touchedCodes = new Set(wireEnds.keys())
+          for (const o of changes.before) for (const code of mapsOf(o).codes) touchedCodes.add(code)
+          for (const o of changes.after) for (const code of mapsOf(o).codes) touchedCodes.add(code)
+          return touchedCodes
         }
         const removed = [...affected].flatMap((id) => previous.activeCache!.byOwner.get(id) ?? [])
         let ends = previous.activeCache.ends
@@ -327,7 +329,7 @@ export class DocumentPins {
           const nearby = moved ? nearbyOf.get(id) ?? this.touching(o) : []
           const duplicates = duplicatesOf(o)
           if (moved && !nearby.length && !wires.length && !duplicates.size) continue
-          if (!moved) for (const p of previous.activeCache.byOwner.get(id) ?? []) if (!touched.has(exactPointCode(p.at))) added.push(p)
+          if (!moved) for (const p of previous.activeCache.byOwner.get(id) ?? []) if (!touched().has(exactPointCode(p.at))) added.push(p)
           let points: Set<PointCode> | undefined
           if (moved) {
             points = new Set()
@@ -338,7 +340,7 @@ export class DocumentPins {
           for (let i = 0; i < maps.pins.length; i++) {
             const p = maps.pins[i]
             const code = codes[i]
-            if (!moved && !touched.has(code)) continue
+            if (!moved && !touched().has(code)) continue
             if (ends.counts.get(settled ? code : exactPointCode({ x: p.at.x - ends.offset.x, y: p.at.y - ends.offset.y })) || (duplicates.size && duplicates.has(p.key.slice(p.key.indexOf(":") + 1))) || (points ? points.has(code) : this.at(p.at, code).length > 1)) added.push(p)
           }
         }

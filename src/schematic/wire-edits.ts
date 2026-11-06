@@ -449,7 +449,8 @@ export function moved(doc: Schematic, from: ReadonlyMap<string, Point>, dx: numb
   } else objects = doc.objects.map((o) => (from.has(o.id) ? shiftedTo(o) : o))
   const remove = wires.size ? doc.wires.filter((s) => wires.has(s.id)) : []
   const add = remove.map((s) => ({ ...s, a: { x: s.a.x + dx, y: s.a.y + dy }, b: { x: s.b.x + dx, y: s.b.y + dy } }))
-  return withSegments({ ...doc, objects: editedObjects(doc.objects, objects, from.keys()) }, add, remove, [...pinPoints(before), ...pinPoints(after)], newId)
+  const points = doc.wires.length ? [...pinPoints(before), ...pinPoints(after)] : []
+  return withSegments({ ...doc, objects: editedObjects(doc.objects, objects, from.keys()) }, add, remove, points, newId)
 }
 
 export function reoriented(before: Schematic, after: Schematic, ids: ReadonlySet<string>, newId: NewId = randomId): Schematic {
