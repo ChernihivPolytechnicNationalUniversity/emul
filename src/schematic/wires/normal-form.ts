@@ -50,9 +50,13 @@ class WireIndex {
     if (this.indexed.has(i)) return
     this.indexed.add(i)
     const s = this.wires[i]
-    push(this.byLine, lineOf(s), i)
-    this.cut(s.a)
-    this.cut(s.b)
+    const line = lineOf(s)
+    push(this.byLine, line, i)
+    const horizontal = isHorizontal(s)
+    push(this.cutsOnLine, horizontal ? line : horizontalLine(s.a.y), s.a.x)
+    push(this.cutsOnLine, horizontal ? verticalLine(s.a.x) : line, s.a.y)
+    push(this.cutsOnLine, horizontal ? line : horizontalLine(s.b.y), s.b.x)
+    push(this.cutsOnLine, horizontal || s.b.x !== s.a.x ? verticalLine(s.b.x) : line, s.b.y)
   }
 
   addPin(pin: WirePin) {
@@ -176,21 +180,48 @@ function assertUniqueIds(wires: readonly WireSegment[]) {
   }
 }
 
+function hitsThrough(index: WireIndex, points: readonly Point[]): (number[] | undefined)[] {
+  const wires = index.wires
+  const rows = new Map<number, number[]>()
+  const columns = new Map<number, number[]>()
+  points.forEach((p, k) => {
+    push(rows, p.y, k)
+    push(columns, p.x, k)
+  })
+  const across: (number[] | undefined)[] = []
+  const down: (number[] | undefined)[] = []
+  const gather = (lines: Map<number, number[]>, key: (at: number) => LineKey, into: (number[] | undefined)[]) => {
+    for (const [at, group] of lines) {
+      const onLine = index.byLine.get(key(at))
+      if (!onLine) continue
+      for (const i of onLine) for (const k of group) if (contains(wires[i], points[k])) (into[k] ??= []).push(i)
+    }
+  }
+  gather(rows, horizontalLine, across)
+  gather(columns, verticalLine, down)
+  return points.map((_, k) => across[k] && down[k] ? [...across[k], ...down[k]] : across[k] ?? down[k])
+}
+
 function affected(index: WireIndex, touched: Touched): Set<number> {
   const out = new Set<number>()
   const wires = index.wires
-  const through = (p: Point) => {
-    for (const line of [horizontalLine(p.y), verticalLine(p.x)]) for (const i of index.byLine.get(line) ?? []) if (contains(wires[i], p)) out.add(i)
+  const segments = touched.segments ?? []
+  const queries: Point[] = [...(touched.points ?? [])]
+  const firstEnd = queries.length
+  for (const t of segments) queries.push(t.a, t.b)
+  const hits = hitsThrough(index, queries)
+  const through = (k: number) => {
+    for (const i of hits[k] ?? []) out.add(i)
   }
-  for (const p of touched.points ?? []) through(p)
-  for (const t of touched.segments ?? []) {
-    through(t.a)
-    through(t.b)
-    if (isZeroLength(t) || !isOrthogonal(t)) continue
+  for (let k = 0; k < firstEnd; k++) through(k)
+  segments.forEach((t, n) => {
+    through(firstEnd + 2 * n)
+    through(firstEnd + 2 * n + 1)
+    if (isZeroLength(t) || !isOrthogonal(t)) return
     const lo = lowOf(t)
     const hi = highOf(t)
     for (const i of index.byLine.get(lineOf(t)) ?? []) if (lowOf(wires[i]) <= hi && highOf(wires[i]) >= lo) out.add(i)
-  }
+  })
   return out
 }
 
