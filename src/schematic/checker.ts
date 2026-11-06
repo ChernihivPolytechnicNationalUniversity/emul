@@ -6,7 +6,7 @@ import { getDef, pinName } from "./registry"
 import type { PlacedObject, Schematic } from "./types"
 import { wireOrder, wiringOf, type Wiring } from "./wire-edits"
 import { WireGraph } from "./wires/graph"
-import type { WireSegment } from "./wires/segment"
+import { exactPointCode as codeOf, type PointCode, type WireSegment } from "./wires/segment"
 
 export const NO_CONNECT = "no-connect"
 
@@ -31,8 +31,6 @@ export type Finding = { kind: CheckKind; at: Point; objects: readonly string[]; 
 
 const HALF = GRID / 2
 const EPS = 1e-6
-
-const keyOf = (p: Point) => `${p.x},${p.y}`
 
 const isMark = (o: PlacedObject) => o.def === NO_CONNECT
 
@@ -111,20 +109,25 @@ const fieldCrossesLead = (box: Rect, lead: Lead) => lead[0].x === lead[1].x || l
 
 const holds = (r: Rect, p: Point) => p.x > r.x + EPS && p.x < r.x + r.w - EPS && p.y > r.y + EPS && p.y < r.y + r.h - EPS
 
+const CELL_SPAN = 2 ** 26
+const CELL_BIAS = 2 ** 25
+
+const cellKey = (i: number, j: number) => (i + CELL_BIAS) * CELL_SPAN + (j + CELL_BIAS)
+
+const NOTHING: ReadonlySet<never> = new Set()
+
 export class Buckets<T> {
-  private readonly cells = new Map<string, Set<T>>()
+  private readonly cells = new Map<number, Set<T>>()
   private readonly size: number
   constructor(size: number) {
     this.size = size
   }
-  private keys(r: Rect) {
-    const keys: string[] = []
-    for (let i = Math.floor(r.x / this.size); i <= Math.floor((r.x + r.w) / this.size); i++)
-      for (let j = Math.floor(r.y / this.size); j <= Math.floor((r.y + r.h) / this.size); j++) keys.push(`${i},${j}`)
-    return keys
-  }
   add(r: Rect, item: T) {
-    for (const key of this.keys(r)) {
+    const i1 = Math.floor((r.x + r.w) / this.size)
+    const j0 = Math.floor(r.y / this.size)
+    const j1 = Math.floor((r.y + r.h) / this.size)
+    for (let i = Math.floor(r.x / this.size); i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const key = cellKey(i, j)
       const cell = this.cells.get(key)
       if (cell) cell.add(item)
       else this.cells.set(key, new Set([item]))
@@ -132,15 +135,36 @@ export class Buckets<T> {
   }
   clear() { this.cells.clear() }
   remove(r: Rect, item: T) {
-    for (const key of this.keys(r)) {
+    const i1 = Math.floor((r.x + r.w) / this.size)
+    const j0 = Math.floor(r.y / this.size)
+    const j1 = Math.floor((r.y + r.h) / this.size)
+    for (let i = Math.floor(r.x / this.size); i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const key = cellKey(i, j)
       const cell = this.cells.get(key)
       cell?.delete(item)
       if (!cell?.size) this.cells.delete(key)
     }
   }
-  near(r: Rect): Set<T> {
+  visit(r: Rect, see: (item: T) => void) {
+    const i1 = Math.floor((r.x + r.w) / this.size)
+    const j0 = Math.floor(r.y / this.size)
+    const j1 = Math.floor((r.y + r.h) / this.size)
+    for (let i = Math.floor(r.x / this.size); i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const cell = this.cells.get(cellKey(i, j))
+      if (cell) for (const item of cell) see(item)
+    }
+  }
+  near(r: Rect): ReadonlySet<T> {
+    const i0 = Math.floor(r.x / this.size)
+    const i1 = Math.floor((r.x + r.w) / this.size)
+    const j0 = Math.floor(r.y / this.size)
+    const j1 = Math.floor((r.y + r.h) / this.size)
+    if (i0 === i1 && j0 === j1) return this.cells.get(cellKey(i0, j0)) ?? NOTHING
     const found = new Set<T>()
-    for (const key of this.keys(r)) for (const item of this.cells.get(key) ?? []) found.add(item)
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const cell = this.cells.get(cellKey(i, j))
+      if (cell) for (const item of cell) found.add(item)
+    }
     return found
   }
 }
@@ -174,42 +198,57 @@ function bodiesOf(objects: readonly PlacedObject[]): Body[] {
   })
 }
 
-function danglingEnds(doc: Schematic, wiring: Wiring, marked: ReadonlySet<string>): Finding[] {
-  const endsAt = new Map<string, string[]>()
-  for (const s of doc.wires) for (const p of [s.a, s.b]) endsAt.set(keyOf(p), [...(endsAt.get(keyOf(p)) ?? []), s.id])
-  return wiring.dangling.filter((p) => !marked.has(keyOf(p))).map((at) => ({ kind: "dangling-end", at, objects: [], segments: endsAt.get(keyOf(at)) ?? [], text: "A wire end that meets nothing" }))
+function danglingEnds(doc: Schematic, wiring: Wiring, marked: ReadonlySet<PointCode>): Finding[] {
+  const open = wiring.dangling.filter((p) => !marked.has(codeOf(p)))
+  if (!open.length) return []
+  const endsAt = new Map<number | string, string[]>(open.map((p) => [codeOf(p), []]))
+  for (const s of doc.wires) {
+    endsAt.get(codeOf(s.a))?.push(s.id)
+    endsAt.get(codeOf(s.b))?.push(s.id)
+  }
+  return open.map((at) => ({ kind: "dangling-end", at, objects: [], segments: endsAt.get(codeOf(at))!, text: "A wire end that meets nothing" }))
 }
 
-function unconnectedPins(doc: Schematic, wiring: Wiring, marked: ReadonlySet<string>): Finding[] {
+function unconnectedPins(doc: Schematic, wiring: Wiring, marked: ReadonlySet<PointCode>): Finding[] {
   const found: Finding[] = []
   for (const o of doc.objects) {
     const def = getDef(o.def)
     if (!def || !def.model?.length || def.pinsAreSockets || def.chip || isMark(o)) continue
-    for (const pin of def.pins) {
-      if (pin.kind === "nc" || pin.kind === "node") continue
-      const key = `${o.id}:${pin.id}`
-      const placed = wiring.index.pin(key)
-      if (!placed || marked.has(keyOf(placed.at))) continue
-      const net = wiring.view.netOfPin(key)
+    const indexed = wiring.index.objects.get(o.id)
+    if (!indexed) continue
+    for (const placed of pinsForObject(indexed)) {
+      if (placed.kind === "nc" || placed.kind === "node" || marked.has(codeOf(placed.at))) continue
+      const net = wiring.view.netOfPin(placed.key)
       const alone = !net || (wiring.view.pinsOf(net).length <= 1 && wiring.view.segmentsOf(net).length === 0)
-      if (alone) found.push({ kind: "unconnected-pin", at: placed.at, objects: [o.id], segments: [], pin: pin.id, text: `${pinName(doc.objects as PlacedObject[], { object: o.id, pin: pin.id })} is not connected` })
+      if (!alone) continue
+      const pin = placed.key.slice(o.id.length + 1)
+      found.push({ kind: "unconnected-pin", at: placed.at, objects: [o.id], segments: [], pin, text: `${pinName(doc.objects as PlacedObject[], { object: o.id, pin })} is not connected` })
     }
   }
   return found
 }
 
 function fourWays(doc: Schematic, wiring: Wiring): Finding[] {
-  const count = new Map<string, { at: Point; n: number; segments: string[]; objects: Set<string> }>()
+  const count = new Map<number | string, number>()
+  const first = new Map<number | string, Point>()
   const bump = (at: Point) => {
-    const key = keyOf(at)
-    let c = count.get(key)
-    if (!c) count.set(key, (c = { at, n: 0, segments: [], objects: new Set() }))
-    c.n++
-    return c
+    const code = codeOf(at)
+    const n = count.get(code)
+    if (n === undefined) { count.set(code, 1); first.set(code, at) }
+    else count.set(code, n + 1)
   }
-  for (const s of doc.wires) for (const p of [s.a, s.b]) bump(p).segments.push(s.id)
-  for (const p of wiring.activePins) bump(p.at).objects.add(p.key.slice(0, p.key.indexOf(":")))
-  return [...count.values()].filter((c) => c.n >= 4).map((c) => ({ kind: "four-way", at: c.at, objects: [...c.objects].sort((a, b) => doc.objects.findIndex((o) => o.id === a) - doc.objects.findIndex((o) => o.id === b)), segments: c.segments, text: `${c.n} conductors meet at one point: two T's read more clearly` }))
+  for (const s of doc.wires) { bump(s.a); bump(s.b) }
+  const pins = wiring.activePins
+  for (const p of pins) bump(p.at)
+  const crowded = new Map<number | string, { at: Point; n: number; segments: string[]; objects: Set<string> }>()
+  for (const [code, n] of count) if (n >= 4) crowded.set(code, { at: first.get(code)!, n, segments: [], objects: new Set() })
+  if (!crowded.size) return []
+  for (const s of doc.wires) {
+    crowded.get(codeOf(s.a))?.segments.push(s.id)
+    crowded.get(codeOf(s.b))?.segments.push(s.id)
+  }
+  for (const p of pins) crowded.get(codeOf(p.at))?.objects.add(p.key.slice(0, p.key.indexOf(":")))
+  return [...crowded.values()].map((c) => ({ kind: "four-way", at: c.at, objects: [...c.objects].sort((a, b) => doc.objects.findIndex((o) => o.id === a) - doc.objects.findIndex((o) => o.id === b)), segments: c.segments, text: `${c.n} conductors meet at one point: two T's read more clearly` }))
 }
 
 function insideOf(s: WireSegment, corners: readonly Point[]): readonly [number, number] | null {
@@ -253,28 +292,31 @@ function runsThrough(s: WireSegment, body: Body) {
   })
 }
 
-function wiresThroughBodies(doc: Schematic, bodies: readonly Body[]): Finding[] {
+function bodyBuckets(bodies: readonly Body[]): Buckets<Body> {
   const near = new Buckets<Body>(BUCKET)
   for (const b of bodies) near.add(b.box, b)
+  return near
+}
+
+function wiresThroughBodies(doc: Schematic, near: Buckets<Body>): Finding[] {
   const found: Finding[] = []
   for (const s of doc.wires) {
-    for (const body of near.near(boxOfSegment(s))) {
-      if (!boxesMeet(body.box, boxOfSegment(s))) continue
-      if (runsThrough(s, body)) found.push({ kind: "wire-through-body", at: middleOf(boxOfSegment(s)), objects: [body.object.id], segments: [s.id], text: `A wire runs through ${refOf(body.object)}` })
+    const box = boxOfSegment(s)
+    for (const body of near.near(box)) {
+      if (!boxesMeet(body.box, box)) continue
+      if (runsThrough(s, body)) found.push({ kind: "wire-through-body", at: middleOf(box), objects: [body.object.id], segments: [s.id], text: `A wire runs through ${refOf(body.object)}` })
     }
   }
   return found
 }
 
-function fieldFindings(doc: Schematic, bodies: readonly Body[]): Finding[] {
+function fieldFindings(doc: Schematic, near: Buckets<Body>): Finding[] {
   const fields = doc.objects.filter((o) => !isMark(o)).flatMap((o) => placedFields(o, GRID))
   const wires = new Buckets<WireSegment>(BUCKET)
   for (const s of doc.wires) wires.add(boxOfSegment(s), s)
-  const near = new Buckets<Body>(BUCKET)
-  for (const b of bodies) near.add(b.box, b)
-  const byObject = new Map(doc.objects.map((o) => [o.id, o]))
+  let byObject: Map<string, PlacedObject> | undefined
   const found: Finding[] = []
-  const named = (f: PlacedField) => `${refOf(byObject.get(f.object)!)}'s ${f.key === "ref" ? "designator" : "value"}`
+  const named = (f: PlacedField) => `${refOf((byObject ??= new Map(doc.objects.map((o) => [o.id, o]))).get(f.object)!)}'s ${f.key === "ref" ? "designator" : "value"}`
   for (const f of fields) {
     const crossed = [...wires.near(f.box)].filter((s) => wireCrossesBox(s, f.box))
     if (crossed.length) found.push({ kind: "field-on-wire", at: middleOf(f.box), objects: [f.object], segments: crossed.map((s) => s.id), text: `${named(f)} lies on a wire` })
@@ -306,7 +348,9 @@ function parallelRuns(doc: Schematic): Finding[] {
     for (const s of doc.wires) {
       if (s.a[across] !== s.b[across] || s.a[axis] === s.b[axis]) continue
       const line = s.a[across]
-      lines.set(line, [...(lines.get(line) ?? []), s])
+      const list = lines.get(line)
+      if (list) list.push(s)
+      else lines.set(line, [s])
     }
     for (const [line, segments] of lines) {
       for (const other of lines.get(line + HALF) ?? []) {
@@ -323,17 +367,32 @@ function parallelRuns(doc: Schematic): Finding[] {
   return found
 }
 
+const KIND_ORDER = new Map(CHECK_KINDS.map((k, i) => [k, i]))
+
+const inReadingOrder = (a: Finding, b: Finding) => KIND_ORDER.get(a.kind)! - KIND_ORDER.get(b.kind)! || a.at.x - b.at.x || a.at.y - b.at.y
+
 export function checked(doc: Schematic, wiring: Wiring = wiringOf(new WireGraph(), doc)): readonly Finding[] {
-  const marked = new Set(doc.objects.filter(isMark).map((o) => keyOf(markAt(o))))
-  const bodies = bodiesOf(doc.objects)
-  const order = new Map(CHECK_KINDS.map((k, i) => [k, i]))
-  return [...danglingEnds(doc, wiring, marked), ...unconnectedPins(doc, wiring, marked), ...fourWays(doc, wiring), ...wiresThroughBodies(doc, bodies), ...fieldFindings(doc, bodies), ...parallelRuns(doc)].sort(
-    (a, b) => order.get(a.kind)! - order.get(b.kind)! || a.at.x - b.at.x || a.at.y - b.at.y,
-  )
+  const marked = new Set(doc.objects.filter(isMark).map((o) => codeOf(markAt(o))))
+  const bodies = bodyBuckets(bodiesOf(doc.objects))
+  return [...danglingEnds(doc, wiring, marked), ...unconnectedPins(doc, wiring, marked), ...fourWays(doc, wiring), ...wiresThroughBodies(doc, bodies), ...fieldFindings(doc, bodies), ...parallelRuns(doc)].sort(inReadingOrder)
 }
 
 
 type CheckedItem = { object?: PlacedObject; segment?: WireSegment; box: Rect }
+
+function ordered<T>(items: readonly T[], rank: (item: T) => number): T[] {
+  return items.map((item) => ({ item, rank: rank(item) })).sort((a, b) => a.rank - b.rank).map((ranked) => ranked.item)
+}
+
+function merged(kept: readonly Finding[], found: readonly Finding[]): Finding[] {
+  const out: Finding[] = []
+  let i = 0
+  let j = 0
+  while (i < kept.length && j < found.length) out.push(inReadingOrder(kept[i], found[j]) <= 0 ? kept[i++] : found[j++])
+  while (i < kept.length) out.push(kept[i++])
+  while (j < found.length) out.push(found[j++])
+  return out
+}
 
 const checkedBox = (o: PlacedObject): Rect => {
   const boxes = [objectRect(o, GRID), ...placedFields(o, GRID).map((f) => f.box)]
@@ -433,20 +492,37 @@ export class KeptChecker {
       this.findings = checked(doc, wiring)
     } else if (changed.length) {
       const targets = new Set<CheckedItem>(changed)
-      for (const item of changed) for (const nearby of this.near.near(item.box)) if (boxesMeet(item.box, nearby.box)) targets.add(nearby)
+      for (const item of changed) this.near.visit(item.box, (nearby) => { if (boxesMeet(item.box, nearby.box)) targets.add(nearby) })
       const local = new Set(targets)
-      for (const item of targets) for (const nearby of this.near.near(item.box)) if (boxesMeet(item.box, nearby.box)) local.add(nearby)
-      const objects = new Set([...targets].flatMap((item) => item.object ? [item.object.id] : []))
-      const segments = new Set([...targets].flatMap((item) => item.segment ? [item.segment.id] : []))
-      const localObjects = new Set([...local].flatMap((item) => item.object ? [item.object.id] : []))
-      const localSegments = new Set([...local].flatMap((item) => item.segment ? [item.segment.id] : []))
+      for (const item of targets) this.near.visit(item.box, (nearby) => { if (boxesMeet(item.box, nearby.box)) local.add(nearby) })
+      const objects = new Set<string>()
+      const segments = new Set<string>()
+      for (const item of targets) {
+        if (item.object) objects.add(item.object.id)
+        if (item.segment) segments.add(item.segment.id)
+      }
       const affected = (f: Finding) => f.objects.some((id) => objects.has(id)) || f.segments.some((id) => segments.has(id))
       const segmentOrder = wireOrder(doc.wires)
-      const subset = { ...doc, objects: [...localObjects].flatMap((id) => wiring.index.objects.get(id) ? [wiring.index.objects.get(id)!] : []).sort((a, b) => wiring.index.rank(a) - wiring.index.rank(b)), wires: [...localSegments].flatMap((id) => wiring.segmentsById.get(id) ? [wiring.segmentsById.get(id)!] : []).sort((a, b) => segmentOrder.get(a)! - segmentOrder.get(b)!) }
-      const ends = new Set(subset.wires.flatMap((s) => [keyOf(s.a), keyOf(s.b)]))
-      const localWiring: Wiring = Object.create(wiring, { activePins: { value: subset.objects.flatMap((o) => pinsForObject(o)) }, dangling: { value: wiring.dangling.filter((p) => ends.has(keyOf(p))) } })
-      const order = new Map(CHECK_KINDS.map((k, i) => [k, i]))
-      this.findings = [...this.findings.filter((f) => !affected(f)), ...checked(subset, localWiring).filter(affected)].sort((a, b) => order.get(a.kind)! - order.get(b.kind)! || a.at.x - b.at.x || a.at.y - b.at.y)
+      const liveObjects: PlacedObject[] = []
+      const liveSegments: WireSegment[] = []
+      if (!this.offset.x && !this.offset.y) for (const item of local) {
+        if (item.object && this.objects.get(item.object.id) === item) liveObjects.push(item.object)
+        if (item.segment && this.segments.get(item.segment.id) === item) liveSegments.push(item.segment)
+      } else {
+        const objectIds = new Set<string>()
+        const segmentIds = new Set<string>()
+        for (const item of local) {
+          if (item.object) objectIds.add(item.object.id)
+          if (item.segment) segmentIds.add(item.segment.id)
+        }
+        for (const id of objectIds) { const o = wiring.index.objects.get(id); if (o) liveObjects.push(o) }
+        for (const id of segmentIds) { const s = wiring.segmentsById.get(id); if (s) liveSegments.push(s) }
+      }
+      const subset = { ...doc, objects: ordered(liveObjects, (o) => wiring.index.rank(o)), wires: ordered(liveSegments, (s) => segmentOrder.get(s)!) }
+      const ends = new Set<number | string>()
+      for (const s of subset.wires) { ends.add(codeOf(s.a)); ends.add(codeOf(s.b)) }
+      const localWiring: Wiring = Object.create(wiring, { activePins: { value: subset.objects.flatMap((o) => wiring.activeOf(o.id)) }, dangling: { value: wiring.dangling.filter((p) => ends.has(codeOf(p))) } })
+      this.findings = merged(this.findings.filter((f) => !affected(f)), checked(subset, localWiring).filter(affected))
     }
     this.source = doc
     return this.findings

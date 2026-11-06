@@ -458,3 +458,21 @@ it("undoing a whole translation restores endpoint counts before a field-only edi
   expect.soft(current.circuit).toEqual(circuitOf(annotated))
   expect.soft(current.circuit.wired).toEqual(["R1:2", "R2:1"])
 })
+
+it("a pin with three wires on it stays a four-way point when the kept checker looks again around an edit on one of the wires", () => {
+  const corner = 300 * GRID
+  const part: PlacedObject = { id: "hub-resistor", def: "resistor", x: corner, y: corner, props: { ref: "R90" } }
+  const hub = { x: corner + 4 * GRID, y: corner + GRID }
+  const spoke = (id: string, x: number, y: number): WireSegment => ({ id, a: hub, b: { x: hub.x + x * GRID, y: hub.y + y * GRID } })
+  const base = tiled(examples.find((e) => e.id === "power-supply")!.build(GRID), 9)
+  const doc: Schematic = { ...base, objects: [...base.objects, part], wires: [...base.wires, spoke("east", 4, 0), spoke("north", 0, -4), spoke("south", 0, 4)] }
+  expect.soft(doc.objects.length, "a sheet large enough for the kept checker's local path").toBeGreaterThan(64)
+  const graph = new WireGraph()
+  const checker = new KeptChecker()
+  checker.update(doc, wiringOf(graph, doc))
+  const east = doc.wires.find((s) => s.id === "east")!
+  const edited = withSegments(doc, [{ ...east, color: "red" }], [east])
+  const kept = checker.update(edited, wiringOf(graph, edited))
+  expect.soft(kept.filter((f) => f.kind === "four-way").map((f) => f.at), "the pin and its three wires").toEqual([hub])
+  expect.soft(kept, "the kept checker, a fresh one").toEqual(checked(edited))
+})
