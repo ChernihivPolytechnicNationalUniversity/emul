@@ -236,6 +236,18 @@ export class WireSheet {
     return [...this.along(rowCode(p.y), p.x, p.x), ...this.along(columnCode(p.x), p.y, p.y)]
   }
 
+  segmentsMarked(line: LineCode, lo: number, hi: number): WireSegment[] {
+    const out: SheetMark[] = []
+    const horizontal = line % 2 === 0
+    const along = horizontal ? this.offset.x : this.offset.y
+    const code = horizontal ? rowCode(line / 2 - this.offset.y) : columnCode((line - 1) / 2 - this.offset.x)
+    this.lines.get(code)?.within(lo - along, hi - along, out)
+    const mapped = !!this.segmentSource || !!this.offset.x || !!this.offset.y
+    const segments: WireSegment[] = []
+    for (const mark of out) if (mark.segment) segments.push(mapped ? this.segment(mark.segment.id)! : mark.segment)
+    return segments
+  }
+
   marks(line: LineCode, lo: number, hi: number): SheetMark[] {
     const out: SheetMark[] = []
     const horizontal = line % 2 === 0

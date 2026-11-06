@@ -13,7 +13,7 @@ import { OverlayMap } from "./wires/overlay-map"
 import { lineCodeOf, columnCode, rowCode, WireSheet } from "./wires/sheet"
 import { commitEdit, normalise, normaliseEdit } from "./wires/normal-form"
 import { splicedAt } from "./splice"
-import { contains, pointKey, samePoint, seededIds, type WirePin, type WireSegment } from "./wires/segment"
+import { contains, exactPointCode, highOf, lowOf, pointKey, samePoint, seededIds, type PointCode, type WirePin, type WireSegment } from "./wires/segment"
 
 export { pinsOf } from "./pin-index"
 import { documentPins, editedObjects, translatedObjects, translationOf, pinsOf, type PinState } from "./pin-index"
@@ -69,11 +69,15 @@ type Committed = { from: readonly WireSegment[]; added: readonly WireSegment[]; 
 const committed = new WeakMap<readonly WireSegment[], Committed>()
 const wireOrders = new WeakMap<readonly WireSegment[], ReadonlyMap<WireSegment, number>>()
 
+const orderParents = new WeakMap<ReadonlyMap<WireSegment, number>, ReadonlyMap<WireSegment, number>>()
+
 export function wireOrder(wires: readonly WireSegment[]): ReadonlyMap<WireSegment, number> {
   let order = wireOrders.get(wires)
   if (!order) wireOrders.set(wires, order = new Map(wires.map((s, i) => [s, i])))
   return order
 }
+
+export const keepsRanks = (order: ReadonlyMap<WireSegment, number>, previous: ReadonlyMap<WireSegment, number>) => order === previous || orderParents.get(order) === previous
 
 export function withSegments(doc: Schematic, add: readonly WireSegment[], remove: readonly WireSegment[] = [], points: readonly Point[] = [], newId: NewId = randomId): Schematic {
   if (!add.length && !remove.length && !points.length) return doc
@@ -81,9 +85,7 @@ export function withSegments(doc: Schematic, add: readonly WireSegment[], remove
   const result = doc.objects.length <= 64 && doc.wires.length <= 200 ? commitEdit(doc.wires, pinsOf(doc.objects), { add, remove, points }, newId) : localCommit(doc, add, remove, points, newId)
   if (!result.added.length && !result.removed.length && !add.length && !remove.length) return doc
   if (result.wires === doc.wires) return doc
-  const wires = [...result.wires]
-  const order = wireOrders.get(result.wires)
-  if (order) wireOrders.set(wires, order)
+  const wires = result.wires as WireSegment[]
   committed.set(wires, { from: doc.wires, added: result.added, removed: result.removed })
   return { ...doc, wires }
 }
@@ -114,6 +116,7 @@ export function segmentsOnLine(wires: readonly WireSegment[], line: number, lo: 
 }
 
 function segmentsFrom(wires: readonly WireSegment[], known: ReturnType<typeof nearbySheet>, line: number, lo: number, hi: number): readonly WireSegment[] {
+  if (known && !known.steps.length) return known.sheet.along(line, lo, hi)
   if (!known) return wires.filter((s) => lineCodeOf(s) === line && Math.min(s.a.x === s.b.x ? s.a.y : s.a.x, s.a.x === s.b.x ? s.b.y : s.b.x) <= hi && Math.max(s.a.x === s.b.x ? s.a.y : s.a.x, s.a.x === s.b.x ? s.b.y : s.b.x) >= lo)
   const out = new Set(known.sheet.along(line, lo, hi))
   for (const step of known.steps) {
@@ -123,19 +126,62 @@ function segmentsFrom(wires: readonly WireSegment[], known: ReturnType<typeof ne
   return [...out]
 }
 
+function positionOf(wires: readonly WireSegment[], order: ReadonlyMap<WireSegment, number>, segment: WireSegment): number {
+  const rank = order.get(segment)
+  if (rank === undefined) return -1
+  let lo = 0
+  let hi = wires.length
+  while (lo < hi) {
+    const middle = (lo + hi) >> 1
+    if (order.get(wires[middle])! < rank) lo = middle + 1
+    else hi = middle
+  }
+  return wires[lo] === segment ? lo : wires.indexOf(segment)
+}
+
 function localCommit(doc: Schematic, add: readonly WireSegment[], remove: readonly WireSegment[], points: readonly Point[], newId: NewId) {
   const known = nearbySheet(doc.wires)
   const near = new Set<WireSegment>()
-  const visited = new Set<string>()
+  const visited = new Set<PointCode>()
   const along = (line: number, lo: number, hi: number) => segmentsFrom(doc.wires, known, line, lo, hi)
   const through = (p: Point) => {
-    const key = pointKey(p)
+    const key = exactPointCode(p)
     if (visited.has(key)) return
     visited.add(key)
     for (const s of along(rowCode(p.y), p.x, p.x)) near.add(s)
     for (const s of along(columnCode(p.x), p.y, p.y)) near.add(s)
   }
-  for (const p of points) through(p)
+  const sheet = known && !known.steps.length ? known.sheet : undefined
+  const throughAll = (list: readonly Point[]) => {
+    if (!sheet) { for (const p of list) through(p); return }
+    const rows = new Map<number, number[]>()
+    const columns = new Map<number, number[]>()
+    for (const p of list) {
+      const key = exactPointCode(p)
+      if (visited.has(key)) continue
+      visited.add(key)
+      const row = rows.get(p.y)
+      if (row) row.push(p.x)
+      else rows.set(p.y, [p.x])
+      const column = columns.get(p.x)
+      if (column) column.push(p.y)
+      else columns.set(p.x, [p.y])
+    }
+    const passing = (line: number, at: number[]) => {
+      let lo = at[0]
+      let hi = at[0]
+      for (const v of at) { if (v < lo) lo = v; if (v > hi) hi = v }
+      for (const s of sheet.along(line, lo, hi)) {
+        if (at.length === 1) { near.add(s); continue }
+        const low = lowOf(s)
+        const high = highOf(s)
+        if (at.some((v) => v >= low && v <= high)) near.add(s)
+      }
+    }
+    for (const [y, xs] of rows) passing(rowCode(y), xs)
+    for (const [x, ys] of columns) passing(columnCode(x), ys)
+  }
+  throughAll(points)
   for (const s of [...add, ...remove]) {
     through(s.a)
     through(s.b)
@@ -151,12 +197,12 @@ function localCommit(doc: Schematic, add: readonly WireSegment[], remove: readon
     for (const pin of index.within(box)) pins.set(pin.key, pin)
     if (known) {
       const axis = s.a.y === s.b.y ? "x" : "y"
-      for (const mark of known.sheet.marks(lineCodeOf(s), Math.min(s.a[axis], s.b[axis]), Math.max(s.a[axis], s.b[axis]))) if (mark.segment) near.add(mark.segment)
+      for (const segment of known.sheet.segmentsMarked(lineCodeOf(s), Math.min(s.a[axis], s.b[axis]), Math.max(s.a[axis], s.b[axis]))) near.add(segment)
       through(s.a)
       through(s.b)
     }
   }
-  if (known) for (const pin of pins.values()) through(pin.at)
+  if (known) throughAll([...pins.values()].map((pin) => pin.at))
   if (!known) return commitEdit(doc.wires, [...pins.values()], { add, remove, points }, newId)
   const order = wireOrder(doc.wires)
   const selected = [...near].filter((s) => order.has(s)).sort((s, t) => order.get(s)! - order.get(t)!)
@@ -170,7 +216,6 @@ function localCommit(doc: Schematic, add: readonly WireSegment[], remove: readon
     if (group) group.push(s)
     else groups.set(owner, [s])
   }
-  const wires = doc.wires.slice()
   const ranks = new Map<WireSegment, number>()
   let ordered = true
   const rankPieces = (pieces: readonly WireSegment[], lo: number, hi: number) => {
@@ -188,7 +233,7 @@ function localCommit(doc: Schematic, add: readonly WireSegment[], remove: readon
   for (const source of originals) {
     const pieces = groups.get(source.id) ?? []
     if (pieces.length === 1 && pieces[0] === source) continue
-    const at = doc.wires.indexOf(source)
+    const at = positionOf(doc.wires, order, source)
     if (at >= 0) {
       const lo = order.get(source)!
       const hi = order.get(doc.wires[at + 1]) ?? lo + 1
@@ -196,16 +241,38 @@ function localCommit(doc: Schematic, add: readonly WireSegment[], remove: readon
       patches.push({ at, pieces })
     }
   }
-  patches.sort((a, b) => b.at - a.at)
-  for (const { at, pieces } of patches) wires.splice(at, 1, ...pieces)
+  patches.sort((a, b) => a.at - b.at)
   let tail = (order.get(doc.wires.at(-1)!) ?? -1) + 1
+  const appended: WireSegment[] = []
   for (const segment of add) if (!originalIds.has(segment.id)) {
     const pieces = groups.get(segment.id) ?? []
     rankPieces(pieces, tail, tail + 1)
     tail++
-    wires.push(...pieces)
+    for (const piece of pieces) appended.push(piece)
   }
-  if (ordered) wireOrders.set(wires, new OverlayMap(order, ranks, new Set([...remove, ...result.removed])))
+  let wires: WireSegment[]
+  if (!appended.length && patches.every((patch) => patch.pieces.length === 1)) {
+    wires = doc.wires.slice()
+    for (const { at, pieces } of patches) wires[at] = pieces[0]
+  } else {
+    let size = doc.wires.length + appended.length
+    for (const { pieces } of patches) size += pieces.length - 1
+    wires = new Array<WireSegment>(size)
+    let next = 0
+    let filled = 0
+    for (const { at, pieces } of patches) {
+      while (next < at) wires[filled++] = doc.wires[next++]
+      for (const piece of pieces) wires[filled++] = piece
+      next = at + 1
+    }
+    while (next < doc.wires.length) wires[filled++] = doc.wires[next++]
+    for (const piece of appended) wires[filled++] = piece
+  }
+  if (ordered) {
+    const next = new OverlayMap(order, ranks, new Set([...remove, ...result.removed]))
+    wireOrders.set(wires, next)
+    orderParents.set(next, order)
+  }
   return { wires, added: result.added, removed: result.removed }
 }
 
@@ -307,17 +374,17 @@ function objectsIn(doc: Pick<Schematic, "objects">, ids: ReadonlySet<string>, wi
 
 function travelling(doc: Schematic, carried: ReadonlySet<string>, known?: Wiring, given?: WireNets): Set<string> {
   const wiring = given ? undefined : knownFor(doc, known)
-  const pins = pinsOf(objectsIn(doc, carried, wiring))
+  const objects = objectsIn(doc, carried, wiring)
+  const pins = wiring ? objects.flatMap((o) => wiring.activeOf(o.id)) : pinsOf(objects)
   const view = given ?? wiring?.view ?? viewOf(doc)
-  const carriedPins = new Set<string>()
-  const carriedAt = new Set<string>()
+  const carriedAt = new Set<number | string>()
   const nets = new Set<string>()
   for (const p of pins) {
-    carriedPins.add(p.key)
-    carriedAt.add(pointKey(p.at))
+    carriedAt.add(exactPointCode(p.at))
     const net = view.netOfPin(p.key)
     if (net !== undefined) nets.add(net)
   }
+  const ids = new Set(objects.map((o) => o.id))
   const out = new Set<string>()
   const runsOfNet = (net: string): readonly Run[] => {
     if (!wiring) return runsOf(view.segmentsOf(net).map((id) => view.segment(id)!), view.pinsOf(net).map((key) => view.pin(key)!))
@@ -326,10 +393,9 @@ function travelling(doc: Schematic, carried: ReadonlySet<string>, known?: Wiring
     return [...runs]
   }
   for (const net of nets) {
-    if (view.pinsOf(net).every((key) => carriedPins.has(key))) for (const id of view.segmentsOf(net)) out.add(id)
+    if (view.pinsOf(net).every((key) => ids.has(key.slice(0, key.indexOf(":"))))) for (const id of view.segmentsOf(net)) out.add(id)
     for (const run of runsOfNet(net)) {
-      const ends = [run.points[0], run.points[run.points.length - 1]]
-      if (ends.every((p) => carriedAt.has(pointKey(p)))) for (const t of run.segments) out.add(t.id)
+      if (carriedAt.has(exactPointCode(run.points[0])) && carriedAt.has(exactPointCode(run.points[run.points.length - 1]))) for (const t of run.segments) out.add(t.id)
     }
   }
   return out
@@ -366,15 +432,21 @@ export function moved(doc: Schematic, from: ReadonlyMap<string, Point>, dx: numb
   if (from.size === doc.objects.length && doc.objects.every((o) => from.has(o.id))) return translatedWhole(doc, from, dx, dy)
   const carried = new Set(from.keys())
   const wires = travelling(doc, carried, known)
-  const before = objectsIn(doc, carried, knownFor(doc, known))
+  const wiring = knownFor(doc, known)
+  const before = objectsIn(doc, carried, wiring)
   const after: PlacedObject[] = []
-  const objects = doc.objects.map((o) => {
-    const p = from.get(o.id)
-    if (!p) return o
+  const shiftedTo = (o: PlacedObject) => {
+    const p = from.get(o.id)!
     const moved = { ...o, x: p.x + dx, y: p.y + dy }
     after.push(moved)
     return moved
-  })
+  }
+  const placed = wiring && before.every((o) => doc.objects[wiring.index.rank(o)] === o)
+  let objects: PlacedObject[]
+  if (placed) {
+    objects = doc.objects.slice()
+    for (const o of before) objects[wiring.index.rank(o)] = shiftedTo(o)
+  } else objects = doc.objects.map((o) => (from.has(o.id) ? shiftedTo(o) : o))
   const remove = wires.size ? doc.wires.filter((s) => wires.has(s.id)) : []
   const add = remove.map((s) => ({ ...s, a: { x: s.a.x + dx, y: s.a.y + dy }, b: { x: s.b.x + dx, y: s.b.y + dy } }))
   return withSegments({ ...doc, objects: editedObjects(doc.objects, objects, from.keys()) }, add, remove, [...pinPoints(before), ...pinPoints(after)], newId)
@@ -404,6 +476,7 @@ export type Wiring = {
   pins: readonly WirePin[]
   changes?: { from: Wiring["source"]; objects: { before: readonly PlacedObject[]; after: readonly PlacedObject[] }; wires: { added: readonly WireSegment[]; removed: readonly WireSegment[] } }
   activePins: readonly WirePin[]
+  activeOf: (object: string) => readonly WirePin[]
   index: import("./pin-index").DocumentPins
   view: WireNets
   runs: readonly Run[]
@@ -529,6 +602,8 @@ function lookOf(view: WireNets, net: string): NetLook {
 }
 
 const EMPTY_IDS: readonly string[] = []
+
+const NO_PINS: readonly WirePin[] = []
 
 export const wiringOf = (graph: WireGraph, doc: Pick<Schematic, "objects" | "wires" | "library">): Wiring => withLibrary(doc.library, () => derivedWiring(graph, doc))
 
@@ -681,8 +756,9 @@ function derivedWiring(graph: WireGraph, doc: Pick<Schematic, "objects" | "wires
     get pins() { return index.all },
     changes: previous && steps && !definitionsChanged ? { from: previous.wiring.source, objects: index.changes(previous.wiring.index), wires: edit! } : undefined,
     get activePins() { return active.pins },
+    activeOf: (object) => active.byOwner.get(object) ?? NO_PINS,
     index,
-    view: Object.create(view, { pin: { value: (key: string) => { void view.nets; return view.pin(key) ?? index.pin(key) } } }),
+    view: withIndexPins(view, index),
     get runs() { return orderedRuns().runs },
     get routes() { return orderedRuns().routes },
     runById,
@@ -701,6 +777,12 @@ function derivedWiring(graph: WireGraph, doc: Pick<Schematic, "objects" | "wires
   assemblies.set(graph, { wiring, looks: lookByNet, routeOf, netByRun, view, pins: active, collections })
   void wiring.sheet
   return wiring
+}
+
+function withIndexPins(view: WireNets, index: import("./pin-index").DocumentPins): WireNets {
+  const nets: WireNets = Object.create(view)
+  Object.defineProperty(nets, "pin", { value: (key: string) => { void view.nets; return view.pin(key) ?? index.pin(key) } })
+  return nets
 }
 
 type KeptSheet = { sheet: WireSheet; wires: readonly WireSegment[]; pins: readonly WirePin[] | undefined }

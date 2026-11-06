@@ -13,7 +13,7 @@ import { circuitOf } from "@/schematic/circuit"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, routeBox, touches, type Point } from "@/schematic/geometry"
 import type { HdlModule, PlacedObject, Schematic } from "@/schematic/types"
-import { moved, recoloured, removed, withModule, withSegments, wireOrder, wiringOf, type Wiring } from "@/schematic/wire-edits"
+import { moved, recoloured, removed, travellingWires, withModule, withSegments, wireOrder, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
 import { PartDrag, SegmentDrag, TurnRun } from "@/schematic/rubber-band"
 import { lineCodeOf, WireSheet, type SheetMark } from "@/schematic/wires/sheet"
@@ -74,6 +74,10 @@ describe("the wiring kept up to date across edits is the wiring built afresh (de
       known = wiringOf(graph, doc)
       const fresh = wiringOf(new WireGraph(), doc)
       expect.soft(shape(known), `${id} step ${step} (action ${action})`).toEqual(shape(fresh))
+      for (const size of [1, 2, 4]) {
+        const carried = new Set(Array.from({ length: size }, () => rng.pick(doc.objects).id))
+        expect.soft([...travellingWires(doc, carried, known)].sort(), `${id} step ${step}: the wires a move of ${size} parts carries, from the kept wiring`).toEqual([...travellingWires(doc, carried)].sort())
+      }
       expect.soft(fresh.circuit, `${id} step ${step}: the store's circuit is the one the solver builds from the document`).toEqual(circuitOf(doc))
     }
   })
