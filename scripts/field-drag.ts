@@ -222,6 +222,37 @@ async function farDropAndWireCopy(page: Page) {
   expect("R on the 74HC595 turns it: no refusal", await page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].some((e) => e.textContent?.includes("Not done") || e.textContent?.includes("Not turned"))), false)
 }
 
+async function doubleClickChecks(page: Page) {
+  console.log("\ndouble clicks: start a wire on bare field, end it as Enter does (the user, 2026-11-06)")
+  await openDoc(page, "double-click", { objects: [resistorAt("F1", -6, -4), resistorAt("F2", 28, 16)], wires: [], parts: {} })
+  const f = await fieldFrame(page)
+  const at = (x: number, y: number) => f.toScreen(cellPoint(x, y))
+  const openEnds = () => page.evaluate(() => [...document.querySelectorAll("[data-dangling]")].map((e) => e.getAttribute("data-dangling")).sort())
+  const drawing = () => countOf(page, "[data-slot=pending-wire-route]")
+  const start = await at(6, 6)
+  await page.mouse.dblclick(start.x, start.y)
+  const corner = await at(10, 6)
+  await page.mouse.move(corner.x, corner.y, { steps: 6 })
+  await page.waitForTimeout(200)
+  expect("a double click on bare field starts a wire there, as W and a click did", await drawing(), 1)
+  await page.mouse.click(corner.x, corner.y)
+  const last = await at(10, 10)
+  await page.mouse.move(last.x, last.y, { steps: 6 })
+  await page.mouse.dblclick(last.x, last.y)
+  await page.waitForTimeout(500)
+  expect("a double click ends it at that point, as Enter ends it at the last clicked one", [await drawing(), await openEnds()], [0, [`${10 * GRID},${10 * GRID}`, `${6 * GRID},${6 * GRID}`].sort()])
+  const single = await at(16, 6)
+  await page.mouse.click(single.x, single.y)
+  await page.mouse.move(single.x + 40, single.y, { steps: 4 })
+  await page.waitForTimeout(200)
+  expect("a single click on bare field starts nothing", await drawing(), 0)
+  await page.waitForTimeout(600)
+  const onWire = await at(8, 6)
+  await page.mouse.dblclick(onWire.x, onWire.y)
+  await page.waitForTimeout(300)
+  expect("a double click on a wire still selects its whole run, both legs, and starts nothing", [await page.evaluate(() => new Set([...document.querySelectorAll("[data-slot=selection] [data-segment]")].map((e) => e.getAttribute("data-segment"))).size), await drawing()], [2, 0])
+}
+
 async function morningChecks(page: Page) {
   console.log("\nthe user's checks on the running app (2026-11-05 morning)")
   const frameParts: PlacedObject[] = [resistorAt("F1", -6, -4), resistorAt("F2", 28, 16)]
@@ -707,6 +738,7 @@ try {
   await drawFromAWire(page)
   await farDropAndWireCopy(page)
   await morningChecks(page)
+  await doubleClickChecks(page)
   await phaseFiveChecks(page)
   await bridgeBuiltByHand(page)
   await noPluggingIntoHeaders(page)

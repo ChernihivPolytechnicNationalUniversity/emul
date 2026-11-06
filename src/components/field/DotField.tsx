@@ -209,6 +209,7 @@ const savedFieldOpen = () => {
 }
 /** How far a finger may wander and still have tapped, px. */
 const TAP_SLOP = 8
+const DOUBLE_CLICK_MS = 500
 
 const CLEAR_OF_CONTROLS_PX = 80
 
@@ -1143,6 +1144,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return true
   }
 
+  const finishAtLastPoint = (): boolean => {
+    if (!pending) return false
+    const last = pending.d.corners.at(-1)
+    return finish(last ? { kind: "field", at: last } : (pending.target ?? { kind: "field", at: snapPoint(pending.d.cursor) }))
+  }
+
   const follow = (clientX: number, clientY: number) => {
     if (!pending) return
     const under = endUnder(clientX, clientY)
@@ -1194,6 +1201,14 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     releaseDrawing(e.clientX, e.clientY)
   })
 
+  const lastPress = React.useRef<{ time: number; x: number; y: number; count: number } | null>(null)
+  const countPress = useEvent((e: React.PointerEvent) => {
+    if (!primaryClick(e)) return
+    const last = lastPress.current
+    const again = !!last && e.timeStamp - last.time <= DOUBLE_CLICK_MS && Math.hypot(e.clientX - last.x, e.clientY - last.y) < TAP_SLOP
+    lastPress.current = { time: e.timeStamp, x: e.clientX, y: e.clientY, count: again ? last.count + 1 : 1 }
+  })
+  const pressedTwice = () => (lastPress.current?.count ?? 1) >= 2
   const wirePress = React.useRef<{ segment: string; x: number; y: number; pointer: number; element: Element } | null>(null)
   const onWirePointerDown = useEvent((e: React.PointerEvent<SVGPathElement>, id: string) => {
     if (!primaryClick(e)) return
@@ -1216,7 +1231,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const run = runById.get(id)
     if (!run) return
     const toggle = addsToSelection(e)
-    if (e.detail >= 2) {
+    if (pressedTwice()) {
       const chain = chainOf(wiring, segmentNearest(run, toWorld(e.clientX, e.clientY)))
       sch.selectWires([...chain], toggle)
       marquee.clear()
@@ -1283,8 +1298,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     // A click on bare field while probing is a miss, not a selection.
     else if (measure.active) return
     else if (primaryClick(e) && pending?.mode === "click") {
+      if (pressedTwice()) {
+        finishAtLastPoint()
+        return
+      }
       const under = endUnder(e.clientX, e.clientY)
-      if (under.kind !== "field" || e.detail >= 2) {
+      if (under.kind !== "field") {
         finish(under)
         return
       }
@@ -1302,6 +1321,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       if (end) {
         e.currentTarget.setPointerCapture(e.pointerId)
         startAt(end, "drag")
+        return
+      }
+      if (pressedTwice() && e.pointerType !== "touch") {
+        marquee.clear()
+        startAt(endUnder(e.clientX, e.clientY), "click")
         return
       }
       // A finger on bare field pans, the way every map does; a tap clears the selection.
@@ -1412,8 +1436,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
     if (pending && e.key === "Enter") {
       e.preventDefault()
-      const last = pending.d.corners.at(-1)
-      return finish(last ? { kind: "field", at: last } : (pending.target ?? { kind: "field", at: snapPoint(pending.d.cursor) }))
+      return finishAtLastPoint()
     }
     if (pending && !e.ctrlKey && !e.metaKey && (e.key === "/" || e.code === "Slash")) {
       e.preventDefault()
@@ -1785,6 +1808,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             data-slot="dot-field-viewport"
             className={cn("absolute inset-0 touch-none select-none", cursor)}
             onPointerDownCapture={(e) => {
+              countPress(e)
               // A long press opens the field menu without a contextmenu event on iOS: add there.
               if (e.pointerType === "touch") {
                 menuPoint.current = toWorld(e.clientX, e.clientY)
