@@ -218,6 +218,20 @@ describe("phase 5's edits keep the store's wiring and sheet equal to fresh ones 
 })
 
 describe("the maintained field commit has the same findings and queries as a fresh field", () => {
+
+  it("editing an interior pin's wire keeps directional body findings fresh through undo and redo", () => {
+    const at = (x: number, y: number) => ({ x: x * GRID, y: y * GRID })
+    const before: Schematic = { objects: [{ id: "U1", def: "opamp-generic", x: 0, y: 0 }, ...Array.from({ length: 65 }, (_, i) => ({ id: `mark${i}`, def: "no-connect", x: (100 + i * 4) * GRID, y: 0 }))], wires: [{ id: "out", a: at(5, 3), b: at(8, 3) }], parts: {} }
+    const graph = new WireGraph()
+    const checker = new KeptChecker()
+    checker.update(before, wiringOf(graph, before))
+    const after = withSegments(before, [{ ...before.wires[0], b: at(0, 3) }], before.wires)
+    for (const doc of [after, before, after]) {
+      const kept = wiringOf(graph, doc)
+      expect.soft(checker.update(doc, kept), "the directional exit after each edit").toEqual(checked(structuredClone(doc)))
+    }
+  })
+
   it.each(["metronome", "nucleo-74hc595", "system-exam", "power-supply", "power-supply-tiled"])("%s: moves, splices, field moves, removal, undo and redo", (id) => {
     const rng = random(id.length * 73)
     const graph = new WireGraph()

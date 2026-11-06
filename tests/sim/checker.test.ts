@@ -152,6 +152,18 @@ describe("four-way connections (design.md §6.8; junctions.md 13, 14; KiCad four
 })
 
 describe("a wire through a body (design.md §5.1, §6.8; inferred from ГОСТ 2.701-84's clearances, research/standards.md; IEC 61082-1 via a secondary source: connecting lines should not interfere with other symbols)", () => {
+
+  it("an interior pin exempts only the exit towards its outward side, at either segment end", () => {
+    for (const reverse of [false, true]) for (const x of [0, 8]) {
+      const endpoints = [at(5, 3), at(x, 3)]
+      if (reverse) endpoints.reverse()
+      const doc = docOf([part("U1", "opamp-generic", 0, 0)], [seg(endpoints[0], endpoints[1])])
+      expect.soft(of(checked(doc), "wire-through-body"), `OUT towards x=${x}, reversed ${reverse}`).toHaveLength(x === 0 ? 1 : 0)
+    }
+    const supply = docOf([part("U1", "opamp-generic", 0, 0)], [seg(at(3, 2), at(3, -2)), seg(at(3, 4), at(3, 8))])
+    expect.soft(of(checked(supply), "wire-through-body"), "interior supply pins exit outwards").toEqual([])
+  })
+
   it("a wire across a resistor's body that meets none of its pins is a finding naming the part and the wire", () => {
     const wire = seg(at(2, -3), at(2, 5))
     const doc = docOf([resistor("R1", 0, 0)], [wire])

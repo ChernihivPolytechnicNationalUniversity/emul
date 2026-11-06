@@ -6,7 +6,7 @@ import { getDef, pinName } from "./registry"
 import type { ComponentDef, PlacedObject, Schematic } from "./types"
 import { wireOrder, wiringOf, type Wiring } from "./wire-edits"
 import { WireGraph } from "./wires/graph"
-import { exactPointCode as codeOf, type PointCode, type WireSegment } from "./wires/segment"
+import { exactPointCode as codeOf, type PointCode, type WirePin, type WireSegment } from "./wires/segment"
 
 export const NO_CONNECT = "no-connect"
 
@@ -171,7 +171,7 @@ export class Buckets<T> {
 
 const BUCKET = 16 * GRID
 
-type Body = { object: PlacedObject; contour: readonly (readonly Point[])[]; leads: readonly Lead[]; pins: readonly Point[]; box: Rect }
+type Body = { object: PlacedObject; contour: readonly (readonly Point[])[]; leads: readonly Lead[]; pins: readonly WirePin[]; box: Rect }
 
 const judged = (o: PlacedObject) => {
   const def = getDef(o.def)
@@ -187,8 +187,8 @@ function bodiesOf(objects: readonly PlacedObject[]): Body[] {
     if (cached && cached.def === def) return [cached.body]
     const f = footprints(object, GRID)
     if (!f) return []
-    const pins = pinsForObject(object).map((p) => p.at)
-    const points = [...f.contour.flatMap((q) => q.corners), ...f.leads.flat(), ...pins]
+    const pins = pinsForObject(object)
+    const points = [...f.contour.flatMap((q) => q.corners), ...f.leads.flat(), ...pins.map((p) => p.at)]
     const xs = points.map((p) => p.x)
     const ys = points.map((p) => p.y)
     const box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }
@@ -287,12 +287,13 @@ const samePoint = (a: Point, b: Point) => Math.abs(a.x - b.x) < EPS && Math.abs(
 function runsThrough(s: WireSegment, body: Body) {
   const length = Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y)
   const slack = EPS / Math.max(length, EPS)
+  const exitsAt = (at: Point, towards: Point) => body.pins.some((p) => samePoint(p.at, at) && p.out && (towards.x - at.x) * p.out.x + (towards.y - at.y) * p.out.y > EPS)
   return body.contour.some((corners) => {
     const inside = insideOf(s, corners)
     if (!inside) return false
     const [lo, hi] = inside
-    const fromPinA = lo <= slack && hi < 1 - slack && body.pins.some((p) => samePoint(p, s.a))
-    const fromPinB = hi >= 1 - slack && lo > slack && body.pins.some((p) => samePoint(p, s.b))
+    const fromPinA = lo <= slack && hi < 1 - slack && exitsAt(s.a, s.b)
+    const fromPinB = hi >= 1 - slack && lo > slack && exitsAt(s.b, s.a)
     return !fromPinA && !fromPinB
   })
 }
@@ -326,7 +327,7 @@ function fieldFindings(doc: Schematic, near: Buckets<Body>): Finding[] {
     const crossed = [...wires.near(f.box)].filter((s) => wireCrossesBox(s, f.box))
     if (crossed.length) found.push({ kind: "field-on-wire", at: middleOf(f.box), objects: [f.object], segments: crossed.map((s) => s.id), text: `${named(f)} lies on a wire` })
     const under = [...near.near(f.box)].filter(
-      (b) => boxesMeet(f.box, b.box) && (b.contour.some((corners) => fieldCrossesContour(f.box, corners)) || b.pins.some((p) => holds(f.box, p)) || b.leads.some((lead) => fieldCrossesLead(f.box, lead))),
+      (b) => boxesMeet(f.box, b.box) && (b.contour.some((corners) => fieldCrossesContour(f.box, corners)) || b.pins.some((p) => holds(f.box, p.at)) || b.leads.some((lead) => fieldCrossesLead(f.box, lead))),
     )
     if (under.length) found.push({ kind: "field-on-body", at: middleOf(f.box), objects: [f.object, ...under.map((b) => b.object.id).filter((id) => id !== f.object)], segments: [], text: `${named(f)} lies on ${under.map((b) => refOf(b.object)).join(", ")}` })
   }
