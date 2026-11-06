@@ -219,6 +219,17 @@ describe("phase 5's edits keep the store's wiring and sheet equal to fresh ones 
 
 describe("the maintained field commit has the same findings and queries as a fresh field", () => {
 
+  it("board field findings stay fresh when a label enters the housing and the edit is undone", () => {
+    const label: PlacedObject = { id: "R1", def: "resistor", x: 100 * GRID, y: 100 * GRID, props: { ref: "I", value: "" } }
+    const before: Schematic = { objects: [{ id: "B", def: "open746i-c", x: 0, y: 0 }, label, ...Array.from({ length: 65 }, (_, i) => ({ id: `mark${i}`, def: "no-connect", x: (200 + i * 4) * GRID, y: 0 }))], wires: [], parts: {} }
+    const after = { ...before, objects: editedObjects(before.objects, before.objects.map((o) => o === label ? withFieldAt(o, "ref", { x: 36.5 * GRID, y: 26.5 * GRID }, GRID, getDef(o.def)!) : o), [label.id]) }
+    const graph = new WireGraph()
+    const checker = new KeptChecker()
+    for (const doc of [before, after, before, after]) {
+      expect.soft(checker.update(doc, wiringOf(graph, doc)), "field collisions include the board").toEqual(checked(structuredClone(doc)))
+    }
+  })
+
   it("circular body collisions stay fresh across a field edit, undo and redo", () => {
     const label: PlacedObject = { id: "R1", def: "resistor", x: 100 * GRID, y: 100 * GRID, props: { ref: "I", value: "" } }
     const before: Schematic = { objects: [{ id: "V1", def: "voltmeter", x: 0, y: 0 }, label, ...Array.from({ length: 65 }, (_, i) => ({ id: `mark${i}`, def: "no-connect", x: (200 + i * 4) * GRID, y: 0 }))], wires: [{ id: "cross", a: { x: 1.5 * GRID, y: 1.5 * GRID }, b: { x: 1.5 * GRID, y: 3 * GRID } }], parts: {} }

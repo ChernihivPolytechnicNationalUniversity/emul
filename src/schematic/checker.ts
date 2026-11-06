@@ -175,7 +175,7 @@ type Body = { object: PlacedObject; contour: readonly (readonly Point[])[]; lead
 
 const judged = (o: PlacedObject) => {
   const def = getDef(o.def)
-  return !!def && !isMark(o) && !def.pinsAreSockets && !def.pins.every((p) => p.kind === "node")
+  return !!def && !isMark(o) && !def.pins.every((p) => p.kind === "node")
 }
 
 const bodyCache = new WeakMap<PlacedObject, { def: ReturnType<typeof getDef>; body: Body }>()
@@ -309,6 +309,7 @@ function wiresThroughBodies(doc: Schematic, near: Buckets<Body>): Finding[] {
   for (const s of doc.wires) {
     const box = boxOfSegment(s)
     for (const body of near.near(box)) {
+      if (getDef(body.object.def)?.pinsAreSockets) continue
       if (!boxesMeet(body.box, box)) continue
       if (runsThrough(s, body)) found.push({ kind: "wire-through-body", at: middleOf(box), objects: [body.object.id], segments: [s.id], text: `A wire runs through ${refOf(body.object)}` })
     }

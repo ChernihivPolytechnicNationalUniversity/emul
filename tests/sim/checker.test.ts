@@ -208,6 +208,21 @@ describe("a wire through a body (design.md §5.1, §6.8; inferred from ГОСТ 
 })
 
 describe("fields over wires, bodies and each other (design.md §5.2, §6.8: a finding, never a refusal)", () => {
+
+  it("fields over a board's housing or socket are findings while exterior fields and wires over the board remain clear", () => {
+    const board = part("B", "open746i-c", 0, 0)
+    const label = resistor("R1", 100, 100, { props: { ref: "I", value: "" } })
+    const socket = objectPins(board, GRID)[0].point
+    for (const target of [at(36.5, 26.5), socket]) {
+      const moved = withFieldAt(label, "ref", target, GRID, getDef("resistor")!)
+      expect.soft(of(checked(docOf([board, moved])), "field-on-body").map((f) => f.objects), `field at ${target.x},${target.y}`).toEqual([["R1", "B"]])
+    }
+    const clear = docOf([board, label], [seg(at(-4, 20), at(80, 20))])
+    expect.soft(of(checked(clear), "field-on-body"), "exterior label").toEqual([])
+    expect.soft(of(checked(clear), "wire-through-body"), "the board jumper exception").toEqual([])
+    expect.soft(of(checked(clear), "unconnected-pin").filter((f) => f.objects.includes("B")), "unused sockets").toEqual([])
+  })
+
   it("a wire through a part's designator is a finding naming the field's part; clear of it, none", () => {
     const r1 = resistor("R1", 0, 0, { props: { ref: "R1", value: "" } })
     const ref = placedFields(r1, GRID).find((f) => f.key === "ref")!
