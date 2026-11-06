@@ -102,7 +102,7 @@ const CHECK_DETAIL: Record<CheckKind, string> = {
 }
 
 /** The schematic checker's findings (design.md §6.8), as problems of the field. */
-export const checkKeyOf = (f: Finding) => `check:${f.kind}:${f.at.x},${f.at.y}:${f.objects.join("+")}:${f.segments.join("+")}`
+export const checkKeyOf = (f: Finding) => `check:${f.kind}:${f.at.x},${f.at.y}:${f.objects.join("+")}:${f.segments.join("+")}:${[...f.fields ?? []].sort().join("+")}`
 
 export const isWarning = (f: Finding) => LEVEL_OF[f.kind] === "warning"
 

@@ -247,6 +247,7 @@ describe("fields over wires, bodies and each other (design.md §5.2, §6.8: a fi
     const f = Object.fromEntries(placedFields(r1, GRID).map((x) => [x.key, x]))
     const onto = withFieldMoved(r1, "ref", f.value.at.x - f.ref.at.x, f.value.at.y - f.ref.at.y, GRID)
     expect.soft(of(checked(docOf([onto])), "fields-overlap"), "one finding").toHaveLength(1)
+    expect.soft(of(checked(docOf([onto])), "fields-overlap")[0].fields, "both field identities, in canonical order").toEqual(["R1:ref", "R1:value"])
     expect.soft(of(checked(docOf([r1])), "fields-overlap"), "autoplaced: none").toEqual([])
   })
 

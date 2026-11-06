@@ -27,7 +27,7 @@ export const LEVEL_OF: Record<CheckKind, CheckLevel> = {
   "parallel-too-close": "note",
 }
 
-export type Finding = { kind: CheckKind; at: Point; objects: readonly string[]; segments: readonly string[]; text: string; pin?: string }
+export type Finding = { kind: CheckKind; at: Point; objects: readonly string[]; segments: readonly string[]; text: string; pin?: string; fields?: readonly string[] }
 
 const HALF = GRID / 2
 const EPS = 1e-6
@@ -326,11 +326,11 @@ function fieldFindings(doc: Schematic, near: Buckets<Body>): Finding[] {
   const named = (f: PlacedField) => `${refOf((byObject ??= new Map(doc.objects.map((o) => [o.id, o]))).get(f.object)!)}'s ${f.key === "ref" ? "designator" : "value"}`
   for (const f of fields) {
     const crossed = [...wires.near(f.box)].filter((s) => wireCrossesBox(s, f.box))
-    if (crossed.length) found.push({ kind: "field-on-wire", at: middleOf(f.box), objects: [f.object], segments: crossed.map((s) => s.id), text: `${named(f)} lies on a wire` })
+    if (crossed.length) found.push({ kind: "field-on-wire", at: middleOf(f.box), objects: [f.object], segments: crossed.map((s) => s.id), fields: [`${f.object}:${f.key}`], text: `${named(f)} lies on a wire` })
     const under = [...near.near(f.box)].filter(
       (b) => boxesMeet(f.box, b.box) && (b.contour.some((corners) => fieldCrossesContour(f.box, corners)) || b.pins.some((p) => holds(f.box, p.at)) || b.leads.some((lead) => fieldCrossesLead(f.box, lead))),
     )
-    if (under.length) found.push({ kind: "field-on-body", at: middleOf(f.box), objects: [f.object, ...under.map((b) => b.object.id).filter((id) => id !== f.object)], segments: [], text: `${named(f)} lies on ${under.map((b) => refOf(b.object)).join(", ")}` })
+    if (under.length) found.push({ kind: "field-on-body", at: middleOf(f.box), objects: [f.object, ...under.map((b) => b.object.id).filter((id) => id !== f.object)], segments: [], fields: [`${f.object}:${f.key}`], text: `${named(f)} lies on ${under.map((b) => refOf(b.object)).join(", ")}` })
   }
   const placed = new Buckets<PlacedField>(BUCKET)
   for (const f of fields) placed.add(f.box, f)
@@ -338,10 +338,11 @@ function fieldFindings(doc: Schematic, near: Buckets<Body>): Finding[] {
   for (const f of fields) {
     for (const g of placed.near(f.box)) {
       if (g === f || !boxesOverlap(f.box, g.box)) continue
-      const pair = [`${f.object}:${f.key}`, `${g.object}:${g.key}`].sort().join("|")
+      const fields = [`${f.object}:${f.key}`, `${g.object}:${g.key}`].sort()
+      const pair = fields.join("|")
       if (seen.has(pair)) continue
       seen.add(pair)
-      found.push({ kind: "fields-overlap", at: middleOf(f.box), objects: [...new Set([f.object, g.object])], segments: [], text: `${named(f)} and ${named(g)} overlap` })
+      found.push({ kind: "fields-overlap", at: middleOf(f.box), objects: [...new Set([f.object, g.object])], segments: [], fields, text: `${named(f)} and ${named(g)} overlap` })
     }
   }
   return found
