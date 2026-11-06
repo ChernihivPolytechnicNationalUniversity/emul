@@ -476,3 +476,16 @@ it("a pin with three wires on it stays a four-way point when the kept checker lo
   expect.soft(kept.filter((f) => f.kind === "four-way").map((f) => f.at), "the pin and its three wires").toEqual([hub])
   expect.soft(kept, "the kept checker, a fresh one").toEqual(checked(edited))
 })
+
+it("visible routes kept from the last frame are ranked again when the commit renumbered the wires before them", () => {
+  const wire = (id: string, y: number, length = 4): WireSegment => ({ id, a: { x: 0, y: y * GRID }, b: { x: length * GRID, y: y * GRID } })
+  const [x1, x2, q, r] = [wire("x1", 0), wire("x2", 3), wire("q", 6), wire("r", 9)]
+  const before: Schematic = { objects: [], wires: [x1, x2, q, r], parts: {} }
+  const view = { x: -GRID, y: -GRID, w: 20 * GRID, h: 20 * GRID }
+  const graph = new WireGraph()
+  const field = new FieldState()
+  field.commit(before, wiringOf(graph, before)).visible(view)
+  const after = withSegments(before, [wire("r", 9, 6)], [x1, x2, r])
+  const known = wiringOf(graph, after)
+  expect.soft(field.commit(after, known).visible(view).routes.map((route) => route.id), "the field's visible routes, in the document's order").toEqual(known.routes.filter((route) => touches(routeBox(route), view)).map((route) => route.id))
+})
