@@ -230,7 +230,6 @@ export type PlacementScene = {
 
 type Placed = { object: PlacedObject; contour: Quad[]; leads: readonly Lead[]; box: Rect }
 
-const NO_CONNECT_MARK = "no-connect"
 
 const isJunction = (object: PlacedObject) => {
   const pins = getDef(object.def)?.pins ?? []
@@ -292,7 +291,7 @@ const shiftedPoint = (p: Point, dx: number, dy: number): Point => ({ x: p.x + dx
 export function placementCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
   const ids = new Set(moving.map((o) => o.id))
   const place = (object: PlacedObject): Placed | null => {
-    if (isJunction(object) || object.def === NO_CONNECT_MARK) return null
+    if (isJunction(object)) return null
     const f = footprints(object, scene.grid)
     if (!f) return null
     const leadBoxes = f.leads.map(([p, q]) => ({ x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) }))

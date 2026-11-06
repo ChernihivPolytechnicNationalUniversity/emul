@@ -16,7 +16,6 @@ export type MovePlan = {
   blocked?: (dx: number, dy: number) => boolean
   contacts?: { show: (dx: number, dy: number) => void }
   rubber?: { show: (dx: number, dy: number) => void; clear: () => void }
-  stale?: readonly (HTMLElement | SVGElement)[]
 }
 
 const HANDLE_ATTRIBUTES = ["data-pins", "data-plate"] as const
@@ -74,7 +73,7 @@ export function planMove(
   const startPositions = new Map<string, Point>()
   for (const o of objects) if (moving.has(o.id)) startPositions.set(o.id, { x: o.x, y: o.y })
   const bodies: Movable[] = layer?.element ? [layer.element] : []
-  if (layer?.whole) return { root, origin, grid, startPositions, bodies, svgGroups: [], rigidWires: [], stale: staleWhileMoving(root) }
+  if (layer?.whole) return { root, origin, grid, startPositions, bodies, svgGroups: [], rigidWires: [] }
 
   const bodyOf = handlesById<HTMLElement>(root, "data-body")
   const pinsOf = handlesById<SVGGElement>(root, "data-pins")
@@ -96,19 +95,7 @@ export function planMove(
     if (elements?.length) rigidWires.push({ elements })
   }
 
-  return { root, origin, grid, startPositions, bodies, svgGroups, rigidWires, stale: staleWhileMoving(root) }
-}
-
-const STALE_WHILE_MOVING = "[data-slot=check-marks]"
-
-export const staleWhileMoving = (root: ParentNode): (HTMLElement | SVGElement)[] => [...root.querySelectorAll<HTMLElement | SVGElement>(STALE_WHILE_MOVING)]
-
-export function hideWhileMoving(elements: readonly (HTMLElement | SVGElement)[]): () => void {
-  const saved = elements.map((element) => ({ element, display: element.style.display }))
-  for (const { element } of saved) element.style.display = "none"
-  return () => {
-    for (const { element, display } of saved) element.style.display = display
-  }
+  return { root, origin, grid, startPositions, bodies, svgGroups, rigidWires }
 }
 
 export class MoveDrag {
@@ -116,7 +103,6 @@ export class MoveDrag {
   private pointer: Point | null = null
   private offset: Point = { x: 0, y: 0 }
   private raf = 0
-  private shown: (() => void) | null = null
 
   get active() {
     return this.plan !== null
@@ -148,8 +134,6 @@ export class MoveDrag {
       this.raf = 0
     }
     if (plan && (this.offset.x || this.offset.y)) this.paint(plan, 0, 0)
-    this.shown?.()
-    this.shown = null
     const { x: dx, y: dy } = plan && at ? snappedOffset(plan, at) : { x: 0, y: 0 }
     this.plan = null
     this.pointer = null
@@ -164,7 +148,6 @@ export class MoveDrag {
     if (!plan || !at) return
     const { x: dx, y: dy } = snappedOffset(plan, at)
     if (dx === this.offset.x && dy === this.offset.y) return
-    if (!this.shown && plan.stale?.length) this.shown = hideWhileMoving(plan.stale)
     this.offset = { x: dx, y: dy }
     this.paint(plan, dx, dy)
   }

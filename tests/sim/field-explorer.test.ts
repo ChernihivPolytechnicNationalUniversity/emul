@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest"
 import * as React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { FieldPanel } from "@/components/explorer/FieldPanel"
-import { CheckMarks } from "@/components/field/check-marks"
 import { checked } from "@/schematic/checker"
 import type { Finding } from "@/schematic/checker"
 import { withFieldAt } from "@/schematic/fields"
@@ -24,7 +23,7 @@ vi.mock("@tanstack/react-virtual", () => ({
   },
 }))
 
-it("coincident designator and value findings have distinct problem, list and mark identities", () => {
+it("coincident designator and value findings have distinct problem and list identities", () => {
   const base: PlacedObject = { id: "R1", def: "resistor", x: 0, y: 0, props: { ref: "R1", value: "1k" } }
   const at = { x: 2 * GRID, y: GRID }
   const ref = withFieldAt(base, "ref", at, GRID, getDef(base.def)!)
@@ -42,10 +41,6 @@ it("coincident designator and value findings have distinct problem, list and mar
   }))
   expect.soft(new Set(virtualKeys.current).size, "every virtual row has a distinct key").toBe(virtualKeys.current.length)
   expect.soft(html.match(/aria-selected="true"/g), "only the chosen field's row is active").toHaveLength(1)
-  const marks = CheckMarks({ findings, active: checkKeyOf(findings[0]), grid: GRID })!
-  const circles = marks.props.children as React.ReactElement<{ strokeWidth: number }>[]
-  expect.soft(new Set(circles.map((circle) => circle.key)).size, "both circles have distinct React keys").toBe(2)
-  expect.soft(circles.filter((circle) => circle.props.strokeWidth === 3), "only the chosen field's mark is active").toHaveLength(1)
 })
 
 it("finding keys are independent of object, segment and field membership order", () => {

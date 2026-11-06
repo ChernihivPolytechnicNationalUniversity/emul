@@ -29,7 +29,6 @@ import { WireGraph as Graph } from "./wires/graph"
 import { junctionAt, type JunctionRefusal } from "./junction-tool"
 import { inRect } from "./wire-select"
 import { withFieldMoved, type FieldKey } from "./fields"
-import { NO_CONNECT } from "./checker"
 import type { SpatialIndex } from "./spatial"
 import { WireGraph } from "./wires/graph"
 import type { WireSegment } from "./wires/segment"
@@ -375,13 +374,6 @@ export function useSchematic(grid: number) {
     }))
   }, [setDoc])
 
-  const markNoConnect = React.useCallback((at: Point) => {
-    setDoc((d) => {
-      if (d.objects.some((o) => o.def === NO_CONNECT && o.x === at.x - grid && o.y === at.y - grid)) return d
-      return placedObject(d, { id: crypto.randomUUID(), def: NO_CONNECT, x: at.x - grid, y: at.y - grid })
-    })
-  }, [setDoc, grid])
-
   const moveField = React.useCallback((id: string, key: FieldKey, dx: number, dy: number) => {
     setDoc((d) => {
       const index = documentPins(d.objects)
@@ -590,7 +582,6 @@ export function useSchematic(grid: number) {
     commitFrom,
     setProps,
     moveField,
-    markNoConnect,
     setVariant,
     setProject,
     setBuild,

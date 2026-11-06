@@ -252,7 +252,7 @@ describe("the maintained field commit has the same findings and queries as a fre
   it.each([0, 65])("a field crossing two wire buckets stays exactly fresh after translation and local edits, with %s distant marks", (count) => {
     const at = (x: number, y: number) => ({ x: x * GRID, y: y * GRID })
     const label = withFieldAt({ id: "R1", def: "resistor", ...at(100, 100), props: { ref: "R1234567890", value: "" } }, "ref", at(-0.5, 0), GRID, getDef("resistor")!)
-    const before: Schematic = { objects: [label, ...Array.from({ length: count }, (_, i) => ({ id: `mark${i}`, def: "no-connect", ...at(200 + i * 4, 0) }))], wires: [{ id: "right", a: at(0, -1), b: at(0, 1) }, { id: "left", a: at(-1, -1), b: at(-1, 1) }], parts: {} }
+    const before: Schematic = { objects: [label, ...Array.from({ length: count }, (_, i) => ({ id: `mark${i}`, def: "junction", ...at(200 + i * 4, 0) }))], wires: [{ id: "right", a: at(0, -1), b: at(0, 1) }, { id: "left", a: at(-1, -1), b: at(-1, 1) }], parts: {} }
     const graph = new WireGraph()
     const checker = new KeptChecker()
     const known = wiringOf(graph, before)
@@ -266,7 +266,7 @@ describe("the maintained field commit has the same findings and queries as a fre
 
   it("board field findings stay fresh when a label enters the housing and the edit is undone", () => {
     const label: PlacedObject = { id: "R1", def: "resistor", x: 100 * GRID, y: 100 * GRID, props: { ref: "I", value: "" } }
-    const before: Schematic = { objects: [{ id: "B", def: "open746i-c", x: 0, y: 0 }, label, ...Array.from({ length: 65 }, (_, i) => ({ id: `mark${i}`, def: "no-connect", x: (200 + i * 4) * GRID, y: 0 }))], wires: [], parts: {} }
+    const before: Schematic = { objects: [{ id: "B", def: "open746i-c", x: 0, y: 0 }, label, ...Array.from({ length: 65 }, (_, i) => ({ id: `mark${i}`, def: "junction", x: (200 + i * 4) * GRID, y: 0 }))], wires: [], parts: {} }
     const after = { ...before, objects: editedObjects(before.objects, before.objects.map((o) => o === label ? withFieldAt(o, "ref", { x: 36.5 * GRID, y: 26.5 * GRID }, GRID, getDef(o.def)!) : o), [label.id]) }
     const graph = new WireGraph()
     const checker = new KeptChecker()
@@ -277,7 +277,7 @@ describe("the maintained field commit has the same findings and queries as a fre
 
   it("circular body collisions stay fresh across a field edit, undo and redo", () => {
     const label: PlacedObject = { id: "R1", def: "resistor", x: 100 * GRID, y: 100 * GRID, props: { ref: "I", value: "" } }
-    const before: Schematic = { objects: [{ id: "V1", def: "voltmeter", x: 0, y: 0 }, label, ...Array.from({ length: 65 }, (_, i) => ({ id: `mark${i}`, def: "no-connect", x: (200 + i * 4) * GRID, y: 0 }))], wires: [{ id: "cross", a: { x: 1.5 * GRID, y: 1.5 * GRID }, b: { x: 1.5 * GRID, y: 3 * GRID } }], parts: {} }
+    const before: Schematic = { objects: [{ id: "V1", def: "voltmeter", x: 0, y: 0 }, label, ...Array.from({ length: 65 }, (_, i) => ({ id: `mark${i}`, def: "junction", x: (200 + i * 4) * GRID, y: 0 }))], wires: [{ id: "cross", a: { x: 1.5 * GRID, y: 1.5 * GRID }, b: { x: 1.5 * GRID, y: 3 * GRID } }], parts: {} }
     const after = { ...before, objects: editedObjects(before.objects, before.objects.map((o) => o === label ? withFieldAt(o, "ref", { x: 1.5 * GRID, y: 1.5 * GRID }, GRID, getDef(o.def)!) : o), [label.id]) }
     const graph = new WireGraph()
     const checker = new KeptChecker()
@@ -289,7 +289,7 @@ describe("the maintained field commit has the same findings and queries as a fre
 
   it("editing an interior pin's wire keeps directional body findings fresh through undo and redo", () => {
     const at = (x: number, y: number) => ({ x: x * GRID, y: y * GRID })
-    const before: Schematic = { objects: [{ id: "U1", def: "opamp-generic", x: 0, y: 0 }, ...Array.from({ length: 65 }, (_, i) => ({ id: `mark${i}`, def: "no-connect", x: (100 + i * 4) * GRID, y: 0 }))], wires: [{ id: "out", a: at(5, 3), b: at(8, 3) }], parts: {} }
+    const before: Schematic = { objects: [{ id: "U1", def: "opamp-generic", x: 0, y: 0 }, ...Array.from({ length: 65 }, (_, i) => ({ id: `mark${i}`, def: "junction", x: (100 + i * 4) * GRID, y: 0 }))], wires: [{ id: "out", a: at(5, 3), b: at(8, 3) }], parts: {} }
     const graph = new WireGraph()
     const checker = new KeptChecker()
     checker.update(before, wiringOf(graph, before))
@@ -561,7 +561,7 @@ it("undoing a whole translation restores endpoint counts before a field-only edi
   expect.soft(current.circuit.wired).toEqual(["R1:2", "R2:1"])
 })
 
-it("a pin with three wires on it stays a four-way point when the kept checker looks again around an edit on one of the wires", () => {
+it("a pin with three wires on it gives the kept checker what a fresh one gives when it looks again around an edit on one of the wires", () => {
   const corner = 300 * GRID
   const part: PlacedObject = { id: "hub-resistor", def: "resistor", x: corner, y: corner, props: { ref: "R90" } }
   const hub = { x: corner + 4 * GRID, y: corner + GRID }
@@ -575,7 +575,7 @@ it("a pin with three wires on it stays a four-way point when the kept checker lo
   const east = doc.wires.find((s) => s.id === "east")!
   const edited = withSegments(doc, [{ ...east, color: "red" }], [east])
   const kept = checker.update(edited, wiringOf(graph, edited))
-  expect.soft(kept.filter((f) => f.kind === "four-way").map((f) => f.at), "the pin and its three wires").toEqual([hub])
+  expect.soft(kept.filter((f) => f.at.x === hub.x && f.at.y === hub.y), "nothing at the pin and its three wires").toEqual([])
   expect.soft(kept, "the kept checker, a fresh one").toEqual(checked(edited))
 })
 

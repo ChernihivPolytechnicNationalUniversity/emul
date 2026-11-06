@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { CHECK_KINDS, checked, LEVEL_OF, NO_CONNECT, type CheckKind, type Finding } from "@/schematic/checker"
+import { CHECK_KINDS, checked, type CheckKind, type Finding } from "@/schematic/checker"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, type Point } from "@/schematic/geometry"
 import { placedFields, withFieldAt, withFieldMoved } from "@/schematic/fields"
+import { CATALOGUE } from "@/schematic/catalogue.gen"
 import { getDef } from "@/schematic/registry"
-import { junctionsOf, pinPartition, WireGraph } from "@/schematic/wires/graph"
+import { WireGraph } from "@/schematic/wires/graph"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import { inNormalForm, wiringOf } from "@/schematic/wire-edits"
 import type { WireSegment } from "@/schematic/wires/segment"
@@ -13,7 +14,6 @@ const c = (v: number) => v * GRID
 const at = (x: number, y: number): Point => ({ x: c(x), y: c(y) })
 const part = (id: string, def: string, x: number, y: number, extra: Partial<PlacedObject> = {}): PlacedObject => ({ id, def, x: c(x), y: c(y), props: { ref: id }, ...extra })
 const resistor = (id: string, x: number, y: number, extra: Partial<PlacedObject> = {}) => part(id, "resistor", x, y, extra)
-const noConnect = (id: string, p: Point): PlacedObject => ({ id, def: NO_CONNECT, x: p.x - GRID, y: p.y - GRID })
 let serial = 0
 const seg = (a: Point, b: Point): WireSegment => ({ id: `s${++serial}`, a, b })
 const docOf = (objects: PlacedObject[], wires: WireSegment[] = []): Schematic => inNormalForm({ objects, wires, parts: {} })
@@ -21,8 +21,8 @@ const of = (findings: readonly Finding[], kind: CheckKind) => findings.filter((f
 const points = (findings: readonly Finding[]) => findings.map((f) => ({ x: f.at.x / GRID, y: f.at.y / GRID })).sort((a, b) => a.x - b.x || a.y - b.y)
 
 describe("the checker: a light ERC that never blocks (design.md §6.8)", () => {
-  it("checks exactly the design's list: dangling ends, unconnected pins, four-way connections, a wire through a body, a field over a wire or a body, two fields overlapping (§6.8), parallel runs closer than one cell (§5.4); two ends of different nets on one point cannot happen (N5) and is no check", () => {
-    expect(CHECK_KINDS).toEqual(["dangling-end", "unconnected-pin", "four-way", "wire-through-body", "field-on-wire", "field-on-body", "fields-overlap", "parallel-too-close"])
+  it("checks exactly the design's list: dangling ends, unconnected pins, a wire through a body, a field over a wire or a body, two fields overlapping (§6.8), parallel runs closer than one cell (§5.4); four conductors at a point are no check (the user, 2026-11-06), and two ends of different nets on one point cannot happen (N5)", () => {
+    expect(CHECK_KINDS).toEqual(["dangling-end", "unconnected-pin", "wire-through-body", "field-on-wire", "field-on-body", "fields-overlap", "parallel-too-close"])
   })
 
   it("gives the same findings from the store's kept wiring as from a fresh one", () => {
@@ -57,20 +57,6 @@ describe("dangling wire ends (design.md §6.8, §3.3; Altium Unconnected Wire, K
     expect(of(checked(doc), "dangling-end")).toEqual([])
   })
 
-  it("a no-connect mark on the end says the opening is meant and silences it (KiCad no-connect flag; Xpedition's no-connect symbol on a dangling end)", () => {
-    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 0, 4), noConnect("N1", at(8, 1))], [seg(at(4, 1), at(8, 1)), seg(at(0, 1), at(0, 5))])
-    expect(of(checked(doc), "dangling-end")).toEqual([])
-  })
-
-  it("a no-connect mark silences only its own point: of two open ends the other stays, and a mark half a cell off silences neither", () => {
-    const wires = [seg(at(4, 1), at(8, 1)), seg(at(0, 1), at(0, 5)), seg(at(4, 5), at(8, 5))]
-    const parts = [resistor("R1", 0, 0), resistor("R2", 0, 4)]
-    expect.soft(points(of(checked(docOf([...parts, noConnect("N1", at(8, 1))], wires)), "dangling-end")), "the other end").toEqual([{ x: 8, y: 5 }])
-    expect.soft(points(of(checked(docOf([...parts, noConnect("N1", at(8.5, 1))], wires)), "dangling-end")), "half a cell off").toEqual([
-      { x: 8, y: 1 },
-      { x: 8, y: 5 },
-    ])
-  })
 })
 
 describe("unconnected pins of parts that have a model (design.md §6.8; KiCad pin-not-connected ERC)", () => {
@@ -90,21 +76,6 @@ describe("unconnected pins of parts that have a model (design.md §6.8; KiCad pi
       { x: 0, y: 1 },
       { x: 8, y: 1 },
     ])
-  })
-
-  it("a no-connect mark on a pin silences it (KiCad no-connect flag)", () => {
-    const found = of(checked(docOf([resistor("R1", 0, 0), noConnect("N1", at(0, 1))])), "unconnected-pin")
-    expect(points(found)).toEqual([{ x: 4, y: 1 }])
-  })
-
-  it("a no-connect mark is electrically nothing: on a pin with three wires it changes no net and no dot, the four-way finding stays, and the mark itself is no unconnected part", () => {
-    const wires = [seg(at(4, 1), at(8, 1)), seg(at(4, 1), at(4, 5)), seg(at(4, 1), at(4, -3))]
-    const unmarked = docOf([resistor("R1", 0, 0)], wires)
-    const marked = docOf([resistor("R1", 0, 0), noConnect("N1", at(4, 1))], wires)
-    expect.soft(pinPartition(wiringOf(new WireGraph(), marked).view), "the nets").toEqual(pinPartition(wiringOf(new WireGraph(), unmarked).view))
-    expect.soft(junctionsOf(wiringOf(new WireGraph(), marked).view), "the dots").toEqual(junctionsOf(wiringOf(new WireGraph(), unmarked).view))
-    expect.soft(points(of(checked(marked), "four-way")), "still four conductors there").toEqual([{ x: 4, y: 1 }])
-    expect.soft(checked(marked).filter((f) => f.objects.includes("N1")), "nothing about the mark").toEqual([])
   })
 
   it("a part with no model is not checked: a crystal is drawn for the board's clock, not simulated", () => {
@@ -132,23 +103,24 @@ describe("unconnected pins of parts that have a model (design.md §6.8; KiCad pi
   })
 })
 
-describe("four-way connections (design.md §6.8; junctions.md 13, 14; KiCad four_way_junction ERC, which counts pins; Altium Convert Cross-Junctions)", () => {
+describe("nothing on the field marks a finding, and nothing silences one: the user dropped the rings and the no-connect mark (2026-11-06)", () => {
+  it("there is no no-connect part: not in the library, not in the catalogue", () => {
+    expect.soft(getDef("no-connect"), "the definition").toBeUndefined()
+    expect.soft(CATALOGUE.filter((c) => c.id === "no-connect"), "the catalogue").toEqual([])
+  })
+})
+
+describe("four conductors at a point are no finding: the user dropped the check (2026-11-06; KiCad's four_way_junction ERC is off by default)", () => {
   const hub = at(10, 10)
-  it("four wire ends at one point are one finding there", () => {
+  it("four wire ends at one point: nothing", () => {
     const doc = docOf([], [seg(hub, at(6, 10)), seg(hub, at(14, 10)), seg(hub, at(10, 6)), seg(hub, at(10, 14))])
-    expect(points(of(checked(doc), "four-way"))).toEqual([{ x: 10, y: 10 }])
+    expect(checked(doc).filter((f) => f.at.x === hub.x && f.at.y === hub.y)).toEqual([])
   })
 
-  it("a T is no finding, nor is a crossing with no dot", () => {
-    const t = docOf([], [seg(hub, at(6, 10)), seg(hub, at(14, 10)), seg(hub, at(10, 14))])
-    expect.soft(of(checked(t), "four-way"), "a T").toEqual([])
-    const cross = docOf([], [seg(at(6, 10), at(14, 10)), seg(at(10, 6), at(10, 14))])
-    expect.soft(of(checked(cross), "four-way"), "a crossing").toEqual([])
-  })
-
-  it("a pin with three wires on it is four conductors at a point: a finding (junctions.md 14)", () => {
-    const doc = docOf([resistor("R1", 0, 0)], [seg(at(4, 1), at(8, 1)), seg(at(4, 1), at(4, 5)), seg(at(4, 1), at(4, -3))])
-    expect(points(of(checked(doc), "four-way"))).toEqual([{ x: 4, y: 1 }])
+  it("a pin with three wires on it: nothing at the pin", () => {
+    const pin = at(4, 1)
+    const doc = docOf([resistor("R1", 0, 0)], [seg(pin, at(8, 1)), seg(pin, at(4, 5)), seg(pin, at(4, -3))])
+    expect(checked(doc).filter((f) => f.at.x === pin.x && f.at.y === pin.y)).toEqual([])
   })
 })
 
@@ -300,15 +272,11 @@ describe("parallel runs closer than one cell (design.md §5.4; ГОСТ 2.701-84
   })
 })
 
-describe("every example is clean: no warning and no note but a four-way point, which ГОСТ allows and the bridge keeps (plan.md acceptance 5; the user, design.md §13.18, §13.21)", () => {
+describe("every example is clean: no warning and no note (plan.md acceptance 5; the user, design.md §13.21)", () => {
   for (const example of examples) {
     it(example.id, () => {
-      const found = checked(example.build(GRID)).filter((f) => f.kind !== "four-way")
+      const found = checked(example.build(GRID))
       expect(found.map((f) => `${f.kind} at (${f.at.x / GRID}, ${f.at.y / GRID}): ${f.text}`)).toEqual([])
     })
   }
-
-  it("a four-way point is a note, never a warning (the user, design.md §13.21)", () => {
-    expect(LEVEL_OF["four-way"]).toBe("note")
-  })
 })

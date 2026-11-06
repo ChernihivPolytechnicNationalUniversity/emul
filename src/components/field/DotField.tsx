@@ -77,7 +77,7 @@ import { labelArea, labelCanvasFits, SymbolRaster, TextRaster } from "./symbol-r
 import { PendingWireLayer, WireLayer, type PendingLook } from "./WireLayer"
 import { RubberBandLayer, type RubberLook } from "./rubber-band-layer"
 import { GhostLayer, PlacementGhost, type Ghost } from "./GhostLayer"
-import { hideWhileMoving, MoveDrag, planMove, staleWhileMoving } from "./move-drag"
+import { MoveDrag, planMove } from "./move-drag"
 import { ContactPreview } from "./contact-preview"
 import { contactsAfterMove } from "@/schematic/contacts"
 import { WireFlow } from "./wire-flow"
@@ -88,7 +88,6 @@ import { useViewport } from "./use-viewport"
 import { FieldPanel, FieldToggle, type FieldTarget, type PeerSelection } from "@/components/explorer/FieldPanel"
 import { fieldEntries, searchField, type FieldHit } from "@/components/explorer/field-index"
 import { checkProblems, runtimeProblems, sortProblems, staticProblems } from "@/components/explorer/problems"
-import { CheckMarks } from "./check-marks"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useSizeClass } from "@/hooks/use-size-class"
 import { useSampled } from "@/hooks/use-sampled"
@@ -936,16 +935,13 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const start = toWorld(e.clientX, e.clientY)
     const step = grid / 2
     let offset = { x: 0, y: 0 }
-    let shown: (() => void) | null = null
     text.setPointerCapture(e.pointerId)
     const moveTo = (ev: PointerEvent) => {
       const at = toWorld(ev.clientX, ev.clientY)
       offset = { x: snap(at.x - start.x, step), y: snap(at.y - start.y, step) }
-      if (!shown && (offset.x || offset.y) && contentRef.current) shown = hideWhileMoving(staleWhileMoving(contentRef.current))
       text.setAttribute("transform", `translate(${offset.x} ${offset.y})`)
     }
     const finish = (commit: boolean) => {
-      shown?.()
       text.removeEventListener("pointermove", moveTo)
       text.removeEventListener("pointerup", release)
       text.removeEventListener("pointercancel", cancel)
@@ -1109,11 +1105,6 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
     return drawEndAt(wiring, snapPoint(world))
   }
-
-  const markNoConnectUnderPointer = useEvent(() => {
-    const pointer = pointerClient.current
-    if (pointer) sch.markNoConnect(endUnder(pointer.x, pointer.y).at)
-  })
 
   const openEndNear = (clientX: number, clientY: number): DrawEnd | null => {
     const world = toWorld(clientX, clientY)
@@ -1481,10 +1472,6 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (!pending && pointer && plain && (e.key.toLowerCase() === "j" || e.code === "KeyJ")) {
       e.preventDefault()
       return joinUnderPointer(pointer)
-    }
-    if (!pending && pointer && plain && (e.key.toLowerCase() === "q" || e.code === "KeyQ")) {
-      e.preventDefault()
-      return markNoConnectUnderPointer()
     }
     const selected = () => sch.selectedObjects.size > 0
     const turnable = () => selected() || sch.selectedWires.size > 0
@@ -1885,7 +1872,6 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               />
               )}
               {labelsOnCanvas && <TextCanvas objects={labelledObjects} view={view} grid={grid} scale={scale} text={sheetText} raster={textRaster} />}
-              {!detail.canvas && <CheckMarks findings={findings} active={activeProblem} grid={grid} />}
               <svg data-slot="rubber-band" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
                 <g />
               </svg>

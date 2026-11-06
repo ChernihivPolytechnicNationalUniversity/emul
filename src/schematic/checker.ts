@@ -6,13 +6,11 @@ import { getDef, pinName } from "./registry"
 import type { ComponentDef, PlacedObject, Schematic } from "./types"
 import { wireOrder, wiringOf, type Wiring } from "./wire-edits"
 import { WireGraph } from "./wires/graph"
-import { exactPointCode as codeOf, type PointCode, type WirePin, type WireSegment } from "./wires/segment"
+import { exactPointCode as codeOf, type WirePin, type WireSegment } from "./wires/segment"
 
-export const NO_CONNECT = "no-connect"
+export type CheckKind = "dangling-end" | "unconnected-pin" | "wire-through-body" | "field-on-wire" | "field-on-body" | "fields-overlap" | "parallel-too-close"
 
-export type CheckKind = "dangling-end" | "unconnected-pin" | "four-way" | "wire-through-body" | "field-on-wire" | "field-on-body" | "fields-overlap" | "parallel-too-close"
-
-export const CHECK_KINDS: readonly CheckKind[] = ["dangling-end", "unconnected-pin", "four-way", "wire-through-body", "field-on-wire", "field-on-body", "fields-overlap", "parallel-too-close"]
+export const CHECK_KINDS: readonly CheckKind[] = ["dangling-end", "unconnected-pin", "wire-through-body", "field-on-wire", "field-on-body", "fields-overlap", "parallel-too-close"]
 
 export type CheckLevel = "warning" | "note"
 
@@ -20,7 +18,6 @@ export const LEVEL_OF: Record<CheckKind, CheckLevel> = {
   "dangling-end": "warning",
   "unconnected-pin": "warning",
   "wire-through-body": "warning",
-  "four-way": "note",
   "field-on-wire": "note",
   "field-on-body": "note",
   "fields-overlap": "note",
@@ -31,10 +28,6 @@ export type Finding = { kind: CheckKind; at: Point; objects: readonly string[]; 
 
 const HALF = GRID / 2
 const EPS = 1e-6
-
-const isMark = (o: PlacedObject) => o.def === NO_CONNECT
-
-const markAt = (o: PlacedObject): Point => ({ x: o.x + GRID, y: o.y + GRID })
 
 const middleOf = (r: Rect): Point => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 })
 
@@ -175,7 +168,7 @@ type Body = { object: PlacedObject; contour: readonly (readonly Point[])[]; lead
 
 const judged = (o: PlacedObject) => {
   const def = getDef(o.def)
-  return !!def && !isMark(o) && !def.pins.every((p) => p.kind === "node")
+  return !!def && !def.pins.every((p) => p.kind === "node")
 }
 
 const bodyCache = new WeakMap<PlacedObject, { def: ReturnType<typeof getDef>; body: Body }>()
@@ -198,8 +191,8 @@ function bodiesOf(objects: readonly PlacedObject[]): Body[] {
   })
 }
 
-function danglingEnds(doc: Schematic, wiring: Wiring, marked: ReadonlySet<PointCode>): Finding[] {
-  const open = wiring.dangling.filter((p) => !marked.has(codeOf(p)))
+function danglingEnds(doc: Schematic, wiring: Wiring): Finding[] {
+  const open = wiring.dangling
   if (!open.length) return []
   const endsAt = new Map<number | string, string[]>(open.map((p) => [codeOf(p), []]))
   for (const s of doc.wires) {
@@ -213,16 +206,16 @@ const MOST_PINS_ALL_NEEDED = 3
 
 const electricalPins = (def: ComponentDef) => def.pins.filter((pin) => pin.kind !== "nc" && pin.kind !== "node")
 
-function unconnectedPins(doc: Schematic, wiring: Wiring, marked: ReadonlySet<PointCode>): Finding[] {
+function unconnectedPins(doc: Schematic, wiring: Wiring): Finding[] {
   const found: Finding[] = []
   for (const o of doc.objects) {
     const def = getDef(o.def)
-    if (!def || !def.model?.length || def.pinsAreSockets || def.chip || isMark(o)) continue
+    if (!def || !def.model?.length || def.pinsAreSockets || def.chip) continue
     if (electricalPins(def).length > MOST_PINS_ALL_NEEDED) continue
     const indexed = wiring.index.objects.get(o.id)
     if (!indexed) continue
     for (const placed of pinsForObject(indexed)) {
-      if (placed.kind === "nc" || placed.kind === "node" || marked.has(codeOf(placed.at))) continue
+      if (placed.kind === "nc" || placed.kind === "node") continue
       const net = wiring.view.netOfPin(placed.key)
       const alone = !net || (wiring.view.pinsOf(net).length <= 1 && wiring.view.segmentsOf(net).length === 0)
       if (!alone) continue
@@ -231,29 +224,6 @@ function unconnectedPins(doc: Schematic, wiring: Wiring, marked: ReadonlySet<Poi
     }
   }
   return found
-}
-
-function fourWays(doc: Schematic, wiring: Wiring): Finding[] {
-  const count = new Map<number | string, number>()
-  const first = new Map<number | string, Point>()
-  const bump = (at: Point) => {
-    const code = codeOf(at)
-    const n = count.get(code)
-    if (n === undefined) { count.set(code, 1); first.set(code, at) }
-    else count.set(code, n + 1)
-  }
-  for (const s of doc.wires) { bump(s.a); bump(s.b) }
-  const pins = wiring.activePins
-  for (const p of pins) bump(p.at)
-  const crowded = new Map<number | string, { at: Point; n: number; segments: string[]; objects: Set<string> }>()
-  for (const [code, n] of count) if (n >= 4) crowded.set(code, { at: first.get(code)!, n, segments: [], objects: new Set() })
-  if (!crowded.size) return []
-  for (const s of doc.wires) {
-    crowded.get(codeOf(s.a))?.segments.push(s.id)
-    crowded.get(codeOf(s.b))?.segments.push(s.id)
-  }
-  for (const p of pins) crowded.get(codeOf(p.at))?.objects.add(p.key.slice(0, p.key.indexOf(":")))
-  return [...crowded.values()].map((c) => ({ kind: "four-way", at: c.at, objects: [...c.objects].sort((a, b) => doc.objects.findIndex((o) => o.id === a) - doc.objects.findIndex((o) => o.id === b)), segments: c.segments, text: `${c.n} conductors meet at one point: two T's read more clearly` }))
 }
 
 function insideOf(s: WireSegment, corners: readonly Point[]): readonly [number, number] | null {
@@ -318,7 +288,7 @@ function wiresThroughBodies(doc: Schematic, near: Buckets<Body>): Finding[] {
 }
 
 function fieldFindings(doc: Schematic, near: Buckets<Body>): Finding[] {
-  const fields = doc.objects.filter((o) => !isMark(o)).flatMap((o) => placedFields(o, GRID))
+  const fields = doc.objects.flatMap((o) => placedFields(o, GRID))
   const wires = new Buckets<WireSegment>(BUCKET)
   for (const s of doc.wires) wires.add(boxOfSegment(s), s)
   let byObject: Map<string, PlacedObject> | undefined
@@ -390,9 +360,8 @@ const placedAt = (f: Finding, x: number, y: number): Finding => ({ ...f, at: { x
 const canonical = (f: Finding): Finding => ({ ...f, objects: [...f.objects].sort(), segments: [...f.segments].sort() })
 
 export function checked(doc: Schematic, wiring: Wiring = wiringOf(new WireGraph(), doc)): readonly Finding[] {
-  const marked = new Set(doc.objects.filter(isMark).map((o) => codeOf(markAt(o))))
   const bodies = bodyBuckets(bodiesOf(doc.objects))
-  return [...danglingEnds(doc, wiring, marked), ...unconnectedPins(doc, wiring, marked), ...fourWays(doc, wiring), ...wiresThroughBodies(doc, bodies), ...fieldFindings(doc, bodies), ...parallelRuns(doc)].map((f) => canonical(placedAt(f, f.at.x, f.at.y))).sort(inReadingOrder)
+  return [...danglingEnds(doc, wiring), ...unconnectedPins(doc, wiring), ...wiresThroughBodies(doc, bodies), ...fieldFindings(doc, bodies), ...parallelRuns(doc)].map((f) => canonical(placedAt(f, f.at.x, f.at.y))).sort(inReadingOrder)
 }
 
 
