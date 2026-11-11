@@ -60,7 +60,8 @@ import { Button } from "@/components/ui/button"
 const CodePanel = React.lazy(() => import("@/components/code/CodePanel").then((m) => ({ default: m.CodePanel })))
 const HdlPanel = React.lazy(() => import("@/components/hdl/HdlPanel").then((m) => ({ default: m.HdlPanel })))
 import { ComponentView } from "./ComponentView"
-import { SelectionLayer } from "./SelectionLayer"
+import { SelectionLayer, type WirePlate } from "./SelectionLayer"
+import { runPath } from "@/schematic/wire-look"
 import { MeasureLayer } from "./MeasureLayer"
 import { PinLayer } from "./PinLayer"
 import { FieldReadout, type RunEnds, ProbeReadout, type HoverTarget } from "./Readout"
@@ -68,7 +69,7 @@ import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
 import { FieldCanvas } from "./FieldCanvas"
 import { marksBesideTheBand, wireMarks } from "./wire-marks"
-import { dotRadius, OPEN_END_CELLS, WIRE_HIT_PX } from "./wire-style"
+import { dotRadius, OPEN_END_CELLS, WIRE_HIT_PX, wireCornerRadius } from "./wire-style"
 import { exportPng } from "./export-image"
 import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
@@ -1071,7 +1072,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   const openEndNear = (clientX: number, clientY: number): DrawEnd | null => {
     const world = toWorld(clientX, clientY)
-    const reach = WIRE_HIT_PX / 2 / scale
+    const reach = Math.max(WIRE_HIT_PX / 2 / scale, OPEN_END_CELLS * grid)
     const end = wiring.dangling.find((q) => Math.abs(q.x - world.x) <= reach && Math.abs(q.y - world.y) <= reach)
     return end ? drawEndAt(wiring, end) : null
   }
@@ -1187,14 +1188,14 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       if (tip) measure.pick(tip)
       return
     }
-    const under = endUnder(e.clientX, e.clientY)
     if (pending?.mode === "click") {
-      finish(under)
+      finish(endUnder(e.clientX, e.clientY))
       return
     }
-    if (under.kind === "end") {
+    const openEnd = openEndNear(e.clientX, e.clientY)
+    if (openEnd) {
       e.currentTarget.setPointerCapture(e.pointerId)
-      startAt(under, "drag")
+      startAt(openEnd, "drag")
       return
     }
     const run = runById.get(id)
@@ -1205,7 +1206,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       return
     }
     const segment = segmentNearest(run, toWorld(e.clientX, e.clientY))
-    sch.selectWires([segment], toggle)
+    sch.selectWires(run.segments.map((s) => s.id), toggle)
     marquee.clear()
     if (toggle) return
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -1524,15 +1525,16 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     () => docObjects.filter((o) => selectedObjects.has(o.id)),
     [docObjects, selectedObjects],
   )
-  const selectedSegments = React.useMemo(
-    () =>
-      [...selectedWires].flatMap((id) => {
-        const s = wireById.get(id)
-        const run = s && wiring.runBySegment.get(id)
-        return s && run ? [{ id, run: run.id, a: s.a, b: s.b }] : []
-      }),
-    [selectedWires, wireById, wiring.runBySegment],
-  )
+  const wirePlates = React.useMemo(() => {
+    const routeOf = new Map(visibleRoutes.map((r) => [r.id, r]))
+    return [...selectedRuns].flatMap((id): WirePlate[] => {
+      const run = runById.get(id)
+      const route = routeOf.get(id)
+      if (!run || !route) return []
+      if (run.segments.every((s) => selectedWires.has(s.id))) return [{ key: id, run: id, d: runPath(route.pts, wireCornerRadius(grid), route.leads), whole: true }]
+      return run.segments.filter((s) => selectedWires.has(s.id)).map((s) => ({ key: s.id, run: id, d: `M${s.a.x} ${s.a.y} L${s.b.x} ${s.b.y}`, whole: false }))
+    })
+  }, [selectedRuns, selectedWires, runById, visibleRoutes, grid])
   // --- field explorer --------------------------------------------------------
   const isPhone = useIsMobile()
   const [fieldOpen, setFieldOpenState] = React.useState(savedFieldOpen)
@@ -1840,7 +1842,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                   </div>
                 </>
               )}
-              {!detail.canvas && <SelectionLayer objects={visibleObjects} segments={selectedSegments} selectedObjects={selectedObjects} grid={grid} />}
+              {!detail.canvas && <SelectionLayer objects={visibleObjects} wires={wirePlates} selectedObjects={selectedObjects} grid={grid} />}
               {!detail.canvas && (
               <WireLayer
                 routes={visibleRoutes}

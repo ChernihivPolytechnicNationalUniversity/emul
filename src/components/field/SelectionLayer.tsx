@@ -5,9 +5,11 @@ import type { PlacedObject } from "@/schematic/types"
 import { placementOf, SELECTION_BANDS, selectionOutline, type Outline } from "./selection-geometry"
 import { SELECTED_WIRE_PX } from "./wire-style"
 
+export type WirePlate = { key: string; run: string; d: string; whole: boolean }
+
 type SelectionLayerProps = {
   objects: readonly PlacedObject[]
-  segments: readonly { id: string; run: string; a: { x: number; y: number }; b: { x: number; y: number } }[]
+  wires: readonly WirePlate[]
   selectedObjects: ReadonlySet<string>
   grid: number
 }
@@ -29,9 +31,8 @@ function platesOf(objects: readonly PlacedObject[], selected: ReadonlySet<string
   return plates
 }
 
-export const SelectionLayer = React.memo(function SelectionLayer({ objects, segments, selectedObjects, grid }: SelectionLayerProps) {
-  if (selectedObjects.size === 0 && segments.length === 0) return null
-  const wires = segments.map((s) => ({ id: s.id, run: s.run, d: `M${s.a.x} ${s.a.y} L${s.b.x} ${s.b.y}` }))
+export const SelectionLayer = React.memo(function SelectionLayer({ objects, wires, selectedObjects, grid }: SelectionLayerProps) {
+  if (selectedObjects.size === 0 && wires.length === 0) return null
   const plates = platesOf(objects, selectedObjects, grid)
   return (
     <svg data-slot="selection" aria-hidden="true" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
@@ -39,7 +40,7 @@ export const SelectionLayer = React.memo(function SelectionLayer({ objects, segm
         {SELECTION_BANDS.map(({ margin, color }) => (
           <g key={margin}>
             {wires.map((wire) => (
-              <path key={wire.id} data-wire={wire.run} data-segment={wire.id} d={wire.d} stroke={color} strokeWidth={SELECTED_WIRE_PX + margin * 2} vectorEffect="non-scaling-stroke" />
+              <path key={wire.key} data-wire={wire.run} data-whole={wire.whole ? "" : undefined} d={wire.d} stroke={color} strokeWidth={SELECTED_WIRE_PX + margin * 2} strokeLinecap={wire.whole ? "round" : "butt"} vectorEffect="non-scaling-stroke" />
             ))}
             {plates.map((plate) => (
               <g key={plate.id} data-plate={plate.id}>

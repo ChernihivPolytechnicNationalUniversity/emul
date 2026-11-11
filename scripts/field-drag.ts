@@ -224,6 +224,25 @@ async function farDropAndWireCopy(page: Page) {
   await page.mouse.up()
   await page.waitForTimeout(500)
   expect("and dropped there: no notice, no flash", [await notices(), await page.evaluate(() => document.querySelectorAll("[data-slot=wires] [data-flash]").length)], [[], 0])
+  await openDoc(page, "stub-wire", { objects: [resistorAt("R1", 10, 10)], wires: [{ id: "stub", a: cellPoint(12, 13), b: cellPoint(13, 13) }], parts: {} })
+  const stubFrame = await fieldFrame(page)
+  const stubMiddle = stubFrame.toScreen(cellPoint(12.5, 13))
+  await page.mouse.click(stubMiddle.x, stubMiddle.y)
+  await page.waitForTimeout(300)
+  expect("a one-cell wire with two open ends: a click on its middle selects it rather than starting a wire from an end (the user, 2026-11-11)", [(await countOf(page, "[data-slot=selection] [data-wire]")) > 0, await countOf(page, "[data-slot^=pending-wire]")], [true, 0])
+  await page.keyboard.press("Delete")
+  await page.waitForTimeout(400)
+  expect("and Delete removes it", await countOf(page, "[data-slot=wires] [data-wire]"), 0)
+  await openDoc(page, "plate-run", { objects: [resistorAt("R1", 10, 10)], wires: [{ id: "l1", a: cellPoint(14, 11), b: cellPoint(15, 11) }, { id: "l2", a: cellPoint(15, 11), b: cellPoint(15, 13) }], parts: {} })
+  const plateFrame = await fieldFrame(page)
+  const onUpright = plateFrame.toScreen(cellPoint(15, 12.3))
+  await page.mouse.click(onUpright.x, onUpright.y)
+  await page.waitForTimeout(300)
+  const plate = await page.evaluate(() => ({
+    plates: [...document.querySelectorAll("[data-slot=selection] [data-wire]")].map((e) => [e.hasAttribute("data-whole"), e.getAttribute("d")]),
+    wire: document.querySelector("[data-slot=wires] [data-wire] path[data-base]")?.getAttribute("d") ?? null,
+  }))
+  expect("a click on one leg of an L selects the whole wire, and its plate is drawn along the wire's own rounded path (the user, 2026-11-11)", plate.plates.length > 0 && plate.plates.every(([whole, d]) => whole && d === plate.wire) ? "along the wire" : plate, "along the wire")
   const shift = examples.find((e) => e.id === "nucleo-74hc595")!.build(GRID)
   await openDoc(page, "turn-refused", shift)
   const u2 = shift.objects.find((o) => o.props?.ref === "U2")!
@@ -775,23 +794,15 @@ try {
   process.exit(1)
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
-const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
 const errors: string[] = []
-page.on("pageerror", (e) => errors.push(String(e)))
+const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, phaseFiveChecks, bridgeBuiltByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
 try {
-  await contactsFollowTheDrag(page)
-  await wiresFollowTheDrag(page)
-  await drawFromAWire(page)
-  await farDropAndWireCopy(page)
-  await morningChecks(page)
-  await doubleClickChecks(page)
-  await phaseFiveChecks(page)
-  await bridgeBuiltByHand(page)
-  await noPluggingIntoHeaders(page)
-  await freedSlotTakesTheDrop(page)
-  await addingLandsInView(page)
-  await typeBPlugTakesTheClick(page)
-  await cursorsOverARunningBench(page)
+  for (const section of sections) {
+    const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+    page.on("pageerror", (e) => errors.push(String(e)))
+    await section(page)
+    await page.close()
+  }
 } finally {
   await browser.close()
 }
