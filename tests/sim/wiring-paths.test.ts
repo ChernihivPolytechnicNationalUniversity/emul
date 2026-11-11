@@ -20,6 +20,7 @@ import { GRID, objectPins, routeBox, touches, type Point } from "@/schematic/geo
 import type { HdlModule, PlacedObject, Schematic } from "@/schematic/types"
 import { moved, placedObject, recoloured, removed, travellingWires, withModule, withSegments, wireOrder, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
+import { isRerouteRefusal, rerouted, routeBetween } from "@/schematic/wires/router"
 import { PartDrag, SegmentDrag, TurnRun } from "@/schematic/rubber-band"
 import { lineCodeOf, WireSheet, type SheetMark } from "@/schematic/wires/sheet"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
@@ -131,6 +132,46 @@ describe("the kept-up turns at pins are derived from the pins, not carried along
       known = wiringOf(graph, doc)
       expect.soft(turns(known), `${id} step ${step}`).toEqual(turns(wiringOf(new WireGraph(), doc)))
     }
+  })
+})
+
+describe("routes read through the kept field are the routes a fresh field gives (design.md §7, §11; plan.md phase 6: the router reads the field's maintained indexes)", () => {
+  it.each(["metronome", "nucleo-74hc595", "power-supply", "nucleo-serial"])("%s: after each of twenty kept moves, deletions and recolourings, routes between random pins and the re-route of a random run equal those of a fresh wiring", (id) => {
+    const rng = random(id.length * 4057 + 11)
+    let doc: Schematic = { ...examples.find((e) => e.id === id)!.build(GRID) }
+    const graph = new WireGraph()
+    let known = wiringOf(graph, doc)
+    let n = 0
+    const newId = () => `k${n++}`
+    let routed = 0
+    for (let step = 0; step < 20; step++) {
+      const action = rng.int(0, 3)
+      const at = (ids: readonly string[]) => new Map(doc.objects.filter((o) => ids.includes(o.id)).map((o) => [o.id, { x: o.x, y: o.y }] as const))
+      const d = () => rng.pick([-2, -1, 1, 2]) * GRID
+      if (action === 0) doc = moved(doc, at([rng.pick(doc.objects).id]), d(), d(), newId, known)
+      else if (action === 1) doc = moved(doc, at(doc.objects.map((o) => o.id)), d(), d(), newId, known)
+      else if (action === 2 && doc.wires.length > 4) doc = removed(doc, new Set(), new Set([rng.pick(doc.wires).id]), newId)
+      else if (doc.wires.length) doc = recoloured(doc, [[rng.pick(doc.wires).id, rng.pick(["red", "blue", undefined] as const)]], newId)
+      known = wiringOf(graph, doc)
+      for (let k = 0; k < 3; k++) {
+        const ends = [0, 1].map(() => {
+          const pins = objectPins(rng.pick(doc.objects), GRID)
+          const p = rng.pick(pins)
+          return { pin: { object: p.key.slice(0, p.key.indexOf(":")), pin: p.pin.id } }
+        })
+        const kept = routeBetween(doc, ends[0], ends[1], known)
+        if (kept) routed++
+        expect.soft(kept, `${id} step ${step}: ${ends.map((e) => `${e.pin.object}:${e.pin.pin}`).join(" → ")}, kept against fresh`).toEqual(routeBetween(doc, ends[0], ends[1]))
+      }
+      if (!doc.wires.length) continue
+      const segment = rng.pick(doc.wires).id
+      let a = 0
+      let b = 0
+      const kept = rerouted(doc, segment, () => `r${a++}`, known)
+      const fresh = rerouted(doc, segment, () => `r${b++}`)
+      expect.soft(isRerouteRefusal(kept) ? kept : kept.wires, `${id} step ${step}: re-route of ${segment}, kept against fresh`).toEqual(isRerouteRefusal(fresh) ? fresh : fresh.wires)
+    }
+    expect.soft(routed, `${id}: some of the random pairs have a route`).toBeGreaterThan(0)
   })
 })
 
