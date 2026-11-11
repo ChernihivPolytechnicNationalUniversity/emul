@@ -378,20 +378,6 @@ describe("copying and pasting with wires (design.md §6.6)", () => {
 })
 
 describe("found by phase 4's review (Codex)", () => {
-  it("a wire is not ended on an outer socket that another net's wire passes: it would join that wire, and the slip that moves it aside is phase 6's (design.md §13.9; Codex 2)", () => {
-    const doc = docOf(
-      [{ id: "B", def: "nucleo-f429zi", x: 0, y: 0 }, resistor("A", -8, 16), resistor("D", -4, 13), resistor("E", 0, 9)],
-      [seg(at(-4, 17), at(6, 17)), seg(at(0, 10), at(0, 14))],
-    )
-    const wiring = wiringFor(doc)
-    const target = drawEndAt(wiring, at(5, 17))
-    expect.soft(target.kind, "the outer socket").toBe("pin")
-    const { d } = drawing(doc, at(0, 14))
-    const preview = previewOf(doc, wiring, pointerAt(d, at(5, 17)), target)
-    expect.soft(preview.refused?.refused, "refused, named").toBe("socket")
-    expect.soft(isRefusal(drawnTo(doc, wiring, pointerAt(d, at(5, 17)), target, newId)), "and not committed").toBe(true)
-  })
-
   it("a paste lands its wires clear of other nets: a pasted wire never lies along another net's wire or over its pins (design.md §6.6, §6.7; Codex 3)", () => {
     const doc = docOf([resistor("A", 0, 0), resistor("B", 10, 0), resistor("C", 20, 0), resistor("D", 30, 0)], [seg(at(4, 1), at(10, 1)), seg(at(24, 1), at(30, 1))])
     const wiring = wiringFor(doc)

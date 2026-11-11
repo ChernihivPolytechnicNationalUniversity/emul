@@ -1,9 +1,11 @@
+import type { Run } from "./circuit"
 import { GRID, objectRect, type Rect } from "./geometry"
 import { footprint } from "./placement"
 import type { PinRef, PlacedObject, Point, Schematic } from "./types"
 import type { WireColorKey } from "./wire-colors"
-import { pinToPinPoints, withSegments, type NewId, type Wiring } from "./wire-edits"
-import { highOf, lowOf, samePoint, type WireSegment } from "./wires/segment"
+import { withSegments, type NewId, type Wiring } from "./wire-edits"
+import { routeAround, runEnds } from "./wires/router"
+import { highOf, lowOf, samePoint, type WirePin, type WireSegment } from "./wires/segment"
 import { columnCode, rowCode } from "./wires/sheet"
 import { bodiesOf, crossedBody, segmentBox } from "./body-crossing"
 
@@ -34,7 +36,7 @@ export type Drawing = {
   readonly back?: Retraction
 }
 
-export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "socket" | "body" | "nothing"; readonly at: Point; readonly nets: readonly string[] }
+export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "body" | "nothing"; readonly at: Point; readonly nets: readonly string[] }
 
 export type DrawPreview = { readonly points: readonly Point[]; readonly refused: DrawRefusal | null; readonly routed: boolean }
 
@@ -49,7 +51,6 @@ export const DRAW_REFUSED: Record<DrawRefusal["refused"], { title: string; why: 
   over: { title: "Not across another net's pin", why: "A wire passing over a pin would connect it. End the wire on the pin to connect it on purpose." },
   corner: { title: "No corner on another net", why: "A bend on another net's pin or wire would join the two. Place the corner on empty field." },
   crossing: { title: "Not on a crossing", why: "Two wires crossing are not connected. Use the junction tool (J) to join them there." },
-  socket: { title: "Another net's wire passes this socket", why: "Ending a wire here would join that wire too. Until the wire that passes can step aside by itself, move it first." },
   body: { title: "Not through a part", why: "A wire goes round a part's body, never across it. Lay a corner beside the part." },
   nothing: { title: "No wire to lay", why: "The wire would have no length." },
 }
@@ -211,7 +212,11 @@ function netOfEnd(wiring: Wiring, end: DrawEnd): string | undefined {
   return undefined
 }
 
-function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: readonly Point[]): DrawRefusal | null {
+const NO_IDS: ReadonlySet<string> = new Set()
+
+const acrossItsRow = (pin: WirePin, horizontal: boolean) => !pin.out || (horizontal ? pin.out.x === 0 : pin.out.y === 0)
+
+function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: readonly Point[], ignore: ReadonlySet<string> = NO_IDS): DrawRefusal | null {
   if (target.kind === "crossing") return { refused: "crossing", at: target.at, nets: [] }
   const sheet = wiring.sheet
   const view = wiring.view
@@ -228,6 +233,7 @@ function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: reado
     const hi = horizontal ? Math.max(a.x, b.x) : Math.max(a.y, b.y)
     const on = (v: number): Point => (horizontal ? { x: v, y: a.y } : { x: a.x, y: v })
     for (const s of sheet.along(line, lo, hi)) {
+      if (ignore.has(s.id)) continue
       const net = segmentNet(s)
       if (!own.has(net) && Math.min(hi, highOf(s)) - Math.max(lo, lowOf(s)) > 0) return refuse("along", on(Math.max(lo, lowOf(s))), net)
     }
@@ -235,22 +241,19 @@ function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: reado
       const v = horizontal ? mark.at.x : mark.at.y
       if (v <= lo || v >= hi) continue
       if (mark.segment) {
+        if (ignore.has(mark.segment.id)) continue
         const net = segmentNet(mark.segment)
         if (!own.has(net)) return refuse("over", mark.at, net)
-      } else if (mark.pin && !mark.pin.socket) {
+      } else if (mark.pin && (!mark.pin.socket || acrossItsRow(mark.pin, horizontal))) {
         const net = pinNet(mark.pin.key)
         if (!own.has(net)) return refuse("over", mark.at, net)
       }
     }
   }
-  for (const end of [points[0], points[points.length - 1]]) {
-    if (!sheet.pinsAt(end).some((pin) => pin.socket)) continue
-    for (const s of sheet.through(end)) if (!samePoint(s.a, end) && !samePoint(s.b, end) && !own.has(segmentNet(s))) return refuse("socket", end, segmentNet(s))
-  }
   const vertices = target.kind === "field" ? points.slice(1) : points.slice(1, -1)
   for (const v of vertices) {
     for (const pin of sheet.pinsAt(v)) if (!own.has(pinNet(pin.key))) return refuse("corner", v, pinNet(pin.key))
-    for (const s of sheet.through(v)) if (!own.has(segmentNet(s))) return refuse("corner", v, segmentNet(s))
+    for (const s of sheet.through(v)) if (!ignore.has(s.id) && !own.has(segmentNet(s))) return refuse("corner", v, segmentNet(s))
   }
   return null
 }
@@ -271,17 +274,35 @@ function crossesABody(doc: Schematic, points: readonly Point[], near?: Near): bo
   return false
 }
 
-const completions = new WeakMap<Schematic, Map<string, Point[] | null>>()
+const completions = new WeakMap<Schematic, Map<string, readonly Point[] | null>>()
 
-function routedPoints(doc: Schematic, wiring: Wiring, d: Drawing, target: DrawEnd, plain: readonly Point[], near?: Near): Point[] | null {
-  if (d.from.kind !== "pin" || target.kind !== "pin" || d.corners.length) return null
-  if (!crossesABody(doc, plain, near)) return null
+function completion(doc: Schematic, wiring: Wiring, from: string, to: string, ignore: ReadonlySet<string>): readonly Point[] | null {
   let known = completions.get(doc)
   if (!known) completions.set(doc, (known = new Map()))
-  const key = `${d.from.key}>${target.key}`
-  if (!known.has(key)) known.set(key, pinToPinPoints(doc, keyOf(d.from.key), keyOf(target.key), [], wiring))
+  const key = `${from}>${to}`
+  if (!known.has(key)) known.set(key, routeAround(wiring, { pin: keyOf(from) }, { pin: keyOf(to) }, { ignore }))
   return known.get(key)!
 }
+
+function passingRuns(wiring: Wiring, from: DrawEnd, target: DrawEnd): Run[] {
+  const own = new Set([netOfEnd(wiring, from), netOfEnd(wiring, target)].filter((n): n is string => n !== undefined))
+  const found = new Map<string, Run>()
+  for (const end of [from, target]) {
+    if (end.kind !== "pin" || !wiring.sheet.pinsAt(end.at).some((pin) => pin.socket)) continue
+    for (const s of wiring.sheet.through(end.at)) {
+      if (isEndOf(s, end.at) || own.has(wiring.view.netOfSegment(s.id) ?? `wire:${s.id}`)) continue
+      const run = wiring.runBySegment.get(s.id)
+      if (run) found.set(run.id, run)
+    }
+  }
+  return [...found.values()]
+}
+
+const piecesOf = (points: readonly Point[], id: string): WireSegment[] => points.slice(1).map((b, i) => ({ id: `${id}:${i}`, a: points[i], b }))
+
+type Moved = { readonly run: Run; readonly points: readonly Point[] }
+
+type Plan = DrawPreview & { readonly moved: readonly Moved[] }
 
 function throughABody(doc: Schematic, points: readonly Point[], near?: Near): DrawRefusal | null {
   for (let i = 1; i < points.length; i++) {
@@ -293,14 +314,40 @@ function throughABody(doc: Schematic, points: readonly Point[], near?: Near): Dr
   return null
 }
 
-export function previewOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: DrawEnd, near?: Near): DrawPreview {
+function planOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: DrawEnd, near?: Near): Plan {
   const end = target ?? { kind: "field", at: d.cursor }
-  const plain = pointsTo(d, end.at)
-  const routed = routedPoints(doc, wiring, d, end, plain, near)
-  const points = routed ? withoutRepeats(routed) : plain
+  const passing = passingRuns(wiring, d.from, end)
+  const ignore = passing.length ? new Set(passing.flatMap((run) => run.segments.map((s) => s.id))) : NO_IDS
   const cut = d.back && !samePoint(d.back.at, d.from.at) ? d.back.at : null
-  const refused = (cut && crossedAt(wiring, d.from, cut)) || refusalOf(wiring, d.from, end, points) || throughABody(doc, points, near)
-  return { points, refused, routed: !!routed }
+  const refusalFor = (points: readonly Point[]) => (cut && crossedAt(wiring, d.from, cut)) || refusalOf(wiring, d.from, end, points, ignore) || throughABody(doc, points, near)
+  let points: readonly Point[] = pointsTo(d, end.at)
+  let refused = refusalFor(points)
+  let routed = false
+  if (d.from.kind === "pin" && end.kind === "pin" && !d.corners.length && (refused || crossesABody(doc, points, near))) {
+    const route = completion(doc, wiring, d.from.key, end.key, ignore)
+    if (route) {
+      points = withoutRepeats(route)
+      refused = refusalFor(points)
+      routed = true
+    }
+  }
+  if (refused || !passing.length) return { points, refused, routed, moved: [] }
+  const moved: Moved[] = []
+  let around = piecesOf(points, "drawn")
+  for (const run of passing) {
+    const [from, to] = runEnds(wiring, run.points)
+    const route = routeAround(wiring, from, to, { ignore, extra: around })
+    const socket = [d.from.at, end.at].find((p) => run.segments.some((s) => !isEndOf(s, p) && onSegment(p, s.a, s.b)))!
+    if (!route) return { points, refused: { refused: "over", at: socket, nets: [wiring.view.netOfSegment(run.segments[0].id) ?? `wire:${run.segments[0].id}`] }, routed, moved: [] }
+    moved.push({ run, points: route })
+    around = [...around, ...piecesOf(route, run.id)]
+  }
+  return { points, refused: null, routed, moved }
+}
+
+export function previewOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: DrawEnd, near?: Near): DrawPreview {
+  const { points, refused, routed } = planOf(doc, wiring, d, target, near)
+  return { points, refused, routed }
 }
 
 export function withCorner(doc: Schematic, wiring: Wiring, d: Drawing, at: Point): Drawing | DrawRefusal {
@@ -318,15 +365,25 @@ export function withCorner(doc: Schematic, wiring: Wiring, d: Drawing, at: Point
 export function drawnTo(doc: Schematic, wiring: Wiring, d: Drawing, target: DrawEnd, newId: NewId = randomId, near?: Near): Schematic | DrawRefusal {
   const back = retracting(d)
   const drawing = back && onPath(back.path, target.at) ? pointerAt(d, target.at) : d
-  const { points, refused } = previewOf(doc, wiring, drawing, target, near)
+  const { points, refused, moved } = planOf(doc, wiring, drawing, target, near)
   if (refused) return refused
   const cut = cutBack(wiring, drawing, newId)
   if (drawing.back && !samePoint(drawing.back.at, drawing.from.at) && !cut) return { refused: "nothing", at: target.at, nets: [] }
   if (points.length < 2 && !cut) return { refused: "nothing", at: target.at, nets: [] }
   const color = d.color
   const segments: WireSegment[] = cut?.kept ? [cut.kept] : []
-  for (let i = 1; i < points.length; i++) segments.push(color ? { id: newId(), a: points[i - 1], b: points[i], color } : { id: newId(), a: points[i - 1], b: points[i] })
-  return withSegments(doc, segments, cut?.removed ?? [], [points[0], points[points.length - 1]], newId)
+  const removed: WireSegment[] = [...(cut?.removed ?? [])]
+  const ends: Point[] = [points[0], points[points.length - 1]]
+  const lay = (along: readonly Point[], colour: WireColorKey | undefined) => {
+    for (let i = 1; i < along.length; i++) segments.push(colour ? { id: newId(), a: along[i - 1], b: along[i], color: colour } : { id: newId(), a: along[i - 1], b: along[i] })
+  }
+  lay(points, color)
+  for (const { run, points: route } of moved) {
+    removed.push(...run.segments)
+    lay(route, run.segments[0].color)
+    ends.push(route[0], route[route.length - 1])
+  }
+  return withSegments(doc, segments, removed, ends, newId)
 }
 
 export function laysClear(wiring: Wiring, segments: readonly { readonly a: Point; readonly b: Point }[], doc?: Schematic): boolean {
