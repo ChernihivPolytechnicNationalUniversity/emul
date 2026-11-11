@@ -161,10 +161,6 @@ export function paintMarks(context: CanvasRenderingContext2D, routes: readonly R
   }
   const dot = dotRadius(grid, pixels / device)
   for (const { at, color } of marks.dots) {
-    context.fillStyle = casing
-    context.beginPath()
-    context.arc(at.x, at.y, dot + screenPx(CASING_PX), 0, Math.PI * 2)
-    context.fill()
     context.fillStyle = color ? colorFor(color) : ink
     context.beginPath()
     context.arc(at.x, at.y, dot, 0, Math.PI * 2)

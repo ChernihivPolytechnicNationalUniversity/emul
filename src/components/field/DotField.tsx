@@ -61,6 +61,7 @@ const CodePanel = React.lazy(() => import("@/components/code/CodePanel").then((m
 const HdlPanel = React.lazy(() => import("@/components/hdl/HdlPanel").then((m) => ({ default: m.HdlPanel })))
 import { ComponentView } from "./ComponentView"
 import { SelectionLayer, type WirePlate } from "./SelectionLayer"
+import { BodyMask } from "./BodyMask"
 import { runPath } from "@/schematic/wire-look"
 import { MeasureLayer } from "./MeasureLayer"
 import { PinLayer } from "./PinLayer"
@@ -1902,6 +1903,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 <GhostLayer ghosts={ghosts} objects={docObjects} grid={grid} scale={scale} colorOf={colorOf} raster={symbolRaster} />
               )}
               <MeasureLayer tips={tips} held={heldTips} grid={grid} />
+              <BodyMask objects={visibleObjects} grid={grid} />
               <div
                 ref={marqueeRef}
                 data-slot="dot-field-selection"

@@ -243,6 +243,15 @@ async function farDropAndWireCopy(page: Page) {
     wire: document.querySelector("[data-slot=wires] [data-wire] path[data-base]")?.getAttribute("d") ?? null,
   }))
   expect("a click on one leg of an L selects the whole wire, and its plate is drawn along the wire's own rounded path (the user, 2026-11-11)", plate.plates.length > 0 && plate.plates.every(([whole, d]) => whole && d === plate.wire) ? "along the wire" : plate, "along the wire")
+  await openDoc(page, "through-body", { objects: [resistorAt("R1", 10, 10), resistorAt("R2", 10, 14)], wires: [{ id: "across", a: cellPoint(12, 9), b: cellPoint(12, 13) }, { id: "under", a: cellPoint(9, 12), b: cellPoint(15, 12) }], parts: {} })
+  const masking = await page.evaluate(() => {
+    const casings = [...document.querySelectorAll("[data-slot=wires] [data-casing]")]
+    const masked = casings.filter((e) => e.closest("[mask]")?.getAttribute("mask") === "url(#field-body-mask)")
+    return { casings: casings.length, masked: masked.length, bodies: document.querySelectorAll("#field-body-mask polygon").length }
+  })
+  expect("a wire across R1's body cuts the wire it crosses but not R1: every gap is kept off both resistors' bodies (the user, 2026-11-11)", [masking.casings > 0, masking.masked === masking.casings, masking.bodies], [true, true, 2])
+  await open(page, "bridge")
+  expect("a junction dot paints no white ring over the leads and wires that meet in it (the user, 2026-11-11: leads cut short at the diamond's corners)", await page.evaluate(() => [document.querySelectorAll("[data-junction]").length > 0, document.querySelectorAll("[data-junction] circle[fill='var(--background)']").length]), [true, 0])
   const shift = examples.find((e) => e.id === "nucleo-74hc595")!.build(GRID)
   await openDoc(page, "turn-refused", shift)
   const u2 = shift.objects.find((o) => o.props?.ref === "U2")!

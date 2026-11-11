@@ -1,4 +1,5 @@
 import * as React from "react"
+import { BODY_MASK } from "./body-mask"
 import { cn } from "@/lib/utils"
 import { toPath, trimRouteEnds, type Point, type RoutedWire } from "@/schematic/geometry"
 import { runPath, towards, type PinCorner } from "@/schematic/wire-look"
@@ -95,6 +96,7 @@ export const WireLayer = React.memo(function WireLayer({
           className={cn(hoveredNet !== null && net !== hoveredNet && "opacity-25")}
           style={{ transition: "opacity 120ms" }}
         >
+          <g mask={BODY_MASK}>
           {wires.map((route) => (
             <path
               key={route.id}
@@ -109,6 +111,7 @@ export const WireLayer = React.memo(function WireLayer({
               vectorEffect="non-scaling-stroke"
             />
           ))}
+          </g>
           {wires.map((route) => {
             const d = pathOf(route.id)
             const width = widthOf(route.id)
@@ -157,7 +160,6 @@ export const WireLayer = React.memo(function WireLayer({
       <g data-slot="wire-marks" pointerEvents="none">
         {marks.dots.map(({ at, color }) => (
           <g key={`dot:${at.x},${at.y}`} data-junction={`${at.x},${at.y}`}>
-            <circle cx={at.x} cy={at.y} r={dotR + CASING_PX * px} fill="var(--background)" />
             {color ? <circle cx={at.x} cy={at.y} r={dotR} fill={wireColorVar(color)} /> : <circle cx={at.x} cy={at.y} r={dotR} className="fill-foreground" />}
           </g>
         ))}
@@ -214,7 +216,7 @@ function Pending({ pending, grid, radius, handleR, part }: { pending: PendingLoo
   }
   return (
     <g pointerEvents="none">
-      <path d={toPath(trimRouteEnds([...pts], casingTrim(grid)), radius)} fill="none" stroke="var(--background)" strokeWidth={casingWidth(WIRE_PX)} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+      <path mask={BODY_MASK} d={toPath(trimRouteEnds([...pts], casingTrim(grid)), radius)} fill="none" stroke="var(--background)" strokeWidth={casingWidth(WIRE_PX)} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
       <path
         d={d}
         fill="none"

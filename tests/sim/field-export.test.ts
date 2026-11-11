@@ -140,6 +140,6 @@ describe("the PNG export paints the wiring's marks through the field's own paint
     const w = wiringOf(new WireGraph(), doc)
     canvases = []
     await exportPng({ host: {} as Element, theme: `export-${exported++}`, objects: doc.objects, routes: w.routes, grid: GRID, colorOf: () => "black", symbols: new SymbolRaster(), texts: new TextRaster(), textScale: 1, marks: wireMarks(w.routes, w.dots, w.dangling, w.corners, () => "black", true) })
-    expect.soft(canvases.reduce((sum, c) => sum + c.arcs, 0), "the dot, its casing and the open end").toBe(3)
+    expect.soft(canvases.reduce((sum, c) => sum + c.arcs, 0), "the dot and the open end, no white ring round the dot (the user, 2026-11-11)").toBe(2)
   })
 })
