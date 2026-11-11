@@ -3,7 +3,7 @@ import type { Rect } from "@/schematic/geometry"
 import { dispatch, ownsKeys, typesAhead } from "@/lib/keys"
 import { KEYMAP } from "@/lib/keymap"
 import { wheelZooms } from "@/lib/pointer"
-import { dotGridStyle } from "./dot-grid"
+import { dotGridPosition, dotGridStyle, type DotGrid } from "./dot-grid"
 import { easeFactor, frameClock } from "./easing"
 
 export type Viewport = { x: number; y: number; scale: number }
@@ -66,6 +66,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   const current = React.useRef<Viewport>(initial)
   const raf = React.useRef(0)
   const paintedScale = React.useRef(NaN)
+  const paintedDots = React.useRef<DotGrid>(dotGridStyle(grid, NaN))
   React.useEffect(() => () => cancelAnimationFrame(raf.current), [])
 
   const size = React.useRef({ width: 0, height: 0 })
@@ -105,12 +106,13 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
       const container = containerRef.current
       if (!container) return
       publishView(v, animating)
-      container.style.backgroundPosition = `${v.x}px ${v.y}px`
-      if (v.scale === paintedScale.current) return
-      paintedScale.current = v.scale
-      const dots = dotGridStyle(grid, v.scale)
-      container.style.backgroundImage = dots.backgroundImage
-      container.style.backgroundSize = dots.backgroundSize
+      if (v.scale !== paintedScale.current) {
+        paintedScale.current = v.scale
+        paintedDots.current = dotGridStyle(grid, v.scale)
+        container.style.backgroundImage = paintedDots.current.backgroundImage
+        container.style.backgroundSize = paintedDots.current.backgroundSize
+      }
+      container.style.backgroundPosition = dotGridPosition(paintedDots.current, v.x, v.y)
     },
     [grid, publishView],
   )
