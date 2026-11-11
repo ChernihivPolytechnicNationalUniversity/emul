@@ -19,11 +19,14 @@ let canvases: Recording[] = []
 
 function recordingContext(recording: Recording): CanvasRenderingContext2D {
   const state: Record<string | symbol, unknown> = { font: "", lineWidth: 1 }
+  let pathArcs = 0
   return new Proxy(state, {
     get(target, key) {
       if (key === "fillText") return (text: string) => recording.texts.push(text)
       if (key === "closePath") return () => recording.closedPaths++
-      if (key === "arc") return () => recording.arcs++
+      if (key === "beginPath") return () => { pathArcs = 0 }
+      if (key === "arc") return () => { pathArcs++; recording.arcs++ }
+      if (key === "clip") return () => { recording.arcs -= pathArcs; pathArcs = 0 }
       if (key === "measureText") return (text: string) => ({ width: text.length * 6 })
       if (key === "createLinearGradient") return () => ({ addColorStop() {} })
       if (key in target) return target[key]
