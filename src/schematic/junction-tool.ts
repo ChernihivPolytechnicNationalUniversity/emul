@@ -2,11 +2,13 @@ import type { Point, Schematic } from "./types"
 import { withSegments, type NewId, type Wiring } from "./wire-edits"
 import { isHorizontal, samePoint, type WireSegment } from "./wires/segment"
 
-export type JunctionRefusal = { readonly refused: "no-crossing"; readonly at: Point }
+export type JunctionRefusal = { readonly refused: "no-crossing" | "off-lattice"; readonly at: Point }
 
 const randomId: NewId = () => crypto.randomUUID()
 
 export const NO_CROSSING = { title: "No crossing here", why: "The junction tool joins two wires only where they cross. Elsewhere, end a wire on a wire to make a branch." }
+
+export const NOT_ON_THE_LATTICE = { title: "Not on the lattice", why: "These wires cross between lattice points. A join there would leave wire ends off the lattice." }
 
 const passesThrough = (s: WireSegment, p: Point) => !samePoint(s.a, p) && !samePoint(s.b, p)
 

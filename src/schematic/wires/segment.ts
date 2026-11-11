@@ -73,5 +73,10 @@ export function contains(s: WireSegment, p: Point): boolean {
   return p.x === s.a.x && p.y >= Math.min(s.a.y, s.b.y) && p.y <= Math.max(s.a.y, s.b.y)
 }
 
+export function latticePointsInside(_s: Pick<WireSegment, "a" | "b">): Point[] {
+  throw new Error("phase 7: the lattice points inside a diagonal are not built yet")
+}
 
-
+export function latticePointNear(_s: Pick<WireSegment, "a" | "b">, _at: Point, _reach: number): Point | null {
+  throw new Error("phase 7: the lattice point of a diagonal nearest a press is not built yet")
+}

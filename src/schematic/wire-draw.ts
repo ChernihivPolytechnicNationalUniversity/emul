@@ -22,6 +22,10 @@ export type CutBack = { readonly run: string; readonly removed: readonly WireSeg
 
 type Click = { readonly added: number; readonly axis: Axis | null; readonly flipped: boolean }
 
+export type LineMode = "90" | "45" | "any"
+
+export const DEFAULT_LINE_MODE: LineMode = "90"
+
 export type Drawing = {
   readonly from: DrawEnd
   readonly heading?: Point
@@ -32,6 +36,7 @@ export type Drawing = {
   readonly flipped: boolean
   readonly color?: WireColorKey
   readonly back?: Retraction
+  readonly mode?: LineMode
 }
 
 export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "socket" | "body" | "nothing"; readonly at: Point; readonly nets: readonly string[] }
@@ -52,6 +57,18 @@ export const DRAW_REFUSED: Record<DrawRefusal["refused"], { title: string; why: 
   socket: { title: "Another net's wire passes this socket", why: "Ending a wire here would join that wire too. Until the wire that passes can step aside by itself, move it first." },
   body: { title: "Not through a part", why: "A wire goes round a part's body, never across it. Lay a corner beside the part." },
   nothing: { title: "No wire to lay", why: "The wire would have no length." },
+}
+
+export function nextLineMode(_mode: LineMode): LineMode {
+  throw new Error("phase 7: cycling the line mode is not built yet")
+}
+
+export function lineModeTag(_mode: LineMode): string {
+  throw new Error("phase 7: the line mode's tag is not built yet")
+}
+
+export function withLineMode(_d: Drawing, _mode: LineMode): Drawing {
+  throw new Error("phase 7: drawing in the 45° and any-angle modes is not built yet")
 }
 
 const other = (axis: Axis): Axis => (axis === "x" ? "y" : "x")

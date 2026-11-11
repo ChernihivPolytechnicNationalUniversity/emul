@@ -122,5 +122,8 @@ export function builder(grid: number) {
   const field = (o: PlacedObject, key: FieldKey, x: number, y: number) => {
     Object.assign(o, withFieldAt(o, key, { x: x * grid, y: y * grid }, grid, need(o.def)))
   }
-  return { doc, place, wire, node, field }
+  const straight = (_a: PlacedObject, _pinA: string, _b: PlacedObject, _pinB: string): void => {
+    throw new Error("phase 7: a straight wire from pin to pin at any angle is not built yet")
+  }
+  return { doc, place, wire, node, field, straight }
 }

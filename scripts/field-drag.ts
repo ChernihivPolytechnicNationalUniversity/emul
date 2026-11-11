@@ -768,6 +768,107 @@ async function contactsFollowTheDrag(page: Page) {
   expect("released: the committed picture is the same", { lcd: await dots(page, lcd.id), board: await dots(page, board.id) }, before)
 }
 
+async function multivibratorByHand(page: Page) {
+  console.log("\nacceptance 6: a multivibrator by hand, its X drawn in the any-angle mode (plan.md acceptance 6, design.md §6.11)")
+  const part = (id: string, def: string, x: number, y: number, props: Record<string, string> = {}, extra: Partial<PlacedObject> = {}): PlacedObject => ({ id, def, x: x * GRID, y: y * GRID, props: { ref: id, ...props }, ...extra })
+  const staged: PlacedObject[] = [
+    part("R1", "resistor", 0, 22, { value: "1 kΩ" }, { rotation: 90 }),
+    part("R2", "resistor", 3, 22, { value: "47 kΩ" }, { rotation: 90 }),
+    part("R3", "resistor", 6, 22, { value: "47 kΩ" }, { rotation: 90 }),
+    part("R4", "resistor", 9, 22, { value: "1 kΩ" }, { rotation: 90 }),
+    part("C1", "capacitor", 12, 23, { value: "220 nF" }),
+    part("C2", "capacitor", 17, 23, { value: "100 nF" }),
+    part("VT1", "npn", 22, 22, {}, { mirror: true }),
+    part("VT2", "npn", 27, 22),
+  ]
+  const places: Record<string, readonly [number, number]> = { R1: [1, 0], R2: [5, 0], R3: [13, 0], R4: [17, 0], C1: [2, 3], C2: [14, 3], VT1: [1, 8], VT2: [15, 8] }
+  const frameParts = [part("V1", "supply", -1, -2, { value: "+5V", voltage: "5 V" }), part("G1", "ground", 9, 14)]
+  const rails = [
+    { id: "rail", a: cellPoint(0, 0), b: cellPoint(18, 0) },
+    { id: "c1", a: cellPoint(2, 4), b: cellPoint(2, 8) },
+    { id: "c2", a: cellPoint(18, 4), b: cellPoint(18, 8) },
+    { id: "e1", a: cellPoint(2, 12), b: cellPoint(2, 14) },
+    { id: "gnd", a: cellPoint(2, 14), b: cellPoint(18, 14) },
+    { id: "e2", a: cellPoint(18, 14), b: cellPoint(18, 12) },
+  ]
+  await openDoc(page, "multivibrator-by-hand", { objects: [...frameParts, ...staged], wires: rails, parts: {} })
+  const frame = await fieldFrame(page)
+  const view = (await page.locator("[data-slot=dot-field-viewport]").boundingBox())!
+  const onScreen = (p: Point) => p.x > view.x && p.x < view.x + view.width && p.y > view.y && p.y < view.y + view.height
+  const middle = (o: PlacedObject) => {
+    const c = bodyCentre(getDef(o.def)!, orientationOf(o))
+    return frame.toScreen({ x: o.x + c.x * GRID, y: o.y + c.y * GRID })
+  }
+  for (const o of staged) {
+    const [x, y] = places[o.id]
+    const target = { ...o, x: x * GRID, y: y * GRID }
+    expect(`${o.id}: where it waits and where it goes are both on screen`, [onScreen(middle(o)), onScreen(middle(target))], [true, true])
+    const was = await frame.worldOf(o.id)
+    await dragBy(page, middle(o), middle(target))
+    const now = await frame.worldOf(o.id)
+    expect(`${o.id} dragged into place`, { x: now.x - was.x, y: now.y - was.y }, { x: target.x - o.x, y: target.y - o.y })
+  }
+  const bare = frame.toScreen(cellPoint(30, 4))
+  await page.mouse.click(bare.x, bare.y)
+  await page.waitForTimeout(500)
+
+  const tag = () => page.evaluate(() => document.querySelector("[data-slot=line-mode]")?.textContent ?? null)
+  const drawing = () => countOf(page, "[data-slot=pending-wire-route]")
+  const startAt = async (from: Point, towards: Point) => {
+    const start = frame.toScreen(from)
+    const aim = frame.toScreen(towards)
+    await page.mouse.move(start.x, start.y)
+    await page.mouse.click(start.x, start.y)
+    await page.mouse.move((start.x + aim.x) / 2, (start.y + aim.y) / 2, { steps: 6 })
+    await page.waitForTimeout(200)
+  }
+  const finishAt = async (to: Point) => {
+    const end = frame.toScreen(to)
+    await page.mouse.move(end.x, end.y, { steps: 6 })
+    await page.mouse.click(end.x, end.y)
+    await page.waitForTimeout(500)
+  }
+  await startAt(cellPoint(6, 4), cellPoint(15, 10))
+  expect("a wire drawn from R2's foot starts in 90°, the tag beside the pointer says so", [await drawing(), await tag()], [1, "90°"])
+  await page.keyboard.press("Shift+Space")
+  await page.waitForTimeout(150)
+  expect("Shift+Space: 45°", await tag(), "45°")
+  await page.keyboard.press("Shift+Space")
+  await page.waitForTimeout(150)
+  expect("Shift+Space again: any angle", await tag(), "∠")
+  await finishAt(cellPoint(15, 10))
+  expect("ended on VT2's base, the wire is finished", await drawing(), 0)
+  await startAt(cellPoint(14, 4), cellPoint(5, 10))
+  expect("the next wire keeps the mode: any angle", await tag(), "∠")
+  await finishAt(cellPoint(5, 10))
+  expect("ended on VT1's base, the wire is finished", await drawing(), 0)
+  await shoot(page, "multivibrator-by-hand")
+
+  const routes = await page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] g[data-net] > g[data-wire]")].map((e) => ({ net: e.parentElement!.getAttribute("data-net"), points: e.getAttribute("data-points") })))
+  const runBetween = (p: Point, q: Point) => routes.find((r) => r.points === `${p.x},${p.y} ${q.x},${q.y}` || r.points === `${q.x},${q.y} ${p.x},${p.y}`)
+  const first = runBetween(cellPoint(6, 4), cellPoint(15, 10))
+  const second = runBetween(cellPoint(14, 4), cellPoint(5, 10))
+  expect("each leg of the X is one straight wire from a foot to the far base", [!!first, !!second], [true, true])
+  expect("the X is two nets: its legs cross without connecting", !!first && !!second && first.net !== second.net, true)
+  const dots = (await page.evaluate(() => [...document.querySelectorAll("[data-junction]")].map((e) => e.getAttribute("data-junction")!))).sort()
+  const want = [[2, 0], [6, 0], [14, 0], [2, 4], [6, 4], [14, 4], [18, 4], [10, 14]].map(([x, y]) => `${x * GRID},${y * GRID}`).sort()
+  expect("dots on the rails' T's and the four foot nodes, none at the crossing (10, 6⅔)", dots, want)
+
+  const contentTransform = () => page.evaluate(() => getComputedStyle(document.querySelector("[data-slot=dot-field-content]")!).transform)
+  const before = await contentTransform()
+  await page.keyboard.down("Shift")
+  await page.keyboard.down("Space")
+  await dragBy(page, bare, { x: bare.x + 120, y: bare.y + 60 })
+  await page.keyboard.up("Space")
+  await page.keyboard.up("Shift")
+  await page.keyboard.press("Escape")
+  expect("Shift+Space held and a drag on bare field: no pan (design.md §6.11 rule 1)", await contentTransform(), before)
+  await page.keyboard.down("Space")
+  await dragBy(page, bare, { x: bare.x + 120, y: bare.y + 60 })
+  await page.keyboard.up("Space")
+  expect("Space alone held and the same drag: the view pans", (await contentTransform()) !== before, true)
+}
+
 async function bridgeBuiltByHand(page: Page) {
   console.log("\na diode bridge built by hand: four diodes turned with R and Shift+R, dragged corner to corner")
   const diode = (n: number): PlacedObject => ({ id: `d${n}`, def: "diode", x: 0, y: (n - 1) * 3 * GRID, props: { ref: `D${n}`, value: "1N4007", vrev: "1000 V" } })
@@ -973,7 +1074,7 @@ try {
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
+const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
 try {
   for (const section of sections) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
