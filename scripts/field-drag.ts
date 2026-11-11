@@ -484,6 +484,79 @@ async function openEndCue(page: Page) {
   expect("33 %: a press where nothing is marked moves the wire: no wire drawn, the open end three cells right", [await countOf(page, "[data-slot^=pending-wire]"), await page.evaluate(() => [...document.querySelectorAll("[data-dangling]")].map((e) => e.getAttribute("data-dangling")))], [0, [`${23 * GRID},${15 * GRID}`]])
 }
 
+async function shorteningFromAnOpenEnd(page: Page) {
+  console.log("\na press on an open end drawn back along the wire shortens it, as Zip retracts a path (the user, 2026-11-11)")
+  const rings = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-dangling]")].filter((e) => getComputedStyle(e).display !== "none").map((e) => e.getAttribute("data-dangling")))
+  const bandRings = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-band-dangling]")].map((e) => e.getAttribute("data-band-dangling")))
+  const bandPieces = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll("[data-slot=rubber-band] [data-piece]")]
+        .map((e) => {
+          const [ax, ay, bx, by] = e.getAttribute("data-piece")!.split(" ").map(Number)
+          return ax < bx || (ax === bx && ay <= by) ? `${ax} ${ay} ${bx} ${by}` : `${bx} ${by} ${ax} ${ay}`
+        })
+        .sort(),
+    )
+  const wirePoints = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire][data-points]")].map((e) => e.getAttribute("data-points")))
+  const key = (x: number, y: number) => `${x * GRID},${y * GRID}`
+  const pointsOf = (...cells: [number, number][]) => cells.map(([x, y]) => key(x, y)).join(" ")
+  await openDoc(page, "shorten", hookedWire())
+  await zoomTo(page, 0)
+  let f = await fieldFrame(page)
+  const via = async (...cells: [number, number][]) => {
+    for (const [x, y] of cells) {
+      const p = f.toScreen(cellPoint(x, y))
+      await page.mouse.move(p.x, p.y, { steps: 6 })
+    }
+    await page.waitForTimeout(200)
+  }
+  const press = async (x: number, y: number) => {
+    const p = f.toScreen(cellPoint(x, y))
+    await page.mouse.move(p.x, p.y)
+    await page.waitForTimeout(100)
+    await page.mouse.down()
+  }
+  await press(20, 15)
+  await via([20, 13])
+  expect("held two cells back up the wire: the wire ends there, its open end with it", [await bandRings(), await rings()], [[key(20, 13)], []])
+  expect("and the wire shown is the shorter one", await bandPieces(), [`${14 * GRID} ${11 * GRID} ${20 * GRID} ${11 * GRID}`, `${20 * GRID} ${11 * GRID} ${20 * GRID} ${13 * GRID}`].sort())
+  await via([20, 11], [17, 11])
+  expect("on round the bend, three cells along: the bend is gone, the end follows the pointer", [await bandRings(), await bandPieces()], [[key(17, 11)], [`${14 * GRID} ${11 * GRID} ${17 * GRID} ${11 * GRID}`]])
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  expect("released: the wire is that much shorter, nothing left being drawn", [await rings(), await wirePoints(), await countOf(page, "[data-slot^=pending-wire]")], [[key(17, 11)], [pointsOf([14, 11], [17, 11])], 0])
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(500)
+  expect("one undo gives the whole wire back", await rings(), [key(20, 15)])
+  f = await fieldFrame(page)
+  await press(20, 15)
+  await via([20, 13], [22, 13], [23, 13])
+  expect("back two cells and off to the right: the wire is cut back and drawn on from the cut", [await bandRings(), await page.evaluate(() => document.querySelector("[data-slot=pending-wire-route] path[stroke-dasharray]")?.getAttribute("d") ?? null)], [[key(20, 13)], `M${20 * GRID} ${13 * GRID} L${23 * GRID} ${13 * GRID}`])
+  await page.mouse.up()
+  await page.keyboard.press("Enter")
+  await page.waitForTimeout(600)
+  expect("finished: the stub below the cut is gone and the wire turns off at it", [await rings(), await wirePoints()], [[key(23, 13)], [pointsOf([14, 11], [20, 11], [20, 13], [23, 13])]])
+  await openDoc(page, "shorten-to-nothing", hookedWire())
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  await press(20, 15)
+  await via([20, 13], [20, 11], [17, 11], [14, 11])
+  expect("held all the way back on R1's pin: no wire left on the field, and no ring left hanging where the end was", [await bandPieces(), await bandRings(), await rings()], [[], [], []])
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  expect("released there: the wire is gone", await countOf(page, "[data-slot=wires] [data-wire]"), 0)
+  await openDoc(page, "shorten-and-back", hookedWire())
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  await press(20, 15)
+  await via([20, 12], [20, 15])
+  expect("drawn back and forward again to the end: the wire is whole again", [await bandRings(), await rings()], [[], [key(20, 15)]])
+  await page.mouse.up()
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(400)
+  expect("and released and dropped there, nothing changed", await wirePoints(), [pointsOf([14, 11], [20, 11], [20, 15])])
+}
+
 async function phaseFiveChecks(page: Page) {
   console.log("\nthe field: bodies, splices, fields and the checker (phase 5, design.md §5, §6.8)")
   const diodeAt = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "diode", x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
@@ -885,7 +958,7 @@ try {
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, phaseFiveChecks, bridgeBuiltByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
+const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
 try {
   for (const section of sections) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
