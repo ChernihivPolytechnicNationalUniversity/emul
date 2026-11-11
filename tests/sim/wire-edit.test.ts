@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { GRID, objectPins, objectRect, type Point } from "@/schematic/geometry"
+import { checked } from "@/schematic/checker"
+import { GRID, objectRect, type Point } from "@/schematic/geometry"
 import { junctionAt } from "@/schematic/junction-tool"
 import { netChanges, NO_CHANGE } from "../lib/net-changes"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import { pasteLanding, pastedInto } from "@/schematic/use-schematic"
+import { freeSpot, wireCheck } from "@/schematic/placement"
 import { drawEndAt, drawnTo, flipPosture, isRefusal, laysClear, pointerAt, previewOf, startDrawing, withCorner, withoutCorner, type DrawEnd, type Drawing } from "@/schematic/wire-draw"
 import { clipOf, inNormalForm, placedObject, removed, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { PartDrag } from "@/schematic/rubber-band"
@@ -571,7 +573,7 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
     for (const altKey of [true, false]) {
       let doc = docOf([resistor("R1", 0, 0), resistor("R2", 16, 0)], [seg(at(4, 1), at(16, 1))])
       const add = sourceCallback<(def: string, center: Point) => PlacedObject>("src/schematic/use-schematic.ts", "add", {
-        getDef, snap, grid: GRID, crypto: { randomUUID: () => "R3" }, placedObject,
+        getDef, snap, grid: GRID, crypto: { randomUUID: () => "R3" }, placedObject, wireCheck, freeSpot,
         setDoc: (fn: (d: Schematic) => Schematic) => { doc = fn(doc) },
         nextRef: () => "R3", setSelectedObjects: () => {}, setSelectedWires: () => {},
       })
@@ -579,7 +581,7 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
       const click = sourceCallback<(e: { clientX: number; clientY: number; shiftKey: boolean; altKey: boolean }, def: string) => void>("src/components/field/DotField.tsx", "placeArmed", {
         toWorld: (x: number, y: number) => ({ x, y }), onArmedChange: () => {},
         afterDefs: (_ids: string[], fn: () => void) => { loaded = fn },
-        sch: { add, selectObject: () => {} }, placed: () => {}, cannotLoad: () => {},
+        sch: { add, selectObject: () => {} }, placed: () => {}, cannotLoad: () => {}, lastPress: { current: null },
       })
       const event = { clientX: c(8), clientY: c(1), shiftKey: false, altKey }
       click(event, "resistor")
@@ -587,7 +589,8 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
       loaded()
       expect.soft(doc.wires.reduce((sum, s) => sum + Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y), 0), `Alt ${altKey}: continuous or spliced length`).toBeNear(c(altKey ? 12 : 8), 1e-6)
       expect.soft(normalFormViolations(doc.wires, wirePins(doc.objects)), `Alt ${altKey}: split at every pin`).toEqual([])
-      expect.soft(partition(doc), `Alt ${altKey}: the intended connectivity`).toEqual(altKey ? [["R1:2", "R2:1", "R3:1", "R3:2"]] : [["R1:2", "R3:1"], ["R2:1", "R3:2"]])
+      expect.soft(checked(doc).filter((f) => f.kind === "wire-through-body"), `Alt ${altKey}: no wire left under R3 (the user, 2026-11-11)`).toEqual([])
+      expect.soft(partition(doc), `Alt ${altKey}: the intended connectivity — with Alt, kept whole and so put beside the wire`).toEqual(altKey ? [["R1:2", "R2:1"]] : [["R1:2", "R3:1"], ["R2:1", "R3:2"]])
     }
   })
 
@@ -599,22 +602,21 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
     expect.soft(partition(landed.doc), "one net").toEqual([["R1:2", "R2:1", "R3:1"]])
   })
 
-  it("a part with three pins is not spliced, even with two of them on the wire (design.md §5.3: a two-terminal part)", () => {
+  it("a part with three pins is not spliced, and since the wire would then run on under its body, it lands where no wire does (design.md §5.3: a two-terminal part; the user, 2026-11-11: no wire through a body)", () => {
     const doc = docOf([resistor("R1", 8, -8, 90), resistor("R2", 8, 8, 90), { id: "Q1", def: "npn", x: c(12), y: c(-6), props: { ref: "Q1" } }], [seg(at(9, -4), at(9, 8))])
     const landed = dropped(doc, "Q1", -6, 5)
-    const pins = Object.fromEntries(objectPins(landed.doc.objects.find((o) => o.id === "Q1")!, GRID).map((p) => [p.pin.id, p.point]))
-    expect.soft([landed.at, pins.C, pins.E], "set up: dropped where let go, collector and emitter on the wire").toEqual([{ x: c(-6), y: c(5) }, at(9, -1), at(9, 3)])
-    expect.soft(geometryOf(landed.doc.wires), "the wire whole, split only at the two pins").toEqual(geometryOf([seg(at(9, -4), at(9, -1)), seg(at(9, -1), at(9, 3)), seg(at(9, 3), at(9, 8))]))
-    expect.soft(partition(landed.doc), "collector, emitter and both resistors on one net").toEqual([["Q1:C", "Q1:E", "R1:2", "R2:1"]])
+    expect.soft(landed.at.x === c(-6) && landed.at.y === c(5), "not over the wire, where collector and emitter would sit on it").toBe(false)
+    expect.soft(checked(landed.doc).filter((f) => f.kind === "wire-through-body"), "no wire through Q1").toEqual([])
+    expect.soft(covers(landed.doc, at(9, -4), at(9, 8)), "the wire whole").toBe(true)
   })
 
-  it("a wire with a branch between the two pins is not cut: the branch would be left under the body (taken by default, findings.md phase 5)", () => {
+  it("a wire with a branch between the two pins is not cut, so the part lands where the branch is not left under its body (taken by default, findings.md phase 5; the user, 2026-11-11)", () => {
     const doc = docOf([resistor("R1", 0, 0), resistor("R2", 16, 0), resistor("R4", 7, 6, 90), resistor("R3", 6, -6)], [seg(at(4, 1), at(16, 1)), seg(at(8, 1), at(8, 6))])
     const landed = dropped(doc, "R3", 0, 6)
+    expect.soft(landed.at.x === 0 && landed.at.y === c(6), "not over the branch point").toBe(false)
+    expect.soft(checked(landed.doc).filter((f) => f.kind === "wire-through-body"), "no wire through R3").toEqual([])
     expect.soft(covers(landed.doc, at(4, 1), at(16, 1)), "the spine stays whole").toBe(true)
-    expect.soft(sortedPoints(junctionsOf(viewOf(landed.doc))).some((p) => p.x === c(8) && p.y === c(1)), "and so does the branch's dot").toBe(true)
-    expect.soft(landed.doc.wires.some((s) => s.a.x === c(8) && s.b.x === c(8) && Math.min(s.a.y, s.b.y) === c(1) && Math.max(s.a.y, s.b.y) === c(6)), "the whole branch down to R4").toBe(true)
-    expect.soft(partition(landed.doc).find((g) => g.includes("R4:1")), "R4 still on the spine").toEqual(["R1:2", "R2:1", "R3:1", "R3:2", "R4:1"])
+    expect.soft(partition(landed.doc).find((g) => g.includes("R4:1")), "R4 still on the spine").toEqual(expect.arrayContaining(["R1:2", "R2:1", "R4:1"]))
   })
 
   it("the halves keep their colour, and a cut inside one colour leaves the boundary where it was", () => {

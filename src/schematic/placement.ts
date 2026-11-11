@@ -5,6 +5,7 @@ import { PointGrid } from "./contacts"
 import { bodyAndLeads, bodyBounds, type Lead } from "./body"
 import { blocksOf } from "./printed-text"
 import { drawsAsField, placedFields } from "./fields"
+import { bodiesOf, crossable, segmentBox, shiftedBody, spliceSpan, staysThrough } from "./body-crossing"
 import type { ComponentDef, PlacedObject } from "./types"
 
 export { bodyBounds }
@@ -363,6 +364,21 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
   }
 }
 
+export function wireCheck(scene: PlacementScene, moving: readonly PlacedObject[], splice = true): (dx: number, dy: number) => boolean {
+  const bodies = bodiesOf(moving).filter(crossable)
+  const segments = scene.routes.flatMap((r) => r.pts.slice(1).map((b, i) => ({ a: r.pts[i], b })))
+  if (!bodies.length || !segments.length) return () => false
+  const index = new BoxIndex(segments, segmentBox, BUCKET_CELLS * scene.grid)
+  return (dx, dy) =>
+    bodies.some((body) => {
+      const moved = shiftedBody(body, dx, dy)
+      const near: { a: Point; b: Point }[] = []
+      index.some(moved.box, (s) => near.push(s) < 0)
+      const span = splice ? spliceSpan(moved, near) : null
+      return near.some((s) => staysThrough(s, moved, span))
+    })
+}
+
 export function contactCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
   const ids = new Set(moving.map((o) => o.id))
   const fixed = pinGridOf(scene.objects.filter((o) => !ids.has(o.id)), scene.grid)
@@ -483,7 +499,7 @@ export function ringsToClear(scene: PlacementScene, moving: readonly PlacedObjec
   return Math.max(0, Math.floor(cells)) + 1
 }
 
-export function freeSpot(scene: PlacementScene, moving: readonly PlacedObject[], from: Point = { x: 0, y: 0 }): Point {
-  const refuse = [placementCheck(scene, moving), contactCheck(scene, moving)]
+export function freeSpot(scene: PlacementScene, moving: readonly PlacedObject[], from: Point = { x: 0, y: 0 }, splice = true): Point {
+  const refuse = [placementCheck(scene, moving), contactCheck(scene, moving), wireCheck(scene, moving, splice)]
   return nearestFreeWithin(refuse, scene.grid, from, () => ringsToClear(scene, moving, from)) ?? from
 }

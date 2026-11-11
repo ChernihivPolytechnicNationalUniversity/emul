@@ -3,7 +3,8 @@ import { splicedAt } from "./splice"
 import { GRID, objectRect, snap, type FlipAxis, type Rect, type Turn } from "./geometry"
 import { flipLine, flipSelection, selectionStep, turnedAbout, turnedSelection, turnPivot } from "./orient"
 import { designatorRects, footprint } from "./placement"
-import { SpatialIndex } from "./spatial"
+import { BoxIndex, SpatialIndex } from "./spatial"
+import { bodiesOf, crossable, crossedBody, segmentBox, shiftedBody, spliceSpan, staysThrough, type Body } from "./body-crossing"
 import type { PlacedObject, Point, Schematic } from "./types"
 import { keepSheet, detachedMove, moved, pinsOf, travellingIn, travellingWires, wiringOf, withSegments, type NewId, type Wiring } from "./wire-edits"
 import { normalOffset, planDrag, translate, type DragBox, type DragCommit, type DragConflict, type DragFrame, type DragMove, type DragPlan } from "./wires/drag"
@@ -117,6 +118,53 @@ const drawnBody = (o: PlacedObject): Rect => footprint(o, GRID)?.box ?? objectRe
 
 const crosses = (a: Point, b: Point, r: Rect) => Math.max(a.x, b.x) > r.x && Math.min(a.x, b.x) < r.x + r.w && Math.max(a.y, b.y) > r.y && Math.min(a.y, b.y) < r.y + r.h
 
+const middleOf = (r: Rect): Point => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 })
+
+class BodyGuard {
+  private objects: SpatialIndex | undefined
+  private wires: BoxIndex<WireSegment> | undefined
+  private readonly carried: readonly Body[]
+  private readonly doc: Schematic
+  private readonly carriedIds: ReadonlySet<string>
+  private readonly index: SpatialIndex | undefined
+
+  constructor(doc: Schematic, carriedIds: ReadonlySet<string>, index?: SpatialIndex) {
+    this.doc = doc
+    this.carriedIds = carriedIds
+    this.index = index
+    this.carried = bodiesOf(doc.objects.filter((o) => carriedIds.has(o.id))).filter(crossable)
+  }
+
+  judged(frame: DragFrame, move: Point): DragFrame {
+    if (frame.blocked) return frame
+    const conflict = this.crossing(frame, move)
+    return conflict ? { ...frame, blocked: true, conflicts: [...frame.conflicts, conflict] } : frame
+  }
+
+  private staticNear(box: Rect): Body[] {
+    this.objects ??= this.index ?? new SpatialIndex(this.doc.objects, GRID)
+    return bodiesOf(this.objects.query(box).filter((o) => !this.carriedIds.has(o.id)))
+  }
+
+  private crossing(frame: DragFrame, move: Point): DragConflict | null {
+    const moved = this.carried.map((b) => shiftedBody(b, move.x, move.y))
+    for (const piece of frame.pieces) {
+      const body = crossedBody(piece, [...this.staticNear(segmentBox(piece)), ...moved])
+      if (body) return { at: middleOf(body.box), reason: "body", piece: piece.id, nets: [piece.net, body.object.id] }
+    }
+    if (!moved.length) return null
+    this.wires ??= new BoxIndex(this.doc.wires, segmentBox, 16 * GRID)
+    for (const body of moved) {
+      const near: WireSegment[] = []
+      this.wires.some(body.box, (s) => !frame.replaced.has(s.id) && near.push(s) < 0)
+      const span = spliceSpan(body, near)
+      const covered = near.find((s) => staysThrough(s, body, span))
+      if (covered) return { at: middleOf(body.box), reason: "body", piece: covered.id, nets: [covered.id, body.object.id] }
+    }
+    return null
+  }
+}
+
 class Surroundings {
   private index: SpatialIndex | undefined
   private readonly objects: readonly PlacedObject[]
@@ -185,10 +233,12 @@ export class PartDrag {
   private readonly relaying: () => DragPlan
   private readonly detach: boolean
   private readonly whole: boolean
+  private readonly guard: BodyGuard
   private last: { key: string; frame: DragFrame } | null = null
 
   constructor(doc: Schematic, wiring: Wiring | undefined, carried: Carried, options: DragOptions = {}) {
     this.doc = doc
+    this.guard = new BodyGuard(doc, carried.objects, options.index)
     this.wiring = currentWiring(doc, wiring)
     this.from = new Map(doc.objects.filter((o) => carried.objects.has(o.id)).map((o) => [o.id, { x: o.x, y: o.y }] as const))
     this.detach = !!options.detach
@@ -229,7 +279,7 @@ export class PartDrag {
   frame(dx: number, dy: number): DragFrame {
     if (!this.plan || this.stale) return EMPTY_FRAME
     const key = `${dx},${dy}`
-    if (this.last?.key !== key) this.last = { key, frame: this.plan.frame({ x: dx, y: dy }) }
+    if (this.last?.key !== key) this.last = { key, frame: this.guard.judged(this.plan.frame({ x: dx, y: dy }), { x: dx, y: dy }) }
     return this.last.frame
   }
 
@@ -262,6 +312,7 @@ export class SegmentDrag {
   private readonly segment: WireSegment | undefined
   private readonly plan: DragPlan | null
   private readonly free: boolean
+  private readonly guard: BodyGuard
   private last: { key: string; frame: DragFrame } | null = null
 
   private readonly wiring: Wiring
@@ -276,6 +327,7 @@ export class SegmentDrag {
 
   constructor(doc: Schematic, wiring: Wiring | undefined, segment: string, index?: SpatialIndex) {
     this.doc = doc
+    this.guard = new BodyGuard(doc, new Set(), index)
     const current = currentWiring(doc, wiring)
     this.wiring = current
     const sheet = current.sheet
@@ -296,8 +348,12 @@ export class SegmentDrag {
     if (!this.plan || this.stale) return EMPTY_FRAME
     const offset = this.offsetOf(dx, dy)
     const key = `${offset.x},${offset.y}`
-    if (this.last?.key !== key) this.last = { key, frame: this.plan.frame(offset) }
+    if (this.last?.key !== key) this.last = { key, frame: this.guard.judged(this.plan.frame(offset), offset) }
     return this.last.frame
+  }
+
+  private frameAt(plan: DragPlan, at: Point): DragFrame {
+    return this.guard.judged(plan.frame(at), at)
   }
 
   landed(dx: number, dy: number, newId: NewId = randomId): Landed {
@@ -306,7 +362,7 @@ export class SegmentDrag {
     if (!plan || !this.segment || (!asked.x && !asked.y)) return { doc: this.doc, unlaid: [], at: ZERO }
     if (this.stale) return { doc: this.doc, unlaid: [], at: ZERO, refused: [] }
     const axis = this.free ? undefined : asked.x ? "x" : "y"
-    const at = this.frame(dx, dy).blocked ? nearestWhere(asked, (p) => !plan.frame(p).blocked && (p.x !== 0 || p.y !== 0), 4, axis) : asked
+    const at = this.frame(dx, dy).blocked ? nearestWhere(asked, (p) => !this.frameAt(plan, p).blocked && (p.x !== 0 || p.y !== 0), 4, axis) : asked
     if (!at) return { doc: this.doc, unlaid: [], at: ZERO, refused: this.frame(dx, dy).conflicts }
     const commit = plan.commit(at, newId, { keepUnlaid: true })
     if (!commit) return { doc: this.doc, unlaid: [], at: ZERO, refused: plan.frame(at).conflicts }
