@@ -13,6 +13,7 @@ import { OverlayMap } from "./wires/overlay-map"
 import { lineCodeOf, columnCode, rowCode, WireSheet } from "./wires/sheet"
 import { commitEdit, normalise, normaliseEdit } from "./wires/normal-form"
 import { splicedAt } from "./splice"
+import { bodyRefusal, type BodyRefusal } from "./body-crossing"
 import { contains, exactPointCode, highOf, lowOf, samePoint, seededIds, type PointCode, type WirePin, type WireSegment } from "./wires/segment"
 
 export { pinsOf } from "./pin-index"
@@ -358,9 +359,13 @@ export function removed(doc: Schematic, objectIds: ReadonlySet<string>, segmentI
   return withSegments(remaining, [], doc.wires.filter((s) => segmentIds.has(s.id)), pinPoints(gone), newId)
 }
 
-export function placedObject(doc: Schematic, object: PlacedObject, newId: NewId = randomId, options: { suppressSplice?: boolean } = {}): Schematic {
+export function placedObject(doc: Schematic, object: PlacedObject, newId: NewId = randomId, options: { suppressSplice?: boolean; onRefused?: (refusal: BodyRefusal) => void } = {}): Schematic {
   const next = withSegments({ ...doc, objects: [...doc.objects, object] }, [], [], pinPoints([object]), newId)
-  return options.suppressSplice ? next : splicedAt(next, [object.id], newId)
+  const result = options.suppressSplice ? next : splicedAt(next, [object.id], newId)
+  const refused = bodyRefusal(doc, result)
+  if (!refused) return result
+  options.onRefused?.(refused)
+  return doc
 }
 
 export function withModule(doc: Schematic, module: HdlModule, newId: NewId = randomId): Schematic {

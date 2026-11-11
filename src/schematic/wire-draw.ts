@@ -5,7 +5,7 @@ import type { WireColorKey } from "./wire-colors"
 import { pinToPinPoints, withSegments, type NewId, type Wiring } from "./wire-edits"
 import { highOf, lowOf, samePoint, type WireSegment } from "./wires/segment"
 import { columnCode, rowCode } from "./wires/sheet"
-import { bodiesOf, crossedBody, segmentBox } from "./body-crossing"
+import { bodiesOf, bodyRefusal, crossedBody, segmentBox } from "./body-crossing"
 
 export type DrawEnd =
   | { readonly kind: "pin"; readonly key: string; readonly at: Point }
@@ -42,7 +42,7 @@ export const isRefusal = (value: unknown): value is DrawRefusal => typeof value 
 
 const randomId: NewId = () => crypto.randomUUID()
 
-export const PASTE_REFUSED = { title: "Nowhere clean to paste", why: "Every place near the paste lays a pasted wire along another net's wire or over its pin." }
+export const PASTE_REFUSED = { title: "Nowhere clean to paste", why: "The paste would lay a wire through a part's body, along another net's wire or over its pin, so nothing changed." }
 
 export const DRAW_REFUSED: Record<DrawRefusal["refused"], { title: string; why: string }> = {
   along: { title: "Not along another net's wire", why: "A wire lying on another net's wire would join the two without saying so. End the wire on it to join them on purpose." },
@@ -326,7 +326,8 @@ export function drawnTo(doc: Schematic, wiring: Wiring, d: Drawing, target: Draw
   const color = d.color
   const segments: WireSegment[] = cut?.kept ? [cut.kept] : []
   for (let i = 1; i < points.length; i++) segments.push(color ? { id: newId(), a: points[i - 1], b: points[i], color } : { id: newId(), a: points[i - 1], b: points[i] })
-  return withSegments(doc, segments, cut?.removed ?? [], [points[0], points[points.length - 1]], newId)
+  const result = withSegments(doc, segments, cut?.removed ?? [], [points[0], points[points.length - 1]], newId)
+  return bodyRefusal(doc, result) ?? result
 }
 
 export function laysClear(wiring: Wiring, segments: readonly { readonly a: Point; readonly b: Point }[], doc?: Schematic): boolean {

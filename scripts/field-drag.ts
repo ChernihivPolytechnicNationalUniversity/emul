@@ -186,7 +186,9 @@ async function farDropAndWireCopy(page: Page) {
   const middle = { x: chip.x + objectRect(chip, GRID).w / 2, y: chip.y + objectRect(chip, GRID).h / 2 }
   await dragBy(page, frame.toScreen(middle), frame.toScreen({ x: middle.x + 13 * GRID, y: middle.y + 7 * GRID }))
   const after = await frame.worldOf(chip.id)
-  expect("a chip dragged 13 cells with every wire blocked near the drop still moves", after.x !== before.x || after.y !== before.y, true)
+  const moved = after.x !== before.x || after.y !== before.y
+  const said = await page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].some((e) => (e.textContent ?? "").startsWith("Nowhere clean to put it")))
+  expect("a chip dragged 13 cells with every wire blocked near the drop moves, or, where its wires could only be laid through a part, stays and says why (the user, 2026-11-11)", moved || said, true)
   await openDoc(page, "copy-a-wire", wiredPair())
   const wired = await fieldFrame(page)
   const onWire = wired.toScreen(cellPoint(16, 11))
@@ -614,7 +616,7 @@ async function phaseFiveChecks(page: Page) {
   await page.keyboard.up("Alt")
   const onTheRow = (await runs()).filter((r) => r.every((v, k) => k % 2 === 0 || v === 11 * GRID)).map((r) => [Math.min(...r.filter((_, k) => k % 2 === 0)), Math.max(...r.filter((_, k) => k % 2 === 0))]).sort((a, b) => a[0] - b[0])
   const covers = onTheRow.reduce((reach, [lo, hi]) => (lo <= reach ? Math.max(reach, hi) : reach), 14 * GRID) >= 26 * GRID && onTheRow[0]?.[0] === 14 * GRID
-  expect("with Alt held R3 lands on the wire and the wire runs on from R1 to R2 under it, nothing cut (design.md §5.3: Alt suppresses)", [await f.worldOf("R3"), covers], [{ x: 16 * GRID, y: 10 * GRID }, true])
+  expect("with Alt held R3 is not cut into the wire, and since the wire would then run on under its body it stays where it was; the wire runs on from R1 to R2 (the user, 2026-11-11: no wire through a part)", [await f.worldOf("R3"), covers], [{ x: 16 * GRID, y: 16 * GRID }, true])
 
   await openDoc(page, "fields", { objects: [{ ...resistorAt("R1", 10, 10), props: { ref: "R1", value: "1 kΩ" } }], wires: [], parts: {} })
   f = await fieldFrame(page)

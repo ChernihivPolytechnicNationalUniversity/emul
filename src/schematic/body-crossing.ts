@@ -2,10 +2,13 @@ import { GRID, type Point, type Rect } from "./geometry"
 import { footprints, type Lead } from "./placement"
 import { pinsForObject } from "./pin-index"
 import { getDef } from "./registry"
-import type { PlacedObject } from "./types"
+import { BoxIndex } from "./spatial"
+import type { PlacedObject, Schematic } from "./types"
 import type { WirePin } from "./wires/segment"
 
 const EPS = 1e-6
+
+const PART_REACH_CELLS = 128
 
 type Segment = { readonly a: Point; readonly b: Point }
 
@@ -64,7 +67,21 @@ function insideOf(s: Segment, corners: readonly Point[]): readonly [number, numb
 
 const samePoint = (a: Point, b: Point) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS
 
-export function runsThrough(s: Segment, body: Body) {
+function crossingIntervals(s: Segment, body: Body): [number, number][] {
+  const length = Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y)
+  const slack = EPS / Math.max(length, EPS)
+  const exitsAt = (at: Point, towards: Point) => body.pins.some((p) => samePoint(p.at, at) && p.out && (towards.x - at.x) * p.out.x + (towards.y - at.y) * p.out.y > EPS)
+  return body.contour.flatMap((corners): [number, number][] => {
+    const inside = insideOf(s, corners)
+    if (!inside) return []
+    const [lo, hi] = inside
+    const fromPinA = lo <= slack && hi < 1 - slack && exitsAt(s.a, s.b)
+    const fromPinB = hi >= 1 - slack && lo > slack && exitsAt(s.b, s.a)
+    return fromPinA || fromPinB ? [] : [[lo, hi]]
+  })
+}
+
+export function runsThrough(s: Segment, body: Body): boolean {
   const length = Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y)
   const slack = EPS / Math.max(length, EPS)
   const exitsAt = (at: Point, towards: Point) => body.pins.some((p) => samePoint(p.at, at) && p.out && (towards.x - at.x) * p.out.x + (towards.y - at.y) * p.out.y > EPS)
@@ -146,5 +163,98 @@ export function staysThrough(s: Segment, body: Body, span: SpliceSpan | null = n
 export function crossedBody(s: Segment, bodies: Iterable<Body>): Body | null {
   const box = segmentBox(s)
   for (const body of bodies) if (crossable(body) && boxesMeet(body.box, box) && runsThrough(s, body)) return body
+  return null
+}
+
+export type BodyRefusal = { readonly refused: "body"; readonly at: Point; readonly nets: readonly [string, string] }
+
+const geometryOf = (body: Body) => JSON.stringify(body.contour.map((polygon) => polygon.map((p) => [Math.round(p.x / EPS), Math.round(p.y / EPS)]).sort()).sort())
+
+function crossingSpans(s: Segment, body: Body): Segment[] {
+  const pointAt = (t: number): Point => ({ x: s.a.x + (s.b.x - s.a.x) * t, y: s.a.y + (s.b.y - s.a.y) * t })
+  return crossingIntervals(s, body).map(([lo, hi]) => ({ a: pointAt(lo), b: pointAt(hi) }))
+}
+
+function coveredBy(span: Segment, old: readonly Segment[]): boolean {
+  const dx = span.b.x - span.a.x
+  const dy = span.b.y - span.a.y
+  const length = Math.hypot(dx, dy)
+  const along = (p: Point) => ((p.x - span.a.x) * dx + (p.y - span.a.y) * dy) / length
+  const onLine = (p: Point) => Math.abs((p.x - span.a.x) * dy - (p.y - span.a.y) * dx) <= EPS * length
+  const intervals = old.filter((s) => onLine(s.a) && onLine(s.b)).map((s) => [Math.min(along(s.a), along(s.b)), Math.max(along(s.a), along(s.b))]).sort((a, b) => a[0] - b[0])
+  let reach = 0
+  for (const [lo, hi] of intervals) {
+    if (lo > reach + EPS) break
+    reach = Math.max(reach, hi)
+    if (reach >= length - EPS) return true
+  }
+  return false
+}
+
+const unionBox = (boxes: readonly Rect[]): Rect | null => {
+  if (!boxes.length) return null
+  const x = Math.min(...boxes.map((b) => b.x))
+  const y = Math.min(...boxes.map((b) => b.y))
+  return { x, y, w: Math.max(...boxes.map((b) => b.x + b.w)) - x, h: Math.max(...boxes.map((b) => b.y + b.h)) - y }
+}
+
+export type Touched = { readonly wires: readonly Segment[]; readonly objects: ReadonlySet<string>; readonly coversChecked: boolean }
+
+export function bodyRefusal(before: Schematic, after: Schematic, touched?: Touched): BodyRefusal | null {
+  if (before === after || !after.wires.length) return null
+  const meets = (w: Segment, r: Rect) => Math.max(w.a.x, w.b.x) >= r.x && Math.min(w.a.x, w.b.x) <= r.x + r.w && Math.max(w.a.y, w.b.y) >= r.y && Math.min(w.a.y, w.b.y) <= r.y + r.h
+  const keptWires = touched ? null : new Set(before.wires)
+  const keptObjects = touched ? null : new Set(before.objects)
+  const freshWires: readonly Segment[] = touched ? touched.wires : after.wires.filter((w) => !keptWires!.has(w))
+  const freshBodies = bodiesOf(after.objects.filter((o) => (keptObjects ? !keptObjects.has(o) : touched!.objects.has(o.id)))).filter(crossable)
+  if (!freshWires.length && !freshBodies.length) return null
+  const previous = new Map<string, Segment[]>()
+  let oldBodies: Body[] | undefined
+  let oldWires: BoxIndex<Schematic["wires"][number]> | undefined
+  const oldSpans = (body: Body) => {
+    const key = geometryOf(body)
+    let spans = previous.get(key)
+    if (spans) return spans
+    oldBodies ??= bodiesOf(before.objects).filter(crossable)
+    oldWires ??= new BoxIndex(before.wires, segmentBox, 16 * GRID)
+    spans = []
+    for (const old of oldBodies) {
+      if (!boxesMeet(old.box, body.box) || geometryOf(old) !== key) continue
+      oldWires.some(old.box, (wire) => {
+        spans!.push(...crossingSpans(wire, old))
+        return false
+      })
+    }
+    previous.set(key, spans)
+    return spans
+  }
+  const refusalFor = (wire: Segment & { readonly id?: string }, body: Body): BodyRefusal | null => {
+    if (!boxesMeet(body.box, segmentBox(wire))) return null
+    const spans = crossingSpans(wire, body)
+    if (!spans.some((span) => !coveredBy(span, oldSpans(body)))) return null
+    return { refused: "body", at: { x: body.box.x + body.box.w / 2, y: body.box.y + body.box.h / 2 }, nets: [wire.id ?? "", body.object.id] }
+  }
+  const wiresArea = unionBox(freshWires.map(segmentBox))
+  if (wiresArea) {
+    const reach = PART_REACH_CELLS * GRID
+    const close = (o: PlacedObject) => o.x <= wiresArea.x + wiresArea.w && o.x + reach >= wiresArea.x && o.y <= wiresArea.y + wiresArea.h && o.y + reach >= wiresArea.y
+    const kept = (o: PlacedObject) => (keptObjects ? keptObjects.has(o) : !touched!.objects.has(o.id))
+    const near = bodiesOf(after.objects.filter((o) => close(o) && kept(o))).filter((b) => crossable(b) && boxesMeet(b.box, wiresArea))
+    for (const wire of freshWires) for (const body of [...near, ...freshBodies]) {
+      const refused = refusalFor(wire, body)
+      if (refused) return refused
+    }
+  }
+  const bodiesArea = touched?.coversChecked ? null : unionBox(freshBodies.map((b) => b.box))
+  if (bodiesArea) {
+    const fresh = new Set(freshWires)
+    for (const wire of after.wires) {
+      if (!meets(wire, bodiesArea) || fresh.has(wire)) continue
+      for (const body of freshBodies) {
+        const refused = refusalFor(wire, body)
+        if (refused) return refused
+      }
+    }
+  }
   return null
 }

@@ -471,7 +471,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         toast.error(PASTE_REFUSED.title, { description: PASTE_REFUSED.why })
         return
       }
-      pasteClip(c, at.x, at.y)
+      if (!pasteClip(c, at.x, at.y, () => toast.error(PASTE_REFUSED.title, { description: PASTE_REFUSED.why }))) return
       revealPlaced(c.objects, snap(at.x, grid), snap(at.y, grid))
     }),
   )
@@ -480,7 +480,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (!def) return sch.add(defId, center)
     const probe: PlacedObject = { id: "placing", def: defId, x: snap(center.x - (def.width * grid) / 2, grid), y: snap(center.y - (def.height * grid) / 2, grid) }
     const at = freeSpot(scene(), [probe])
-    const added = sch.add(defId, { x: center.x + at.x, y: center.y + at.y })
+    const added = sch.add(defId, { x: center.x + at.x, y: center.y + at.y }, { onRefused: () => toast.error(DRAG_REFUSED.title, { description: DRAG_REFUSED.why }) })
     if (added) revealPlaced([added], 0, 0)
     return added
   })
@@ -500,7 +500,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (!more) onArmedChange?.(null)
     lastPress.current = null
     afterDefs([defId], () => {
-      const added = sch.add(defId, at, { suppressSplice })
+      const added = sch.add(defId, at, { suppressSplice, onRefused: () => toast.error(DRAG_REFUSED.title, { description: DRAG_REFUSED.why }) })
       if (!added) return
       sch.selectObject(added.id)
       placed(defId)
@@ -627,7 +627,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   const turn = useEvent((direction: Turn, alone = false) => {
     if (alone) {
-      sch.rotateAlone(sch.selectedObjects, direction)
+      const refused = sch.rotateAlone(sch.selectedObjects, direction)
+      if (refused) toast.error(TURN_REFUSED.title, { description: TURN_REFUSED.why })
       return
     }
     const landed = sch.rotate(sch.selectedObjects, direction, index, sch.selectedWires)
@@ -635,7 +636,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
   const mirror = useEvent((axis: FlipAxis, alone = false) => {
     if (alone) {
-      sch.flipAlone(sch.selectedObjects, axis)
+      const refused = sch.flipAlone(sch.selectedObjects, axis)
+      if (refused) toast.error(TURN_REFUSED.title, { description: TURN_REFUSED.why })
       return
     }
     const landed = sch.flip(sch.selectedObjects, axis, index, sch.selectedWires)
