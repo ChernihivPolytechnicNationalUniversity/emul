@@ -1,21 +1,28 @@
 import type { Point } from "../types"
 import {
+  along,
+  alongLine,
   contains,
-  crossLineThrough,
+  cross,
+  diagonalLine,
+  diagonalOf,
   HALF_CELL,
   highOf,
   horizontalLine,
-  isHorizontal,
-  isOrthogonal,
+  isDiagonalLine,
+  isHorizontalLine,
+  lineCoordinate,
   lineOf,
   lowOf,
   onLattice,
   exactPointCode,
-  isHorizontalLine,
-  lineCoordinate,
   type PointCode,
   pointOnLine,
   samePoint,
+  segmentsMeet,
+  slopeKey,
+  slopeOf,
+  type Slope,
   verticalLine,
   type LineKey,
   type WirePin,
@@ -38,28 +45,37 @@ const push = <K, V>(map: Map<K, V[]>, key: K, value: V) => {
 
 type Span = { lo: number; hi: number }
 
+const slanted = (s: { a: Point; b: Point }) => s.a.x !== s.b.x && s.a.y !== s.b.y
+
 class WireIndex {
   readonly byLine = new Map<LineKey, number[]>()
   readonly cutsOnLine = new Map<LineKey, number[]>()
   readonly pinsAt = new Map<PointCode, number>()
   readonly wires: readonly WireSegment[]
   private readonly indexed = new Set<number>()
+  private readonly cutPoints: Point[] = []
+  private readonly slopes = new Map<string, Slope>()
+  private readonly projected = new Set<string>()
 
   constructor(wires: readonly WireSegment[]) {
     this.wires = wires
+  }
+
+  has(i: number) {
+    return this.indexed.has(i)
   }
 
   add(i: number) {
     if (this.indexed.has(i)) return
     this.indexed.add(i)
     const s = this.wires[i]
-    const line = lineOf(s)
-    push(this.byLine, line, i)
-    const horizontal = isHorizontal(s)
-    push(this.cutsOnLine, horizontal ? line : horizontalLine(s.a.y), s.a.x)
-    push(this.cutsOnLine, horizontal ? verticalLine(s.a.x) : line, s.a.y)
-    push(this.cutsOnLine, horizontal ? line : horizontalLine(s.b.y), s.b.x)
-    push(this.cutsOnLine, horizontal || s.b.x !== s.a.x ? verticalLine(s.b.x) : line, s.b.y)
+    push(this.byLine, lineOf(s), i)
+    if (slanted(s)) {
+      const slope = slopeOf(s)
+      this.slopes.set(slopeKey(slope), slope)
+    }
+    this.cut(s.a)
+    this.cut(s.b)
   }
 
   addPin(pin: WirePin) {
@@ -71,6 +87,25 @@ class WireIndex {
   private cut(p: Point) {
     push(this.cutsOnLine, horizontalLine(p.y), p.x)
     push(this.cutsOnLine, verticalLine(p.x), p.y)
+    this.cutPoints.push(p)
+  }
+
+  cutsOn(line: LineKey): readonly number[] {
+    if (isDiagonalLine(line)) {
+      const { slope } = diagonalOf(line)
+      const key = slopeKey(slope)
+      if (!this.projected.has(key)) {
+        this.projected.add(key)
+        for (const p of this.cutPoints) push(this.cutsOnLine, diagonalLine(slope, p), p.x)
+      }
+    }
+    return this.cutsOnLine.get(line) ?? []
+  }
+
+  linesThrough(p: Point): LineKey[] {
+    const lines: LineKey[] = [horizontalLine(p.y), verticalLine(p.x)]
+    for (const slope of this.slopes.values()) lines.push(diagonalLine(slope, p))
+    return lines
   }
 
   private reach = new Map<LineKey, { starts: number[]; furthest: number[] }>()
@@ -84,7 +119,7 @@ class WireIndex {
       for (const i of order) furthest.push(Math.max(furthest[furthest.length - 1] ?? -Infinity, highOf(this.wires[i])))
       this.reach.set(line, (known = { starts, furthest }))
     }
-    const at = isHorizontalLine(line) ? p.x : p.y
+    const at = alongLine(line, p)
     let lo = 0
     let hi = known.starts.length
     while (lo < hi) {
@@ -106,9 +141,11 @@ function wholeIndex(wires: readonly WireSegment[], pins: readonly WirePin[]): Wi
 function collinearWith(wires: readonly WireSegment[], touched: Touched): WireIndex {
   const rows = new Set<number>()
   const columns = new Set<number>()
+  const points: Point[] = []
   const note = (p: Point) => {
     rows.add(p.y)
     columns.add(p.x)
+    points.push(p)
   }
   for (const p of touched.points ?? []) note(p)
   for (const t of touched.segments ?? []) {
@@ -117,8 +154,9 @@ function collinearWith(wires: readonly WireSegment[], touched: Touched): WireInd
   }
   const index = new WireIndex(wires)
   for (let i = 0; i < wires.length; i++) {
-    const { a, b } = wires[i]
-    if (a.y === b.y ? rows.has(a.y) : columns.has(a.x)) index.add(i)
+    const s = wires[i]
+    const { a, b } = s
+    if (a.y === b.y ? rows.has(a.y) : a.x === b.x ? columns.has(a.x) : points.some((p) => cross(a, b, p) === 0)) index.add(i)
   }
   return index
 }
@@ -139,39 +177,55 @@ function spansOf(wires: readonly WireSegment[], members: ReadonlySet<number>): M
 function aroundRuns(index: WireIndex, pins: readonly WirePin[], spans: ReadonlyMap<LineKey, Span>) {
   const rows: number[] = []
   const columns: number[] = []
-  for (const [line, span] of spans) (isHorizontalLine(line) ? rows : columns).push(lineCoordinate(line), span.lo, span.hi)
+  const slants: { a: Point; b: Point }[] = []
+  for (const [line, span] of spans) {
+    if (isDiagonalLine(line)) slants.push({ a: pointOnLine(line, span.lo), b: pointOnLine(line, span.hi) })
+    else (isHorizontalLine(line) ? rows : columns).push(lineCoordinate(line), span.lo, span.hi)
+  }
   const wires = index.wires
   for (let i = 0; i < wires.length; i++) {
-    const { a, b } = wires[i]
+    if (index.has(i)) continue
+    const s = wires[i]
+    const { a, b } = s
+    if (slanted(s)) {
+      if (meetsAny(s, rows, columns, slants)) index.add(i)
+      continue
+    }
     const horizontal = a.y === b.y
     const crossing = horizontal ? columns : rows
-    if (!crossing.length) continue
     const at = horizontal ? a.y : a.x
     const lo = horizontal ? Math.min(a.x, b.x) : Math.min(a.y, b.y)
     const hi = horizontal ? Math.max(a.x, b.x) : Math.max(a.y, b.y)
+    let met = false
     for (let k = 0; k < crossing.length; k += 3) {
       const fixed = crossing[k]
       if (fixed >= lo && fixed <= hi && at >= crossing[k + 1] && at <= crossing[k + 2]) {
-        index.add(i)
+        met = true
         break
       }
     }
+    if (met || (slants.length && slants.some((t) => segmentsMeet(s, t)))) index.add(i)
   }
   const rowSpans = new Map<number, Span>()
   const columnSpans = new Map<number, Span>()
-  for (const [line, span] of spans) (isHorizontalLine(line) ? rowSpans : columnSpans).set(lineCoordinate(line), span)
+  for (const [line, span] of spans) if (!isDiagonalLine(line)) (isHorizontalLine(line) ? rowSpans : columnSpans).set(lineCoordinate(line), span)
   for (const pin of pins) {
     const { x, y } = pin.at
     const row = rowSpans.get(y)
     const column = columnSpans.get(x)
-    if ((row && x >= row.lo && x <= row.hi) || (column && y >= column.lo && y <= column.hi)) index.addPin(pin)
+    if ((row && x >= row.lo && x <= row.hi) || (column && y >= column.lo && y <= column.hi) || slants.some((t) => contains(t, pin.at))) index.addPin(pin)
   }
+}
+
+function meetsAny(s: WireSegment, rows: readonly number[], columns: readonly number[], slants: readonly { a: Point; b: Point }[]): boolean {
+  for (let k = 0; k < rows.length; k += 3) if (segmentsMeet(s, { a: { x: rows[k + 1], y: rows[k] }, b: { x: rows[k + 2], y: rows[k] } })) return true
+  for (let k = 0; k < columns.length; k += 3) if (segmentsMeet(s, { a: { x: columns[k], y: columns[k + 1] }, b: { x: columns[k], y: columns[k + 2] } })) return true
+  return slants.some((t) => segmentsMeet(s, t))
 }
 
 const isZeroLength = (s: WireSegment) => samePoint(s.a, s.b)
 
 function assertDrawable(s: WireSegment) {
-  if (!isOrthogonal(s)) throw new Error(`wire ${s.id} runs neither horizontally nor vertically: (${s.a.x}, ${s.a.y}) → (${s.b.x}, ${s.b.y})`)
   if (!onLattice(s.a) || !onLattice(s.b)) throw new Error(`wire ${s.id} has an end off the half-cell lattice: (${s.a.x}, ${s.a.y}) → (${s.b.x}, ${s.b.y})`)
 }
 
@@ -202,7 +256,14 @@ function hitsThrough(index: WireIndex, points: readonly Point[]): (number[] | un
   }
   gather(rows, horizontalLine, across)
   gather(columns, verticalLine, down)
-  return points.map((_, k) => across[k] && down[k] ? [...across[k], ...down[k]] : across[k] ?? down[k])
+  const hits = points.map((_, k) => across[k] && down[k] ? [...across[k], ...down[k]] : across[k] ?? down[k])
+  for (const [line, onLine] of index.byLine) {
+    if (!isDiagonalLine(line)) continue
+    points.forEach((p, k) => {
+      for (const i of onLine) if (contains(wires[i], p)) (hits[k] ??= []).push(i)
+    })
+  }
+  return hits
 }
 
 function affected(index: WireIndex, touched: Touched): Set<number> {
@@ -220,7 +281,7 @@ function affected(index: WireIndex, touched: Touched): Set<number> {
   segments.forEach((t, n) => {
     through(firstEnd + 2 * n)
     through(firstEnd + 2 * n + 1)
-    if (isZeroLength(t) || !isOrthogonal(t)) return
+    if (isZeroLength(t)) return
     const lo = lowOf(t)
     const hi = highOf(t)
     for (const i of index.byLine.get(lineOf(t)) ?? []) if (lowOf(wires[i]) <= hi && highOf(wires[i]) >= lo) out.add(i)
@@ -234,7 +295,8 @@ function mergeable(index: WireIndex, run: Run, at: number, next: WireSegment): b
   if (run.color !== next.color) return false
   const p = pointOnLine(run.line, at)
   if (index.pinsAt.has(exactPointCode(p))) return false
-  return !index.passesThrough(p, crossLineThrough(run.line, p))
+  for (const line of index.linesThrough(p)) if (line !== run.line && index.passesThrough(p, line)) return false
+  return true
 }
 
 class LowestFirst {
@@ -293,9 +355,10 @@ function runsOnLine(index: WireIndex, line: LineKey, members: readonly number[],
     if (hi > max) max = hi
   }
   const offLattice = new Set<number>()
-  for (const c of index.cutsOnLine.get(line) ?? []) {
+  const diagonal = isDiagonalLine(line)
+  for (const c of index.cutsOn(line)) {
     if (c <= min || c >= max) continue
-    if (!Number.isInteger(c / HALF_CELL)) offLattice.add(c)
+    if (diagonal ? !onLattice(pointOnLine(line, c)) : !Number.isInteger(c / HALF_CELL)) offLattice.add(c)
     cuts.add(c)
   }
   const stops = [...cuts].sort((a, b) => a - b)
@@ -307,7 +370,7 @@ function runsOnLine(index: WireIndex, line: LineKey, members: readonly number[],
     const hi = stops[k + 1]
     while (next < byStart.length && lowOf(wires[byStart[next]]) <= lo) open.push(byStart[next++])
     while (open.size && highOf(wires[open.peek()]) <= lo) open.pop()
-    if (open.size && offLattice.has(lo)) throw new Error(`a pin at ${lo} on ${isHorizontalLine(line) ? "h" : "v"}${lineCoordinate(line)} lies on a wire but off the half-cell lattice`)
+    if (open.size && offLattice.has(lo)) throw new Error(`a pin at ${lo} on ${diagonal ? line : `${isHorizontalLine(line) ? "h" : "v"}${lineCoordinate(line)}`} lies on a wire but off the half-cell lattice`)
     if (!open.size) {
       if (run) emit(run)
       run = null
@@ -328,7 +391,7 @@ function runsOnLine(index: WireIndex, line: LineKey, members: readonly number[],
 function segmentOf(source: WireSegment, run: Run, id: string): WireSegment {
   const lo = pointOnLine(run.line, run.lo)
   const hi = pointOnLine(run.line, run.hi)
-  const forward = isHorizontal(source) ? source.a.x <= source.b.x : source.a.y <= source.b.y
+  const forward = along(source, source.a) <= along(source, source.b)
   const [a, b] = forward ? [lo, hi] : [hi, lo]
   return source.color ? { id, a, b, color: source.color } : { id, a, b }
 }
