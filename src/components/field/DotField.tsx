@@ -234,7 +234,7 @@ const FLASH_MS = 1400
 
 export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, armed = null, onArmedChange, onPlaced, onHdlImport, peerSelections = NO_PEERS, onSelectionShare, fieldSlot = null, onFieldPicked, onProblemCount, projectName, children, ...props }: DotFieldProps) {
   const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, show, toWorld, isPanStart, startPan, movePan, endPan, setOnPinchStart } = useViewport(grid)
-  const marquee = useSelection(toWorld, worldPerPixel, grid)
+  const marquee = useSelection(toWorld, worldPerPixel)
   const { boxRef: marqueeRef } = marquee
   const sch = useSchematic(grid)
   setLibrary(sch.doc.library)
@@ -934,12 +934,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     e.stopPropagation()
     const text = e.currentTarget
     const start = toWorld(e.clientX, e.clientY)
-    const step = grid / 2
     let offset = { x: 0, y: 0 }
     text.setPointerCapture(e.pointerId)
     const moveTo = (ev: PointerEvent) => {
       const at = toWorld(ev.clientX, ev.clientY)
-      offset = { x: snap(at.x - start.x, step), y: snap(at.y - start.y, step) }
+      offset = { x: at.x - start.x, y: at.y - start.y }
       text.setAttribute("transform", `translate(${offset.x} ${offset.y})`)
     }
     const finish = (commit: boolean) => {

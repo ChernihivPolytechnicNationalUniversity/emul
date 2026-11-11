@@ -239,5 +239,7 @@ export const systemExam: Example = {
   build: (grid) => placedByHand(buildExam(grid).doc, grid, [
       ["Q4", "ref", 77.5, 10.5, "start"],
       ["Q4", "value", 77.5, 11, "start"],
+      ["C5", "ref", 54.1, 27.15, "end"],
+      ["C5", "value", 54.1, 27.6, "end"],
     ]),
 }

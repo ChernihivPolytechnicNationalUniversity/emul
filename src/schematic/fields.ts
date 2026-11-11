@@ -14,9 +14,8 @@ export type PlacedField = { object: string; key: FieldKey; text: string; at: Poi
 const KEYS: readonly FieldKey[] = ["ref", "value"]
 const FIELD_TEXT = /\{(ref|value)\}/
 const DEFAULT_SIZE = 0.4
-const HPADDING = 0.25
-const VPADDING = 0.15
-const FIELD_GRID = 0.5
+const FIELD_GAP = 0.1
+const LINE_GAP = 0.05
 const WIDE = 3
 
 type TextShape = Extract<BodyShape, { type: "text" }>
@@ -143,15 +142,6 @@ export function autoplaceSide(def: ComponentDef, orientation: Orientation): Fiel
   return chosenSide(placementOf(def, orientation)).side.name
 }
 
-const roundAway = (v: number, up: boolean) => {
-  const steps = v / FIELD_GRID
-  const whole = Math.round(steps)
-  if (Math.abs(steps - whole) < 1e-9) return whole * FIELD_GRID
-  return (up ? Math.ceil(steps) : Math.floor(steps)) * FIELD_GRID
-}
-
-const roundedUp = (h: number) => Math.ceil(h / FIELD_GRID - 1e-9) * FIELD_GRID
-
 const NARROW = new Set([..."iljI.,:;'|!"])
 const WIDE_LETTERS = new Set([..."mwMW"])
 const GAP = new Set([" ", "\u2009", "\u00a0"])
@@ -179,25 +169,22 @@ const boxAt = (at: Point, anchor: TextAnchor, w: number, h: number): Rect => ({ 
 function autoplaced(p: Placement, fields: readonly Sized[]): Placed[] {
   const { side, pins, maxX, minY } = chosenSide(p)
   const width = Math.max(...fields.map((f) => f.w))
-  const height = fields.reduce((sum, f) => sum + roundedUp(f.h), 0)
+  const height = fields.reduce((sum, f) => sum + f.h, 0) + LINE_GAP * (fields.length - 1)
   const centre = { x: p.body.x + p.body.w / 2, y: p.body.y + p.body.h / 2 }
-  const offsetX = (p.body.w + width) / 2 + (side.x ? HPADDING : 0)
-  const offsetY = (p.body.h + height) / 2 + (!side.x && side.y ? VPADDING : 0)
+  const offsetX = (p.body.w + width) / 2 + FIELD_GAP
+  const offsetY = (p.body.h + height) / 2 + FIELD_GAP
   let x = centre.x + side.x * offsetX - width / 2
   let y = centre.y + side.y * offsetY - height / 2
   if (pins > 0) {
-    if (side.y) x = maxX + HPADDING * 2
-    else y = minY - (height + VPADDING * 2)
+    if (side.y) x = maxX + FIELD_GAP * 2
+    else y = minY - (height + FIELD_GAP * 2)
   }
   const justified: TextAnchor = pins > 0 ? (side.y ? "start" : "middle") : side.x > 0 ? "start" : side.x < 0 ? "end" : "middle"
+  const atX = justified === "start" ? x : justified === "end" ? x + width : x + width / 2
   let top = y
   return fields.map((f) => {
-    const padding = roundedUp(f.h) - f.h
-    let atY = top + padding / 2 + f.h / 2
-    top += padding + f.h
-    let atX = justified === "start" ? x : justified === "end" ? x + width : x + width / 2
-    if (side.x) atX = roundAway(atX, side.x >= 0)
-    if (side.y) atY = roundAway(atY, side.y >= 0)
+    const atY = top + f.h / 2
+    top += f.h + LINE_GAP
     return { at: { x: atX, y: atY }, anchor: justified, side: side.name }
   })
 }
@@ -223,7 +210,7 @@ function besideTheDiagonal(def: ComponentDef, orientation: Orientation, fields: 
   const corners = bodyCorners(def, orientation)
   return fields.map((f, i) => {
     const n = i === 0 ? up : { x: -up.x, y: -up.y }
-    const reach = Math.max(...corners.map((p) => (p.x - centre.x) * n.x + (p.y - centre.y) * n.y)) + VPADDING
+    const reach = Math.max(...corners.map((p) => (p.x - centre.x) * n.x + (p.y - centre.y) * n.y)) + FIELD_GAP
     const corner = { x: centre.x, y: centre.y + reach / n.y }
     const anchor: TextAnchor = n.x >= 0 ? "start" : "end"
     return { at: { x: corner.x, y: corner.y + (n.y < 0 ? -f.h / 2 : f.h / 2) }, anchor, side: n.y < 0 ? "top" : "bottom" }

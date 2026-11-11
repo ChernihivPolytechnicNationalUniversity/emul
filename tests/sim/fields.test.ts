@@ -146,7 +146,7 @@ describe("designator and value are fields of the placed part, not body text (des
   })
 })
 
-describe("fields are autoplaced as KiCad's autoplacer does on place and turn (design.md §5.2, §13.3; KiCad eeschema/autoplace_fields.cpp at 07ed5d7, AUTOPLACE_AUTO, allow_rejustify and align_to_grid on; ГОСТ 2.702-2011 §5.3.11: right of or above the symbol)", () => {
+describe("fields are autoplaced as KiCad's autoplacer does on place and turn (design.md §5.2, §13.3; KiCad eeschema/autoplace_fields.cpp at 07ed5d7, AUTOPLACE_AUTO and allow_rejustify on; align_to_grid off and the stack hugging the body by the user's decision of 2026-11-11, design.md §13.24; ГОСТ 2.702-2011 §5.3.11: right of or above the symbol)", () => {
   const sides: [string, ComponentDef, PlacedObject["rotation"], boolean, FieldSide][] = [
     ["a resistor lying", getDef("resistor")!, 0, false, "top"],
     ["a resistor turned a quarter", getDef("resistor")!, 90, false, "right"],
@@ -178,17 +178,48 @@ describe("fields are autoplaced as KiCad's autoplacer does on place and turn (de
     expect(autoplaceSide(wide, { rotation: 0, mirror: false })).toBe("top")
   })
 
-  it("a lying resistor's fields: R1 centred over the body at y = −0.5 cell, its value under it at y = 0, both read left to right (DoAutoplace with align_to_grid; computed from fieldBoxPlacement and fieldVPlacement)", () => {
+  it("a lying resistor's fields hug its body: the value (0.3 high) 0.1 cell over the body's top at y = 0.6, so centred at y = 0.35, R1 (0.35 high) 0.05 above it, centred at y = −0.025, both centred on x = 2 and read left to right (the user, 2026-11-11: «намного ближе»; no rounding to the half cell)", () => {
     const f = byKey(placedFields(named("R1", "resistor", 0, 0), GRID))
     expect.soft([f.ref.side, f.value.side], "both above").toEqual(["top", "top"])
-    expect.soft([inCells(f.ref.at), f.ref.anchor, f.ref.angle], "the designator").toEqual([{ x: 2, y: -0.5 }, "middle", 0])
-    expect.soft([inCells(f.value.at), f.value.anchor, f.value.angle], "the value").toEqual([{ x: 2, y: 0 }, "middle", 0])
+    expect.soft([inCells(f.ref.at), f.ref.anchor, f.ref.angle], "the designator").toEqual([{ x: 2, y: -0.025 }, "middle", 0])
+    expect.soft([inCells(f.value.at), f.value.anchor, f.value.angle], "the value").toEqual([{ x: 2, y: 0.35 }, "middle", 0])
   })
 
-  it("a resistor turned a quarter: both fields to its right, left-justified at x = 2 cells, R1 at y = 1.75, the value at y = 2.25 (justifyField: the side's opposite; x rounded away from the body)", () => {
+  it("a resistor turned a quarter: both fields 0.1 cell right of its body's edge at x = 1.4, left-justified at x = 1.5, the stack of 0.35 + 0.05 + 0.3 centred on the body's middle at y = 2, R1 at y = 1.825, the value at y = 2.2 (justifyField: the side's opposite; no rounding away from the body)", () => {
     const f = byKey(placedFields(named("R1", "resistor", 0, 0, { rotation: 90 }), GRID))
-    expect.soft([inCells(f.ref.at), f.ref.anchor, f.ref.angle], "the designator").toEqual([{ x: 2, y: 1.75 }, "start", 0])
-    expect.soft([inCells(f.value.at), f.value.anchor, f.value.angle], "the value").toEqual([{ x: 2, y: 2.25 }, "start", 0])
+    expect.soft([inCells(f.ref.at), f.ref.anchor, f.ref.angle], "the designator").toEqual([{ x: 1.5, y: 1.825 }, "start", 0])
+    expect.soft([inCells(f.value.at), f.value.anchor, f.value.angle], "the value").toEqual([{ x: 1.5, y: 2.2 }, "start", 0])
+  })
+
+  it("on the side it takes, the stack of fields of every common part, in every turn and mirror, stands exactly 0.1 cell clear of the box of the body as drawn, and its two lines are 0.05 cell apart (the user, 2026-11-11)", () => {
+    const offenders: string[] = []
+    for (const id of ["resistor", "capacitor", "capacitor-polarized", "diode", "zener", "led", "inductor", "potentiometer", "npn", "pnp", "nmos", "pmos"]) {
+      const def = getDef(id)
+      if (!def) {
+        offenders.push(`${id}: no definition`)
+        continue
+      }
+      for (const rotation of [0, 90, 180, 270] as const) {
+        for (const mirror of [false, true]) {
+          const o = part("X1", id, 0, 0, { rotation, mirror, props: { ...def.defaults, ref: "X1", value: "100 kΩ" } })
+          const drawn = footprints(o, GRID)!.outline.flat()
+          const body = { x: Math.min(...drawn.map((p) => p.x)), y: Math.min(...drawn.map((p) => p.y)), w: 0, h: 0 }
+          body.w = Math.max(...drawn.map((p) => p.x)) - body.x
+          body.h = Math.max(...drawn.map((p) => p.y)) - body.y
+          const fields = placedFields(o, GRID)
+          const where = `${id} ${rotation}°${mirror ? " mirrored" : ""} (${fields[0]?.side})`
+          const gaps = fields.map((f) => f.side === "top" ? body.y - (f.box.y + f.box.h) : f.side === "bottom" ? f.box.y - (body.y + body.h) : f.side === "left" ? body.x - (f.box.x + f.box.w) : f.box.x - (body.x + body.w))
+          const nearest = Math.min(...gaps) / GRID
+          if (Math.abs(nearest - 0.1) > 1e-6) offenders.push(`${where}: ${nearest.toFixed(3)} cell from the body`)
+          if (fields.length === 2) {
+            const [a, b] = [...fields].sort((p, q) => p.box.y - q.box.y)
+            const between = (b.box.y - (a.box.y + a.box.h)) / GRID
+            if (Math.abs(between - 0.05) > 1e-6) offenders.push(`${where}: lines ${between.toFixed(3)} cell apart`)
+          }
+        }
+      }
+    }
+    expect(offenders).toEqual([])
   })
 
   it("on the left side the fields are right-justified, their ends aligned", () => {
@@ -201,7 +232,7 @@ describe("fields are autoplaced as KiCad's autoplacer does on place and turn (de
     const ref = byKey(placedFields(part("U1", "hc595", 0, 0), GRID)).ref
     expect.soft(ref.side, "top").toBe("top")
     expect.soft(ref.anchor, "left-justified").toBe("start")
-    expect.soft(ref.box.x >= c(4.5) - 1e-6, "right of VCC's pin at x = 4 by 2 × HPADDING").toBe(true)
+    expect.soft(Math.abs(ref.box.x - c(4.2)) < 1e-6, "right of VCC's pin at x = 4 by two gaps of 0.1 cell").toBe(true)
   })
 
   it("on a right side that has a pin the stack is centred above that side's pins by two paddings (fieldBoxPlacement; justifyField as SIDE_TOP)", () => {
@@ -211,7 +242,7 @@ describe("fields are autoplaced as KiCad's autoplacer does on place and turn (de
     const fields = placedFields({ id: "U9", def: busy.id, x: 0, y: 0, props: { ref: "U9" } }, GRID, busy)
     expect.soft(fields.map((f) => f.key), "set up: its designator").toEqual(["ref"])
     expect.soft(fields.map((f) => f.anchor), "centred").toEqual(["middle"])
-    expect.soft(fields.every((f) => f.box.y + f.box.h <= c(9 - 0.3) + 1e-6), "above the right side's pin at y = 9 by 2 × VPADDING").toBe(true)
+    expect.soft(fields.every((f) => Math.abs(f.box.y + f.box.h - c(9 - 0.2)) < 1e-6), "above the right side's pin at y = 9 by two gaps of 0.1 cell").toBe(true)
   })
 
   it("in every orientation of every definition, the autoplaced fields are all there, read left to right, and lie beside the body, never over it, over a pin or a lead, or over each other", () => {
@@ -259,10 +290,20 @@ describe("fields move by hand, and keep where they were put (design.md §5.2; Ki
       const moved = withFieldMoved(r1, key, c(3), c(-1), GRID)
       const after = byKey(placedFields(moved, GRID))
       const other = key === "ref" ? "value" : "ref"
-      expect.soft(after[key].at, `${key}: three cells right, one up`).toEqual({ x: before[key].at.x + c(3), y: before[key].at.y - c(1) })
+      expect.soft([Math.abs(after[key].at.x - before[key].at.x - c(3)) < 1e-9, Math.abs(after[key].at.y - before[key].at.y + c(1)) < 1e-9], `${key}: three cells right, one up`).toEqual([true, true])
       expect.soft(after[key].moved, `${key}: marked as moved`).toBe(true)
       expect.soft([after[other].at, after[other].moved], `${other}: still autoplaced`).toEqual([before[other].at, false])
     }
+  })
+
+  it("a field moved by hand lands where it was dropped to the hundredth of a pixel, off every lattice, and is saved so (the user, 2026-11-11: «свободно», no invisible cells)", () => {
+    const moved = withFieldMoved(r1, "value", c(1.37), c(-0.41), GRID)
+    const before = byKey(placedFields(r1, GRID)).value.at
+    const after = byKey(placedFields(moved, GRID)).value.at
+    expect.soft([Math.abs(after.x - before.x - c(1.37)) < 0.01, Math.abs(after.y - before.y + c(0.41)) < 0.01], "exactly the pointer's offset").toEqual([true, true])
+    const reopened = upgraded(JSON.parse(JSON.stringify(stamped(docWith(moved))))).doc
+    const back = byKey(placedFields(reopened.objects[0] as PlacedObject, GRID)).value.at
+    expect.soft([Math.abs(back.x - after.x) < 0.01, Math.abs(back.y - after.y) < 0.01], "the same after a save and an open").toEqual([true, true])
   })
 
   it("the moved field is saved with the part, the offset itself and not just where it lands: through a file and a live room", () => {
@@ -347,7 +388,7 @@ describe("fields never block (design.md §5.1, §5.2)", () => {
   })
 
   it("a field moved by hand over another part blocks nothing either", () => {
-    const a = withFieldMoved(named("R1", "resistor", 0, 0), "ref", c(9), c(1.5), GRID)
+    const a = withFieldMoved(named("R1", "resistor", 0, 0), "ref", c(9), c(1), GRID)
     const b = part("R2", "resistor", 9, 0)
     const s = { objects: [a, b], routes: routesOf([a, b], []), grid: GRID }
     expect.soft(strictlyOverlap(byKey(placedFields(a, GRID)).ref.box, footprints(b, GRID)!.body.box), "set up: R1's designator over R2's body").toBe(true)

@@ -246,7 +246,7 @@ describe("fields over wires, bodies and each other (design.md §5.2, §6.8: a fi
   it("another part's body under a field is a finding; apart, none", () => {
     const doc = docOf([resistor("R1", 0, 0, { props: { ref: "R1", value: "1 kΩ" } }), resistor("R2", 0, -1, { props: { ref: "R2", value: "" } })])
     const onR2 = of(checked(doc), "field-on-body").filter((f) => f.objects.includes("R1"))
-    expect.soft(onR2.map((f) => f.text), "R1's value over R2's body: one finding for that field (its designator above clears R2's body)").toEqual(["R1's value lies on R2"])
+    expect.soft(onR2.map((f) => f.text).sort(), "both of R1's fields, hugging its body, lie over R2's body one row up: one finding for each field").toEqual(["R1's designator lies on R2", "R1's value lies on R2"])
     const apart = docOf([resistor("R1", 0, 0, { props: { ref: "R1", value: "1 kΩ" } }), resistor("R2", 0, -4, { props: { ref: "R2", value: "" } })])
     expect.soft(of(checked(apart), "field-on-body"), "four rows apart").toEqual([])
   })

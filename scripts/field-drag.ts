@@ -412,20 +412,32 @@ async function phaseFiveChecks(page: Page) {
   const before = await fieldBox()
   const body = await box(page, "R1")
   expect("R1's designator is a field of its own, drawn above the lying resistor (design.md §5.2)", !!before && before.y + before.height <= body.y + body.height / 2, true)
-  if (!before) expect("a field dragged by hand follows the pointer and lands three cells right, the part stays", "no field to drag", "a field")
+  if (!before) expect("a field dragged by hand follows the pointer freely, off the cells, the part stays", "no field to drag", "a field")
   else {
     const cell = (await f.toScreen(cellPoint(1, 0))).x - (await f.toScreen(cellPoint(0, 0))).x
     const grip = { x: before.x + before.width / 2, y: before.y + before.height / 2 }
-    const moved = (b: { x: number; y: number } | null) => (b ? [Math.round(((b.x - before.x) / cell) * 1000), Math.round(((b.y - before.y) / cell) * 1000)] : null)
-    await dragBy(page, grip, { x: grip.x + 3 * cell, y: grip.y }, false)
-    expect("held, the field follows the pointer three cells right and the part stays", [moved(await fieldBox()), await f.worldOf("R1")], [[3000, 0], { x: 10 * GRID, y: 10 * GRID }])
+    const moved = (b: { x: number; y: number } | null) => (b ? [Math.round(((b.x - before.x) / cell) * 100), Math.round(((b.y - before.y) / cell) * 100)] : null)
+    await dragBy(page, grip, { x: grip.x + 1.37 * cell, y: grip.y + 0.41 * cell }, false)
+    expect("held, the field follows the pointer exactly, 1.37 cells right and 0.41 down, no invisible cells (the user, 2026-11-11), and the part stays", [moved(await fieldBox()), await f.worldOf("R1")], [[137, 41], { x: 10 * GRID, y: 10 * GRID }])
     await page.mouse.up()
     await page.waitForTimeout(500)
-    expect("dropped, the field is three cells right, not a hair up or down, and the part has not moved", [moved(await fieldBox()), await f.worldOf("R1")], [[3000, 0], { x: 10 * GRID, y: 10 * GRID }])
+    expect("dropped, the field stays exactly where the pointer left it and the part has not moved", [moved(await fieldBox()), await f.worldOf("R1")], [[137, 41], { x: 10 * GRID, y: 10 * GRID }])
     await page.keyboard.press("Control+z")
     await page.waitForTimeout(500)
     expect("one Undo puts the field back", moved(await fieldBox()), [0, 0])
   }
+
+  await page.keyboard.press("Escape")
+  const cellPx = (await f.toScreen(cellPoint(1, 0))).x - (await f.toScreen(cellPoint(0, 0))).x
+  const resistorBox = await box(page, "R1")
+  const marqueeFrom = { x: resistorBox.x - 0.63 * cellPx, y: resistorBox.y + resistorBox.height + 0.29 * cellPx }
+  const marqueeTo = { x: marqueeFrom.x + 1.44 * cellPx, y: marqueeFrom.y + 0.67 * cellPx }
+  await dragBy(page, marqueeFrom, marqueeTo, false)
+  const marqueeBox = await page.evaluate(() => document.querySelector("[data-slot=dot-field-selection]")?.getBoundingClientRect().toJSON() ?? null)
+  const offBy = marqueeBox ? Math.max(Math.abs(marqueeBox.x - marqueeFrom.x), Math.abs(marqueeBox.y - marqueeFrom.y), Math.abs(marqueeBox.x + marqueeBox.width - marqueeTo.x), Math.abs(marqueeBox.y + marqueeBox.height - marqueeTo.y)) : Infinity
+  expect("the selection box runs exactly from where the press was to the pointer, off the cells, within a pixel (the user, 2026-11-11)", offBy <= 1 ? "within a pixel" : { offBy, marqueeBox, marqueeFrom, marqueeTo }, "within a pixel")
+  await page.mouse.up()
+  await page.waitForTimeout(300)
 
   await openDoc(page, "checker", {
     objects: [resistorAt("R1", 10, 10), resistorAt("R2", 10, 16)],
