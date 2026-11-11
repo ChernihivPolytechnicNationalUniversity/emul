@@ -31,7 +31,7 @@ export type DragPieceKind = "moved" | "stretched" | "jog" | "added"
 
 export type DragPiece = { readonly id: string; readonly a: Point; readonly b: Point; readonly color?: WireColorKey; readonly kind: DragPieceKind; readonly net: string; readonly source?: string }
 
-export type DragContact = "along" | "over" | "end" | "pin" | "crossing"
+export type DragContact = "along" | "over" | "end" | "pin" | "crossing" | "body"
 
 export type DragConflict = { readonly at: Point; readonly reason: DragContact; readonly piece?: string; readonly pin?: string; readonly nets: readonly [string, string] }
 

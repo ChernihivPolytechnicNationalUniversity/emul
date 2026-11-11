@@ -1,12 +1,13 @@
 import { placedFields, type PlacedField } from "./fields"
 import { GRID, objectRect, type Point, type Rect } from "./geometry"
-import { footprints, type Lead } from "./placement"
+import type { Lead } from "./placement"
 import { pinsForObject, translationOf } from "./pin-index"
 import { getDef, pinName } from "./registry"
 import type { ComponentDef, PlacedObject, Schematic } from "./types"
 import { wireOrder, wiringOf, type Wiring } from "./wire-edits"
 import { WireGraph } from "./wires/graph"
-import { exactPointCode as codeOf, type WirePin, type WireSegment } from "./wires/segment"
+import { bodiesOf, runsThrough, type Body } from "./body-crossing"
+import { exactPointCode as codeOf, type WireSegment } from "./wires/segment"
 
 export type CheckKind = "dangling-end" | "unconnected-pin" | "wire-through-body" | "field-on-wire" | "field-on-body" | "fields-overlap" | "parallel-too-close"
 
@@ -164,33 +165,6 @@ export class Buckets<T> {
 
 const BUCKET = 16 * GRID
 
-type Body = { object: PlacedObject; contour: readonly (readonly Point[])[]; leads: readonly Lead[]; pins: readonly WirePin[]; box: Rect }
-
-const judged = (o: PlacedObject) => {
-  const def = getDef(o.def)
-  return !!def && !def.pins.every((p) => p.kind === "node")
-}
-
-const bodyCache = new WeakMap<PlacedObject, { def: ReturnType<typeof getDef>; body: Body }>()
-
-function bodiesOf(objects: readonly PlacedObject[]): Body[] {
-  return objects.filter(judged).flatMap((object): Body[] => {
-    const def = getDef(object.def)
-    const cached = bodyCache.get(object)
-    if (cached && cached.def === def) return [cached.body]
-    const f = footprints(object, GRID)
-    if (!f) return []
-    const pins = pinsForObject(object)
-    const points = [...f.contour.flatMap((q) => q.corners), ...f.leads.flat(), ...pins.map((p) => p.at)]
-    const xs = points.map((p) => p.x)
-    const ys = points.map((p) => p.y)
-    const box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }
-    const body = { object, contour: f.outline, leads: f.leads, pins, box }
-    bodyCache.set(object, { def, body })
-    return [body]
-  })
-}
-
 function danglingEnds(doc: Schematic, wiring: Wiring): Finding[] {
   const open = wiring.dangling
   if (!open.length) return []
@@ -224,48 +198,6 @@ function unconnectedPins(doc: Schematic, wiring: Wiring): Finding[] {
     }
   }
   return found
-}
-
-function insideOf(s: WireSegment, corners: readonly Point[]): readonly [number, number] | null {
-  let lo = 0
-  let hi = 1
-  const d = { x: s.b.x - s.a.x, y: s.b.y - s.a.y }
-  const sign = Math.sign(corners.reduce((sum, p, i) => {
-    const q = corners[(i + 1) % corners.length]
-    return sum + (p.x * q.y - q.x * p.y)
-  }, 0))
-  for (let i = 0; i < corners.length; i++) {
-    const p = corners[i]
-    const q = corners[(i + 1) % corners.length]
-    const inward = { x: -(q.y - p.y) * sign, y: (q.x - p.x) * sign }
-    const start = (s.a.x - p.x) * inward.x + (s.a.y - p.y) * inward.y
-    const rate = d.x * inward.x + d.y * inward.y
-    if (Math.abs(rate) < EPS) {
-      if (start <= EPS) return null
-      continue
-    }
-    const t = -start / rate
-    if (rate > 0) lo = Math.max(lo, t)
-    else hi = Math.min(hi, t)
-    if (hi - lo <= EPS) return null
-  }
-  return [lo, hi]
-}
-
-const samePoint = (a: Point, b: Point) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS
-
-function runsThrough(s: WireSegment, body: Body) {
-  const length = Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y)
-  const slack = EPS / Math.max(length, EPS)
-  const exitsAt = (at: Point, towards: Point) => body.pins.some((p) => samePoint(p.at, at) && p.out && (towards.x - at.x) * p.out.x + (towards.y - at.y) * p.out.y > EPS)
-  return body.contour.some((corners) => {
-    const inside = insideOf(s, corners)
-    if (!inside) return false
-    const [lo, hi] = inside
-    const fromPinA = lo <= slack && hi < 1 - slack && exitsAt(s.a, s.b)
-    const fromPinB = hi >= 1 - slack && lo > slack && exitsAt(s.b, s.a)
-    return !fromPinA && !fromPinB
-  })
 }
 
 function bodyBuckets(bodies: readonly Body[]): Buckets<Body> {
