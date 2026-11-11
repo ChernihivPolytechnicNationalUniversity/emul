@@ -34,8 +34,8 @@ import { useEvent } from "@/hooks/use-event"
 import { clipboardDefIds, clipboardText, clipFromClipboard, pasteLanding, useSchematic, type Clip } from "@/schematic/use-schematic"
 import { pressedOn, travellingWires } from "@/schematic/wire-edits"
 import { CONTACT_OPENED, DRAG_REFUSED, PartDrag, SegmentDrag, TURN_REFUSED, UNLAID, WIRE_MOVE_REFUSED, WIRES_REFUSED, type Landed } from "@/schematic/rubber-band"
-import { DRAW_REFUSED, PASTE_REFUSED, backAlong, cutBack, laysClear, drawEndAt, flipPosture, isRefusal, pointerAt, previewOf, startDrawing, withCorner, withoutCorner, type CutBack, type DrawEnd, type Drawing, type DrawRefusal } from "@/schematic/wire-draw"
-import { NO_CROSSING } from "@/schematic/junction-tool"
+import { DEFAULT_LINE_MODE, DRAW_REFUSED, PASTE_REFUSED, backAlong, cutBack, laysClear, drawEndAt, flipPosture, isRefusal, lineModeTag, nextLineMode, pointerAt, previewOf, startDrawing, withCorner, withLineMode, withoutCorner, type CutBack, type DrawEnd, type Drawing, type DrawRefusal, type LineMode } from "@/schematic/wire-draw"
+import { crossingNear, JUNCTION_REFUSED, NOT_ON_THE_LATTICE } from "@/schematic/junction-tool"
 import { segmentNearest } from "@/schematic/wire-select"
 import type { DragFrame } from "@/schematic/wires/drag"
 import { samePoint } from "@/schematic/wires/segment"
@@ -1021,6 +1021,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   // --- wiring: drag from pin to pin, or click bend by bend ------------------
   const [pending, setPending] = React.useState<Pending | null>(null)
   const [wireArmed, setWireArmed] = React.useState<Point | null>(null)
+  const [lineMode, setLineMode] = React.useState<LineMode>(DEFAULT_LINE_MODE)
   const preview = React.useMemo(() => (pending ? previewOf(sch.doc, wiring, pending.d, pending.target ?? undefined, (area) => index.query(area)) : null), [pending, sch.doc, wiring, index])
   React.useEffect(() => {
     onWirePreview?.(preview ? [...preview.points] : null)
@@ -1176,7 +1177,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       refuse(started)
       return false
     }
-    setPending({ d: started, mode, target: null, moved: false })
+    setPending({ d: withLineMode(started, lineMode), mode, target: null, moved: false })
     showContinueCue(null)
     sch.deselectAll()
     return true
@@ -1195,8 +1196,16 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return true
   }
 
+  const crossingUnder = (clientX: number, clientY: number) => crossingNear(wiring, toWorld(clientX, clientY), backReach())
+
   const joinOrStartAt = (clientX: number, clientY: number) => {
     marquee.clear()
+    const crossing = crossingUnder(clientX, clientY)
+    if (crossing) {
+      const refusal = sch.junction(crossing.at)
+      if (refusal?.refused === "off-lattice") toast.error(NOT_ON_THE_LATTICE.title, { description: NOT_ON_THE_LATTICE.why })
+      if (!refusal || refusal.refused === "off-lattice") return
+    }
     const under = endUnder(clientX, clientY)
     if (!sch.junction(under.at)) return
     startAt(under, "click")
@@ -1468,8 +1477,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return ownsKeys(e.target) ? "text" : "field"
   }
   const joinUnderPointer = useEvent((client: ScreenPoint) => {
-    const refusal = sch.junction(snapPoint(toWorld(client.x, client.y)))
-    if (refusal) toast.error(NO_CROSSING.title, { description: NO_CROSSING.why })
+    const refusal = sch.junction(crossingUnder(client.x, client.y)?.at ?? snapPoint(toWorld(client.x, client.y)))
+    if (refusal) toast.error(JUNCTION_REFUSED[refusal.refused].title, { description: JUNCTION_REFUSED[refusal.refused].why })
   })
   const onKey = useEvent((e: KeyboardEvent) => {
     if (composing(e)) return
@@ -1492,6 +1501,13 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (matches(e, KEYMAP.find) && !e.defaultPrevented) {
       e.preventDefault()
       return explorerKeys.current?.find()
+    }
+    if ((pending || wireArmed) && matchesAny(e, KEYMAP.lineMode)) {
+      e.preventDefault()
+      const next = nextLineMode(lineMode)
+      setLineMode(next)
+      if (pending) setPending({ ...pending, d: withLineMode(pending.d, next) })
+      return
     }
     if (pending && e.key === "Backspace") {
       e.preventDefault()
@@ -1988,6 +2004,15 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               />
               <OpenEndCue cue={shownCue} reach={openEndReach(grid, scale)} grid={grid} scale={scale} />
               <PendingWireLayer pending={pendingLook} grid={grid} scale={scale} part="marks" />
+              {pending && (
+                <div
+                  data-slot="line-mode"
+                  className="pointer-events-none absolute rounded-sm border border-border bg-popover px-1 leading-none text-popover-foreground tabular-nums shadow-sm"
+                  style={{ left: pending.d.cursor.x + 12 / scale, top: pending.d.cursor.y + 12 / scale, fontSize: 11 / scale, paddingTop: 2 / scale, paddingBottom: 2 / scale, borderWidth: 1 / scale }}
+                >
+                  {lineModeTag(pending.d.mode ?? lineMode)}
+                </div>
+              )}
               {armed && armedAt && <PlacementGhost defId={armed} at={armedAt} grid={grid} scale={scale} detail={detail} sim={simStore} colorOf={colorOf} raster={symbolRaster} />}
               {quick && quickPreview && <PlacementGhost defId={quickPreview} at={quick.world} grid={grid} scale={scale} detail={detail} sim={simStore} colorOf={colorOf} raster={symbolRaster} />}
               {markRect && (
