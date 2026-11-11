@@ -1,6 +1,5 @@
 import { GRID, objectRect, type Rect } from "./geometry"
 import { footprint } from "./placement"
-import type { PinGroup } from "./net-names"
 import type { PinRef, PlacedObject, Point, Schematic } from "./types"
 import type { WireColorKey } from "./wire-colors"
 import { pinToPinPoints, withSegments, type NewId, type Wiring } from "./wire-edits"
@@ -31,7 +30,7 @@ export type Drawing = {
 
 export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "socket" | "nothing"; readonly at: Point; readonly nets: readonly string[] }
 
-export type DrawPreview = { readonly points: readonly Point[]; readonly refused: DrawRefusal | null; readonly joins: readonly PinGroup[]; readonly routed: boolean }
+export type DrawPreview = { readonly points: readonly Point[]; readonly refused: DrawRefusal | null; readonly routed: boolean }
 
 export const isRefusal = (value: unknown): value is DrawRefusal => typeof value === "object" && value !== null && "refused" in value
 
@@ -131,20 +130,6 @@ function netOfEnd(wiring: Wiring, end: DrawEnd): string | undefined {
   return undefined
 }
 
-function groupOfNet(wiring: Wiring, net: string | undefined): PinGroup | null {
-  if (net === undefined) return null
-  const pins = wiring.view.pinsOf(net)
-  return pins.length >= 2 ? [...pins].sort() : null
-}
-
-function joinsOf(wiring: Wiring, from: DrawEnd, target: DrawEnd): readonly PinGroup[] {
-  const a = netOfEnd(wiring, from)
-  const b = netOfEnd(wiring, target)
-  if (a === undefined || b === undefined || a === b) return []
-  const groups = [groupOfNet(wiring, a), groupOfNet(wiring, b)]
-  return groups[0] && groups[1] ? [groups[0], groups[1]] : []
-}
-
 function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: readonly Point[]): DrawRefusal | null {
   if (target.kind === "crossing") return { refused: "crossing", at: target.at, nets: [] }
   const sheet = wiring.sheet
@@ -223,7 +208,7 @@ export function previewOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: D
   const routed = routedPoints(doc, wiring, d, end, plain, near)
   const points = routed ? withoutRepeats(routed) : plain
   const refused = refusalOf(wiring, d.from, end, points)
-  return { points, refused, joins: refused ? [] : joinsOf(wiring, d.from, end), routed: !!routed }
+  return { points, refused, routed: !!routed }
 }
 
 export function withCorner(_doc: Schematic, wiring: Wiring, d: Drawing, at: Point): Drawing | DrawRefusal {

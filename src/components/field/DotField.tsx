@@ -36,7 +36,6 @@ import { nearestOn, travellingWires } from "@/schematic/wire-edits"
 import { CONTACT_OPENED, DRAG_REFUSED, PartDrag, SegmentDrag, TURN_REFUSED, UNLAID, WIRE_MOVE_REFUSED, WIRES_REFUSED, type Landed } from "@/schematic/rubber-band"
 import { DRAW_REFUSED, PASTE_REFUSED, laysClear, drawEndAt, flipPosture, isRefusal, pointerAt, previewOf, startDrawing, withCorner, withoutCorner, type DrawEnd, type Drawing, type DrawRefusal } from "@/schematic/wire-draw"
 import { NO_CROSSING } from "@/schematic/junction-tool"
-import { changeMessage, netChanges } from "@/schematic/net-names"
 import { segmentNearest } from "@/schematic/wire-select"
 import type { DragFrame } from "@/schematic/wires/drag"
 import { samePoint } from "@/schematic/wires/segment"
@@ -230,7 +229,6 @@ const keyRef = (key: string): PinRef => ({ object: key.slice(0, key.indexOf(":")
 
 type Pending = { d: Drawing; mode: "drag" | "click"; target: DrawEnd | null; moved: boolean }
 
-const FLASH_MS = 1400
 
 export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, armed = null, onArmedChange, onPlaced, onHdlImport, peerSelections = NO_PEERS, onSelectionShare, fieldSlot = null, onFieldPicked, onProblemCount, projectName, children, ...props }: DotFieldProps) {
   const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, show, toWorld, isPanStart, startPan, movePan, endPan, setOnPinchStart } = useViewport(grid)
@@ -435,27 +433,6 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     [nets, colorOf],
   )
   const [hoveredWire, setHoveredWire] = React.useState<string | null>(null)
-  const [litNets, setLitNets] = React.useState<ReadonlySet<string>>(EMPTY_IDS)
-  const [flash, setFlash] = React.useState<ReadonlySet<string>>(EMPTY_IDS)
-  const { takePastedNets } = sch
-  const seenNets = React.useRef(wiring.circuit.nets)
-  const seenEdits = React.useRef(sch.edits)
-  React.useEffect(() => {
-    const before = [...seenNets.current, ...takePastedNets()]
-    seenNets.current = wiring.circuit.nets
-    if (seenEdits.current === sch.edits) return
-    seenEdits.current = sch.edits
-    const change = netChanges(before, wiring.circuit.nets)
-    const message = changeMessage(sch.doc.objects, change)
-    if (!message) return
-    toast.info(message)
-    const flashing = new Set<string>()
-    for (const j of change.joined) flashing.add(nets.netOfPin(j.into[0]) ?? "")
-    for (const s of change.split) for (const g of s.into) flashing.add(nets.netOfPin(g[0]) ?? "")
-    setFlash(flashing)
-    const timer = setTimeout(() => setFlash(EMPTY_IDS), FLASH_MS)
-    return () => clearTimeout(timer)
-  }, [wiring, sch.edits, sch.doc.objects, nets, takePastedNets])
   const hoveredNet = hoveredWire === null ? null : (nets.netOfWire(hoveredWire) ?? null)
   const [flow] = React.useState(() => new WireFlow())
   React.useEffect(() => () => flow.dispose(), [flow])
@@ -788,13 +765,6 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     pixel: bandPixel,
   }))
   const dragging = React.useRef<{ kind: "parts"; drag: PartDrag; base: Schematic; detach: boolean; bodies: (dx: number, dy: number) => boolean } | { kind: "segment"; drag: SegmentDrag; base: Schematic } | null>(null)
-  const litBy = React.useRef("")
-  const lightJoins = useEvent((joins: readonly (readonly [string, string])[]) => {
-    const key = joins.map((j) => j.join("+")).join(" ")
-    if (key === litBy.current) return
-    litBy.current = key
-    setLitNets(joins.length ? new Set(joins.flat()) : EMPTY_IDS)
-  })
   const rubberNow = React.useRef<RubberBandLayer | null>(null)
   const rubberFor = (content: ParentNode, frameAt: (dx: number, dy: number) => DragFrame, always: ReadonlySet<string> = EMPTY_IDS) => {
     const layer = new RubberBandLayer(content, rubberLook(), always)
@@ -804,12 +774,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       show: (dx: number, dy: number) => {
         const frame = frameAt(dx, dy)
         layer.show(frame)
-        lightJoins(frame.joins)
       },
       clear: () => {
         if (always.size) layer.show(still)
         else layer.clear()
-        lightJoins([])
       },
     }
   }
@@ -1044,11 +1012,6 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   React.useEffect(() => {
     onWirePreview?.(preview ? [...preview.points] : null)
   }, [preview, onWirePreview])
-  React.useEffect(() => {
-    if (!preview) return
-    lightJoins(preview.joins.map((g) => [nets.netOfPin(g[0]) ?? "", nets.netOfPin(g[g.length - 1]) ?? ""] as const))
-    return () => lightJoins([])
-  }, [preview, nets, lightJoins])
   const snapPoint = (p: Point): Point => ({
     x: snap(p.x, grid),
     y: snap(p.y, grid),
@@ -1885,8 +1848,6 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 scale={scale}
                 selected={selectedRuns}
                 hoveredNet={hoveredNet}
-                lit={litNets}
-                flash={flash}
                 colorOf={colorOf}
                 netOfWire={nets.netOfWire}
                 dots={wiring.dots}

@@ -208,9 +208,22 @@ async function farDropAndWireCopy(page: Page) {
   await page.mouse.click(fromWire.x, fromWire.y)
   const toWire = joining.toScreen(cellPoint(17, 17))
   await page.mouse.move(toWire.x, toWire.y, { steps: 6 })
+  const dimmed = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-net]")].filter((e) => getComputedStyle(e).opacity !== "1").length)
   await page.mouse.click(toWire.x, toWire.y)
   await page.waitForTimeout(250)
-  expect("two nets joined by a drawn wire: the merged net flashes on the field", await page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-flash]")].map((e) => getComputedStyle(e).animationName)), ["wire-flash"])
+  const notices = () => page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].map((e) => e.textContent ?? "").filter((t) => /joined|split apart|in series/.test(t)))
+  expect("two nets joined by a drawn wire: no notice and no flash, nothing dimmed (the user, 2026-11-11)", [await notices(), await page.evaluate(() => document.querySelectorAll("[data-slot=wires] [data-flash]").length), await dimmed()], [[], 0, 0])
+  await openDoc(page, "join-unlit", {
+    objects: [resistorAt("R1", 10, 10), resistorAt("R4", 18, 16)],
+    wires: [{ id: "a", a: cellPoint(14, 11), b: cellPoint(17, 11) }, { id: "b", a: cellPoint(22, 17), b: cellPoint(26, 17) }, { id: "c", a: cellPoint(10, 20), b: cellPoint(14, 20) }],
+    parts: {},
+  })
+  const unlit = await fieldFrame(page)
+  await dragBy(page, unlit.toScreen(cellPoint(20, 17)), unlit.toScreen(cellPoint(19, 11)), false)
+  expect("R4 held with its pin on another net's open end: no wire dims before the drop (the user, 2026-11-11)", await dimmed(), 0)
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+  expect("and dropped there: no notice, no flash", [await notices(), await page.evaluate(() => document.querySelectorAll("[data-slot=wires] [data-flash]").length)], [[], 0])
   const shift = examples.find((e) => e.id === "nucleo-74hc595")!.build(GRID)
   await openDoc(page, "turn-refused", shift)
   const u2 = shift.objects.find((o) => o.props?.ref === "U2")!

@@ -18,8 +18,6 @@ type WireLayerProps = {
   scale: number
   selected: ReadonlySet<string>
   hoveredNet: string | null
-  lit?: ReadonlySet<string>
-  flash?: ReadonlySet<string>
   colorOf: (wireId: string) => WireColorKey
   netOfWire: (wireId: string) => string | undefined
   dots: readonly Point[]
@@ -45,8 +43,6 @@ export const WireLayer = React.memo(function WireLayer({
   scale,
   selected,
   hoveredNet,
-  lit,
-  flash,
   colorOf,
   netOfWire,
   dots,
@@ -96,8 +92,7 @@ export const WireLayer = React.memo(function WireLayer({
         <g
           key={net}
           data-net={net}
-          data-flash={flash?.has(net) ? "" : undefined}
-          className={cn(lit?.size ? !lit.has(net) && "opacity-25" : hoveredNet !== null && net !== hoveredNet && "opacity-25")}
+          className={cn(hoveredNet !== null && net !== hoveredNet && "opacity-25")}
           style={{ transition: "opacity 120ms" }}
         >
           {wires.map((route) => (

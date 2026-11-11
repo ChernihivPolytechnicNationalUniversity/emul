@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { GRID, objectPins } from "@/schematic/geometry"
 import { footprint } from "@/schematic/placement"
 import { wirePins } from "@/schematic/migrate-wires"
-import { changeMessage, netChanges } from "@/schematic/net-names"
+import { netChanges } from "../lib/net-changes"
 import { flippedWithWires, PartDrag, SegmentDrag, TurnRun } from "@/schematic/rubber-band"
 import { inNormalForm, wiringOf } from "@/schematic/wire-edits"
 import { rotateSelection } from "@/schematic/orient"
@@ -321,12 +321,12 @@ describe("what the drag commits", () => {
     expect.soft(normalFormViolations(wires, pins), "normal form").toEqual([])
   })
 
-  it("a pin dropped on another net's wire joins the two, named; a pin dropped on a crossing of two is blocked", () => {
+  it("a pin dropped on another net's wire joins the two, the frame knowing it for the release's audit; a pin dropped on a crossing of two is blocked", () => {
     const sheet = sheetOf([part("A", c(0, 4), c(0, 8)), part("B", c(10, 4), c(10, 8)), part("C", c(5, -2), c(5, 2)), part("D", c(5, 8), c(5, 12)), part("R1", c(-6, 0), c(-2, 0))], [w(c(0, 4), c(10, 4)), w(c(5, 2), c(5, 8))])
     const before = wireNets(sheet.wires, sheet.pins)
     const onWire = planOf(sheet, { parts: ["R1"] }).frame(cells(4, 4))
     expect.soft(onWire.blocked, "R1's right pin on the A–B wire").toBe(false)
-    expect.soft(onWire.joins, "the join is named").toEqual([[before.netOfPin("A:1")!, before.netOfPin("R1:2") ?? "pin:R1:2"].sort()])
+    expect.soft(onWire.joins, "the join, known to the frame").toEqual([[before.netOfPin("A:1")!, before.netOfPin("R1:2") ?? "pin:R1:2"].sort()])
     const onCrossing = planOf(sheet, { parts: ["R1"] }).frame(cells(7, 4))
     expect.soft(onCrossing.blocked, "R1's right pin on the crossing").toBe(true)
   })
@@ -611,13 +611,13 @@ describe("the rubber band wired to the document: dragging parts and segments (de
     expect.soft(nets(landed.doc), "R2 off the net").toEqual([])
   })
 
-  it("a part dropped with one pin on a wire splits it there and the pin joins, with a dot (junctions.md 25); a lone pin joining a net is no merge to flash", () => {
+  it("a part dropped with one pin on a wire splits it there and the pin joins, with a dot (junctions.md 25); a lone pin joining a net is no merge of nets", () => {
     const doc = docOf([resistor("R2", 0, 0), resistor("R3", 12, 0), resistor("R4", 20, 20, 90)], [wire(at(4, 1), at(12, 1))])
     const before = wiringFor(doc)
     const landed = new PartDrag(doc, before, carried("R4")).landed(...by(-13, -19), ids)
     expect.soft(junctionsOf(viewOf(landed.doc)), "the dot under R4's pin").toEqual([at(8, 1)])
     expect.soft(nets(landed.doc), "R4 on the net").toEqual([["R2:2", "R3:1", "R4:1"]])
-    expect.soft(netChanges(before.circuit.nets, wiringFor(landed.doc).circuit.nets).joined, "nothing to flash").toEqual([])
+    expect.soft(netChanges(before.circuit.nets, wiringFor(landed.doc).circuit.nets).joined, "no two nets joined").toEqual([])
   })
 
   it("dragging a segment moves it along its normal and its neighbours stretch (design.md §6.3, dragging a segment; LibrePCB, KiCad)", () => {
@@ -627,7 +627,7 @@ describe("the rubber band wired to the document: dragging parts and segments (de
     expect.soft(geometryOf(landed.doc.wires), "the upright piece one cell right").toEqual(geometryOf(chain(at(4, 1), at(8, 1), at(8, 5), at(10, 5))))
   })
 
-  it("two dangling ends of different nets brought together by a dragged segment join, lit in the frame and named after (junctions.md 16)", () => {
+  it("two dangling ends of different nets brought together by a dragged segment join, the frame knowing it before the release (junctions.md 16)", () => {
     const doc = docOf(
       [resistor("A", 0, 0), ground("G1", 3, 2), resistor("B", 14, 3), supply("V1", 13, 0, "VCC")],
       [wire(at(4, 1), at(4, 2)), wire(at(4, 1), at(6, 1)), wire(at(6, 1), at(6, 4)), wire(at(14, 2), at(14, 4)), wire(at(14, 4), at(8, 4))],
@@ -635,9 +635,9 @@ describe("the rubber band wired to the document: dragging parts and segments (de
     const before = wiringFor(doc)
     const upright = doc.wires.find((s) => s.a.x === at(6, 0).x && s.b.x === at(6, 0).x)!
     const drag = new SegmentDrag(doc, before, upright.id)
-    expect.soft(drag.frame(...by(2, 0)).joins.length, "the join lit before the release").toBe(1)
+    expect.soft(drag.frame(...by(2, 0)).joins.length, "the join known before the release").toBe(1)
     const landed = drag.landed(...by(2, 0))
-    expect.soft(changeMessage(landed.doc.objects, netChanges(before.circuit.nets, wiringFor(landed.doc).circuit.nets)), "named").toBe("GND and VCC joined")
+    expect.soft(netChanges(before.circuit.nets, wiringFor(landed.doc).circuit.nets).joined.length, "one join").toBe(1)
   })
 })
 
