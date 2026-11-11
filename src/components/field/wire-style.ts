@@ -17,5 +17,8 @@ const DOT_MIN_PX = 1.5 * WIRE_PX
 const DOT_MAX_PX = 2.5 * WIRE_PX
 
 export const OPEN_END_CELLS = 0.14
+const OPEN_END_CLEARANCE_PX = 4
+
+export const openEndReach = (grid: number, scale: number) => Math.max(WIRE_HIT_PX / 2 / scale, OPEN_END_CELLS * grid + OPEN_END_CLEARANCE_PX / scale)
 
 export const dotRadius = (grid: number, scale: number) => Math.min(Math.max(DOT_CELLS * grid * scale, DOT_MIN_PX), DOT_MAX_PX) / scale

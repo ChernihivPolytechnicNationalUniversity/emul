@@ -70,12 +70,12 @@ import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
 import { FieldCanvas } from "./FieldCanvas"
 import { marksBesideTheBand, wireMarks } from "./wire-marks"
-import { dotRadius, OPEN_END_CELLS, WIRE_HIT_PX, wireCornerRadius } from "./wire-style"
+import { dotRadius, OPEN_END_CELLS, openEndReach, wireCornerRadius } from "./wire-style"
 import { exportPng } from "./export-image"
 import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
 import { labelArea, labelCanvasFits, SymbolRaster, TextRaster } from "./symbol-raster"
-import { PendingWireLayer, WireLayer, type PendingLook } from "./WireLayer"
+import { OpenEndCue, PendingWireLayer, WireLayer, type ContinueCue, type PendingLook } from "./WireLayer"
 import { RubberBandLayer, type RubberLook } from "./rubber-band-layer"
 import { GhostLayer, PlacementGhost, type Ghost } from "./GhostLayer"
 import { MoveDrag, planMove } from "./move-drag"
@@ -942,6 +942,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   const hoverAt = React.useRef<{ x: number; y: number } | null>(null)
   const hoverFrame = React.useRef(0)
+  const [continueCue, setContinueCue] = React.useState<ContinueCue | null>(null)
+  const cueAt = React.useRef<{ x: number; y: number } | null>(null)
+  const cueFrame = React.useRef(0)
+  React.useEffect(() => () => void (cueFrame.current && cancelAnimationFrame(cueFrame.current)), [])
+  const showContinueCue = (cue: ContinueCue | null) =>
+    setContinueCue((prev) => (prev === cue || (prev && cue && samePoint(prev.at, cue.at) && prev.color === cue.color) ? prev : cue))
   const probeHover = useEvent(() => {
     hoverFrame.current = 0
     const at = hoverAt.current
@@ -954,6 +960,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (hoverFrame.current) cancelAnimationFrame(hoverFrame.current)
     hoverFrame.current = 0
     setHover((prev) => (prev === null ? prev : null))
+    cueAt.current = null
+    showContinueCue(null)
   })
   React.useEffect(() => () => void (hoverFrame.current && cancelAnimationFrame(hoverFrame.current)), [])
   const updateHover = (e: React.PointerEvent) => {
@@ -1076,9 +1084,43 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   const openEndNear = (clientX: number, clientY: number): DrawEnd | null => {
     const world = toWorld(clientX, clientY)
-    const reach = Math.max(WIRE_HIT_PX / 2 / scale, OPEN_END_CELLS * grid)
-    const end = wiring.dangling.find((q) => Math.abs(q.x - world.x) <= reach && Math.abs(q.y - world.y) <= reach)
-    return end ? drawEndAt(wiring, end) : null
+    let nearest: Point | null = null
+    let distance = openEndReach(grid, scale)
+    for (const q of wiring.dangling) {
+      const d = Math.hypot(q.x - world.x, q.y - world.y)
+      if (d > distance) continue
+      nearest = q
+      distance = d
+    }
+    return nearest ? drawEndAt(wiring, nearest) : null
+  }
+
+  const pressReachesOpenEnds = (clientX: number, clientY: number) => {
+    const under = document.elementFromPoint(clientX, clientY)
+    if (under !== containerRef.current && !under?.closest("[data-slot=wires]")) return false
+    return !(detail.canvas && objectAt(clientX, clientY))
+  }
+
+  const continuesFrom = (clientX: number, clientY: number): ContinueCue | null => {
+    if (armed || measure.active || wireArmed || pending || !pressReachesOpenEnds(clientX, clientY)) return null
+    const end = openEndNear(clientX, clientY)
+    const segment = end && wiring.sheet.endsAt(end.at)[0]
+    const run = segment && wiring.runBySegment.get(segment.id)
+    if (!end || !run) return null
+    const inward = samePoint(run.points[0], end.at) ? run.points[1] : run.points[run.points.length - 2]
+    const length = Math.hypot(end.at.x - inward.x, end.at.y - inward.y)
+    return { at: end.at, along: length ? { x: (end.at.x - inward.x) / length, y: (end.at.y - inward.y) / length } : null, color: colorOf(run.id) }
+  }
+
+  const probeCue = useEvent(() => {
+    cueFrame.current = 0
+    const at = cueAt.current
+    if (at) showContinueCue(continuesFrom(at.x, at.y))
+  })
+  const updateCue = (e: React.PointerEvent) => {
+    if (!hoverAt.current) return
+    cueAt.current = { x: e.clientX, y: e.clientY }
+    if (!cueFrame.current) cueFrame.current = requestAnimationFrame(probeCue)
   }
 
   const refuse = (refusal: DrawRefusal) => {
@@ -1094,6 +1136,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       return false
     }
     setPending({ d: started, mode, target: null, moved: false })
+    showContinueCue(null)
     sch.deselectAll()
     return true
   }
@@ -1334,6 +1377,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       return
     }
     updateHover(e)
+    updateCue(e)
     marquee.move(e)
   }
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1524,6 +1568,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
   }, [onKey, onCopy, onCut, onPaste])
 
+  const shownCue = continueCue && !pending && wiring.dangling.some((p) => samePoint(p, continueCue.at)) ? continueCue : null
   const cursor = panning ? "cursor-grabbing" : spaceHeld ? "cursor-grab" : armed ? "cursor-copy" : "cursor-precise"
   const probeReading = sim.probe(PROBE_ID)
   const { selectedObjects, selectedWires, doc: schDoc, setPart } = sch
@@ -1781,6 +1826,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             ref={containerRef}
             data-slot="dot-field-viewport"
             className={cn("absolute inset-0 touch-none select-none", cursor)}
+            style={{ ["--wire-cursor" as string]: shownCue ? "var(--cursor-precise)" : "move" }}
             onPointerDownCapture={(e) => {
               countPress(e)
               // A long press opens the field menu without a contextmenu event on iOS: add there.
@@ -1894,6 +1940,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 onPinPointerMove={onPinPointerMove}
                 onPinPointerUp={onPinPointerUp}
               />
+              <OpenEndCue cue={shownCue} reach={openEndReach(grid, scale)} grid={grid} scale={scale} />
               <PendingWireLayer pending={pendingLook} grid={grid} scale={scale} part="marks" />
               {armed && armedAt && <PlacementGhost defId={armed} at={armedAt} grid={grid} scale={scale} detail={detail} sim={simStore} colorOf={colorOf} raster={symbolRaster} />}
               {quick && quickPreview && <PlacementGhost defId={quickPreview} at={quick.world} grid={grid} scale={scale} detail={detail} sim={simStore} colorOf={colorOf} raster={symbolRaster} />}
