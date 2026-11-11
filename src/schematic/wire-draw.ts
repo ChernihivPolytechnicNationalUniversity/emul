@@ -16,6 +16,10 @@ export type DrawEnd =
 
 export type Axis = "x" | "y"
 
+export type Retraction = { readonly path: readonly Point[]; readonly at: Point }
+
+export type CutBack = { readonly run: string; readonly removed: readonly WireSegment[]; readonly kept: WireSegment | null }
+
 type Click = { readonly added: number; readonly axis: Axis | null; readonly flipped: boolean }
 
 export type Drawing = {
@@ -27,6 +31,7 @@ export type Drawing = {
   readonly axis: Axis | null
   readonly flipped: boolean
   readonly color?: WireColorKey
+  readonly back?: Retraction
 }
 
 export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "socket" | "body" | "nothing"; readonly at: Point; readonly nets: readonly string[] }
@@ -68,15 +73,61 @@ export function drawEndAt(wiring: Wiring, at: Point): DrawEnd {
 
 const axisAligned = (p: Point | undefined) => !!p && (p.x === 0) !== (p.y === 0)
 
+function runFrom(wiring: Wiring, end: Point): { id: string; points: readonly Point[]; segments: readonly WireSegment[] } | null {
+  const ends = wiring.sheet.endsAt(end)
+  if (ends.length !== 1) return null
+  const run = wiring.runBySegment.get(ends[0].id)
+  if (!run) return null
+  if (samePoint(run.points[0], end)) return run
+  return { id: run.id, points: [...run.points].reverse(), segments: [...run.segments].reverse() }
+}
+
 export function startDrawing(wiring: Wiring, from: DrawEnd, color?: WireColorKey): Drawing | DrawRefusal {
   if (from.kind === "crossing") return { refused: "crossing", at: from.at, nets: [] }
   const out = from.kind === "pin" ? wiring.sheet.pin(from.key)?.out : undefined
-  return { from, ...(axisAligned(out) && { heading: out }), corners: [], clicks: [], cursor: from.at, axis: null, flipped: false, ...(color && { color }) }
+  const run = from.kind === "end" ? runFrom(wiring, from.at) : null
+  return { from, ...(axisAligned(out) && { heading: out }), corners: [], clicks: [], cursor: from.at, axis: null, flipped: false, ...(color && { color }), ...(run && { back: { path: run.points, at: from.at } }) }
 }
 
-const lastOf = (d: Drawing) => d.corners.at(-1) ?? d.from.at
+const startOf = (d: Drawing) => d.back?.at ?? d.from.at
+
+const lastOf = (d: Drawing) => d.corners.at(-1) ?? startOf(d)
+
+const between = (v: number, a: number, b: number) => v >= Math.min(a, b) && v <= Math.max(a, b)
+
+const onSegment = (p: Point, a: Point, b: Point) => (b.x - a.x) * (p.y - a.y) === (b.y - a.y) * (p.x - a.x) && between(p.x, a.x, b.x) && between(p.y, a.y, b.y)
+
+const onPath = (path: readonly Point[], p: Point) => path.some((q, i) => (i === 0 ? samePoint(q, p) : onSegment(p, path[i - 1], q)))
+
+const retracting = (d: Drawing): Retraction | null => (d.back && !d.corners.length ? d.back : null)
+
+function nearestOnPath(path: readonly Point[], p: Point, grid: number): { at: Point; distance: number } {
+  let best = { at: path[0], distance: Math.hypot(p.x - path[0].x, p.y - path[0].y) }
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1]
+    const b = path[i]
+    const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / grid
+    if (!steps) continue
+    const length2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2
+    const t = Math.min(1, Math.max(0, ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / length2))
+    const k = Math.round(t * steps) / steps
+    const at = { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }
+    const distance = Math.hypot(p.x - a.x - (b.x - a.x) * t, p.y - a.y - (b.y - a.y) * t)
+    if (distance < best.distance) best = { at, distance }
+  }
+  return best
+}
+
+export function backAlong(d: Drawing, pointer: Point, reach: number, grid: number = GRID): Point | null {
+  const back = retracting(d)
+  if (!back) return null
+  const nearest = nearestOnPath(back.path, pointer, grid)
+  return nearest.distance <= reach ? nearest.at : null
+}
 
 export function pointerAt(d: Drawing, at: Point): Drawing {
+  const back = retracting(d)
+  if (back && onPath(back.path, at)) return { ...d, cursor: at, axis: null, back: { ...back, at } }
   if (d.axis !== null) return { ...d, cursor: at }
   const last = lastOf(d)
   const dx = Math.abs(at.x - last.x)
@@ -107,7 +158,35 @@ function withoutRepeats(points: readonly Point[]): Point[] {
 function pointsTo(d: Drawing, to: Point): Point[] {
   const last = lastOf(d)
   const corner = firstAxis(d, to) === "x" ? { x: to.x, y: last.y } : { x: last.x, y: to.y }
-  return withoutRepeats([d.from.at, ...d.corners, corner, to])
+  return withoutRepeats([startOf(d), ...d.corners, corner, to])
+}
+
+export function cutBack(wiring: Wiring, d: Drawing, newId: NewId = randomId): CutBack | null {
+  const back = d.back
+  if (!back || samePoint(back.at, d.from.at)) return null
+  const run = runFrom(wiring, d.from.at)
+  if (!run) return null
+  const removed: WireSegment[] = []
+  for (let i = 0; i < run.segments.length; i++) {
+    const s = run.segments[i]
+    const far = run.points[i + 1]
+    removed.push(s)
+    if (!onSegment(back.at, run.points[i], far)) continue
+    if (samePoint(back.at, far)) return { run: run.id, removed, kept: null }
+    const kept: WireSegment = { id: newId(), a: back.at, b: far, ...(s.color && { color: s.color }) }
+    return { run: run.id, removed, kept }
+  }
+  return null
+}
+
+function crossedAt(wiring: Wiring, from: DrawEnd, at: Point): DrawRefusal | null {
+  const own = netOfEnd(wiring, from)
+  for (const s of wiring.sheet.through(at)) {
+    if (isEndOf(s, at)) continue
+    const net = wiring.view.netOfSegment(s.id) ?? `wire:${s.id}`
+    if (net !== own) return { refused: "crossing", at, nets: own ? [own, net] : [net] }
+  }
+  return null
 }
 
 export function withoutCorner(d: Drawing): Drawing {
@@ -219,7 +298,8 @@ export function previewOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: D
   const plain = pointsTo(d, end.at)
   const routed = routedPoints(doc, wiring, d, end, plain, near)
   const points = routed ? withoutRepeats(routed) : plain
-  const refused = refusalOf(wiring, d.from, end, points) ?? throughABody(doc, points, near)
+  const cut = d.back && !samePoint(d.back.at, d.from.at) ? d.back.at : null
+  const refused = (cut && crossedAt(wiring, d.from, cut)) || refusalOf(wiring, d.from, end, points) || throughABody(doc, points, near)
   return { points, refused, routed: !!routed }
 }
 
@@ -236,13 +316,17 @@ export function withCorner(doc: Schematic, wiring: Wiring, d: Drawing, at: Point
 }
 
 export function drawnTo(doc: Schematic, wiring: Wiring, d: Drawing, target: DrawEnd, newId: NewId = randomId, near?: Near): Schematic | DrawRefusal {
-  const { points, refused } = previewOf(doc, wiring, d, target, near)
+  const back = retracting(d)
+  const drawing = back && onPath(back.path, target.at) ? pointerAt(d, target.at) : d
+  const { points, refused } = previewOf(doc, wiring, drawing, target, near)
   if (refused) return refused
-  if (points.length < 2) return { refused: "nothing", at: target.at, nets: [] }
+  const cut = cutBack(wiring, drawing, newId)
+  if (drawing.back && !samePoint(drawing.back.at, drawing.from.at) && !cut) return { refused: "nothing", at: target.at, nets: [] }
+  if (points.length < 2 && !cut) return { refused: "nothing", at: target.at, nets: [] }
   const color = d.color
-  const segments: WireSegment[] = []
+  const segments: WireSegment[] = cut?.kept ? [cut.kept] : []
   for (let i = 1; i < points.length; i++) segments.push(color ? { id: newId(), a: points[i - 1], b: points[i], color } : { id: newId(), a: points[i - 1], b: points[i] })
-  return withSegments(doc, segments, [], [points[0], points[points.length - 1]], newId)
+  return withSegments(doc, segments, cut?.removed ?? [], [points[0], points[points.length - 1]], newId)
 }
 
 export function laysClear(wiring: Wiring, segments: readonly { readonly a: Point; readonly b: Point }[], doc?: Schematic): boolean {

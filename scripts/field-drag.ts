@@ -430,6 +430,148 @@ async function morningChecks(page: Page) {
   expect("a wire dragged where it would lie along another net's wire is refused in the words of a wire, not of a dropped part", toasts.some((t) => t.startsWith("Wire not moved")) && !toasts.some((t) => t.includes("Nowhere clean to put it")), true)
 }
 
+const hookedWire = (): Schematic => ({
+  objects: [resistorAt("R1", 10, 10)],
+  wires: [{ id: "level", a: cellPoint(14, 11), b: cellPoint(20, 11) }, { id: "down", a: cellPoint(20, 11), b: cellPoint(20, 15) }],
+  parts: {},
+})
+
+async function zoomTo(page: Page, outSteps: number) {
+  await page.keyboard.press("Control+0")
+  await page.waitForTimeout(500)
+  for (let k = 0; k < outSteps; k++) await page.keyboard.press("Control+Minus")
+  await page.waitForTimeout(900)
+}
+
+async function openEndCue(page: Page) {
+  console.log("\nan open end shows that a press there continues the wire, and the rest of the wire that a press moves it (the user, 2026-11-11)")
+  await openDoc(page, "open-end-cue", hookedWire())
+  const end = `${20 * GRID},${15 * GRID}`
+  const cue = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=open-end-cue] [data-continues]")].map((e) => e.getAttribute("data-continues")))
+  const cueSize = () => page.evaluate(() => {
+    const ring = document.querySelector("[data-slot=open-end-cue] circle[data-continues]")
+    return ring ? Math.round(ring.getBoundingClientRect().width) : 0
+  })
+  const cursorAt = (p: Point) => page.evaluate(({ x, y }) => {
+    const cursor = getComputedStyle(document.elementFromPoint(x, y)!).cursor
+    return cursor.startsWith("url(") ? "precise" : cursor
+  }, p)
+  const hover = async (p: Point) => {
+    await page.mouse.move(p.x, p.y, { steps: 4 })
+    await page.waitForTimeout(150)
+  }
+  for (const [zoom, outSteps, near, far] of [["100 %", 0, 4, 40], ["33 %", 6, 5, 12], ["300 %", -6, 8, 60]] as const) {
+    if (outSteps >= 0) await zoomTo(page, outSteps)
+    else {
+      await zoomTo(page, 0)
+      for (let k = 0; k < -outSteps; k++) await page.keyboard.press("Control+Equal")
+      await page.waitForTimeout(900)
+    }
+    const f = await fieldFrame(page)
+    const tip = f.toScreen(cellPoint(20, 15))
+    const beside = { x: tip.x + near * 0.6, y: tip.y - near * 0.8 }
+    await hover(beside)
+    expect(`${zoom}: ${near} px from the open end the end is marked: a press there continues the wire`, await cue(), [end])
+    expect(`${zoom}: and the cursor there is the cross a pin shows, the one that starts a wire`, await cursorAt(beside), "precise")
+    if (zoom === "33 %") expect(`${zoom}: the mark is at least 14 px across, as wide as the press reaches`, (await cueSize()) >= 14, true)
+    const onWire = { x: tip.x, y: tip.y - far }
+    await hover(onWire)
+    expect(`${zoom}: ${far} px up the wire nothing is marked`, await cue(), [])
+    expect(`${zoom}: and the cursor says a press moves the wire`, await cursorAt(onWire), "move")
+  }
+  await zoomTo(page, 6)
+  const f = await fieldFrame(page)
+  const tip = f.toScreen(cellPoint(20, 15))
+  await hover({ x: tip.x + 3, y: tip.y - 4 })
+  await page.mouse.down()
+  await page.mouse.move(tip.x + 40, tip.y + 30, { steps: 8 })
+  await page.waitForTimeout(200)
+  expect("33 %: a press where the end is marked starts drawing from it, and the mark gives way to the wire being drawn", [await countOf(page, "[data-slot=pending-wire-route]"), await cue()], [1, []])
+  await page.mouse.up()
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(300)
+  const up = { x: tip.x, y: tip.y - 12 }
+  await hover(up)
+  await page.mouse.down()
+  await page.mouse.move(up.x + f.toScreen(cellPoint(23, 15)).x - tip.x, up.y, { steps: 8 })
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  expect("33 %: a press where nothing is marked moves the wire: no wire drawn, the open end three cells right", [await countOf(page, "[data-slot^=pending-wire]"), await page.evaluate(() => [...document.querySelectorAll("[data-dangling]")].map((e) => e.getAttribute("data-dangling")))], [0, [`${23 * GRID},${15 * GRID}`]])
+}
+
+async function shorteningFromAnOpenEnd(page: Page) {
+  console.log("\na press on an open end drawn back along the wire shortens it, as Zip retracts a path (the user, 2026-11-11)")
+  const rings = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-dangling]")].filter((e) => getComputedStyle(e).display !== "none").map((e) => e.getAttribute("data-dangling")))
+  const bandRings = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-band-dangling]")].map((e) => e.getAttribute("data-band-dangling")))
+  const bandPieces = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll("[data-slot=rubber-band] [data-piece]")]
+        .map((e) => {
+          const [ax, ay, bx, by] = e.getAttribute("data-piece")!.split(" ").map(Number)
+          return ax < bx || (ax === bx && ay <= by) ? `${ax} ${ay} ${bx} ${by}` : `${bx} ${by} ${ax} ${ay}`
+        })
+        .sort(),
+    )
+  const wirePoints = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire][data-points]")].map((e) => e.getAttribute("data-points")))
+  const key = (x: number, y: number) => `${x * GRID},${y * GRID}`
+  const pointsOf = (...cells: [number, number][]) => cells.map(([x, y]) => key(x, y)).join(" ")
+  await openDoc(page, "shorten", hookedWire())
+  await zoomTo(page, 0)
+  let f = await fieldFrame(page)
+  const via = async (...cells: [number, number][]) => {
+    for (const [x, y] of cells) {
+      const p = f.toScreen(cellPoint(x, y))
+      await page.mouse.move(p.x, p.y, { steps: 6 })
+    }
+    await page.waitForTimeout(200)
+  }
+  const press = async (x: number, y: number) => {
+    const p = f.toScreen(cellPoint(x, y))
+    await page.mouse.move(p.x, p.y)
+    await page.waitForTimeout(100)
+    await page.mouse.down()
+  }
+  await press(20, 15)
+  await via([20, 13])
+  expect("held two cells back up the wire: the wire ends there, its open end with it", [await bandRings(), await rings()], [[key(20, 13)], []])
+  expect("and the wire shown is the shorter one", await bandPieces(), [`${14 * GRID} ${11 * GRID} ${20 * GRID} ${11 * GRID}`, `${20 * GRID} ${11 * GRID} ${20 * GRID} ${13 * GRID}`].sort())
+  await via([20, 11], [17, 11])
+  expect("on round the bend, three cells along: the bend is gone, the end follows the pointer", [await bandRings(), await bandPieces()], [[key(17, 11)], [`${14 * GRID} ${11 * GRID} ${17 * GRID} ${11 * GRID}`]])
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  expect("released: the wire is that much shorter, nothing left being drawn", [await rings(), await wirePoints(), await countOf(page, "[data-slot^=pending-wire]")], [[key(17, 11)], [pointsOf([14, 11], [17, 11])], 0])
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(500)
+  expect("one undo gives the whole wire back", await rings(), [key(20, 15)])
+  f = await fieldFrame(page)
+  await press(20, 15)
+  await via([20, 13], [22, 13], [23, 13])
+  expect("back two cells and off to the right: the wire is cut back and drawn on from the cut", [await bandRings(), await page.evaluate(() => document.querySelector("[data-slot=pending-wire-route] path[stroke-dasharray]")?.getAttribute("d") ?? null)], [[key(20, 13)], `M${20 * GRID} ${13 * GRID} L${23 * GRID} ${13 * GRID}`])
+  await page.mouse.up()
+  await page.keyboard.press("Enter")
+  await page.waitForTimeout(600)
+  expect("finished: the stub below the cut is gone and the wire turns off at it", [await rings(), await wirePoints()], [[key(23, 13)], [pointsOf([14, 11], [20, 11], [20, 13], [23, 13])]])
+  await openDoc(page, "shorten-to-nothing", hookedWire())
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  await press(20, 15)
+  await via([20, 13], [20, 11], [17, 11], [14, 11])
+  expect("held all the way back on R1's pin: no wire left on the field, and no ring left hanging where the end was", [await bandPieces(), await bandRings(), await rings()], [[], [], []])
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  expect("released there: the wire is gone", await countOf(page, "[data-slot=wires] [data-wire]"), 0)
+  await openDoc(page, "shorten-and-back", hookedWire())
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  await press(20, 15)
+  await via([20, 12], [20, 15])
+  expect("drawn back and forward again to the end: the wire is whole again", [await bandRings(), await rings()], [[], [key(20, 15)]])
+  await page.mouse.up()
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(400)
+  expect("and released and dropped there, nothing changed", await wirePoints(), [pointsOf([14, 11], [20, 11], [20, 15])])
+}
+
 async function phaseFiveChecks(page: Page) {
   console.log("\nthe field: bodies, splices, fields and the checker (phase 5, design.md §5, §6.8)")
   const diodeAt = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "diode", x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
@@ -831,7 +973,7 @@ try {
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, phaseFiveChecks, bridgeBuiltByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
+const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
 try {
   for (const section of sections) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })

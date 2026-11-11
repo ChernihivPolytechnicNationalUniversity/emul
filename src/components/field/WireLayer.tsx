@@ -147,7 +147,7 @@ export const WireLayer = React.memo(function WireLayer({
                   stroke="transparent"
                   strokeWidth={WIRE_HIT_PX}
                   vectorEffect="non-scaling-stroke"
-                  className="pointer-events-auto cursor-pointer"
+                  className="pointer-events-auto cursor-(--wire-cursor)"
                   onPointerDown={(e) => onWirePointerDown(e, route.id)}
                   onPointerEnter={() => onWirePointerEnter(route.id)}
                   onPointerLeave={() => onWirePointerLeave(route.id)}
@@ -170,6 +170,35 @@ export const WireLayer = React.memo(function WireLayer({
     </svg>
   )
 })
+
+export type ContinueCue = { at: Point; along: Point | null; color: WireColorKey }
+
+const CUE_STUB_PX = 14
+
+const outward = (at: Point, along: Point, by: number): Point => ({ x: at.x + along.x * by, y: at.y + along.y * by })
+
+export function OpenEndCue({ cue, reach, grid, scale }: { cue: ContinueCue | null; reach: number; grid: number; scale: number }) {
+  if (!cue) return null
+  const { at, along, color } = cue
+  const stroke = wireColorVar(color)
+  const stub = along && Math.max(grid, CUE_STUB_PX / scale)
+  return (
+    <svg data-slot="open-end-cue" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
+      {along && stub && (
+        <path
+          d={toPath([outward(at, along, reach), outward(at, along, reach + stub)])}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={WIRE_PX}
+          strokeDasharray={`${WIRE_PX * 3} ${WIRE_PX * 2.5}`}
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+      <circle data-continues={`${at.x},${at.y}`} cx={at.x} cy={at.y} r={reach} fill="none" stroke={stroke} strokeWidth={WIRE_PX} vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
 
 type PendingPart = "route" | "marks"
 

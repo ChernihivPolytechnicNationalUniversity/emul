@@ -134,7 +134,7 @@ export class RubberBandLayer {
       covered.add(pointKey(piece.a))
       covered.add(pointKey(piece.b))
     }
-    this.hideMarks(drawn.length ? covered : new Set())
+    this.hideMarks(covered)
     this.paint(drawn, frame.blocked, drawn.length ? bandMarks(drawn, this.look.sheet, hiddenSegments, frame.pins) : { open: [], dots: [] })
   }
 
