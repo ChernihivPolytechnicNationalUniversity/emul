@@ -1,7 +1,10 @@
+import { FieldState } from "@/schematic/field-state"
+import { OverlayMap } from "@/schematic/wires/overlay-map"
+import { splicedAt } from "@/schematic/splice"
 import "./lib/all-parts"
 import { builder, connect, connections, legacyOf } from "@/schematic/builder"
 import { examples, lab1Board } from "@/schematic/examples"
-import { circuitOf } from "@/schematic/circuit"
+import { circuitOf, runsOf } from "@/schematic/circuit"
 import { buildNetlist } from "@/sim/netlist"
 import { FlowSolver } from "@/sim/flow"
 import { GRID } from "@/schematic/geometry"
@@ -15,7 +18,7 @@ import { boardDocuments, stressDocuments } from "./lib/stress"
 import { PartDrag, TurnRun } from "@/schematic/rubber-band"
 import { SpatialIndex } from "@/schematic/spatial"
 import { drawEndAt, isRefusal, pointerAt, previewOf, startDrawing } from "@/schematic/wire-draw"
-import { wiringOf } from "@/schematic/wire-edits"
+import { moved, withSegments, wiringOf } from "@/schematic/wire-edits"
 import { commitEdit, normalise } from "@/schematic/wires/normal-form"
 import { planDrag } from "@/schematic/wires/drag"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
@@ -170,6 +173,12 @@ const results = SIZES.map((n) => {
   return { n, overlap, rails, merge, aligned, sparse, big, copies }
 })
 
+const singleSegments = fingers(20_000).wires
+let singleRuns = 0
+const singletonRuns = time(() => {
+  for (const segment of singleSegments) singleRuns += runsOf([segment], [])[0].segments.length
+}, 9)
+
 const CHAIN = 512
 const chain = (): Schematic => ({ objects: Array.from({ length: CHAIN }, (_, i): PlacedObject => ({ id: `r${i}`, def: "resistor", x: 3 * i * GRID, y: 3 * i * GRID, rotation: 45, props: { ref: `R${i + 1}` } })), wires: [], parts: {}, version: 2 } as Schematic)
 const lattice = time(() => upgraded(chain()), 3)
@@ -179,14 +188,37 @@ const carried: PlacedObject = { id: "carried", def: "crystal", x: 38 * GRID, y: 
 const dragStart = time(() => placementCheck({ objects: [...sheet.objects, carried], routes: [], grid: GRID }, [carried]), 5)
 const firstGestures: number[] = []
 for (let i = 0; i < 6; i++) {
-  const loaded = wiringOf(new WireGraph(), sheet)
-  const fieldIndex = new SpatialIndex(sheet.objects, GRID)
+  const doc = { ...sheet, objects: sheet.objects.map((o) => ({ ...o })) }
+  const loaded = wiringOf(new WireGraph(), doc)
+  const fieldIndex = new FieldState().commit(doc, loaded).index
   const started = performance.now()
-  const drag = new PartDrag(sheet, loaded, { objects: new Set([sheet.objects[0].id]) }, { index: fieldIndex })
+  const drag = new PartDrag(doc, loaded, { objects: new Set([doc.objects[0].id]) }, { index: fieldIndex })
   drag.frame(GRID, GRID)
   if (i > 0) firstGestures.push(performance.now() - started)
 }
 const firstGesture = median(firstGestures)
+const firstAfter = (mode: "undo" | "translation") => {
+  const samples: number[] = []
+  for (let i = 0; i < 6; i++) {
+    const graph = new WireGraph()
+    const state = new FieldState()
+    const original = { ...sheet, objects: sheet.objects.map((o) => ({ ...o })) }
+    let current = original
+    let live = wiringOf(graph, current)
+    state.commit(current, live)
+    current = moved(current, new Map(current.objects.map((o) => [o.id, { x: o.x, y: o.y }])), CELL, CELL, undefined, live)
+    live = wiringOf(graph, current)
+    state.commit(current, live)
+    if (mode === "undo") { current = original; live = wiringOf(graph, current) }
+    const field = state.commit(current, live)
+    const started = performance.now()
+    new PartDrag(current, live, { objects: new Set([current.objects[0].id]) }, { index: field.index }).frame(CELL, CELL)
+    if (i) samples.push(performance.now() - started)
+  }
+  return median(samples)
+}
+const firstAfterUndo = firstAfter("undo")
+const firstAfterTranslation = firstAfter("translation")
 const FENCE = 60
 const FENCED = 40
 const fenced = (): Schematic => ({
@@ -334,6 +366,29 @@ const standWiring = wiringOf(new WireGraph(), stand)
 void standWiring.sheet
 const standIndex = new SpatialIndex(stand.objects, CELL)
 const standPart = stand.objects.find((o) => o.def === "resistor")!
+const standField = new FieldState().commit(stand, standWiring)
+const smallView = { x: standPart.x - CELL, y: standPart.y - CELL, w: 10 * CELL, h: 8 * CELL }
+const queriedField = time(() => { standField.visible(smallView) }, 25)
+const normalisingEmptyLine = time(() => { withSegments(stand, [], [], [{ x: -1000 * CELL, y: -1000 * CELL }]) }, 25)
+const baseMap = new Map(Array.from({ length: 40_000 }, (_, i) => [i, i]))
+let mapsCorrect = true
+const mapSnapshots = time(() => {
+  let current: ReadonlyMap<number, number> = baseMap
+  for (let i = 0; i < 256; i++) current = new OverlayMap(current, new Map([[i % 8, -i]]), new Set())
+  mapsCorrect &&= current.get(39_999) === 39_999 && current.get(7) === -255
+}, 9)
+const [farStand] = stressDocuments([167])
+const farWiring = wiringOf(new WireGraph(), farStand)
+const farField = new FieldState().commit(farStand, farWiring)
+const last = farStand.objects.at(-1)!
+const farView = { x: last.x - 50 * CELL, y: last.y - 40 * CELL, w: 200 * CELL, h: 160 * CELL }
+let query = 0
+const queriedFarField = time(() => { farField.visible({ ...farView, x: farView.x + (++query % 2) }) }, 25)
+const twoTerminal = farStand.objects.find((o) => o.def === "resistor")!
+let spliceUnchanged = true
+const offWireDrops = time(() => {
+  for (let i = 0; i < 20; i++) spliceUnchanged &&= splicedAt(farStand, [twoTerminal.id]) === farStand
+}, 25)
 const carriedPart = { objects: new Set([standPart.id]) }
 const dragBuilt = time(() => new PartDrag(stand, standWiring, carriedPart, { index: standIndex }), 15)
 const dragBuiltAlone = time(() => new PartDrag(stand, standWiring, carriedPart), 15)
@@ -349,16 +404,17 @@ const standFrame = median(standFrames)
 const standLanded = time(() => standDrag.landed(CELL, 2 * CELL), 9)
 const pressed = time(() => new TurnRun(stand, standWiring, carriedPart.objects, standIndex).turned(1), 9)
 const storeGraph = new WireGraph()
+const storeField = new FieldState()
 const secondPresses: number[] = []
 for (let i = 0; i < 7; i++) {
   const live = wiringOf(storeGraph, stand)
-  void live.sheet
+  storeField.commit(stand, live).visible({ x: 0, y: 0, w: 200 * GRID, h: 160 * GRID })
   const run = new TurnRun(stand, live, carriedPart.objects, standIndex)
   const first = run.turned(1)
-  void wiringOf(storeGraph, first.doc).sheet
+  storeField.commit(first.doc, wiringOf(storeGraph, first.doc)).visible({ x: 0, y: 0, w: 200 * GRID, h: 160 * GRID })
   const started = performance.now()
   const next = run.turned(1)
-  void wiringOf(storeGraph, next.doc).sheet
+  storeField.commit(next.doc, wiringOf(storeGraph, next.doc)).visible({ x: 0, y: 0, w: 200 * GRID, h: 160 * GRID })
   secondPresses.push(next.doc === first.doc ? Infinity : performance.now() - started)
 }
 const pressedAgain = median(secondPresses.slice(1))
@@ -397,6 +453,14 @@ check(`a part's drop on ${stand.objects.length} objects`, standLanded, 8)
 check(`a press of R on ${stand.objects.length} objects`, pressed, 7)
 check(`the next press of a run on ${stand.objects.length} objects`, pressedAgain, 10)
 check(`the first drag after loading ${BOARDS} boards`, firstGesture, 20)
+check(`the first drag after undo past the sheet on ${BOARDS} boards`, firstAfterUndo, 20)
+check(`the first drag after translating ${BOARDS} boards`, firstAfterTranslation, 20)
+check(`visible routes queried on ${stand.objects.length} objects`, queriedField, 0.2)
+check(`normalising a touched empty line on ${stand.objects.length} objects`, normalisingEmptyLine, 0.2)
+check("runs derived for 20000 single-segment nets", singleRuns ? singletonRuns : Infinity, 4)
+check("256 local map snapshots with 40000 untouched entries", mapsCorrect ? mapSnapshots : Infinity, 2)
+check(`visible routes queried at the far end of ${farStand.objects.length} objects`, queriedFarField, 0.2)
+check(`20 two-terminal drops away from wiring on ${farStand.objects.length} objects`, spliceUnchanged ? offWireDrops : Infinity, 1.8)
 check(`a drawing's preview on ${stand.objects.length} objects`, previewed, 2)
 check(`a preview over a target pin on ${stand.objects.length} objects, each move after the first`, hoverRouted ? hovering : Infinity, 2)
 console.log(`\n${checked - failed}/${checked} checks passed`)

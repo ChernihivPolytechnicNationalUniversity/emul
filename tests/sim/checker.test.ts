@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { CHECK_KINDS, checked, LEVEL_OF, NO_CONNECT, type CheckKind, type Finding } from "@/schematic/checker"
+import { CHECK_KINDS, checked, type CheckKind, type Finding } from "@/schematic/checker"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, type Point } from "@/schematic/geometry"
-import { placedFields, withFieldMoved } from "@/schematic/fields"
-import { junctionsOf, pinPartition, WireGraph } from "@/schematic/wires/graph"
+import { placedFields, withFieldAt, withFieldMoved } from "@/schematic/fields"
+import { CATALOGUE } from "@/schematic/catalogue.gen"
+import { getDef } from "@/schematic/registry"
+import { WireGraph } from "@/schematic/wires/graph"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import { inNormalForm, wiringOf } from "@/schematic/wire-edits"
 import type { WireSegment } from "@/schematic/wires/segment"
@@ -12,7 +14,6 @@ const c = (v: number) => v * GRID
 const at = (x: number, y: number): Point => ({ x: c(x), y: c(y) })
 const part = (id: string, def: string, x: number, y: number, extra: Partial<PlacedObject> = {}): PlacedObject => ({ id, def, x: c(x), y: c(y), props: { ref: id }, ...extra })
 const resistor = (id: string, x: number, y: number, extra: Partial<PlacedObject> = {}) => part(id, "resistor", x, y, extra)
-const noConnect = (id: string, p: Point): PlacedObject => ({ id, def: NO_CONNECT, x: p.x - GRID, y: p.y - GRID })
 let serial = 0
 const seg = (a: Point, b: Point): WireSegment => ({ id: `s${++serial}`, a, b })
 const docOf = (objects: PlacedObject[], wires: WireSegment[] = []): Schematic => inNormalForm({ objects, wires, parts: {} })
@@ -20,8 +21,8 @@ const of = (findings: readonly Finding[], kind: CheckKind) => findings.filter((f
 const points = (findings: readonly Finding[]) => findings.map((f) => ({ x: f.at.x / GRID, y: f.at.y / GRID })).sort((a, b) => a.x - b.x || a.y - b.y)
 
 describe("the checker: a light ERC that never blocks (design.md §6.8)", () => {
-  it("checks exactly the design's list: dangling ends, unconnected pins, four-way connections, a wire through a body, a field over a wire or a body, two fields overlapping (§6.8), parallel runs closer than one cell (§5.4); two ends of different nets on one point cannot happen (N5) and is no check", () => {
-    expect(CHECK_KINDS).toEqual(["dangling-end", "unconnected-pin", "four-way", "wire-through-body", "field-on-wire", "field-on-body", "fields-overlap", "parallel-too-close"])
+  it("checks exactly the design's list: dangling ends, unconnected pins, a wire through a body, a field over a wire or a body, two fields overlapping (§6.8), parallel runs closer than one cell (§5.4); four conductors at a point are no check (the user, 2026-11-06), and two ends of different nets on one point cannot happen (N5)", () => {
+    expect(CHECK_KINDS).toEqual(["dangling-end", "unconnected-pin", "wire-through-body", "field-on-wire", "field-on-body", "fields-overlap", "parallel-too-close"])
   })
 
   it("gives the same findings from the store's kept wiring as from a fresh one", () => {
@@ -56,20 +57,6 @@ describe("dangling wire ends (design.md §6.8, §3.3; Altium Unconnected Wire, K
     expect(of(checked(doc), "dangling-end")).toEqual([])
   })
 
-  it("a no-connect mark on the end says the opening is meant and silences it (KiCad no-connect flag; Xpedition's no-connect symbol on a dangling end)", () => {
-    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 0, 4), noConnect("N1", at(8, 1))], [seg(at(4, 1), at(8, 1)), seg(at(0, 1), at(0, 5))])
-    expect(of(checked(doc), "dangling-end")).toEqual([])
-  })
-
-  it("a no-connect mark silences only its own point: of two open ends the other stays, and a mark half a cell off silences neither", () => {
-    const wires = [seg(at(4, 1), at(8, 1)), seg(at(0, 1), at(0, 5)), seg(at(4, 5), at(8, 5))]
-    const parts = [resistor("R1", 0, 0), resistor("R2", 0, 4)]
-    expect.soft(points(of(checked(docOf([...parts, noConnect("N1", at(8, 1))], wires)), "dangling-end")), "the other end").toEqual([{ x: 8, y: 5 }])
-    expect.soft(points(of(checked(docOf([...parts, noConnect("N1", at(8.5, 1))], wires)), "dangling-end")), "half a cell off").toEqual([
-      { x: 8, y: 1 },
-      { x: 8, y: 5 },
-    ])
-  })
 })
 
 describe("unconnected pins of parts that have a model (design.md §6.8; KiCad pin-not-connected ERC)", () => {
@@ -91,21 +78,6 @@ describe("unconnected pins of parts that have a model (design.md §6.8; KiCad pi
     ])
   })
 
-  it("a no-connect mark on a pin silences it (KiCad no-connect flag)", () => {
-    const found = of(checked(docOf([resistor("R1", 0, 0), noConnect("N1", at(0, 1))])), "unconnected-pin")
-    expect(points(found)).toEqual([{ x: 4, y: 1 }])
-  })
-
-  it("a no-connect mark is electrically nothing: on a pin with three wires it changes no net and no dot, the four-way finding stays, and the mark itself is no unconnected part", () => {
-    const wires = [seg(at(4, 1), at(8, 1)), seg(at(4, 1), at(4, 5)), seg(at(4, 1), at(4, -3))]
-    const unmarked = docOf([resistor("R1", 0, 0)], wires)
-    const marked = docOf([resistor("R1", 0, 0), noConnect("N1", at(4, 1))], wires)
-    expect.soft(pinPartition(wiringOf(new WireGraph(), marked).view), "the nets").toEqual(pinPartition(wiringOf(new WireGraph(), unmarked).view))
-    expect.soft(junctionsOf(wiringOf(new WireGraph(), marked).view), "the dots").toEqual(junctionsOf(wiringOf(new WireGraph(), unmarked).view))
-    expect.soft(points(of(checked(marked), "four-way")), "still four conductors there").toEqual([{ x: 4, y: 1 }])
-    expect.soft(checked(marked).filter((f) => f.objects.includes("N1")), "nothing about the mark").toEqual([])
-  })
-
   it("a part with no model is not checked: a crystal is drawn for the board's clock, not simulated", () => {
     expect(of(checked(docOf([part("Y1", "crystal", 0, 0)])), "unconnected-pin")).toEqual([])
   })
@@ -118,32 +90,68 @@ describe("unconnected pins of parts that have a model (design.md §6.8; KiCad pi
     expect(of(checked(docOf([part("U1", "stm32f746ig", 0, 0)])), "unconnected-pin")).toEqual([])
   })
 
-  it("a chip is not a board: a 74HC595 on its own has all sixteen pins unconnected", () => {
-    expect(of(checked(docOf([part("U1", "hc595", 0, 0)])), "unconnected-pin")).toHaveLength(16)
+  it("a part with more than three pins is not checked: an IC or a module leaves pins free by design (the user, 2026-11-06)", () => {
+    for (const def of ["hc595", "opamp-lm358", "ne555", "lcd-1602", "oled-ssd1306-i2c", "ws2812b", "rgb-led", "tp4056"]) {
+      expect.soft(of(checked(docOf([part("U1", def, 0, 0)])), "unconnected-pin"), def).toEqual([])
+    }
+  })
+
+  it("a part with at most three pins is checked: none of them is spare", () => {
+    for (const [def, pins] of [["npn", 3], ["nmos", 3], ["potentiometer", 3], ["ncp1117", 3], ["diode", 2], ["led", 2]] as const) {
+      expect.soft(of(checked(docOf([part("U1", def, 0, 0)])), "unconnected-pin"), def).toHaveLength(pins)
+    }
   })
 })
 
-describe("four-way connections (design.md §6.8; junctions.md 13, 14; KiCad four_way_junction ERC, which counts pins; Altium Convert Cross-Junctions)", () => {
+describe("nothing on the field marks a finding, and nothing silences one: the user dropped the rings and the no-connect mark (2026-11-06)", () => {
+  it("there is no no-connect part: not in the library, not in the catalogue", () => {
+    expect.soft(getDef("no-connect"), "the definition").toBeUndefined()
+    expect.soft(CATALOGUE.filter((c) => c.id === "no-connect"), "the catalogue").toEqual([])
+  })
+})
+
+describe("four conductors at a point are no finding: the user dropped the check (2026-11-06; KiCad's four_way_junction ERC is off by default)", () => {
   const hub = at(10, 10)
-  it("four wire ends at one point are one finding there", () => {
+  it("four wire ends at one point: nothing", () => {
     const doc = docOf([], [seg(hub, at(6, 10)), seg(hub, at(14, 10)), seg(hub, at(10, 6)), seg(hub, at(10, 14))])
-    expect(points(of(checked(doc), "four-way"))).toEqual([{ x: 10, y: 10 }])
+    expect(checked(doc).filter((f) => f.at.x === hub.x && f.at.y === hub.y)).toEqual([])
   })
 
-  it("a T is no finding, nor is a crossing with no dot", () => {
-    const t = docOf([], [seg(hub, at(6, 10)), seg(hub, at(14, 10)), seg(hub, at(10, 14))])
-    expect.soft(of(checked(t), "four-way"), "a T").toEqual([])
-    const cross = docOf([], [seg(at(6, 10), at(14, 10)), seg(at(10, 6), at(10, 14))])
-    expect.soft(of(checked(cross), "four-way"), "a crossing").toEqual([])
-  })
-
-  it("a pin with three wires on it is four conductors at a point: a finding (junctions.md 14)", () => {
-    const doc = docOf([resistor("R1", 0, 0)], [seg(at(4, 1), at(8, 1)), seg(at(4, 1), at(4, 5)), seg(at(4, 1), at(4, -3))])
-    expect(points(of(checked(doc), "four-way"))).toEqual([{ x: 4, y: 1 }])
+  it("a pin with three wires on it: nothing at the pin", () => {
+    const pin = at(4, 1)
+    const doc = docOf([resistor("R1", 0, 0)], [seg(pin, at(8, 1)), seg(pin, at(4, 5)), seg(pin, at(4, -3))])
+    expect(checked(doc).filter((f) => f.at.x === pin.x && f.at.y === pin.y)).toEqual([])
   })
 })
 
 describe("a wire through a body (design.md §5.1, §6.8; inferred from ГОСТ 2.701-84's clearances, research/standards.md; IEC 61082-1 via a secondary source: connecting lines should not interfere with other symbols)", () => {
+  it("circular bodies catch wires and fields in every quadrant and clear their exterior", () => {
+    for (const def of ["voltmeter", "ammeter"]) for (const dx of [-1, 1]) for (const dy of [-1, 1]) {
+      const meter = part("M1", def, 0, 0, { props: { ref: "", value: "" } })
+      const x = 2 + dx * 0.5
+      const crossing = docOf([meter], [seg(at(x, 1 + dy * 0.5), at(x, 1 + dy * 2))])
+      const clear = docOf([meter], [seg(at(x, 1 + dy * 2), at(x, 1 + dy * 3))])
+      expect.soft(of(checked(crossing), "wire-through-body"), `${def}: wire in quadrant ${dx},${dy}`).toHaveLength(1)
+      expect.soft(of(checked(clear), "wire-through-body"), `${def}: exterior wire ${dx},${dy}`).toEqual([])
+      const label = part("R1", "resistor", 100, 100, { props: { ref: "I", value: "" } })
+      for (const radius of [0.5, 2]) {
+        const moved = withFieldAt(label, "ref", at(2 + dx * radius, 1 + dy * radius), GRID, getDef("resistor")!)
+        expect.soft(of(checked(docOf([meter, moved])), "field-on-body").filter((f) => f.objects.includes("R1")), `${def}: field radius ${radius}, quadrant ${dx},${dy}`).toHaveLength(radius === 0.5 ? 1 : 0)
+      }
+    }
+  })
+
+  it("an interior pin exempts only the exit towards its outward side, at either segment end", () => {
+    for (const reverse of [false, true]) for (const x of [0, 8]) {
+      const endpoints = [at(5, 3), at(x, 3)]
+      if (reverse) endpoints.reverse()
+      const doc = docOf([part("U1", "opamp-generic", 0, 0)], [seg(endpoints[0], endpoints[1])])
+      expect.soft(of(checked(doc), "wire-through-body"), `OUT towards x=${x}, reversed ${reverse}`).toHaveLength(x === 0 ? 1 : 0)
+    }
+    const supply = docOf([part("U1", "opamp-generic", 0, 0)], [seg(at(3, 2), at(3, -2)), seg(at(3, 4), at(3, 8))])
+    expect.soft(of(checked(supply), "wire-through-body"), "interior supply pins exit outwards").toEqual([])
+  })
+
   it("a wire across a resistor's body that meets none of its pins is a finding naming the part and the wire", () => {
     const wire = seg(at(2, -3), at(2, 5))
     const doc = docOf([resistor("R1", 0, 0)], [wire])
@@ -172,6 +180,41 @@ describe("a wire through a body (design.md §5.1, §6.8; inferred from ГОСТ 
 })
 
 describe("fields over wires, bodies and each other (design.md §5.2, §6.8: a finding, never a refusal)", () => {
+  it("a numeric value collides with a wire inside its independently calculated box and clears one outside", () => {
+    const label = withFieldAt(resistor("R1", 100, 100, { props: { ref: "", value: "100000" } }), "value", at(12, 12), GRID, getDef("resistor")!)
+    const box = { x: c(11.442), y: c(11.85), w: c(1.116), h: c(0.3) }
+    const actual = placedFields(label, GRID).find((f) => f.key === "value")!.box
+    for (const key of ["x", "y", "w", "h"] as const) expect.soft(actual[key], `the fixed numeric box's ${key}`).toBeNear(box[key], 1e-9)
+    for (const x of [12.5, 13]) {
+      const wire = seg(at(x, 11), at(x, 13))
+      const intersects = wire.a.x > box.x && wire.a.x < box.x + box.w && wire.a.y < box.y && wire.b.y > box.y + box.h
+      expect.soft(intersects, `fixed-box control at x=${x}`).toBe(x === 12.5)
+      expect.soft(of(checked(docOf([label], [wire])), "field-on-wire").map((f) => f.fields), `numeric collision at x=${x}`).toEqual(x === 12.5 ? [["R1:value"]] : [])
+    }
+  })
+
+  it("a field over several bodies names its owners in canonical order", () => {
+    const label = withFieldAt(resistor("label", 100, 100, { props: { ref: "I", value: "" } }), "ref", at(1.5, 1), GRID, getDef("resistor")!)
+    const doc = docOf([resistor("Z", -1, 0), resistor("A", 0, 0), label])
+    const finding = of(checked(doc), "field-on-body").find((f) => f.fields?.includes("label:ref"))!
+    expect.soft(finding.text, "body names follow object identity").toBe("I's designator lies on A, Z")
+    expect.soft(finding.objects, "membership uses the same order").toEqual(["A", "Z", "label"])
+  })
+
+  it("fields over a board's housing or socket are findings while exterior fields and wires over the board remain clear", () => {
+    const board = part("B", "open746i-c", 0, 0)
+    const label = resistor("R1", 100, 100, { props: { ref: "I", value: "" } })
+    const socket = objectPins(board, GRID)[0].point
+    for (const target of [at(36.5, 26.5), socket]) {
+      const moved = withFieldAt(label, "ref", target, GRID, getDef("resistor")!)
+      expect.soft(of(checked(docOf([board, moved])), "field-on-body").map((f) => f.objects), `field at ${target.x},${target.y}`).toEqual([["B", "R1"]])
+    }
+    const clear = docOf([board, label], [seg(at(-4, 20), at(80, 20))])
+    expect.soft(of(checked(clear), "field-on-body"), "exterior label").toEqual([])
+    expect.soft(of(checked(clear), "wire-through-body"), "the board jumper exception").toEqual([])
+    expect.soft(of(checked(clear), "unconnected-pin").filter((f) => f.objects.includes("B")), "unused sockets").toEqual([])
+  })
+
   it("a wire through a part's designator is a finding naming the field's part; clear of it, none", () => {
     const r1 = resistor("R1", 0, 0, { props: { ref: "R1", value: "" } })
     const ref = placedFields(r1, GRID).find((f) => f.key === "ref")!
@@ -196,13 +239,14 @@ describe("fields over wires, bodies and each other (design.md §5.2, §6.8: a fi
     const f = Object.fromEntries(placedFields(r1, GRID).map((x) => [x.key, x]))
     const onto = withFieldMoved(r1, "ref", f.value.at.x - f.ref.at.x, f.value.at.y - f.ref.at.y, GRID)
     expect.soft(of(checked(docOf([onto])), "fields-overlap"), "one finding").toHaveLength(1)
+    expect.soft(of(checked(docOf([onto])), "fields-overlap")[0].fields, "both field identities, in canonical order").toEqual(["R1:ref", "R1:value"])
     expect.soft(of(checked(docOf([r1])), "fields-overlap"), "autoplaced: none").toEqual([])
   })
 
   it("another part's body under a field is a finding; apart, none", () => {
     const doc = docOf([resistor("R1", 0, 0, { props: { ref: "R1", value: "1 kΩ" } }), resistor("R2", 0, -1, { props: { ref: "R2", value: "" } })])
     const onR2 = of(checked(doc), "field-on-body").filter((f) => f.objects.includes("R1"))
-    expect.soft(onR2.map((f) => f.text), "R1's value over R2's body: one finding for that field (its designator above clears R2's body)").toEqual(["R1's value lies on R2"])
+    expect.soft(onR2.map((f) => f.text).sort(), "both of R1's fields, hugging its body, lie over R2's body one row up: one finding for each field").toEqual(["R1's designator lies on R2", "R1's value lies on R2"])
     const apart = docOf([resistor("R1", 0, 0, { props: { ref: "R1", value: "1 kΩ" } }), resistor("R2", 0, -4, { props: { ref: "R2", value: "" } })])
     expect.soft(of(checked(apart), "field-on-body"), "four rows apart").toEqual([])
   })
@@ -234,15 +278,11 @@ describe("parallel runs closer than one cell (design.md §5.4; ГОСТ 2.701-84
   })
 })
 
-describe("every example is clean: no warning and no note but a four-way point, which ГОСТ allows and the bridge keeps (plan.md acceptance 5; the user, design.md §13.18, §13.21)", () => {
+describe("every example is clean: no warning and no note (plan.md acceptance 5; the user, design.md §13.21)", () => {
   for (const example of examples) {
     it(example.id, () => {
-      const found = checked(example.build(GRID)).filter((f) => f.kind !== "four-way")
+      const found = checked(example.build(GRID))
       expect(found.map((f) => `${f.kind} at (${f.at.x / GRID}, ${f.at.y / GRID}): ${f.text}`)).toEqual([])
     })
   }
-
-  it("a four-way point is a note, never a warning (the user, design.md §13.21)", () => {
-    expect(LEVEL_OF["four-way"]).toBe("note")
-  })
 })

@@ -1,9 +1,10 @@
 import * as React from "react"
+import { BODY_MASK } from "./body-mask"
 import { cn } from "@/lib/utils"
 import { toPath, trimRouteEnds, type Point, type RoutedWire } from "@/schematic/geometry"
 import { runPath, towards, type PinCorner } from "@/schematic/wire-look"
 import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
-import { CASING_PX, casingTrim, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_HIT_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
+import { CASING_PX, casingTrim, casingWidth, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_HIT_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
 import { wireMarks } from "./wire-marks"
 import type { WireFlow } from "./wire-flow"
 
@@ -18,8 +19,6 @@ type WireLayerProps = {
   scale: number
   selected: ReadonlySet<string>
   hoveredNet: string | null
-  lit?: ReadonlySet<string>
-  flash?: ReadonlySet<string>
   colorOf: (wireId: string) => WireColorKey
   netOfWire: (wireId: string) => string | undefined
   dots: readonly Point[]
@@ -45,8 +44,6 @@ export const WireLayer = React.memo(function WireLayer({
   scale,
   selected,
   hoveredNet,
-  lit,
-  flash,
   colorOf,
   netOfWire,
   dots,
@@ -96,27 +93,25 @@ export const WireLayer = React.memo(function WireLayer({
         <g
           key={net}
           data-net={net}
-          data-flash={flash?.has(net) ? "" : undefined}
-          className={cn(lit?.size ? !lit.has(net) && "opacity-25" : hoveredNet !== null && net !== hoveredNet && "opacity-25")}
+          className={cn(hoveredNet !== null && net !== hoveredNet && "opacity-25")}
           style={{ transition: "opacity 120ms" }}
         >
-          {wires.map(
-            (route) =>
-              !selected.has(route.id) && (
-                <path
-                  key={route.id}
-                  data-wire={route.id}
-                  data-casing=""
-                  d={casingOf(route.id)}
-                  fill="none"
-                  stroke="var(--background)"
-                  strokeWidth={WIRE_PX + CASING_PX}
-                  strokeLinejoin="round"
-                  strokeLinecap="butt"
-                  vectorEffect="non-scaling-stroke"
-                />
-              ),
-          )}
+          <g mask={BODY_MASK}>
+          {wires.map((route) => (
+            <path
+              key={route.id}
+              data-wire={route.id}
+              data-casing=""
+              d={casingOf(route.id)}
+              fill="none"
+              stroke={selected.has(route.id) ? "var(--selection-tint)" : "var(--background)"}
+              strokeWidth={casingWidth(widthOf(route.id))}
+              strokeLinejoin="round"
+              strokeLinecap="butt"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+          </g>
           {wires.map((route) => {
             const d = pathOf(route.id)
             const width = widthOf(route.id)
@@ -152,7 +147,7 @@ export const WireLayer = React.memo(function WireLayer({
                   stroke="transparent"
                   strokeWidth={WIRE_HIT_PX}
                   vectorEffect="non-scaling-stroke"
-                  className="pointer-events-auto cursor-pointer"
+                  className="pointer-events-auto cursor-(--wire-cursor)"
                   onPointerDown={(e) => onWirePointerDown(e, route.id)}
                   onPointerEnter={() => onWirePointerEnter(route.id)}
                   onPointerLeave={() => onWirePointerLeave(route.id)}
@@ -165,7 +160,6 @@ export const WireLayer = React.memo(function WireLayer({
       <g data-slot="wire-marks" pointerEvents="none">
         {marks.dots.map(({ at, color }) => (
           <g key={`dot:${at.x},${at.y}`} data-junction={`${at.x},${at.y}`}>
-            <circle cx={at.x} cy={at.y} r={dotR + CASING_PX * px} fill="var(--background)" />
             {color ? <circle cx={at.x} cy={at.y} r={dotR} fill={wireColorVar(color)} /> : <circle cx={at.x} cy={at.y} r={dotR} className="fill-foreground" />}
           </g>
         ))}
@@ -176,6 +170,35 @@ export const WireLayer = React.memo(function WireLayer({
     </svg>
   )
 })
+
+export type ContinueCue = { at: Point; along: Point | null; color: WireColorKey }
+
+const CUE_STUB_PX = 14
+
+const outward = (at: Point, along: Point, by: number): Point => ({ x: at.x + along.x * by, y: at.y + along.y * by })
+
+export function OpenEndCue({ cue, reach, grid, scale }: { cue: ContinueCue | null; reach: number; grid: number; scale: number }) {
+  if (!cue) return null
+  const { at, along, color } = cue
+  const stroke = wireColorVar(color)
+  const stub = along && Math.max(grid, CUE_STUB_PX / scale)
+  return (
+    <svg data-slot="open-end-cue" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
+      {along && stub && (
+        <path
+          d={toPath([outward(at, along, reach), outward(at, along, reach + stub)])}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={WIRE_PX}
+          strokeDasharray={`${WIRE_PX * 3} ${WIRE_PX * 2.5}`}
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+      <circle data-continues={`${at.x},${at.y}`} cx={at.x} cy={at.y} r={reach} fill="none" stroke={stroke} strokeWidth={WIRE_PX} vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
 
 type PendingPart = "route" | "marks"
 
@@ -222,7 +245,7 @@ function Pending({ pending, grid, radius, handleR, part }: { pending: PendingLoo
   }
   return (
     <g pointerEvents="none">
-      <path d={toPath(trimRouteEnds([...pts], casingTrim(grid)), radius)} fill="none" stroke="var(--background)" strokeWidth={WIRE_PX + CASING_PX} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+      <path mask={BODY_MASK} d={toPath(trimRouteEnds([...pts], casingTrim(grid)), radius)} fill="none" stroke="var(--background)" strokeWidth={casingWidth(WIRE_PX)} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
       <path
         d={d}
         fill="none"

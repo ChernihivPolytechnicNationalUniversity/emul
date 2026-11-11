@@ -10,6 +10,8 @@ import { PartDrag } from "@/schematic/rubber-band"
 import { inNormalForm, wiringOf } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
 import { boardDocuments } from "../../scripts/lib/stress"
+import { bodyAndLeads } from "@/schematic/body"
+import type { BodyShape } from "@/schematic/types"
 
 const c = (v: number) => v * GRID
 const part = (id: string, def: string, x: number, y: number): PlacedObject => ({ id, def, x: c(x), y: c(y) })
@@ -19,6 +21,32 @@ function scene(objects: PlacedObject[], wires: readonly (Wire | WireSegment)[] =
 }
 
 describe("a part takes the room it draws, not its whole box", () => {
+  it("rectangles and placeholders contribute all four corners to their body hull", () => {
+    for (const type of ["rect", "soon"] as const) {
+      const body: BodyShape[] = [type === "rect" ? { type, x: 1, y: 2, w: 3, h: 4 } : { type, x: 1, y: 2, w: 3, h: 4, label: "pending", body: [] }]
+      const def = { ...getDef("resistor")!, pins: [], parts: [], body }
+      expect.soft(bodyAndLeads(def).hull, `${type}: the full rectangle`).toEqual([{ x: 1, y: 2 }, { x: 4, y: 2 }, { x: 4, y: 6 }, { x: 1, y: 6 }])
+    }
+  })
+
+  it("curved body hulls follow their perimeter within 0.005 cells rather than their control boxes", () => {
+    const paths: [string, number, number, number, number][] = [
+      ["M0 0 Q4 4 8 0", 0, 8, 0, 2],
+      ["M0 0 q2 4 4 0 t4 0", 0, 8, -2, 2],
+      ["M0 0 C0 4 4 4 4 0", 0, 4, 0, 3],
+      ["M0 0 c0 4 4 4 4 0 s4 -4 4 0", 0, 8, -3, 3],
+      ["M0 0 A2 1 0 0 1 4 0", 0, 4, -1, 0],
+      ["M0 0 a2 1 0 0 0 4 0", 0, 4, 0, 1],
+    ]
+    for (const [d, minX, maxX, minY, maxY] of paths) {
+      const body: BodyShape[] = [{ type: "path", d }]
+      const hull = bodyAndLeads({ ...getDef("resistor")!, pins: [], parts: [], body }).hull
+      for (const [got, want] of [[Math.min(...hull.map((p) => p.x)), minX], [Math.max(...hull.map((p) => p.x)), maxX], [Math.min(...hull.map((p) => p.y)), minY], [Math.max(...hull.map((p) => p.y)), maxY]]) {
+        expect.soft(got, d).toBeNear(want, 0.005)
+      }
+    }
+  })
+
   it("a resistor is as tall as its body, not its two-cell box", () => {
     const b = bodyBounds(getDef("resistor")!)
     expect(b.w).toBeCloseTo(4)

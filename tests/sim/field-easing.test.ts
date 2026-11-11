@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { dotGridStyle } from "@/components/field/dot-grid"
+import { dotGridPosition, dotGridStyle } from "@/components/field/dot-grid"
 import { easeFactor, progress } from "@/components/field/easing"
 import { followTarget, type Viewport } from "@/components/field/use-viewport"
 import { WireFlow } from "@/components/field/wire-flow"
@@ -193,5 +193,11 @@ describe("the dot grid gives up on a scale it cannot draw instead of looping for
     const style = dotGridStyle(GRID, 1)
     expect(style.backgroundImage).toContain("radial-gradient")
     expect(style.backgroundSize).toBe("20px 20px")
+  })
+  it("puts every dot on a lattice point, where pins and wire ends land, not in the middle of a cell (the user, 2026-11-11: «по каким-то не видимым клеткам»)", () => {
+    expect.soft(dotGridPosition(dotGridStyle(GRID, 1), 7, 3), "a tile's dot is at its centre, so the tile starts half a cell back").toBe("-3px -7px")
+    const coarse = dotGridStyle(GRID, 0.3)
+    expect.soft(coarse.backgroundSize, "set up: two layers, 24 and 12 px").toBe("24px 24px, 12px 12px")
+    expect.soft(dotGridPosition(coarse, 100, 50), "each layer half its own step back").toBe("88px 38px, 94px 44px")
   })
 })

@@ -592,6 +592,7 @@ export class Engine {
     this.z = new Float64Array(this.size)
     this.x = new Float64Array(this.size)
     this.lu = new SparseLU(this.size)
+    this.reserveSwitchedCells()
 
     let minFreq = Infinity
     let linear = true
@@ -951,6 +952,16 @@ export class Engine {
     if (a !== GROUND && b !== GROUND) {
       A[this.cell(a, b)] -= val
       A[this.cell(b, a)] -= val
+    }
+  }
+
+  private reserveSwitchedCells() {
+    for (const el of this.net.elements) {
+      if (el.kind === "SW") this.addG(el.a, el.b, 0)
+      else if (el.kind === "GPIO") {
+        if (el.vddNet !== undefined) this.addG(el.node, el.vddNet, 0)
+        this.addG(el.node, el.gndNet ?? GROUND, 0)
+      }
     }
   }
 
@@ -1387,6 +1398,7 @@ export class Engine {
       const G = (this.tailA ??= new Float64Array(size * size))
       const lu = (this.tailLu ??= new SparseLU(size))
       G.set(this.A)
+      lu.adopt(this.lu)
       lu.register(G)
       for (let i = 0; i < elements.length; i++) {
         const el = elements[i]
@@ -3749,6 +3761,10 @@ export class Engine {
 
   get factorizationCount(): number {
     return this.factorizations
+  }
+
+  get orderingCount(): number {
+    return this.lu.orderings + (this.tailLu?.orderings ?? 0)
   }
 
   sourceAt(node: number): { ohms: number; farads: number } | null {

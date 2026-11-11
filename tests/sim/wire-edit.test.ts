@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { GRID, objectPins, objectRect, type Point } from "@/schematic/geometry"
-import { junctionAt, junctionJoins } from "@/schematic/junction-tool"
-import { changeMessage, netChanges, netName, NO_CHANGE } from "@/schematic/net-names"
+import { junctionAt } from "@/schematic/junction-tool"
+import { netChanges, NO_CHANGE } from "../lib/net-changes"
 import type { PlacedObject, Schematic } from "@/schematic/types"
-import { clipNets, pasteLanding, pastedInto } from "@/schematic/use-schematic"
+import { pasteLanding, pastedInto } from "@/schematic/use-schematic"
 import { drawEndAt, drawnTo, flipPosture, isRefusal, laysClear, pointerAt, previewOf, startDrawing, withCorner, withoutCorner, type DrawEnd, type Drawing } from "@/schematic/wire-draw"
 import { clipOf, inNormalForm, placedObject, removed, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { PartDrag } from "@/schematic/rubber-band"
@@ -13,6 +13,9 @@ import { wirePins } from "@/schematic/migrate-wires"
 import { danglingEnds, junctionsOf, pinPartition, WireGraph, wireNets } from "@/schematic/wires/graph"
 import type { WireSegment } from "@/schematic/wires/segment"
 import { geometryOf, normalFormViolations, sortedPoints } from "../lib/wire-reference"
+import { sourceCallback } from "../lib/source-callback"
+import { getDef } from "@/schematic/registry"
+import { snap } from "@/schematic/geometry"
 
 const c = (v: number) => v * GRID
 const at = (x: number, y: number): Point => ({ x: c(x), y: c(y) })
@@ -200,7 +203,7 @@ describe("drawing a wire: connections are made by ends (design.md §6.7; junctio
     expect.soft(isRefusal(drawnTo(doc, wiring, moved, field(at(12, 1)), newId)), "finishing there is refused").toBe(true)
   })
 
-  it("a wire that would pass over another net's pin without ending there is refused; ended on that pin it joins, and the join is shown before the click (junctions.md 10, 12; ГОСТ 2.721-74 item 6 note 3; Altium: a wire across a pin connects it)", () => {
+  it("a wire that would pass over another net's pin without ending there is refused; ended on that pin it joins (junctions.md 10, 12; ГОСТ 2.721-74 item 6 note 3; Altium: a wire across a pin connects it)", () => {
     const doc = docOf(
       [resistor("R2", 0, 0), ground("G1", 3, 2), resistor("R1", 7, 1, 90), supply("V1", 7, -3, "VCC"), resistor("R3", 12, 0)],
       [seg(at(4, 1), at(4, 2)), seg(at(8, -1), at(8, 1))],
@@ -211,11 +214,9 @@ describe("drawing a wire: connections are made by ends (design.md §6.7; junctio
     expect.soft(across.refused?.at, "named where").toEqual(at(8, 1))
     const onPin = previewOf(doc, wiring, pointerAt(d, at(8, 1)), drawEndAt(wiring, at(8, 1)))
     expect.soft(onPin.refused, "ending on R1's pin is allowed").toBeNull()
-    expect.soft(onPin.joins.map((g) => [...g]).sort(), "both nets lit before the click").toEqual([["G1:GND", "R2:2"], ["R1:1", "V1:V"]])
     const after = drawn(doc, at(4, 1), at(8, 1))
     const change = netChanges(wiringFor(doc).circuit.nets, wiringFor(after).circuit.nets)
     expect.soft(change.joined.length, "one join").toBe(1)
-    expect.soft(changeMessage(after.objects, change), "named in the status line").toBe("GND and VCC joined")
   })
 
   it("a wire of another net drawn along the spine is refused (junctions.md 24)", () => {
@@ -243,16 +244,16 @@ describe("drawing a wire: connections are made by ends (design.md §6.7; junctio
     expect.soft(preview.refused, "no wire ends there").not.toBeNull()
   })
 
-  it("two dangling ends of different nets drawn together join, shown before and named after (junctions.md 16)", () => {
+  it("two dangling ends of different nets drawn together join (junctions.md 16)", () => {
     const doc = docOf(
       [resistor("A", 0, 0), ground("G1", 3, 2), resistor("B", 14, 0), supply("V1", 13, -3, "VCC")],
       [seg(at(4, 1), at(4, 2)), seg(at(4, 1), at(6, 1)), seg(at(14, -1), at(14, 1)), seg(at(14, 1), at(10, 1))],
     )
     const { wiring, d } = drawing(doc, at(6, 1))
     const preview = previewOf(doc, wiring, pointerAt(d, at(10, 1)), drawEndAt(wiring, at(10, 1)))
-    expect.soft(preview.joins.length, "both nets lit").toBe(2)
+    expect.soft(preview.refused, "allowed").toBeNull()
     const after = drawn(doc, at(6, 1), at(10, 1))
-    expect.soft(changeMessage(after.objects, netChanges(wiringFor(doc).circuit.nets, wiringFor(after).circuit.nets)), "named").toBe("GND and VCC joined")
+    expect.soft(netChanges(wiringFor(doc).circuit.nets, wiringFor(after).circuit.nets).joined.length, "one join").toBe(1)
   })
 })
 
@@ -264,10 +265,9 @@ describe("the junction tool, the only way to join a crossing (design.md §6.4; O
     )
   }
 
-  it("on a crossing it splits both wires there: four ends, a dot, the two nets one, named before the click (junctions.md 32)", () => {
+  it("on a crossing it splits both wires there: four ends, a dot, the two nets one (junctions.md 32)", () => {
     const doc = crossing()
     const wiring = wiringFor(doc)
-    expect.soft(junctionJoins(wiring, at(5, 5)).map((g) => [...g]).sort(), "both nets named before").toEqual([["A:2", "B:1"], ["C:2", "D:1"]])
     const after = junctionAt(doc, wiring, at(5, 5), newId)
     if ("refused" in after) throw new Error(after.refused)
     expect.soft(after.wires.length, "four ends").toBe(4)
@@ -321,7 +321,7 @@ describe("selecting wires (design.md §6.2)", () => {
 })
 
 describe("deleting wires (design.md §6.5)", () => {
-  it("the segment between two dots deleted: both dots become bends, the net splits in two and the split is named (junctions.md 30)", () => {
+  it("the segment between two dots deleted: both dots become bends, the net splits in two (junctions.md 30)", () => {
     const doc = docOf(
       [resistor("R1", 0, 0), resistor("R2", 2, 4, 90), resistor("R3", 16, 0), resistor("R4", 9, 4, 90)],
       [seg(at(4, 1), at(16, 1)), seg(at(3, 4), at(3, 3)), seg(at(3, 3), at(6, 3)), seg(at(6, 3), at(6, 1)), seg(at(10, 4), at(10, 1))],
@@ -333,7 +333,6 @@ describe("deleting wires (design.md §6.5)", () => {
     expect.soft(junctionsOf(viewOf(after)), "no dot left").toEqual([])
     const change = netChanges(before.circuit.nets, wiringFor(after).circuit.nets)
     expect.soft(change.split.length, "one net split").toBe(1)
-    expect.soft(changeMessage(after.objects, change), "named").toBe("R1.2 and R3.1 split apart")
   })
 
   it("a run deleted takes the whole chain between its pins and branches, and its dot goes with it (design.md §6.5)", () => {
@@ -346,23 +345,14 @@ describe("deleting wires (design.md §6.5)", () => {
   })
 })
 
-describe("merges and splits are always named (design.md §6.7, N5)", () => {
-  it("a net is named GND when it holds a ground, by its rail's label when it holds a supply, else by its first pin", () => {
-    const objects = [resistor("R1", 0, 0), resistor("R2", 6, 0), ground("G1", 0, 6), supply("V1", 6, 6, "+5V")]
-    expect.soft(netName(objects, ["G1:GND", "R1:1"]), "ground").toBe("GND")
-    expect.soft(netName(objects, ["R2:2", "V1:V"]), "rail").toBe("+5V")
-    expect.soft(netName(objects, ["R2:1", "R1:2"]), "first pin by name").toBe("R1.2")
-  })
-
-  it("an edit that joins or splits nothing reports nothing, even when a net was derived again", () => {
+describe("the join oracle the tests read (tests/lib/net-changes.ts)", () => {
+  it("the same partition derived again is no change", () => {
     expect.soft(netChanges([["A:1", "B:1"]], [["A:1", "B:1"]]), "the same groups").toEqual(NO_CHANGE)
-    expect.soft(changeMessage([], NO_CHANGE), "no message").toBeNull()
   })
 
-  it("three nets joined at once are named together, ground first, rails next (design.md §6.7)", () => {
-    const objects = [resistor("R1", 0, 0), resistor("R2", 6, 0), resistor("R3", 12, 0), ground("G1", 0, 6), supply("V1", 6, 6, "VCC")]
+  it("three nets made one are one join of three", () => {
     const change = netChanges([["G1:GND", "R1:1"], ["R2:2", "V1:V"], ["R3:1", "R3:2"]], [["G1:GND", "R1:1", "R2:2", "R3:1", "R3:2", "V1:V"]])
-    expect.soft(changeMessage(objects, change), "one message").toBe("GND, VCC and R3.1 joined")
+    expect.soft(change.joined.map((j) => j.from.length), "one join of three").toEqual([3])
   })
 })
 
@@ -414,15 +404,12 @@ describe("found by phase 4's review (Codex)", () => {
 })
 
 describe("found by phase 4's review (Claude)", () => {
-  it("a pasted net whose end lands on an existing wire is a join, and it is named like any other (design.md §6.7; Claude 3)", () => {
+  it("a pasted net whose end lands on an existing wire is a join (design.md §6.7; Claude 3)", () => {
     const doc = docOf([resistor("R8", 0, 4), resistor("R9", 8, 4)], [seg(at(4, 5), at(8, 5))])
     const clip = { objects: [resistor("R1", 0, 0), resistor("R2", 8, 0)], wires: [seg(at(4, 1), at(8, 1)), seg(at(6, 1), at(6, 4))], parts: {} }
     const idOf = (old: string) => `${old}'`
     const after = pastedInto(doc, clip, 0, c(1), idOf, newId)
-    const before = [...wiringFor(doc).circuit.nets, ...clipNets(clip, idOf)]
-    const change = netChanges(before, wiringFor(after).circuit.nets)
-    expect.soft(change.joined.length, "the pasted net and R8–R9 joined, reported").toBe(1)
-    expect.soft(netChanges(wiringFor(doc).circuit.nets, wiringFor(after).circuit.nets).joined, "without the clip's own nets it would go unreported").toEqual([])
+    expect.soft(partition(after).find((g) => g.includes("R8:2")), "the pasted net and R8–R9 one net").toEqual(expect.arrayContaining(["R1':2", "R2':1", "R8:2", "R9:1"]))
   })
 
   it("over a target pin, the completion goes round the target part's own body when the plain L runs through it (design.md §6.1; Claude 7)", () => {
@@ -486,12 +473,12 @@ describe("found by phase 4's review (Claude)", () => {
 })
 
 describe("found by the verification of phase 4's fixes (Codex)", () => {
-  it("a one-part paste whose wire's free end lands on an existing wire is a join, and it is named (design.md §6.7)", () => {
+  it("a one-part paste whose wire's free end lands on an existing wire is a join (design.md §6.7)", () => {
     const doc = docOf([resistor("A", 0, 4), resistor("B", 8, 4)], [seg(at(4, 5), at(8, 5))])
     const clip = { objects: [resistor("P", 0, 0)], wires: [seg(at(4, 1), at(6, 1)), seg(at(6, 1), at(6, 4))], parts: {} }
     const idOf = (old: string) => `copy${old}`
     const after = pastedInto(doc, clip, 0, c(1), idOf, newId)
-    expect.soft(netChanges([...wiringFor(doc).circuit.nets, ...clipNets(clip, idOf)], wiringFor(after).circuit.nets).joined.length, "reported").toBe(1)
+    expect.soft(partition(after).find((g) => g.includes("A:2")), "the pasted P on A–B's net").toEqual(expect.arrayContaining(["A:2", "B:1", "copyP:2"]))
   })
 
   it("Backspace after a flipped posture from a pin restores both the flip and the axis (design.md §6.1)", () => {
@@ -521,13 +508,6 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
     ])
     expect.soft(junctionsOf(viewOf(landed.doc)), "a pin and one end: no dot").toEqual([])
     expect.soft(normalFormViolations(landed.doc.wires, wirePins(landed.doc.objects)), "normal form").toEqual([])
-  })
-
-  it("a splice is named as what it is, a part put in series, not as a net split apart (design.md §6.7: every merge and split is named; findings 5.4)", () => {
-    const doc = line()
-    const landed = dropped(doc, "R3", 0, -4)
-    const change = netChanges(wiringFor(doc).circuit.nets, wiringFor(landed.doc).circuit.nets)
-    expect(changeMessage(landed.doc.objects, change)).toBe("R3 put in series between R1.2 and R2.1")
   })
 
   it("every two-terminal symbol splices the same way: capacitor, inductor, diode, LED, Zener (design.md §5.3: a two-terminal part)", () => {
@@ -585,6 +565,30 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
     const landed = dropped(line(), "R3", 0, -4, true)
     expect.soft(covers(landed.doc, at(4, 1), at(16, 1)), "the wire still runs from R1 to R2").toBe(true)
     expect.soft(partition(landed.doc), "R3 on the wire at both pins").toEqual([["R1:2", "R2:1", "R3:1", "R3:2"]])
+  })
+
+  it("an armed palette click preserves Alt while the definition loads and still normalises pins", () => {
+    for (const altKey of [true, false]) {
+      let doc = docOf([resistor("R1", 0, 0), resistor("R2", 16, 0)], [seg(at(4, 1), at(16, 1))])
+      const add = sourceCallback<(def: string, center: Point) => PlacedObject>("src/schematic/use-schematic.ts", "add", {
+        getDef, snap, grid: GRID, crypto: { randomUUID: () => "R3" }, placedObject,
+        setDoc: (fn: (d: Schematic) => Schematic) => { doc = fn(doc) },
+        nextRef: () => "R3", setSelectedObjects: () => {}, setSelectedWires: () => {},
+      })
+      let loaded = () => {}
+      const click = sourceCallback<(e: { clientX: number; clientY: number; shiftKey: boolean; altKey: boolean }, def: string) => void>("src/components/field/DotField.tsx", "placeArmed", {
+        toWorld: (x: number, y: number) => ({ x, y }), onArmedChange: () => {},
+        afterDefs: (_ids: string[], fn: () => void) => { loaded = fn },
+        sch: { add, selectObject: () => {} }, placed: () => {}, cannotLoad: () => {},
+      })
+      const event = { clientX: c(8), clientY: c(1), shiftKey: false, altKey }
+      click(event, "resistor")
+      event.altKey = !altKey
+      loaded()
+      expect.soft(doc.wires.reduce((sum, s) => sum + Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y), 0), `Alt ${altKey}: continuous or spliced length`).toBeNear(c(altKey ? 12 : 8), 1e-6)
+      expect.soft(normalFormViolations(doc.wires, wirePins(doc.objects)), `Alt ${altKey}: split at every pin`).toEqual([])
+      expect.soft(partition(doc), `Alt ${altKey}: the intended connectivity`).toEqual(altKey ? [["R1:2", "R2:1", "R3:1", "R3:2"]] : [["R1:2", "R3:1"], ["R2:1", "R3:2"]])
+    }
   })
 
   it("with one pin on the wire the part just connects there: the wire is split at the pin, a dot, nothing cut (design.md §5.3; junctions.md 25)", () => {

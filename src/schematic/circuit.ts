@@ -2,7 +2,7 @@ import { wirePins } from "./migrate-wires"
 import { withLibrary } from "./registry"
 import type { HdlModule, PlacedObject, Point, Schematic } from "./types"
 import { pinPartition, wireNets } from "./wires/graph"
-import { pointKey, samePoint, type WirePin, type WireSegment } from "./wires/segment"
+import { exactPointCode, type PointCode, samePoint, type WirePin, type WireSegment } from "./wires/segment"
 
 export type Run = { id: string; segments: readonly WireSegment[]; points: readonly Point[] }
 
@@ -17,17 +17,23 @@ export const isCircuit = (doc: Schematic | Circuit): doc is Circuit => "nets" in
 const other = (s: WireSegment, p: Point) => (samePoint(s.a, p) ? s.b : s.a)
 
 export function runsOf(wires: readonly WireSegment[], pins: readonly WirePin[]): Run[] {
-  const ends = new Map<string, WireSegment[]>()
-  for (const s of wires)
-    for (const p of [s.a, s.b]) {
-      const key = pointKey(p)
-      const list = ends.get(key)
-      if (list) list.push(s)
-      else ends.set(key, [s])
-    }
-  const pinned = new Set(pins.map((p) => pointKey(p.at)))
+  if (wires.length === 1) {
+    const segment = wires[0]
+    const points = [segment.a, segment.b]
+    return [{ id: segment.id, segments: [segment], points: backwards(points) ? points.reverse() : points }]
+  }
+  const ends = new Map<PointCode, WireSegment[]>()
+  const addEnd = (point: Point, segment: WireSegment) => {
+    const key = exactPointCode(point)
+    const list = ends.get(key)
+    if (list) list.push(segment)
+    else ends.set(key, [segment])
+  }
+  for (const s of wires) { addEnd(s.a, s); addEnd(s.b, s) }
+  const pinned = new Set<PointCode>()
+  for (const p of pins) pinned.add(exactPointCode(p.at))
   const through = (p: Point) => {
-    const key = pointKey(p)
+    const key = exactPointCode(p)
     const list = ends.get(key)!
     return list.length === 2 && !pinned.has(key) && list[0].color === list[1].color ? list : null
   }
@@ -74,9 +80,9 @@ function backwards(points: readonly Point[]): boolean {
 }
 
 export function flowVertices(runs: readonly Run[], pins: readonly WirePin[]): { runs: FlowRun[]; pins: (readonly [string, string])[] } {
-  const names = new Map<string, string>()
+  const names = new Map<PointCode, string>()
   const offer = (at: Point, name: string) => {
-    const key = pointKey(at)
+    const key = exactPointCode(at)
     const was = names.get(key)
     if (was === undefined || name < was) names.set(key, name)
   }
@@ -85,7 +91,7 @@ export function flowVertices(runs: readonly Run[], pins: readonly WirePin[]): { 
     offer(r.points[0], `r:${r.id}:a`)
     offer(r.points[r.points.length - 1], `r:${r.id}:b`)
   }
-  const nameAt = (at: Point) => names.get(pointKey(at))!
+  const nameAt = (at: Point) => names.get(exactPointCode(at))!
   return {
     runs: runs.map((r) => ({ id: r.id, a: nameAt(r.points[0]), b: nameAt(r.points[r.points.length - 1]) })),
     pins: pins.map((p) => [p.key, nameAt(p.at)] as const),
@@ -94,15 +100,16 @@ export function flowVertices(runs: readonly Run[], pins: readonly WirePin[]): { 
 
 export function flowGraph(runs: readonly Run[], pins: readonly WirePin[]): FlowGraph {
   const vertices = flowVertices(runs, pins)
-  return { runs: vertices.runs, pins: Object.fromEntries(vertices.pins) }
+  return { runs: vertices.runs.sort((a, b) => a.id.localeCompare(b.id)), pins: Object.fromEntries(vertices.pins) }
 }
 
 export function circuitOf(doc: Pick<Schematic, "objects" | "wires" | "library">): Circuit {
   return withLibrary(doc.library, () => {
     const pins = wirePins(doc.objects)
     const view = wireNets(doc.wires, pins)
-    const ends = new Set(doc.wires.flatMap((s) => [pointKey(s.a), pointKey(s.b)]))
-    const wired = pins.filter((p) => ends.has(pointKey(p.at))).map((p) => p.key).sort()
+    const ends = new Set<PointCode>()
+    for (const s of doc.wires) { ends.add(exactPointCode(s.a)); ends.add(exactPointCode(s.b)) }
+    const wired = pins.filter((p) => ends.has(exactPointCode(p.at))).map((p) => p.key).sort()
     const wiredNets = new Set(doc.wires.map((s) => view.netOfSegment(s.id)))
     const flowPins = pins.filter((p) => wiredNets.has(view.netOfPin(p.key)))
     return { objects: doc.objects, library: doc.library, nets: pinPartition(view), wired, flow: flowGraph(runsOf(doc.wires, pins), flowPins) }

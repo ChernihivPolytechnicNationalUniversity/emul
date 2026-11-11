@@ -92,14 +92,26 @@ function occupiedContour(def: ComponentDef): readonly Rect[] {
   return found
 }
 
+const leadPins = new WeakMap<ComponentDef, readonly number[]>()
+
+function leadPinsOf(def: ComponentDef): readonly number[] {
+  let found = leadPins.get(def)
+  if (!found) {
+    found = bodyAndLeads(def).leads.map(([pin]) => {
+      const id = def.pins.find((p) => Math.abs(p.x - pin.x) < EPSILON && Math.abs(p.y - pin.y) < EPSILON)?.id
+      return def.pins.findIndex((p) => p.id === id)
+    })
+    leadPins.set(def, found)
+  }
+  return found
+}
+
 function placedLeads(object: PlacedObject, def: ComponentDef, grid: number): readonly Lead[] {
   if (!bodyAndLeads(def).leads.length) return []
   const at = frameOf(object, def, grid)
   const pins = objectPins(object, grid)
-  return bodyAndLeads(def).leads.map(([pin, body]) => {
-    const id = def.pins.find((p) => Math.abs(p.x - pin.x) < EPSILON && Math.abs(p.y - pin.y) < EPSILON)?.id
-    return [pins.find((p) => p.pin.id === id)?.point ?? at(pin), at(body)] as const
-  })
+  const owners = leadPinsOf(def)
+  return bodyAndLeads(def).leads.map(([pin, body], i) => [pins[owners[i]]?.point ?? at(pin), at(body)] as const)
 }
 
 export function footprints(object: PlacedObject, grid: number): Footprint | null {
@@ -218,7 +230,6 @@ export type PlacementScene = {
 
 type Placed = { object: PlacedObject; contour: Quad[]; leads: readonly Lead[]; box: Rect }
 
-const NO_CONNECT_MARK = "no-connect"
 
 const isJunction = (object: PlacedObject) => {
   const pins = getDef(object.def)?.pins ?? []
@@ -280,7 +291,7 @@ const shiftedPoint = (p: Point, dx: number, dy: number): Point => ({ x: p.x + dx
 export function placementCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
   const ids = new Set(moving.map((o) => o.id))
   const place = (object: PlacedObject): Placed | null => {
-    if (isJunction(object) || object.def === NO_CONNECT_MARK) return null
+    if (isJunction(object)) return null
     const f = footprints(object, scene.grid)
     if (!f) return null
     const leadBoxes = f.leads.map(([p, q]) => ({ x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) }))

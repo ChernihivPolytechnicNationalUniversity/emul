@@ -3,7 +3,7 @@ import type { Point, Schematic } from "@/schematic/types"
 import { wiringOf } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
 import type { WireSegment } from "@/schematic/wires/segment"
-import { netChanges } from "@/schematic/net-names"
+import { netChanges } from "./net-changes"
 
 const contains = (s: WireSegment, p: Point) =>
   s.a.y === s.b.y ? p.y === s.a.y && p.x >= Math.min(s.a.x, s.b.x) && p.x <= Math.max(s.a.x, s.b.x) : p.x === s.a.x && p.y >= Math.min(s.a.y, s.b.y) && p.y <= Math.max(s.a.y, s.b.y)

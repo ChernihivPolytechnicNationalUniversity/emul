@@ -382,7 +382,7 @@ describe("the stretched leads are drawn to the pins: the symbol on the field, on
 
   it.each(cases)("%s: the selection plate outlines the stretched leads up to the pins", (_, def, o) => {
     const object = placedAs(def.id, o, 7, 5)
-    const html = renderToStaticMarkup(React.createElement(SelectionLayer, { objects: [object], segments: [], selectedObjects: new Set([object.id]), grid: GRID }))
+    const html = renderToStaticMarkup(React.createElement(SelectionLayer, { objects: [object], wires: [], selectedObjects: new Set([object.id]), grid: GRID }))
     const stretch = stretchedLeads(def, o)
     const plate = /<path d="([^"]*)" transform="translate\(([-\d.e]+) ([-\d.e]+)\) rotate\((\d+) ([-\d.e]+) ([-\d.e]+)\)( translate\(([-\d.e]+) 0\) scale\(-1 1\))? scale\((\d+)\)"/.exec(html)
     expect.soft(plate, "a plate").not.toBeNull()

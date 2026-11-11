@@ -1,4 +1,3 @@
-import type { PinGroup } from "./net-names"
 import type { Point, Schematic } from "./types"
 import { withSegments, type NewId, type Wiring } from "./wire-edits"
 import { isHorizontal, samePoint, type WireSegment } from "./wires/segment"
@@ -18,17 +17,6 @@ export function crossingAt(wiring: Wiring, at: Point): readonly [WireSegment, Wi
   const across = through.find(isHorizontal)
   const upright = through.find((s) => !isHorizontal(s))
   return across && upright && through.length === 2 ? [across, upright] : null
-}
-
-const groupOf = (wiring: Wiring, net: string): PinGroup => [...wiring.view.pinsOf(net)].sort()
-
-export function junctionJoins(wiring: Wiring, at: Point): readonly PinGroup[] {
-  const crossing = crossingAt(wiring, at)
-  if (!crossing) return []
-  const [a, b] = crossing.map((s) => wiring.view.netOfSegment(s.id))
-  if (a === undefined || b === undefined || a === b) return []
-  const groups = [groupOf(wiring, a), groupOf(wiring, b)]
-  return groups.every((g) => g.length >= 2) ? groups : []
 }
 
 const halvesOf = (s: WireSegment, at: Point, newId: NewId): WireSegment[] => [

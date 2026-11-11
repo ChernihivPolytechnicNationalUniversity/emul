@@ -83,7 +83,6 @@ const CHECK_FIX: Record<CheckKind, string> = {
   "dangling-end": "Connect it, delete the wire, or press Q on it to mark it as meant to stay open.",
   "unconnected-pin": "Wire it, or press Q on it to mark it as meant to stay open.",
   "wire-through-body": "Lead the wire round the part.",
-  "four-way": "Move one branch along so two T's meet instead.",
   "field-on-wire": "Drag the text clear of the wire.",
   "field-on-body": "Drag the text clear of the part.",
   "fields-overlap": "Drag one of the texts aside.",
@@ -94,7 +93,6 @@ const CHECK_DETAIL: Record<CheckKind, string> = {
   "dangling-end": "A wire end touches no pin and no other wire.",
   "unconnected-pin": "Nothing is wired to this pin.",
   "wire-through-body": "A wire crosses the part's drawn body.",
-  "four-way": "Four conductors join at one dot, which a print can lose: two T's read without doubt.",
   "field-on-wire": "The text lies over a wire.",
   "field-on-body": "The text lies over another part.",
   "fields-overlap": "Two texts lie over each other.",
@@ -102,7 +100,7 @@ const CHECK_DETAIL: Record<CheckKind, string> = {
 }
 
 /** The schematic checker's findings (design.md §6.8), as problems of the field. */
-export const checkKeyOf = (f: Finding) => `check:${f.kind}:${f.at.x},${f.at.y}:${f.objects.join("+")}:${f.segments.join("+")}`
+export const checkKeyOf = (f: Finding) => `check:${f.kind}:${f.at.x},${f.at.y}:${[...f.objects].sort().join("+")}:${[...f.segments].sort().join("+")}:${[...(f.fields ?? [])].sort().join("+")}`
 
 export const isWarning = (f: Finding) => LEVEL_OF[f.kind] === "warning"
 
@@ -110,7 +108,7 @@ export function checkProblems(findings: readonly Finding[]): Problem[] {
   return findings.map((f) => ({
     key: checkKeyOf(f),
     severity: severityOf(f.kind),
-    ...(f.objects.length === 1 && f.kind !== "four-way" && { object: f.objects[0] }),
+    ...(f.objects.length === 1 && { object: f.objects[0] }),
     ...(f.kind === "unconnected-pin" && f.pin && { pin: f.pin }),
     title: f.text,
     detail: CHECK_DETAIL[f.kind],

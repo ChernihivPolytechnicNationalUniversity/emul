@@ -1,4 +1,10 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import * as React from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import { FieldPanel } from "@/components/explorer/FieldPanel"
+import { checked } from "@/schematic/checker"
+import type { Finding } from "@/schematic/checker"
+import { withFieldAt } from "@/schematic/fields"
 import { builder } from "@/schematic/builder"
 import { wiringOf } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
@@ -7,7 +13,41 @@ import { examples } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import type { Damage, PlacedObject, Schematic } from "@/schematic/types"
 import { compareRefs, fieldEntries, searchField, valueNumber } from "@/components/explorer/field-index"
-import { countBySeverity, runtimeProblems, sortProblems, staticProblems, type RuntimeReadout } from "@/components/explorer/problems"
+import { checkKeyOf, checkProblems, countBySeverity, runtimeProblems, sortProblems, staticProblems, type RuntimeReadout } from "@/components/explorer/problems"
+
+const virtualKeys = vi.hoisted(() => ({ current: [] as string[] }))
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count, getItemKey }: { count: number; getItemKey: (i: number) => string }) => {
+    virtualKeys.current = Array.from({ length: count }, (_, i) => getItemKey(i))
+    return { getTotalSize: () => count * 28, getVirtualItems: () => virtualKeys.current.map((key, index) => ({ key, index, start: index * 28 })), measureElement: () => {}, scrollToIndex: () => {} }
+  },
+}))
+
+it("coincident designator and value findings have distinct problem and list identities", () => {
+  const base: PlacedObject = { id: "R1", def: "resistor", x: 0, y: 0, props: { ref: "R1", value: "1k" } }
+  const at = { x: 2 * GRID, y: GRID }
+  const ref = withFieldAt(base, "ref", at, GRID, getDef(base.def)!)
+  const object = withFieldAt(ref, "value", at, GRID, getDef(base.def)!)
+  const findings = checked({ objects: [object], wires: [], parts: {} }).filter((f) => f.kind === "field-on-body")
+  const problems = checkProblems(findings)
+  expect.soft(findings, "two fields on the same body").toHaveLength(2)
+  expect.soft(new Set(problems.map((p) => p.key)).size, "each field has its own problem").toBe(2)
+  const noop = () => {}
+  const html = renderToStaticMarkup(React.createElement(FieldPanel, {
+    open: true, onOpenChange: noop, objects: [object], problems, activeProblem: problems[0].key, onProblem: noop,
+    selected: new Set<string>(), sim: { live: false, damage: {} } as React.ComponentProps<typeof FieldPanel>["sim"], peers: [],
+    query: "", onQueryChange: noop, hits: [], hitIndex: -1, onStep: noop, onHit: noop, onPick: noop, onHover: noop,
+    onLeave: noop, searchRef: React.createRef<HTMLInputElement>(),
+  }))
+  expect.soft(new Set(virtualKeys.current).size, "every virtual row has a distinct key").toBe(virtualKeys.current.length)
+  expect.soft(html.match(/aria-selected="true"/g), "only the chosen field's row is active").toHaveLength(1)
+})
+
+it("finding keys are independent of object, segment and field membership order", () => {
+  const finding: Finding = { kind: "fields-overlap", at: { x: 0, y: 0 }, objects: ["R2", "R1"], segments: ["right", "left"], fields: ["R2:value", "R1:ref"], text: "Overlapping fields" }
+  const reversed = { ...finding, objects: [...finding.objects].reverse(), segments: [...finding.segments].reverse(), fields: [...finding.fields!].reverse() }
+  expect.soft(checkKeyOf(finding), "the same finding despite bucket traversal order").toBe(checkKeyOf(reversed))
+})
 
 // The field explorer: rows for what is on the bench, the search that finds a part or one of its
 // pins, and the problems list, worst first.

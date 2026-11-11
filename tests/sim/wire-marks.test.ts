@@ -124,9 +124,9 @@ describe("junction dots, open ends and turns at pins are drawn wherever the grap
       ;(globalThis as { Path2D?: unknown }).Path2D = realPath
     }
     const count = (name: string) => calls.filter((call) => call.startsWith(`${name}:`)).length
-    expect.soft(count("arc"), "two dots, each on its casing, and one open end").toBe(5)
+    expect.soft(count("arc"), "two dots and one open end, no white ring round a dot (the user, 2026-11-11)").toBe(3)
     expect.soft(count("quadraticCurveTo"), "the corner").toBe(1)
-    expect.soft(count("fill"), "every dot and its casing, and the open end").toBe(5)
+    expect.soft(count("fill"), "every dot and the open end").toBe(3)
   })
 
   it("on the field a lead turned at its pin is hidden a stroke past the pin, so its round cap does not show beside the turn", () => {

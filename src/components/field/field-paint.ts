@@ -6,7 +6,7 @@ import { wireColorVar, type WireColorKey } from "@/schematic/wire-colors"
 import { readFieldPalette } from "./field-palette"
 import { SELECTION_BANDS, selectionOutline } from "./selection-geometry"
 import { PIN_MARK_CELLS, type SymbolRaster } from "./symbol-raster"
-import { CASING_PX, casingTrim, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
+import { CASING_PX, casingTrim, casingWidth, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
 import type { WireMarks } from "./wire-marks"
 
 const wirePaths = new WeakMap<RoutedWire, Path2D>()
@@ -99,11 +99,23 @@ export type FieldPaint = {
   device: number
   theme: string
   colorOf: (wireId: string) => WireColorKey
+  netOf?: (wireId: string) => string | undefined
   raster: SymbolRaster
   selection?: Selection
   marks?: WireMarks
   /** A search is on: these objects are drawn at full strength, the rest of the field faint. */
   lit?: ReadonlySet<string> | null
+}
+
+function byNet(routes: readonly RoutedWire[], netOf: ((wireId: string) => string | undefined) | undefined): RoutedWire[][] {
+  const nets = new Map<string, RoutedWire[]>()
+  for (const route of routes) {
+    const net = netOf?.(route.id) ?? route.id
+    const list = nets.get(net)
+    if (list) list.push(route)
+    else nets.set(net, [route])
+  }
+  return [...nets.values()]
 }
 
 export type MarkPaint = { radius: number; screenPx: (px: number) => number; pixels: number; device: number; grid: number; casing: string; ink: string; colorFor: (key: WireColorKey) => string; colorOf: (wireId: string) => WireColorKey }
@@ -149,10 +161,6 @@ export function paintMarks(context: CanvasRenderingContext2D, routes: readonly R
   }
   const dot = dotRadius(grid, pixels / device)
   for (const { at, color } of marks.dots) {
-    context.fillStyle = casing
-    context.beginPath()
-    context.arc(at.x, at.y, dot + screenPx(CASING_PX), 0, Math.PI * 2)
-    context.fill()
     context.fillStyle = color ? colorFor(color) : ink
     context.beginPath()
     context.arc(at.x, at.y, dot, 0, Math.PI * 2)
@@ -171,7 +179,7 @@ export function paintMarks(context: CanvasRenderingContext2D, routes: readonly R
 /** How strong what a search did not find is drawn. */
 const DIMMED = 0.22
 
-export function paintField(context: CanvasRenderingContext2D, host: Element, { objects, routes, view, grid, pixels, device, theme, colorOf, raster, selection, marks, lit }: FieldPaint) {
+export function paintField(context: CanvasRenderingContext2D, host: Element, { objects, routes, view, grid, pixels, device, theme, colorOf, netOf, raster, selection, marks, lit }: FieldPaint) {
   raster.setPalette(readFieldPalette(host, theme))
   context.save()
   context.setTransform(pixels, 0, 0, pixels, -view.x * pixels, -view.y * pixels)
@@ -193,15 +201,21 @@ export function paintField(context: CanvasRenderingContext2D, host: Element, { o
   context.lineJoin = "round"
   if (selection && (selection.objects.size || selection.wires.size)) paintSelection(context, host, objects, routes, selection, grid, screenPx)
   if (lit) context.globalAlpha = DIMMED
-  context.lineCap = "butt"
-  context.lineWidth = screenPx(WIRE_PX + CASING_PX)
-  context.strokeStyle = casing
-  for (const route of routes) if (!selectedWire(route.id)) context.stroke(casingPath(route, radius, trim))
-  context.lineCap = "round"
-  for (const route of routes) {
-    context.strokeStyle = colorFor(colorOf(route.id))
-    context.lineWidth = screenPx(selectedWire(route.id) ? SELECTED_WIRE_PX : WIRE_PX)
-    context.stroke(wirePath(route, radius))
+  const widthOf = (id: string) => (selectedWire(id) ? SELECTED_WIRE_PX : WIRE_PX)
+  const plate = selection?.wires.size ? cssColor(host, "var(--selection-tint)") : casing
+  for (const net of byNet(routes, netOf)) {
+    context.lineCap = "butt"
+    for (const route of net) {
+      context.strokeStyle = selectedWire(route.id) ? plate : casing
+      context.lineWidth = screenPx(casingWidth(widthOf(route.id)))
+      context.stroke(casingPath(route, radius, trim))
+    }
+    context.lineCap = "round"
+    for (const route of net) {
+      context.strokeStyle = colorFor(colorOf(route.id))
+      context.lineWidth = screenPx(widthOf(route.id))
+      context.stroke(wirePath(route, radius))
+    }
   }
   context.restore()
 

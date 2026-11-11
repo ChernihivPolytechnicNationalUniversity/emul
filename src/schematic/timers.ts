@@ -77,7 +77,6 @@ export const nucleoShiftRegister: Example = {
     const { doc, place, node, gnd, join, j, wire } = sheet(grid)
     const n = place("nucleo-f429zi", 0, 0)
     const u = place("hc595", 38, 13)
-    place("no-connect", 44, 23)
     const supply = node(37, 11)
     const vcc = node(42, 11)
     wire(n, "CN8-7", supply, "J", [

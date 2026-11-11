@@ -24,15 +24,13 @@ import { clipOf, connectPins, moved, inNormalForm, placedObject, recoloured, rem
 import { flipSelection, rotateSelection } from "./orient"
 import { flippedWithWires, TurnRun, type Landed } from "./rubber-band"
 import { drawnTo, isRefusal, type DrawEnd, type Drawing, type DrawRefusal, type Near } from "./wire-draw"
-import type { PinGroup } from "./net-names"
-import { WireGraph as Graph } from "./wires/graph"
 import { junctionAt, type JunctionRefusal } from "./junction-tool"
 import { inRect } from "./wire-select"
 import { withFieldMoved, type FieldKey } from "./fields"
-import { NO_CONNECT } from "./checker"
 import type { SpatialIndex } from "./spatial"
 import { WireGraph } from "./wires/graph"
 import type { WireSegment } from "./wires/segment"
+import { documentPins, editedObjects } from "./pin-index"
 
 /** A board as a file brings it: its project, build options and debugger settings re-checked. */
 function checked(saved: PlacedObject): PlacedObject {
@@ -148,12 +146,6 @@ export function pasteLanding(scene: PlacementScene, saved: Clip, offset: Point, 
   return { clip, at, clear: false }
 }
 
-export function clipNets(clip: Clip, idOf: (old: string) => string): PinGroup[] {
-  const renamed = (key: string) => `${idOf(key.slice(0, key.indexOf(":")))}${key.slice(key.indexOf(":"))}`
-  const view = wiringOf(new Graph(), { objects: clip.objects, wires: clip.wires }).view
-  return view.nets.map((net) => view.pinsOf(net)).filter((pins) => pins.length > 0).map((pins) => pins.map(renamed).sort())
-}
-
 export function pastedInto(doc: Schematic, clip: Clip, dx: number, dy: number, idOf: (old: string) => string, newId: () => string): Schematic {
   const ids = new Map(clip.objects.map((o) => [o.id, idOf(o.id)]))
   const objects = [...doc.objects]
@@ -190,12 +182,6 @@ export function useSchematic(grid: number) {
   const [selectedObjects, setSelectedObjects] = React.useState<ReadonlySet<string>>(() => new Set())
   const [selectedWires, setSelectedWires] = React.useState<ReadonlySet<string>>(() => new Set())
   const edits = history.edits
-  const pastedNets = React.useRef<PinGroup[]>([])
-  const takePastedNets = React.useCallback(() => {
-    const groups = pastedNets.current
-    pastedNets.current = []
-    return groups
-  }, [])
   const turning = React.useRef<{ ids: string; run: TurnRun; doc: Schematic } | null>(null)
 
   const setDoc = React.useCallback(
@@ -247,7 +233,7 @@ export function useSchematic(grid: number) {
 
   /** Place a component centered at a world point, snapped to the grid. */
   const add = React.useCallback(
-    (defId: string, center: Point) => {
+    (defId: string, center: Point, options: { suppressSplice?: boolean } = {}) => {
       const def = getDef(defId)
       if (!def) return
       const obj: PlacedObject = {
@@ -258,7 +244,7 @@ export function useSchematic(grid: number) {
       }
       setDoc((d) => {
         if (def.prefix) obj.props = { ref: nextRef(d.objects, def.prefix) }
-        return placedObject(d, obj)
+        return placedObject(d, obj, undefined, options)
       })
       setSelectedObjects(new Set([obj.id]))
       setSelectedWires(new Set())
@@ -374,15 +360,17 @@ export function useSchematic(grid: number) {
     }))
   }, [setDoc])
 
-  const markNoConnect = React.useCallback((at: Point) => {
-    setDoc((d) => {
-      if (d.objects.some((o) => o.def === NO_CONNECT && o.x === at.x - grid && o.y === at.y - grid)) return d
-      return placedObject(d, { id: crypto.randomUUID(), def: NO_CONNECT, x: at.x - grid, y: at.y - grid })
-    })
-  }, [setDoc, grid])
-
   const moveField = React.useCallback((id: string, key: FieldKey, dx: number, dy: number) => {
-    setDoc((d) => ({ ...d, objects: d.objects.map((o) => (o.id === id ? withFieldMoved(o, key, dx, dy, grid) : o)) }))
+    setDoc((d) => {
+      const index = documentPins(d.objects)
+      const object = index.objects.get(id)
+      if (!object) return d
+      const moved = withFieldMoved(object, key, dx, dy, grid)
+      if (moved === object) return d
+      const objects = d.objects.slice()
+      objects[index.rank(object)] = moved
+      return { ...d, objects: editedObjects(d.objects, objects, [id]) }
+    })
   }, [setDoc, grid])
 
   /**
@@ -545,7 +533,6 @@ export function useSchematic(grid: number) {
   const paste = React.useCallback(
     (clip: Clip, dx: number, dy: number) => {
       const ids = new Map(clip.objects.map((o) => [o.id, crypto.randomUUID()]))
-      pastedNets.current = clipNets(clip, (old) => ids.get(old) ?? old)
       setDoc((d) => pastedInto(d, clip, snap(dx, grid), snap(dy, grid), (old) => ids.get(old)!, () => crypto.randomUUID()))
       setSelectedObjects(new Set(ids.values()))
       setSelectedWires(new Set())
@@ -580,7 +567,6 @@ export function useSchematic(grid: number) {
     commitFrom,
     setProps,
     moveField,
-    markNoConnect,
     setVariant,
     setProject,
     setBuild,
@@ -598,7 +584,6 @@ export function useSchematic(grid: number) {
     canRedo,
     copySelected,
     paste,
-    takePastedNets,
   }
 }
 
