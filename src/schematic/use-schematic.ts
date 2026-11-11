@@ -4,7 +4,7 @@ import { isNetlist } from "emul-shared/hdl"
 import { normalizeFiles } from "@/project/files"
 import { normalizeDebug } from "@/debug/saved"
 import { GRID, objectPins, snap, type FlipAxis, type Point, type Rect, type Turn } from "./geometry"
-import { freeSpot, placementCheck, type PlacementScene } from "./placement"
+import { freeSpot, placementCheck, wireCheck, type PlacementScene } from "./placement"
 import { getDef, withLibrary } from "./registry"
 import { migrated, SCHEMATIC_VERSION, upgradedFrom, type SavedSchematic } from "./migrate"
 import {
@@ -135,12 +135,13 @@ export function pasteLanding(scene: PlacementScene, saved: Clip, offset: Point, 
   const at = freeSpot(scene, objects, offset)
   if (!wiresClear || !clip.wires.length || wiresClear(clip, at)) return { clip, at, clear: true }
   const bodies = placementCheck(scene, objects)
+  const covers = wireCheck(scene, objects)
   for (let ring = 1; ring <= PASTE_REACH; ring++) {
     const around: Point[] = []
     for (let dx = -ring; dx <= ring; dx++)
       for (let dy = -ring; dy <= ring; dy++) if (Math.max(Math.abs(dx), Math.abs(dy)) === ring) around.push({ x: at.x + dx * scene.grid, y: at.y + dy * scene.grid })
     around.sort((p, q) => Math.hypot(p.x - at.x, p.y - at.y) - Math.hypot(q.x - at.x, q.y - at.y))
-    const found = around.find((p) => !bodies(p.x, p.y) && wiresClear(clip, p))
+    const found = around.find((p) => !bodies(p.x, p.y) && !covers(p.x, p.y) && wiresClear(clip, p))
     if (found) return { clip, at: found, clear: true }
   }
   return { clip, at, clear: false }
@@ -236,14 +237,16 @@ export function useSchematic(grid: number) {
     (defId: string, center: Point, options: { suppressSplice?: boolean } = {}) => {
       const def = getDef(defId)
       if (!def) return
-      const obj: PlacedObject = {
-        id: crypto.randomUUID(),
-        def: defId,
-        x: snap(center.x - (def.width * grid) / 2, grid),
-        y: snap(center.y - (def.height * grid) / 2, grid),
-      }
+      const x = snap(center.x - (def.width * grid) / 2, grid)
+      const y = snap(center.y - (def.height * grid) / 2, grid)
+      const obj: PlacedObject = { id: crypto.randomUUID(), def: defId, x, y }
       setDoc((d) => {
         if (def.prefix) obj.props = { ref: nextRef(d.objects, def.prefix) }
+        const scene = { objects: d.objects, routes: d.wires.map((s) => ({ id: s.id, pts: [s.a, s.b], owner: [] })), grid }
+        const splice = !options.suppressSplice
+        const clear = wireCheck(scene, [{ ...obj, x, y }], splice)(0, 0) ? freeSpot(scene, [{ ...obj, x, y }], { x: 0, y: 0 }, splice) : { x: 0, y: 0 }
+        obj.x = x + clear.x
+        obj.y = y + clear.y
         return placedObject(d, obj, undefined, options)
       })
       setSelectedObjects(new Set([obj.id]))

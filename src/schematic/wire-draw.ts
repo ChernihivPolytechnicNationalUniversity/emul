@@ -5,6 +5,7 @@ import type { WireColorKey } from "./wire-colors"
 import { pinToPinPoints, withSegments, type NewId, type Wiring } from "./wire-edits"
 import { highOf, lowOf, samePoint, type WireSegment } from "./wires/segment"
 import { columnCode, rowCode } from "./wires/sheet"
+import { bodiesOf, crossedBody, segmentBox } from "./body-crossing"
 
 export type DrawEnd =
   | { readonly kind: "pin"; readonly key: string; readonly at: Point }
@@ -28,7 +29,7 @@ export type Drawing = {
   readonly color?: WireColorKey
 }
 
-export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "socket" | "nothing"; readonly at: Point; readonly nets: readonly string[] }
+export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "socket" | "body" | "nothing"; readonly at: Point; readonly nets: readonly string[] }
 
 export type DrawPreview = { readonly points: readonly Point[]; readonly refused: DrawRefusal | null; readonly routed: boolean }
 
@@ -44,6 +45,7 @@ export const DRAW_REFUSED: Record<DrawRefusal["refused"], { title: string; why: 
   corner: { title: "No corner on another net", why: "A bend on another net's pin or wire would join the two. Place the corner on empty field." },
   crossing: { title: "Not on a crossing", why: "Two wires crossing are not connected. Use the junction tool (J) to join them there." },
   socket: { title: "Another net's wire passes this socket", why: "Ending a wire here would join that wire too. Until the wire that passes can step aside by itself, move it first." },
+  body: { title: "Not through a part", why: "A wire goes round a part's body, never across it. Lay a corner beside the part." },
   nothing: { title: "No wire to lay", why: "The wire would have no length." },
 }
 
@@ -202,18 +204,28 @@ function routedPoints(doc: Schematic, wiring: Wiring, d: Drawing, target: DrawEn
   return known.get(key)!
 }
 
+function throughABody(doc: Schematic, points: readonly Point[], near?: Near): DrawRefusal | null {
+  for (let i = 1; i < points.length; i++) {
+    const s = { a: points[i - 1], b: points[i] }
+    const box = segmentBox(s)
+    const crossed = crossedBody(s, bodiesOf(near ? near(box) : doc.objects))
+    if (crossed) return { refused: "body", at: { x: crossed.box.x + crossed.box.w / 2, y: crossed.box.y + crossed.box.h / 2 }, nets: [] }
+  }
+  return null
+}
+
 export function previewOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: DrawEnd, near?: Near): DrawPreview {
   const end = target ?? { kind: "field", at: d.cursor }
   const plain = pointsTo(d, end.at)
   const routed = routedPoints(doc, wiring, d, end, plain, near)
   const points = routed ? withoutRepeats(routed) : plain
-  const refused = refusalOf(wiring, d.from, end, points)
+  const refused = refusalOf(wiring, d.from, end, points) ?? throughABody(doc, points, near)
   return { points, refused, routed: !!routed }
 }
 
-export function withCorner(_doc: Schematic, wiring: Wiring, d: Drawing, at: Point): Drawing | DrawRefusal {
+export function withCorner(doc: Schematic, wiring: Wiring, d: Drawing, at: Point): Drawing | DrawRefusal {
   const points = pointsTo(d, at)
-  const refused = refusalOf(wiring, d.from, { kind: "field", at }, points)
+  const refused = refusalOf(wiring, d.from, { kind: "field", at }, points) ?? throughABody(doc, points)
   if (refused) return refused
   const corners = points.slice(1)
   if (corners.length === d.corners.length) return { ...d, cursor: at }
@@ -233,10 +245,11 @@ export function drawnTo(doc: Schematic, wiring: Wiring, d: Drawing, target: Draw
   return withSegments(doc, segments, [], [points[0], points[points.length - 1]], newId)
 }
 
-export function laysClear(wiring: Wiring, segments: readonly { readonly a: Point; readonly b: Point }[]): boolean {
+export function laysClear(wiring: Wiring, segments: readonly { readonly a: Point; readonly b: Point }[], doc?: Schematic): boolean {
   const sheet = wiring.sheet
   for (const { a, b } of segments) {
     if (samePoint(a, b)) continue
+    if (doc && throughABody(doc, [a, b])) return false
     const horizontal = a.y === b.y
     const line = horizontal ? rowCode(a.y) : columnCode(a.x)
     const lo = horizontal ? Math.min(a.x, b.x) : Math.min(a.y, b.y)

@@ -466,7 +466,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const pasteFree = useEvent((saved: Clip, dx: number, dy: number) =>
     inOrder(defIds(saved), () => {
       const shifted = (clip: Clip, at: Point) => clip.wires.map((s) => ({ a: { x: s.a.x + at.x, y: s.a.y + at.y }, b: { x: s.b.x + at.x, y: s.b.y + at.y } }))
-      const { clip: c, at, clear } = pasteLanding(scene(), saved, { x: dx, y: dy }, (clip, at) => laysClear(wiring, shifted(clip, at)))
+      const { clip: c, at, clear } = pasteLanding(scene(), saved, { x: dx, y: dy }, (clip, at) => laysClear(wiring, shifted(clip, at), sch.doc))
       if (!clear) {
         toast.error(PASTE_REFUSED.title, { description: PASTE_REFUSED.why })
         return
