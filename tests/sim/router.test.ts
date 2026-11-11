@@ -201,7 +201,7 @@ describe("no detour the user did not draw (design.md §7: «tests/sim/router.tes
 })
 
 describe("the cost order (design.md §7: «crossing a body …, leaving or entering a pin against its outward direction, running along another net's segment (forbidden), crossing another net's segment, each bend, length»)", () => {
-  it("no foreign body is crossed when a free path exists: two pins on one level with a part standing across the row go round it (design.md §5.1 row «wire across a body»; ГОСТ 2.701 via research/standards.md: lines do not pass through symbols)", () => {
+  it("no body may be crossed: two pins on one level with a part standing across the row go round it (design.md §13.27 supersedes §7’s body cost; ГОСТ 2.701 via research/standards.md: lines do not pass through symbols)", () => {
     const doc = docOf([resistor("R1", 0, 0), resistor("R2", 12, 0), resistor("R9", 7, -1, 90)])
     const route = routeBetween(doc, pin("R1", "2"), pin("R2", "1"))
     expect.soft(route && shapeOf(doc, route).faults, `nothing through R9's body, leads or pins: ${JSON.stringify(cells(route))}`).toEqual([])
@@ -436,6 +436,7 @@ describe("every inner header row on the five boards (design.md §4.5: «322 pins
         continue
       }
       const [p0, p1, p2, p3, p4] = got
+      expect.soft(p2[p.d.x ? 0 : 1], `${p.def} ${p.pin.id}: a whole column after the names`).toBe(Math.round(p2[p.d.x ? 0 : 1]))
       const outward = (pt: readonly [number, number]) => (pt[0] - p.pin.x) * p.d.x + (pt[1] - p.pin.y) * p.d.y
       const sideways = (pt: readonly [number, number]) => (pt[0] - p.pin.x) * across.x + (pt[1] - p.pin.y) * across.y
       const ok =
@@ -478,7 +479,7 @@ function columnClearOfNames(def: string, pins: readonly PinDef[]): number {
   const names = d.body.filter((s): s is Printed => isPrintedName(s))
   const outward = OUT[pins[0].side].x
   const edges = pins.map((p) => {
-    const name = names.find((s) => s.text === p.label && Math.abs(s.y - p.y) < 0.5 && (s.x - p.x) * outward > 0 && Math.abs(s.x - p.x) < 2)
+    const name = names.find((s) => Math.abs(s.y - p.y) < 0.5 && (s.x - p.x) * outward > 0 && Math.abs(s.x - p.x) < 2)
     if (!outward || OUT[p.side].x !== outward || !name) throw new Error(`${def} ${p.id}: no printed name beside it on the header's left or right side`)
     const box = printedBox(name, growth.get(name) ?? 1)
     return outward < 0 ? box.x : box.x + box.w
@@ -902,5 +903,102 @@ describe("the reference this suite measures against (tests/lib/route-reference.t
     const doc = closePartsHooks()
     const hook = runsOf(doc.wires, wirePins(doc.objects)).find((r) => r.segments.some((s) => s.id === "w67"))!
     expect.soft(shapeOf({ ...doc, wires: doc.wires.filter((s) => !s.id.startsWith("w67")) }, hook.points).bends, "R6 → R7 as frozen: two corners where one will do").toBe(2)
+  })
+})
+
+
+describe("routes with free ends and hard body obstacles (design.md §7, §4.1, §13.27)", () => {
+  it("a pin to a free point and back uses the same clean minimum cost as the reference", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R9", 7, -1, 90)])
+    for (const [from, to] of [[pin("R1", "2"), { at: at(12, 1) }], [{ at: at(12, 1) }, pin("R1", "2")]] as const) {
+      const route = routeBetween(doc, from, to)
+      const a = "pin" in from ? at(4, 1) : from.at
+      const b = "pin" in to ? at(4, 1) : to.at
+      const want = bestShape(doc, a, b)
+      expect.soft(route?.[0], "the requested start").toEqual(a)
+      expect.soft(route?.at(-1), "the requested end").toEqual(b)
+      expect.soft(route && shapeOf(doc, route), "clean and optimal").toEqual({ ...want, faults: [] })
+    }
+  })
+
+  it("two free points route without inventing a pin or a half-cell escape", () => {
+    const doc = docOf([])
+    const route = routeBetween(doc, { at: at(2, 3) }, { at: at(5, 7) })
+    expect.soft(route && shapeOf(doc, route), "one corner, seven cells").toEqual({ crossings: 0, bends: 1, length: 7, faults: [] })
+    expect.soft(route?.[0], "from").toEqual(at(2, 3))
+    expect.soft(route?.at(-1), "to").toEqual(at(5, 7))
+  })
+
+  it("a free end inside a foreign body is refused even when crossing it is the only route (§13.27 reverses §7’s ×100 cost)", () => {
+    const doc = docOf([resistor("R9", 0, 0)])
+    expect.soft(bestShape(doc, at(2, 1), at(6, 1)), "the hard-obstacle reference").toBeNull()
+    expect.soft(routeBetween(doc, { at: at(2, 1) }, { at: at(6, 1) }), "never buy a body crossing").toBeNull()
+  })
+
+  it("a foreign wire crossing between whole cells is counted and cannot hide an overlap or endpoint", () => {
+    const doc = docOf([], [seg(at(3.5, 0), at(3.5, 8))])
+    expect.soft(shapeOf(doc, [at(1, 4), at(6, 4)]), "the continuous reference sees the crossing").toEqual({ crossings: 1, bends: 0, length: 5, faults: [] })
+    const route = routeBetween(doc, { at: at(1, 4) }, { at: at(6, 4) })
+    expect.soft(cells(route), "one crossing is cheaper than two bends").toEqual([[1, 4], [6, 4]])
+    const touching = docOf([], [seg(at(3.5, 4), at(3.5, 8))])
+    const around = routeBetween(touching, { at: at(1, 4) }, { at: at(6, 4) })
+    expect.soft(cells(around), "cannot pass through a foreign end between cells").not.toEqual([[1, 4], [6, 4]])
+    expect.soft(around, "a detour exists").not.toBeNull()
+  })
+})
+
+describe("board routing through the editor and a selected run (design.md §4.5, §6.1, §7, §13.5)", () => {
+  it("a stored board run re-routes onto the approved slip and keeps its circuit", () => {
+    const before = nucleoScene(true, path(at(6, 19), at(6, 19.5), at(0, 19.5), at(0, 20), at(-8, 20)))
+    const run = runsOf(before.wires, wirePins(before.objects)).find((r) => r.points.some((p) => p.x === c(6)))!
+    const after = rerouted(before, run.segments[0].id, newId)
+    expect.soft(isRerouteRefusal(after) ? after.refused : geometryOf(after.wires), "the board’s names determine the step back").toEqual(geometryOf([...path(at(5, 19), at(-2, 19)), ...SLIPPED_D45()]))
+    expect.soft(!isRerouteRefusal(after) && partition(after), "the circuit").toEqual(partition(before))
+  })
+
+  it("completion of the same-header jumper offers the U past the printed names", () => {
+    const doc = docOf([board("nucleo-f429zi")])
+    const after = drawn(doc, at(5, 19), at(5, 26))
+    expect.soft(geometryOf(after.wires), "the U, never along five sockets").toEqual(geometryOf(path(at(5, 19), at(3, 19), at(3, 26), at(5, 26))))
+    expect.soft(partition(after), "only the two requested sockets").toEqual([["U1:CN8-5", "U1:CN9-1"]])
+  })
+
+  it("a header name column comes from the board art rather than a fixed two-cell distance (§13.22 question 4)", () => {
+    const pins = outerPins("open746i-c", "P20").filter((p) => p.side === "left")
+    const column = columnClearOfNames("open746i-c", pins)
+    expect.soft(column, "P20’s longest printed name clears at 7, not 8").toBe(7)
+    const p = pins.find((p) => p.y > 15)!
+    const doc = docOf([board("open746i-c"), resistor("T", -4, p.y - 3, 90)])
+    expect.soft(cells(routeBetween(doc, pin("U1", p.id), pin("T", "2"))), "the whole header shares its names column").toEqual([[p.x, p.y], [column, p.y], [column, p.y + 1], [-3, p.y + 1]])
+  })
+})
+
+describe("reference guards for the audit (design.md §4.5, §13.22, §13.27)", () => {
+  it("the board is passable on a socket row, with no route through the socket column", () => {
+    const doc = docOf([board("nucleo-f429zi")])
+    expect.soft(shapeOf(doc, [at(6, 19), at(-2, 19)]).faults, "jumper row").toEqual([])
+    expect.soft(shapeOf(doc, [at(5, 19), at(5, 26)]).faults.length, "the apparent short down a header is invalid").toBeGreaterThan(0)
+  })
+
+  it("an off-grid route is rejected without walking forever", () => {
+    const got = shapeOf(docOf([]), [at(0, 0), at(0, 0.5)])
+    expect.soft(got.faults, "the half-cell exception needs a taken socket row").toEqual(["(0, 0.5) is off the whole-cell grid"])
+  })
+})
+
+
+describe("routing is local to the field’s maintained indexes (design.md §11; plan.md phase 6; route-bench)", () => {
+  it("a known field routes without enumerating its object or wire lists", () => {
+    let armed = false
+    const localList = <T>(items: T[]): T[] => new Proxy(items, { get(target, property, receiver) {
+      if (armed && (property === Symbol.iterator || ["map", "filter", "flatMap", "forEach", "find", "some", "every", "slice", "values", "entries"].includes(String(property)))) throw new Error(`routing enumerated the document’s ${String(property)}`)
+      return Reflect.get(target, property, receiver)
+    } })
+    const doc: Schematic = { objects: localList([resistor("R1", 0, 0), resistor("R2", 12, 0), ...Array.from({ length: 100 }, (_, i) => resistor(`F${i}`, 100 + i * 10, 100))]), wires: localList([seg(at(6, 1), at(10, 1))]), parts: {} }
+    const known = wiringFor(doc)
+    armed = true
+    const got = routeBetween(doc, pin("R1", "2"), pin("R2", "1"), known)
+    armed = false
+    expect.soft(got && shapeOf(doc, got).faults, "the local route still avoids the foreign wire").toEqual([])
   })
 })

@@ -1,6 +1,7 @@
 import { GRID, objectRect, type Point } from "@/schematic/geometry"
 import { wirePins } from "@/schematic/migrate-wires"
 import { footprints } from "@/schematic/placement"
+import { getDef } from "@/schematic/registry"
 import type { Schematic } from "@/schematic/types"
 import { wireNets } from "@/schematic/wires/graph"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
@@ -58,7 +59,7 @@ type Scene = {
   readonly to: Point
   readonly bodies: readonly Box[]
   readonly leads: readonly Lead[]
-  readonly pins: ReadonlyMap<string, WirePin>
+  readonly pins: ReadonlyMap<string, readonly WirePin[]>
   readonly foreign: readonly WireSegment[]
   readonly out: (p: Point) => Point | undefined
   readonly window: Box
@@ -70,7 +71,7 @@ function sceneOf(doc: Schematic, from: Point, to: Point): Scene {
   const netAt = (p: Point) => {
     const pin = pins.find((q) => same(q.at, p))
     if (pin) return nets.netOfPin(pin.key) ?? `pin:${pin.key}`
-    const s = doc.wires.find((w) => same(w.a, p) || same(w.b, p))
+    const s = doc.wires.find((w) => onWire(w, p))
     return s ? (nets.netOfSegment(s.id) ?? `wire:${s.id}`) : undefined
   }
   const own = new Set([netAt(from), netAt(to)].filter((n): n is string => n !== undefined))
@@ -80,8 +81,10 @@ function sceneOf(doc: Schematic, from: Point, to: Point): Scene {
   for (const o of doc.objects) {
     const f = footprints(o, GRID)
     if (!f) continue
-    bodies.push(f.body.box)
-    leads.push(...f.leads)
+    if (!getDef(o.def)?.pinsAreSockets) {
+      bodies.push(f.body.box)
+      leads.push(...f.leads)
+    }
   }
   const boxes = [...doc.objects.map((o) => objectRect(o, GRID)), ...doc.wires.map((s) => ({ x: Math.min(s.a.x, s.b.x), y: Math.min(s.a.y, s.b.y), w: Math.abs(s.a.x - s.b.x), h: Math.abs(s.a.y - s.b.y) })), { x: from.x, y: from.y, w: 0, h: 0 }, { x: to.x, y: to.y, w: 0, h: 0 }]
   const margin = 6 * GRID
@@ -89,23 +92,22 @@ function sceneOf(doc: Schematic, from: Point, to: Point): Scene {
   const y0 = Math.floor(Math.min(...boxes.map((b) => b.y)) / GRID) * GRID - margin
   const x1 = Math.ceil(Math.max(...boxes.map((b) => b.x + b.w)) / GRID) * GRID + margin
   const y1 = Math.ceil(Math.max(...boxes.map((b) => b.y + b.h)) / GRID) * GRID + margin
-  const byPoint = new Map(pins.map((p) => [key(p.at), p]))
-  return { from, to, bodies, leads, pins: byPoint, foreign, out: (p) => byPoint.get(key(p))?.out, window: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } }
+  const byPoint = new Map<string, WirePin[]>()
+  for (const p of pins) byPoint.set(key(p.at), [...(byPoint.get(key(p.at)) ?? []), p])
+  return { from, to, bodies, leads, pins: byPoint, foreign, out: (p) => byPoint.get(key(p))?.[0]?.out, window: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } }
 }
-
-const horizontal = (s: WireSegment) => s.a.y === s.b.y
 
 function onWire(s: WireSegment, p: Point): "end" | "interior" | null {
   if (same(s.a, p) || same(s.b, p)) return "end"
-  if (horizontal(s)) return p.y === s.a.y && p.x > Math.min(s.a.x, s.b.x) && p.x < Math.max(s.a.x, s.b.x) ? "interior" : null
+  if (s.a.y === s.b.y) return p.y === s.a.y && p.x > Math.min(s.a.x, s.b.x) && p.x < Math.max(s.a.x, s.b.x) ? "interior" : null
   return p.x === s.a.x && p.y > Math.min(s.a.y, s.b.y) && p.y < Math.max(s.a.y, s.b.y) ? "interior" : null
 }
 
-type Arrival = { readonly fault: string | null; readonly crossing: boolean; readonly straightOnly: boolean }
+type Arrival = { readonly fault: string | null; readonly crossing: number; readonly straightOnly: boolean }
 
 function arrive(scene: Scene, p: Point, d: Point): Arrival {
   const q = { x: p.x + d.x * GRID, y: p.y + d.y * GRID }
-  const fault = (why: string): Arrival => ({ fault: `${show(p)}→${show(q)}: ${why}`, crossing: false, straightOnly: false })
+  const fault = (why: string): Arrival => ({ fault: `${show(p)}→${show(q)}: ${why}`, crossing: 0, straightOnly: false })
   if (same(p, scene.from)) {
     const out = scene.out(p)
     if (out && out.x === -d.x && out.y === -d.y) return fault("leaves its pin into its own part")
@@ -120,21 +122,21 @@ function arrive(scene: Scene, p: Point, d: Point): Arrival {
     if (meeting(p, q, lead).some((at) => !allowed || !near(at, allowed))) return fault("touches a part's lead")
   }
   let straightOnly = false
-  const pin = scene.pins.get(key(q))
-  if (pin && !same(q, scene.to)) {
+  for (const pin of scene.pins.get(key(q)) ?? []) {
+    if (same(q, scene.to)) continue
     if (!pin.socket) return fault(`passes over the pin ${pin.key}`)
+    if (pin.out && d.x * pin.out.x + d.y * pin.out.y === 0) return fault(`passes along the header column at ${pin.key}`)
     straightOnly = true
   }
-  let crossing = false
+  let crossing = 0
   for (const s of scene.foreign) {
-    const at = onWire(s, q)
-    if (at === "end") return fault(`touches the end of another net's wire ${s.id}`)
-    if (at === "interior") {
-      if (horizontal(s) === (d.y === 0)) return fault(`runs along another net's wire ${s.id}`)
-      crossing = true
-      straightOnly = true
-    }
-    if (!at && onWire(s, p) === "interior" && horizontal(s) === (d.y === 0)) return fault(`runs along another net's wire ${s.id}`)
+    const hits = meeting(p, q, [s.a, s.b])
+    if (!hits.length) continue
+    if (hits.length > 1) return fault(`runs along another net's wire ${s.id}`)
+    const at = hits[0]
+    if (same(at, s.a) || same(at, s.b)) return fault(`touches the end of another net's wire ${s.id}`)
+    if (near(at, q)) straightOnly = true
+    if (!near(at, p)) crossing++
   }
   return { fault: null, crossing, straightOnly }
 }
@@ -170,11 +172,13 @@ export function shapeOf(doc: Schematic, points: readonly Point[]): Shape & { rea
       bends++
     }
     heading = d
+    const steps = (Math.abs(b.x - a.x) + Math.abs(b.y - a.y)) / GRID
+    if (!Number.isInteger(steps)) continue
     for (let at = a; !same(at, b); ) {
       const next = { x: at.x + d.x * GRID, y: at.y + d.y * GRID }
       const step = arrive(scene, at, d)
       if (step.fault) faults.push(step.fault)
-      if (step.crossing) crossings++
+      crossings += step.crossing
       straightOnly = step.straightOnly
       if (seen.has(key(next))) faults.push(`comes back to ${show(next)}`)
       seen.add(key(next))
@@ -267,7 +271,7 @@ export function bestShape(doc: Schematic, from: Point, to: Point, order: Order =
       if (at < 0) continue
       const arrival = arrive(scene, here, d)
       if (arrival.fault) continue
-      const nextShape = { crossings: shape.crossings + (arrival.crossing ? 1 : 0), bends: shape.bends + (turned ? 1 : 0), length: shape.length + 1, straightOnly: arrival.straightOnly }
+      const nextShape = { crossings: shape.crossings + arrival.crossing, bends: shape.bends + (turned ? 1 : 0), length: shape.length + 1, straightOnly: arrival.straightOnly }
       const nextCost = (nextShape.crossings * CROSSING_IN_BENDS + nextShape.bends) * bendWeight + nextShape.length * lengthWeight
       const nextState = at * 5 + step
       if (nextCost >= (best.get(nextState) ?? Infinity)) continue

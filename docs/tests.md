@@ -189,3 +189,5 @@
 | `tests/firmware/chip-clock.test.ts` | the lab 1 stand on its 8 MHz crystal (HSERDY 2 ms after HSEON), without it (HAL timeout into Error_Handler, the inspector's "No clock"), with an oscillator module the crystal-mode firmware cannot use; a bare F429 on an oscillator module in bypass, with and without the module's VCC; the Nucleo's LSE crystal taking 2 s |
 | `tests/sim/exam.test.ts`, `tests/sim/logic.test.ts`, `tests/sim/bridge.test.ts`, `tests/sim/nucleo.test.ts` | analog engine scenarios |
 
+
+| `tests/sim/router.test.ts` | phase 6 standards suite: whole-cell routing costs, deterministic ties, every inner header row, taken-row slips and order independence, drawing completion, run re-route and migration; independent Dijkstra and route-fault reference in `tests/lib/route-reference.ts`, including free ends, hard body refusal, continuous half-cell-wire intersections and board row/column rules |

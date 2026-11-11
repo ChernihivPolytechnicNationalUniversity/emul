@@ -62,11 +62,16 @@ function timed(doc: Schematic, pair: Pair): number {
   const known = wiringOf(new WireGraph(), doc)
   const from = endOf(doc, pair.from)
   const to = endOf(doc, pair.to)
+  const a = known.sheet.pin(`${"pin" in from ? from.pin.object : ""}:${"pin" in from ? from.pin.pin : ""}`)!.at
+  const b = known.sheet.pin(`${"pin" in to ? to.pin.object : ""}:${"pin" in to ? to.pin.pin : ""}`)!.at
   const samples: number[] = []
   for (let i = 0; i < WARMUP + ITERATIONS; i++) {
     const started = performance.now()
-    routeBetween(doc, from, to, known)
-    if (i >= WARMUP) samples.push(performance.now() - started)
+    const route = routeBetween({ ...doc }, from, to, known)
+    const elapsed = performance.now() - started
+    if (!route?.length || route[0].x !== a.x || route[0].y !== a.y || route.at(-1)!.x !== b.x || route.at(-1)!.y !== b.y) throw new Error("the route must connect the requested pins")
+    if (route.some((p, j) => j > 0 && p.x !== route[j - 1].x && p.y !== route[j - 1].y)) throw new Error("the route must be orthogonal")
+    if (i >= WARMUP) samples.push(elapsed)
   }
   return median(samples)
 }
