@@ -4,9 +4,9 @@ import { paintField } from "@/components/field/field-paint"
 import { SymbolRaster, TextRaster } from "@/components/field/symbol-raster"
 import { casingTrim, casingWidth, WIRE_PX, wireCornerRadius } from "@/components/field/wire-style"
 import { GRID, toPath, trimRouteEnds, type Point, type RoutedWire } from "@/schematic/geometry"
-import { runPath } from "@/schematic/wire-look"
+import { runPath, turnsAtPins } from "@/schematic/wire-look"
 import { segmentNearest } from "@/schematic/wire-select"
-import type { WireSegment } from "@/schematic/wires/segment"
+import type { WirePin, WireSegment } from "@/schematic/wires/segment"
 
 const R = wireCornerRadius(GRID)
 const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
@@ -137,5 +137,23 @@ describe("a press on a diagonal hits it at the usual reach: the segment nearest 
     const run = { id: "run", segments: [level, slant], points: [at(0, 4), at(8, 4), at(4, 0)] }
     expect.soft(segmentNearest(run, { x: 5 * GRID, y: 3.8 * GRID }), "4.8 px from the level wire, 47 px from the slant").toBe("level")
     expect.soft(segmentNearest(run, { x: 6.1 * GRID, y: 2 * GRID }), "1.7 px from the slant").toBe("slant")
+  })
+})
+
+describe("a turn at a pin at any angle (phase7-standards-tests.md design hole 2, taken A in findings 7.2: the arc replaces R·tan(θ/2) of the lead; §8)", () => {
+  const pin: WirePin = { key: "VT1:B", at: at(0, 0), out: { x: 1, y: 0 } }
+  const runOf = (b: Point) => ({ id: "x", segments: [{ id: "x", a: pin.at, b }], points: [pin.at, b] })
+
+  it("a diagonal leaving a pin at atan(1/2) bends at the pin: R·(√5 − 2) of the lead and of the wire", () => {
+    const run = runOf(at(2, 1))
+    const leads = turnsAtPins([run], [pin]).leads.get("x")
+    const tangent = R * (Math.sqrt(5) - 2)
+    expect.soft(leads?.start?.x, "the lead's share, x").toBeNear(-tangent, 1e-9)
+    expect.soft(leads?.start?.y, "… y").toBeNear(0, 1e-9)
+    if (leads) expectBend(runPath(run.points, R, leads), pin.at, { x: -GRID, y: 0 }, at(2, 1), tangent, "at the pin")
+  })
+
+  it("a wire leaving straight along the pin's lead does not turn there", () => {
+    expect(turnsAtPins([runOf(at(3, 0))], [pin]).leads.size).toBe(0)
   })
 })

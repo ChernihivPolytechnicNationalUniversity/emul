@@ -612,6 +612,15 @@ export function routeToPoint(a: Point, aSide: Facing, aStub: number, p: Point, g
   return dedupe(pts)
 }
 
+export function turnTangent(inX: number, inY: number, outX: number, outY: number): number {
+  const across = inX * outY - inY * outX
+  const along = inX * outX + inY * outY
+  const lengths = Math.hypot(inX, inY) * Math.hypot(outX, outY)
+  if (!lengths) return 0
+  if (along === 0) return 1
+  return Math.abs(across) / (lengths + along)
+}
+
 export function toPath(pts: Point[], radius = 0): string {
   if (pts.length === 0) return ""
   if (radius <= 0 || pts.length < 3) return pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x} ${p.y}`).join(" ")
@@ -627,7 +636,7 @@ export function toPath(pts: Point[], radius = 0): string {
       out.push(`L${c.x} ${c.y}`)
       continue
     }
-    const r = Math.min(radius, inLen / 2, outLen / 2)
+    const r = Math.min(radius * turnTangent(c.x - p.x, c.y - p.y, n.x - c.x, n.y - c.y), inLen / 2, outLen / 2)
     const a = { x: c.x - ((c.x - p.x) / inLen) * r, y: c.y - ((c.y - p.y) / inLen) * r }
     const b = { x: c.x + ((n.x - c.x) / outLen) * r, y: c.y + ((n.y - c.y) / outLen) * r }
     out.push(`L${a.x} ${a.y}`, `Q${c.x} ${c.y} ${b.x} ${b.y}`)

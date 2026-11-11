@@ -592,8 +592,9 @@ function shiftedLook(look: NetLook, d: Point, view: WireNets): NetLook {
   const routeOf = new Map<string, RoutedWire>()
   for (const [id, route] of look.routeOf) {
     const pins = look.turned.leads.get(id)
-    const leads = pins && { ...(pins.start && { start: leadEnd(view.pin(pins.start)!) }), ...(pins.end && { end: leadEnd(view.pin(pins.end)!) }) }
-    routeOf.set(id, leads ? { id, pts: route.pts.map(by), owner: [], leads } : { id, pts: route.pts.map(by), owner: [] })
+    const pts = route.pts.map(by)
+    const leads = pins && { ...(pins.start && { start: leadEnd(view.pin(pins.start)!, pts[1]) }), ...(pins.end && { end: leadEnd(view.pin(pins.end)!, pts[pts.length - 2]) }) }
+    routeOf.set(id, leads ? { id, pts, owner: [], leads } : { id, pts, owner: [] })
   }
   return {
     runOf,

@@ -2,19 +2,13 @@ import type { Run } from "./circuit"
 import { GRID, intersects, objectRect, type Rect } from "./geometry"
 import type { Point, Schematic } from "./types"
 import type { Wiring } from "./wire-edits"
-import { samePoint, type WireSegment } from "./wires/segment"
-
-function distanceTo(s: WireSegment, p: Point): number {
-  const x = Math.max(Math.min(s.a.x, s.b.x), Math.min(Math.max(s.a.x, s.b.x), p.x))
-  const y = Math.max(Math.min(s.a.y, s.b.y), Math.min(Math.max(s.a.y, s.b.y), p.y))
-  return Math.hypot(p.x - x, p.y - y)
-}
+import { distanceToSegment, samePoint, type WireSegment } from "./wires/segment"
 
 export function segmentNearest(run: Run, at: Point): string {
   let best = run.segments[0]
   let distance = Infinity
   for (const s of run.segments) {
-    const d = distanceTo(s, at)
+    const d = distanceToSegment(s, at)
     if (d < distance) {
       best = s
       distance = d
