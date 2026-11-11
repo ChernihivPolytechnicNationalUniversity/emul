@@ -250,7 +250,21 @@ function fieldFindings(doc: Schematic, near: Buckets<Body>): Finding[] {
   return found
 }
 
-function parallelRuns(doc: Schematic): Finding[] {
+function slipStepOf(wiring: Wiring) {
+  const sheet = wiring.sheet
+  const stepsToASocket = (t: WireSegment, from: Point, horizontal: boolean) => {
+    const to = t.a.x === from.x && t.a.y === from.y ? t.b : t.a
+    const half = horizontal ? to.x === from.x && Math.abs(to.y - from.y) === HALF : to.y === from.y && Math.abs(to.x - from.x) === HALF
+    return half && sheet.pinsAt(to).some((pin) => pin.socket)
+  }
+  return (s: WireSegment) => {
+    const horizontal = s.a.y === s.b.y
+    return [s.a, s.b].some((end) => sheet.endsAt(end).some((t) => t.id !== s.id && stepsToASocket(t, end, horizontal)))
+  }
+}
+
+function parallelRuns(doc: Schematic, wiring: Wiring): Finding[] {
+  const slipped = slipStepOf(wiring)
   const found: Finding[] = []
   for (const axis of ["x", "y"] as const) {
     const across = axis === "x" ? "y" : "x"
@@ -267,7 +281,7 @@ function parallelRuns(doc: Schematic): Finding[] {
         for (const s of segments) {
           const lo = Math.max(Math.min(s.a[axis], s.b[axis]), Math.min(other.a[axis], other.b[axis]))
           const hi = Math.min(Math.max(s.a[axis], s.b[axis]), Math.max(other.a[axis], other.b[axis]))
-          if (hi - lo <= EPS) continue
+          if (hi - lo <= EPS || slipped(s) || slipped(other)) continue
           const at = axis === "x" ? { x: (lo + hi) / 2, y: line + HALF / 2 } : { x: line + HALF / 2, y: (lo + hi) / 2 }
           found.push({ kind: "parallel-too-close", at, objects: [], segments: [s.id, other.id], text: "Two wires run side by side half a cell apart" })
         }
@@ -293,7 +307,7 @@ const canonical = (f: Finding): Finding => ({ ...f, objects: [...f.objects].sort
 
 export function checked(doc: Schematic, wiring: Wiring = wiringOf(new WireGraph(), doc)): readonly Finding[] {
   const bodies = bodyBuckets(bodiesOf(doc.objects))
-  return [...danglingEnds(doc, wiring), ...unconnectedPins(doc, wiring), ...wiresThroughBodies(doc, bodies), ...fieldFindings(doc, bodies), ...parallelRuns(doc)].map((f) => canonical(placedAt(f, f.at.x, f.at.y))).sort(inReadingOrder)
+  return [...danglingEnds(doc, wiring), ...unconnectedPins(doc, wiring), ...wiresThroughBodies(doc, bodies), ...fieldFindings(doc, bodies), ...parallelRuns(doc, wiring)].map((f) => canonical(placedAt(f, f.at.x, f.at.y))).sort(inReadingOrder)
 }
 
 
