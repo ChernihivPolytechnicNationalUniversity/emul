@@ -31,6 +31,7 @@ import type { SpatialIndex } from "./spatial"
 import { WireGraph } from "./wires/graph"
 import type { WireSegment } from "./wires/segment"
 import { documentPins, editedObjects } from "./pin-index"
+import { bodyRefusal, type BodyRefusal } from "./body-crossing"
 
 /** A board as a file brings it: its project, build options and debugger settings re-checked. */
 function checked(saved: PlacedObject): PlacedObject {
@@ -132,22 +133,29 @@ const PASTE_REACH = 24
 export function pasteLanding(scene: PlacementScene, saved: Clip, offset: Point, wiresClear?: (clip: Clip, at: Point) => boolean): { clip: Clip; at: Point; clear: boolean } {
   const clip = clipOnTheLattice(saved)
   const objects = clip.objects.map((o) => ({ ...o, id: `paste:${o.id}` }))
-  const at = freeSpot(scene, objects, offset)
-  if (!wiresClear || !clip.wires.length || wiresClear(clip, at)) return { clip, at, clear: true }
+  if (bodyRefusal(emptySchematic(), clip)) return { clip, at: offset, clear: false }
+  const base: Schematic = { objects: [...scene.objects], wires: scene.routes.flatMap((r) => r.pts.slice(1).map((b, i) => ({ id: `${r.id}:${i}`, a: r.pts[i], b }))), parts: {} }
+  const clearAt = (at: Point) => {
+    const shifted = (p: Point) => ({ x: p.x + at.x, y: p.y + at.y })
+    const after = { ...base, objects: [...base.objects, ...objects.map((o) => ({ ...o, ...shifted(o) }))], wires: [...base.wires, ...clip.wires.map((s) => ({ ...s, a: shifted(s.a), b: shifted(s.b) }))] }
+    return (!wiresClear || !clip.wires.length || wiresClear(clip, at)) && !bodyRefusal(base, after)
+  }
+  const at = freeSpot(scene, objects, offset, false)
+  if (clearAt(at)) return { clip, at, clear: true }
   const bodies = placementCheck(scene, objects)
-  const covers = wireCheck(scene, objects)
+  const covers = wireCheck(scene, objects, false)
   for (let ring = 1; ring <= PASTE_REACH; ring++) {
     const around: Point[] = []
     for (let dx = -ring; dx <= ring; dx++)
       for (let dy = -ring; dy <= ring; dy++) if (Math.max(Math.abs(dx), Math.abs(dy)) === ring) around.push({ x: at.x + dx * scene.grid, y: at.y + dy * scene.grid })
     around.sort((p, q) => Math.hypot(p.x - at.x, p.y - at.y) - Math.hypot(q.x - at.x, q.y - at.y))
-    const found = around.find((p) => !bodies(p.x, p.y) && !covers(p.x, p.y) && wiresClear(clip, p))
+    const found = around.find((p) => !bodies(p.x, p.y) && !covers(p.x, p.y) && clearAt(p))
     if (found) return { clip, at: found, clear: true }
   }
   return { clip, at, clear: false }
 }
 
-export function pastedInto(doc: Schematic, clip: Clip, dx: number, dy: number, idOf: (old: string) => string, newId: () => string): Schematic {
+export function pastedInto(doc: Schematic, clip: Clip, dx: number, dy: number, idOf: (old: string) => string, newId: () => string, onRefused?: (refusal: BodyRefusal) => void): Schematic {
   const ids = new Map(clip.objects.map((o) => [o.id, idOf(o.id)]))
   const objects = [...doc.objects]
   const added: PlacedObject[] = []
@@ -166,7 +174,11 @@ export function pastedInto(doc: Schematic, clip: Clip, dx: number, dy: number, i
     if (id) parts[partKey(id, part)] = v
   }
   const points = added.flatMap((o) => objectPins(o, GRID).map((p) => p.point))
-  return withSegments({ ...doc, objects, parts }, wires, [], points, newId)
+  const result = withSegments({ ...doc, objects, parts }, wires, [], points, newId)
+  const refused = bodyRefusal(doc, result)
+  if (!refused) return result
+  onRefused?.(refused)
+  return doc
 }
 
 /** Schematic document plus selection and undo history. All coordinates are world px. */
@@ -234,26 +246,24 @@ export function useSchematic(grid: number) {
 
   /** Place a component centered at a world point, snapped to the grid. */
   const add = React.useCallback(
-    (defId: string, center: Point, options: { suppressSplice?: boolean } = {}) => {
+    (defId: string, center: Point, options: { suppressSplice?: boolean; onRefused?: (refusal: BodyRefusal) => void } = {}) => {
       const def = getDef(defId)
       if (!def) return
       const x = snap(center.x - (def.width * grid) / 2, grid)
       const y = snap(center.y - (def.height * grid) / 2, grid)
-      const obj: PlacedObject = { id: crypto.randomUUID(), def: defId, x, y }
-      setDoc((d) => {
-        if (def.prefix) obj.props = { ref: nextRef(d.objects, def.prefix) }
-        const scene = { objects: d.objects, routes: d.wires.map((s) => ({ id: s.id, pts: [s.a, s.b], owner: [] })), grid }
-        const splice = !options.suppressSplice
-        const clear = wireCheck(scene, [{ ...obj, x, y }], splice)(0, 0) ? freeSpot(scene, [{ ...obj, x, y }], { x: 0, y: 0 }, splice) : { x: 0, y: 0 }
-        obj.x = x + clear.x
-        obj.y = y + clear.y
-        return placedObject(d, obj, undefined, options)
-      })
+      const probe: PlacedObject = { id: crypto.randomUUID(), def: defId, x, y, ...(def.prefix && { props: { ref: nextRef(doc.objects, def.prefix) } }) }
+      const scene = { objects: doc.objects, routes: doc.wires.map((s) => ({ id: s.id, pts: [s.a, s.b], owner: [] })), grid }
+      const splice = !options.suppressSplice
+      const clear = wireCheck(scene, [probe], splice)(0, 0) ? freeSpot(scene, [probe], { x: 0, y: 0 }, splice) : { x: 0, y: 0 }
+      const obj = { ...probe, x: x + clear.x, y: y + clear.y }
+      const next = placedObject(doc, obj, undefined, options)
+      if (next === doc) return
+      setDoc((d) => d === doc ? next : placedObject(d, obj, undefined, options))
       setSelectedObjects(new Set([obj.id]))
       setSelectedWires(new Set())
       return obj
     },
-    [grid, setDoc],
+    [doc, grid, setDoc],
   )
 
   const remove = React.useCallback((objects: ReadonlySet<string>, wires: ReadonlySet<string>) => {
@@ -449,7 +459,10 @@ export function useSchematic(grid: number) {
   const rotateAlone = React.useCallback(
     (ids: ReadonlySet<string>, turn: Turn) => {
       if (!ids.size) return
-      commitFrom(doc, reoriented(doc, rotateSelection(doc, ids, turn, grid), ids))
+      const next = reoriented(doc, rotateSelection(doc, ids, turn, grid), ids)
+      const refused = bodyRefusal(doc, next)
+      if (refused) return refused
+      commitFrom(doc, next)
     },
     [doc, grid, commitFrom],
   )
@@ -457,7 +470,10 @@ export function useSchematic(grid: number) {
   const flipAlone = React.useCallback(
     (ids: ReadonlySet<string>, axis: FlipAxis) => {
       if (!ids.size) return
-      commitFrom(doc, reoriented(doc, flipSelection(doc, ids, axis, grid), ids))
+      const next = reoriented(doc, flipSelection(doc, ids, axis, grid), ids)
+      const refused = bodyRefusal(doc, next)
+      if (refused) return refused
+      commitFrom(doc, next)
     },
     [doc, grid, commitFrom],
   )
@@ -534,13 +550,17 @@ export function useSchematic(grid: number) {
    * select what was added. Pasting the same clip twice yields two independent copies.
    */
   const paste = React.useCallback(
-    (clip: Clip, dx: number, dy: number) => {
+    (clip: Clip, dx: number, dy: number, onRefused?: (refusal: BodyRefusal) => void) => {
       const ids = new Map(clip.objects.map((o) => [o.id, crypto.randomUUID()]))
-      setDoc((d) => pastedInto(d, clip, snap(dx, grid), snap(dy, grid), (old) => ids.get(old)!, () => crypto.randomUUID()))
+      const into = (d: Schematic) => pastedInto(d, clip, snap(dx, grid), snap(dy, grid), (old) => ids.get(old)!, () => crypto.randomUUID(), onRefused)
+      const next = into(doc)
+      if (next === doc) return false
+      setDoc((d) => d === doc ? next : into(d))
       setSelectedObjects(new Set(ids.values()))
       setSelectedWires(new Set())
+      return true
     },
-    [grid, setDoc],
+    [doc, grid, setDoc],
   )
 
   return {

@@ -563,17 +563,20 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
     ])
   })
 
-  it("Alt suppresses the splice: the wire stays whole under the body (design.md §5.3: on by default, Alt suppresses)", () => {
-    const landed = dropped(line(), "R3", 0, -4, true)
+  it("Alt suppresses the splice, so a drop that leaves the whole wire under the body is refused", () => {
+    const before = line()
+    const landed = dropped(before, "R3", 0, -4, true)
     expect.soft(covers(landed.doc, at(4, 1), at(16, 1)), "the wire still runs from R1 to R2").toBe(true)
-    expect.soft(partition(landed.doc), "R3 on the wire at both pins").toEqual([["R1:2", "R2:1", "R3:1", "R3:2"]])
+    expect.soft(landed.refused?.some((c) => c.reason === "body"), "the body crossing is named").toBe(true)
+    expect.soft(landed.doc, "the entire document stays as it was").toBe(before)
+    expect.soft(partition(landed.doc), "R3 stays off the wire").toEqual([["R1:2", "R2:1"]])
   })
 
   it("an armed palette click preserves Alt while the definition loads and still normalises pins", () => {
     for (const altKey of [true, false]) {
       let doc = docOf([resistor("R1", 0, 0), resistor("R2", 16, 0)], [seg(at(4, 1), at(16, 1))])
       const add = sourceCallback<(def: string, center: Point) => PlacedObject>("src/schematic/use-schematic.ts", "add", {
-        getDef, snap, grid: GRID, crypto: { randomUUID: () => "R3" }, placedObject, wireCheck, freeSpot,
+        doc, getDef, snap, grid: GRID, crypto: { randomUUID: () => "R3" }, placedObject, wireCheck, freeSpot,
         setDoc: (fn: (d: Schematic) => Schematic) => { doc = fn(doc) },
         nextRef: () => "R3", setSelectedObjects: () => {}, setSelectedWires: () => {},
       })
