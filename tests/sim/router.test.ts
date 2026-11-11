@@ -379,11 +379,12 @@ function innerRowPins(): Inner[] {
 }
 
 function beyond(def: string, from: PinDef | Point, d: Point, cellsOut: number): Point {
-  const size = objectSize(getDef(def)!)
-  if (d.x < 0) return { x: -cellsOut, y: from.y }
-  if (d.x > 0) return { x: size.w + cellsOut, y: from.y }
-  if (d.y < 0) return { x: from.x, y: -cellsOut }
-  return { x: from.x, y: size.h + cellsOut }
+  const board = getDef(def)!
+  const size = objectSize(board)
+  const onTheLine = board.pins.filter((p) => (d.x ? p.y === from.y : p.x === from.x)).map((p) => p.x * d.x + p.y * d.y)
+  const edge = d.x < 0 ? 0 : d.x > 0 ? size.w : d.y < 0 ? 0 : size.h
+  const past = Math.max(edge * (d.x + d.y), ...onTheLine) + cellsOut
+  return d.x ? { x: past * d.x, y: from.y } : { x: from.x, y: past * d.y }
 }
 
 function facing(id: string, q: Point, d: Point): { part: PlacedObject; pin: string } {
@@ -400,21 +401,33 @@ describe("every inner header row on the five boards (design.md §4.5: «322 pins
     expect.soft(Object.fromEntries(count), "inner-row pins per board").toEqual({ "open746i-c": 166, "nucleo-f429zi": 50, "stm32f4-discovery": 50, "olimex-stm32-h405": 36, "lcd7-f": 20 })
   })
 
-  it("each leaves straight out over the free sockets in front of it to a part three cells past the board, joining none of them (junctions.md 33; design.md §4.5)", () => {
+  it("each leaves straight out over the free sockets in front of it to a part three cells past the board, or past its header where the header stands out of the board's box, joining none of them; a pin whose straight row would run along another header's line of sockets takes the router's clean route instead (junctions.md 33; design.md §4.5; §13.22 question 6: never along a header's line of sockets, «KiCad and EAGLE draw it looking joined»)", () => {
     const misses: string[] = []
+    const alongAHeader: string[] = []
     for (const p of innerRowPins()) {
       const q = beyond(p.def, p.pin, p.d, 3)
       const { part, pin: end } = facing("T", q, p.d)
       const doc = docOf([board(p.def), part])
       const route = routeBetween(doc, pin("U1", p.pin.id), pin("T", end))
+      const name = `${p.def} ${p.pin.id}`
+      const oneNet = JSON.stringify([[`T:${end}`, `U1:${p.pin.id}`].sort()])
+      const straight = [at(p.pin.x, p.pin.y), at(q.x, q.y)]
+      if (shapeOf(doc, straight).faults.some((f) => f.includes("passes along the header column"))) {
+        alongAHeader.push(name)
+        const faults = route ? shapeOf(doc, route).faults : ["no route"]
+        if (faults.length) misses.push(`${name}: ${JSON.stringify(cells(route))}: ${faults.join("; ")}`)
+        else if (JSON.stringify(partition(laid(doc, route))) !== oneNet) misses.push(`${name}: joins a socket it passes`)
+        continue
+      }
       const want = [
         [p.pin.x, p.pin.y],
         [q.x, q.y],
       ]
-      if (JSON.stringify(cells(route)) !== JSON.stringify(want)) misses.push(`${p.def} ${p.pin.id}: ${JSON.stringify(cells(route))}, not ${JSON.stringify(want)}`)
-      else if (JSON.stringify(partition(laid(doc, route))) !== JSON.stringify([[`T:${end}`, `U1:${p.pin.id}`].sort()])) misses.push(`${p.def} ${p.pin.id}: joins a socket it passes`)
+      if (JSON.stringify(cells(route)) !== JSON.stringify(want)) misses.push(`${name}: ${JSON.stringify(cells(route))}, not ${JSON.stringify(want)}`)
+      else if (JSON.stringify(partition(laid(doc, route))) !== oneNet) misses.push(`${name}: joins a socket it passes`)
     }
-    expect.soft(misses, "322 straight wires").toEqual([])
+    expect.soft(alongAHeader, "the straight rows that would run along another header's line of sockets: the Open746I-C's P18-14 and P18-16, across CN5").toEqual(["open746i-c P18-14", "open746i-c P18-16"])
+    expect.soft(misses, "320 straight wires and two clean routes round").toEqual([])
   })
 
   it("with the outer socket in front wired, each inner pin between two rows slips half a cell towards its target, passes between the two outer pins and steps back onto the next whole row (design.md §13.5: «the half-cell slip, and only it»)", () => {
@@ -448,6 +461,51 @@ describe("every inner header row on the five boards (design.md §4.5: «322 pins
     }
     expect.soft(checked, "inner pins with an inner and an outer neighbour either side and one socket in front: Open746I-C 86, Nucleo 42, Discovery 46, H405 30").toBe(204)
     expect.soft(misses, "every one on the slip").toEqual([])
+  })
+})
+
+const isWholeCell = (p: readonly [number, number]) => Number.isInteger(p[0]) && Number.isInteger(p[1])
+
+function escapes(route: readonly (readonly [number, number])[], pin: readonly [number, number], out: Point): string | null {
+  const [p0, p1, p2] = route
+  if (p0[0] !== pin[0] || p0[1] !== pin[1]) return `does not start on the pin ${JSON.stringify(pin)}`
+  const alongOff = !Number.isInteger(out.x ? pin[0] : pin[1])
+  const acrossOff = !Number.isInteger(out.x ? pin[1] : pin[0])
+  const outward = (q: readonly [number, number]) => (q[0] - pin[0]) * out.x + (q[1] - pin[1]) * out.y
+  const sideways = (q: readonly [number, number]) => Math.abs((q[0] - pin[0]) * out.y - (q[1] - pin[1]) * out.x)
+  if (alongOff && acrossOff) return outward(p1) === 0.5 && sideways(p1) === 0 && outward(p2) === 0.5 && sideways(p2) === 0.5 && isWholeCell(p2) ? null : `not half a cell out, then half a cell across onto whole cells: ${JSON.stringify(route.slice(0, 3))}`
+  if (alongOff) return outward(p1) === 0.5 && sideways(p1) === 0 && Number.isInteger(p1[out.x ? 0 : 1]) ? null : `not half a cell out onto a whole column: ${JSON.stringify(route.slice(0, 2))}`
+  return outward(p1) === 0 && sideways(p1) === 0.5 && isWholeCell(p1) ? null : `not half a cell sideways onto whole cells: ${JSON.stringify(route.slice(0, 2))}`
+}
+
+describe("pins off the whole-cell lattice: a half-cell step out of the pin onto whole cells, then whole cells (design.md §4.2: boards keep their half cells; the user's decision on phase 6's question 12)", () => {
+  it("a Black Pill's SWD pin, on a half cell both ways, to a resistor: half a cell out, half a cell across onto the target's row, straight on to its pin", () => {
+    const doc = docOf([board("weact-blackpill-f411"), resistor("T", 24, 6)])
+    const route = routeBetween(doc, pin("U1", "P3-1"), pin("T", "1"))
+    expect.soft(cells(route), "(19.5, 6.5) → (20, 6.5) → (20, 7) → (24, 7)").toEqual([
+      [19.5, 6.5],
+      [20, 6.5],
+      [20, 7],
+      [24, 7],
+    ])
+    expect.soft(route && partition(laid(doc, route)), "one net").toEqual([["T:1", "U1:P3-1"]])
+  })
+
+  it("a half-cell pin to another half-cell pin: each end leaves by its half-cell step onto whole cells, the route between them on whole cells and clean, one net", () => {
+    const turned = { ...board("weact-blackpill-f411"), id: "U2", rotation: 180 as Rotation, props: { ref: "U2" } }
+    const swdAt = (o: PlacedObject) => pointOf(o, "P3-1")
+    const u2 = { ...turned, x: c(27.5) - swdAt(turned).x }
+    const doc = docOf([board("weact-blackpill-f411"), u2])
+    const a = swdAt(board("weact-blackpill-f411"))
+    const b = swdAt(u2)
+    const route = routeBetween(doc, pin("U1", "P3-1"), pin("U2", "P3-1"))
+    const got = cells(route)
+    expect.soft(got && escapes(got, [a.x / GRID, a.y / GRID], { x: 1, y: 0 }), `U1's end: ${JSON.stringify(got)}`).toBeNull()
+    expect.soft(got && escapes([...got].reverse(), [b.x / GRID, b.y / GRID], { x: -1, y: 0 }), `U2's end: ${JSON.stringify(got)}`).toBeNull()
+    const middle = route ? route.slice(2, -2) : []
+    expect.soft(middle.length > 0 && middle.every((p) => isWholeCell([p.x / GRID, p.y / GRID])), "every point between the two steps on whole cells").toBe(true)
+    expect.soft(middle.length > 1 ? shapeOf(doc, middle).faults : ["no whole-cell route"], "the whole-cell route between them is clean").toEqual([])
+    expect.soft(route && partition(laid(doc, route)), "one net").toEqual([["U1:P3-1", "U2:P3-1"]])
   })
 })
 

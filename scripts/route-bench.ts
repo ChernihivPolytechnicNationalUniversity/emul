@@ -1,10 +1,11 @@
 import "./lib/all-parts"
+import { lab1Stand } from "@/schematic/examples"
 import { GRID, objectPins } from "@/schematic/geometry"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import { wiringOf } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
 import { routeBetween, type RouteEnd } from "@/schematic/wires/router"
-import { stressDocuments, TILE_PITCH, TILINGS } from "./lib/stress"
+import { tiled, TILE_PITCH, TILINGS } from "./lib/stress"
 
 const ITERATIONS = 21
 const WARMUP = 10
@@ -12,6 +13,10 @@ const REFERENCE_MS = 18
 const LOCAL_GROWTH = 2
 
 const BUDGET_MS = { near: 2, across: 5 }
+
+const STM32_ROWS = 84
+
+const PITCH_LEAVING_A_WAY_ROUND_THE_CHIP = { x: TILE_PITCH.x, y: (STM32_ROWS + 6) * GRID }
 
 function reference() {
   const map = new Map<number, number>()
@@ -48,7 +53,7 @@ function middleTile(doc: Schematic) {
   const tiles = doc.objects.length / 30
   const tile = Math.floor(tiles / 2)
   const columns = Math.ceil(Math.sqrt(tiles))
-  return { x: (tile % columns) * TILE_PITCH.x, y: Math.floor(tile / columns) * TILE_PITCH.y }
+  return { x: (tile % columns) * PITCH_LEAVING_A_WAY_ROUND_THE_CHIP.x, y: Math.floor(tile / columns) * PITCH_LEAVING_A_WAY_ROUND_THE_CHIP.y }
 }
 
 function endOf(doc: Schematic, [def, x, y, index]: readonly [string, number, number, number]): RouteEnd {
@@ -85,7 +90,8 @@ const check = (what: string, ok: boolean, detail: string) => {
 }
 const ms = (value: number) => `${value.toFixed(2)} ms`
 
-const documents = stressDocuments(TILINGS)
+const stand = lab1Stand.build(GRID)
+const documents = TILINGS.map((tiles) => tiled(stand, tiles, PITCH_LEAVING_A_WAY_ROUND_THE_CHIP))
 const measured = new Map<string, number>()
 console.log("One route between two pins of the middle tile (design.md §7; plan.md phase 6)")
 for (const doc of documents)

@@ -205,13 +205,13 @@ describe("drawing a wire: connections are made by ends (design.md §6.7; junctio
     expect.soft(isRefusal(drawnTo(doc, wiring, moved, field(at(12, 1)), newId)), "finishing there is refused").toBe(true)
   })
 
-  it("a wire that would pass over another net's pin without ending there is refused; ended on that pin it joins (junctions.md 10, 12; ГОСТ 2.721-74 item 6 note 3; Altium: a wire across a pin connects it)", () => {
+  it("a wire that would pass over another net's pin without ending there is refused; ended on that pin it joins (junctions.md 10, 12; ГОСТ 2.721-74 item 6 note 3; Altium: a wire across a pin connects it; the end a free point beside R3's pin, since a pin target is offered the router's route, design.md §13.22 question 7 A)", () => {
     const doc = docOf(
       [resistor("R2", 0, 0), ground("G1", 3, 2), resistor("R1", 7, 1, 90), supply("V1", 7, -3, "VCC"), resistor("R3", 12, 0)],
       [seg(at(4, 1), at(4, 2)), seg(at(8, -1), at(8, 1))],
     )
     const { wiring, d } = drawing(doc, at(4, 1))
-    const across = previewOf(doc, wiring, pointerAt(d, at(12, 1)), drawEndAt(wiring, at(12, 1)))
+    const across = previewOf(doc, wiring, pointerAt(d, at(11, 1)), drawEndAt(wiring, at(11, 1)))
     expect.soft(across.refused?.refused, "over R1's pin").toBe("over")
     expect.soft(across.refused?.at, "named where").toEqual(at(8, 1))
     const onPin = previewOf(doc, wiring, pointerAt(d, at(8, 1)), drawEndAt(wiring, at(8, 1)))
@@ -221,10 +221,10 @@ describe("drawing a wire: connections are made by ends (design.md §6.7; junctio
     expect.soft(change.joined.length, "one join").toBe(1)
   })
 
-  it("a wire of another net drawn along the spine is refused (junctions.md 24)", () => {
+  it("a wire of another net drawn along the spine is refused (junctions.md 24; the end a free point beside R3's pin, since a pin target is offered the router's route, design.md §13.22 question 7 A)", () => {
     const doc = docOf([resistor("R2", 0, 0), resistor("R1", 7, 1, 90), resistor("R3", 12, 0), resistor("R5", 5, 4, 90)], [seg(at(4, 1), at(8, 1))])
     const { wiring, d } = drawing(doc, at(6, 4))
-    const preview = previewOf(doc, wiring, towards(d, at(6, 3), at(12, 1)), drawEndAt(wiring, at(12, 1)))
+    const preview = previewOf(doc, wiring, towards(d, at(6, 3), at(11, 1)), drawEndAt(wiring, at(11, 1)))
     expect.soft(preview.refused?.refused, "up onto the spine and along it").toBe("along")
   })
 
@@ -409,13 +409,13 @@ describe("found by phase 4's review (Claude)", () => {
     expect.soft(preview.refused, "not refused over R2's other pin").toBeNull()
   })
 
-  it("a wire passing over a bare pin of another net, or over the end of another net's stub, is refused (design.md §6.7; Claude 8)", () => {
+  it("a wire passing over a bare pin of another net, or over the end of another net's stub, is refused (design.md §6.7; Claude 8; the end a free point beside R3's pin, since a pin target is offered the router's route, design.md §13.22 question 7 A)", () => {
     const pinOnly = docOf([resistor("R1", 0, 0), resistor("R7", 7, 1, 90), resistor("R3", 12, 0)])
     const a = drawing(pinOnly, at(4, 1))
-    expect.soft(previewOf(pinOnly, a.wiring, pointerAt(a.d, at(12, 1)), drawEndAt(a.wiring, at(12, 1))).refused?.refused, "over R7's bare pin").toBe("over")
+    expect.soft(previewOf(pinOnly, a.wiring, pointerAt(a.d, at(11, 1)), drawEndAt(a.wiring, at(11, 1))).refused?.refused, "over R7's bare pin").toBe("over")
     const stub = docOf([resistor("R1", 0, 0), resistor("R7", 7, 4, 90), resistor("R3", 12, 0)], [seg(at(8, 4), at(8, 1))])
     const b = drawing(stub, at(4, 1))
-    expect.soft(previewOf(stub, b.wiring, pointerAt(b.d, at(12, 1)), drawEndAt(b.wiring, at(12, 1))).refused?.refused, "over the end of R7's stub").toBe("over")
+    expect.soft(previewOf(stub, b.wiring, pointerAt(b.d, at(11, 1)), drawEndAt(b.wiring, at(11, 1))).refused?.refused, "over the end of R7's stub").toBe("over")
   })
 
   it("a drawn wire may pass a free board socket without joining it: the jumper rule (design.md §4.5; junctions.md 33)", () => {
