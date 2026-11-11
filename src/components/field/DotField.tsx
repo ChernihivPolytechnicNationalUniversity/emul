@@ -32,7 +32,7 @@ import { KEYMAP, labelFor, stopUnlessAppCommand } from "@/lib/keymap"
 import { addsToSelection, primaryClick } from "@/lib/pointer"
 import { useEvent } from "@/hooks/use-event"
 import { clipboardDefIds, clipboardText, clipFromClipboard, pasteLanding, useSchematic, type Clip } from "@/schematic/use-schematic"
-import { nearestOn, travellingWires } from "@/schematic/wire-edits"
+import { pressedOn, travellingWires } from "@/schematic/wire-edits"
 import { CONTACT_OPENED, DRAG_REFUSED, PartDrag, SegmentDrag, TURN_REFUSED, UNLAID, WIRE_MOVE_REFUSED, WIRES_REFUSED, type Landed } from "@/schematic/rubber-band"
 import { DRAW_REFUSED, PASTE_REFUSED, backAlong, cutBack, laysClear, drawEndAt, flipPosture, isRefusal, pointerAt, previewOf, startDrawing, withCorner, withoutCorner, type CutBack, type DrawEnd, type Drawing, type DrawRefusal } from "@/schematic/wire-draw"
 import { NO_CROSSING } from "@/schematic/junction-tool"
@@ -1109,7 +1109,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       if (run) {
         const id = segmentNearest(run, world)
         const s = run.segments.find((segment) => segment.id === id)!
-        return drawEndAt(wiring, nearestOn(s, world))
+        const on = pressedOn(s, world, backReach())
+        if (on) return drawEndAt(wiring, on)
       }
     }
     return drawEndAt(wiring, snapPoint(world))
