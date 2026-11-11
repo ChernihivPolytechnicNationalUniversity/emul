@@ -206,3 +206,13 @@ export function nearestOnSegment(s: Pick<WireSegment, "a" | "b">, p: Point): Poi
   const t = length2 ? Math.max(0, Math.min(1, ((p.x - s.a.x) * dx + (p.y - s.a.y) * dy) / length2)) : 0
   return { x: s.a.x + t * dx, y: s.a.y + t * dy }
 }
+
+export function entersBox(s: Pick<WireSegment, "a" | "b">, box: { x: number; y: number; w: number; h: number }): boolean {
+  if (Math.max(s.a.x, s.b.x) <= box.x || Math.min(s.a.x, s.b.x) >= box.x + box.w || Math.max(s.a.y, s.b.y) <= box.y || Math.min(s.a.y, s.b.y) >= box.y + box.h) return false
+  if (s.a.x === s.b.x || s.a.y === s.b.y) return true
+  const dx = s.b.x - s.a.x
+  const dy = s.b.y - s.a.y
+  const tx = [(box.x - s.a.x) / dx, (box.x + box.w - s.a.x) / dx].sort((p, q) => p - q)
+  const ty = [(box.y - s.a.y) / dy, (box.y + box.h - s.a.y) / dy].sort((p, q) => p - q)
+  return Math.max(0, tx[0], ty[0]) < Math.min(1, tx[1], ty[1])
+}

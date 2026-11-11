@@ -304,6 +304,17 @@ export class WireSheet {
     return [...found]
   }
 
+  slantsWithin(box: { x: number; y: number; w: number; h: number }): WireSegment[] {
+    const out: WireSegment[] = []
+    if (!this.slanted.size) return out
+    const x = box.x - this.offset.x
+    const y = box.y - this.offset.y
+    const found: WireSegment[] = []
+    for (const line of this.slanted.values()) line.overlapping(x, x + box.w, found)
+    for (const s of found) if (Math.max(s.a.y, s.b.y) >= y && Math.min(s.a.y, s.b.y) <= y + box.h) out.push(s)
+    return this.segmentSource || this.offset.x || this.offset.y ? out.map((s) => this.segment(s.id)!) : out
+  }
+
   alongSegment(s: { a: Point; b: Point }): WireSegment[] {
     if (!slants(s)) {
       const horizontal = s.a.y === s.b.y
