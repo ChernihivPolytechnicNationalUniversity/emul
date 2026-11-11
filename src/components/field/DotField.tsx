@@ -498,6 +498,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const more = e.shiftKey
     const suppressSplice = e.altKey
     if (!more) onArmedChange?.(null)
+    lastPress.current = null
     afterDefs([defId], () => {
       const added = sch.add(defId, at, { suppressSplice })
       if (!added) return
@@ -875,6 +876,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
 
   const onBodyPointerDown = useEvent((e: React.PointerEvent<SVGSVGElement>, id: string) => {
+    if (armed) return
     if (!primaryClick(e) || spaceHeld) return
     e.stopPropagation()
     beginMove(e, id, addsToSelection(e))
@@ -900,6 +902,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const onBodyContextMenu = useEvent((id: string) => sch.selectObject(id))
 
   const onFieldPointerDown = useEvent((e: React.PointerEvent<SVGTextElement>, id: string, key: FieldKey) => {
+    if (armed) return
     if (!primaryClick(e) || spaceHeld) return
     e.stopPropagation()
     const text = e.currentTarget
@@ -1146,6 +1149,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   }
 
   const onPinPointerDown = useEvent((e: React.PointerEvent<SVGElement>, object: string, pin: string) => {
+    if (armed) return
     if (!primaryClick(e)) return
     e.stopPropagation()
     if (measure.active) {
@@ -1182,6 +1186,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const pressedTwice = () => (lastPress.current?.count ?? 1) >= 2
   const wirePress = React.useRef<{ segment: string; x: number; y: number; pointer: number; element: Element } | null>(null)
   const onWirePointerDown = useEvent((e: React.PointerEvent<SVGPathElement>, id: string) => {
+    if (armed) return
     if (!primaryClick(e)) return
     e.stopPropagation()
     if (measure.active) {
