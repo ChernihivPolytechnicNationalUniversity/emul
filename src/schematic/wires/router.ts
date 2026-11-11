@@ -5,7 +5,7 @@ import type { PinRef, PlacedObject, Point, Schematic } from "../types"
 import { withSegments, wiringOf, type NewId, type Wiring } from "../wire-edits"
 import { WireGraph } from "./graph"
 import { alongOut, headerOfPin, type HeaderSide } from "./headers"
-import { HALF_CELL, samePoint, type WirePin, type WireSegment } from "./segment"
+import { HALF_CELL, onLattice, samePoint, type WirePin, type WireSegment } from "./segment"
 import { columnCode, rowCode } from "./sheet"
 
 export type RouteEnd = { readonly pin: PinRef } | { readonly at: Point }
@@ -166,7 +166,7 @@ function endOf(context: Context, end: RouteEnd): End | null {
   const { wiring } = context
   const pin = "pin" in end ? wiring.index.pin(keyOf(end.pin)) : [...wiring.index.at(end.at)].sort((p, q) => (p.key < q.key ? -1 : p.key > q.key ? 1 : 0))[0]
   const at = "pin" in end ? pin?.at : end.at
-  if (!at || !isWhole(at)) return null
+  if (!at || !(isWhole(at) || (pin && onLattice(at)))) return null
   const socketPassed = !!pin?.socket && wiresTouching(context, at).some((s) => !samePoint(s.a, at) && !samePoint(s.b, at))
   return { at, pin, header: pin && headerFor(wiring, pin), socketPassed }
 }
@@ -402,11 +402,51 @@ function slipsAt(context: Context, end: End): { readonly side: number; readonly 
   return found
 }
 
+type Escape = { readonly landing: Point; readonly heading: number; readonly corners: readonly Point[]; readonly cost: number; readonly turnedOut: boolean }
+
+const halfStepsOf = (from: Point, to: Point) => (Math.abs(to.x - from.x) + Math.abs(to.y - from.y)) / HALF_CELL
+
+function escapesFrom(context: Context, end: End): Escape[] {
+  const pin = end.pin
+  if (isWhole(end.at) || !pin) return []
+  const out = pin.out && pin.out.x * pin.out.y === 0 ? pin.out : null
+  const offAlong = (d: Point) => (d.x ? !Number.isInteger(end.at.x / GRID) : !Number.isInteger(end.at.y / GRID))
+  const axes: Point[] = out ? [out] : [{ x: 1, y: 0 }, { x: 0, y: 1 }]
+  const first = out && offAlong(out) ? [plus(end.at, out, HALF_CELL)] : [end.at]
+  const across = out ? { x: Math.abs(out.y), y: Math.abs(out.x) } : null
+  const found: Escape[] = []
+  const tryPath = (drawn: readonly Point[]) => {
+    const route = drawn.filter((p, i) => i === 0 || !samePoint(p, drawn[i - 1]))
+    const landing = route[route.length - 1]
+    if (route.length < 2 || !isWhole(landing)) return
+    for (let i = 1; i < route.length; i++) if (!segmentClear(context, route[i - 1], route[i], end.at)) return
+    if (wiresTouching(context, landing).length || context.wiring.index.at(landing).length) return
+    const corners = route.slice(1, -1)
+    const last = route[route.length - 2]
+    const heading = dirIndex({ x: Math.sign(landing.x - last.x), y: Math.sign(landing.y - last.y) })
+    const cost = corners.length * PRIMARY_BEND + halfStepsOf(end.at, route[1]) + corners.reduce((sum, p, i) => sum + halfStepsOf(p, route[i + 2]), 0)
+    found.push({ landing, heading, corners, cost, turnedOut: false })
+    if (out && heading !== dirIndex(out)) found.push({ landing, heading: dirIndex(out), corners: [...corners, landing], cost: cost + PRIMARY_BEND, turnedOut: true })
+  }
+  if (across) {
+    const start = first[0]
+    if (isWhole(start)) tryPath([end.at, start])
+    else for (const side of [1, -1]) tryPath([end.at, start, plus(start, across, side * HALF_CELL)])
+  } else
+    for (const [a, b] of [[axes[0], axes[1]], [axes[1], axes[0]]])
+      for (const sa of [1, -1])
+        for (const sb of [1, -1]) {
+          const p1 = offAlong(a) ? plus(end.at, a, sa * HALF_CELL) : end.at
+          tryPath([end.at, p1, offAlong(b) ? plus(p1, b, sb * HALF_CELL) : p1])
+        }
+  return found
+}
+
 type Search = { field: Field; g: Float64Array; best: number; overflow: boolean; startCell: number; targetCell: number; starts: readonly Slip[]; ends: readonly (Slip & { readonly cell: number })[] }
 
 const PRIMARY_BEND = BEND * PRIMARY
 
-function search(context: Context, from: End, to: End, box: Box, startSlips: ReturnType<typeof slipsAt>, endSlips: ReturnType<typeof slipsAt>): Search {
+function search(context: Context, from: End, to: End, box: Box, startSlips: ReturnType<typeof slipsAt>, endSlips: ReturnType<typeof slipsAt>, startEscapes: readonly Escape[], endEscapes: readonly Escape[]): Search {
   const field = fieldOf(context, box, [from, to])
   const states = field.cols * field.rows * HEADINGS
   const g = new Float64Array(states).fill(Infinity)
@@ -427,20 +467,32 @@ function search(context: Context, from: End, to: End, box: Box, startSlips: Retu
     return ahead >= 0 ? 1 : 2
   }
   const estimate = (p: Point, heading: number) => lowerBends(p, heading) * PRIMARY_BEND + ((Math.abs(goal.x - p.x) + Math.abs(goal.y - p.y)) / GRID) * WHOLE_STEP
-  const starts: Slip[] = startSlips.map((s) => ({ landing: s.landing, heading: dirIndex({ x: Math.sign(s.landing.x - s.back.x), y: Math.sign(s.landing.y - s.back.y) }), points: [s.half, s.back], cost: 2 * PRIMARY_BEND + (2 * s.k + 2) }))
-  const ends = endSlips.flatMap((s) => {
-    const cell = field.cellOf(s.landing)
-    return cell < 0 ? [] : [{ landing: s.landing, heading: dirIndex({ x: Math.sign(s.back.x - s.landing.x), y: Math.sign(s.back.y - s.landing.y) }), points: [s.back, s.half], cost: 2 * PRIMARY_BEND + (2 * s.k + 2), cell }]
-  })
+  const starts: Slip[] = [
+    ...startSlips.map((s) => ({ landing: s.landing, heading: dirIndex({ x: Math.sign(s.landing.x - s.back.x), y: Math.sign(s.landing.y - s.back.y) }), points: [s.half, s.back], cost: 2 * PRIMARY_BEND + (2 * s.k + 2) })),
+    ...startEscapes.map((e) => ({ landing: e.landing, heading: e.heading, points: e.corners, cost: e.cost })),
+  ]
+  const ends = [
+    ...endSlips.flatMap((s) => {
+      const cell = field.cellOf(s.landing)
+      return cell < 0 ? [] : [{ landing: s.landing, heading: dirIndex({ x: Math.sign(s.back.x - s.landing.x), y: Math.sign(s.back.y - s.landing.y) }), points: [s.back, s.half], cost: 2 * PRIMARY_BEND + (2 * s.k + 2), cell }]
+    }),
+    ...endEscapes.flatMap((e) => {
+      const cell = field.cellOf(e.landing)
+      if (cell < 0 || e.turnedOut) return []
+      const points = [...e.corners].reverse()
+      const next = points[0] ?? to.at
+      return [{ landing: e.landing, heading: dirIndex({ x: Math.sign(next.x - e.landing.x), y: Math.sign(next.y - e.landing.y) }), points, cost: e.cost, cell }]
+    }),
+  ]
   const result: Search = { field, g, best: Infinity, overflow: false, startCell, targetCell, starts, ends }
-  if (startCell < 0 || targetCell < 0) return result
+  if ((startCell < 0 && !starts.length) || (targetCell < 0 && !ends.length)) return result
   const heap = new Heap()
   const open = (state: number, cost: number, p: Point, heading: number) => {
     if (cost >= g[state]) return
     g[state] = cost
     heap.push(cost + estimate(p, heading), state, cost)
   }
-  open(startCell * HEADINGS + START, 0, from.at, START)
+  if (startCell >= 0) open(startCell * HEADINGS + START, 0, from.at, START)
   for (const s of starts) {
     const cell = field.cellOf(s.landing)
     if (cell >= 0) open(cell * HEADINGS + s.heading, s.cost, s.landing, s.heading)
@@ -522,7 +574,7 @@ function chosen(from: End, to: End, found: Search): Point[] | null {
     onPath[state] = 1
     stack.push(state)
   }
-  for (let h = 0; h < HEADINGS; h++) if (g[targetCell * HEADINGS + h] === best) mark(targetCell * HEADINGS + h)
+  if (targetCell >= 0) for (let h = 0; h < HEADINGS; h++) if (g[targetCell * HEADINGS + h] === best) mark(targetCell * HEADINGS + h)
   for (const end of ends)
     for (let h = 0; h < HEADINGS; h++) {
       const state = end.cell * HEADINGS + h
@@ -585,10 +637,11 @@ function chosen(from: End, to: End, found: Search): Point[] | null {
   const firstOk = (p: Point | undefined) => (!startHeader || !p ? 1 : alongOut(p, startHeader.out) === startHeader.clearAt ? 1 : 0)
   const lastOk = (corners: readonly Point[]) => (!header || !corners.length ? 1 : alongOut(corners[corners.length - 1], header.out) === header.clearAt ? 1 : 0)
   const candidate = (corners: Point[], first: number, axis: boolean, slipStart: boolean, slipEnd: boolean) => {
-    candidates.push({ points: [from.at, ...corners, to.at], first, axis, ok: (slipStart ? 1 : firstOk(corners[0])) + (slipEnd ? 1 : lastOk(corners)) })
+    const points = [from.at, ...corners, to.at].filter((p, i, all) => i === 0 || !samePoint(p, all[i - 1]))
+    candidates.push({ points, first, axis, ok: (slipStart ? 1 : firstOk(corners[0])) + (slipEnd ? 1 : lastOk(corners)) })
   }
   const startState = startCell * HEADINGS + START
-  if (onPath[startState])
+  if (startCell >= 0 && onPath[startState])
     for (let step = 0; step < 4; step++) {
       let cell = startCell
       let heading = START
@@ -632,7 +685,7 @@ function chosen(from: End, to: End, found: Search): Point[] | null {
   return candidates[0].points
 }
 
-const isEndSlip = (tail: Tail, ends: readonly Slip[]) => ends.some((e) => tail.points.length >= 2 && near(tail.points[tail.points.length - 1], e.points[1]) && near(tail.points[tail.points.length - 2], e.points[0]))
+const isEndSlip = (tail: Tail, ends: readonly Slip[]) => ends.some((e) => e.points.length > 0 && tail.points.length >= e.points.length && e.points.every((p, i) => near(tail.points[tail.points.length - e.points.length + i], p)))
 
 function windowAround(points: readonly Point[], pad: number): Box {
   const xs = points.map((p) => p.x)
@@ -659,9 +712,12 @@ export function routeAround(wiring: Wiring, from: RouteEnd, to: RouteEnd, around
   if (a.socketPassed || b.socketPassed) return null
   const startSlips = slipsAt(context, a)
   const endSlips = slipsAt(context, b)
-  const reach = [a.at, b.at, ...startSlips.flatMap((s) => [s.landing, s.back]), ...endSlips.flatMap((s) => [s.landing, s.back])]
+  const startEscapes = escapesFrom(context, a)
+  const endEscapes = escapesFrom(context, b)
+  if ((!isWhole(a.at) && !startEscapes.length) || (!isWhole(b.at) && !endEscapes.length)) return null
+  const reach = [a.at, b.at, ...startSlips.flatMap((s) => [s.landing, s.back]), ...endSlips.flatMap((s) => [s.landing, s.back]), ...startEscapes.map((e) => e.landing), ...endEscapes.map((e) => e.landing)]
   for (let pad = FIRST_PAD_CELLS; ; pad *= 2) {
-    const found = search(context, a, b, windowAround(reach, pad), startSlips, endSlips)
+    const found = search(context, a, b, windowAround(reach, pad), startSlips, endSlips, startEscapes, endEscapes)
     if (Number.isFinite(found.best) || !found.overflow || pad >= LAST_PAD_CELLS) return chosen(a, b, found)
   }
 }
