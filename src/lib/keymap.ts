@@ -28,6 +28,7 @@ const BINDINGS = {
   flipHorizontalAlone: { key: "x", alt: true },
   flipVerticalAlone: { key: "y", alt: true },
   measure: { key: "m" },
+  lineMode: { key: " ", shift: true },
   scope: { key: "o" },
   logic: { key: "l" },
   code: { key: "j", mod: true },

@@ -149,8 +149,8 @@ export function closeMenusAfterCommands(target: Pick<Window, "addEventListener" 
 }
 
 const KEY_NAMES: Readonly<Record<"apple" | "words", Readonly<Record<string, string>>>> = {
-  apple: { "-": "−", Delete: "⌦", Escape: "⎋", Backspace: "⌫", Enter: "↩" },
-  words: { "-": "−", Delete: "Del", Escape: "Esc" },
+  apple: { "-": "−", Delete: "⌦", Escape: "⎋", Backspace: "⌫", Enter: "↩", " ": "Space" },
+  words: { "-": "−", Delete: "Del", Escape: "Esc", " ": "Space" },
 }
 
 export function keyName(key: string, platform: Platform = currentPlatform()): string {

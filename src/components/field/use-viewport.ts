@@ -8,7 +8,7 @@ import { easeFactor, frameClock } from "./easing"
 
 export type Viewport = { x: number; y: number; scale: number }
 
-export const holdsPan = (e: Pick<KeyboardEvent, "code" | "repeat" | "shiftKey" | "defaultPrevented">) => e.code === "Space" && !e.repeat && !e.defaultPrevented
+export const holdsPan = (e: Pick<KeyboardEvent, "code" | "repeat" | "shiftKey" | "defaultPrevented">) => e.code === "Space" && !e.repeat && !e.defaultPrevented && !e.shiftKey
 export type Point = { x: number; y: number }
 
 export const MIN_SCALE = 0.1
