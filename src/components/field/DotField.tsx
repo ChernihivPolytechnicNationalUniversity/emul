@@ -42,6 +42,7 @@ import { samePoint } from "@/schematic/wires/segment"
 import { announceUpgrade } from "@/hooks/use-projects"
 import { contactCheck, designatorRects, freeSpot, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
 import { toast } from "sonner"
+import { REROUTE_REFUSED } from "@/schematic/wires/router"
 import { DT } from "@/sim/speeds"
 import { useSimulation } from "@/sim/use-simulation"
 import { boardFromObject, DebugController } from "@/debug/session"
@@ -1322,6 +1323,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     sch.setWireColors([...ids].map((id) => [id, color] as const))
   })
 
+  const rerouteSelected = useEvent(() => {
+    const refused = sch.reroute()
+    if (refused) toast.error(REROUTE_REFUSED[refused.refused].title, { description: REROUTE_REFUSED[refused.refused].why })
+  })
+
   const autoColorAllNets = useEvent(() => {
     const entries: [string, WireColorKey | undefined][] = []
     let next = 0
@@ -1572,6 +1578,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       { keys: KEYMAP.rotateBackAlone, when: selected, run: () => turn(-1, true) },
       { keys: KEYMAP.flipHorizontalAlone, when: selected, run: () => mirror("horizontal", true) },
       { keys: KEYMAP.flipVerticalAlone, when: selected, run: () => mirror("vertical", true) },
+      { keys: KEYMAP.reroute, when: () => sch.selectedWires.size > 0, run: rerouteSelected },
       { keys: KEYMAP.zoomToSelection, run: () => explorerKeys.current?.zoomToSelection() },
       { keys: KEYMAP.nextProblem, run: () => explorerKeys.current?.nextProblem() },
       { keys: KEYMAP.previousProblem, run: () => explorerKeys.current?.previousProblem() },
@@ -2155,6 +2162,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         <ContextMenuItem disabled={!hasSelection} onClick={sch.removeSelected}>
           Delete
           <ContextMenuShortcut>{labelFor(KEYMAP.remove)}</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem disabled={sch.selectedWires.size === 0} onClick={rerouteSelected}>
+          Re-route wire
+          <ContextMenuShortcut>{labelFor(KEYMAP.reroute)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!selectedBoard} onClick={() => setCodeOpen(true)}>

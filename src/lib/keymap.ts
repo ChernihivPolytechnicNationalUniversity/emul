@@ -27,6 +27,7 @@ const BINDINGS = {
   rotateBackAlone: { key: "r", alt: true, shift: true, repeats: true },
   flipHorizontalAlone: { key: "x", alt: true },
   flipVerticalAlone: { key: "y", alt: true },
+  reroute: { key: "t" },
   measure: { key: "m" },
   scope: { key: "o" },
   logic: { key: "l" },

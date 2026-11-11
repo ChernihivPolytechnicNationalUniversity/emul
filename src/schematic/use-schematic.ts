@@ -29,6 +29,7 @@ import { inRect } from "./wire-select"
 import { withFieldMoved, type FieldKey } from "./fields"
 import type { SpatialIndex } from "./spatial"
 import { WireGraph } from "./wires/graph"
+import { reroutedRuns, type RerouteRefusal } from "./wires/router"
 import type { WireSegment } from "./wires/segment"
 import { documentPins, editedObjects } from "./pin-index"
 
@@ -516,6 +517,16 @@ export function useSchematic(grid: number) {
     [doc, wiring, setDoc],
   )
 
+  const reroute = React.useCallback((): RerouteRefusal | null => {
+    if (!selectedWires.size) return null
+    const { doc: next, refused } = reroutedRuns(doc, selectedWires, () => crypto.randomUUID(), wiring)
+    if (next === doc) return refused
+    commitFrom(doc, next)
+    const before = new Set(doc.wires.map((s) => s.id))
+    setSelectedWires(new Set(next.wires.filter((s) => !before.has(s.id)).map((s) => s.id)))
+    return refused
+  }, [doc, wiring, selectedWires, commitFrom])
+
   const setPart = React.useCallback(
     (object: string, part: string, patch: PartState) => {
       const key = partKey(object, part)
@@ -579,6 +590,7 @@ export function useSchematic(grid: number) {
     addWire,
     tapWire,
     setWireColors,
+    reroute,
     setPart,
     replace,
     undo,

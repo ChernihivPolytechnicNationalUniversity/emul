@@ -13,7 +13,9 @@ import type { BodyShape, LegacySchematic, PinDef, PlacedObject, Rotation, Schema
 import { drawEndAt, drawnTo, isRefusal, pointerAt, previewOf, startDrawing, type Drawing } from "@/schematic/wire-draw"
 import { inNormalForm, removed, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { danglingEnds, junctionsOf, pinPartition, WireGraph, wireNets } from "@/schematic/wires/graph"
-import { isRerouteRefusal, REROUTE_REFUSED, rerouted, routeBetween, type RouteEnd } from "@/schematic/wires/router"
+import { isRerouteRefusal, REROUTE_REFUSED, rerouted, reroutedRuns, routeBetween, type RerouteRefusal, type RouteEnd } from "@/schematic/wires/router"
+import { KEYMAP } from "@/lib/keymap"
+import { sourceCallback } from "../lib/source-callback"
 import type { WireSegment } from "@/schematic/wires/segment"
 import { bestShape, cells, shapeOf } from "../lib/route-reference"
 import { geometryOf, normalFormViolations, random } from "../lib/wire-reference"
@@ -1000,5 +1002,39 @@ describe("routing is local to the field’s maintained indexes (design.md §11; 
     const got = routeBetween(doc, pin("R1", "2"), pin("R2", "1"), known)
     armed = false
     expect.soft(got && shapeOf(doc, got).faults, "the local route still avoids the foreign wire").toEqual([])
+  })
+})
+
+describe("the editor's re-route command (design.md §7: «the “re-route” command on a selected run»; §13.22)", () => {
+  type Reroute = () => RerouteRefusal | null
+  function command(doc: Schematic, selected: readonly string[]) {
+    const seen: { committed: Schematic | null; selected: ReadonlySet<string> | null } = { committed: null, selected: null }
+    const reroute = sourceCallback<Reroute>("src/schematic/use-schematic.ts", "reroute", {
+      selectedWires: new Set(selected),
+      doc,
+      wiring: wiringFor(doc),
+      reroutedRuns,
+      commitFrom: (base: Schematic, next: Schematic) => void (seen.committed = base === doc ? next : null),
+      setSelectedWires: (ids: ReadonlySet<string>) => void (seen.selected = ids),
+    })
+    return { refused: reroute(), ...seen }
+  }
+
+  it("every selected run is laid again in one edit, the new runs are selected, and the key is T", () => {
+    const doc = closePartsHooks()
+    const { refused, committed, selected } = command(doc, ["w67~2", "w45b", "w45b~3"])
+    expect.soft(refused, "nothing refused").toBeNull()
+    const untouched = doc.wires.filter((s) => !s.id.startsWith("w67") && !s.id.startsWith("w45b"))
+    expect.soft(committed && geometryOf(committed.wires), "R6 → R7 one corner, R4 ∥ R5's bottoms straight, the rest as it was, one document").toEqual(geometryOf([...untouched, ...path(at(16, 8), at(17, 8), at(17, 10)), seg(at(13, 4), at(15, 4))]))
+    expect.soft(committed && selected && geometryOf(committed.wires.filter((s) => selected.has(s.id))), "the new runs selected").toEqual(geometryOf([...path(at(16, 8), at(17, 8), at(17, 10)), seg(at(13, 4), at(15, 4))]))
+    expect.soft(KEYMAP.reroute, "T, free on every layout the keymap tests cover").toEqual({ key: "t" })
+  })
+
+  it("a run with no clean path is left as it was and the refusal is returned for the toast", () => {
+    const doc = docOf([resistor("R2", 8, 0), resistor("R5", 3, 0), resistor("R6", 7, -4, 90), resistor("R7", 7, 2, 90)], path(at(8, 1), at(8, 1.5), at(10, 1.5), at(10, 4)))
+    const { refused, committed } = command(doc, [doc.wires[0].id])
+    expect.soft(refused?.refused, "refused, named").toBe("no-clean-path")
+    expect.soft(refused && REROUTE_REFUSED[refused.refused].title, "the toast's title").toBe("Not re-routed")
+    expect.soft(committed, "no edit").toBeNull()
   })
 })

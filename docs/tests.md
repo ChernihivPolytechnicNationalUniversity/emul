@@ -191,4 +191,4 @@
 | `tests/sim/exam.test.ts`, `tests/sim/logic.test.ts`, `tests/sim/bridge.test.ts`, `tests/sim/nucleo.test.ts` | analog engine scenarios |
 
 
-| `tests/sim/router.test.ts` | phase 6 standards suite: whole-cell routing costs, deterministic ties, every inner header row, taken-row slips and order independence, drawing completion, run re-route and migration; independent Dijkstra and route-fault reference in `tests/lib/route-reference.ts`, including free ends, hard body refusal, continuous half-cell-wire intersections and board row/column rules |
+| `tests/sim/router.test.ts` | phase 6 standards suite: whole-cell routing costs, deterministic ties, every inner header row, taken-row slips and order independence, drawing completion, run re-route, the editor's re-route command (the store's callback read from `use-schematic.ts`: every selected run in one edit, the new runs selected, a refusal returned for the toast, the key T) and migration; independent Dijkstra and route-fault reference in `tests/lib/route-reference.ts`, including free ends, hard body refusal, continuous half-cell-wire intersections and board row/column rules |
