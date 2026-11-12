@@ -18,9 +18,10 @@ import { circuitOf } from "@/schematic/circuit"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, routeBox, touches, type Point } from "@/schematic/geometry"
 import type { HdlModule, PlacedObject, Schematic } from "@/schematic/types"
-import { moved, placedObject, recoloured, removed, travellingWires, withModule, withSegments, wireOrder, wiringOf, type Wiring } from "@/schematic/wire-edits"
+import { clipOf, moved, placedObject, recoloured, removed, travellingWires, withModule, withSegments, wireOrder, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
-import { PartDrag, SegmentDrag, TurnRun } from "@/schematic/rubber-band"
+import { flippedWithWires, PartDrag, SegmentDrag, TurnRun } from "@/schematic/rubber-band"
+import { pastedInto } from "@/schematic/use-schematic"
 import { lineCodeOf, WireSheet, type SheetMark } from "@/schematic/wires/sheet"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
 import type { FieldKey } from "@/schematic/fields"
@@ -400,6 +401,56 @@ describe("diagonals on the kept wiring and sheet (design.md §6.11 rules 3–9, 
     expect.soft(laid, "diagonals were laid").toBeGreaterThan(5)
     expect.soft(slanted().length, "and some are still there at the end").toBeGreaterThan(0)
   })
+
+  it.each(["metronome", "logic", "power-supply", "bridge"])("%s: turns, mirrors, pastes, deletes, undos and redos around diagonals leave the wiring and the sheet equal to fresh ones", (id) => {
+    const rng = random(id.length * 911)
+    let doc: Schematic = { ...examples.find((e) => e.id === id)!.build(GRID) }
+    const graph = new WireGraph()
+    let known = wiringOf(graph, doc)
+    let n = 0
+    const newId = () => `r${n++}`
+    const history: Schematic[] = [doc]
+    let cursor = 0
+    const done = new Set<string>()
+    const slopes = [{ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 1, y: -1 }, { x: 3, y: -2 }, { x: 1, y: 2 }]
+    const slanted = () => doc.wires.filter((s) => s.a.x !== s.b.x && s.a.y !== s.b.y)
+    for (let step = 0; step < 40; step++) {
+      const kind = step < 6 || step % 3 === 0 ? "lay" : rng.pick(["turn", "mirror", "paste", "delete", "undo", "redo"] as const)
+      let next: Schematic | null = null
+      if (kind === "lay") {
+        const on = slanted().length && rng.next() < 0.6 ? rng.pick(slanted()) : null
+        const from = on ? rng.pick([on.a, on.b, ...segmentKeys.latticePointsInside(on)]) : rng.pick(doc.wires.flatMap((s) => [s.a, s.b]))
+        const slope = rng.pick(slopes)
+        const k = rng.int(1, 4) * (rng.next() < 0.5 ? 1 : -1) * segmentKeys.HALF_CELL
+        const add = [{ id: `diag${step}`, a: from, b: { x: from.x + slope.x * k, y: from.y + slope.y * k } }]
+        next = withSegments(doc, add, [], [add[0].a, add[0].b], newId)
+      } else if (kind === "turn") {
+        const parts = new Set(rng.next() < 0.5 ? [rng.pick(doc.objects).id] : doc.objects.slice(0, 3).map((o) => o.id))
+        next = new TurnRun(doc, known, parts, undefined, new Set(rng.next() < 0.5 ? slanted().slice(0, 2).map((s) => s.id) : [])).turned(rng.next() < 0.5 ? 1 : -1, newId).doc
+      } else if (kind === "mirror") {
+        next = flippedWithWires(doc, known, new Set([rng.pick(doc.objects).id]), rng.next() < 0.5 ? "horizontal" : "vertical", newId, undefined, new Set(rng.next() < 0.5 ? slanted().slice(0, 1).map((s) => s.id) : [])).doc
+      } else if (kind === "paste") {
+        const clip = clipOf(doc, new Set(doc.objects.slice(0, 2).map((o) => o.id)))
+        if (clip) next = pastedInto(doc, clip, 0, 40 * GRID, (old) => `p${step}-${old}`, newId)
+      } else if (kind === "delete" && slanted().length) next = removed(doc, new Set(), new Set([rng.pick(slanted()).id]), newId)
+      else if (kind === "undo" && cursor > 0) doc = history[(cursor = Math.max(0, cursor - rng.int(1, 3)))]
+      else if (kind === "redo" && cursor < history.length - 1) doc = history[++cursor]
+      if (next) {
+        doc = next
+        history.length = cursor + 1
+        history.push(doc)
+        cursor++
+      }
+      if (doc.wires !== known.source.wires) done.add(kind)
+      known = wiringOf(graph, doc)
+      const fresh = wiringOf(new WireGraph(), doc)
+      expect.soft(shape(known), `${id} step ${step} (${kind}): the wiring`).toEqual(shape(fresh))
+      expect.soft(slantShape(known.sheet, doc.wires, known.pins), `${id} step ${step} (${kind}): the sheet at any angle`).toEqual(slantShape(WireSheet.of(doc.wires, known.pins), doc.wires, known.pins))
+    }
+    expect.soft([...done].sort(), "set up: the wires changed by laying, turning, mirroring, pasting or deleting, and by an undo").toEqual(expect.arrayContaining(["lay", "undo"]))
+    expect.soft(done.size, "and by at least four kinds of edit").toBeGreaterThanOrEqual(4)
+    expect.soft(slanted().length, "diagonals present at the end").toBeGreaterThan(0)
+  })
 })
 
 describe("local commit indexes preserve the document and the gesture's starting state", () => {
@@ -474,6 +525,19 @@ describe("local commit indexes preserve the document and the gesture's starting 
       previous = next
     }
   })
+})
+
+it("a snapshot of the sheet keeps answering for its own wiring at any angle after the live sheet takes a delta on the same slanted lines (the turn run's starting sheet, design.md §6.6, §6.11 rule 9)", () => {
+  const c = (x: number, y: number) => ({ x: x * GRID, y: y * GRID })
+  const pins: WirePin[] = [{ key: "R1:2", at: c(4, 1) }, { key: "R2:1", at: c(10, 5) }]
+  const before: WireSegment[] = [{ id: "d", a: c(4, 1), b: c(10, 5) }, { id: "far", a: c(16, 9), b: c(22, 13) }, { id: "x", a: c(4, 5), b: c(10, 1) }]
+  const live = WireSheet.of(before, pins)
+  const kept = live.snapshot()
+  const stretched: WireSegment = { id: "d2", a: c(4, 1), b: c(13, 7) }
+  live.apply({ removed: [before[0], before[2]], added: [stretched, { id: "x2", a: c(4, 5), b: c(13, 3) }] })
+  const after = [stretched, before[1], { id: "x2", a: c(4, 5), b: c(13, 3) }]
+  expect.soft(slantShape(kept, before, pins), "the snapshot answers as a fresh sheet of the wires it was taken from").toEqual(slantShape(WireSheet.of(before, pins), before, pins))
+  expect.soft(slantShape(live, after, pins), "the live sheet answers as a fresh sheet of the wires after the delta").toEqual(slantShape(WireSheet.of(after, pins), after, pins))
 })
 
 it("the sheet shifted with the whole drawing then edited locally still answers as a fresh sheet", () => {
