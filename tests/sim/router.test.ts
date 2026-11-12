@@ -6,7 +6,8 @@ import { GRID, objectPins, objectSize, type Point } from "@/schematic/geometry"
 import { runsOf } from "@/schematic/circuit"
 import { upgraded, type SavedSchematic } from "@/schematic/migrate"
 import { wirePins, wiresAsSegments } from "@/schematic/migrate-wires"
-import { placementCheck } from "@/schematic/placement"
+import { footprints, placementCheck } from "@/schematic/placement"
+import { bodiesOf, crossedBody } from "@/schematic/body-crossing"
 import { isPrintedName, printedBox, printedGrowth } from "@/schematic/printed-text"
 import { allDefs, getDef } from "@/schematic/registry"
 import type { BodyShape, LegacySchematic, PinDef, PlacedObject, Rotation, Schematic } from "@/schematic/types"
@@ -993,6 +994,20 @@ describe("routes with free ends and hard body obstacles (design.md §7, §4.1, �
     const doc = docOf([resistor("R9", 0, 0)])
     expect.soft(bestShape(doc, at(2, 1), at(6, 1)), "the hard-obstacle reference").toBeNull()
     expect.soft(routeBetween(doc, { at: at(2, 1) }, { at: at(6, 1) }), "never buy a body crossing").toBeNull()
+  })
+
+  it("a pin on a part's drawn outline but inside its box — an op-amp's supply pin — is reached from outside, through no body by the body rule (design.md §13.27, as body-crossing.ts reads a body: its drawn outline)", () => {
+    const amp: PlacedObject = { id: "U1", def: "opamp-tl072", x: c(10), y: c(10), props: { ref: "U1" } }
+    const vplus = pointOf(amp, "V+")
+    const box = footprints(amp, GRID)!.body.box
+    expect.soft(vplus.x > box.x && vplus.x < box.x + box.w && vplus.y > box.y && vplus.y < box.y + box.h, "guard: V+ lies inside the part's box").toBe(true)
+    const doc = docOf([amp, resistor("R1", vplus.x / GRID - 1, vplus.y / GRID - 8, 90)])
+    const route = routeBetween(doc, pin("R1", "2"), pin("U1", "V+"))
+    expect.soft(cells(route), "straight down onto V+").toEqual([
+      [vplus.x / GRID, vplus.y / GRID - 4],
+      [vplus.x / GRID, vplus.y / GRID],
+    ])
+    expect.soft(route && route.slice(1).some((p, i) => crossedBody({ a: route[i], b: p }, bodiesOf(doc.objects))), "through no body").toBe(false)
   })
 
   it("a foreign wire crossing between whole cells is counted and cannot hide an overlap or endpoint", () => {

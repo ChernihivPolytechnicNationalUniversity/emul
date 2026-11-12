@@ -1,5 +1,5 @@
 import { GRID } from "../grid"
-import { footprints } from "../placement"
+import { bodiesOf, runsThrough, type Body } from "../body-crossing"
 import { getDef } from "../registry"
 import type { PinRef, PlacedObject, Point, Schematic } from "../types"
 import { withSegments, wiringOf, type NewId, type Wiring } from "../wire-edits"
@@ -284,13 +284,16 @@ class Field {
     }
   }
 
-  body(box: Box) {
-    const [r0, r1] = this.rowRange(box.y, box.y + box.h, true)
-    const [c0, c1] = this.columnRange(box.x - GRID, box.x + box.w, true)
-    for (let j = r0; j <= r1; j++) for (let i = c0; i <= Math.min(c1, this.cols - 2); i++) this.hBlock[j * this.cols + i] = 1
-    const [k0, k1] = this.columnRange(box.x, box.x + box.w, true)
-    const [s0, s1] = this.rowRange(box.y - GRID, box.y + box.h, true)
-    for (let i = k0; i <= k1; i++) for (let j = s0; j <= Math.min(s1, this.rows - 2); j++) this.vBlock[j * this.cols + i] = 1
+  body(body: Body) {
+    const box = body.box
+    const [c0, c1] = this.columnRange(box.x - GRID, box.x + box.w, false)
+    const [r0, r1] = this.rowRange(box.y - GRID, box.y + box.h, false)
+    for (let j = r0; j <= r1; j++)
+      for (let i = c0; i <= c1; i++) {
+        const p = { x: this.x0 + i * GRID, y: this.y0 + j * GRID }
+        if (i + 1 < this.cols && runsThrough({ a: p, b: { x: p.x + GRID, y: p.y } }, body)) this.hBlock[j * this.cols + i] = 1
+        if (j + 1 < this.rows && runsThrough({ a: p, b: { x: p.x, y: p.y + GRID } }, body)) this.vBlock[j * this.cols + i] = 1
+      }
   }
 
   lead([pin, inner]: readonly [Point, Point]) {
@@ -322,6 +325,10 @@ class Field {
   }
 }
 
+function bodiesNear(wiring: Wiring, box: Box): Body[] {
+  return bodiesOf(wiring.index.spatial.query(box).filter((o) => !getDef(o.def)?.pinsAreSockets))
+}
+
 function fieldOf(context: Context, box: Box, ends: readonly End[]): Field {
   const { wiring, ignore, extra } = context
   const field = new Field(box)
@@ -333,15 +340,11 @@ function fieldOf(context: Context, box: Box, ends: readonly End[]): Field {
   for (const s of extra) field.wire(s)
   for (const p of wiring.index.within(box)) field.pin(p)
   for (const end of ends) if (end.header) field.zone(end.header)
-  for (const o of wiring.index.spatial.query(box)) {
-    const def = getDef(o.def)
-    if (!def || def.pinsAreSockets) continue
-    const f = footprints(o, GRID)
-    if (!f) continue
-    const b = f.body.box
+  for (const body of bodiesNear(wiring, box)) {
+    const b = body.box
     if (b.x > x1 || b.y > y1 || b.x + b.w < box.x || b.y + b.h < box.y) continue
-    field.body(b)
-    for (const lead of f.leads) field.lead(lead)
+    field.body(body)
+    for (const lead of body.leads) field.lead(lead)
   }
   return field
 }
@@ -367,15 +370,9 @@ function segmentClear(context: Context, a: Point, b: Point, own: Point): boolean
   }
   for (const s of extra) if (touchesOutsideOwn(s)) return false
   for (const p of wiring.index.within(box)) if (!near(p.at, own)) return false
-  for (const o of wiring.index.spatial.query(box)) {
-    const def = getDef(o.def)
-    if (!def || def.pinsAreSockets) continue
-    const f = footprints(o, GRID)
-    if (!f) continue
-    const r = f.body.box
-    const inside = horizontal ? a.y > r.y + EPS && a.y < r.y + r.h - EPS && hi > r.x + EPS && lo < r.x + r.w - EPS : a.x > r.x + EPS && a.x < r.x + r.w - EPS && hi > r.y + EPS && lo < r.y + r.h - EPS
-    if (inside) return false
-    for (const [pin, inner] of f.leads) if (meetings(a, b, pin, inner).length) return false
+  for (const body of bodiesNear(wiring, box)) {
+    if (runsThrough({ a, b }, body)) return false
+    for (const [pin, inner] of body.leads) if (meetings(a, b, pin, inner).length) return false
   }
   return true
 }
