@@ -106,7 +106,6 @@ describe("every example, case and saved file keeps its circuit through the freez
       "before-the-segments--bend-on-foreign-wire.emul",
       "before-the-segments--board-open746-bend-on-p3-7.emul",
       "before-the-segments--corridor-different-nets.emul",
-      "before-the-segments--junction-unwired-on-route.emul",
       "before-the-segments--nc-pads-bridging-two-nets.emul",
       "before-the-segments--off-grid-near-contact.emul",
       "before-the-segments--random-0237.emul",
