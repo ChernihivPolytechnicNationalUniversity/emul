@@ -572,6 +572,26 @@ async function shorteningFromAnOpenEnd(page: Page) {
   await page.keyboard.press("Escape")
   await page.waitForTimeout(400)
   expect("and released and dropped there, nothing changed", await wirePoints(), [pointsOf([14, 11], [20, 11], [20, 15])])
+  const crossed = hookedWire()
+  await openDoc(page, "shorten-to-a-crossing", { ...crossed, wires: [...crossed.wires, { id: "across", a: cellPoint(17, 13), b: cellPoint(23, 13) }] })
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  const end = f.toScreen(cellPoint(20, 15))
+  await page.mouse.click(end.x, end.y)
+  await via([20, 14], [20, 13])
+  const casingEnds = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll("[data-slot=rubber-band] [data-band-casing]")].flatMap((e) => {
+        const [ax, ay, bx, by] = (e.getAttribute("d") ?? "").replace(/[ML]/g, " ").trim().split(/\s+/).map(Number)
+        return [`${ax},${ay}`, `${bx},${by}`]
+      }),
+    )
+  expect("clicked on the open end and drawn back to the other net's wire across it: nothing refused, a dot shows the T it would make (the user, 2026-11-12)", [await countOf(page, "[data-slot^=pending-wire][data-refused], [data-slot=rubber-band] > g[data-blocked]"), await page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-band-junction]")].map((e) => e.getAttribute("data-band-junction")))], [0, [key(20, 13)]])
+  expect("and the wire's white casing stops short of that wire instead of painting over it", (await casingEnds()).includes(key(20, 13)), false)
+  const across = f.toScreen(cellPoint(20, 13))
+  await page.mouse.click(across.x, across.y)
+  await page.waitForTimeout(600)
+  expect("a click there ends the wire on it: a dot at the T, the other wire's two ends still open, nothing being drawn", [await page.evaluate(() => [...document.querySelectorAll("[data-slot=wire-marks] [data-junction]")].map((e) => e.getAttribute("data-junction"))), (await rings()).sort(), await countOf(page, "[data-slot^=pending-wire]")], [[key(20, 13)], [key(17, 13), key(23, 13)].sort(), 0])
 }
 
 async function phaseFiveChecks(page: Page) {

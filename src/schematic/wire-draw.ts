@@ -179,14 +179,12 @@ export function cutBack(wiring: Wiring, d: Drawing, newId: NewId = randomId): Cu
   return null
 }
 
-function crossedAt(wiring: Wiring, from: DrawEnd, at: Point): DrawRefusal | null {
-  const own = netOfEnd(wiring, from)
-  for (const s of wiring.sheet.through(at)) {
-    if (isEndOf(s, at)) continue
-    const net = wiring.view.netOfSegment(s.id) ?? `wire:${s.id}`
-    if (net !== own) return { refused: "crossing", at, nets: own ? [own, net] : [net] }
-  }
-  return null
+function atTheCut(wiring: Wiring, d: Drawing, end: DrawEnd): DrawEnd {
+  const back = retracting(d)
+  if (!back || samePoint(back.at, d.from.at) || !samePoint(end.at, back.at) || end.kind === "pin") return end
+  const own = new Set(runFrom(wiring, d.from.at)?.segments.map((s) => s.id))
+  const other = wiring.sheet.through(back.at).find((s) => !own.has(s.id) && !isEndOf(s, back.at))
+  return other ? { kind: "wire", at: back.at, segment: other.id } : { kind: "field", at: back.at }
 }
 
 export function withoutCorner(d: Drawing): Drawing {
@@ -294,12 +292,11 @@ function throughABody(doc: Schematic, points: readonly Point[], near?: Near): Dr
 }
 
 export function previewOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: DrawEnd, near?: Near): DrawPreview {
-  const end = target ?? { kind: "field", at: d.cursor }
+  const end = atTheCut(wiring, d, target ?? { kind: "field", at: d.cursor })
   const plain = pointsTo(d, end.at)
   const routed = routedPoints(doc, wiring, d, end, plain, near)
   const points = routed ? withoutRepeats(routed) : plain
-  const cut = d.back && !samePoint(d.back.at, d.from.at) ? d.back.at : null
-  const refused = (cut && crossedAt(wiring, d.from, cut)) || refusalOf(wiring, d.from, end, points) || throughABody(doc, points, near)
+  const refused = refusalOf(wiring, d.from, end, points) || throughABody(doc, points, near)
   return { points, refused, routed: !!routed }
 }
 
