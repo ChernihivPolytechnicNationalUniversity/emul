@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { GRID, type Point } from "@/schematic/geometry"
-import type { PlacedObject, Rotation, Schematic } from "@/schematic/types"
+import type { LegacySchematic, LegacyWire, PlacedObject, Rotation, Schematic } from "@/schematic/types"
 import { examples } from "@/schematic/examples"
-import { wirePins } from "@/schematic/migrate-wires"
+import { wirePins, wiresAsSegments } from "@/schematic/migrate-wires"
 import { drawEndAt, isRefusal, pointerAt, previewOf, startDrawing } from "@/schematic/wire-draw"
 import { inNormalForm, wiringOf, type Wiring } from "@/schematic/wire-edits"
-import { WireGraph } from "@/schematic/wires/graph"
+import { pinPartition, WireGraph, wireNets } from "@/schematic/wires/graph"
 import { isRerouteRefusal, REROUTE_REFUSED, rerouted, routeBetween, type RouteEnd } from "@/schematic/wires/router"
 import { contains, passesInside, samePoint, segmentsMeet, type WireSegment } from "@/schematic/wires/segment"
 
@@ -96,5 +96,37 @@ describe("a socket pair joined by a drawn shunt is impassable along its row, as 
     const preview = previewOf(doc, wiring, pointerAt(started, at(49, 9)), drawEndAt(wiring, at(49, 9)))
     expect.soft(preview.refused?.refused, "over the CTS socket").toBe("over")
     expect.soft(preview.refused && cellsOf([preview.refused.at]), "at the socket").toEqual([[45, 9]])
+  })
+})
+
+describe("the freeze passes its own net's pins as it passes its own net's wires, and counts a crossing of its own net as a crossing (the main session's decisions on review B's questions 3 and 4; design.md §13.22)", () => {
+  const frozen = (objects: PlacedObject[], wires: LegacyWire[]) => {
+    let i = 0
+    return wiresAsSegments({ objects, wires, parts: {} } satisfies LegacySchematic, () => `z${i++}`)
+  }
+  const wire = (id: string, from: [string, string], to: [string, string]): LegacyWire => ({ id, from: { object: from[0], pin: from[1] }, to: { object: to[0], pin: to[1] } })
+
+  it("R1 → R3 along row 1 over R2's bottom pin, which R1's other wire already reaches: straight over it, not round it (review B finding 3, system-exam's current mirror)", () => {
+    const { routes, notes } = frozen([resistor("R1", 0, 0), resistor("R2", 8, -3, 90), resistor("R3", 10, 0)], [wire("a", ["R1", "2"], ["R2", "2"]), wire("b", ["R1", "2"], ["R3", "1"])])
+    expect.soft(cellsOf(routes.get("b") ?? []), "the straight row, over R2:2 of its own net").toEqual([
+      [4, 1],
+      [10, 1],
+    ])
+    expect.soft(notes, "nothing laid again").toEqual([])
+  })
+
+  it("of two one-corner routes from R1 to R3's top pin, the one that crosses no wire of its own net: down beside R1 and along the net's wire into R3, not along R1's axis across the net's riser (review B finding 8)", () => {
+    const { routes, doc } = frozen([resistor("R1", 0, 0), resistor("R2", 6, -5, 90), resistor("R3", 9, 5, 90)], [wire("riser", ["R2", "2"], ["R3", "1"]), wire("w", ["R1", "2"], ["R3", "1"])])
+    expect.soft(cellsOf(routes.get("riser") ?? []), "guard: the net's riser runs down x = 7 and along row 5 into R3").toEqual([
+      [7, -1],
+      [7, 5],
+      [10, 5],
+    ])
+    expect.soft(cellsOf(routes.get("w") ?? []), "down first, onto the riser's row, no crossing").toEqual([
+      [4, 1],
+      [4, 5],
+      [10, 5],
+    ])
+    expect.soft(pinPartition(wireNets(doc.wires, wirePins(doc.objects))), "one net").toEqual([["R1:2", "R2:2", "R3:1"]])
   })
 })

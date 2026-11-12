@@ -297,7 +297,8 @@ export function wiresAsSegments(saved: LegacySchematic, ids?: () => string): Fro
     const pts = new Map<number, Point[]>()
     const routed = (l: Laid, bends: readonly Point[]) => {
       const stops = hubPins.filter((h) => h.net !== l.net).map((h) => h.at)
-      const route = routeThroughBends(wiring, l.ends[0], l.ends[1], bends, { extra: segments.filter((s) => s.net !== l.net).map((s) => s.segment), taken: wiredSockets, stops }, (key) => netOf(key) === l.net)
+      const around = { extra: segments.filter((s) => s.net !== l.net).map((s) => s.segment), own: segments.filter((s) => s.net === l.net).map((s) => s.segment), taken: wiredSockets, stops, passable: (pin: WirePin) => !pin.socket && netOf(pin.key) === l.net }
+      const route = routeThroughBends(wiring, l.ends[0], l.ends[1], bends, around, (key) => netOf(key) === l.net)
       return route && clearOf(field, l.own, route) ? corners(route) : null
     }
     for (const i of order) {

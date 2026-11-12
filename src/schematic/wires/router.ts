@@ -19,7 +19,7 @@ export const REROUTE_REFUSED: Record<RerouteRefusal["refused"], { title: string;
 
 export const isRerouteRefusal = (value: unknown): value is RerouteRefusal => typeof value === "object" && value !== null && "refused" in value
 
-export type RouteAround = { readonly ignore?: ReadonlySet<string>; readonly extra?: readonly WireSegment[]; readonly taken?: ReadonlySet<string>; readonly stops?: readonly Point[]; readonly passable?: (pin: WirePin) => boolean }
+export type RouteAround = { readonly ignore?: ReadonlySet<string>; readonly extra?: readonly WireSegment[]; readonly taken?: ReadonlySet<string>; readonly stops?: readonly Point[]; readonly passable?: (pin: WirePin) => boolean; readonly own?: readonly WireSegment[] }
 
 type Box = { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
 
@@ -46,6 +46,8 @@ const NO_V = 4
 const THROUGH_H = 8
 const THROUGH_V = 16
 const NO_TURN = 32
+const OWN_H = 64
+const OWN_V = 128
 
 const dirIndex = (d: Point) => DIRS.findIndex((e) => e.x === d.x && e.y === d.y)
 const opposite = (h: number) => (h + 2) % 4
@@ -143,13 +145,13 @@ type End = { readonly at: Point; readonly pin?: WirePin; readonly header?: Heade
 
 type Slip = { readonly landing: Point; readonly heading: number; readonly points: readonly Point[]; readonly cost: number }
 
-type Context = { readonly wiring: Wiring; readonly ignore: ReadonlySet<string>; readonly extra: readonly WireSegment[]; readonly taken: ReadonlySet<string>; readonly stops: readonly Point[]; readonly passable: (pin: WirePin) => boolean }
+type Context = { readonly wiring: Wiring; readonly ignore: ReadonlySet<string>; readonly extra: readonly WireSegment[]; readonly taken: ReadonlySet<string>; readonly stops: readonly Point[]; readonly passable: (pin: WirePin) => boolean; readonly own: readonly WireSegment[] }
 
 const NOTHING_TAKEN: ReadonlySet<string> = new Set()
 
 const NO_PIN_PASSABLE = () => false
 
-const contextOf = (wiring: Wiring, around: RouteAround): Context => ({ wiring, ignore: around.ignore ?? new Set(), extra: around.extra ?? [], taken: around.taken ?? NOTHING_TAKEN, stops: around.stops ?? [], passable: around.passable ?? NO_PIN_PASSABLE })
+const contextOf = (wiring: Wiring, around: RouteAround): Context => ({ wiring, ignore: around.ignore ?? new Set(), extra: around.extra ?? [], taken: around.taken ?? NOTHING_TAKEN, stops: around.stops ?? [], passable: around.passable ?? NO_PIN_PASSABLE, own: around.own ?? [] })
 
 const pinsAt = (context: Context, p: Point) => context.wiring.index.at(p).filter((pin) => !context.passable(pin))
 
@@ -273,6 +275,25 @@ class Field {
     }
   }
 
+  ownWire(s: { readonly a: Point; readonly b: Point }) {
+    if (samePoint(s.a, s.b)) return
+    const horizontal = s.a.y === s.b.y
+    if (!horizontal && s.a.x !== s.b.x) return
+    const line = horizontal ? s.a.y : s.a.x
+    const lo = horizontal ? Math.min(s.a.x, s.b.x) : Math.min(s.a.y, s.b.y)
+    const hi = horizontal ? Math.max(s.a.x, s.b.x) : Math.max(s.a.y, s.b.y)
+    const offset = (line - (horizontal ? this.y0 : this.x0)) / GRID
+    const [n0, n1] = horizontal ? this.columnRange(lo, hi, true) : this.rowRange(lo, hi, true)
+    if (Number.isInteger(offset)) {
+      if (offset < 0 || offset >= (horizontal ? this.rows : this.cols)) return
+      for (let k = n0; k <= n1; k++) this.node[horizontal ? offset * this.cols + k : k * this.cols + offset] |= horizontal ? OWN_H : OWN_V
+      return
+    }
+    const below = Math.floor(offset)
+    if (offset - below !== 0.5 || below < 0 || below + 1 >= (horizontal ? this.rows : this.cols)) return
+    for (let k = n0; k <= n1; k++) (horizontal ? this.vCross : this.hCross)[horizontal ? below * this.cols + k : k * this.cols + below]++
+  }
+
   pin(p: WirePin, taken: boolean) {
     const i = (p.at.x - this.x0) / GRID
     const j = (p.at.y - this.y0) / GRID
@@ -369,6 +390,7 @@ function fieldOf(context: Context, box: Box, ends: readonly End[]): Field {
   for (let y = box.y; y <= y1; y += HALF_CELL) for (const s of sheet.along(rowCode(y), box.x, x1)) if (!ignore.has(s.id)) field.wire(s)
   for (let x = box.x; x <= x1; x += HALF_CELL) for (const s of sheet.along(columnCode(x), box.y, y1)) if (!ignore.has(s.id)) field.wire(s)
   for (const s of extra) field.wire(s)
+  for (const s of context.own) field.ownWire(s)
   for (const p of wiring.index.within(box)) if (!context.passable(p)) field.pin(p, context.taken.has(p.key))
   for (const at of context.stops) field.pin({ key: "", at }, true)
   for (const end of ends) if (end.header) field.zone(end.header)
@@ -605,6 +627,7 @@ function stepCosts(field: Field, startCell: number, targetCell: number, startOut
     const edge = step === 0 || step === 1 ? cell : next
     if ((horizontal ? field.hBlock : field.vBlock)[edge]) return BLOCKED
     let crossings = (horizontal ? field.hCross : field.vCross)[edge]
+    if (!turned && heading !== START && field.node[cell] & (horizontal ? OWN_V : OWN_H)) crossings++
     if (next === targetCell) {
       if (targetOut === step) return BLOCKED
     } else {
