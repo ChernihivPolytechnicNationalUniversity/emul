@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest"
+import * as React from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 import { examples } from "@/schematic/examples"
 import { GRID, type Point } from "@/schematic/geometry"
 import { PartDrag, SegmentDrag } from "@/schematic/rubber-band"
@@ -11,6 +13,8 @@ import type { WireSegment } from "@/schematic/wires/segment"
 import { WireSheet } from "@/schematic/wires/sheet"
 import { bandOf, bandRuns, type BandLook, type BandPiece } from "@/components/field/rubber-band-layer"
 import { leadPatchPaths, wireCasingPath, wireStrokePath, type WireRoute } from "@/components/field/wire-paths"
+import { WireLayer } from "@/components/field/WireLayer"
+import { WireFlow } from "@/components/field/wire-flow"
 import { random } from "../lib/wire-reference"
 
 const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
@@ -69,6 +73,29 @@ describe("the rubber band draws a wire mid-drag the way the field draws it after
     expect.soft(strokes(band).map(bends), "no curve on the slant").toEqual([0, 0])
   })
 
+  it("a piece lying on a wire the field still draws is not drawn again on top, so the field's own turn at the pin stays as it is", () => {
+    const sheet = WireSheet.of([{ id: "stay", a: at(46, 8), b: at(46, 11) }], [])
+    expect.soft(bandRuns([piece(at(46, 8), at(46, 11))], sheet, new Set(), new Map()), "nothing drawn twice").toEqual([])
+    const longer = bandRuns([piece(at(46, 5), at(46, 11))], sheet, new Set(), new Map())
+    expect.soft(longer.map((r) => r.pts), "only the part off the field").toEqual([[at(46, 5), at(46, 8)]])
+  })
+
+  it("in a blocked frame a piece along another wire stays drawn: that overlap is the conflict", () => {
+    const sheet = WireSheet.of([{ id: "other", a: at(46, 8), b: at(46, 11) }], [])
+    expect.soft(bandRuns([piece(at(46, 8), at(46, 11))], sheet, new Set(), new Map(), true).map((r) => r.pts), "kept").toEqual([[at(46, 8), at(46, 11)]])
+  })
+
+  it("a piece that passes over a pin is two wires at the pin, as the normal form splits it", () => {
+    const sheet = WireSheet.of([], [{ key: "R1:1", at: at(45, 12) }])
+    const band = bandRuns([piece(at(45, 11), at(45, 13))], sheet, new Set(), new Map())
+    expect.soft(band.map((r) => r.pts), "split at the pin").toEqual([[at(45, 11), at(45, 12)], [at(45, 12), at(45, 13)]])
+  })
+
+  it("pieces that double back over each other are one wire, so the bend after them is still a bend and not a false junction", () => {
+    const band = bandRuns([piece(at(41, 13), at(46, 13)), piece(at(46, 13), at(46, 18)), piece(at(46, 14), at(46, 13))], WireSheet.of([], []), new Set(), new Map())
+    expect.soft(strokes(band), "the field's L").toEqual(strokes(fieldOf(docOf([], chain(at(41, 13), at(46, 13), at(46, 18))))))
+  })
+
   it("two colours meeting at a corner are two wires, as on the field", () => {
     const band = bandRuns([piece(at(5, 7), at(12, 7), "red"), piece(at(12, 7), at(12, 4), "blue")], WireSheet.of([], []), new Set(), new Map())
     const field = fieldOf(docOf([], [wire(at(5, 7), at(12, 7), "red"), wire(at(12, 7), at(12, 4), "blue")]))
@@ -124,6 +151,42 @@ describe("the rubber band draws a wire mid-drag the way the field draws it after
     const field = fieldOf(drag.landed(...by(-1, 1)).doc)
     expect.soft(band.some((r) => r.leads?.start || r.leads?.end), "the band turns at the carried pin").toBe(true)
     expect.soft(strokes(field), "every band path is one the field draws after the drop").toEqual(expect.arrayContaining(strokes(band)))
+  })
+})
+
+describe("the field's own wire layer and the rubber band draw from one set of paths (so a drag cannot drift from the field again)", () => {
+  const fieldHtml = (doc: Schematic) => {
+    const w = wiringFor(doc)
+    const html = renderToStaticMarkup(
+      React.createElement(WireLayer, {
+        routes: w.routes,
+        grid: GRID,
+        scale: PX,
+        selected: new Set<string>(),
+        hoveredNet: null,
+        colorOf: () => "black" as const,
+        netOfWire: (id: string) => w.nets.netOfWire(id),
+        dots: w.dots,
+        dangling: w.dangling,
+        corners: w.corners,
+        flow: new WireFlow(),
+        onWirePointerDown: () => {},
+        onWirePointerEnter: () => {},
+        onWirePointerLeave: () => {},
+      }),
+    )
+    return { w, html }
+  }
+  const attrs = (html: string, test: RegExp, name: string) => [...html.matchAll(/<path [^>]*>/g)].map((m) => m[0]).filter((tag) => test.test(tag)).map((tag) => tag.match(new RegExp(`${name}="([^"]*)"`))?.[1] ?? "")
+
+  it("the field strokes, casings and pin-turn patches of the user's ground wire are the shared paths, and each patch carries its wire's id so the band can lift it", () => {
+    const { w, html } = fieldHtml(docOf([ground("G", 0, 10), resistor("R1", 4, 0, 90)], chain(at(1, 10), at(3, 10), at(3, 9), at(9, 9), at(9, 8), at(5, 8), at(5, 4))))
+    expect.soft(attrs(html, /data-base=/, "d").sort(), "strokes").toEqual(strokes(w.routes))
+    expect.soft(attrs(html, /data-casing=/, "d").sort(), "casings").toEqual(casings(w.routes))
+    const turning = w.routes.filter((r) => r.leads)
+    expect.soft(turning.length, "the wire turns at the ground pin").toBe(1)
+    expect.soft(attrs(html, /stroke-linejoin="miter"/, "d").sort(), "the patch under the turn").toEqual(patches(turning))
+    expect.soft(attrs(html, /stroke-linejoin="miter"/, "data-wire"), "tagged with its wire").toEqual([turning[0].id])
   })
 })
 
