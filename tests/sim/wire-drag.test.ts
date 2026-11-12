@@ -641,6 +641,134 @@ describe("the rubber band wired to the document: dragging parts and segments (de
   })
 })
 
+describe("Alt on a wire detaches it: the run moves alone, any way, and leaves what it touched (design.md §6.3; KiCad M, OrCAD Alt, Altium Ctrl+drag)", () => {
+  const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
+  const by = (x: number, y: number) => [x * GRID, y * GRID] as const
+  const resistor = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
+  let n = 0
+  const wire = (a: Point, b: Point): WireSegment => ({ id: `alt${++n}`, a, b })
+  const chain = (...pts: Point[]) => pts.slice(1).map((p, i) => wire(pts[i], p))
+  const docOf = (objects: PlacedObject[], wires: WireSegment[]): Schematic => inNormalForm({ objects, wires, parts: {} })
+  const wiringFor = (doc: Schematic) => wiringOf(new WireGraph(), doc)
+  const viewOf = (doc: Schematic) => wireNets(doc.wires, wirePins(doc.objects))
+  const nets = (doc: Schematic) => pinPartition(viewOf(doc))
+  const normal = (doc: Schematic) => normalFormViolations(doc.wires, wirePins(doc.objects))
+  const tee = () => docOf([resistor("R1", 19, 2, 90), resistor("R2", 19, 14, 90)], [...chain(at(20, 6), at(20, 10), at(20, 14)), wire(at(12, 10), at(20, 10))])
+  const branchOf = (doc: Schematic) => doc.wires.find((s) => s.a.y === at(0, 10).y && s.b.y === at(0, 10).y)!
+  const altDrag = (doc: Schematic, segment: string) => new SegmentDrag(doc, wiringFor(doc), segment, undefined, { detach: true })
+  const spine = [wire(at(20, 6), at(20, 14))]
+
+  it("the user's wire, an open end teeing into an upright, Alt-dragged three cells left: it lands there, the upright closes up with no dot, and the circuit is the one it was", () => {
+    const doc = tee()
+    const landed = altDrag(doc, branchOf(doc).id).landed(...by(-3, 0.2), counter("l"))
+    expect.soft(landed.at, "dropped where it was let go").toEqual(at(-3, 0))
+    expect.soft(geometryOf(landed.doc.wires), "the wire three cells left, the upright whole").toEqual(geometryOf([...spine, wire(at(9, 10), at(17, 10))]))
+    expect.soft(junctionsOf(viewOf(landed.doc)), "no dot left where it teed in").toEqual([])
+    expect.soft(danglingEnds(viewOf(landed.doc)), "both its ends open").toEqual([at(9, 10), at(17, 10)])
+    expect.soft(nets(landed.doc), "R1 and R2 still on one net").toEqual([["R1:2", "R2:1"]])
+    expect.soft(normal(landed.doc), "normal form").toEqual([])
+  })
+
+  it("Alt-dragged three cells right, across the upright it left: a crossing with no dot, not a four-way joint, as the band drew it", () => {
+    const doc = tee()
+    const drag = altDrag(doc, branchOf(doc).id)
+    const frame = drag.frame(...by(3, 0))
+    const landed = drag.landed(...by(3, 0), counter("r"))
+    expect.soft(geometryOf(landed.doc.wires), "the wire across the upright, the upright whole").toEqual(geometryOf([...spine, wire(at(15, 10), at(23, 10))]))
+    expect.soft(junctionsOf(viewOf(landed.doc)), "no dot on the crossing").toEqual([])
+    expect.soft(danglingEnds(viewOf(landed.doc)), "both its ends open").toEqual([at(15, 10), at(23, 10)])
+    expect.soft(geometryOf(frame.pieces.map((p, i) => ({ id: `f${i}`, a: p.a, b: p.b }))), "the band draws exactly what the release commits").toEqual(geometryOf(landed.doc.wires))
+    expect.soft(frame.blocked, "a clean offset").toBe(false)
+    expect.soft(normal(landed.doc), "normal form").toEqual([])
+  })
+
+  it("Alt-dragged down or diagonally it goes where the pointer went; plain, the same press moves it only across itself, so left and right do nothing (design.md §6.3: a plain segment drag moves along its normal)", () => {
+    const doc = tee()
+    const id = branchOf(doc).id
+    const plain = new SegmentDrag(doc, wiringFor(doc), id)
+    expect.soft(plain.landed(...by(-3, 0)).doc, "plain, left: nothing moves").toBe(doc)
+    expect.soft(plain.landed(...by(3, 0)).doc, "plain, right: nothing moves").toBe(doc)
+    const down = altDrag(doc, id).landed(...by(0, 2), counter("d"))
+    expect.soft(geometryOf(down.doc.wires), "Alt, down: its end lands on the upright two cells lower, as a plain drag puts it").toEqual(geometryOf(new SegmentDrag(doc, wiringFor(doc), id).landed(...by(0, 2), counter("p")).doc.wires))
+    expect.soft(junctionsOf(viewOf(down.doc)), "the dot where it meets the upright now").toEqual([at(20, 12)])
+    const slant = altDrag(doc, id).landed(...by(-3, 2), counter("s"))
+    expect.soft(geometryOf(slant.doc.wires), "Alt, left and down: both at once").toEqual(geometryOf([...spine, wire(at(9, 12), at(17, 12))]))
+  })
+
+  it("a whole run goes, corners and all, and the pins it left are open: Alt is the part's Alt for a wire (design.md §6.3)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 4)], chain(at(4, 1), at(7, 1), at(7, 5), at(10, 5)))
+    const upright = doc.wires.find((s) => s.a.x === s.b.x)!
+    expect.soft(new SegmentDrag(doc, wiringFor(doc), upright.id).landed(...by(0, -3)).doc, "plain, along itself: nothing moves").toBe(doc)
+    const drag = altDrag(doc, upright.id)
+    expect.soft([...drag.touched].sort(), "the band lifts the whole run and nothing else").toEqual(doc.wires.map((s) => s.id).sort())
+    const landed = drag.landed(...by(0, -3), counter("u"))
+    expect.soft(geometryOf(landed.doc.wires), "the run three cells up, its shape kept").toEqual(geometryOf(chain(at(4, -2), at(7, -2), at(7, 2), at(10, 2))))
+    expect.soft(danglingEnds(viewOf(landed.doc)), "its ends open where they landed").toEqual([at(4, -2), at(10, 2)])
+    expect.soft(nets(landed.doc), "R1 and R2 off it").toEqual([])
+    expect.soft(normal(landed.doc), "normal form").toEqual([])
+  })
+
+  it("a run between two pins Alt-dragged off them translates whole, with no wire grown back to either pin", () => {
+    const doc = docOf([resistor("R1", 10, 10), resistor("R2", 20, 10)], [wire(at(14, 11), at(20, 11))])
+    const landed = altDrag(doc, doc.wires[0].id).landed(...by(0, 3), counter("t"))
+    expect.soft(geometryOf(landed.doc.wires), "the wire alone, three cells down").toEqual(geometryOf([wire(at(14, 14), at(20, 14))]))
+    expect.soft(nets(landed.doc), "both pins open").toEqual([])
+  })
+
+  it("its ends join what they are dropped on, as a drawn wire's do, and the frame knows it before the release (design.md §6.7: connections are made by ends)", () => {
+    const doc = docOf(
+      [resistor("R1", 19, 2, 90), resistor("R2", 19, 14, 90), resistor("R3", 9, 20, 90), resistor("R6", 2, 15)],
+      [...chain(at(20, 6), at(20, 10), at(20, 14)), wire(at(10, 10), at(20, 10)), ...chain(at(10, 11), at(10, 16), at(10, 20)), wire(at(6, 16), at(10, 16))],
+    )
+    const before = wiringFor(doc)
+    const drag = new SegmentDrag(doc, before, branchOf(doc).id, undefined, { detach: true })
+    expect.soft(drag.frame(...by(0, 2)).joins.length, "the join known before the release").toBe(1)
+    const landed = drag.landed(...by(0, 2), counter("j"))
+    expect.soft(nets(landed.doc), "R3 and R6 joined to R1 and R2 through the dropped wire's ends").toEqual([["R1:2", "R2:1", "R3:1", "R6:2"]])
+    expect.soft(netChanges(before.circuit.nets, wiringFor(landed.doc).circuit.nets).joined.length, "one join").toBe(1)
+    expect.soft(normal(landed.doc), "normal form").toEqual([])
+  })
+
+  it("dropped along another net's wire it is refused there and lands on the nearest clean offset, joining nothing (design.md §6.7)", () => {
+    const other = wire(at(6, 13), at(14, 13))
+    const doc = docOf([resistor("R1", 19, 2, 90), resistor("R2", 19, 14, 90), resistor("R4", 2, 12)], [...chain(at(20, 6), at(20, 10), at(20, 14)), wire(at(12, 10), at(20, 10)), other])
+    const drag = altDrag(doc, branchOf(doc).id)
+    expect.soft(drag.frame(...by(-4, 3)).blocked, "along R4's wire: blocked").toBe(true)
+    const landed = drag.landed(...by(-4, 3), counter("b"))
+    expect.soft(landed.refused, "a drop, not a refusal").toBeUndefined()
+    expect.soft(landed.at, "somewhere else").not.toEqual(at(-4, 3))
+    expect.soft(drag.frame(landed.at.x, landed.at.y).blocked, "a clean offset").toBe(false)
+    expect.soft(Math.abs(landed.at.x - at(-4, 3).x) + Math.abs(landed.at.y - at(-4, 3).y), "a cell away").toBe(GRID)
+    expect.soft(nets(landed.doc), "R4 kept apart from R1 and R2").toEqual([["R1:2", "R2:1"]])
+    expect.soft(normal(landed.doc), "normal form").toEqual([])
+  })
+
+  it("the wire it left closes up only where nothing else holds the point: two colours keep their joint, a corner stays a corner, and a socket keeps both wires ending on it (design.md §4.5)", () => {
+    const coloured = docOf([resistor("R1", 19, 2, 90), resistor("R2", 19, 14, 90)], [wire(at(20, 6), at(20, 10)), { ...wire(at(20, 10), at(20, 14)), color: "red" }, wire(at(12, 10), at(20, 10))])
+    const left = altDrag(coloured, branchOf(coloured).id).landed(...by(-3, 0), counter("c"))
+    expect.soft(geometryOf(left.doc.wires), "the upright still in two colours, joined where the colour changes").toEqual(geometryOf([wire(at(20, 6), at(20, 10)), { ...wire(at(20, 10), at(20, 14)), color: "red" }, wire(at(9, 10), at(17, 10))]))
+    const corner = docOf([resistor("R1", 19, 2, 90), resistor("R7", 26, 9)], [...chain(at(20, 6), at(20, 10), at(26, 10)), wire(at(12, 10), at(20, 10))])
+    const cornerLeft = altDrag(corner, corner.wires.find((s) => s.a.y === s.b.y && Math.min(s.a.x, s.b.x) === at(12, 0).x)!.id).landed(...by(-3, 0), counter("o"))
+    expect.soft(geometryOf(cornerLeft.doc.wires), "a corner stays a corner").toEqual(geometryOf([...chain(at(20, 6), at(20, 10), at(26, 10)), wire(at(9, 10), at(17, 10))]))
+    expect.soft(normal(cornerLeft.doc), "normal form").toEqual([])
+    const socket: WirePin = { key: "J1:1", at: c(20, 10), socket: true }
+    const pins: WirePin[] = [socket, { key: "R1:1", at: c(20, 6) }, { key: "R2:1", at: c(20, 14) }]
+    const wires = normalise([...path(c(20, 6), c(20, 10), c(20, 14)), w(c(12, 10), c(20, 10))], pins, undefined, counter("n"))
+    const branch = wires.find((s) => s.a.y === s.b.y)!
+    const plan = planDrag(WireSheet.of(wires, pins), new WireGraph().of(wires, pins), { pins: [], wires: [branch.id], detach: true })
+    const done = plan.commit(c(-3, 0), counter("k"))!
+    const after = commitEdit(wires, pins, done.edit, counter("m")).wires
+    expect.soft(geometryOf(after), "both halves still end on the socket").toEqual(geometryOf([...path(c(20, 6), c(20, 10), c(20, 14)), w(c(9, 10), c(17, 10))]))
+    expect.soft(canonical(pinPartition(wireNets(after, pins))), "the socket still on R1's and R2's net").toEqual(canonical([["J1:1", "R1:1", "R2:1"]]))
+  })
+
+  it("dropped through a part's body it is refused there too (design.md §13.27)", () => {
+    const doc = docOf([resistor("R1", 19, 2, 90), resistor("R2", 19, 14, 90), resistor("R5", 10, 16)], [...chain(at(20, 6), at(20, 10), at(20, 14)), wire(at(12, 10), at(20, 10))])
+    const drag = altDrag(doc, branchOf(doc).id)
+    expect.soft(drag.frame(...by(0, 7)).blocked, "over R5's body: blocked").toBe(true)
+  })
+})
+
 describe("turning and mirroring with wires (design.md §6.6, §13.17, §13.19 Q14)", () => {
   const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
   const resistor = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })

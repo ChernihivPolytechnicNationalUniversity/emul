@@ -20,6 +20,8 @@ export type Landed = { readonly doc: Schematic; readonly unlaid: readonly Unlaid
 
 export type DragOptions = { readonly detach?: boolean; readonly index?: SpatialIndex }
 
+export type SegmentDragOptions = { readonly detach?: boolean }
+
 const randomId: NewId = () => crypto.randomUUID()
 
 export const UNLAID = { title: "wire left where it was", why: "Laying it to the new place would have touched another net's wire or pin, so nothing was joined: the wire stays where it was and the pin is open. Draw it again or move the part." }
@@ -325,18 +327,19 @@ export class SegmentDrag {
     return this.plan?.reach ?? new Set()
   }
 
-  constructor(doc: Schematic, wiring: Wiring | undefined, segment: string, index?: SpatialIndex) {
+  constructor(doc: Schematic, wiring: Wiring | undefined, segment: string, index?: SpatialIndex, options: SegmentDragOptions = {}) {
     this.doc = doc
     this.guard = new BodyGuard(doc, new Set(), index)
     const current = currentWiring(doc, wiring)
     this.wiring = current
     const sheet = current.sheet
     this.segment = sheet.segment(segment)
-    const chain = this.segment ? freeChain(sheet, this.segment) : null
+    const detach = !!options.detach
+    const chain = !this.segment ? null : detach ? current.runBySegment.get(segment)?.segments ?? [this.segment] : freeChain(sheet, this.segment)
     this.free = chain !== null
     const around = new Surroundings(doc, new Set(), [], index)
     const wires = chain ? chain.map((s) => s.id) : [segment]
-    this.plan = this.segment ? planDrag(sheet, current.view, { pins: [], wires, heading: (key) => axisAligned(sheet.pin(key)?.out), avoid: around.avoid, solid: around.solid }) : null
+    this.plan = this.segment ? planDrag(sheet, current.view, { pins: [], wires, detach, heading: (key) => axisAligned(sheet.pin(key)?.out), avoid: around.avoid, solid: around.solid }) : null
   }
 
   offsetOf(dx: number, dy: number): Point {
