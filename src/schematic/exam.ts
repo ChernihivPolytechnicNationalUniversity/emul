@@ -82,7 +82,7 @@ export function buildExam(grid: number): ExamBench {
     wire(r2, "2", g, "GND", [[ox + 9, 19], [ox + 17, 19]])
     // Anode towards the base, which sits at +2 V; the source side is at 0 V.
     wire(src, "+", cin, "2")
-    wire(cin, "1", j, "J")
+    wire(cin, "1", j, "J", [[ox + 2, 9]])
     wire(src, "-", g, "GND", [[ox, 19], [ox + 17, 19]])
     wire(q, "C", cout, "1", [[ox + 17, 8], [ox + 19, 8], [ox + 19, 9]])
     wire(cout, "2", load, "1")
@@ -143,11 +143,11 @@ export function buildExam(grid: number): ExamBench {
     wire(mains, "-", t, "P2")
     wire(t, "S1", d1, "1")
     wire(t, "S2", d2, "1", [[ox + 10, oy + 16], [ox + 24, oy + 16], [ox + 24, oy + 6]])
-    wire(d1, "2", c, "1")
+    wire(d1, "2", c, "1", [[ox + 21, oy + 7]])
     wire(c, "1", load, "1")
     wire(d3, "1", g, "GND")
     wire(c, "2", g, "GND")
-    wire(load, "2", c, "2")
+    wire(load, "2", c, "2", [[ox + 29, oy + 3]])
     return { c, load, t }
   })()
 

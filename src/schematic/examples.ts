@@ -210,7 +210,7 @@ const chargeBoostChips: Example = {
     wire(led1, "2", u1, "CHRG")
     wire(led2, "2", u1, "STDBY")
     wire(u1, "BAT", bat, "+")
-    wire(bat, "+", u2, "VDD")
+    wire(bat, "+", u2, "VDD", [[27, 4], [27, 11]])
     wire(bat, "-", u2, "GND")
     wire(u2, "VM", gnd(28, 17), "GND")
     wire(bat, "+", u3, "IN")
