@@ -40,7 +40,7 @@ export type Drawing = {
   readonly mode?: LineMode
 }
 
-export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "body" | "nothing"; readonly at: Point; readonly nets: readonly string[] }
+export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "body" | "socket" | "nothing"; readonly at: Point; readonly nets: readonly string[] }
 
 export type DrawPreview = { readonly points: readonly Point[]; readonly refused: DrawRefusal | null; readonly routed: boolean }
 
@@ -56,6 +56,7 @@ export const DRAW_REFUSED: Record<DrawRefusal["refused"], { title: string; why: 
   corner: { title: "No corner on another net", why: "A bend on another net's pin or wire would join the two. Place the corner on empty field." },
   crossing: { title: "Not on a crossing", why: "Two wires crossing are not connected. Use the junction tool (J) to join them there." },
   body: { title: "Not through a part", why: "A wire goes round a part's body, never across it. Lay a corner beside the part." },
+  socket: { title: "Another net's wire passes this socket", why: "It has no clean way to step aside, and ending a wire here would join it. Move that wire first." },
   nothing: { title: "No wire to lay", why: "The wire would have no length." },
 }
 
@@ -368,7 +369,7 @@ function planOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: DrawEnd, ne
     const [from, to] = runEnds(wiring, run.points)
     const route = routeAround(wiring, from, to, { ignore, extra: around })
     const socket = [d.from.at, end.at].find((p) => run.segments.some((s) => !isEndOf(s, p) && onSegment(p, s.a, s.b)))!
-    if (!route) return { points, refused: { refused: "over", at: socket, nets: [wiring.view.netOfSegment(run.segments[0].id) ?? `wire:${run.segments[0].id}`] }, routed, moved: [] }
+    if (!route) return { points, refused: { refused: "socket", at: socket, nets: [wiring.view.netOfSegment(run.segments[0].id) ?? `wire:${run.segments[0].id}`] }, routed, moved: [] }
     moved.push({ run, points: route })
     around = [...around, ...piecesOf(route, run.id)]
   }
