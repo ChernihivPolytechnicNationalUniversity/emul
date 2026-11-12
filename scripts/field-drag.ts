@@ -779,7 +779,7 @@ async function multivibratorByHand(page: Page) {
     part("C1", "capacitor", 12, 23, { value: "220 nF" }),
     part("C2", "capacitor", 17, 23, { value: "100 nF" }),
     part("VT1", "npn", 22, 22, {}, { mirror: true }),
-    part("VT2", "npn", 27, 22),
+    part("VT2", "npn", 22, 15),
   ]
   const places: Record<string, readonly [number, number]> = { R1: [1, 0], R2: [5, 0], R3: [13, 0], R4: [17, 0], C1: [2, 3], C2: [14, 3], VT1: [1, 8], VT2: [15, 8] }
   const frameParts = [part("V1", "supply", -1, -2, { value: "+5V", voltage: "5 V" }), part("G1", "ground", 9, 14)]
@@ -795,6 +795,7 @@ async function multivibratorByHand(page: Page) {
   const frame = await fieldFrame(page)
   const view = (await page.locator("[data-slot=dot-field-viewport]").boundingBox())!
   const onScreen = (p: Point) => p.x > view.x && p.x < view.x + view.width && p.y > view.y && p.y < view.y + view.height
+  const bodyUnder = (p: Point) => page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest("[data-body]")?.getAttribute("data-body") ?? null, [p.x, p.y])
   const middle = (o: PlacedObject) => {
     const c = bodyCentre(getDef(o.def)!, orientationOf(o))
     return frame.toScreen({ x: o.x + c.x * GRID, y: o.y + c.y * GRID })
@@ -802,15 +803,16 @@ async function multivibratorByHand(page: Page) {
   for (const o of staged) {
     const [x, y] = places[o.id]
     const target = { ...o, x: x * GRID, y: y * GRID }
-    expect(`${o.id}: where it waits and where it goes are both on screen`, [onScreen(middle(o)), onScreen(middle(target))], [true, true])
+    expect(`${o.id}: where it waits a press lands on its body, and where it goes is on screen`, [await bodyUnder(middle(o)), onScreen(middle(target))], [o.id, true])
     const was = await frame.worldOf(o.id)
     await dragBy(page, middle(o), middle(target))
     const now = await frame.worldOf(o.id)
     expect(`${o.id} dragged into place`, { x: now.x - was.x, y: now.y - was.y }, { x: target.x - o.x, y: target.y - o.y })
   }
-  const bare = frame.toScreen(cellPoint(30, 4))
+  const bare = frame.toScreen(cellPoint(10, 18))
   await page.mouse.click(bare.x, bare.y)
   await page.waitForTimeout(500)
+  expect("a click on bare field clears the selection: no inspector over the field", await countOf(page, "[data-slot=inspector]"), 0)
 
   const tag = () => page.evaluate(() => document.querySelector("[data-slot=line-mode]")?.textContent ?? null)
   const drawing = () => countOf(page, "[data-slot=pending-wire-route]")
