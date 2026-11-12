@@ -140,6 +140,101 @@ async function wiresFollowTheDrag(page: Page) {
   expect("Alt-dragged: R2 moved alone, the wire's end hangs where its pin was", await countOf(page, "[data-dangling]"), 1)
 }
 
+async function plateAfterDragBackAndForth(page: Page) {
+  console.log("\na selected wire dragged back and forth keeps one plate along its drawn path, pin to pin (the user, 2026-11-12: «туда-сюда подёргали провод»)")
+  const R1 = cellPoint(8, 7)
+  const C1 = cellPoint(14, 10)
+  await openDoc(page, "plate-after-drag", {
+    objects: [resistorAt("R1", 4, 6), { id: "C1", def: "capacitor-polarized", x: 14 * GRID, y: 9 * GRID, props: { ref: "C1" } }],
+    wires: [
+      { id: "a", a: R1, b: cellPoint(12, 7) },
+      { id: "b", a: cellPoint(12, 7), b: cellPoint(12, 10) },
+      { id: "c", a: cellPoint(12, 10), b: C1 },
+    ],
+    parts: {},
+  })
+  const frame = await fieldFrame(page)
+  const look = () =>
+    page.evaluate(() => {
+      const wire = document.querySelector("[data-slot=wires] g[data-wire][data-points]")
+      return {
+        runs: document.querySelectorAll("[data-slot=wires] g[data-wire][data-points]").length,
+        points: (wire?.getAttribute("data-points") ?? "").split(" ").map((p) => p.split(",").map(Number)),
+        d: wire?.querySelector("path[data-base]")?.getAttribute("d") ?? null,
+        plates: [...document.querySelectorAll("[data-slot=selection] path[data-wire]")].filter((e) => getComputedStyle(e).display !== "none").map((p) => ({ whole: p.hasAttribute("data-whole"), d: p.getAttribute("d") })),
+        casings: [...document.querySelectorAll("[data-slot=wires] path[data-casing]")].filter((e) => getComputedStyle(e).display !== "none").map((p) => p.getAttribute("stroke")),
+        patches: [...document.querySelectorAll("[data-slot=pin-turns] > path:not([data-corner])")].map((p) => p.getAttribute("stroke")),
+        pieces: document.querySelectorAll("[data-slot=rubber-band] [data-piece]").length,
+      }
+    })
+  type Pick = (points: number[][]) => number
+  const segmentMiddle = async (pick: Pick) => {
+    const { points } = await look()
+    const k = pick(points)
+    return frame.toScreen({ x: (points[k][0] + points[k + 1][0]) / 2, y: (points[k][1] + points[k + 1][1]) / 2 })
+  }
+  const segments = (points: number[][]) => points.slice(1).map((b, k) => ({ k, a: points[k], b }))
+  const upright: Pick = (points) => segments(points).filter(({ a, b }) => a[0] === b[0]).sort((p, q) => Math.abs(q.b[1] - q.a[1]) - Math.abs(p.b[1] - p.a[1]))[0].k
+  const level = (by: (y: number) => number): Pick => (points) => segments(points).filter(({ a, b }) => a[1] === b[1]).sort((p, q) => by(p.a[1]) - by(q.a[1]))[0].k
+  const top = level((y) => y)
+  const bottom = level((y) => -y)
+  const drags: [string, Pick, number, number, string?][] = [
+    ["the upright left two cells", upright, -2, 0],
+    ["and back", upright, 2, 0],
+    ["the top run up two cells, so the wire turns up right at R1's pin", top, 0, -2, "plate-after-drag-at-r1"],
+    ["the top run down again", top, 0, 2],
+    ["the run into C1 down a cell", bottom, 0, 1, "plate-after-drag-at-c1"],
+    ["and up again", bottom, 0, -1],
+    ["the upright right a cell", upright, 1, 0],
+    ["the top run up a cell", top, 0, -1],
+    ["the upright left two cells", upright, -2, 0],
+    ["the top run back down", top, 0, 1],
+  ]
+  const pastDoubleClick = () => page.waitForTimeout(600)
+  const onUpright = await segmentMiddle(upright)
+  await page.mouse.click(onUpright.x, onUpright.y)
+  await pastDoubleClick()
+  const selected = await look()
+  expect("clicked, the wire's plate is its drawn path, one band per pass", selected.plates.map((p) => p.whole && p.d === selected.d), [true, true])
+  let turned = false
+  for (const [what, pick, dx, dy, shot] of drags) {
+    const from = await segmentMiddle(pick)
+    const cell = frame.toScreen(cellPoint(1, 1)).x - frame.toScreen(cellPoint(0, 0)).x
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(from.x + dx * cell, from.y + dy * cell, { steps: 12 })
+    await page.waitForTimeout(150)
+    const held = await look()
+    expect(`${what}, held: no plate left at the wire's old place, the rubber band draws it`, [held.plates.length, held.pieces > 0], [0, true])
+    await page.mouse.up()
+    await page.waitForTimeout(700)
+    const landed = await look()
+    turned ||= landed.patches.length > 0
+    if (shot) {
+      const aside = frame.toScreen(cellPoint(20, 14))
+      await page.mouse.move(aside.x, aside.y)
+      await page.waitForTimeout(200)
+      await shoot(page, shot)
+    }
+    expect(`${what}, released: still one wire from R1's pin to C1's`, [landed.runs, landed.points[0], landed.points.at(-1)], [1, [R1.x, R1.y], [C1.x, C1.y]])
+    expect(`${what}, released: the wire stays selected whole, its plate one band per pass along its own drawn path`, landed.plates.map((p) => p.whole && p.d === landed.d), [true, true])
+    expect(`${what}, released: its casing is the plate's tint and so is every lead patch under a turn at a pin`, [landed.casings, landed.patches.every((stroke) => stroke === "var(--selection-tint)")], [["var(--selection-tint)"], true])
+    const bare = frame.toScreen(cellPoint(20, 3))
+    await page.mouse.click(bare.x, bare.y)
+    await pastDoubleClick()
+    const again = await segmentMiddle(upright)
+    await page.mouse.click(again.x, again.y)
+    await pastDoubleClick()
+    const clicked = await look()
+    expect(`${what}: the plate kept through the drag is the plate a fresh click draws`, clicked.plates.map((p) => p.d), landed.plates.map((p) => p.d))
+  }
+  expect("one of the drags made the wire turn at a pin, so a lead patch was checked under the plate", turned, true)
+  const aside = frame.toScreen(cellPoint(20, 14))
+  await page.mouse.move(aside.x, aside.y)
+  await page.waitForTimeout(200)
+  await shoot(page, "plate-after-drag")
+}
+
 async function drawFromAWire(page: Page) {
   console.log("\na wire drawn from a wire with W, and the drawing keys (design.md §6.1)")
   await openDoc(page, "draw-from-wire", wiredPair())
@@ -975,7 +1070,7 @@ try {
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
+const sections = [contactsFollowTheDrag, wiresFollowTheDrag, plateAfterDragBackAndForth, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
 try {
   for (const section of sections) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
