@@ -70,7 +70,7 @@ import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
 import { FieldCanvas } from "./FieldCanvas"
 import { marksBesideTheBand, wireMarks } from "./wire-marks"
-import { dotRadius, OPEN_END_CELLS, openEndReach, WIRE_HIT_PX, wireCornerRadius } from "./wire-style"
+import { casingTrim, dotRadius, OPEN_END_CELLS, openEndReach, WIRE_HIT_PX, wireCornerRadius } from "./wire-style"
 import { exportPng } from "./export-image"
 import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
@@ -766,6 +766,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     },
     sheet: wiring.sheet,
     ringRadius: OPEN_END_CELLS * grid,
+    casingTrim: casingTrim(grid),
     dotRadius: bandDotRadius,
     pixel: bandPixel,
   }))

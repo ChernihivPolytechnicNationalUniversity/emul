@@ -15,6 +15,7 @@ export type RubberLook = {
   colorOfNet: (net: string) => WireColorKey
   sheet: WireSheet
   ringRadius: number
+  casingTrim: number
   dotRadius: () => number
   pixel: () => number
 }
@@ -69,6 +70,18 @@ export function bandMarks(drawn: readonly BandPiece[], sheet: WireSheet, hidden:
     else if (meeting >= 3) dots.push({ at, color })
   }
   return { open, dots }
+}
+
+export function bandCasings(drawn: readonly { readonly a: Point; readonly b: Point }[], trim: number): { a: Point; b: Point }[] {
+  const ends = new Map<string, number>()
+  for (const { a, b } of drawn) for (const p of [a, b]) ends.set(pointKey(p), (ends.get(pointKey(p)) ?? 0) + 1)
+  const lone = (p: Point) => ends.get(pointKey(p)) === 1
+  return drawn.map(({ a, b }) => {
+    const length = Math.hypot(b.x - a.x, b.y - a.y)
+    const t = length ? Math.min(trim, length / 2) / length : 0
+    const inward = (from: Point, to: Point) => ({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t })
+    return { a: lone(a) ? inward(a, b) : a, b: lone(b) ? inward(b, a) : b }
+  })
 }
 
 const SVG_MARKS = "[data-slot=wire-marks] > [data-junction], [data-slot=wire-marks] > [data-dangling], [data-corner]"
@@ -183,18 +196,28 @@ export class RubberBandLayer {
     const casings = document.createElementNS(SVG_NS, "g")
     casings.setAttribute("mask", BODY_MASK)
     layer.append(casings)
-    for (const casing of [true, false])
-      for (const { a, b, color } of drawn) {
-        const path = document.createElementNS(SVG_NS, "path")
-        path.setAttribute("d", `M${a.x} ${a.y} L${b.x} ${b.y}`)
-        path.setAttribute("fill", "none")
-        path.setAttribute("stroke", casing ? "var(--background)" : blocked ? "var(--destructive)" : wireColorVar(color))
-        path.setAttribute("stroke-width", String(casing ? casingWidth(WIRE_PX) : blocked ? SELECTED_WIRE_PX : WIRE_PX))
-        path.setAttribute("stroke-linecap", casing ? "butt" : "round")
-        path.setAttribute("vector-effect", "non-scaling-stroke")
-        if (!casing) path.setAttribute("data-piece", `${a.x} ${a.y} ${b.x} ${b.y}`)
-        ;(casing ? casings : layer).append(path)
-      }
+    for (const { a, b } of bandCasings(drawn, this.look.casingTrim)) {
+      const path = document.createElementNS(SVG_NS, "path")
+      path.setAttribute("d", `M${a.x} ${a.y} L${b.x} ${b.y}`)
+      path.setAttribute("fill", "none")
+      path.setAttribute("stroke", "var(--background)")
+      path.setAttribute("stroke-width", String(casingWidth(WIRE_PX)))
+      path.setAttribute("stroke-linecap", "butt")
+      path.setAttribute("vector-effect", "non-scaling-stroke")
+      path.setAttribute("data-band-casing", "")
+      casings.append(path)
+    }
+    for (const { a, b, color } of drawn) {
+      const path = document.createElementNS(SVG_NS, "path")
+      path.setAttribute("d", `M${a.x} ${a.y} L${b.x} ${b.y}`)
+      path.setAttribute("fill", "none")
+      path.setAttribute("stroke", blocked ? "var(--destructive)" : wireColorVar(color))
+      path.setAttribute("stroke-width", String(blocked ? SELECTED_WIRE_PX : WIRE_PX))
+      path.setAttribute("stroke-linecap", "round")
+      path.setAttribute("vector-effect", "non-scaling-stroke")
+      path.setAttribute("data-piece", `${a.x} ${a.y} ${b.x} ${b.y}`)
+      layer.append(path)
+    }
     const stroke = (color: WireColorKey) => (blocked ? "var(--destructive)" : wireColorVar(color))
     const dotR = this.look.dotRadius()
     for (const { at, color } of marks.dots) {
