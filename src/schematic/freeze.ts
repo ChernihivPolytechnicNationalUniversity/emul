@@ -1,7 +1,7 @@
 import { DIR, framePoint, GRID, objectPins, orientationOf, orientationSlot, ownBodies, routeObstacles, unionOf, type Direction, type Orientation, type Point, type Rect } from "./geometry"
 import { getDef } from "./registry"
 import type { ComponentDef, LegacyWire, PlacedObject } from "./types"
-import { clearPath, type Box } from "./wires/clear-path"
+import { clearPath, type Box, type Closed } from "./wires/clear-path"
 import { clearOf, type Conductors } from "./wires/conductors"
 import { onLattice, type WirePin } from "./wires/segment"
 
@@ -83,15 +83,21 @@ const clipped = (r: Box, to: Box): Box => {
   return { x, y, w: Math.min(r.x + r.w, to.x + to.w) - x, h: Math.min(r.y + r.h, to.y + to.h) - y }
 }
 
-export function laidAgain(l: Lay, byId: ReadonlyMap<string, PlacedObject>, objects: readonly PlacedObject[], conductors: Conductors, extent: Rect): Point[] | null {
+export type Relaid = { readonly path: Point[]; readonly strict: boolean }
+
+export function laidAgain(l: Lay, byId: ReadonlyMap<string, PlacedObject>, objects: readonly PlacedObject[], conductors: Conductors, extent: Rect, closed: readonly Closed[] = []): Relaid | null {
   const clear = (pts: readonly Point[] | null): pts is Point[] => clearOf(conductors, l.own, pts)
   const bodies = [...routeObstacles(objects, GRID, l.fromObject, l.toObject), ...ownBodies(byId, GRID, l.fromObject, l.toObject)]
   const span = { x: Math.min(l.from.x, l.to.x), y: Math.min(l.from.y, l.to.y), w: Math.abs(l.from.x - l.to.x), h: Math.abs(l.from.y - l.to.y) }
   const whole = grown(unionOf([span, extent]), 4 * GRID)
   const windows = WINDOW_CELLS.map((cells) => clipped(grown(span, cells * GRID), whole)).filter((w, i, all) => i === 0 || w.w > all[i - 1].w || w.h > all[i - 1].h)
   for (const around of windows) {
+    const path = clearPath(l.from, l.to, conductors.foreign(l.own, around, [], closed), GRID)
+    if (clear(path)) return { path, strict: true }
+  }
+  for (const around of windows) {
     const path = clearPath(l.from, l.to, conductors.foreign(l.own, around, bodies), GRID)
-    if (clear(path)) return path
+    if (clear(path)) return { path, strict: false }
   }
   return null
 }

@@ -3,7 +3,8 @@ import { footprints, type Lead } from "./placement"
 import { pinsForObject } from "./pin-index"
 import { getDef } from "./registry"
 import type { PlacedObject } from "./types"
-import type { WirePin } from "./wires/segment"
+import type { Closed } from "./wires/clear-path"
+import { contains, crossingOf, segmentsMeet, type WirePin } from "./wires/segment"
 
 const EPS = 1e-6
 
@@ -141,6 +142,21 @@ export function staysThrough(s: Segment, body: Body, span: SpliceSpan | null = n
     if (runsThrough(piece, body)) return true
   }
   return false
+}
+
+function touchesLead(s: Segment, [pin, inner]: Lead): boolean {
+  const lead = { a: pin, b: inner }
+  if (!segmentsMeet(s, lead)) return false
+  const at = crossingOf(s, lead)
+  if (at) return !samePoint(at, pin)
+  const fromThePin = (end: Point, other: Point) => samePoint(end, pin) && !contains(lead, other)
+  return !fromThePin(s.a, s.b) && !fromThePin(s.b, s.a)
+}
+
+export function closedBodies(objects: readonly PlacedObject[]): Closed[] {
+  return bodiesOf(objects)
+    .filter(crossable)
+    .map((body) => ({ box: body.box, blocks: (a: Point, b: Point) => runsThrough({ a, b }, body) || body.leads.some((lead) => touchesLead({ a, b }, lead)) }))
 }
 
 export function crossedBody(s: Segment, bodies: Iterable<Body>): Body | null {

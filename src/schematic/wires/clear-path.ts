@@ -9,8 +9,12 @@ const SOCKET = 4
 const ROW = 8
 const COLUMN = 16
 const BODY = 32
+const ALONG_X = 64
+const ALONG_Y = 128
 
 const TURN_BLOCKERS = STOP | SOCKET | ROW | COLUMN
+
+export type Closed = { readonly box: Box; readonly blocks: (a: Point, b: Point) => boolean }
 
 export class Foreign {
   readonly x0: number
@@ -18,6 +22,9 @@ export class Foreign {
   readonly cols: number
   readonly rows: number
   readonly flags: Uint8Array
+  readonly hClosed: Uint8Array
+  readonly vClosed: Uint8Array
+  strict = false
 
   constructor(bounds: Box) {
     this.x0 = Math.floor(bounds.x / HALF_CELL) * HALF_CELL
@@ -25,6 +32,8 @@ export class Foreign {
     this.cols = Math.ceil((bounds.x + bounds.w - this.x0) / HALF_CELL) + 1
     this.rows = Math.ceil((bounds.y + bounds.h - this.y0) / HALF_CELL) + 1
     this.flags = new Uint8Array(this.cols * this.rows)
+    this.hClosed = new Uint8Array(this.cols * this.rows)
+    this.vClosed = new Uint8Array(this.cols * this.rows)
   }
 
   indexOf(p: Point): number {
@@ -39,8 +48,21 @@ export class Foreign {
     if (k >= 0) this.flags[k] |= flag
   }
 
-  pin(at: Point, socket: boolean) {
-    this.mark(at, PIN | (socket ? SOCKET : STOP))
+  pin(at: Point, socket: boolean, along?: Point) {
+    this.mark(at, PIN | (socket ? SOCKET | (along ? (along.y === 0 ? ALONG_X : ALONG_Y) : 0) : STOP))
+  }
+
+  close({ box, blocks }: Closed) {
+    const i0 = Math.max(0, Math.floor((box.x - this.x0) / HALF_CELL) - 1)
+    const i1 = Math.min(this.cols - 1, Math.ceil((box.x + box.w - this.x0) / HALF_CELL) + 1)
+    const j0 = Math.max(0, Math.floor((box.y - this.y0) / HALF_CELL) - 1)
+    const j1 = Math.min(this.rows - 1, Math.ceil((box.y + box.h - this.y0) / HALF_CELL) + 1)
+    for (let j = j0; j <= j1; j++)
+      for (let i = i0; i <= i1; i++) {
+        const p = { x: this.x0 + i * HALF_CELL, y: this.y0 + j * HALF_CELL }
+        if (i + 1 < this.cols && blocks(p, { x: p.x + HALF_CELL, y: p.y })) this.hClosed[j * this.cols + i] = 1
+        if (j + 1 < this.rows && blocks(p, { x: p.x, y: p.y + HALF_CELL })) this.vClosed[j * this.cols + i] = 1
+      }
   }
 
   end(at: Point) {
@@ -92,7 +114,7 @@ class Buckets {
 }
 
 export function clearPath(from: Point, to: Point, foreign: Foreign, grid: number): Point[] | null {
-  const { x0, y0, cols, rows, flags } = foreign
+  const { x0, y0, cols, rows, flags, strict, hClosed, vClosed } = foreign
   const inside = (i: number, j: number) => i >= 0 && j >= 0 && i < cols && j < rows
   const pointOf = (cell: number): Point => ({ x: x0 + (cell % cols) * HALF_CELL, y: y0 + Math.floor(cell / cols) * HALF_CELL })
   const si = Math.round((from.x - x0) / HALF_CELL)
@@ -152,6 +174,8 @@ export function clearPath(from: Point, to: Point, foreign: Foreign, grid: number
       const isTarget = next === target
       if (there & STOP && !isTarget) continue
       if (nd % 2 === 0 ? here & there & ROW : here & there & COLUMN) continue
+      if (strict && (nd === 0 ? hClosed[cell] : nd === 2 ? hClosed[next] : nd === 1 ? vClosed[cell] : vClosed[next])) continue
+      if (strict && there & SOCKET && !isTarget && !(there & (nd % 2 === 0 ? ALONG_X : ALONG_Y))) continue
       const onLine = nd % 2 === 0 ? onRowLine[nj] : onColumnLine[ni]
       const step = STEP + (onLine ? 0 : OFF_THE_GRID) + (there & BODY ? THROUGH_A_BODY : 0) + (beside[next] && !isTarget ? BESIDE_A_PIN : 0) + (turning ? BEND : 0)
       const s = next * 4 + nd

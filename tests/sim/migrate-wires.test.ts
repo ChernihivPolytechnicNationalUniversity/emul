@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 import { openedFile, projectFile, readProjectFile } from "@/project/project-store"
 import { builder, connect, connections, legacyOf, rewire } from "@/schematic/builder"
 import { examples, lab1Board } from "@/schematic/examples"
-import { GRID, objectPins, type Point } from "@/schematic/geometry"
+import { GRID, objectIndex, objectPins, type Point } from "@/schematic/geometry"
 import { getDef, withLibrary } from "@/schematic/registry"
 import type { HdlNetlist } from "emul-shared/hdl"
 import counter from "./hdl/counter.json"
@@ -15,7 +15,7 @@ import { Conductors } from "@/schematic/wires/conductors"
 import type { HdlModule, LegacySchematic, LegacyWire, PlacedObject, Schematic } from "@/schematic/types"
 import { junctionsOf, wireNets } from "@/schematic/wires/graph"
 import { runsOf } from "@/schematic/circuit"
-import { bodiesOf, crossedBody } from "@/schematic/body-crossing"
+import { bodiesOf, closedBodies, crossedBody, staysThrough } from "@/schematic/body-crossing"
 import { buildNetlist, GROUND, type Netlist } from "@/sim/netlist"
 import { SimLoop } from "@/sim/loop"
 import { legacyCircuit } from "../lib/legacy-circuit"
@@ -224,9 +224,53 @@ describe("wires that ran over another net are laid again (design.md §10 item 4)
     }
     const lay = { wire: { id: "w", from: { object: "A", pin: "1" }, to: { object: "B", pin: "1" } }, own: new Set(["mine"]), from: c(0, 0), to: c(10, 0), fromObject: "A", toObject: "B", candidates: [[c(0, 0), c(10, 0)]] }
     const extent = { x: c(-150, 0).x, y: c(0, -150).y, w: c(310, 0).x, h: c(0, 300).y }
-    const round = laidAgain(lay, new Map(), [], wall(16), extent)
+    const round = laidAgain(lay, new Map(), [], wall(16), extent)?.path
     expect.soft(round && Math.max(...round.map((p) => Math.abs(p.y))) > c(0, 8).y, `round the 8-cell wall: ${JSON.stringify(round)}`).toBe(true)
     expect.soft(laidAgain(lay, new Map(), [], wall(200), extent), "a wall of 100 cells either way is beyond the search: the wire stays and is named").toBeNull()
+  })
+
+  it("the half-cell last resort goes round a part's body and its leads in a wider window before it takes the body in a narrow one (design.md §13.22 q2, §13.27; phase 6 review A, question 3)", () => {
+    const standing: PlacedObject = { id: "R3", def: "resistor", x: c(4, -1).x, y: c(4, -1).y, rotation: 90, props: { ref: "R3" } }
+    const fence = new Conductors()
+    for (const p of objectPins(standing, GRID)) fence.addFixed({ at: p.point, net: `R3.${p.pin.id}`, socket: false })
+    for (let k = 1; k <= 16; k++) for (const y of [-1 - k / 2, 3 + k / 2]) fence.addFixed({ at: c(5, y), net: "fence", socket: false })
+    const lay = { wire: { id: "w", from: { object: "A", pin: "1" }, to: { object: "B", pin: "1" } }, own: new Set(["mine"]), from: c(0, 1), to: c(10, 1), fromObject: "A", toObject: "B", candidates: [] }
+    const extent = { x: c(-150, 0).x, y: c(0, -150).y, w: c(310, 0).x, h: c(0, 300).y }
+    const objects = [standing]
+    const again = laidAgain(lay, objectIndex(objects), objects, fence, extent, closedBodies(objects))
+    const path = again?.path ?? []
+    const body = bodiesOf(objects)[0]
+    expect.soft(again?.strict, `laid clear of every body: ${JSON.stringify(path.map((p) => [p.x / GRID, p.y / GRID]))}`).toBe(true)
+    expect.soft(path.some((p, i) => i > 0 && staysThrough({ a: path[i - 1], b: p }, body)), "never through R3's body or along its leads, though the six-cell window has no other way").toBe(false)
+    expect.soft(Math.max(...path.map((p) => Math.abs(p.y - c(0, 1).y))) >= c(0, 9).y, "round the fence's end, nine cells out").toBe(true)
+  })
+
+  it("the half-cell last resort passes a header socket only along its row: down a corridor through the column in the six-cell window it goes round in a wider one (design.md §4.5, §13.22 q6)", () => {
+    const header = new Conductors()
+    for (let y = -8; y <= 8; y++) header.addFixed({ at: c(5, y), net: `CN.${y}`, socket: true, along: { x: -1, y: 0 } })
+    for (let k = -20; k <= 20; k++) for (const x of [4.5, 5.5]) header.addFixed({ at: c(x, k / 2), net: "corridor", socket: false })
+    for (let k = -4; k <= 24; k++) for (const y of [-10, 10]) if (k / 2 < 4.5 || k / 2 > 5.5) header.addFixed({ at: c(k / 2, y), net: "corridor", socket: false })
+    const lay = { wire: { id: "w", from: { object: "A", pin: "1" }, to: { object: "B", pin: "1" } }, own: new Set(["mine"]), from: c(5, -12), to: c(5, 12), fromObject: "A", toObject: "B", candidates: [] }
+    const extent = { x: c(-150, 0).x, y: c(0, -150).y, w: c(310, 0).x, h: c(0, 300).y }
+    const path = laidAgain(lay, new Map(), [], header, extent)?.path ?? []
+    const downTheColumn = path.some((p, i) => i > 0 && p.x === c(5, 0).x && path[i - 1].x === c(5, 0).x && Math.min(p.y, path[i - 1].y) < c(0, 8).y && Math.max(p.y, path[i - 1].y) > c(0, -8).y)
+    expect.soft(path.length > 1, "laid").toBe(true)
+    expect.soft(downTheColumn, `never down the socket column x = 5: ${JSON.stringify(path.map((p) => [p.x / GRID, p.y / GRID]))}`).toBe(false)
+  })
+
+  it("a wire only a body lets keep its circuit takes it, and the note names the body (phase 6 review A, question 3: «forbid both there and let such wires … be named»)", () => {
+    const doc: LegacySchematic = {
+      objects: [
+        { id: "R1", def: "resistor", x: 0, y: 0, props: { ref: "R1" } },
+        { id: "R2", def: "resistor", x: c(10, 0).x, y: 0, props: { ref: "R2" } },
+        { id: "R3", def: "resistor", x: c(9, -1).x, y: c(9, -1).y, rotation: 90, props: { ref: "R3" } },
+      ],
+      wires: [{ id: "w", from: { object: "R1", pin: "2" }, to: { object: "R2", pin: "1" } }],
+      parts: {},
+    }
+    const { doc: after, notes } = wiresAsSegments(doc)
+    expect.soft(pinPartition(after), "R2's pin 1 stands inside R3's body; the circuit stays").toEqual([["R1.2", "R2.1"]])
+    expect.soft(notes, "the note says what the wire crosses").toEqual(["The wire between R1 2 and R2 1 ran over another net's wire or pin where it was drawn; it is laid again so the circuit stays as it was, though only across R3's body: check it."])
   })
 
   it("two nets drawn along one corridor: the first keeps its route, the second is laid apart and named", () => {

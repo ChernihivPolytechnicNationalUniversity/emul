@@ -1,4 +1,5 @@
 import { flowVertices, runsOf, type Circuit, type FlowRun, type Run } from "./circuit"
+import { closedBodies } from "./body-crossing"
 import { corners, JUNCTION, laidAgain } from "./freeze"
 import { GRID, objectIndex, objectPins, objectRect, snap, unionOf, type Point, type RoutedWire } from "./geometry"
 import type { NetMap } from "./nets"
@@ -42,7 +43,7 @@ const segmentsAlong = (pts: readonly Point[], color: WireColorKey | undefined, n
 
 function conductorsOf(doc: Schematic, view: WireNets, pins: readonly WirePin[]): Conductors {
   const conductors = new Conductors()
-  for (const p of pins) conductors.addFixed({ at: p.at, net: view.netOfPin(p.key) ?? `pin:${p.key}`, socket: !!p.socket })
+  for (const p of pins) conductors.addFixed({ at: p.at, net: view.netOfPin(p.key) ?? `pin:${p.key}`, socket: !!p.socket, ...(p.out && !p.shunt && { along: p.out }) })
   doc.wires.forEach((s, i) => conductors.lay(i, view.netOfSegment(s.id) ?? `wire:${s.id}`, [s.a, s.b]))
   return conductors
 }
@@ -65,7 +66,7 @@ function laid(doc: Schematic, wire: LegacyWire, own: ReadonlySet<string>, object
   const clean = routed(bends) ?? (bends.length ? routed([]) : null)
   if (clean) return clean
   const extent = unionOf(objects.map((o) => objectRect(o, GRID)))
-  return laidAgain({ wire, own, from: fromPin.point, to: toPin.point, fromObject: wire.from.object, toObject: wire.to.object, candidates: [] }, byId, objects, conductors, extent)
+  return laidAgain({ wire, own, from: fromPin.point, to: toPin.point, fromObject: wire.from.object, toObject: wire.to.object, candidates: [] }, byId, objects, conductors, extent, closedBodies(objects))?.path ?? null
 }
 
 const netOrSelf = (view: WireNets, key: string) => view.netOfPin(key) ?? `pin:${key}`

@@ -1,11 +1,11 @@
 import { GRID } from "../grid"
 import type { Point } from "../types"
-import { Foreign, type Box } from "./clear-path"
+import { Foreign, type Box, type Closed } from "./clear-path"
 import { contains } from "./segment"
 
 const same = (p: Point, q: Point) => p.x === q.x && p.y === q.y
 
-export type Fixed = { at: Point; net: string; socket: boolean }
+export type Fixed = { at: Point; net: string; socket: boolean; along?: Point }
 
 export type Clash = { wires: Set<number>; points: boolean }
 
@@ -80,13 +80,13 @@ export class Conductors {
     return Conductors.spanned({ x: around.x, y: around.y }, { x: around.x + around.w, y: around.y + around.h })
   }
 
-  foreign(own: ReadonlySet<string>, around: Box, bodies: readonly Box[]): Foreign {
+  foreign(own: ReadonlySet<string>, around: Box, bodies: readonly Box[], closed?: readonly Closed[]): Foreign {
     const lattice = new Foreign(around)
     const within = (p: Point) => p.x >= around.x && p.x <= around.x + around.w && p.y >= around.y && p.y <= around.y + around.h
     const buckets = this.bucketsMeeting(around)
     const met = new Set<{ a: Point; b: Point; net: string }>()
     for (const b of buckets) {
-      for (const f of this.fixed.get(b) ?? []) if (!own.has(f.net) && within(f.at)) lattice.pin(f.at, f.socket)
+      for (const f of this.fixed.get(b) ?? []) if (!own.has(f.net) && within(f.at)) lattice.pin(f.at, f.socket, f.along)
       for (const s of this.segments.get(b) ?? []) met.add(s)
     }
     for (const s of met) {
@@ -101,6 +101,10 @@ export class Conductors {
       for (let v = Math.ceil(lo / (GRID / 2)) * (GRID / 2); v <= hi; v += GRID / 2) lattice.run(horizontal ? { x: v, y: fixed } : { x: fixed, y: v }, horizontal)
     }
     for (const body of bodies) lattice.body(body)
+    if (closed) {
+      lattice.strict = true
+      for (const c of closed) lattice.close(c)
+    }
     return lattice
   }
 }
