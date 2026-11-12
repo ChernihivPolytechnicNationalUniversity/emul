@@ -351,7 +351,7 @@ function fieldOf(context: Context, box: Box, ends: readonly End[]): Field {
   return field
 }
 
-function segmentClear(context: Context, a: Point, b: Point, own: Point): boolean {
+function crossingsOn(context: Context, a: Point, b: Point, own: Point): number {
   const { wiring, ignore, extra } = context
   const box = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) }
   const horizontal = a.y === b.y
@@ -365,38 +365,63 @@ function segmentClear(context: Context, a: Point, b: Point, own: Point): boolean
   }
   const lo = horizontal ? box.x : box.y
   const hi = horizontal ? box.x + box.w : box.y + box.h
-  const touchesOutsideOwn = (s: { a: Point; b: Point }) => meetings(a, b, s.a, s.b).some((m) => !near(m, own))
+  const seen = new Set<WireSegment>()
+  let crossed = 0
+  const meet = (s: WireSegment): boolean => {
+    if (seen.has(s)) return true
+    seen.add(s)
+    const hits = meetings(a, b, s.a, s.b).filter((m) => !near(m, own))
+    if (!hits.length) return true
+    if (hits.length > 1 || near(hits[0], a) || near(hits[0], b) || near(hits[0], s.a) || near(hits[0], s.b)) return false
+    crossed++
+    return true
+  }
   for (const [k, line] of lines.entries()) {
     const span = k === 0 ? [lo, hi] : horizontal ? [a.y, a.y] : [a.x, a.x]
-    for (const s of wiring.sheet.along(line, span[0], span[1])) if (!ignore.has(s.id) && touchesOutsideOwn(s)) return false
+    for (const s of wiring.sheet.along(line, span[0], span[1])) if (!ignore.has(s.id) && !meet(s)) return -1
   }
-  for (const s of extra) if (touchesOutsideOwn(s)) return false
-  for (const p of wiring.index.within(box)) if (!near(p.at, own)) return false
+  for (const s of extra) if (!meet(s)) return -1
+  for (const p of wiring.index.within(box)) if (!near(p.at, own)) return -1
   for (const body of bodiesNear(wiring, box)) {
-    if (runsThrough({ a, b }, body)) return false
-    for (const [pin, inner] of body.leads) if (meetings(a, b, pin, inner).length) return false
+    if (runsThrough({ a, b }, body)) return -1
+    for (const [pin, inner] of body.leads) if (meetings(a, b, pin, inner).length) return -1
   }
-  return true
+  return crossed
 }
 
-function slipsAt(context: Context, end: End): { readonly side: number; readonly landing: Point; readonly half: Point; readonly back: Point; readonly k: number }[] {
+const segmentClear = (context: Context, a: Point, b: Point, own: Point) => crossingsOn(context, a, b, own) === 0
+
+const SLIP_REACH_CELLS = 6
+
+type SlipAt = { readonly side: number; readonly landing: Point; readonly half: Point; readonly back: Point; readonly k: number; readonly crossings: number }
+
+function slipsAt(context: Context, end: End): SlipAt[] {
   const pin = end.pin
   const header = end.header
   if (!pin?.socket || !pin.out || !header) return []
   const outer = plus(pin.at, pin.out, GRID)
   if (!context.wiring.index.at(outer).some((p) => p.socket && objectOfPin(context.wiring, p.key) === objectOfPin(context.wiring, pin.key))) return []
   if (!wiresTouching(context, outer).length && !context.wiring.index.at(outer).some((p) => context.taken.has(p.key))) return []
-  const k = header.clearAt - alongOut(pin.at, pin.out)
-  if (!Number.isInteger(k) || k < 2) return []
-  const found: { side: number; landing: Point; half: Point; back: Point; k: number }[] = []
+  const first = header.clearAt - alongOut(pin.at, pin.out)
+  if (!Number.isInteger(first) || first < 2) return []
+  const found: SlipAt[] = []
   for (const side of [1, -1]) {
     const across = { x: header.across.x * side, y: header.across.y * side }
     const half = plus(pin.at, across, HALF_CELL)
-    const back = plus(half, pin.out, k * GRID)
-    const landing = plus(back, across, HALF_CELL)
-    if (!segmentClear(context, pin.at, half, pin.at) || !segmentClear(context, half, back, pin.at) || !segmentClear(context, back, landing, pin.at)) continue
-    if (wiresTouching(context, landing).length || context.wiring.index.at(landing).length) continue
-    found.push({ side, landing, half, back, k })
+    if (!segmentClear(context, pin.at, half, pin.at)) continue
+    for (let k = first; k <= first + SLIP_REACH_CELLS; k++) {
+      const back = plus(half, pin.out, k * GRID)
+      const landing = plus(back, across, HALF_CELL)
+      const crossings = crossingsOn(context, half, back, pin.at)
+      if (crossings < 0) {
+        if (crossingsOn(context, half, plus(back, pin.out, -GRID), pin.at) < 0) break
+        continue
+      }
+      if (!segmentClear(context, back, landing, pin.at)) continue
+      if (wiresTouching(context, landing).length || context.wiring.index.at(landing).length) continue
+      found.push({ side, landing, half, back, k, crossings })
+      break
+    }
   }
   return found
 }
@@ -445,7 +470,9 @@ type Search = { field: Field; g: Float64Array; best: number; overflow: boolean; 
 
 const PRIMARY_BEND = BEND * PRIMARY
 
-function search(context: Context, from: End, to: End, box: Box, startSlips: ReturnType<typeof slipsAt>, endSlips: ReturnType<typeof slipsAt>, startEscapes: readonly Escape[], endEscapes: readonly Escape[]): Search {
+const slipCost = (s: SlipAt) => 2 * PRIMARY_BEND + s.crossings * CROSSING * PRIMARY + (2 * s.k + 2)
+
+function search(context: Context, from: End, to: End, box: Box, startSlips: readonly SlipAt[], endSlips: readonly SlipAt[], startEscapes: readonly Escape[], endEscapes: readonly Escape[]): Search {
   const field = fieldOf(context, box, [from, to])
   const states = field.cols * field.rows * HEADINGS
   const g = new Float64Array(states).fill(Infinity)
@@ -467,13 +494,13 @@ function search(context: Context, from: End, to: End, box: Box, startSlips: Retu
   }
   const estimate = (p: Point, heading: number) => lowerBends(p, heading) * PRIMARY_BEND + ((Math.abs(goal.x - p.x) + Math.abs(goal.y - p.y)) / GRID) * WHOLE_STEP
   const starts: Slip[] = [
-    ...startSlips.map((s) => ({ landing: s.landing, heading: dirIndex({ x: Math.sign(s.landing.x - s.back.x), y: Math.sign(s.landing.y - s.back.y) }), points: [s.half, s.back], cost: 2 * PRIMARY_BEND + (2 * s.k + 2) })),
+    ...startSlips.map((s) => ({ landing: s.landing, heading: dirIndex({ x: Math.sign(s.landing.x - s.back.x), y: Math.sign(s.landing.y - s.back.y) }), points: [s.half, s.back], cost: slipCost(s) })),
     ...startEscapes.map((e) => ({ landing: e.landing, heading: e.heading, points: e.corners, cost: e.cost })),
   ]
   const ends = [
     ...endSlips.flatMap((s) => {
       const cell = field.cellOf(s.landing)
-      return cell < 0 ? [] : [{ landing: s.landing, heading: dirIndex({ x: Math.sign(s.back.x - s.landing.x), y: Math.sign(s.back.y - s.landing.y) }), points: [s.back, s.half], cost: 2 * PRIMARY_BEND + (2 * s.k + 2), cell }]
+      return cell < 0 ? [] : [{ landing: s.landing, heading: dirIndex({ x: Math.sign(s.back.x - s.landing.x), y: Math.sign(s.back.y - s.landing.y) }), points: [s.back, s.half], cost: slipCost(s), cell }]
     }),
     ...endEscapes.flatMap((e) => {
       const cell = field.cellOf(e.landing)
