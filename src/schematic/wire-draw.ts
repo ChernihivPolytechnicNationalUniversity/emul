@@ -4,7 +4,7 @@ import { footprint } from "./placement"
 import type { PinRef, PlacedObject, Point, Schematic } from "./types"
 import type { WireColorKey } from "./wire-colors"
 import { withSegments, type NewId, type Wiring } from "./wire-edits"
-import { routeAround, runEnds } from "./wires/router"
+import { routeAround, runEnds, type RouteEnd } from "./wires/router"
 import { along, greatestDivisor, HALF_CELL, highOf, lineOf, lowOf, pointOnLine, samePoint, type WirePin, type WireSegment } from "./wires/segment"
 import { bodiesOf, crossedBody, segmentBox } from "./body-crossing"
 
@@ -307,11 +307,33 @@ function crossesABody(doc: Schematic, points: readonly Point[], near?: Near): bo
 
 const completions = new WeakMap<Schematic, Map<string, readonly Point[] | null>>()
 
-function completion(doc: Schematic, wiring: Wiring, from: string, to: string, ignore: ReadonlySet<string>): readonly Point[] | null {
+function completionStart(d: Drawing): RouteEnd | null {
+  if (d.back && !samePoint(d.back.at, d.from.at)) return null
+  const corner = d.corners.at(-1)
+  if (corner) return { at: corner }
+  return d.from.kind === "pin" ? { pin: keyOf(d.from.key) } : { at: d.from.at }
+}
+
+function pointsBehind(drawn: readonly Point[]): Point[] {
+  const behind: Point[] = []
+  for (let i = 1; i < drawn.length; i++) {
+    const a = drawn[i - 1]
+    const b = drawn[i]
+    const steps = (Math.abs(b.x - a.x) + Math.abs(b.y - a.y)) / HALF_CELL
+    for (let k = 0; k < steps; k++) behind.push({ x: a.x + Math.sign(b.x - a.x) * HALF_CELL * k, y: a.y + Math.sign(b.y - a.y) * HALF_CELL * k })
+  }
+  return behind
+}
+
+function completion(doc: Schematic, wiring: Wiring, d: Drawing, start: RouteEnd, to: string, ignore: ReadonlySet<string>): readonly Point[] | null {
   let known = completions.get(doc)
   if (!known) completions.set(doc, (known = new Map()))
-  const key = `${from}>${to}`
-  if (!known.has(key)) known.set(key, routeAround(wiring, { pin: keyOf(from) }, { pin: keyOf(to) }, { ignore }))
+  const drawn = [startOf(d), ...d.corners]
+  const key = `${drawn.map((p) => `${p.x},${p.y}`).join(" ")}>${to}|${[...ignore].join(" ")}`
+  if (!known.has(key)) {
+    const route = routeAround(wiring, start, { pin: keyOf(to) }, { ignore, stops: pointsBehind(drawn) })
+    known.set(key, route && withoutRepeats([...drawn.slice(0, -1), ...route]))
+  }
   return known.get(key)!
 }
 
@@ -354,10 +376,11 @@ function planOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: DrawEnd, ne
   let points: readonly Point[] = pointsTo(d, end.at)
   let refused = refusalFor(points)
   let routed = false
-  if (modeOf(d) === "90" && d.from.kind === "pin" && end.kind === "pin" && !d.corners.length && (refused || crossesABody(doc, points, near))) {
-    const route = completion(doc, wiring, d.from.key, end.key, ignore)
+  const start = completionStart(d)
+  if (modeOf(d) === "90" && start && end.kind === "pin" && (refused || crossesABody(doc, points, near))) {
+    const route = completion(doc, wiring, d, start, end.key, ignore)
     if (route) {
-      points = withoutRepeats(route)
+      points = route
       refused = refusalFor(points)
       routed = true
     }
