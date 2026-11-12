@@ -235,7 +235,7 @@ describe("the rubber band's own marks: a dragged wire carries its open ends and 
   })
 })
 
-describe("the rubber band's casings stop short of its ends, as a laid wire's do: nothing white is painted over the wire, pin or dot an end lands on (the user, 2026-11-12: «хуйня белая непрозрачная, которую видно на другом проводе»)", () => {
+describe("the rubber band's casings stop short of its ends, as a laid wire's do: nothing white is painted over the wire, pin or dot an end lands on (the user, 2026-11-12: a white patch on the wire the end met)", () => {
   const p = (x: number, y: number): Point => ({ x: c(x), y: c(y) })
   const piece = (a: Point, b: Point): BandPiece => ({ a, b, color: "red" })
   const trim = casingTrim(GRID)
