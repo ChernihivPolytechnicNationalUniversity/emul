@@ -117,7 +117,12 @@ const wiredPair = (): Schematic => ({
 })
 const countOf = (page: Page, selector: string) => page.evaluate((s) => document.querySelectorAll(s).length, selector)
 const pieces = (page: Page) =>
-  page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-piece]")].map((e) => e.getAttribute("data-piece")!.split(" ").map(Number)))
+  page.evaluate(() =>
+    [...document.querySelectorAll("[data-slot=rubber-band] [data-points]")].flatMap((e) => {
+      const pts = e.getAttribute("data-points")!.split(" ").map((p) => p.split(",").map(Number))
+      return pts.slice(1).map((p, i) => [...pts[i], ...p])
+    }),
+  )
 const orthogonal = (piece: number[]) => piece[0] === piece[2] || piece[1] === piece[3]
 
 async function wiresFollowTheDrag(page: Page) {
@@ -505,10 +510,13 @@ async function shorteningFromAnOpenEnd(page: Page) {
   const bandRings = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-band-dangling]")].map((e) => e.getAttribute("data-band-dangling")))
   const bandPieces = () =>
     page.evaluate(() =>
-      [...document.querySelectorAll("[data-slot=rubber-band] [data-piece]")]
-        .map((e) => {
-          const [ax, ay, bx, by] = e.getAttribute("data-piece")!.split(" ").map(Number)
-          return ax < bx || (ax === bx && ay <= by) ? `${ax} ${ay} ${bx} ${by}` : `${bx} ${by} ${ax} ${ay}`
+      [...document.querySelectorAll("[data-slot=rubber-band] [data-points]")]
+        .flatMap((e) => {
+          const pts = e.getAttribute("data-points")!.split(" ").map((p) => p.split(",").map(Number))
+          return pts.slice(1).map(([bx, by], i) => {
+            const [ax, ay] = pts[i]
+            return ax < bx || (ax === bx && ay <= by) ? `${ax} ${ay} ${bx} ${by}` : `${bx} ${by} ${ax} ${ay}`
+          })
         })
         .sort(),
     )
