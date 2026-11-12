@@ -75,6 +75,7 @@
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
     --warning: oklch(0.72 0.16 65);
+    --conflict: oklch(0.87 0.27 136);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
@@ -141,6 +142,7 @@
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --warning: oklch(0.8 0.15 75);
+    --conflict: oklch(0.9 0.25 132);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
@@ -263,13 +265,9 @@
   font-style: italic;
   opacity: 0.9;
 }
-[data-slot="dot-field-content"] [data-blocked] {
-  --selection: var(--destructive);
-  --selection-feather: color-mix(in srgb, var(--destructive) 50%, var(--background));
-  --selection-plate-opacity: 0.16;
-}
-[data-slot="field-drag-layer"][data-blocked]:has([data-slot="field-canvas"]) {
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--destructive) 55%, transparent));
+[data-conflict]:not([data-slot="field-drag-layer"]),
+[data-slot="field-drag-layer"][data-conflict]:has([data-slot="field-canvas"]) {
+  filter: drop-shadow(0 0 var(--conflict-px, 1px) var(--conflict)) drop-shadow(0 0 calc(2.5 * var(--conflict-px, 1px)) var(--conflict)) drop-shadow(0 0 calc(6 * var(--conflict-px, 1px)) var(--conflict));
 }
 
 /* A search on the field: what it did not find, and every wire, fade back (field explorer). */
@@ -277,7 +275,4 @@
 [data-slot="dot-field-content"][data-dim] [data-slot="pins"],
 [data-slot="dot-field-content"][data-dim] [data-slot="field-text"] {
   opacity: 0.22;
-}
-[data-slot="rubber-band"] > g[data-blocked] {
-  filter: drop-shadow(0 0 2px var(--destructive)) drop-shadow(0 0 6px color-mix(in srgb, var(--destructive) 60%, transparent));
 }

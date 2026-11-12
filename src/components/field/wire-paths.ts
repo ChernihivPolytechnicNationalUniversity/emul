@@ -1,3 +1,4 @@
+import { chained, trimmedAtBends, type Stretch } from "@/schematic/conflict-marks"
 import { toPath, trimRouteEnds, type Point } from "@/schematic/geometry"
 import { runPath, towards, type Leads } from "@/schematic/wire-look"
 import { casingTrim, WIRE_PX, wireCornerRadius } from "./wire-style"
@@ -14,4 +15,9 @@ export function leadPatchPaths({ pts, leads }: WireRoute, px: number): string[] 
   if (leads?.start) patches.push(toPath([leads.start, towards(pts[0], leads.start, -pastThePin)]))
   if (leads?.end) patches.push(toPath([leads.end, towards(pts[pts.length - 1], leads.end, -pastThePin)]))
   return patches
+}
+
+export function conflictGlowPaths(stretches: readonly Stretch[], bendAt: (p: Point) => boolean, grid: number): string[] {
+  const radius = wireCornerRadius(grid)
+  return chained(stretches).map((line) => toPath(trimmedAtBends(line, bendAt, radius), radius))
 }

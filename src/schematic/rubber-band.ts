@@ -159,7 +159,7 @@ class BodyGuard {
       this.wires.some(body.box, (s) => !frame.replaced.has(s.id) && near.push(s) < 0)
       const span = spliceSpan(body, near)
       const covered = near.find((s) => staysThrough(s, body, span))
-      if (covered) return { at: middleOf(body.box), reason: "body", piece: covered.id, nets: [covered.id, body.object.id] }
+      if (covered) return { at: middleOf(body.box), reason: "body", piece: covered.id, part: body.object.id, nets: [covered.id, body.object.id] }
     }
     return null
   }
