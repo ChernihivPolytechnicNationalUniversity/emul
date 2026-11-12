@@ -179,6 +179,10 @@ async function modifiersOnAWire(page: Page) {
     expect(`Alt, ${name}: the wire goes three cells ${name}, the upright closes up whole`, await wirePaths(), [segment(12 + dx, 10, 20 + dx, 10), segment(20, 6, 20, 14)].sort())
     expect(`Alt, ${name}: both its ends open, no dot left where it teed in`, await marks(), { open: [point(12 + dx, 10), point(20 + dx, 10)].sort(), dots: [] })
   }
+  await openDoc(page, "alt-one-leg", { ...hookedWire(), objects: [...hookedWire().objects, resistorAt("F1", -6, -4), resistorAt("F2", 28, 16)] })
+  await heldWith(["Alt"], cellPoint(20, 13), cellPoint(23, 13))
+  expect("Alt on one leg of an L: that leg moves alone, as a part does, and the other stays where it was", await wirePaths(), [segment(14, 11, 20, 11), segment(23, 11, 23, 15)].sort())
+  expect("…the leg left behind hangs open where the moved one was", (await marks()).open, [point(20, 11), point(23, 11), point(23, 15)].sort())
   await openDoc(page, "alt-shift", teeingWire())
   await heldWith(["Alt", "Shift"], cellPoint(15, 10), cellPoint(12, 12))
   expect("Alt with Shift: detached all the same, left and down at once", await wirePaths(), [segment(9, 12, 17, 12), segment(20, 6, 20, 14)].sort())
