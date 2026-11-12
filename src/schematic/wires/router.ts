@@ -290,13 +290,13 @@ class Field {
 
   body(body: Body) {
     const box = body.box
-    const [c0, c1] = this.columnRange(box.x - GRID, box.x + box.w, false)
-    const [r0, r1] = this.rowRange(box.y - GRID, box.y + box.h, false)
+    const [c0, c1] = this.columnRange(box.x - GRID, box.x + box.w + GRID, false)
+    const [r0, r1] = this.rowRange(box.y - GRID, box.y + box.h + GRID, false)
     for (let j = r0; j <= r1; j++)
       for (let i = c0; i <= c1; i++) {
         const p = { x: this.x0 + i * GRID, y: this.y0 + j * GRID }
-        if (i + 1 < this.cols && runsThrough({ a: p, b: { x: p.x + GRID, y: p.y } }, body)) this.hBlock[j * this.cols + i] = 1
-        if (j + 1 < this.rows && runsThrough({ a: p, b: { x: p.x, y: p.y + GRID } }, body)) this.vBlock[j * this.cols + i] = 1
+        if (i + 1 < this.cols && closedBy(body, p, { x: p.x + GRID, y: p.y })) this.hBlock[j * this.cols + i] = 1
+        if (j + 1 < this.rows && closedBy(body, p, { x: p.x, y: p.y + GRID })) this.vBlock[j * this.cols + i] = 1
       }
   }
 
@@ -328,6 +328,27 @@ class Field {
       }
   }
 }
+
+const OUTLINE_BAND = GRID / 4
+
+function alongOutline(body: Body, a: Point, b: Point): boolean {
+  const horizontal = a.y === b.y
+  const lo = horizontal ? Math.min(a.x, b.x) : Math.min(a.y, b.y)
+  const hi = horizontal ? Math.max(a.x, b.x) : Math.max(a.y, b.y)
+  const line = horizontal ? a.y : a.x
+  return body.contour.some((corners) =>
+    corners.some((p, i) => {
+      const q = corners[(i + 1) % corners.length]
+      if (horizontal ? Math.abs(p.y - q.y) > EPS : Math.abs(p.x - q.x) > EPS) return false
+      if (Math.abs((horizontal ? p.y : p.x) - line) >= OUTLINE_BAND - EPS) return false
+      const elo = horizontal ? Math.min(p.x, q.x) : Math.min(p.y, q.y)
+      const ehi = horizontal ? Math.max(p.x, q.x) : Math.max(p.y, q.y)
+      return Math.min(hi, ehi) - Math.max(lo, elo) > EPS
+    }),
+  )
+}
+
+const closedBy = (body: Body, a: Point, b: Point) => runsThrough({ a, b }, body) || alongOutline(body, a, b)
 
 function bodiesNear(wiring: Wiring, box: Box): Body[] {
   return bodiesOf(wiring.index.spatial.query(box).filter((o) => !getDef(o.def)?.pinsAreSockets))
