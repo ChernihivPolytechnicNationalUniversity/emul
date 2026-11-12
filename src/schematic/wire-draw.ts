@@ -275,7 +275,7 @@ function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: reado
         if (ignore.has(mark.segment.id)) continue
         const net = segmentNet(mark.segment)
         if (!own.has(net)) return refuse("over", mark.at, net)
-      } else if (mark.pin && (!mark.pin.socket || slanted || acrossItsRow(mark.pin, horizontal))) {
+      } else if (mark.pin && (!mark.pin.socket || slanted || !!mark.pin.shunt || acrossItsRow(mark.pin, horizontal))) {
         const net = pinNet(mark.pin.key)
         if (!own.has(net)) return refuse("over", mark.at, net)
       }

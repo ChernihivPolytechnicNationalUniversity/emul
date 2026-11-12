@@ -402,7 +402,7 @@ describe("every inner header row on the five boards (design.md §4.5: «322 pins
     expect.soft(Object.fromEntries(count), "inner-row pins per board").toEqual({ "open746i-c": 166, "nucleo-f429zi": 50, "stm32f4-discovery": 50, "olimex-stm32-h405": 36, "lcd7-f": 20 })
   })
 
-  it("each leaves straight out over the free sockets in front of it to a part three cells past the board, or past its header where the header stands out of the board's box, joining none of them; a pin whose straight row would run along another header's line of sockets takes the router's clean route instead (junctions.md 33; design.md §4.5; §13.22 question 6: never along a header's line of sockets, «KiCad and EAGLE draw it looking joined»)", () => {
+  it("each leaves straight out over the free sockets in front of it to a part three cells past the board, or past its header where the header stands out of the board's box, joining none of them; a pin whose straight row would run along another header's line of sockets, or along a jumper's shunt, takes the router's clean route instead (junctions.md 33; design.md §4.5; §13.22 question 6: never along a header's line of sockets, «KiCad and EAGLE draw it looking joined»; the main session's decision on phase 6 review B's question 2: a socket pair joined by a drawn shunt as a header column)", () => {
     const misses: string[] = []
     const alongAHeader: string[] = []
     for (const p of innerRowPins()) {
@@ -413,7 +413,7 @@ describe("every inner header row on the five boards (design.md §4.5: «322 pins
       const name = `${p.def} ${p.pin.id}`
       const oneNet = JSON.stringify([[`T:${end}`, `U1:${p.pin.id}`].sort()])
       const straight = [at(p.pin.x, p.pin.y), at(q.x, q.y)]
-      if (shapeOf(doc, straight).faults.some((f) => f.includes("passes along the header column"))) {
+      if (shapeOf(doc, straight).faults.some((f) => f.includes("passes along the header column") || f.includes("jumper's shunt"))) {
         alongAHeader.push(name)
         const faults = route ? shapeOf(doc, route).faults : ["no route"]
         if (faults.length) misses.push(`${name}: ${JSON.stringify(cells(route))}: ${faults.join("; ")}`)
@@ -427,12 +427,13 @@ describe("every inner header row on the five boards (design.md §4.5: «322 pins
       if (JSON.stringify(cells(route)) !== JSON.stringify(want)) misses.push(`${name}: ${JSON.stringify(cells(route))}, not ${JSON.stringify(want)}`)
       else if (JSON.stringify(partition(laid(doc, route))) !== oneNet) misses.push(`${name}: joins a socket it passes`)
     }
-    expect.soft(alongAHeader, "the straight rows that would run along another header's line of sockets: the Open746I-C's P18-14 and P18-16, across CN5").toEqual(["open746i-c P18-14", "open746i-c P18-16"])
-    expect.soft(misses, "320 straight wires and two clean routes round").toEqual([])
+    expect.soft(alongAHeader, "the straight rows that would run along another header's line of sockets or a jumper's shunt: the Open746I-C's P18-14 and P18-16, across CN5, and P19-32, -30, -28 and -26, along the USART1 jumper's four shunts").toEqual(["open746i-c P18-14", "open746i-c P18-16", "open746i-c P19-26", "open746i-c P19-28", "open746i-c P19-30", "open746i-c P19-32"])
+    expect.soft(misses, "316 straight wires and six clean routes round").toEqual([])
   })
 
-  it("with the outer socket in front wired, each inner pin between two rows slips half a cell towards its target, passes between the two outer pins and steps back onto the next whole row (design.md §13.5: «the half-cell slip, and only it»)", () => {
+  it("with the outer socket in front wired, each inner pin between two rows slips half a cell towards its target, passes between the two outer pins and steps back onto the next whole row; where that row runs along a jumper's shunt, the route is clean (design.md §13.5: «the half-cell slip, and only it»; the main session's decision on phase 6 review B's question 2)", () => {
     const misses: string[] = []
+    const ontoAShunt: string[] = []
     let checked = 0
     for (const p of innerRowPins()) {
       if (p.def === "lcd7-f" || p.passed !== 1 || !p.between) continue
@@ -447,6 +448,14 @@ describe("every inner header row on the five boards (design.md §4.5: «322 pins
       const route = routeBetween(doc, pin("U1", p.pin.id), pin("T", innerEnd.pin))
       const got = cells(route)
       const name = `${p.def} ${p.pin.id}: ${JSON.stringify(got)}`
+      if (shapeOf(doc, [at(next.x, next.y), at(qi.x, qi.y)]).faults.some((f) => f.includes("jumper's shunt"))) {
+        ontoAShunt.push(`${p.def} ${p.pin.id}`)
+        const landing = got?.findIndex((q, i) => i > 0 && isWholeCell(q)) ?? -1
+        const faults = route && landing > 0 ? shapeOf(doc, route.slice(landing)).faults : ["no route"]
+        if (faults.length) misses.push(`${name}: from the slip's landing on, ${faults.join("; ")}`)
+        else if (JSON.stringify(partition(laid(doc, route!))) !== JSON.stringify([[`O:${outerEnd.pin}`, `U1:${p.outer.id}`].sort(), [`T:${innerEnd.pin}`, `U1:${p.pin.id}`].sort()].sort())) misses.push(`${name}: the two nets do not stay two`)
+        continue
+      }
       if (!got || got.length !== 5) {
         misses.push(`${name}: not pin, slip, run, step back, target`)
         continue
@@ -461,6 +470,7 @@ describe("every inner header row on the five boards (design.md §4.5: «322 pins
       else if (JSON.stringify(partition(laid(doc, route))) !== JSON.stringify([[`O:${outerEnd.pin}`, `U1:${p.outer.id}`].sort(), [`T:${innerEnd.pin}`, `U1:${p.pin.id}`].sort()].sort())) misses.push(`${name}: the two nets do not stay two`)
     }
     expect.soft(checked, "inner pins with an inner and an outer neighbour either side and one socket in front: Open746I-C 86, Nucleo 42, Discovery 46, H405 30").toBe(204)
+    expect.soft(ontoAShunt, "the pin whose next row runs along a jumper's shunt, held to a slip away from it and a clean route on: the Open746I-C's P19-34 above the USART1 jumper").toEqual(["open746i-c P19-34"])
     expect.soft(misses, "every one on the slip").toEqual([])
   })
 })

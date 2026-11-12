@@ -1,6 +1,6 @@
-import { DIR, GRID, objectPins, ownBodies, routeObstacles, unionOf, type Direction, type Point, type Rect } from "./geometry"
+import { DIR, framePoint, GRID, objectPins, orientationOf, orientationSlot, ownBodies, routeObstacles, unionOf, type Direction, type Orientation, type Point, type Rect } from "./geometry"
 import { getDef } from "./registry"
-import type { LegacyWire, PlacedObject } from "./types"
+import type { ComponentDef, LegacyWire, PlacedObject } from "./types"
 import { clearPath, type Box } from "./wires/clear-path"
 import { clearOf, type Conductors } from "./wires/conductors"
 import { onLattice, type WirePin } from "./wires/segment"
@@ -34,11 +34,40 @@ export function corners(input: readonly Point[]): Point[] {
   }
 }
 
+type Shunt = readonly [Point, Point]
+
+const shuntsByDef = new WeakMap<ComponentDef, (readonly Shunt[] | undefined)[]>()
+
+function shuntsOf(def: ComponentDef, orientation: Orientation): readonly Shunt[] {
+  let slots = shuntsByDef.get(def)
+  if (!slots) shuntsByDef.set(def, (slots = []))
+  return (slots[orientationSlot(orientation)] ??= (def.parts ?? []).flatMap((part): Shunt[] => {
+    if (part.type !== "switch" || part.throws) return []
+    const far = part.vertical ? { x: part.x, y: part.y + part.span } : { x: part.x + part.span, y: part.y }
+    return [[framePoint(def, orientation, part), framePoint(def, orientation, far)]]
+  }))
+}
+
+const SHUNT_EPS = 1e-6
+
+function shuntFrom(o: PlacedObject, def: ComponentDef, at: Point): Point | undefined {
+  const local = { x: (at.x - o.x) / GRID, y: (at.y - o.y) / GRID }
+  for (const [p, q] of shuntsOf(def, orientationOf(o)))
+    for (const [end, far] of [[p, q], [q, p]])
+      if (Math.abs(end.x - local.x) < SHUNT_EPS && Math.abs(end.y - local.y) < SHUNT_EPS) return { x: Math.round((far.x - end.x) * GRID * 1e6) / 1e6, y: Math.round((far.y - end.y) * GRID * 1e6) / 1e6 }
+  return undefined
+}
+
 export function wirePins(objects: readonly PlacedObject[]): WirePin[] {
   return objects.flatMap((o) => {
     if (isJunction(o)) return []
-    const socket = !!getDef(o.def)?.pinsAreSockets
-    return objectPins(o, GRID).flatMap((p) => (onLattice(p.point) ? [{ key: p.key, at: p.point, socket, kind: p.pin.kind, ...(p.pin.side in DIR && { out: DIR[p.pin.side as Direction] }) }] : []))
+    const def = getDef(o.def)
+    const socket = !!def?.pinsAreSockets
+    return objectPins(o, GRID).flatMap((p) => {
+      if (!onLattice(p.point)) return []
+      const shunt = socket && def?.parts ? shuntFrom(o, def, p.point) : undefined
+      return [{ key: p.key, at: p.point, socket, kind: p.pin.kind, ...(p.pin.side in DIR && { out: DIR[p.pin.side as Direction] }), ...(shunt && { shunt }) }]
+    })
   })
 }
 

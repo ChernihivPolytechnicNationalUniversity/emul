@@ -62,6 +62,7 @@ type Scene = {
   readonly pins: ReadonlyMap<string, readonly WirePin[]>
   readonly foreign: readonly WireSegment[]
   readonly out: (p: Point) => Point | undefined
+  readonly shunts: readonly Lead[]
   readonly window: Box
 }
 
@@ -94,7 +95,8 @@ function sceneOf(doc: Schematic, from: Point, to: Point): Scene {
   const y1 = Math.ceil(Math.max(...boxes.map((b) => b.y + b.h)) / GRID) * GRID + margin
   const byPoint = new Map<string, WirePin[]>()
   for (const p of pins) byPoint.set(key(p.at), [...(byPoint.get(key(p.at)) ?? []), p])
-  return { from, to, bodies, leads, pins: byPoint, foreign, out: (p) => byPoint.get(key(p))?.[0]?.out, window: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } }
+  const shunts = pins.flatMap((p): Lead[] => (p.shunt ? [[p.at, { x: p.at.x + p.shunt.x, y: p.at.y + p.shunt.y }]] : []))
+  return { from, to, bodies, leads, pins: byPoint, foreign, out: (p) => byPoint.get(key(p))?.[0]?.out, shunts, window: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } }
 }
 
 function onWire(s: WireSegment, p: Point): "end" | "interior" | null {
@@ -121,6 +123,7 @@ function arrive(scene: Scene, p: Point, d: Point): Arrival {
     const allowed = [scene.from, scene.to].find((end) => same(end, lead[0]))
     if (meeting(p, q, lead).some((at) => !allowed || !near(at, allowed))) return fault("touches a part's lead")
   }
+  for (const shunt of scene.shunts) if (meeting(p, q, shunt).some((at) => !near(at, scene.to) && !near(at, scene.from))) return fault(`runs onto the jumper's shunt at ${show(shunt[0])}`)
   let straightOnly = false
   for (const pin of scene.pins.get(key(q)) ?? []) {
     if (same(q, scene.to)) continue

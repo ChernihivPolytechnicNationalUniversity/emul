@@ -6,7 +6,7 @@ export const HALF_CELL = GRID / 2
 
 export type WireSegment = { readonly id: string; readonly a: Readonly<Point>; readonly b: Readonly<Point>; readonly color?: WireColorKey }
 
-export type WirePin = { readonly key: string; readonly at: Readonly<Point>; readonly socket?: boolean; readonly kind?: PinKind; readonly out?: Readonly<Point> }
+export type WirePin = { readonly key: string; readonly at: Readonly<Point>; readonly socket?: boolean; readonly kind?: PinKind; readonly out?: Readonly<Point>; readonly shunt?: Readonly<Point> }
 
 export type LineKey = number | string
 

@@ -281,7 +281,8 @@ class Field {
     if (Number.isInteger(i) && Number.isInteger(j)) {
       if (i < 0 || j < 0 || i >= this.cols || j >= this.rows) return
       const cell = j * this.cols + i
-      this.node[cell] |= !p.socket || !p.out || taken ? STOP : NO_TURN | (horizontalOut ? NO_V : NO_H)
+      this.node[cell] |= !p.socket || !p.out || taken ? STOP : p.shunt ? NO_TURN | NO_H | NO_V : NO_TURN | (horizontalOut ? NO_V : NO_H)
+      if (p.shunt) this.lead([p.at, plus(p.at, p.shunt, 1)])
       return
     }
     if (Number.isInteger(j) && j >= 0 && j < this.rows) {
