@@ -18,6 +18,8 @@ import { opensQuickInsert, type KeyTarget, type Rect as ScreenRect } from "@/com
 import { GRID as FIELD_GRID, objectPins, objectRect, resolvePin, snap, unionOf, type FlipAxis, type Point, type Turn } from "@/schematic/geometry"
 import type { FieldKey } from "@/schematic/fields"
 import { fieldDetail } from "./detail"
+import { labelsOnTheirWires, wiresAtPins } from "./pin-label"
+import { monoAdvanceEm } from "./printed-names"
 import { savedTextScale, saveTextScale } from "./text-scale"
 import { autoNetColor, semanticNetColor, wireColorVar, AUTO_COLOR_ORDER, DEFAULT_SIGNAL_COLOR, wireColorFor, type WireColorKey } from "@/schematic/wire-colors"
 import { partKey, pinKey, type PinRef, type PlacedObject, type Schematic } from "@/schematic/types"
@@ -363,6 +365,18 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const visibleRoutes = visible.routes
   const detail = React.useMemo(() => fieldDetail(grid, scale, visibleObjects.length, textScale), [grid, scale, visibleObjects, textScale])
   const sheetText = React.useMemo(() => ({ boost: detail.textBoost, pinSize: detail.pinLabelSize }), [detail.textBoost, detail.pinLabelSize])
+  const bareLabels = React.useMemo(() => {
+    const wiresAt = wiresAtPins(wiring.routes)
+    const wired = new Set<PlacedObject>()
+    for (const { pts } of wiring.routes)
+      for (const end of [pts[0], pts[pts.length - 1]])
+        for (const pin of wiring.index.at(end)) {
+          const object = wiring.index.objects.get(pin.key.slice(0, pin.key.indexOf(":")))
+          if (object) wired.add(object)
+        }
+    const bare = new Map([...wired].map((object) => [object, labelsOnTheirWires(object, detail.pinLabelSize, monoAdvanceEm(), grid, wiresAt)]))
+    return (object: PlacedObject) => bare.get(object) ?? EMPTY_IDS
+  }, [wiring, detail.pinLabelSize, grid])
 
   const dragLayerRef = React.useRef<HTMLDivElement>(null)
   const [lifted, setLifted] = React.useState<ReadonlySet<string>>(() => new Set())
@@ -1968,7 +1982,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 <>
                   {objectViews}
                   <div ref={dragLayerRef} data-slot="field-drag-layer" className="pointer-events-none absolute top-0 left-0">
-                    {liftedArea && <TextCanvas objects={liftedLabels} view={liftedArea} grid={grid} scale={scale} text={sheetText} raster={textRaster} />}
+                    {liftedArea && <TextCanvas objects={liftedLabels} view={liftedArea} grid={grid} scale={scale} text={sheetText} raster={textRaster} bare={bareLabels} />}
                   </div>
                 </>
               )}
@@ -1991,7 +2005,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 onWirePointerLeave={onWirePointerLeave}
               />
               )}
-              {labelsOnCanvas && <TextCanvas objects={labelledObjects} view={view} grid={grid} scale={scale} text={sheetText} raster={textRaster} />}
+              {labelsOnCanvas && <TextCanvas objects={labelledObjects} view={view} grid={grid} scale={scale} text={sheetText} raster={textRaster} bare={bareLabels} />}
               <svg data-slot="rubber-band" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
                 <g />
               </svg>

@@ -1,5 +1,7 @@
-import { DIR, orientPin, unorientOffset, type Direction, type Orientation, type PlacedPin, type Point } from "@/schematic/geometry"
-import type { BodyShape, ComponentDef, Fill } from "@/schematic/types"
+import { DIR, objectPins, orientationOf, orientPin, unorientOffset, type Direction, type Orientation, type PlacedPin, type Point } from "@/schematic/geometry"
+import { getDef } from "@/schematic/registry"
+import type { BodyShape, ComponentDef, Fill, PlacedObject } from "@/schematic/types"
+import { entersBox } from "@/schematic/wires/segment"
 
 export const PIN_LABEL_CELLS = 0.4
 export const MAX_PIN_LABEL_CELLS = 0.8
@@ -108,6 +110,44 @@ export function labelFrame(label: Placement, size: number): (p: Point) => Point 
   const cos = Math.cos(label.angle / DEGREES)
   const sin = Math.sin(label.angle / DEGREES)
   return (p) => ({ x: origin.x + p.x * cos - p.y * sin, y: origin.y + p.x * sin + p.y * cos })
+}
+
+export type WiresAtPins = ReadonlyMap<string, readonly (readonly Point[])[]>
+
+export function wiresAtPins(routes: readonly { readonly pts: readonly Point[] }[]): WiresAtPins {
+  const at = new Map<string, (readonly Point[])[]>()
+  for (const { pts } of routes)
+    for (const end of pts.length > 1 ? [pts[0], pts[pts.length - 1]] : []) {
+      const key = `${end.x},${end.y}`
+      const list = at.get(key)
+      if (list) list.push(pts)
+      else at.set(key, [pts])
+    }
+  return at
+}
+
+export function labelOnItsWire(label: Placement & Pick<PinLabel, "text">, pin: Point, size: number, advanceEm: number, grid: number, wires: WiresAtPins): boolean {
+  const own = wires.get(`${pin.x},${pin.y}`)
+  if (!own) return false
+  const { solid } = labelKnockout(label.text, label.anchor, size, advanceEm)
+  const box = boundsOf(boxCorners(solid, labelFrame(label, size)).map((p) => ({ x: pin.x + p.x * grid, y: pin.y + p.y * grid })))
+  return own.some((pts) => pts.some((b, i) => i > 0 && entersBox({ a: pts[i - 1], b }, box)))
+}
+
+const NO_PINS: ReadonlySet<string> = new Set()
+
+export function labelsOnTheirWires(object: PlacedObject, size: number, advanceEm: number, grid: number, wires: WiresAtPins): ReadonlySet<string> {
+  const def = getDef(object.def)
+  if (!def || !wires.size) return NO_PINS
+  let labels: ReadonlyMap<string, PinLabel> | undefined
+  const found = new Set<string>()
+  for (const { pin, point } of objectPins(object, grid)) {
+    if (!wires.has(`${point.x},${point.y}`)) continue
+    labels ??= pinLabelById(pinLabels(def, orientationOf(object)))
+    const label = labels.get(pin.id)
+    if (label && labelOnItsWire(label, point, size, advanceEm, grid, wires)) found.add(pin.id)
+  }
+  return found.size ? found : NO_PINS
 }
 
 export function boxCorners(box: Box, turn: (p: Point) => Point): Point[] {

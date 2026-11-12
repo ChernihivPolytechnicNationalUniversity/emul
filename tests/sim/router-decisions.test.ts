@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { GRID, type Point } from "@/schematic/geometry"
+import * as React from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import { fieldDetail } from "@/components/field/detail"
+import { labelsOnTheirWires, MONO_ADVANCE_EM, pinLabelById, pinLabels, wiresAtPins } from "@/components/field/pin-label"
+import { PinLayer } from "@/components/field/PinLayer"
+import { DIR, GRID, objectPins, orientationOf, type Direction, type Point } from "@/schematic/geometry"
 import type { LegacySchematic, LegacyWire, PlacedObject, Rotation, Schematic } from "@/schematic/types"
+import { getDef } from "@/schematic/registry"
 import { examples } from "@/schematic/examples"
 import { wirePins, wiresAsSegments } from "@/schematic/migrate-wires"
 import { drawEndAt, drawnTo, isRefusal, pointerAt, previewOf, startDrawing, withCorner, type Drawing } from "@/schematic/wire-draw"
@@ -85,7 +91,10 @@ describe("a socket pair joined by a drawn shunt is impassable along its row, as 
         }
       }
     }
-    expect.soft(found, "wires   it("drawn by hand along the CTS row, through the socket, the wire is refused as passing over the pin; over R2's pin the router's route is offered instead, clear of the socket and its shunt", () => {
+    expect.soft(found, "wires across a shunt").toEqual([])
+  })
+
+  it("drawn by hand along the CTS row, through the socket, the wire is refused as passing over the pin; over R2's pin the router's route is offered instead, clear of the socket and its shunt", () => {
     const doc = docOf([board("open746i-c"), resistor("R2", 49, 8)])
     const wiring = wiringOf(new WireGraph(), doc)
     const started = startDrawing(wiring, drawEndAt(wiring, at(41, 9)))
@@ -98,8 +107,6 @@ describe("a socket pair joined by a drawn shunt is impassable along its row, as 
     const pad = { x: cts.at.x + cts.shunt!.x, y: cts.at.y + cts.shunt!.y }
     expect.soft([overR2.refused?.refused ?? null, overR2.routed], "over R2's pin: the router's route, not the refusal (design.md §13.22 question 7 A)").toEqual([null, true])
     expect.soft(legsOf(overR2.points).some((s) => contains(s, cts.at) || segmentsMeet(s, { a: cts.at, b: pad })), `clear of CTS and its shunt: ${JSON.stringify(cellsOf(overR2.points))}`).toBe(false)
-  })
-e socket").toEqual([[45, 9]])
   })
 })
 
@@ -218,3 +225,37 @@ describe("the row taken after the fact is shown while the end is held over the s
   })
 })
 
+describe("a pin's own label no longer cuts a wire of that pin (the main session's decision on review B's question 1, option c; design.md §8)", () => {
+  const capacitor: PlacedObject = { id: "C1", def: "capacitor-polarized", x: c(0), y: c(0), props: { ref: "C1" } }
+  const scene = () => {
+    const labels = pinLabelById(pinLabels(getDef("capacitor-polarized")!, orientationOf(capacitor)))
+    const [plus, minus] = objectPins(capacitor, GRID)
+    const toward = labels.get(plus.pin.id)!.dir
+    const sideways = { id: "a", pts: [plus.point, { x: plus.point.x + toward.x * c(3), y: plus.point.y + toward.y * c(3) }], owner: [0] }
+    const out = DIR[minus.pin.side as Direction]
+    const outward = { id: "b", pts: [minus.point, { x: minus.point.x + out.x * c(3), y: minus.point.y + out.y * c(3) }], owner: [1] }
+    return { plus, minus, routes: [sideways, outward] }
+  }
+
+  it("C1's «+» pin left sideways, through its label: the label is drawn on the wire with no knockout; «−», whose wire leaves away from its label, keeps its knockout", () => {
+    const { plus, minus, routes } = scene()
+    expect.soft([...labelsOnTheirWires(capacitor, 0.4, MONO_ADVANCE_EM, GRID, wiresAtPins(routes))], "only «+» sits on its own wire").toEqual([plus.pin.id])
+    const html = renderToStaticMarkup(
+      React.createElement(PinLayer, {
+        objects: [capacitor],
+        grid: GRID,
+        detail: fieldDetail(GRID, 1, 1, 1),
+        connected: () => true,
+        contacts: new Map<string, string>(),
+        selected: new Set<string>(),
+        routes,
+        onPinPointerDown: () => {},
+        onPinPointerMove: () => {},
+        onPinPointerUp: () => {},
+      }),
+    )
+    const knocked = [...html.matchAll(/data-knockout="([^"]+)"/g)].map((m) => m[1]).sort()
+    expect.soft(knocked, "a knockout under «−» only").toEqual([minus.pin.id])
+    expect.soft((html.match(/>\+</g) ?? []).length + (html.match(/>−</g) ?? []).length, "both labels still drawn").toBe(2)
+  })
+})
