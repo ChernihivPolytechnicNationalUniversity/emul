@@ -145,6 +145,71 @@ async function wiresFollowTheDrag(page: Page) {
   expect("Alt-dragged: R2 moved alone, the wire's end hangs where its pin was", await countOf(page, "[data-dangling]"), 1)
 }
 
+const teeingWire = (): Schematic => ({
+  objects: [resistorAt("R1", 19, 2, 90), resistorAt("R2", 19, 14, 90)],
+  wires: [{ id: "up", a: cellPoint(20, 6), b: cellPoint(20, 10) }, { id: "down", a: cellPoint(20, 10), b: cellPoint(20, 14) }, { id: "branch", a: cellPoint(12, 10), b: cellPoint(20, 10) }],
+  parts: {},
+})
+
+async function modifiersOnAWire(page: Page) {
+  console.log("\nmodifiers held on a wire and a part: Alt detaches, Shift and Ctrl still drag (the user, 2026-11-12)")
+  const wirePaths = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire] path[data-base]")].map((e) => e.getAttribute("d")).sort())
+  const marks = () => page.evaluate(() => ({ open: [...document.querySelectorAll("[data-dangling]")].map((e) => e.getAttribute("data-dangling")).sort(), dots: [...document.querySelectorAll("[data-junction]")].map((e) => e.getAttribute("data-junction")) }))
+  const point = (x: number, y: number) => `${x * GRID},${y * GRID}`
+  const segment = (ax: number, ay: number, bx: number, by: number) => `M${ax * GRID} ${ay * GRID} L${bx * GRID} ${by * GRID}`
+  const teeAsDrawn = [segment(12, 10, 20, 10), segment(20, 6, 20, 10), segment(20, 10, 20, 14)].sort()
+  const slidDown = [segment(12, 12, 20, 12), segment(20, 6, 20, 12), segment(20, 12, 20, 14)].sort()
+  const heldWith = async (keys: readonly string[], from: Point, to: Point) => {
+    const f = await fieldFrame(page)
+    for (const key of keys) await page.keyboard.down(key)
+    await dragBy(page, f.toScreen(from), f.toScreen(to))
+    for (const key of [...keys].reverse()) await page.keyboard.up(key)
+  }
+  await openDoc(page, "plain-sideways", teeingWire())
+  await heldWith([], cellPoint(15, 10), cellPoint(12, 10))
+  expect("plain, sideways: a wire teeing into another moves only across itself, so nothing moves (design.md §6.3)", await wirePaths(), teeAsDrawn)
+  for (const [name, dx] of [["left", -3], ["right", 3]] as const) {
+    await openDoc(page, `alt-${name}`, teeingWire())
+    await heldWith(["Alt"], cellPoint(15, 10), cellPoint(15 + dx, 10))
+    expect(`Alt, ${name}: the wire goes three cells ${name}, the upright closes up whole`, await wirePaths(), [segment(12 + dx, 10, 20 + dx, 10), segment(20, 6, 20, 14)].sort())
+    expect(`Alt, ${name}: both its ends open, no dot left where it teed in`, await marks(), { open: [point(12 + dx, 10), point(20 + dx, 10)].sort(), dots: [] })
+  }
+  await openDoc(page, "alt-shift", teeingWire())
+  await heldWith(["Alt", "Shift"], cellPoint(15, 10), cellPoint(12, 12))
+  expect("Alt with Shift: detached all the same, left and down at once", await wirePaths(), [segment(9, 12, 17, 12), segment(20, 6, 20, 14)].sort())
+  for (const key of ["Shift", "Control"]) {
+    await openDoc(page, `${key.toLowerCase()}-drag`, teeingWire())
+    await heldWith([key], cellPoint(15, 10), cellPoint(15, 12))
+    expect(`${key} held: the press still drags, as a plain one does`, await wirePaths(), slidDown)
+    expect(`${key} held: the dragged wire is selected`, (await countOf(page, "[data-slot=selection] [data-wire]")) > 0, true)
+  }
+  await openDoc(page, "shift-click", teeingWire())
+  const g = await fieldFrame(page)
+  const onWire = g.toScreen(cellPoint(15, 10))
+  await page.keyboard.down("Shift")
+  await page.mouse.click(onWire.x, onWire.y)
+  await page.waitForTimeout(300)
+  const added = await countOf(page, "[data-slot=selection] [data-wire]")
+  await page.waitForTimeout(400)
+  await page.mouse.click(onWire.x, onWire.y)
+  await page.waitForTimeout(300)
+  await page.keyboard.up("Shift")
+  expect("a Shift-click still toggles: the first adds the wire, the second takes it off", [added > 0, await countOf(page, "[data-slot=selection] [data-wire]")], [true, 0])
+  await openDoc(page, "shift-part", wiredPair())
+  const r2 = (await fieldFrame(page)).toScreen(cellPoint(22, 11))
+  await page.mouse.click(r2.x, r2.y)
+  await heldWith(["Shift"], cellPoint(12, 11), cellPoint(12, 14))
+  const parts = await fieldFrame(page)
+  expect("a part Shift-dragged joins the selection and moves with it", [(await parts.worldOf("R1")).y, (await parts.worldOf("R2")).y], [13 * GRID, 13 * GRID])
+  const r1 = parts.toScreen(cellPoint(12, 14))
+  await page.keyboard.down("Control")
+  await page.mouse.click(r1.x, r1.y)
+  await page.keyboard.up("Control")
+  await page.waitForTimeout(300)
+  const plated = await page.evaluate(() => [...new Set([...document.querySelectorAll("[data-slot=selection] [data-plate]")].map((e) => e.getAttribute("data-plate")))])
+  expect("a Ctrl-click on a selected part still takes it off the selection, nothing moved", [plated, (await parts.worldOf("R1")).y], [["R2"], 13 * GRID])
+}
+
 async function drawFromAWire(page: Page) {
   console.log("\na wire drawn from a wire with W, and the drawing keys (design.md §6.1)")
   await openDoc(page, "draw-from-wire", wiredPair())
@@ -1120,7 +1185,7 @@ try {
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
+const sections = [contactsFollowTheDrag, wiresFollowTheDrag, modifiersOnAWire, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
 try {
   for (const section of sections) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })

@@ -790,13 +790,19 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     rubberNow.current?.clear()
     rubberNow.current = null
   }
+  const toggledOffOnClick = React.useRef<{ id: string; x: number; y: number } | null>(null)
+  const pressTravelled = (e: React.PointerEvent) => {
+    const press = toggledOffOnClick.current
+    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) >= TAP_SLOP) toggledOffOnClick.current = null
+  }
   const beginMove = useEvent((e: React.PointerEvent, id: string, toggle: boolean) => {
-    flushSync(() => sch.selectObject(id, toggle))
+    const wasSelected = sch.selectedObjects.has(id)
+    toggledOffOnClick.current = toggle && wasSelected ? { id, x: e.clientX, y: e.clientY } : null
+    if (!toggle || !wasSelected) flushSync(() => sch.selectObject(id, toggle))
     marquee.clear()
-    if (toggle) return
     const content = contentRef.current
     if (!content) return
-    const moving = sch.selectedObjects.has(id) ? sch.selectedObjects : new Set([id])
+    const moving = toggle ? new Set([...sch.selectedObjects, id]) : wasSelected ? sch.selectedObjects : new Set([id])
     if (detail.canvas || labelsOnCanvas) setLifted(moving)
     const pinsDrawn = detail.pins && !detail.canvas
     const detach = e.altKey
@@ -816,15 +822,15 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     })
   })
 
-  const beginSegmentDrag = useEvent((e: React.PointerEvent, segment: string) => {
+  const beginSegmentDrag = useEvent((press: { readonly x: number; readonly y: number; readonly segment: string; readonly detach: boolean }) => {
     const content = contentRef.current
     if (!content) return
-    const segmentDrag = new SegmentDrag(sch.doc, wiring, segment, index)
+    const segmentDrag = new SegmentDrag(sch.doc, wiring, press.segment, index, { detach: press.detach })
     dragging.current = { kind: "segment", drag: segmentDrag, base: sch.doc }
     const band = detail.canvas ? segmentDrag.touched : EMPTY_IDS
     if (band.size) setBanded(band)
     drag.begin({
-      ...planMove(content, docObjects, EMPTY_IDS, EMPTY_IDS, toWorld(e.clientX, e.clientY), grid),
+      ...planMove(content, docObjects, EMPTY_IDS, EMPTY_IDS, toWorld(press.x, press.y), grid),
       rubber: rubberFor(content, (dx, dy) => segmentDrag.frame(dx, dy), band),
     })
   })
@@ -836,6 +842,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
 
   const abandonDrag = useEvent(() => {
+    toggledOffOnClick.current = null
     if (!dragging.current) return
     dragging.current = null
     drag.clearAndFinish()
@@ -856,6 +863,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     endRubber()
     const kind = dragging.current
     dragging.current = null
+    const clicked = toggledOffOnClick.current
+    toggledOffOnClick.current = null
+    if (clicked) return sch.selectObject(clicked.id, true)
     if (!done || (!done.dx && !done.dy)) return
     if (kind?.kind === "segment") {
       const landed = kind.drag.landed(done.dx, done.dy)
@@ -885,6 +895,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     e.currentTarget.setPointerCapture(e.pointerId)
   })
   const onBodyPointerMove = useEvent((e: React.PointerEvent<SVGSVGElement>) => {
+    pressTravelled(e)
     if (drag.active) trackMove(toWorld(e.clientX, e.clientY))
   })
   const onBodyPointerUp = useEvent((e: React.PointerEvent<SVGSVGElement>) => {
@@ -1285,7 +1296,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     lastPress.current = { time: e.timeStamp, x: e.clientX, y: e.clientY, count: again ? last.count + 1 : 1 }
   })
   const pressedTwice = () => (lastPress.current?.count ?? 1) >= 2
-  const wirePress = React.useRef<{ segment: string; x: number; y: number; pointer: number; element: Element } | null>(null)
+  const wirePress = React.useRef<{ segment: string; run: readonly string[]; x: number; y: number; detach: boolean; toggle: boolean } | null>(null)
   const onWirePointerDown = useEvent((e: React.PointerEvent<SVGPathElement>, id: string) => {
     if (armed) return
     if (!primaryClick(e)) return
@@ -1313,11 +1324,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       return
     }
     const segment = segmentNearest(run, toWorld(e.clientX, e.clientY))
-    sch.selectWires(run.segments.map((s) => s.id), toggle)
+    const runIds = run.segments.map((s) => s.id)
+    if (!toggle) sch.selectWires(runIds)
     marquee.clear()
-    if (toggle) return
     e.currentTarget.setPointerCapture(e.pointerId)
-    wirePress.current = { segment, x: e.clientX, y: e.clientY, pointer: e.pointerId, element: e.currentTarget }
+    wirePress.current = { segment, run: runIds, x: e.clientX, y: e.clientY, detach: e.altKey, toggle }
   })
   const onWirePointerEnter = useEvent((id: string) => {
     if (pending || drag.active || marquee.isDragging()) return
@@ -1356,6 +1367,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const tap = React.useRef<Point | null>(null)
   // A second finger turns whatever the first one started into a pinch: nothing it began lands.
   const cancelGesture = useEvent(() => {
+    toggledOffOnClick.current = null
     if (drag.active) abandonDrag()
     dragging.current = null
     wirePress.current = null
@@ -1422,10 +1434,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     onPointerWorld?.(toWorld(e.clientX, e.clientY))
     if (armed && e.pointerType !== "touch") setArmedAt(toWorld(e.clientX, e.clientY))
     if (movePan(e)) return
+    pressTravelled(e)
     const press = wirePress.current
     if (press && !drag.active && Math.hypot(e.clientX - press.x, e.clientY - press.y) >= TAP_SLOP) {
       wirePress.current = null
-      beginSegmentDrag({ clientX: press.x, clientY: press.y } as React.PointerEvent, press.segment)
+      if (press.toggle && !press.run.every((id) => sch.selectedWires.has(id))) sch.selectWires(press.run, true)
+      beginSegmentDrag(press)
     }
     if (drag.active) {
       trackMove(toWorld(e.clientX, e.clientY))
@@ -1457,7 +1471,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       setHoveredWire(null)
     }
     if (endPan(e)) return
+    const clickedWire = wirePress.current
     wirePress.current = null
+    if (clickedWire?.toggle && e.type === "pointerup") sch.selectWires(clickedWire.run, true)
     if (drag.active) {
       endMove()
       if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
