@@ -37,10 +37,8 @@ export function turnsAtPins(runs: readonly Run[], pins: readonly WirePin[]): { l
     if (here?.length !== 1 || endsAt.get(key) !== 1) return undefined
     const pin = here[0]
     if (!pin.out || pin.socket) return undefined
-    const d = { x: Math.sign(next.x - at.x), y: Math.sign(next.y - at.y) }
-    const square = d.x * pin.out.x + d.y * pin.out.y === 0
-    const slanting = (pin.out.x === 0) !== (pin.out.y === 0) && pin.out.x * d.y - pin.out.y * d.x !== 0
-    return square || slanting ? pin : undefined
+    const turns = pin.out.x * (next.y - at.y) - pin.out.y * (next.x - at.x) !== 0
+    return turns ? pin : undefined
   }
   const leads = new Map<string, Leads>()
   const turned: TurnPins = { leads: new Map(), corners: [] }

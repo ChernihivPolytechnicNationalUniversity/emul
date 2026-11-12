@@ -67,7 +67,7 @@ describe("a wire turning at a pin is drawn with a rounded corner taking the lead
 })
 
 describe("found by phase 3's reviews", () => {
-  it("two diagonal pins meeting at a right angle are drawn as one rounded corner, and a diagonal pin on a straight wire is not (findings 3.R7)", () => {
+  it("two diagonal pins meeting at a right angle are drawn as one rounded corner, and a wire turning 45° at a diagonal pin is rounded there too, the arc taking R·tan(22.5°) of the lead (findings 3.R7; a turn at a pin rounds at any angle and on every pin, findings 7.2 and 7.4)", () => {
     const a = resistor("A", 0, 0, 45)
     const probe = resistor("B", 0, 0, 135)
     const pa = pinAt(a, "2")
@@ -75,8 +75,15 @@ describe("found by phase 3's reviews", () => {
     const b: PlacedObject = { ...probe, x: probe.x + pa.x - pb.x, y: probe.y + pa.y - pb.y }
     const butted = look([a, b], [])
     expect.soft(butted.corners.length, "one corner where the two leads meet").toBe(1)
+    const out = wirePins([a]).find((p) => p.key.endsWith(":2"))!.out!
     const wired = look([a], [seg("w", pa, { x: pa.x + c(3), y: pa.y })])
-    expect.soft(wired.leads.size, "a straight wire off a diagonal pin turns 45°, which is no rounded corner").toBe(0)
+    const lead = wired.leads.get("w")
+    const end = lead?.start ?? lead?.end
+    const share = LEAD * Math.tan(Math.PI / 8)
+    expect.soft(end?.x, "a straight wire off a diagonal pin turns 45° on the lead: x").toBeNear(pa.x - out.x * share, 1e-9)
+    expect.soft(end?.y, "… y").toBeNear(pa.y - out.y * share, 1e-9)
+    const along = look([a], [seg("w", pa, { x: pa.x + Math.sign(out.x) * c(3), y: pa.y + Math.sign(out.y) * c(3) })])
+    expect.soft(along.leads.size, "a wire leaving straight along the diagonal lead does not turn there").toBe(0)
   })
 
   it("a corner's two ends come in the order of their pins' keys, whatever order the pins are found in (findings 3.L16)", () => {
