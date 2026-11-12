@@ -67,9 +67,8 @@ describe("a project saved on emul 1.28.0 keeps its Open746I-C wiring now that P1
     expect(read, "the file reads as a project").not.toBeNull()
     expect(coloursNow(read!.doc), "opened: TIM4 CH1–CH3 as the brief and the firmware have them").toEqual({ red: "PD12", green: "PD13", blue: "PD14" })
     expect(versionOf(read!.doc)).toBe(SCHEMATIC_VERSION)
-    expect(read!.notes).toEqual([
+    expect(read!.notes, "the renumbering only: the phase 6 router lays U1 P4-7 → R2 2 clear through its own bends, where the old router's stubs ran it over another net (design.md §13.22)").toEqual([
       "U1: 2 wire ends on P4 moved to keep the same signals, now that these pins are numbered as on the board itself.",
-      "The wire between U1 P4-7 and R2 2 ran over another net's wire or pin where it was drawn; it is laid again so the circuit stays as it was.",
     ])
   })
 

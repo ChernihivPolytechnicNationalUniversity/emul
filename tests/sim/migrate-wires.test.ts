@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { join } from "node:path"
+import { join, relative, sep } from "node:path"
 import { describe, expect, it } from "vitest"
 import { openedFile, projectFile, readProjectFile } from "@/project/project-store"
 import { builder, connect, connections, legacyOf, rewire } from "@/schematic/builder"
@@ -14,11 +14,13 @@ import { laidAgain } from "@/schematic/freeze"
 import { Conductors } from "@/schematic/wires/conductors"
 import type { HdlModule, LegacySchematic, LegacyWire, PlacedObject, Schematic } from "@/schematic/types"
 import { junctionsOf, wireNets } from "@/schematic/wires/graph"
+import { runsOf } from "@/schematic/circuit"
+import { bodiesOf, crossedBody } from "@/schematic/body-crossing"
 import { buildNetlist, GROUND, type Netlist } from "@/sim/netlist"
 import { SimLoop } from "@/sim/loop"
 import { legacyCircuit } from "../lib/legacy-circuit"
 import { joiningContactsOfNcPads, legacyPinPartition, netsJoinedThroughNcPads, pinPartition } from "../lib/pin-partition"
-import { partitionDocuments, readFixture } from "../lib/partition-documents"
+import { emulFiles, partitionDocuments, readFixture } from "../lib/partition-documents"
 import { normalFormViolations } from "../lib/wire-reference"
 
 const c = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
@@ -89,18 +91,37 @@ describe("every example, case and saved file keeps its circuit through the freez
     }
   })
 
-  it("only the documents whose wires ran over another net say so, and each names the wire it laid again", () => {
+  it("only the documents with a wire laid again say so, each naming that wire, and keep their circuits; phase 0's register of five is gone now that every document agrees (design.md §10 item 4)", async () => {
     const relaid: string[] = []
     for (const e of examples) {
       const { notes } = wiresAsSegments(legacyOf(e.build(GRID)))
       expect.soft(notes.every((n) => n.includes("laid again")), `${e.id}: ${JSON.stringify(notes)}`).toBe(true)
       if (notes.length) relaid.push(e.id)
     }
-    expect.soft(relaid.sort(), "the four examples of phase 0's register").toEqual(["charge-boost-chips", "nucleo-serial", "open746-touch", "system-exam"])
+    for (const file of emulFiles()) {
+      const read = await readProjectFile(new Blob([readFileSync(file)]))
+      if (read?.notes.some((n) => / ran over another net's wire or pin where it was drawn; it is laid again /.test(n))) relaid.push(relative(ROOT, file).split(sep).join("--"))
+    }
+    expect.soft(relaid, "the documents whose freeze lays a wire again, from the files").toEqual([
+      "before-the-segments--bend-on-foreign-wire.emul",
+      "before-the-segments--board-open746-bend-on-p3-7.emul",
+      "before-the-segments--corridor-different-nets.emul",
+      "before-the-segments--junction-unwired-on-route.emul",
+      "before-the-segments--nc-pads-bridging-two-nets.emul",
+      "before-the-segments--off-grid-near-contact.emul",
+      "before-the-segments--random-0237.emul",
+      "before-the-segments--user-bend-on-foreign-pin.emul",
+      "emul-1.42.0--resistor-bridge.emul",
+    ])
+    for (const name of relaid) {
+      const doc = documents.find((d) => d.name === name)?.doc
+      const fixture = readFixture(name)
+      expect.soft(doc && fixture && pinPartition(doc), `${name}: the circuit phase 0 froze`).toEqual(doc && fixture && joiningContactsOfNcPads(fixture.nets, doc.objects))
+    }
   })
 })
 
-describe("a wire at a diagonal pin: the first straight piece slides onto the pin (design.md §13.14)", () => {
+describe("a wire at a diagonal pin (design.md §13.14's slide of the old router's 45° stubs, superseded by §13.22: an old file freezes through the phase 6 router)", () => {
   const frozenOf = (doc: LegacySchematic) => wiresAsSegments(doc).routes
   const between = (doc: LegacySchematic, a: string, b: string): LegacyWire => {
     const ref = (r: string) => {
@@ -114,14 +135,28 @@ describe("a wire at a diagonal pin: the first straight piece slides onto the pin
   }
   const cells = (pts: readonly Point[] | undefined) => (pts ?? []).map((p) => [p.x / GRID, p.y / GRID])
 
-  it("the power supply's four corners: every wire leaves its corner at a right angle, the rest of it where it was", () => {
-    const doc = legacyOf(examples.find((e) => e.id === "power-supply")!.build(GRID))
-    const routes = frozenOf(doc)
-    expect.soft(cells(routes.get(between(doc, "D1.2", "C1.1").id)), "the top corner, straight up to the rail").toEqual([[17, 3], [17, 1], [27, 1], [27, 2]])
-    expect.soft(cells(routes.get(between(doc, "T1.S1", "D1.1").id)), "the left corner, in from the left on its own row").toEqual([[8, 5], [11, 5], [11, 6], [14, 6]])
-    expect.soft(cells(routes.get(between(doc, "T1.S2", "D2.1").id)).slice(-2), "the right corner, out to the right on its own row").toEqual([[24, 6], [20, 6]])
-    expect.soft(cells(routes.get(between(doc, "D3.1", "ground@16,13.GND").id)), "the bottom corner, straight down to ground").toEqual([[17, 9], [17, 13]])
+  it("the power supply frozen through the router reads as a schematic: the four corner wires exactly, the diamond's corners exact contacts, dots only at those corners and the T's on the rails, no wire through a body, no run past its ends (design.md §13.22; plan.md acceptance 5)", () => {
+    const legacy = legacyOf(examples.find((e) => e.id === "power-supply")!.build(GRID))
+    const { doc, routes } = wiresAsSegments(legacy)
+    expect.soft(cells(routes.get(between(legacy, "D1.2", "C1.1").id)), "the top corner, from C1's + pin along the rail and down onto the corner").toEqual([[27, 2], [17, 2], [17, 3]])
+    expect.soft(cells(routes.get(between(legacy, "T1.S1", "D1.1").id)), "the left corner, up a row and in from the left").toEqual([[14, 6], [14, 5], [8, 5]])
+    expect.soft(cells(routes.get(between(legacy, "T1.S2", "D2.1").id)), "the right corner, through the bends the example draws under the bridge").toEqual([[20, 6], [24, 6], [24, 16], [8, 16], [8, 7]])
+    expect.soft(cells(routes.get(between(legacy, "D3.1", "ground@16,13.GND").id)), "the bottom corner, straight down to ground").toEqual([[17, 9], [17, 13]])
     for (const pts of routes.values()) for (let i = 1; i < pts.length; i++) expect.soft(pts[i].x === pts[i - 1].x || pts[i].y === pts[i - 1].y, `orthogonal: ${JSON.stringify(cells(pts))}`).toBe(true)
+    const pinAt = (ref: string, pin: string) => objectPins(doc.objects.find((o) => o.props?.ref === ref)!, GRID).find((p) => p.pin.id === pin)!.point
+    const corners = [["D1", "1", "D3", "2"], ["D1", "2", "D2", "2"], ["D2", "1", "D4", "2"], ["D3", "1", "D4", "1"]] as const
+    expect.soft(corners.map(([a, pa, b, pb]) => [cells([pinAt(a, pa)]), cells([pinAt(b, pb)])]), "the diamond's four corners: two diode pins on one point each").toEqual([[[[14, 6]], [[14, 6]]], [[[17, 3]], [[17, 3]]], [[[20, 6]], [[20, 6]]], [[[17, 9]], [[17, 9]]]])
+    const dots = junctionsOf(wireNets(doc.wires, wirePins(doc.objects))).map((p) => `${p.x / GRID},${p.y / GRID}`).sort()
+    expect.soft(dots, "dots at the four corners, where a wire meets two diode pins (design.md §3.2: three conductors), and at the T's on the + rail (C1 +, R1's top) and the − rail (C1 −, R1's bottom, the ground pin both − wires reach), nowhere else").toEqual(["14,6", "17,13", "17,3", "17,9", "20,6", "27,2", "27,6", "31,2", "31,6"])
+    expect.soft(doc.wires.filter((s) => crossedBody(s, bodiesOf(doc.objects))).map((s) => cells([s.a, s.b])), "no wire through a body").toEqual([])
+    const underTheBridge = c(24, 16)
+    const pastItsEnds = runsOf(doc.wires, wirePins(doc.objects))
+      .filter((r) => !r.points.some((p) => p.x === underTheBridge.x && p.y === underTheBridge.y))
+      .filter((r) => {
+        const [a, b] = [r.points[0], r.points[r.points.length - 1]]
+        return r.points.some((p) => p.x < Math.min(a.x, b.x) || p.x > Math.max(a.x, b.x) || p.y < Math.min(a.y, b.y) || p.y > Math.max(a.y, b.y))
+      })
+    expect.soft(pastItsEnds.map((r) => cells(r.points)), "no run but the one through the example's own bends goes past either of its ends").toEqual([])
   })
 
   it("the resistor bridge: the loops round its side corners become the one-cell wires to R3", () => {
