@@ -409,6 +409,15 @@ describe("turning, flipping and pasting keep diagonals exact (design.md §6.11 r
     expect.soft(normalForm(turned.doc), "on the lattice, in normal form").toEqual([])
   })
 
+  it("a part turned alone stretches its diagonal as one segment even where the segment's box overlaps another part it passes clear of (the avoidance is exact, not by the box; rule 8)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 4), resistor("R9", 9, 1)], [seg(at(4, 1), at(10, 5))])
+    const turned = new TurnRun(doc, wiringFor(doc), new Set(["R2"])).turned(1, ids)
+    const pin = pinOf(turned.doc, "R2", "1")
+    expect.soft(pin, "set up: R2's pin turned to (11, 4), the stretch passing under R9's body inside its box").toEqual(at(11, 4))
+    expect.soft(geometryOf(turned.doc.wires), "one straight segment, not rerouted round R9").toEqual(geometryOf([seg(at(4, 1), pin)]))
+    expect.soft(normalForm(turned.doc), "normal form").toEqual([])
+  })
+
   it("mirrored: one straight segment between the mirrored pins, the same run and rise", () => {
     const doc = pair()
     const flipped = flippedWithWires(doc, wiringFor(doc), new Set(["R1", "R2"]), "horizontal", ids, undefined, new Set([doc.wires[0].id]))
