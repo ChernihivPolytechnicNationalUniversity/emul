@@ -334,6 +334,7 @@ async function doubleClickChecks(page: Page) {
   await page.waitForTimeout(400)
   expect("selected, each wire keeps a 3 px casing, in the selection plate's own tint, so the gap stays and no white band shows inside the plate (the user's checks, 2026-11-06)", await casings(), [{ gap: 6, stroke: "var(--selection-tint)" }, { gap: 6, stroke: "var(--selection-tint)" }])
   await page.keyboard.press("Escape")
+  await page.waitForTimeout(600)
   await page.mouse.click(bare.x, bare.y)
   await page.waitForTimeout(700)
   const cross = await g.toScreen(cellPoint(5, 5))
@@ -1104,6 +1105,209 @@ async function typeBPlugTakesTheClick(page: Page) {
   }
 }
 
+const cellsOfPath = (d: string | null) => {
+  if (!d) return null
+  const marks = [...d.matchAll(/([MLQ])(-?[\d.]+) (-?[\d.]+)/g)]
+  const kept = marks.filter((m, i) => m[1] !== "L" || i === marks.length - 1 || marks[i + 1][1] !== "Q")
+  return kept.map((m) => [Number(m[2]) / GRID, Number(m[3]) / GRID])
+}
+
+async function phaseSixChecks(page: Page) {
+  console.log("\nthe router in the editor: the completion mid-gesture, the row taken after the fact, re-route with T and the menu (phase 6, design.md §6.1, §7, §13.9, §13.22)")
+  const previewCells = () => page.evaluate(() => document.querySelector("[data-slot=pending-wire-route] path:not([mask])")?.getAttribute("d") ?? null).then(cellsOfPath)
+  const previewRefused = () => page.evaluate(() => document.querySelector("[data-slot=pending-wire-route]")?.hasAttribute("data-refused") ?? null)
+  const runCells = () =>
+    page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire][data-points]")].map((e) => e.getAttribute("data-points")!)).then((runs) =>
+      runs
+        .map((r) => r.split(" ").map((p) => p.split(",").map((v) => Number(v) / GRID)))
+        .map((run) => (run[0][0] - run[run.length - 1][0] || run[0][1] - run[run.length - 1][1]) > 0 ? run.reverse() : run)
+        .sort((a, b) => a[0][0] - b[0][0] || a[0][1] - b[0][1]),
+    )
+  const shownRuns = () => page.evaluate(() => [...document.querySelectorAll<SVGElement>("[data-slot=wires] [data-wire][data-points]")].filter((e) => e.style.display !== "none").map((e) => e.getAttribute("data-points")))
+  const bandCells = () =>
+    page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-piece]")].map((e) => e.getAttribute("data-piece")!.split(" ").map(Number))).then((pieces) =>
+      pieces.map(([ax, ay, bx, by]) => (ax < bx || (ax === bx && ay <= by) ? [ax, ay, bx, by] : [bx, by, ax, ay]).map((v) => v / GRID).join(" ")).sort(),
+    )
+  const piecesOf = (cells: number[][]) => cells.slice(1).map(([x, y], i) => ([cells[i][0], cells[i][1], x, y] as number[])).map(([ax, ay, bx, by]) => (ax < bx || (ax === bx && ay <= by) ? [ax, ay, bx, by] : [bx, by, ax, ay]).join(" ")).sort()
+  const selectedRuns = () => page.evaluate(() => new Set([...document.querySelectorAll("[data-slot=selection] path[data-wire]")].map((e) => e.getAttribute("data-wire"))).size)
+  const toastTexts = () => page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].map((e) => e.textContent ?? ""))
+  const press = async (p: Point) => {
+    await page.mouse.move(p.x, p.y)
+    await page.waitForTimeout(80)
+    await page.mouse.down()
+  }
+  const glide = async (p: Point) => {
+    await page.mouse.move(p.x, p.y, { steps: 10 })
+    await page.waitForTimeout(250)
+  }
+  const undo = async () => {
+    await page.keyboard.press("Control+z")
+    await page.waitForTimeout(500)
+  }
+  const redo = async () => {
+    await page.keyboard.press("Control+Shift+z")
+    await page.waitForTimeout(500)
+  }
+
+  await openDoc(page, "completion-over", { objects: [resistorAt("R1", 10, 10), resistorAt("R2", 20, 10), resistorAt("R3", 16, 7, 90)], wires: [], parts: {} })
+  await zoomTo(page, 0)
+  let f = await fieldFrame(page)
+  const under = [
+    [14, 11],
+    [14, 12],
+    [20, 12],
+    [20, 11],
+  ]
+  await press(f.toScreen(cellPoint(14, 11)))
+  await glide(f.toScreen(cellPoint(19, 11)))
+  expect("held, one cell short of R2's pin: the plain L would pass over R3's pin, so it is drawn refused, and nothing is routed on the field (design.md §6.7)", await previewRefused(), true)
+  await glide(f.toScreen(cellPoint(20, 11)))
+  expect("held over R2's pin: the router's route under R3's pin is offered, not refused (design.md §13.22 q7 A; mockups/phase6-questions.png 7)", [await previewRefused(), await previewCells()], [false, under])
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  expect("released there: the wire laid is exactly the route that was shown", await runCells(), [under])
+  await undo()
+  expect("one undo takes it back", await runCells(), [])
+  await redo()
+  expect("one redo lays it again", await runCells(), [under])
+
+  await openDoc(page, "completion-corner", { objects: [resistorAt("R1", 10, 10), resistorAt("R5", 20, 10), resistorAt("R3", 19, 15, 90)], wires: [], parts: {} })
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  const otherL = [
+    [14, 11],
+    [14, 15],
+    [20, 15],
+  ]
+  const r1 = f.toScreen(cellPoint(14, 11))
+  await page.mouse.click(r1.x, r1.y)
+  await page.waitForTimeout(200)
+  await glide(f.toScreen(cellPoint(20, 15)))
+  expect("click mode, over R3's top pin: the plain L would bend on R5's pin, the other L is offered (design.md §13.22 q7 A)", [await previewRefused(), await previewCells()], [false, otherL])
+  const r3 = f.toScreen(cellPoint(20, 15))
+  await page.mouse.click(r3.x, r3.y)
+  await page.waitForTimeout(600)
+  expect("the click lays exactly the preview", await runCells(), [otherL])
+
+  const nucleo: PlacedObject = { id: "U1", def: "nucleo-f429zi", x: 20 * GRID, y: 0, props: { ref: "U1" } }
+  const straightD45 = [
+    [12, 20],
+    [23, 20],
+    [23, 19],
+    [26, 19],
+  ]
+  const slippedD45 = [
+    [12, 20],
+    [23, 20],
+    [23, 19.5],
+    [26, 19.5],
+    [26, 19],
+  ]
+  const segmentsOf = (cells: number[][], id: string) => cells.slice(1).map(([x, y], i) => ({ id: `${id}${i}`, a: cellPoint(cells[i][0], cells[i][1]), b: cellPoint(x, y) }))
+  await openDoc(page, "row-taken-after", { objects: [nucleo, resistorAt("R1", 14, 18), resistorAt("R4", 8, 19)], wires: segmentsOf(straightD45, "d45-"), parts: {} })
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  const reset = f.toScreen(cellPoint(25, 19))
+  const visible = await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest("[data-slot=dot-field-viewport]"), reset)
+  expect("guard: RESET's socket is on screen", visible, true)
+  await press(f.toScreen(cellPoint(18, 19)))
+  await glide(reset)
+  expect("held over RESET, which D45's wire passes: the drawing is offered, not refused (junctions.md 35)", [await previewRefused(), await previewCells()], [false, [[18, 19], [25, 19]]])
+  expect("and D45's wire shows on its half-cell slip while the end is held, the wire the release lays (the main session's decision on review B's question 5)", [await shownRuns(), await bandCells()], [[], piecesOf(slippedD45)])
+  await page.mouse.up()
+  await page.waitForTimeout(700)
+  expect("released: RESET's wire straight, D45's on the half-cell slip, in that one edit (design.md §13.9)", await runCells(), [[[18, 19], [25, 19]], slippedD45].sort((a, b) => a[0][0] - b[0][0]))
+  await undo()
+  expect("one undo gives back D45's straight wire and no RESET wire", await runCells(), [straightD45])
+  await redo()
+  expect("one redo both again", await runCells(), [[[18, 19], [25, 19]], slippedD45].sort((a, b) => a[0][0] - b[0][0]))
+
+  const hooked = (): Schematic => ({
+    objects: [resistorAt("R6", 22, 17), { ...resistorAt("R7", 23, 19), rotation: 180 }],
+    wires: segmentsOf(
+      [
+        [26, 18],
+        [28, 18],
+        [28, 20],
+        [27, 20],
+      ],
+      "hook-",
+    ),
+    parts: {},
+  })
+  const hook = [
+    [26, 18],
+    [28, 18],
+    [28, 20],
+    [27, 20],
+  ]
+  const straight = [
+    [26, 18],
+    [27, 18],
+    [27, 20],
+  ]
+  await openDoc(page, "reroute-key", hooked())
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  const onHook = f.toScreen(cellPoint(28, 19))
+  await page.mouse.click(onHook.x, onHook.y)
+  await page.waitForTimeout(300)
+  expect("guard: a click on the hook selects its run", await selectedRuns(), 1)
+  await page.keyboard.press("t")
+  await page.waitForTimeout(600)
+  expect("T re-routes the selected run: the hook becomes one corner (design.md §7, §13.18)", await runCells(), [straight])
+  expect("and the new run is the selection", await selectedRuns(), 1)
+  await undo()
+  expect("one undo gives the hook back", await runCells(), [hook])
+  await redo()
+  expect("one redo straightens it again", await runCells(), [straight])
+  await undo()
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(200)
+  await page.keyboard.press("t")
+  await page.waitForTimeout(400)
+  expect("T with nothing selected does nothing", await runCells(), [hook])
+
+  const menuItem = () => page.getByRole("menuitem", { name: /Re-route wire/ })
+  const empty = f.toScreen(cellPoint(34, 26))
+  await page.mouse.click(empty.x, empty.y, { button: "right" })
+  await page.waitForTimeout(300)
+  expect("the field's menu offers «Re-route wire» with its key, disabled while no wire is selected", [await menuItem().count(), await menuItem().getAttribute("data-disabled"), (await menuItem().textContent())?.replace("Re-route wire", "")], [1, "", "T"])
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(300)
+  await page.mouse.click(onHook.x, onHook.y)
+  await page.waitForTimeout(300)
+  await page.mouse.click(onHook.x, onHook.y, { button: "right" })
+  await page.waitForTimeout(300)
+  expect("with the run selected it is enabled", await menuItem().getAttribute("data-disabled"), null)
+  await menuItem().click()
+  await page.waitForTimeout(600)
+  expect("and re-routes it as T does", await runCells(), [straight])
+  await undo()
+  expect("in one undo step", await runCells(), [hook])
+
+  const boxedIn = segmentsOf(
+    [
+      [18, 11],
+      [18, 11.5],
+      [20, 11.5],
+      [20, 14],
+    ],
+    "boxed-",
+  )
+  await openDoc(page, "reroute-refused", { objects: [resistorAt("R2", 18, 10), resistorAt("R5", 13, 10), resistorAt("R6", 17, 6, 90), resistorAt("R7", 17, 12, 90)], wires: boxedIn, parts: {} })
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  const before = await runCells()
+  const onRun = f.toScreen(cellPoint(20, 13))
+  await page.mouse.click(onRun.x, onRun.y)
+  await page.waitForTimeout(300)
+  await page.keyboard.press("t")
+  await page.waitForTimeout(600)
+  expect("T on a run with no clean path: the toast names the refusal (design.md §7; REROUTE_REFUSED)", (await toastTexts()).some((t) => t.startsWith("Not re-routed")), true)
+  expect("and the run stays as it was", await runCells(), before)
+}
+
 try {
   await fetch(DEV_SERVER, { signal: AbortSignal.timeout(3000) })
 } catch {
@@ -1112,7 +1316,7 @@ try {
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
+const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench, phaseSixChecks]
 try {
   for (const section of sections) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
