@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { bodiesOf } from "@/schematic/body-crossing"
+import { runsOf } from "@/schematic/circuit"
+import { labelsOnTheirWires, MONO_ADVANCE_EM, wiresAtPins } from "@/components/field/pin-label"
+import { wirePins } from "@/schematic/migrate-wires"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, type Point } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
@@ -121,5 +124,62 @@ describe("the row taken after the fact, when the passing wire cannot step aside 
     expect.soft(isRefusal(result) && result.refused !== "over", "refused, but not as passing over a pin").toBe(true)
     expect.soft(isRefusal(result) && result.refused, "refused as the socket another net's wire passes").toBe("socket")
     expect.soft(isRefusal(result) && DRAW_REFUSED[result.refused].why.includes("End the wire on the pin"), "the words do not ask for what the user just did").toBe(false)
+  })
+})
+
+describe("the examples review B judged worse are tidied in their builder code, never by a special case in the router (phase 6's review fixes brief; plan.md acceptance 5)", () => {
+  const runsIn = (id: string) => {
+    const doc = examples.find((e) => e.id === id)!.build(GRID)
+    const pins = wirePins(doc.objects)
+    const name = (p: Point) => {
+      const here = pins.filter((q) => q.at.x === p.x && q.at.y === p.y)
+      if (!here.length) return "·"
+      return here
+        .map((pin) => {
+          const object = doc.objects.find((o) => o.id === pin.key.slice(0, pin.key.indexOf(":")))
+          return `${object?.props?.ref ?? object?.def}:${pin.key.slice(pin.key.indexOf(":") + 1)}`
+        })
+        .sort()
+        .join("+")
+    }
+    return { doc, runs: runsOf(doc.wires, pins).map((r) => `${name(r.points[0])} ${name(r.points[r.points.length - 1])} ${JSON.stringify(cells(r.points))}`) }
+  }
+  const hasRun = (id: string, from: string, to: string, points: number[][]) => {
+    const { runs } = runsIn(id)
+    const want = [`${from} ${to} ${JSON.stringify(points)}`, `${to} ${from} ${JSON.stringify([...points].reverse())}`]
+    expect.soft(runs.some((r) => want.includes(r)), `${id}: ${from} → ${to} as ${JSON.stringify(points)}; the runs: ${runs.filter((r) => r.includes(from) || r.includes(to)).join("; ")}`).toBe(true)
+  }
+
+  it("open746-touch: TERM1's TX into RXD round the top and down the names column, one turn into the socket — not along the USART1 jumper's row, over the CP2102, past RXD and back (finding 2)", () => {
+    hasRun("open746-touch", "TERM1:TX", "U1:VCP-RX", [[34, -6], [33, -6], [33, -11], [48, -11], [48, 8], [45, 8]])
+  })
+
+  it("system-exam: C5 the right way up, the rectifier's + and ground wires straight onto it with no lap round the bridge; the current mirror's base link one hook, not an S (finding 3)", () => {
+    hasRun("system-exam", "D2:2+D3:2", "C5:1", [[45, 27], [45, 26], [55, 26]])
+    hasRun("system-exam", "ground:GND", "C5:2", [[45, 37], [55, 37], [55, 30]])
+    hasRun("system-exam", "Q2:B", "R13:2", [[54, 11], [53, 11], [53, 8], [57, 8]])
+  })
+
+  it("nucleo-i2c: one + rail on row 2 with T's to R1, R2 and the memory's VCC, no two wires of the net crossing beside the supply pin (finding 8)", () => {
+    hasRun("nucleo-i2c", "supply:V", "·", [[38, 1], [38, 2]])
+    const { doc } = runsIn("nucleo-i2c")
+    const rail = doc.wires.filter((s) => s.a.y === c(2) && s.b.y === c(2))
+    const crossing = doc.wires.filter((v) => v.a.x === v.b.x && rail.some((h) => Math.min(h.a.x, h.b.x) < v.a.x && v.a.x < Math.max(h.a.x, h.b.x) && Math.min(v.a.y, v.b.y) < c(2) && c(2) < Math.max(v.a.y, v.b.y)))
+    expect.soft(crossing.map((s) => cells([s.a, s.b])), "nothing crosses the rail").toEqual([])
+  })
+
+  it("the bridge: R4 into the left corner along its row from the left, the bend the example now draws (review B's table and question 8: §13.22's tie kept)", () => {
+    hasRun("bridge", "R4:2", "R1:1+R6:2", [[5, 5], [5, 6], [14, 6]])
+  })
+
+  it("charge-boost-chips: BT1's + into the DW03's VDD from above, clear of the battery's printed «3.7 V Li-ion» (finding 7)", () => {
+    hasRun("charge-boost-chips", "U2:VDD", "·", [[26, 11], [26, 9], [28, 9], [28, 5]])
+  })
+
+  it("power-supply: the rails run a row out from C1's pins, so no pin label sits on its own wire (the main session's decision on review B's question 1, d)", () => {
+    const { doc } = runsIn("power-supply")
+    const at = wiresAtPins(wiringOf(new WireGraph(), doc).routes)
+    const onTheirWires = doc.objects.flatMap((o) => [...labelsOnTheirWires(o, 0.4, MONO_ADVANCE_EM, GRID, at)].map((pin) => `${o.props?.ref}:${pin}`))
+    expect.soft(onTheirWires.filter((k) => k.startsWith("C1:")), "C1's «+» and «−» clear of the rails").toEqual([])
   })
 })

@@ -68,14 +68,26 @@ const powerSupply: Example = {
       [24, 6],
     ])
     // + corner out to the filter and the load.
-    wire(d1, "2", c, "1")
-    wire(c, "1", load, "1")
-    wire(load, "1", r, "1")
+    wire(d1, "2", c, "1", [
+      [17, 1],
+      [27, 1],
+    ])
+    wire(c, "1", load, "1", [
+      [27, 1],
+      [31, 1],
+    ])
+    wire(load, "1", r, "1", [
+      [31, 1],
+      [35, 1],
+    ])
     // R2 and the LED are butted pin to pin: touching pins conduct, so no wire is drawn here.
     // − corner down to ground, and the returns along it.
     wire(d3, "1", gnd, "GND")
     wire(c, "2", gnd, "GND")
-    wire(load, "2", c, "2")
+    wire(load, "2", c, "2", [
+      [31, 7],
+      [27, 7],
+    ])
     wire(led, "2", load, "2")
     return doc
   },
@@ -139,7 +151,7 @@ const bridge: Example = {
     wire(v, "V", r4, "1")
     wire(r4, "1", r1, "2", [[5, 0], [17, 0]])
     // Left corner.
-    wire(r4, "2", r1, "1")
+    wire(r4, "2", r1, "1", [[5, 6]])
     wire(r1, "1", r3, "1")
     // Right corner.
     wire(r3, "2", r7, "2")
@@ -210,7 +222,7 @@ const chargeBoostChips: Example = {
     wire(led1, "2", u1, "CHRG")
     wire(led2, "2", u1, "STDBY")
     wire(u1, "BAT", bat, "+")
-    wire(bat, "+", u2, "VDD", [[27, 4], [27, 11]])
+    wire(bat, "+", u2, "VDD", [[28, 4], [28, 9], [26, 9]])
     wire(bat, "-", u2, "GND")
     wire(u2, "VM", gnd(28, 17), "GND")
     wire(bat, "+", u3, "IN")
@@ -394,7 +406,7 @@ export const touchDemo: Example = {
     // The CP2102's side of USART1: TX and RX on the USART1 JMP's right column, at (45, 7) and (45, 8).
     const term = place("serial-terminal", 34, -9, { baud: "115200" })
     wire(u, "VCP-TX", term, "RX")
-    wire(u, "VCP-RX", term, "TX")
+    wire(u, "VCP-RX", term, "TX", [[48, 8], [48, -11], [33, -11], [33, -6]])
     doc.parts[`${u.id}:OTG_VBUS`] = { on: false }
     return doc
   },
@@ -606,8 +618,8 @@ export const nucleoI2c: Example = {
     const gnd = place("ground", 42, 20)
     wire(u, "CN7-2", mem, "SCL", [[33, 13], [33, 11]])
     wire(u, "CN7-4", mem, "SDA", [[35, 14], [35, 12]])
-    wire(rail, "V", r1, "1")
-    wire(rail, "V", r2, "1")
+    wire(rail, "V", r1, "1", [[38, 2], [37, 2]])
+    wire(rail, "V", r2, "1", [[38, 2], [39, 2]])
     wire(r1, "2", mem, "SCL")
     wire(r2, "2", mem, "SDA")
     wire(rail, "V", mem, "VCC", [[38, 2], [43, 2]])

@@ -137,7 +137,9 @@ describe("a wire at a diagonal pin (design.md §13.14's slide of the old router'
   it("the power supply frozen through the router reads as a schematic: the four corner wires exactly, the diamond's corners exact contacts, dots only at those corners and the T's on the rails, no wire through a body, no run past its ends (design.md §13.22; plan.md acceptance 5)", () => {
     const legacy = legacyOf(examples.find((e) => e.id === "power-supply")!.build(GRID))
     const { doc, routes } = wiresAsSegments(legacy)
-    expect.soft(cells(routes.get(between(legacy, "D1.2", "C1.1").id)), "the top corner, from C1's + pin along the rail and down onto the corner").toEqual([[27, 2], [17, 2], [17, 3]])
+    expect.soft(cells(routes.get(between(legacy, "D1.2", "C1.1").id)), "the top corner, from C1's + pin up onto the rail a row above, along it and down onto the corner, clear of C1's «+» (the main session's decision on review B's question 1, d)").toEqual([[27, 2], [27, 1], [17, 1], [17, 3]])
+    expect.soft(cells(routes.get(between(legacy, "C1.1", "R1.1").id)), "the + rail: up from C1's + pin, along row 1, down into R1's top").toEqual([[27, 2], [27, 1], [31, 1], [31, 2]])
+    expect.soft(cells(routes.get(between(legacy, "R1.2", "C1.2").id)), "the − rail: down from C1's − pin, along row 7, up into R1's bottom, clear of C1's «−»").toEqual([[27, 6], [27, 7], [31, 7], [31, 6]])
     expect.soft(cells(routes.get(between(legacy, "T1.S1", "D1.1").id)), "the left corner, up a row and in from the left").toEqual([[14, 6], [14, 5], [8, 5]])
     expect.soft(cells(routes.get(between(legacy, "T1.S2", "D2.1").id)), "the right corner, through the bends the example draws under the bridge").toEqual([[20, 6], [24, 6], [24, 16], [8, 16], [8, 7]])
     expect.soft(cells(routes.get(between(legacy, "D3.1", "ground@16,13.GND").id)), "the bottom corner, straight down to ground").toEqual([[17, 9], [17, 13]])
@@ -146,7 +148,7 @@ describe("a wire at a diagonal pin (design.md §13.14's slide of the old router'
     const corners = [["D1", "1", "D3", "2"], ["D1", "2", "D2", "2"], ["D2", "1", "D4", "2"], ["D3", "1", "D4", "1"]] as const
     expect.soft(corners.map(([a, pa, b, pb]) => [cells([pinAt(a, pa)]), cells([pinAt(b, pb)])]), "the diamond's four corners: two diode pins on one point each").toEqual([[[[14, 6]], [[14, 6]]], [[[17, 3]], [[17, 3]]], [[[20, 6]], [[20, 6]]], [[[17, 9]], [[17, 9]]]])
     const dots = junctionsOf(wireNets(doc.wires, wirePins(doc.objects))).map((p) => `${p.x / GRID},${p.y / GRID}`).sort()
-    expect.soft(dots, "dots at the four corners, where a wire meets two diode pins (design.md §3.2: three conductors), and at the T's on the + rail (C1 +, R1's top) and the − rail (C1 −, R1's bottom, the ground pin both − wires reach), nowhere else").toEqual(["14,6", "17,13", "17,3", "17,9", "20,6", "27,2", "27,6", "31,2", "31,6"])
+    expect.soft(dots, "dots at the four corners, where a wire meets two diode pins (design.md §3.2: three conductors), and at the T's on the + rail above C1 + and R1's top, the − rail below C1 − and R1's bottom, and the ground pin both − wires reach, nowhere else").toEqual(["14,6", "17,13", "17,3", "17,9", "20,6", "27,1", "27,7", "31,1", "31,7"])
     expect.soft(doc.wires.filter((s) => crossedBody(s, bodiesOf(doc.objects))).map((s) => cells([s.a, s.b])), "no wire through a body").toEqual([])
     const underTheBridge = c(24, 16)
     const pastItsEnds = runsOf(doc.wires, wirePins(doc.objects))
@@ -166,18 +168,14 @@ describe("a wire at a diagonal pin (design.md §13.14's slide of the old router'
   })
 
   it("the two 1.42.0 files freeze to the corners their examples do", async () => {
-    for (const [file, example] of [
-      ["emul-1.42.0/power-supply.emul", "power-supply"],
-      ["emul-1.42.0/resistor-bridge.emul", "bridge"],
-    ] as const) {
-      const read = await readProjectFile(new Blob([readFileSync(join(ROOT, file))]))
-      const mine = { ...examples.find((e) => e.id === example)!.build(GRID) }
-      const corner = (d: Schematic) =>
-        junctionsOf(wireNets(d.wires, wirePins(d.objects)))
-          .map((p) => `${p.x},${p.y}`)
-          .sort()
-      expect.soft(corner(read!.doc), `${file}: the same dots`).toEqual(corner(mine))
-    }
+    const corner = (d: Schematic) =>
+      junctionsOf(wireNets(d.wires, wirePins(d.objects)))
+        .map((p) => `${p.x / GRID},${p.y / GRID}`)
+        .sort()
+    const bridgeFile = await readProjectFile(new Blob([readFileSync(join(ROOT, "emul-1.42.0/resistor-bridge.emul"))]))
+    expect.soft(corner(bridgeFile!.doc), "emul-1.42.0/resistor-bridge.emul: the bridge example's dots").toEqual(corner(examples.find((e) => e.id === "bridge")!.build(GRID)))
+    const supplyFile = await readProjectFile(new Blob([readFileSync(join(ROOT, "emul-1.42.0/power-supply.emul"))]))
+    expect.soft(corner(supplyFile!.doc), "emul-1.42.0/power-supply.emul: the example's four corners, and the T's of the rails the file drew through C1's and R1's pins (the example's rails now run a row out, clear of C1's «+» and «−»)").toEqual(["14,6", "17,13", "17,3", "17,9", "20,6", "27,2", "27,6", "31,2", "31,6"])
   })
 
   const diagonalBeside = (dx: number, dy: number, rotation: 45 | 135 | 225 | 315 = 45) => {
