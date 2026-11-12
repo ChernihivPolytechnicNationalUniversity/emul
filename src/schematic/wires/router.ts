@@ -5,7 +5,7 @@ import type { PinRef, PlacedObject, Point, Schematic } from "../types"
 import { withSegments, wiringOf, type NewId, type Wiring } from "../wire-edits"
 import { WireGraph } from "./graph"
 import { alongOut, headerOfPin, type HeaderSide } from "./headers"
-import { HALF_CELL, onLattice, samePoint, type WirePin, type WireSegment } from "./segment"
+import { contains, HALF_CELL, onLattice, samePoint, type WirePin, type WireSegment } from "./segment"
 import { columnCode, rowCode } from "./sheet"
 
 export type RouteEnd = { readonly pin: PinRef } | { readonly at: Point }
@@ -240,6 +240,26 @@ class Field {
     if (samePoint(s.a, s.b)) return
     if (s.a.y === s.b.y) this.run(s.a.y, Math.min(s.a.x, s.b.x), Math.max(s.a.x, s.b.x), true)
     else if (s.a.x === s.b.x) this.run(s.a.x, Math.min(s.a.y, s.b.y), Math.max(s.a.y, s.b.y), false)
+    else this.slant(s)
+  }
+
+  private slant(s: { readonly a: Point; readonly b: Point }) {
+    const [c0, c1] = this.columnRange(Math.min(s.a.x, s.b.x) - GRID, Math.max(s.a.x, s.b.x), false)
+    const [r0, r1] = this.rowRange(Math.min(s.a.y, s.b.y) - GRID, Math.max(s.a.y, s.b.y), false)
+    const edge = (p: Point, q: Point, block: Uint8Array, crossing: Uint8Array, at: number) => {
+      const hits = meetings(p, q, s.a, s.b)
+      if (hits.length !== 1 || near(hits[0], p) || near(hits[0], q)) return
+      if (near(hits[0], s.a) || near(hits[0], s.b)) block[at] = 1
+      else crossing[at]++
+    }
+    for (let j = r0; j <= r1; j++)
+      for (let i = c0; i <= c1; i++) {
+        const p = { x: this.x0 + i * GRID, y: this.y0 + j * GRID }
+        const cell = j * this.cols + i
+        if (contains(s, p)) this.node[cell] |= samePoint(p, s.a) || samePoint(p, s.b) ? STOP : THROUGH_H | THROUGH_V | NO_TURN
+        if (i + 1 < this.cols) edge(p, { x: p.x + GRID, y: p.y }, this.hBlock, this.hCross, cell)
+        if (j + 1 < this.rows) edge(p, { x: p.x, y: p.y + GRID }, this.vBlock, this.vCross, cell)
+      }
   }
 
   private run(line: number, lo: number, hi: number, horizontal: boolean) {
@@ -389,6 +409,7 @@ function fieldOf(context: Context, box: Box, ends: readonly End[]): Field {
   const y1 = box.y + box.h
   for (let y = box.y; y <= y1; y += HALF_CELL) for (const s of sheet.along(rowCode(y), box.x, x1)) if (!ignore.has(s.id)) field.wire(s)
   for (let x = box.x; x <= x1; x += HALF_CELL) for (const s of sheet.along(columnCode(x), box.y, y1)) if (!ignore.has(s.id)) field.wire(s)
+  for (const s of sheet.slantsWithin(box)) if (!ignore.has(s.id)) field.wire(s)
   for (const s of extra) field.wire(s)
   for (const s of context.own) field.ownWire(s)
   for (const p of wiring.index.within(box)) if (!context.passable(p)) field.pin(p, context.taken.has(p.key))
@@ -432,6 +453,7 @@ function crossingsOn(context: Context, a: Point, b: Point, own: Point): number {
     const span = k === 0 ? [lo, hi] : horizontal ? [a.y, a.y] : [a.x, a.x]
     for (const s of wiring.sheet.along(line, span[0], span[1])) if (!ignore.has(s.id) && !meet(s)) return -1
   }
+  for (const s of wiring.sheet.slantsWithin(box)) if (!ignore.has(s.id) && !meet(s)) return -1
   for (const s of extra) if (!meet(s)) return -1
   for (const p of wiring.index.within(box)) if (!near(p.at, own) && !context.passable(p)) return -1
   for (const at of context.stops) if (!near(at, own) && meetings(a, b, at, at).length) return -1

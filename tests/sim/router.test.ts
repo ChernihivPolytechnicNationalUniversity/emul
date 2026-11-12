@@ -11,7 +11,7 @@ import { bodiesOf, crossedBody } from "@/schematic/body-crossing"
 import { isPrintedName, printedBox, printedGrowth } from "@/schematic/printed-text"
 import { allDefs, getDef } from "@/schematic/registry"
 import type { BodyShape, LegacySchematic, PinDef, PlacedObject, Rotation, Schematic } from "@/schematic/types"
-import { drawEndAt, drawnTo, isRefusal, pointerAt, previewOf, startDrawing, type Drawing } from "@/schematic/wire-draw"
+import { drawEndAt, drawnTo, isRefusal, pointerAt, previewOf, startDrawing, withLineMode, type Drawing } from "@/schematic/wire-draw"
 import { inNormalForm, removed, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { danglingEnds, junctionsOf, pinPartition, WireGraph, wireNets } from "@/schematic/wires/graph"
 import { isRerouteRefusal, REROUTE_REFUSED, rerouted, reroutedRuns, routeBetween, type RerouteRefusal, type RouteEnd } from "@/schematic/wires/router"
@@ -34,6 +34,7 @@ const docOf = (objects: PlacedObject[], wires: WireSegment[] = []): Schematic =>
 const wiringFor = (doc: Schematic): Wiring => wiringOf(new WireGraph(), doc)
 const viewOf = (doc: Schematic) => wireNets(doc.wires, wirePins(doc.objects))
 const partition = (doc: Schematic) => pinPartition(viewOf(doc))
+const onTheSegment = (a: Point, b: Point, p: Point) => (b.x - a.x) * (p.y - a.y) === (b.y - a.y) * (p.x - a.x) && Math.min(a.x, b.x) <= p.x && p.x <= Math.max(a.x, b.x) && Math.min(a.y, b.y) <= p.y && p.y <= Math.max(a.y, b.y)
 const pointOf = (o: PlacedObject, id: string) => objectPins(o, GRID).find((p) => p.pin.id === id)!.point
 let fresh = 0
 const newId = () => `r${++fresh}`
@@ -1119,5 +1120,84 @@ describe("the editor's re-route command (design.md §7: «the “re-route” com
     expect.soft(refused?.refused, "refused, named").toBe("no-clean-path")
     expect.soft(refused && REROUTE_REFUSED[refused.refused].title, "the toast's title").toBe("Not re-routed")
     expect.soft(committed, "no edit").toBeNull()
+  })
+})
+
+describe("the router and diagonal wires (design.md §6.11 rule 10: «never lays a diagonal; another net's diagonal is crossed at the crossing's cost and never touched at an end or a bend. Re-route … on a run that holds a diagonal lays it orthogonal»; phase7-standards-tests.md «for the merge with phase 6»)", () => {
+  const scene = (diagonal: [Point, Point]) => docOf([resistor("R1", 0, 0), resistor("R3", 9, 5, 90)], [seg(diagonal[0], diagonal[1])])
+  const orthogonal = (route: readonly Point[] | null) => !!route && route.every((p, i) => i === 0 || p.x === route[i - 1].x || p.y === route[i - 1].y)
+  const otherL = [
+    [4, 1],
+    [4, 5],
+    [10, 5],
+  ]
+
+  it("guard: the reference weighs another net's diagonal as the router must — a crossing between lattice points or at one, a fault at its end or for a turn on it", () => {
+    expect.soft(shapeOf(scene([at(6, -1), at(9, 4)]), [at(4, 1), at(10, 1), at(10, 5)]), "across it at (7.2, 1), off the lattice: one crossing, no fault").toEqual({ crossings: 1, bends: 1, length: 10, faults: [] })
+    expect.soft(shapeOf(scene([at(5, -1), at(9, 3)]), [at(4, 1), at(10, 1), at(10, 5)]).crossings, "across it at (7, 1), a lattice point inside it: one crossing").toBe(1)
+    expect.soft(shapeOf(scene([at(8, -1), at(12, 3)]), [at(4, 1), at(10, 1), at(10, 5)]).faults.some((f) => f.includes("turns at (10, 1)")), "a bend on (10, 1) inside it is a fault").toBe(true)
+    expect.soft(shapeOf(scene([at(10, 1), at(12, -1)]), [at(4, 1), at(10, 1), at(10, 5)]).faults.some((f) => f.includes("touches the end")), "a corner on its end is a fault").toBe(true)
+  })
+
+  it("of R1 → R3's two one-corner routes, the one that crosses no diagonal: across it off the lattice, or at a lattice point inside it, costs a crossing (design.md §13.22: more than one bend)", () => {
+    for (const [name, diagonal] of [
+      ["off the lattice at (7.2, 1)", [at(6, -1), at(9, 4)]],
+      ["at the lattice point (7, 1)", [at(5, -1), at(9, 3)]],
+    ] as const) {
+      const doc = scene([diagonal[0], diagonal[1]])
+      const route = routeBetween(doc, pin("R1", "2"), pin("R3", "1"))
+      expect.soft(cells(route), `${name}: the other L`).toEqual(otherL)
+      expect.soft(orthogonal(route), `${name}: orthogonal`).toBe(true)
+      const want = bestShape(doc, at(4, 1), at(10, 5))
+      const got = route && shapeOf(doc, route)
+      expect.soft(got && [got.crossings, got.bends, got.length, got.faults], `${name}: the reference's cost`).toEqual(want && [want.crossings, want.bends, want.length, []])
+    }
+  })
+
+  it("never a bend on a lattice point inside another net's diagonal: R1 → R3's corner at (10, 1) would join the diagonal through it (N3), so the other L", () => {
+    const doc = scene([at(8, -1), at(12, 3)])
+    const route = routeBetween(doc, pin("R1", "2"), pin("R3", "1"))
+    expect.soft(cells(route), "the other L").toEqual(otherL)
+    expect.soft(partition(laid(doc, route)), "R1 and R3 joined, the diagonal on its own").toEqual([["R1:2", "R3:1"]])
+  })
+
+  it("never over a diagonal's end: R1 → R2 on one row with another net's diagonal ending on it goes round, two nets kept", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 12, 0), resistor("R5", 8, -6, 90)], [seg(at(8, 1), at(9, -2))])
+    const route = routeBetween(doc, pin("R1", "2"), pin("R2", "1"))
+    expect.soft(route && route.some((p, i) => i > 0 && onTheSegment(route[i - 1], p, at(8, 1))), "not over (8, 1)").toBe(false)
+    expect.soft(orthogonal(route), "orthogonal").toBe(true)
+    expect.soft(partition(laid(doc, route)), "R1 and R2 joined, nothing else").toEqual([["R1:2", "R2:1"]])
+  })
+
+  it("the half-cell slip never touches a diagonal's end either: with another net's diagonal ending on the slip below RESET, D45 slips above it and the diagonal joins nothing (junctions.md 34)", () => {
+    const doc = nucleoScene(true, [seg(at(4.5, 19.5), at(1.5, 22.5))])
+    const route = routeBetween(doc, pin("U1", "CN8-6"), pin("R4", "2"))
+    expect.soft(route?.[1] && cells([route[1]]), "D45's first step is half a cell up, away from the diagonal's end").toEqual([[6, 18.5]])
+    expect.soft(route && partition(laid(doc, route)), "RESET, D45 and the diagonal apart").toEqual([
+      ["R1:2", "U1:CN8-5"],
+      ["R4:2", "U1:CN8-6"],
+    ])
+  })
+
+  it("re-route on a run that holds a diagonal lays the router's orthogonal route, the circuit unchanged (rule 10: «the user asked»)", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 9, 5, 90)], [seg(at(4, 1), at(10, 5))])
+    const result = rerouted(doc, doc.wires[0].id, newId)
+    if (isRerouteRefusal(result)) throw new Error(result.refused)
+    expect.soft(geometryOf(result.wires), "the router's route").toEqual(geometryOf(path(...routeBetween(docOf(doc.objects), pin("R1", "2"), pin("R2", "1"))!)))
+    expect.soft(result.wires.every((s) => s.a.x === s.b.x || s.a.y === s.b.y), "no diagonal left").toBe(true)
+    expect.soft(partition(result), "the same circuit").toEqual(partition(doc))
+  })
+
+  it("the completion over a pin is offered in 90° only: in 45° and any angle the segment aimed is the one laid or refused (rule 2)", () => {
+    const doc = docOf([resistor("R1", 10, 10), resistor("R2", 20, 10), resistor("R3", 16, 7, 90)])
+    const wiring = wiringFor(doc)
+    const started = startDrawing(wiring, drawEndAt(wiring, at(14, 11)))
+    if (isRefusal(started)) throw new Error(started.refused)
+    const target = drawEndAt(wiring, at(20, 11))
+    for (const mode of ["90", "45", "any"] as const) {
+      const preview = previewOf(doc, wiring, pointerAt(withLineMode(started, mode), at(20, 11)), target)
+      if (mode === "90") expect.soft([preview.routed, preview.refused], "90°: routed under R3's pin").toEqual([true, null])
+      else expect.soft([preview.routed, preview.refused?.refused, cells(preview.points)], `${mode}: the straight leg over R3's pin, refused`).toEqual([false, "over", [[14, 11], [20, 11]]])
+    }
   })
 })
