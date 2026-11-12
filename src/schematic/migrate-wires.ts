@@ -1,21 +1,32 @@
-import { GRID, objectIndex, objectPins, objectRect, ownBodies, resolvePinIn, routeObstacles, unionOf, type Point } from "./geometry"
-import { frozenCandidates, hasDiagonal, isJunction, laidAgain, wirePins, type Lay } from "./freeze"
+import { GRID, objectIndex, objectPins, objectRect, resolvePinIn, unionOf, type Point } from "./geometry"
+import { corners, isJunction, laidAgain, wirePins, type Lay } from "./freeze"
 import { pinContacts } from "./contacts"
 import { legacyNets } from "./nets"
 import { getDef } from "./registry"
-import { fieldRouter } from "./placement"
 import { pinKey, type LegacySchematic, type LegacyWire, type PlacedObject, type Schematic } from "./types"
 import { listed, nameOf, pinName, refOf } from "./upgrade-names"
 import { clearOf, Conductors } from "./wires/conductors"
-import { pinPartition, wireNets } from "./wires/graph"
+import { pinPartition, WireGraph, wireNets } from "./wires/graph"
 import { normalise } from "./wires/normal-form"
 import { HALF_CELL, onLattice, pointKey, seededIds, type WirePin, type WireSegment } from "./wires/segment"
+import { routeThroughBends, type RouteEnd } from "./wires/router"
+import { wiringOf } from "./wire-edits"
 
 export { corners, frozenCandidates, isJunction, JUNCTION, wirePins } from "./freeze"
 
 const same = (p: Point, q: Point) => p.x === q.x && p.y === q.y
 
-type Laid = Lay & { net: string; pts: Point[]; straightened: boolean }
+function asDrawn(through: readonly Point[]): Point[] {
+  const out: Point[] = [through[0]]
+  for (const p of through.slice(1)) {
+    const last = out[out.length - 1]
+    if (last.x !== p.x && last.y !== p.y) out.push({ x: p.x, y: last.y })
+    out.push(p)
+  }
+  return corners(out)
+}
+
+type Laid = Lay & { net: string; pts: Point[]; ends: readonly [RouteEnd, RouteEnd] }
 
 function expectedNets(doc: LegacySchematic): (key: string) => string {
   const nets = legacyNets(doc.objects, doc.wires, GRID)
@@ -259,52 +270,55 @@ export function wiresAsSegments(saved: LegacySchematic, ids?: () => string): Fro
   const pins = wirePins(objects)
   const netOf = expectedNets(doc)
   const rejoined = throughMissingPins(doc, byId, newId)
-  const field = new Conductors()
   const wiredEnds = new Set(rejoined.wires.flatMap((w) => [pinKey(w.from.object, w.from.pin), pinKey(w.to.object, w.to.pin)]))
-  for (const p of pins) field.addFixed({ at: p.at, net: netOf(p.key), socket: !!p.socket && !wiredEnds.has(p.key) })
-  for (const j of doc.objects.filter(isJunction)) for (const p of objectPins(j, GRID)) if (wiredEnds.has(p.key)) field.addFixed({ at: p.point, net: netOf(p.key), socket: false })
-  const routes = new Map(fieldRouter().routeAll(doc.objects, rejoined.wires, GRID).map((r) => [r.id, r.pts]))
+  const wiredSockets = new Set(pins.filter((p) => p.socket && wiredEnds.has(p.key)).map((p) => p.key))
+  const hubs = new Map(doc.objects.filter(isJunction).map((j) => [j.id, j]))
+  const wiring = wiringOf(new WireGraph(), { objects, wires: [], ...(doc.library && { library: doc.library }) })
+  const endOf = (ref: LegacyWire["from"], point: Point): RouteEnd => (hubs.has(ref.object) ? { at: point } : { pin: ref })
   const laid: Laid[] = []
   for (const wire of rejoined.wires) {
-    const route = routes.get(wire.id)
     const from = resolvePinIn(byId, wire.from, GRID)
     const to = resolvePinIn(byId, wire.to, GRID)
-    if (!route || !from || !to) continue
-    const bodies = [...routeObstacles(doc.objects, GRID, wire.from.object, wire.to.object), ...ownBodies(byId, GRID, wire.from.object, wire.to.object)]
-    const candidates = frozenCandidates(route, bodies)
+    if (!from || !to) continue
     const net = netOf(pinKey(wire.from.object, wire.from.pin))
-    laid.push({ wire, net, own: new Set([net]), from: from.point, to: to.point, fromObject: wire.from.object, toObject: wire.to.object, candidates, pts: candidates[0], straightened: hasDiagonal(route) })
+    const drawn = asDrawn([from.point, ...(wire.points ?? []), to.point])
+    laid.push({ wire, net, own: new Set([net]), from: from.point, to: to.point, fromObject: wire.from.object, toObject: wire.to.object, candidates: [drawn], pts: drawn, ends: [endOf(wire.from, from.point), endOf(wire.to, to.point)] })
   }
-  laid.forEach((l, i) => field.lay(i, l.net, l.pts))
-  const offenders = new Set<number>()
-  laid.forEach((l, i) => {
-    const clash = field.clashes(l.own, l.pts)
-    if (clash.points || clash.wires.size) offenders.add(i)
-    for (const j of clash.wires) offenders.add(j)
-  })
-  for (const i of offenders) field.lift(i)
   const extent = unionOf(doc.objects.map((o) => objectRect(o, GRID)))
   const layInTurn = (order: readonly number[]) => {
+    const field = new Conductors()
+    for (const p of pins) field.addFixed({ at: p.at, net: netOf(p.key), socket: !!p.socket && !wiredEnds.has(p.key) })
+    for (const j of hubs.values()) for (const p of objectPins(j, GRID)) if (wiredEnds.has(p.key)) field.addFixed({ at: p.point, net: netOf(p.key), socket: false })
+    const segments: { net: string; segment: WireSegment }[] = []
     const relaid: number[] = []
+    const unbent: number[] = []
     const stuck: number[] = []
     const pts = new Map<number, Point[]>()
+    const routed = (l: Laid, bends: readonly Point[]) => {
+      const route = routeThroughBends(wiring, l.ends[0], l.ends[1], bends, { extra: segments.filter((s) => s.net !== l.net).map((s) => s.segment), taken: wiredSockets }, (key) => netOf(key) === l.net)
+      return route && clearOf(field, l.own, route) ? corners(route) : null
+    }
     for (const i of order) {
       const l = laid[i]
-      const kept = l.candidates.find((c) => clearOf(field, l.own, c))
-      const found = kept ?? laidAgain(l, byId, doc.objects, field, extent)
-      if (!kept && found) relaid.push(i)
+      const bends = l.wire.points ?? []
+      const throughBends = routed(l, bends)
+      const clean = throughBends ?? (bends.length ? routed(l, []) : null)
+      const found = clean ?? laidAgain(l, byId, doc.objects, field, extent)
+      if (!throughBends && clean) unbent.push(i)
+      if (!clean && found) relaid.push(i)
       if (!found) stuck.push(i)
-      pts.set(i, found ?? l.candidates[0])
-      field.lay(i, l.net, pts.get(i)!)
+      const kept = found ?? l.pts
+      pts.set(i, kept)
+      field.lay(i, l.net, kept)
+      for (let k = 1; k < kept.length; k++) segments.push({ net: l.net, segment: { id: `${i}.${k}`, a: kept[k - 1], b: kept[k] } })
     }
-    return { relaid, stuck, pts }
+    return { relaid, unbent, stuck, pts }
   }
-  let order = [...offenders].sort((a, b) => a - b)
+  let order = laid.map((_, i) => i)
   let last = layInTurn(order)
   let best = last
   let fruitless = 0
   for (let pass = 1; pass < PASSES_STUCK_FIRST && best.stuck.length && fruitless < FRUITLESS_PASSES; pass++) {
-    for (const i of order) field.lift(i)
     const stuckNow = new Set(last.stuck)
     order = [...last.stuck, ...order.filter((i) => !stuckNow.has(i))]
     last = layInTurn(order)
@@ -315,6 +329,7 @@ export function wiresAsSegments(saved: LegacySchematic, ids?: () => string): Fro
   }
   for (const [i, pts] of best.pts) laid[i].pts = pts
   const relaidWires = best.relaid.sort((a, b) => a - b)
+  const unbentWires = best.unbent.sort((a, b) => a - b)
   const stuck = best.stuck.sort((a, b) => a - b)
   const segments: WireSegment[] = []
   const used = new Set<string>()
@@ -336,12 +351,7 @@ export function wiresAsSegments(saved: LegacySchematic, ids?: () => string): Fro
   const upgraded: Schematic = { ...doc, objects, wires: [...wires] }
   const notes: string[] = [...placed.notes, ...rejoined.notes]
   const ends = (l: Laid) => `${pinName(pinKey(l.wire.from.object, l.wire.from.pin), byId)} and ${pinName(pinKey(l.wire.to.object, l.wire.to.pin), byId)}`
-  for (const i of relaidWires)
-    notes.push(
-      laid[i].straightened
-        ? `The wire between ${ends(laid[i])}, straightened where it left a pin at 45°, would have touched another net's wire or pin; it is laid again so the circuit stays as it was.`
-        : `The wire between ${ends(laid[i])} ran over another net's wire or pin where it was drawn; it is laid again so the circuit stays as it was.`,
-    )
+  for (const i of [...unbentWires, ...relaidWires].sort((a, b) => a - b)) notes.push(`The wire between ${ends(laid[i])} ran over another net's wire or pin where it was drawn; it is laid again so the circuit stays as it was.`)
   for (const i of stuck) notes.push(`The wire between ${ends(laid[i])} could not be laid clear of another net: check its connections.`)
   const astray = astrayParts(upgraded, pins.filter((p) => p.kind !== "nc"), oldNetOf, objectIndex([...saved.objects, ...doc.objects]))
   if (astray.length) notes.push(`The circuit round ${listed(astray)} could not be kept exactly: check its connections.`)

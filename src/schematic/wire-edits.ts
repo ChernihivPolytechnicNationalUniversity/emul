@@ -1,14 +1,14 @@
 import { flowVertices, runsOf, type Circuit, type FlowRun, type Run } from "./circuit"
-import { frozenCandidates, JUNCTION, laidAgain } from "./freeze"
-import { GRID, objectIndex, objectPins, objectRect, ownBodies, routeObstacles, snap, unionOf, type Point, type RoutedWire } from "./geometry"
+import { corners, JUNCTION, laidAgain } from "./freeze"
+import { GRID, objectIndex, objectPins, objectRect, snap, unionOf, type Point, type RoutedWire } from "./geometry"
 import type { NetMap } from "./nets"
 import { leadEnd, turnsAtPins, type PinCorner, type TurnPins } from "./wire-look"
-import { fieldRouter } from "./placement"
 import { getLibraryVersion, withLibrary } from "./registry"
 import type { HdlModule, LegacyWire, PartState, PinRef, PlacedObject, Schematic } from "./types"
 import type { WireColorKey } from "./wire-colors"
 import { clearOf, Conductors } from "./wires/conductors"
 import { WireGraph, type WireNets } from "./wires/graph"
+import { routeThroughBends, type RouteEnd } from "./wires/router"
 import { OverlayMap } from "./wires/overlay-map"
 import { lineCodeOf, columnCode, rowCode, WireSheet } from "./wires/sheet"
 import { commitEdit, normalise, normaliseEdit } from "./wires/normal-form"
@@ -47,19 +47,25 @@ function conductorsOf(doc: Schematic, view: WireNets, pins: readonly WirePin[]):
   return conductors
 }
 
-function laid(doc: Schematic, wire: LegacyWire, own: ReadonlySet<string>, objects: readonly PlacedObject[], view: WireNets, pins: readonly WirePin[]): Point[] | null {
+const wiresOf = (doc: Schematic, view: WireNets, nets: ReadonlySet<string>) => new Set(doc.wires.filter((s) => nets.has(view.netOfSegment(s.id) ?? `wire:${s.id}`)).map((s) => s.id))
+
+function laid(doc: Schematic, wire: LegacyWire, own: ReadonlySet<string>, objects: readonly PlacedObject[], view: WireNets, pins: readonly WirePin[], known: Wiring | undefined, passable: ReadonlySet<string>): Point[] | null {
   const byId = objectIndex(objects)
-  const route = fieldRouter().routeAll(objects, [wire], GRID)[0]
   const fromPin = objectPins(byId.get(wire.from.object)!, GRID).find((p) => p.pin.id === wire.from.pin)
   const toPin = objectPins(byId.get(wire.to.object)!, GRID).find((p) => p.pin.id === wire.to.pin)
-  if (!route || !fromPin || !toPin) return null
+  if (!fromPin || !toPin) return null
   const conductors = conductorsOf(doc, view, pins)
-  const bodies = [...routeObstacles(objects, GRID, wire.from.object, wire.to.object), ...ownBodies(byId, GRID, wire.from.object, wire.to.object)]
-  const candidates = frozenCandidates(route.pts, bodies)
-  const clean = candidates.find((c) => clearOf(conductors, own, c))
+  const endOf = (ref: PinRef, at: Point): RouteEnd => (byId.get(ref.object)?.def === JUNCTION ? { at } : { pin: ref })
+  const wiring = knownFor(doc, known) ?? wiringOf(new WireGraph(), doc)
+  const bends = wire.points ?? []
+  const routed = (through: readonly Point[]) => {
+    const route = routeThroughBends(wiring, endOf(wire.from, fromPin.point), endOf(wire.to, toPin.point), through, { ignore: passable })
+    return route && clearOf(conductors, own, route) ? corners(route) : null
+  }
+  const clean = routed(bends) ?? (bends.length ? routed([]) : null)
   if (clean) return clean
   const extent = unionOf(objects.map((o) => objectRect(o, GRID)))
-  return laidAgain({ wire, own, from: fromPin.point, to: toPin.point, fromObject: wire.from.object, toObject: wire.to.object, candidates }, byId, objects, conductors, extent)
+  return laidAgain({ wire, own, from: fromPin.point, to: toPin.point, fromObject: wire.from.object, toObject: wire.to.object, candidates: [] }, byId, objects, conductors, extent)
 }
 
 const netOrSelf = (view: WireNets, key: string) => view.netOfPin(key) ?? `pin:${key}`
@@ -298,16 +304,9 @@ export function connectPins(doc: Schematic, from: PinRef, to: PinRef, points: re
   const wiring = knownFor(doc, known)
   const view = wiring?.view ?? viewOf(doc)
   const own = new Set([netOrSelf(view, `${from.object}:${from.pin}`), netOrSelf(view, `${to.object}:${to.pin}`)])
-  const pts = laid(doc, { id: "wire", from, to, points: [...points] }, own, doc.objects, view, wiring?.pins ?? pinsOf(doc.objects))
+  const pts = laid(doc, { id: "wire", from, to, points: [...points] }, own, doc.objects, view, wiring?.pins ?? pinsOf(doc.objects), wiring, wiresOf(doc, view, own))
   if (!pts) return doc
   return withSegments(doc, segmentsAlong(pts, color, newId), [], [], newId)
-}
-
-export function pinToPinPoints(doc: Schematic, from: PinRef, to: PinRef, points: readonly Point[] = [], known?: Wiring): Point[] | null {
-  const wiring = knownFor(doc, known)
-  const view = wiring?.view ?? viewOf(doc)
-  const own = new Set([netOrSelf(view, `${from.object}:${from.pin}`), netOrSelf(view, `${to.object}:${to.pin}`)])
-  return laid(doc, { id: "wire", from, to, points: [...points] }, own, doc.objects, view, wiring?.pins ?? pinsOf(doc.objects))
 }
 
 export function nearestOn(s: WireSegment, at: Point): Point {
@@ -326,8 +325,12 @@ export function tapWireAt(doc: Schematic, segmentId: string, at: Point, from: Pi
   const fromKey = `${from.object}:${from.pin}`
   const point = nearestOn(tapped, at)
   const hub: PlacedObject = { id: "tap", def: JUNCTION, x: point.x - GRID, y: point.y - GRID }
-  const own = new Set([netOrSelf(view, fromKey), view.netOfSegment(tapped.id) ?? `wire:${tapped.id}`])
-  const pts = laid(doc, { id: "wire", from, to: { object: hub.id, pin: "J" }, points: [...points] }, own, [...doc.objects, hub], view, wiring?.pins ?? pinsOf(doc.objects))
+  const tappedNet = view.netOfSegment(tapped.id) ?? `wire:${tapped.id}`
+  if (netOrSelf(view, fromKey) === tappedNet) return doc
+  const own = new Set([netOrSelf(view, fromKey), tappedNet])
+  const passable = wiresOf(doc, view, own)
+  passable.delete(tapped.id)
+  const pts = laid(doc, { id: "wire", from, to: { object: hub.id, pin: "J" }, points: [...points] }, own, [...doc.objects, hub], view, wiring?.pins ?? pinsOf(doc.objects), wiring, passable)
   if (!pts) return doc
   return withSegments(doc, segmentsAlong(pts, color ?? tapped.color, newId), [], [point], newId)
 }

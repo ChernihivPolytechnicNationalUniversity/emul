@@ -18,7 +18,7 @@ export const REROUTE_REFUSED: Record<RerouteRefusal["refused"], { title: string;
 
 export const isRerouteRefusal = (value: unknown): value is RerouteRefusal => typeof value === "object" && value !== null && "refused" in value
 
-export type RouteAround = { readonly ignore?: ReadonlySet<string>; readonly extra?: readonly WireSegment[] }
+export type RouteAround = { readonly ignore?: ReadonlySet<string>; readonly extra?: readonly WireSegment[]; readonly taken?: ReadonlySet<string> }
 
 type Box = { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
 
@@ -142,7 +142,9 @@ type End = { readonly at: Point; readonly pin?: WirePin; readonly header?: Heade
 
 type Slip = { readonly landing: Point; readonly heading: number; readonly points: readonly Point[]; readonly cost: number }
 
-type Context = { readonly wiring: Wiring; readonly ignore: ReadonlySet<string>; readonly extra: readonly WireSegment[] }
+type Context = { readonly wiring: Wiring; readonly ignore: ReadonlySet<string>; readonly extra: readonly WireSegment[]; readonly taken: ReadonlySet<string> }
+
+const NOTHING_TAKEN: ReadonlySet<string> = new Set()
 
 const keyOf = (ref: PinRef) => `${ref.object}:${ref.pin}`
 
@@ -264,7 +266,7 @@ class Field {
     }
   }
 
-  pin(p: WirePin) {
+  pin(p: WirePin, taken: boolean) {
     const i = (p.at.x - this.x0) / GRID
     const j = (p.at.y - this.y0) / GRID
     const horizontalOut = !!p.out && p.out.y === 0
@@ -272,7 +274,7 @@ class Field {
     if (Number.isInteger(i) && Number.isInteger(j)) {
       if (i < 0 || j < 0 || i >= this.cols || j >= this.rows) return
       const cell = j * this.cols + i
-      this.node[cell] |= !p.socket || !p.out ? STOP : NO_TURN | (horizontalOut ? NO_V : NO_H)
+      this.node[cell] |= !p.socket || !p.out || taken ? STOP : NO_TURN | (horizontalOut ? NO_V : NO_H)
       return
     }
     if (Number.isInteger(j) && j >= 0 && j < this.rows) {
@@ -338,7 +340,7 @@ function fieldOf(context: Context, box: Box, ends: readonly End[]): Field {
   for (let y = box.y; y <= y1; y += HALF_CELL) for (const s of sheet.along(rowCode(y), box.x, x1)) if (!ignore.has(s.id)) field.wire(s)
   for (let x = box.x; x <= x1; x += HALF_CELL) for (const s of sheet.along(columnCode(x), box.y, y1)) if (!ignore.has(s.id)) field.wire(s)
   for (const s of extra) field.wire(s)
-  for (const p of wiring.index.within(box)) field.pin(p)
+  for (const p of wiring.index.within(box)) field.pin(p, context.taken.has(p.key))
   for (const end of ends) if (end.header) field.zone(end.header)
   for (const body of bodiesNear(wiring, box)) {
     const b = body.box
@@ -383,7 +385,7 @@ function slipsAt(context: Context, end: End): { readonly side: number; readonly 
   if (!pin?.socket || !pin.out || !header) return []
   const outer = plus(pin.at, pin.out, GRID)
   if (!context.wiring.index.at(outer).some((p) => p.socket && objectOfPin(context.wiring, p.key) === objectOfPin(context.wiring, pin.key))) return []
-  if (!wiresTouching(context, outer).length) return []
+  if (!wiresTouching(context, outer).length && !context.wiring.index.at(outer).some((p) => context.taken.has(p.key))) return []
   const k = header.clearAt - alongOut(pin.at, pin.out)
   if (!Number.isInteger(k) || k < 2) return []
   const found: { side: number; landing: Point; half: Point; back: Point; k: number }[] = []
@@ -701,7 +703,7 @@ function wiringFor(doc: Schematic, known?: Wiring): Wiring {
 }
 
 export function routeAround(wiring: Wiring, from: RouteEnd, to: RouteEnd, around: RouteAround = {}): Point[] | null {
-  const context: Context = { wiring, ignore: around.ignore ?? new Set(), extra: around.extra ?? [] }
+  const context: Context = { wiring, ignore: around.ignore ?? new Set(), extra: around.extra ?? [], taken: around.taken ?? NOTHING_TAKEN }
   const a = endOf(context, from)
   const b = endOf(context, to)
   if (!a || !b) return null
@@ -719,15 +721,70 @@ export function routeAround(wiring: Wiring, from: RouteEnd, to: RouteEnd, around
   }
 }
 
+export function routeThrough(wiring: Wiring, ends: readonly RouteEnd[], around: RouteAround = {}): Point[] | null {
+  const extra = [...(around.extra ?? [])]
+  const points: Point[] = []
+  for (let i = 1; i < ends.length; i++) {
+    const leg = routeAround(wiring, ends[i - 1], ends[i], { ...around, extra })
+    if (!leg) return null
+    for (let k = 1; k < leg.length; k++) extra.push({ id: `leg ${i}.${k}`, a: leg[k - 1], b: leg[k] })
+    points.push(...(points.length ? leg.slice(1) : leg))
+  }
+  return points
+}
+
+const endKeyOf = (end: RouteEnd) => ("pin" in end ? keyOf(end.pin) : undefined)
+
+const sortsFirst = (wiring: Wiring, a: RouteEnd, b: RouteEnd) => {
+  const ka = endKeyOf(a)
+  const kb = endKeyOf(b)
+  if (ka === undefined || kb === undefined) return kb === undefined
+  return byOrder(wiring)(ka, kb) <= 0
+}
+
+const NO_PIN_OF_ITS_OWN = () => false
+
+export function routeThroughBends(wiring: Wiring, from: RouteEnd, to: RouteEnd, bends: readonly Point[], around: RouteAround = {}, ownPin: (key: string) => boolean = NO_PIN_OF_ITS_OWN): Point[] | null {
+  const [a, b, through] = sortsFirst(wiring, from, to) ? [from, to, bends] : [to, from, [...bends].reverse()]
+  const extra = around.extra ?? []
+  const context: Context = { wiring, ignore: around.ignore ?? new Set(), extra, taken: around.taken ?? NOTHING_TAKEN }
+  const pointOf = (end: RouteEnd) => ("pin" in end ? wiring.index.pin(keyOf(end.pin))?.at : end.at)
+  const onAnEnd = (p: Point) => [a, b].some((end) => {
+    const q = pointOf(end)
+    return !!q && samePoint(p, q)
+  })
+  const between = through.filter((p, i) => !onAnEnd(p) && (i === 0 || !samePoint(p, through[i - 1])))
+  const free = (p: Point) => isWhole(p) && wiring.index.at(p).every((pin) => ownPin(pin.key)) && !wiresTouching(context, p).length
+  if (!between.every(free)) return null
+  const ends = [a, ...between.map((at): RouteEnd => ({ at })), b]
+  return routeThrough(wiring, ends, around)
+}
+
 export function routeBetween(doc: Schematic, from: RouteEnd, to: RouteEnd, known?: Wiring): readonly Point[] | null {
   return routeAround(wiringFor(doc, known), from, to)
 }
 
-const endKey = (wiring: Wiring, p: Point) => [...wiring.sheet.pinsAt(p)].map((pin) => pin.key).sort()[0]
+const UNNAMED_LAST = "\uffff"
+
+function orderOf(wiring: Wiring, key: string): string {
+  const id = key.slice(0, key.indexOf(":"))
+  const pin = key.slice(key.indexOf(":") + 1)
+  const o = wiring.index.objects.get(id)
+  const name = o?.props?.ref || `${UNNAMED_LAST}${o?.def ?? ""}@${o?.x ?? ""},${o?.y ?? ""}`
+  return `${name}\u0000${pin}\u0000${id}`
+}
+
+const byOrder = (wiring: Wiring) => (a: string, b: string) => {
+  const p = orderOf(wiring, a)
+  const q = orderOf(wiring, b)
+  return p < q ? -1 : p > q ? 1 : 0
+}
+
+const endKey = (wiring: Wiring, p: Point) => [...wiring.sheet.pinsAt(p)].map((pin) => pin.key).sort(byOrder(wiring))[0]
 
 export function runEnds(wiring: Wiring, points: readonly Point[]): [RouteEnd, RouteEnd] {
   const ends = [points[0], points[points.length - 1]].map((p) => ({ p, key: endKey(wiring, p) }))
-  ends.sort((a, b) => (a.key !== undefined ? 0 : 1) - (b.key !== undefined ? 0 : 1) || (a.key !== undefined && b.key !== undefined ? (a.key < b.key ? -1 : a.key > b.key ? 1 : 0) : 0) || comparePoints(a.p, b.p))
+  ends.sort((a, b) => (a.key !== undefined ? 0 : 1) - (b.key !== undefined ? 0 : 1) || (a.key !== undefined && b.key !== undefined ? byOrder(wiring)(a.key, b.key) : 0) || comparePoints(a.p, b.p))
   const routeEnd = (e: { p: Point; key: string | undefined }): RouteEnd => (e.key ? { pin: { object: e.key.slice(0, e.key.indexOf(":")), pin: e.key.slice(e.key.indexOf(":") + 1) } } : { at: e.p })
   return [routeEnd(ends[0]), routeEnd(ends[1])]
 }
