@@ -18,7 +18,7 @@ export const REROUTE_REFUSED: Record<RerouteRefusal["refused"], { title: string;
 
 export const isRerouteRefusal = (value: unknown): value is RerouteRefusal => typeof value === "object" && value !== null && "refused" in value
 
-export type RouteAround = { readonly ignore?: ReadonlySet<string>; readonly extra?: readonly WireSegment[]; readonly taken?: ReadonlySet<string> }
+export type RouteAround = { readonly ignore?: ReadonlySet<string>; readonly extra?: readonly WireSegment[]; readonly taken?: ReadonlySet<string>; readonly stops?: readonly Point[] }
 
 type Box = { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
 
@@ -142,9 +142,11 @@ type End = { readonly at: Point; readonly pin?: WirePin; readonly header?: Heade
 
 type Slip = { readonly landing: Point; readonly heading: number; readonly points: readonly Point[]; readonly cost: number }
 
-type Context = { readonly wiring: Wiring; readonly ignore: ReadonlySet<string>; readonly extra: readonly WireSegment[]; readonly taken: ReadonlySet<string> }
+type Context = { readonly wiring: Wiring; readonly ignore: ReadonlySet<string>; readonly extra: readonly WireSegment[]; readonly taken: ReadonlySet<string>; readonly stops: readonly Point[] }
 
 const NOTHING_TAKEN: ReadonlySet<string> = new Set()
+
+const contextOf = (wiring: Wiring, around: RouteAround): Context => ({ wiring, ignore: around.ignore ?? new Set(), extra: around.extra ?? [], taken: around.taken ?? NOTHING_TAKEN, stops: around.stops ?? [] })
 
 const keyOf = (ref: PinRef) => `${ref.object}:${ref.pin}`
 
@@ -341,6 +343,7 @@ function fieldOf(context: Context, box: Box, ends: readonly End[]): Field {
   for (let x = box.x; x <= x1; x += HALF_CELL) for (const s of sheet.along(columnCode(x), box.y, y1)) if (!ignore.has(s.id)) field.wire(s)
   for (const s of extra) field.wire(s)
   for (const p of wiring.index.within(box)) field.pin(p, context.taken.has(p.key))
+  for (const at of context.stops) field.pin({ key: "", at }, true)
   for (const end of ends) if (end.header) field.zone(end.header)
   for (const body of bodiesNear(wiring, box)) {
     const b = body.box
@@ -382,6 +385,7 @@ function crossingsOn(context: Context, a: Point, b: Point, own: Point): number {
   }
   for (const s of extra) if (!meet(s)) return -1
   for (const p of wiring.index.within(box)) if (!near(p.at, own)) return -1
+  for (const at of context.stops) if (!near(at, own) && meetings(a, b, at, at).length) return -1
   for (const body of bodiesNear(wiring, box)) {
     if (runsThrough({ a, b }, body)) return -1
     for (const [pin, inner] of body.leads) if (meetings(a, b, pin, inner).length) return -1
@@ -748,7 +752,7 @@ function wiringFor(doc: Schematic, known?: Wiring): Wiring {
 }
 
 export function routeAround(wiring: Wiring, from: RouteEnd, to: RouteEnd, around: RouteAround = {}): Point[] | null {
-  const context: Context = { wiring, ignore: around.ignore ?? new Set(), extra: around.extra ?? [], taken: around.taken ?? NOTHING_TAKEN }
+  const context = contextOf(wiring, around)
   const a = endOf(context, from)
   const b = endOf(context, to)
   if (!a || !b) return null
@@ -770,7 +774,8 @@ export function routeThrough(wiring: Wiring, ends: readonly RouteEnd[], around: 
   const extra = [...(around.extra ?? [])]
   const points: Point[] = []
   for (let i = 1; i < ends.length; i++) {
-    const leg = routeAround(wiring, ends[i - 1], ends[i], { ...around, extra })
+    const later = ends.slice(i + 1).flatMap((end) => ("at" in end ? [end.at] : []))
+    const leg = routeAround(wiring, ends[i - 1], ends[i], { ...around, extra, stops: [...(around.stops ?? []), ...later] })
     if (!leg) return null
     for (let k = 1; k < leg.length; k++) extra.push({ id: `leg ${i}.${k}`, a: leg[k - 1], b: leg[k] })
     points.push(...(points.length ? leg.slice(1) : leg))
@@ -791,15 +796,14 @@ const NO_PIN_OF_ITS_OWN = () => false
 
 export function routeThroughBends(wiring: Wiring, from: RouteEnd, to: RouteEnd, bends: readonly Point[], around: RouteAround = {}, ownPin: (key: string) => boolean = NO_PIN_OF_ITS_OWN): Point[] | null {
   const [a, b, through] = sortsFirst(wiring, from, to) ? [from, to, bends] : [to, from, [...bends].reverse()]
-  const extra = around.extra ?? []
-  const context: Context = { wiring, ignore: around.ignore ?? new Set(), extra, taken: around.taken ?? NOTHING_TAKEN }
+  const context = contextOf(wiring, around)
   const pointOf = (end: RouteEnd) => ("pin" in end ? wiring.index.pin(keyOf(end.pin))?.at : end.at)
   const onAnEnd = (p: Point) => [a, b].some((end) => {
     const q = pointOf(end)
     return !!q && samePoint(p, q)
   })
   const between = through.filter((p, i) => !onAnEnd(p) && (i === 0 || !samePoint(p, through[i - 1])))
-  const free = (p: Point) => isWhole(p) && wiring.index.at(p).every((pin) => ownPin(pin.key)) && !wiresTouching(context, p).length
+  const free = (p: Point) => isWhole(p) && wiring.index.at(p).every((pin) => ownPin(pin.key)) && !wiresTouching(context, p).length && !context.stops.some((q) => samePoint(p, q))
   if (!between.every(free)) return null
   const ends = [a, ...between.map((at): RouteEnd => ({ at })), b]
   return routeThrough(wiring, ends, around)
