@@ -1,12 +1,9 @@
 import { existsSync, readdirSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { legacyOf } from "@/schematic/builder"
-import { GRID, objectPins, Router } from "@/schematic/geometry"
+import { GRID, objectPins } from "@/schematic/geometry"
 import { wiresAsSegments } from "@/schematic/migrate-wires"
-import { designatorRects, fieldRouter } from "@/schematic/placement"
-import { getDef } from "@/schematic/registry"
 import type { LegacySchematic, LegacyWire as Wire, PlacedObject, Point } from "@/schematic/types"
-import { canonical, duplicateRefs, geometricGroups, inventory, joiningContactsOfNcPads, legacyPinPartition, partitionDiff, pinPartition, polylineSegments, renamed, stableNames, type Partition, type RefPin, type RefSegment } from "../lib/pin-partition"
+import { canonical, duplicateRefs, geometricGroups, inventory, joiningContactsOfNcPads, legacyPinPartition, partitionDiff, pinPartition, polylineSegments, stableNames, type Partition, type RefPin, type RefSegment } from "../lib/pin-partition"
 import { fixturePath, PARTITIONS, partitionDocuments, readFixture } from "../lib/partition-documents"
 import { SCHEMATIC_CASES } from "../lib/schematic-cases"
 
@@ -165,21 +162,6 @@ describe("the brute-force geometric reference: connected exactly when a conducto
   })
 })
 
-const refPins = (doc: Pick<LegacySchematic, "objects">): RefPin[] =>
-  doc.objects.flatMap((o) => objectPins(o, GRID).map((p) => ({ key: p.key, at: p.point, socket: !!getDef(o.def)?.pinsAreSockets, nc: p.pin.kind === "nc" })))
-
-function frozenPartition(doc: LegacySchematic, corners = polylineSegments) {
-  const routes = fieldRouter().routeAll(doc.objects, doc.wires, GRID)
-  const byId = new Map(doc.wires.map((w) => [w.id, w]))
-  const pinned = (w: Wire) => [`${w.from.object}:${w.from.pin}`, `${w.to.object}:${w.to.pin}`] as const
-  const collapsed = routes.filter((r) => corners(r.pts).length === 0).map((r) => pinned(byId.get(r.id)!))
-  return renamed(doc.objects, geometricGroups(refPins(doc), routes.flatMap((r) => corners(r.pts)), collapsed))
-}
-
-const everyVertex = (pts: readonly Point[]): RefSegment[] => pts.slice(1).flatMap((p, i) => (p.x === pts[i].x && p.y === pts[i].y ? [] : [{ a: pts[i], b: p }]))
-
-const legacyExample = (name: string) => legacyOf(documents.find((d) => d.name === name)!.doc)
-
 describe("what phase 0 learnt from freezing today's routes, kept as the reasons the upgrade does what it does", () => {
   it("a wire whose two pins coincide keeps its connection through the upgrade, and an NC pad is now a pin like any other", () => {
     const board: PlacedObject = { id: "u1", def: "nucleo-f429zi", x: 0, y: 0, props: { ref: "U1" } }
@@ -192,31 +174,4 @@ describe("what phase 0 learnt from freezing today's routes, kept as the reasons 
     expect.soft(legacyPinPartition(wired, GRID), "wired to it, before: joined").toEqual([["R1.1", "U1.CN8-1"]])
     expect.soft(pinPartition(wiresAsSegments(wired).doc), "upgraded: still joined").toEqual([["R1.1", "U1.CN8-1"]])
   })
-
-  it("the freeze routes as the field does, designators and values in the way included", () => {
-    const doc = legacyExample("charge-boost-chips")
-    const shape = (router: Router) => router.routeAll(doc.objects, doc.wires, GRID).map((r) => r.pts)
-    expect.soft(shape(fieldRouter()), "the field's router").toEqual(shape(new Router(designatorRects)))
-    expect.soft(shape(new Router()), "a router blind to text routes this document differently, so the check above can fail").not.toEqual(shape(new Router(designatorRects)))
-  })
-
-  it("a frozen route has to be written as its corners: kept, the stub ends lying on another net's wire at a crossing join the two nets", () => {
-    const joined = (name: string) => {
-      const doc = legacyExample(name)
-      return partitionDiff(legacyPinPartition(doc, GRID), frozenPartition(doc, everyVertex)).extra
-    }
-    expect.soft(joined("metronome"), "the supply rail shorted to two grounds through R17 and D7's stub ends").toContainEqual(expect.arrayContaining(["R17.2", "D7.1", "U1.VCC"]))
-    expect.soft(joined("logic").length, "logic: three pairs of gate nets joined").toBe(3)
-  })
-
-  it("written as its corners, a frozen route still touches another net in five documents, the ones the upgrade lays again", () => {
-    const touching = documents.filter((d) => d.name in SCHEMATIC_EXAMPLE_NAMES).map((d) => {
-      const doc = legacyOf(d.doc)
-      return { name: d.name, extra: partitionDiff(legacyPinPartition(doc, GRID), frozenPartition(doc)).extra.length }
-    })
-    expect.soft(touching.filter((t) => t.extra > 0).map((t) => t.name).sort(), "examples whose naive freeze merges nets").toEqual(["charge-boost-chips", "nucleo-serial", "open746-touch", "system-exam"])
-    for (const { name, doc } of documents.filter((d) => d.name in SCHEMATIC_EXAMPLE_NAMES)) expect.soft(pinPartition(doc), `${name}: the upgrade keeps the circuit all the same`).toEqual(readFixture(name)!.nets)
-  })
 })
-
-const SCHEMATIC_EXAMPLE_NAMES = Object.fromEntries(documents.filter((d) => d.source.startsWith("example ")).map((d) => [d.name, true]))

@@ -740,7 +740,7 @@ export const junction: ComponentDef = {
   width: 2,
   height: 2,
   parts: [],
-  pins: [{ id: "J", label: "", x: 1, y: 1, side: "right", labelAt: "top", kind: "node", stub: 0 }],
+  pins: [{ id: "J", label: "", x: 1, y: 1, side: "right", labelAt: "top", kind: "node" }],
   // The pin is the dot; the ring around it is what the node is dragged by, so dropping one and
   // picking it up again moves it rather than starting a wire.
   body: [{ type: "circle", cx: 1, cy: 1, r: 0.6, fill: "grip" }],

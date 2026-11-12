@@ -108,7 +108,6 @@ const strip = (name: Strip): PinDef[] => {
     side: s.top ? "top" : "bottom",
     labelAt: s.top ? "bottom" : "top",
     kind: kindOf(label, mcu),
-    stub: 1,
     mcu,
     fn: mcu ? AVR_ALT[mcu] : undefined,
     connector: name,
@@ -127,7 +126,6 @@ const icsp: PinDef[] = ICSP_ROWS.map(([pin, label, mcu]) => {
     side: outer ? "right" : "left",
     labelAt: outer ? "left" : "right",
     kind: kindOf(label === "+5V" ? "5V" : label, mcu),
-    stub: 1,
     mcu,
     fn: mcu ? AVR_ALT[mcu] : undefined,
     connector: "ICSP",
@@ -140,10 +138,10 @@ const icsp: PinDef[] = ICSP_ROWS.map(([pin, label, mcu]) => {
 /** The 16U2's end of the USB serial port on the USB-B, above and below the plug, on the board's edge, well inside the receptacle. */
 const USB_FACE_X = 0
 const pins: PinDef[] = [
-  { id: "VCP-TX", label: "TX", ...cell({ x: USB_FACE_X, y: 4 * PITCH }), side: "left", labelAt: "right", kind: "digital", stub: 1, signal: "ATmega16U2 RXD1", note: "D1/TX through 1 kΩ: what the board sends to the PC. A terminal's RX here is the PC listening over USB", printed: true, hostSerial: "in" },
-  { id: "VCP-RX", label: "RX", ...cell({ x: USB_FACE_X, y: 8 * PITCH }), side: "left", labelAt: "right", kind: "digital", stub: 1, signal: "ATmega16U2 TXD1", note: "The 16U2's TXD, to D0/RX through 1 kΩ: what the PC sends. A terminal's TX here is the PC typing over USB", printed: true, hostSerial: "out" },
+  { id: "VCP-TX", label: "TX", ...cell({ x: USB_FACE_X, y: 4 * PITCH }), side: "left", labelAt: "right", kind: "digital", signal: "ATmega16U2 RXD1", note: "D1/TX through 1 kΩ: what the board sends to the PC. A terminal's RX here is the PC listening over USB", printed: true, hostSerial: "in" },
+  { id: "VCP-RX", label: "RX", ...cell({ x: USB_FACE_X, y: 8 * PITCH }), side: "left", labelAt: "right", kind: "digital", signal: "ATmega16U2 TXD1", note: "The 16U2's TXD, to D0/RX through 1 kΩ: what the PC sends. A terminal's TX here is the PC typing over USB", printed: true, hostSerial: "out" },
   // The jack, as the Open746I-C's 5VDC: its centre pin at the mouth; the supply's minus goes to any GND.
-  { id: "JACK", label: "DC", ...cell({ x: JACK.mouth, y: JACK.y }), side: "left", labelAt: "right", kind: "power", stub: 2, signal: "PWRIN", connector: "X1", connectorPin: 2, note: "The 2.1 mm jack's centre pin, plus: 7–12 V recommended, through D1 (M7) to VIN. Its sleeve is the board's ground: the supply's minus to any GND", printed: true },
+  { id: "JACK", label: "DC", ...cell({ x: JACK.mouth, y: JACK.y }), side: "left", labelAt: "right", kind: "power", signal: "PWRIN", connector: "X1", connectorPin: 2, note: "The 2.1 mm jack's centre pin, plus: 7–12 V recommended, through D1 (M7) to VIN. Its sleeve is the board's ground: the supply's minus to any GND", printed: true },
   ...strip("IOH"),
   ...strip("IOL"),
   ...strip("POWER"),

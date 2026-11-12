@@ -10,7 +10,8 @@ import { sheetTexts } from "@/components/field/symbol-raster"
 import { cellAt, EDGE_MARGIN_CELLS, FRAME, MODULE_AT, MODULE_COLUMNS, MODULE_PAD, onModule, SMD_MM, type Edge } from "@/schematic/components/open746i-c-art"
 import { bodyBounds } from "@/schematic/body"
 import { examples } from "@/schematic/examples"
-import { objectPins, routeAll, UPRIGHT, type Point } from "@/schematic/geometry"
+import { objectPins, UPRIGHT, type Point } from "@/schematic/geometry"
+import { routeBetween } from "@/schematic/wires/router"
 import { pinContacts } from "@/schematic/contacts"
 import { blocksOf, boxesMeet, boxInside, boxMeetsPolygon, homeOf, isPrintedName, marksOf, MAX_PRINTED_GROWTH, partBox, pointInPolygon, printedBox, printedGrowth, ruleCrossesBox, rulesOf, switchContacts, type Box } from "@/schematic/printed-text"
 import { getDef, allDefs } from "@/schematic/registry"
@@ -376,8 +377,9 @@ describe("the board's printed names lie over the wires, on a knockout of their g
   })
 
   it("a real route from I2C1 to the strip is knocked out under every name it passes and nowhere else", () => {
-    const doc = { objects: [placed], wires: [{ id: "w1", from: { object: "U1", pin: "P4-8" }, to: { object: "U1", pin: "P21-28" } }] }
-    const routes = routeAll(doc.objects, doc.wires, GRID)
+    const route = routeBetween({ objects: [placed], wires: [], parts: {} }, { pin: { object: "U1", pin: "P4-8" } }, { pin: { object: "U1", pin: "P21-28" } })
+    expect(route, "the router finds the route").not.toBeNull()
+    const routes = route ? [{ id: "w1", pts: [...route], owner: [] }] : []
     const crossed = printedNameLayout(board, UPRIGHT).filter((n) => {
       const b = printedNameBox(n, printedNameSize(n, 1), 0.6)
       return crossedBy({ x: b.x * GRID, y: b.y * GRID, w: b.w * GRID, h: b.h * GRID }, routes.map((r) => r.pts))

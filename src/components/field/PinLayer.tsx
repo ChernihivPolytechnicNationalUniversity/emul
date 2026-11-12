@@ -231,7 +231,7 @@ export const PinLayer = React.memo(function PinLayer({
                 onPointerMove={(e) => onPinPointerMove(e, object.id, pin.id)}
                 onPointerUp={(e) => onPinPointerUp(e, object.id, pin.id)}
               >
-                <circle cx={point.x} cy={point.y} r={g(pin.stub === 0 ? 0.22 : 0.45)} className="fill-transparent stroke-none" />
+                <circle cx={point.x} cy={point.y} r={g(pin.kind === "node" ? 0.22 : 0.45)} className="fill-transparent stroke-none" />
                 {marker && <circle
                   data-marker=""
                   cx={point.x}

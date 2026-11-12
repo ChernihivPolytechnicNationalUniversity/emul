@@ -47,7 +47,6 @@ const pins: PinDef[] = FFC.map(([pin, label, , note]) => ({
   side: "top",
   labelAt: pin <= 20 ? "top" : "bottom",
   kind: label === "GND" ? "gnd" : label === "5V" || label === "3V3" ? "power" : "digital",
-  stub: pin <= 20 ? 3 : 4,
   connector: "FFC",
   connectorPin: pin,
   note,

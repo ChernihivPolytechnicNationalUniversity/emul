@@ -9,10 +9,9 @@ import { getDef, withLibrary } from "@/schematic/registry"
 import type { HdlNetlist } from "emul-shared/hdl"
 import counter from "./hdl/counter.json"
 import { legacyUpgraded, SCHEMATIC_VERSION, upgraded, versionOf } from "@/schematic/migrate"
-import { corners, frozenCandidates, wiresAsSegments, wirePins } from "@/schematic/migrate-wires"
+import { wiresAsSegments, wirePins } from "@/schematic/migrate-wires"
 import { laidAgain } from "@/schematic/freeze"
 import { Conductors } from "@/schematic/wires/conductors"
-import { fieldRouter } from "@/schematic/placement"
 import type { HdlModule, LegacySchematic, LegacyWire, PlacedObject, Schematic } from "@/schematic/types"
 import { junctionsOf, wireNets } from "@/schematic/wires/graph"
 import { buildNetlist, GROUND, type Netlist } from "@/sim/netlist"
@@ -154,24 +153,6 @@ describe("a wire at a diagonal pin: the first straight piece slides onto the pin
     return { r1, r2, pin: pin.point }
   }
 
-  it("a wire with a 45° stub at each end keeps the run between them on the row it was drawn on (design.md §13.14; findings 3.L15)", () => {
-    const route = [c(0, 0), c(1, 1), c(4, 1), c(5, 2), c(5, 3)]
-    const first = frozenCandidates(route, [])[0].map((p) => [p.x / GRID, p.y / GRID])
-    expect.soft(first, "onto the pin, then along row 1 as drawn").toEqual([[0, 0], [0, 1], [5, 1], [5, 3]])
-  })
-
-  it("where the piece after the stub ends at the far pin, nothing can slide: the stub becomes a one-cell step", () => {
-    const route = [c(0, 0), c(1, 1), c(5, 1)]
-    expect.soft(frozenCandidates(route, []).map(cells), "only the step").toEqual([[[0, 0], [0, 1], [5, 1]]])
-  })
-
-  it("a slide that would run through a body takes the step instead", () => {
-    const route = [c(0, 0), c(1, 1), c(1, 6), c(6, 6)]
-    const body = { x: -GRID / 2, y: 2 * GRID, w: GRID, h: 2 * GRID }
-    expect.soft(frozenCandidates(route, []).map(cells)[0], "free: the slide").toEqual([[0, 0], [0, 6], [6, 6]])
-    expect.soft(frozenCandidates(route, [body]).map(cells), "a body on the slid piece: the step").toEqual([[[0, 0], [1, 0], [1, 6], [6, 6]]])
-  })
-
   it("a slide or a step that would touch another net is never kept: the wire goes the next clean way, and the circuit stays", () => {
     const { r1, r2 } = diagonalBeside(5, 3)
     const doc: LegacySchematic = { objects: [r1, r2], wires: [{ id: "w", from: { object: "R1", pin: "2" }, to: { object: "R2", pin: "1" } }], parts: {} }
@@ -183,21 +164,6 @@ describe("a wire at a diagonal pin: the first straight piece slides onto the pin
     const fenced = wiresAsSegments({ ...doc, objects: [...doc.objects, blocker] })
     expect.soft(legacyPinPartition({ ...doc, objects: [...doc.objects, blocker] }, GRID), "before: the ground on nothing").toEqual([["R1.2", "R2.1"]])
     expect.soft(pinPartition(fenced.doc), "after: still on nothing").toEqual([["R1.2", "R2.1"]])
-  })
-
-  it("a wire every straightening of which would touch another net is laid again, and the note says it was the straightening (findings 3.L17)", () => {
-    const { r1, r2 } = diagonalBeside(5, 3)
-    const doc: LegacySchematic = { objects: [r1, r2], wires: [{ id: "w", from: { object: "R1", pin: "2" }, to: { object: "R2", pin: "1" } }], parts: {} }
-    const route = fieldRouter().routeAll(doc.objects, doc.wires, GRID)[0].pts
-    const ground: PlacedObject = { id: "G", def: "ground", x: 0, y: 0 }
-    const gnd = objectPins(ground, GRID)[0].point
-    const ends = [route[0], route[route.length - 1]]
-    const corners = [...new Map(frozenCandidates(route, []).flatMap((c) => c.slice(1, -1)).filter((p) => !ends.some((e) => e.x === p.x && e.y === p.y)).map((p) => [`${p.x},${p.y}`, p])).values()]
-    const blockers = corners.map((p, i): PlacedObject => ({ ...ground, id: `G${i}`, x: p.x - gnd.x, y: p.y - gnd.y, props: { ref: `G${i}` } }))
-    expect.soft(blockers.length, "corners to block").toBeGreaterThan(0)
-    const fenced = wiresAsSegments({ ...doc, objects: [...doc.objects, ...blockers] })
-    expect.soft(pinPartition(fenced.doc), "still joined, the grounds on nothing").toEqual([["R1.2", "R2.1"]])
-    expect.soft(fenced.notes, "said").toEqual(["The wire between R1 2 and R2 1, straightened where it left a pin at 45°, would have touched another net's wire or pin; it is laid again so the circuit stays as it was."])
   })
 })
 
@@ -307,10 +273,11 @@ describe("wires that ran over another net are laid again (design.md §10 item 4)
     const at = { x: a.x + c(3, 0).x, y: a.y }
     const hub: PlacedObject = { id: "J", def: "junction", x: at.x - GRID, y: at.y - GRID }
     const doc: LegacySchematic = { objects: [r1, r2, hub], wires: [{ id: "w", from: { object: "R1", pin: "2" }, to: { object: "R2", pin: "1" }, points: [at] }], parts: {} }
-    expect.soft(corners(fieldRouter().routeAll(doc.objects, doc.wires, GRID)[0].pts).some((p, i, list) => i > 0 && list[i - 1].y === at.y && p.y === at.y && Math.min(list[i - 1].x, p.x) <= at.x && at.x <= Math.max(list[i - 1].x, p.x)), "the field drew the wire through the junction's point").toBe(true)
+    const without = wiresAsSegments({ ...doc, objects: [r1, r2] }).routes.get("w") ?? []
+    expect.soft(without.some((p, i, list) => i > 0 && list[i - 1].y === at.y && p.y === at.y && Math.min(list[i - 1].x, p.x) <= at.x && at.x <= Math.max(list[i - 1].x, p.x)), "with no junction there, the router lays the wire through the junction's point").toBe(true)
     const withHub = wiresAsSegments(doc)
     expect.soft(withHub.notes, "nothing to say").toEqual([])
-    expect.soft(withHub.routes.get("w"), "the wire where the field drew it, not laid again").toEqual(corners(fieldRouter().routeAll(doc.objects, doc.wires, GRID)[0].pts))
+    expect.soft(withHub.routes.get("w"), "the wire where the router lays it with no junction there, not laid again").toEqual(without)
   })
 
   it("a file whose NC pads touch, wired, keeps its circuit with nothing to say about it (findings 3.R12)", async () => {

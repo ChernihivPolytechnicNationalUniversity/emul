@@ -5,43 +5,21 @@ import { circuitOf } from "@/schematic/circuit"
 import { ContactIndex, contactsAfterMove, pinContacts } from "@/schematic/contacts"
 import { SpatialIndex } from "@/schematic/spatial"
 import { examples, lab1Stand } from "@/schematic/examples"
-import {
-  bendReach,
-  bendsOnRoute,
-  facingOf,
-  GRID,
-  liesOnRoute,
-  nudgeRoutes,
-  objectIndex,
-  objectPins,
-  objectRect,
-  ownBodies,
-  resolvePin,
-  routeAll,
-  routeObstacles,
-  Router,
-  routeWire,
-  toPath,
-  type Point,
-  type RoutedWire,
-  type WireEnd,
-} from "@/schematic/geometry"
-import { legacyNets as buildNets } from "@/schematic/nets"
+import { GRID, objectPins, objectRect, toPath, type Point } from "@/schematic/geometry"
 import { autoNetColor, semanticNetColor, WIRE_COLORS } from "@/schematic/wire-colors"
 import { nearestOn, pinsOf, tapWireAt, wiringOf } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
 import type { WireSegment } from "@/schematic/wires/segment"
 import { getDef } from "@/schematic/registry"
-import { partKey, pinKey, type ComponentDef, type LegacySchematic, type PinKind, type PlacedObject, type Schematic } from "@/schematic/types"
+import { partKey, pinKey, type ComponentDef, type PinKind, type PlacedObject, type Schematic } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
 import { TopologyGate } from "@/sim/topology"
 import { exampleBase64 } from "../lib/firmware"
 
-const legacy = (doc: Schematic): LegacySchematic => legacyOf(doc)
-const route = (doc: Schematic, id: string) => routeAll(legacy(doc).objects, legacy(doc).wires, GRID).find((r) => r.id === id)!
+const route = (doc: Schematic, id: string) => ({ pts: wiringOf(new WireGraph(), doc).runs.find((r) => r.segments.some((s) => s.id === id))!.points })
 const wiring = (doc: Schematic) => wiringOf(new WireGraph(), doc)
 const horizontal = (a: Point, b: Point) => a.y === b.y
-function crosses(pts: Point[], r: { x: number; y: number; w: number; h: number }) {
+function crosses(pts: readonly Point[], r: { x: number; y: number; w: number; h: number }) {
   const [x0, x1, y0, y1] = [r.x + 0.5, r.x + r.w - 0.5, r.y + 0.5, r.y + r.h - 0.5]
   for (let i = 1; i < pts.length; i++) {
     const p = pts[i - 1]
@@ -53,41 +31,26 @@ function crosses(pts: Point[], r: { x: number; y: number; w: number; h: number }
   }
   return false
 }
-const onLine = (r: RoutedWire, y: number) =>
-  r.pts.slice(0, -1).filter((p, i) => horizontal(p, r.pts[i + 1]) && Math.abs(p.y - y) < GRID)
-const orthogonal = (r: RoutedWire) => r.pts.every((p, i, all) => i === 0 || p.x === all[i - 1].x || p.y === all[i - 1].y)
-const samePoint = (a: Point, b: Point) => a.x === b.x && a.y === b.y
-const find = (rs: RoutedWire[], id: string) => rs.find((r) => r.id === id)!
-const shape = (routes: readonly RoutedWire[]) =>
-  routes
-    .map((r) => `${r.id} ${r.pts.map((p) => `${p.x},${p.y}`).join(" ")} / ${r.owner.join(",")}`)
-    .sort()
-    .join("\n")
 
 describe("routing", () => {
-  it("runs stubs and a straight line between two pins", () => {
+  it("runs a straight line between two pins on one level, with no stub vertex between them (design.md §4.1)", () => {
     const { doc, place, wire } = builder(GRID)
     const r1 = place("resistor", 0, 0)
     const r2 = place("resistor", 10, 0)
     const w = wire(r1, "2", r2, "1")
     const r = route(doc, w.id)
     expect.soft(new Set(r.pts.map((p) => p.y)).size, "every point on one line").toBe(1)
-    expect.soft(r.pts[0].x, "starts at R1 pin 2").toBe(4 * GRID)
-    expect.soft(r.pts[r.pts.length - 1].x, "ends at R2 pin 1").toBe(10 * GRID)
-    expect.soft(r.pts[1].x - r.pts[0].x, "stub is one cell out of the pin").toBe(GRID)
+    expect.soft(r.pts.map((p) => p.x).sort((a, b) => a - b), "from R1 pin 2 to R2 pin 1, the one segment").toEqual([4 * GRID, 10 * GRID])
   })
 
-  it("a pin on a diagonal is a corner of its part's square, on the grid, and its stub lands on the grid too", () => {
+  it("a pin on a diagonal is a corner of its part's square, on the grid, and the wire from it is orthogonal on the grid from the pin on (design.md §4.1: no stub, at 45° or otherwise)", () => {
     const { doc, place, wire } = builder(GRID)
     const r1 = place("resistor", 0, 0, {}, 45)
     const r2 = place("resistor", 12, 6)
     const w = wire(r1, "2", r2, "1")
     const r = route(doc, w.id)
-    const stub = r.pts[1]
-    expect.soft(stub.x % GRID, "stub end snapped to the grid in x").toBe(0)
-    expect.soft(stub.y % GRID, "stub end snapped to the grid in y").toBe(0)
-    expect.soft([r.pts[0].x % GRID, r.pts[0].y % GRID], "the pin itself is on the grid").toEqual([0, 0])
-    expect.soft(r.pts.slice(1).every((p, i, a) => i === 0 || p.x === a[i - 1].x || p.y === a[i - 1].y), "everything after the stub is orthogonal").toBe(true)
+    expect.soft(r.pts.every((p) => p.x % GRID === 0 && p.y % GRID === 0), "every vertex, the pin included, on the grid").toBe(true)
+    expect.soft(r.pts.every((p, i, a) => i === 0 || p.x === a[i - 1].x || p.y === a[i - 1].y), "every piece orthogonal").toBe(true)
   })
 
   it("routes around a component in the way, not through it", () => {
@@ -181,323 +144,6 @@ describe("nets and colours", () => {
       const missing = WIRE_COLORS.filter((k) => Number.isNaN(lightness(blocks.light, `wire-${k}-flow`)) || Number.isNaN(lightness(blocks.dark, `wire-${k}-flow`)))
       expect(missing).toEqual([])
     })
-  })
-})
-
-describe("nudging", () => {
-  it("separates two nets sharing a corridor", () => {
-    const { doc, place, wire } = builder(GRID)
-    const a1 = place("resistor", 0, 0)
-    const a2 = place("resistor", 0, 16)
-    const b1 = place("resistor", 24, 2)
-    const b2 = place("resistor", 24, 14)
-    const wa = wire(a1, "2", a2, "2", [
-      [12, 8],
-      [20, 8],
-    ])
-    const wb = wire(b1, "1", b2, "1", [
-      [10, 8],
-      [18, 8],
-    ])
-    const raw = routeAll(legacy(doc).objects, legacy(doc).wires, GRID)
-    const lane = 8 * GRID
-    expect(onLine(raw.find((r) => r.id === wa.id)!, lane).length > 0 && onLine(raw.find((r) => r.id === wb.id)!, lane).length > 0, "both routes use the lane before nudging").toBe(true)
-
-    const nets = buildNets(legacy(doc).objects, legacy(doc).wires, GRID)
-    const out = nudgeRoutes(raw, nets.netOfWire, GRID)
-    const ya = onLine(out.find((r) => r.id === wa.id)!, lane)[0].y
-    const yb = onLine(out.find((r) => r.id === wb.id)!, lane)[0].y
-    expect.soft(ya !== yb, "the two nets end up on different lines").toBe(true)
-    expect.soft(Math.abs(ya - yb), "they are a third of a cell apart").toBeNear(GRID / 3, 0.01)
-    expect.soft(Math.max(Math.abs(ya - lane), Math.abs(yb - lane)), "both stay within half a cell of the lane").toBeLessThanOrEqual(GRID / 2)
-
-    const same = (a: RoutedWire, b: RoutedWire) => a.pts[0].x === b.pts[0].x && a.pts[0].y === b.pts[0].y && a.pts.at(-1)!.x === b.pts.at(-1)!.x && a.pts.at(-1)!.y === b.pts.at(-1)!.y
-    expect.soft(out.every((r) => same(r, raw.find((x) => x.id === r.id)!)), "the pins themselves did not move").toBe(true)
-    expect.soft(out.every(orthogonal), "every segment is still orthogonal").toBe(true)
-  })
-
-  it("leaves one net running alongside itself alone", () => {
-    const { doc, place, wire } = builder(GRID)
-    const a = place("resistor", 0, 0)
-    const b = place("resistor", 24, 0)
-    const c = place("resistor", 24, 8)
-    const w1 = wire(a, "2", b, "1", [[12, 4]])
-    const w2 = wire(a, "2", c, "1", [[12, 4]])
-    const raw = routeAll(legacy(doc).objects, legacy(doc).wires, GRID)
-    const nets = buildNets(legacy(doc).objects, legacy(doc).wires, GRID)
-    const out = nudgeRoutes(raw, nets.netOfWire, GRID)
-    expect.soft(nets.nets.length, "one net").toBe(1)
-    expect.soft(out === raw, "nothing moved").toBe(true)
-    expect.soft(out.filter((r) => r.id === w1.id || r.id === w2.id).every((r) => r.pts.some((p) => p.x === 12 * GRID && p.y === 4 * GRID)), "both wires still pass through the shared bend").toBe(true)
-  })
-
-  it("jogs next to a stub instead of tilting the stub", () => {
-    const { doc, place, wire } = builder(GRID)
-    const a = place("resistor", 0, 0)
-    const b = place("resistor", 10, 0)
-    const c = place("resistor", 0, 4)
-    const d = place("resistor", 10, 4)
-    const straight = wire(a, "2", b, "1")
-    const over = wire(c, "2", d, "1", [
-      [6, 1],
-      [8, 1],
-    ])
-    const raw = routeAll(legacy(doc).objects, legacy(doc).wires, GRID)
-    const nets = buildNets(legacy(doc).objects, legacy(doc).wires, GRID)
-    const out = nudgeRoutes(raw, nets.netOfWire, GRID)
-    const s0 = find(raw, straight.id)
-    const s1 = find(out, straight.id)
-    expect(onLine(s0, 1 * GRID).length > 0 && onLine(find(raw, over.id), 1 * GRID).length > 0, "the two runs did share the lane").toBe(true)
-    expect.soft(s1 !== s0, "the straight wire moved").toBe(true)
-    expect.soft(out.every(orthogonal), "every wire stays orthogonal").toBe(true)
-    expect.soft(samePoint(s1.pts[1], s0.pts[1]), "stub end at the first pin did not move").toBe(true)
-    expect.soft(samePoint(s1.pts.at(-2)!, s0.pts.at(-2)!), "stub end at the second pin did not move").toBe(true)
-    expect.soft(Math.abs(onLine(s1, 1 * GRID).find((p) => p.x > 6 * GRID && p.x < 8 * GRID)!.y - 1 * GRID), "the middle of the straight wire is off the lane").toBeNear(GRID / 6, 0.01)
-    expect.soft(out.every((r) => r.owner.length === r.pts.length - 1), "owner has one entry per segment").toBe(true)
-  })
-
-  it("jogs a run that leaves the shared corridor back to its own line", () => {
-    const { doc, place, wire } = builder(GRID)
-    const a = place("resistor", 0, 0)
-    const b = place("resistor", 30, 0)
-    const c = place("resistor", 0, 6)
-    const d = place("resistor", 12, 6)
-    const long = wire(a, "2", b, "1", [
-      [6, 3],
-      [12, 3],
-      [18, 3],
-      [24, 3],
-    ])
-    wire(c, "2", d, "1", [
-      [8, 3],
-      [10, 3],
-    ])
-    const raw = routeAll(legacy(doc).objects, legacy(doc).wires, GRID)
-    const nets = buildNets(legacy(doc).objects, legacy(doc).wires, GRID)
-    const out = nudgeRoutes(raw, nets.netOfWire, GRID)
-    const r = find(out, long.id)
-    expect.soft(orthogonal(r), "chained run still orthogonal").toBe(true)
-    const ys = onLine(r, 3 * GRID).map((p) => p.y)
-    expect.soft(ys.some((y) => y !== 3 * GRID), "part of the run is offset").toBe(true)
-    expect.soft(ys.some((y) => y === 3 * GRID), "and part of it is back on its own line").toBe(true)
-    expect.soft(r.owner.length, "owner still matches the segments").toBe(r.pts.length - 1)
-  })
-
-  it("never pushes a wire further than half a cell up the ladder", () => {
-    const { doc, place, wire } = builder(GRID)
-    const ids: string[] = []
-    for (let i = 0; i < 6; i++) {
-      const a = place("resistor", 0, 4 * i)
-      const b = place("resistor", 40, 4 * i)
-      ids.push(
-        wire(a, "2", b, "1", [
-          [10 + i, 30],
-          [30 - i, 30],
-        ]).id,
-      )
-    }
-    const raw = routeAll(legacy(doc).objects, legacy(doc).wires, GRID)
-    const nets = buildNets(legacy(doc).objects, legacy(doc).wires, GRID)
-    const out = nudgeRoutes(raw, nets.netOfWire, GRID)
-    const offsets = ids.map((id) => Math.abs(onLine(find(out, id), 30 * GRID)[0].y - 30 * GRID))
-    expect.soft(nets.nets.length, "six nets on one lane").toBe(6)
-    expect.soft(Math.max(...offsets), "largest offset").toBeLessThanOrEqual(GRID / 2 + 1e-9)
-    expect.soft(new Set(ids.map((id) => onLine(find(out, id), 30 * GRID)[0].y)).size, "all six on distinct lines").toBe(6)
-    expect.soft(out.every(orthogonal), "all orthogonal").toBe(true)
-  })
-
-  it("draws by cached lanes what the straightforward sweep drew", () => {
-    type Axis = "h" | "v"
-    type Seg = { wire: number; at: number; net: string; axis: Axis; lo: number; hi: number; lean: number }
-    const axisOf = (p: Point, q: Point): Axis | null => (p.y === q.y ? "h" : p.x === q.x ? "v" : null)
-    const NUDGE_STEP = 1 / 3
-    const NUDGE_MAX = 1 / 2
-  
-    const applyOffsets = (r: RoutedWire, offsetOf: (segment: number) => number): RoutedWire => {
-      const { pts, owner } = r
-      const last = pts.length - 1
-      let touched = false
-      for (let i = 0; i < last; i++) if (offsetOf(i)) touched = true
-      if (!touched) return r
-      const moved = (segment: number, p: Point): Point => {
-        const d = offsetOf(segment)
-        if (!d) return p
-        const axis = axisOf(pts[segment], pts[segment + 1])
-        if (axis === "h") return { x: p.x, y: p.y + d }
-        if (axis === "v") return { x: p.x + d, y: p.y }
-        return p
-      }
-      const outPts: Point[] = [pts[0]]
-      const outOwner: number[] = []
-      for (let i = 1; i < last; i++) {
-        const inAxis = axisOf(pts[i - 1], pts[i])
-        const outAxis = axisOf(pts[i], pts[i + 1])
-        const turns = inAxis !== null && outAxis !== null && inAxis !== outAxis
-        if (turns) {
-          outPts.push(moved(i, moved(i - 1, pts[i])))
-          outOwner.push(owner[i - 1])
-          continue
-        }
-        outPts.push(moved(i - 1, pts[i]))
-        outOwner.push(owner[i - 1])
-        if (offsetOf(i - 1) !== offsetOf(i)) {
-          outPts.push(moved(i, pts[i]))
-          outOwner.push(owner[i])
-        }
-      }
-      outPts.push(pts[last])
-      outOwner.push(owner[last - 1])
-      return { ...r, pts: outPts, owner: outOwner }
-    }
-  
-    const plainly = (routes: RoutedWire[], netOf: (id: string) => string | undefined, grid: number): RoutedWire[] => {
-      const segs: Seg[] = []
-      routes.forEach((r, wire) => {
-        const net = netOf(r.id) ?? r.id
-        for (let at = 1; at < r.pts.length - 2; at++) {
-          const p = r.pts[at]
-          const q = r.pts[at + 1]
-          const axis = axisOf(p, q)
-          if (!axis) continue
-          const before = r.pts[at - 1]
-          const after = r.pts[at + 2]
-          const lean = axis === "h" ? (before.y + after.y) / 2 - p.y : (before.x + after.x) / 2 - p.x
-          const [lo, hi] = axis === "h" ? [Math.min(p.x, q.x), Math.max(p.x, q.x)] : [Math.min(p.y, q.y), Math.max(p.y, q.y)]
-          segs.push({ wire, at, net, axis, lo, hi, lean })
-        }
-      })
-      const lanes = new Map<string, Seg[]>()
-      for (const s of segs) {
-        const p = routes[s.wire].pts[s.at]
-        const key = `${s.axis}${Math.round(s.axis === "h" ? p.y : p.x)}`
-        const list = lanes.get(key)
-        if (list) list.push(s)
-        else lanes.set(key, [s])
-      }
-      const meanLean = (cluster: Seg[], net: string) => {
-        let sum = 0
-        let n = 0
-        for (const s of cluster) {
-          if (s.net !== net) continue
-          sum += s.lean
-          n++
-        }
-        return n ? sum / n : 0
-      }
-      const offset = new Map<string, number>()
-      const separate = (cluster: Seg[]) => {
-        const nets = [...new Set(cluster.map((s) => s.net))]
-        if (nets.length < 2) return
-        nets.sort((a, b) => meanLean(cluster, a) - meanLean(cluster, b))
-        const step = Math.min(NUDGE_STEP * grid, (2 * NUDGE_MAX * grid) / (nets.length - 1))
-        const span = (nets.length - 1) / 2
-        const deltaOf = new Map(nets.map((net, i) => [net, (i - span) * step]))
-        for (const s of cluster) {
-          const delta = deltaOf.get(s.net) ?? 0
-          if (delta) offset.set(`${s.wire}:${s.at}`, delta)
-        }
-      }
-      for (const list of lanes.values()) {
-        if (list.length < 2) continue
-        list.sort((a, b) => a.lo - b.lo)
-        let cluster: Seg[] = []
-        let end = -Infinity
-        for (const s of list) {
-          if (cluster.length && s.lo >= end) {
-            separate(cluster)
-            cluster = []
-          }
-          cluster.push(s)
-          end = Math.max(end, s.hi)
-        }
-        separate(cluster)
-      }
-      if (offset.size === 0) return routes
-      return routes.map((r, wire) => applyOffsets(r, (at) => offset.get(`${wire}:${at}`) ?? 0))
-    }
-  
-    const shape = (routes: readonly RoutedWire[]) =>
-      routes
-        .map((r) => `${r.id} ${r.pts.map((p) => `${p.x},${p.y}`).join(" ")} / ${r.owner.join(",")}`)
-        .sort()
-        .join("\n")
-  
-    let apart = 0
-    let nudgedAnything = 0
-    const agrees = (doc: LegacySchematic) => {
-      const nets = buildNets(doc.objects, doc.wires, GRID)
-      const straight = new Router().routeAll(doc.objects, doc.wires, GRID)
-      const now = nudgeRoutes(new Router().routeAll(doc.objects, doc.wires, GRID), nets.netOfWire, GRID)
-      const before = plainly(new Router().routeAll(doc.objects, doc.wires, GRID), nets.netOfWire, GRID)
-      if (shape(now) !== shape(straight)) nudgedAnything++
-      if (shape(now) !== shape(before)) apart++
-    }
-  
-    for (const example of examples) agrees(legacy(example.build(GRID)))
-    let seed = 5150
-    const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
-    const base = legacy(lab1Stand.build(GRID))
-    for (let i = 0; i < 12; i++) {
-      agrees({
-        ...base,
-        objects: base.objects.map((o) => ({ ...o, x: o.x + Math.round(random() * 6 - 3) * GRID, y: o.y + Math.round(random() * 6 - 3) * GRID })),
-      })
-    }
-    expect.soft(apart, "every document nudges to the same routes").toBe(0)
-    expect.soft(nudgedAnything, "and the corpus does exercise nudging").toBeGreaterThan(0)
-  })
-})
-
-describe("a bend handle never leaves its wire", () => {
-  const c = (v: number) => v * GRID
-  const from: WireEnd = { point: { x: c(2), y: c(15) }, side: "top", stub: 1 }
-  const intoTheLeft: WireEnd = { point: { x: c(51), y: c(12) }, side: "left", stub: 1 }
-  const fromAbove: WireEnd = { point: { x: c(51), y: c(12) }, side: "top", stub: 1 }
-  const route = (to: WireEnd, bends: Point[]) => routeWire(from.point, from.side, from.stub, to.point, to.side, to.stub, GRID, bends).pts
-
-  it("a bend dragged past the corner of a wire into a pin's back would make the wire run out and back, so the route drops it", () => {
-    const beyond = { x: c(53), y: c(3) }
-    expect(liesOnRoute(route(intoTheLeft, [{ x: c(2), y: c(3) }, beyond]), beyond)).toBe(false)
-  })
-
-  it("such a bend's handle is drawn where the wire turns, not out in the field", () => {
-    const bends = [{ x: c(2), y: c(3) }, { x: c(53), y: c(3) }]
-    const pts = route(intoTheLeft, bends)
-    const drawn = bendsOnRoute(pts, bends)
-    expect(drawn[0]).toEqual(bends[0])
-    expect(liesOnRoute(pts, drawn[1])).toBe(true)
-    expect(drawn[1]).toEqual({ x: c(50), y: c(3) })
-  })
-
-  it("dragged past where the wire can follow, the handle stops at the last place the wire still runs through", () => {
-    const bends = [{ x: c(2), y: c(3) }, { x: c(40), y: c(3) }]
-    const reached = bendReach(from, intoTheLeft, bends, 1, bends[1], { x: c(90), y: c(3) }, GRID)!
-    expect(reached.y).toBe(c(3))
-    expect(reached.x).toBeGreaterThanOrEqual(c(50))
-    expect(reached.x).toBeLessThanOrEqual(c(51))
-    const moved = bends.slice()
-    moved[1] = reached
-    expect(liesOnRoute(route(intoTheLeft, moved), reached)).toBe(true)
-  })
-
-  it("where the wire can follow, the handle goes all the way to the pointer", () => {
-    const bends = [{ x: c(2), y: c(3) }, { x: c(40), y: c(3) }]
-    const target = { x: c(56), y: c(3) }
-    expect(bendReach(from, fromAbove, bends, 1, bends[1], target, GRID)).toEqual(target)
-    const moved = bends.slice()
-    moved[1] = target
-    expect(liesOnRoute(route(fromAbove, moved), target)).toBe(true)
-  })
-
-  it("wherever the pointer goes, the bend a drag leaves behind lies on the wire", () => {
-    const bends = [{ x: c(2), y: c(3) }, { x: c(40), y: c(3) }]
-    let at = bends[1]
-    for (const pointer of [{ x: c(70), y: c(3) }, { x: c(70), y: c(-20) }, { x: c(-30), y: c(40) }, { x: c(30), y: c(8) }]) {
-      at = bendReach(from, intoTheLeft, bends, 1, at, pointer, GRID) ?? at
-      const moved = bends.slice()
-      moved[1] = at
-      expect(liesOnRoute(route(intoTheLeft, moved), at), JSON.stringify(pointer)).toBe(true)
-    }
   })
 })
 
@@ -818,125 +464,6 @@ describe("caching", () => {
     expect.soft(valued !== settled, "a component's value is").toBe(true)
     const unwired: Schematic = { ...revalued, wires: revalued.wires.filter((x) => x.id === "stub") }
     expect.soft(sent(unwired) !== valued, "a wire removed is").toBe(true)
-  })
-
-  describe("obstacles queried near a wire route what the whole document would", () => {
-    const trace = (id: string, pts: readonly Point[]) => `${id} ${pts.map((p) => `${p.x},${p.y}`).join(" ")}`
-    const globally = (doc: LegacySchematic) =>
-      doc.wires
-        .flatMap((w) => {
-          const a = resolvePin(doc.objects, w.from, GRID)
-          const b = resolvePin(doc.objects, w.to, GRID)
-          if (!a || !b) return []
-          const route = routeWire(
-            a.point,
-            facingOf(a.pin),
-            a.pin.stub ?? 1,
-            b.point,
-            facingOf(b.pin),
-            b.pin.stub ?? 1,
-            GRID,
-            w.points ?? [],
-            routeObstacles(doc.objects, GRID, w.from.object, w.to.object),
-            ownBodies(objectIndex(doc.objects), GRID, w.from.object, w.to.object),
-          )
-          return [trace(w.id, route.pts)]
-        })
-        .sort()
-        .join("\n")
-    const locally = (doc: LegacySchematic) =>
-      new Router()
-        .routeAll(doc.objects, doc.wires, GRID)
-        .map((r) => trace(r.id, r.pts))
-        .sort()
-        .join("\n")
-
-    it.each(examples.map((e) => [e.id, e] as const))("on %s", (_, example) => {
-      const doc = legacyOf(example.build(GRID))
-      expect(locally(doc)).toBe(globally(doc))
-    })
-
-    it("on 12 jumbled copies of the stand", () => {
-      let seed = 7401
-      const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
-      let apart = 0
-      const base = legacyOf(lab1Stand.build(GRID))
-      for (let i = 0; i < 12; i++) {
-        const jittered: LegacySchematic = {
-          ...base,
-          objects: base.objects.map((o) => ({ ...o, x: o.x + Math.round(random() * 6 - 3) * GRID, y: o.y + Math.round(random() * 6 - 3) * GRID })),
-        }
-        if (locally(jittered) !== globally(jittered)) apart++
-      }
-      expect(apart).toBe(0)
-    })
-  })
-
-  it("keeps a router between edits that routes exactly what a fresh one does", () => {
-    const kept = new Router()
-    let doc = legacyOf(lab1Stand.build(GRID))
-    let previous: readonly RoutedWire[] = []
-    const after = (what: string, next: LegacySchematic) => {
-      doc = next
-      const got = kept.routeAll(doc.objects, doc.wires, GRID)
-      const want = new Router().routeAll(doc.objects, doc.wires, GRID)
-      expect.soft(shape(got), what).toBe(shape(want))
-      previous = got
-      return got
-    }
-
-    const byRef = (ref: string) => doc.objects.find((o) => o.props?.ref === ref)!
-    const moveBy = (id: string, dx: number, dy: number): LegacySchematic => ({
-      ...doc,
-      objects: doc.objects.map((o) => (o.id === id ? { ...o, x: o.x + dx * GRID, y: o.y + dy * GRID } : o)),
-    })
-
-    after("the document as built", doc)
-    const unchanged = kept.routeAll(doc.objects, doc.wires, GRID)
-    expect.soft(unchanged.every((r, i) => r === previous[i]), "routing it again hands back the same routes").toBe(true)
-
-    const led = byRef("VD1").id
-    const settled = new Map(previous.map((r) => [r.id, r]))
-    const moved = after("one LED moved a cell", moveBy(led, 1, 0))
-    expect.soft(moved.filter((r) => settled.get(r.id) !== r).length, "and only the wires near it are routed again").toBe(6)
-    after("the LED moved back", moveBy(led, -1, 0))
-    after("the LED dropped across the field", moveBy(led, 30, 12))
-    after("the LED brought back", moveBy(led, -30, -12))
-    after("a resistor rotated", { ...doc, objects: doc.objects.map((o) => (o.id === byRef("R2").id ? { ...o, rotation: 90 as const } : o)) })
-    const bent = doc.wires.find((w) => (w.points?.length ?? 0) > 0)!
-    after("a bend point moved", {
-      ...doc,
-      wires: doc.wires.map((w) => (w.id === bent.id ? { ...w, points: w.points!.map((p, i) => (i === 0 ? { x: p.x + GRID, y: p.y } : p)) } : w)),
-    })
-    after("a wire recoloured", { ...doc, wires: doc.wires.map((w) => (w.id === bent.id ? { ...w, color: "blue" as const } : w)) })
-    const ground = doc.objects.find((o) => o.def === "ground")!
-    after("a ground deleted with its wires", {
-      ...doc,
-      objects: doc.objects.filter((o) => o.id !== ground.id),
-      wires: doc.wires.filter((w) => w.from.object !== ground.id && w.to.object !== ground.id),
-    })
-    after("a fresh object dropped in the middle of the wiring", {
-      ...doc,
-      objects: [...doc.objects, { id: "intruder", def: "resistor", x: -9 * GRID, y: 6 * GRID, rotation: 90 as const }],
-    })
-    after("the intruder shuffled along", moveBy("intruder", 0, 2))
-    after("the intruder removed", { ...doc, objects: doc.objects.filter((o) => o.id !== "intruder") })
-    after("the whole schematic moved", { ...doc, objects: doc.objects.map((o) => ({ ...o, x: o.x + 3 * GRID, y: o.y - GRID })) })
-
-    let seed = 424242
-    const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
-    let drifted = 0
-    for (let i = 0; i < 60; i++) {
-      const victim = doc.objects[Math.floor(random() * doc.objects.length)]
-      doc = {
-        ...doc,
-        objects: doc.objects.map((o) =>
-          o.id === victim.id ? { ...o, x: o.x + Math.round(random() * 8 - 4) * GRID, y: o.y + Math.round(random() * 8 - 4) * GRID } : o,
-        ),
-      }
-      if (shape(kept.routeAll(doc.objects, doc.wires, GRID)) !== shape(new Router().routeAll(doc.objects, doc.wires, GRID))) drifted++
-    }
-    expect.soft(drifted, "60 random moves, each routed the same either way").toBe(0)
   })
 })
 

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { DIR, flipped, GRID, objectPins, objectRect, objectSize, orientationOf, orientPin, pinPoint, placedText, routeAll, UPRIGHT, type Orientation, type Point } from "@/schematic/geometry"
+import { DIR, flipped, GRID, objectPins, objectRect, objectSize, orientationOf, orientPin, pinPoint, placedText, UPRIGHT, type Orientation, type Point } from "@/schematic/geometry"
 import { legacyOf } from "@/schematic/builder"
 import { examples } from "@/schematic/examples"
 import { flipSelection, rotateSelection } from "@/schematic/orient"
 import { footprint } from "@/schematic/placement"
+import { wiringOf } from "@/schematic/wire-edits"
+import { WireGraph } from "@/schematic/wires/graph"
+import { routeBetween } from "@/schematic/wires/router"
 import { getDef, allDefs } from "@/schematic/registry"
 import type { PlacedObject, Rotation, Schematic } from "@/schematic/types"
 
@@ -191,18 +194,23 @@ describe("a part turned or mirrored in place keeps its wires out of its own body
           const moved = after.objects.find((o) => o.id === part.id)!
           const wires = legacy.wires.filter((w) => w.from.object === part.id || w.to.object === part.id).map(({ points: _drawnForTheOldWayRound, ...w }) => w)
           const body = footprint(moved, GRID)!.box
-          for (const route of routeAll(after.objects, wires, GRID)) {
-            const pts = route.pts
+          const bare: Schematic = { ...after, wires: [] }
+          const field = wiringOf(new WireGraph(), bare)
+          for (const w of wires) {
             const name = `${example.id} ${part.props?.ref ?? part.def} ${how}`
             const known = cornered.has(`${example.id} ${part.props?.ref}`)
+            const pts = routeBetween(bare, { pin: w.from }, { pin: w.to }, field)
+            if (!pts) {
+              if (!known) issues.push(`${name}: no route`)
+              continue
+            }
             for (let i = 2; i < pts.length - 1; i++) if (!known && crossesBody(pts[i - 1], pts[i], body)) issues.push(`${name}: through its body`)
             for (let i = 1; i + 1 < pts.length; i++) if (turnsBack(pts[i - 1], pts[i], pts[i + 1])) issues.push(`${name}: doubles back`)
-            const w = wires.find((x) => x.id === route.id)!
             if (pts.length < 2) continue
             for (const [ref, from, to] of [[w.from, pts[0], pts[1]], [w.to, pts[pts.length - 1], pts[pts.length - 2]]] as const) {
               const pin = objectPins(after.objects.find((o) => o.id === ref.object)!, GRID).find((p) => p.pin.id === ref.pin)!.pin
               const d = DIR[pin.side]
-              if ((pin.stub ?? 1) > 0 && (Math.sign(to.x - from.x) !== Math.sign(d.x) || Math.sign(to.y - from.y) !== Math.sign(d.y))) issues.push(`${name}: meets ${ref.pin} from the side`)
+              if (pin.kind !== "node" && (Math.sign(to.x - from.x) !== Math.sign(d.x) || Math.sign(to.y - from.y) !== Math.sign(d.y))) issues.push(`${name}: meets ${ref.pin} from the side`)
             }
           }
         }

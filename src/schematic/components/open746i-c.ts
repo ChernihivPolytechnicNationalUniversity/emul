@@ -326,7 +326,7 @@ function kindOf(label: string, mcu?: string): PinKind {
   return "digital"
 }
 
-type At = { x: number; y: number; side: Side; stub: number; labelAt?: Side; printed?: boolean }
+type At = { x: number; y: number; side: Side; labelAt?: Side; printed?: boolean }
 
 function pinOf(connector: string, [pin, label, mcu, signal, fn, note]: Row, at: At): PinDef {
   return {
@@ -337,7 +337,6 @@ function pinOf(connector: string, [pin, label, mcu, signal, fn, note]: Row, at: 
     side: at.side,
     labelAt: at.labelAt ?? at.side,
     kind: kindOf(label, mcu),
-    stub: at.stub,
     mcu: mcu === "NRST" ? undefined : mcu,
     signal,
     fn,
@@ -363,7 +362,6 @@ function line(connector: string, tables: Row[][], pinsLeftRight: readonly number
 const countdown = (from: number, step = 1, count = from) => Array.from({ length: Math.ceil(count / step) }, (_, i) => from - i * step).filter((p) => p >= 1)
 const countup = (from: number, to: number, step = 1) => Array.from({ length: Math.floor((to - from) / step) + 1 }, (_, i) => from + i * step)
 
-const EDGE_STUB = 2
 const STRIP_ROWS = 18
 const STRIP = { left: { odd: SEATS.leftStrip.x, even: SEATS.leftStrip.x + 1, top: SEATS.leftStrip.y }, right: { odd: SEATS.rightStrip.x + 1, even: SEATS.rightStrip.x, top: SEATS.rightStrip.y } }
 
@@ -377,7 +375,7 @@ function pinStrip(connector: string, rows: Row[], half: 0 | 1, side: "left" | "r
     const rank = Math.floor((pin - 1) / 2)
     const y = top + (pin1Top ? rank : STRIP_ROWS - 1 - rank)
     const inward: Side = side === "left" ? "right" : "left"
-    return pinOf(connector, row, { x: odd ? at.odd : at.even, y, side, stub: odd ? 2 : 3, labelAt: odd ? side : inward })
+    return pinOf(connector, row, { x: odd ? at.odd : at.even, y, side, labelAt: odd ? side : inward })
   })
 }
 
@@ -405,11 +403,11 @@ const LCD7_A = LCD7.slice(0, 20)
 const LCD7_B = LCD7.slice(20)
 
 const pins: PinDef[] = [
-  { id: "5VDC", label: "5VDC", x: S.dcJack.x, y: S.dcJack.y, side: "top", labelAt: "bottom", kind: "power", stub: 2, connector: "DC jack", note: "5 V in; S2 picks this or the USART1 USB as 5Vin, and the module takes 5Vin with SW1 off", printed: true },
+  { id: "5VDC", label: "5VDC", x: S.dcJack.x, y: S.dcJack.y, side: "top", labelAt: "bottom", kind: "power", connector: "DC jack", note: "5 V in; S2 picks this or the USART1 USB as 5Vin, and the module takes 5Vin with SW1 off", printed: true },
   ...(["P22", "P24", "P23"] as const).flatMap((connector, row) =>
     [1, 2, 3, 4].map((pin): PinDef => {
       const label = ["5V", "GND", "3V3"][row]
-      return { id: `${connector}-${pin}`, label: pin === 4 ? label : "", x: S.rails.x + pin - 1, y: S.rails.y + row, side: "top", labelAt: "right", kind: row === 1 ? "gnd" : "power", stub: 1 + row, connector, connectorPin: pin, note: `${label} rail`, printed: true }
+      return { id: `${connector}-${pin}`, label: pin === 4 ? label : "", x: S.rails.x + pin - 1, y: S.rails.y + row, side: "top", labelAt: "right", kind: row === 1 ? "gnd" : "power", connector, connectorPin: pin, note: `${label} rail`, printed: true }
     }),
   ),
   ...USART1_BRIDGE_SIDE.map(([id, label, mcu, signal, note], row): PinDef => ({
@@ -420,7 +418,6 @@ const pins: PinDef[] = [
     side: "right",
     labelAt: "right",
     kind: "digital",
-    stub: 2,
     mcu,
     signal,
     fn: signal,
@@ -431,38 +428,38 @@ const pins: PinDef[] = [
     // A terminal on the CP2102's TXD/RXD is the PC on the USART1 USB: the bridge drives the line.
     ...(id === "VCP-RX" ? { hostSerial: "out" as const, hostDriver: "$cp2102txd" } : id === "VCP-TX" ? { hostSerial: "in" as const } : {}),
   })),
-  ...line("P6", [SDMMC], countup(1, 9), { x: S.sdmmc.x, y: S.sdmmc.y, side: "top", stub: 5, labelAt: "bottom" }),
-  ...line("P3", [QSPI], countup(1, 8), { x: S.qspi.x, y: S.qspi.y, side: "top", stub: 5, labelAt: "bottom" }),
-  ...line("P5", [I2S2], countup(2, 16, 2), { x: S.i2s.x, y: S.i2s.y, side: "top", stub: 5, labelAt: "bottom" }),
-  ...line("P5", [I2S3], countup(1, 15, 2), { x: S.i2s.x, y: S.i2s.y + 1, side: "top", stub: 6, labelAt: "bottom" }),
-  ...column("P2", [USART3], countdown(7), { x: S.usart3.x, y: S.usart3.y, side: "left", stub: 5, labelAt: "right" }),
-  ...column("P8", [CAN2], countdown(4), { x: S.can2.x, y: S.can2.y, side: "left", stub: 5, labelAt: "right" }),
-  ...column("P7", [CAN1], countdown(4), { x: S.can1.x, y: S.can1.y, side: "left", stub: 5, labelAt: "right" }),
-  ...column("P4", [I2C_EVEN], countdown(10, 2), { x: S.i2c.x, y: S.i2c.y, side: "left", stub: 5, labelAt: "right" }),
-  ...column("P4", [I2C_ODD], countdown(9, 2), { x: S.i2c.x + 1, y: S.i2c.y, side: "left", stub: 6, labelAt: "right" }),
-  ...column("P13", [DCMI_EVEN], countdown(24, 2), { x: S.dcmi.x, y: S.dcmi.y, side: "left", stub: EDGE_STUB, labelAt: "right" }),
-  ...column("P13", [DCMI_ODD], countdown(23, 2), { x: S.dcmi.x + 1, y: S.dcmi.y, side: "left", stub: EDGE_STUB + 1, labelAt: "right" }),
-  ...column("P11", [ETH_ODD], countup(1, 13, 2), { x: S.eth.x, y: S.eth.y, side: "right", stub: 6, labelAt: "left" }),
-  ...column("P11", [ETH_EVEN], countup(2, 14, 2), { x: S.eth.x + 1, y: S.eth.y, side: "right", stub: 5, labelAt: "left" }),
-  ...column("P1", [SPI2], countup(1, 11, 2), { x: S.spi.x, y: S.spi.y, side: "right", stub: 6, labelAt: "left" }),
-  ...column("P1", [SPI1], countup(2, 12, 2), { x: S.spi.x + 1, y: S.spi.y, side: "right", stub: 5, labelAt: "left" }),
-  ...column("P9", [SAI_A], countup(1, 15, 2), { x: S.sai.x, y: S.sai.y, side: "right", stub: 6, labelAt: "left" }),
-  ...column("P9", [SAI_B], countup(2, 16, 2), { x: S.sai.x + 1, y: S.sai.y, side: "right", stub: 5, labelAt: "left" }),
-  ...line("P12", [FMC_ODD], countdown(19, 2), { x: S.fmc.x, y: S.fmc.y, side: "bottom", stub: 7, labelAt: "top" }),
-  ...line("P12", [FMC_EVEN], countdown(20, 2), { x: S.fmc.x, y: S.fmc.y + 1, side: "bottom", stub: 6, labelAt: "top" }),
-  ...line("P10", [ULPI_ODD], countdown(19, 2), { x: S.ulpi.x, y: S.ulpi.y, side: "bottom", stub: 7, labelAt: "top" }),
-  ...line("P10", [ULPI_EVEN], countdown(20, 2), { x: S.ulpi.x, y: S.ulpi.y + 1, side: "bottom", stub: 6, labelAt: "top" }),
-  ...LCD7_A.map((row, i) => pinOf("P15", row, { x: FFC_PINS.x + i, y: FFC_PINS.rowA, side: "bottom", stub: 3, labelAt: "top" })),
-  ...LCD7_B.map((row, i) => pinOf("P15", row, { x: FFC_PINS.x + i, y: FFC_PINS.rowB, side: "bottom", stub: 2, labelAt: "bottom" })),
-  ...column("CN2", [CN2], countup(1, 8), { x: S.cn2.x, y: S.cn2.y, side: "left", stub: 1, labelAt: "right" }),
-  ...column("CN3", [CN3], countup(1, 6), { x: S.cn3.x, y: S.cn3.y, side: "left", stub: 1, labelAt: "right" }),
-  ...column("CN1", [CN1], countdown(10), { x: S.cn1.x, y: S.cn1.y, side: "right", stub: 1, labelAt: "left" }),
-  ...column("CN4", [CN4], countdown(8), { x: S.cn4.x, y: S.cn4.y, side: "right", stub: 1, labelAt: "left" }),
-  ...line("CN5", [ICSP_ODD], [5, 3, 1], { x: S.icsp.x, y: S.icsp.y, side: "top", stub: 1, labelAt: "top" }),
-  ...line("CN5", [ICSP_EVEN], [6, 4, 2], { x: S.icsp.x, y: S.icsp.y + 1, side: "bottom", stub: 1, labelAt: "bottom" }),
-  { id: "VBAT", label: "VBAT", ...cellAt(onModule(POWER_JMP.vbat.pin)), side: "bottom", labelAt: "bottom", kind: "power", stub: 0, signal: "VBAT", connector: "P16", connectorPin: 8, note: "Backup-domain supply (1.65–3.6 V): with the POWER JMP's VBAT cap off, a battery here keeps the RTC and backup registers through a power cut", printed: true },
-  { id: "VREF+", label: "VREF+", ...cellAt(onModule(POWER_JMP.vref.pin)), side: "bottom", labelAt: "bottom", kind: "power", stub: 0, signal: "VREF+", connector: "P16", connectorPin: 34, note: "The ADC and DAC reference: the POWER JMP's VREF+ cap ties it to the 3.3 V rail, fitted as shipped. With the cap off, a reference wired here sets the full scale of every conversion (1.7 V to VDDA, and within 1.2 V of it: DS10916 Table 63); left open, the converters have none", printed: true },
-  { id: "BOOT0", label: "BOOT0", ...cellAt(onModule(MODULE_PAD.boot0)), side: "left", labelAt: "left", kind: "digital", stub: 0, signal: "BOOT0", connector: "P17", connectorPin: 69, note: "The module's pad P17-69, printed BOOT0, the one place the pin is brought out; through 10 kΩ (MCU.R1) to the boot switch's common: FLASH grounds it, SYSTEM lifts it to 3.3 V (the ST bootloader is not modelled: the core idles in system memory)", printed: true },
+  ...line("P6", [SDMMC], countup(1, 9), { x: S.sdmmc.x, y: S.sdmmc.y, side: "top", labelAt: "bottom" }),
+  ...line("P3", [QSPI], countup(1, 8), { x: S.qspi.x, y: S.qspi.y, side: "top", labelAt: "bottom" }),
+  ...line("P5", [I2S2], countup(2, 16, 2), { x: S.i2s.x, y: S.i2s.y, side: "top", labelAt: "bottom" }),
+  ...line("P5", [I2S3], countup(1, 15, 2), { x: S.i2s.x, y: S.i2s.y + 1, side: "top", labelAt: "bottom" }),
+  ...column("P2", [USART3], countdown(7), { x: S.usart3.x, y: S.usart3.y, side: "left", labelAt: "right" }),
+  ...column("P8", [CAN2], countdown(4), { x: S.can2.x, y: S.can2.y, side: "left", labelAt: "right" }),
+  ...column("P7", [CAN1], countdown(4), { x: S.can1.x, y: S.can1.y, side: "left", labelAt: "right" }),
+  ...column("P4", [I2C_EVEN], countdown(10, 2), { x: S.i2c.x, y: S.i2c.y, side: "left", labelAt: "right" }),
+  ...column("P4", [I2C_ODD], countdown(9, 2), { x: S.i2c.x + 1, y: S.i2c.y, side: "left", labelAt: "right" }),
+  ...column("P13", [DCMI_EVEN], countdown(24, 2), { x: S.dcmi.x, y: S.dcmi.y, side: "left", labelAt: "right" }),
+  ...column("P13", [DCMI_ODD], countdown(23, 2), { x: S.dcmi.x + 1, y: S.dcmi.y, side: "left", labelAt: "right" }),
+  ...column("P11", [ETH_ODD], countup(1, 13, 2), { x: S.eth.x, y: S.eth.y, side: "right", labelAt: "left" }),
+  ...column("P11", [ETH_EVEN], countup(2, 14, 2), { x: S.eth.x + 1, y: S.eth.y, side: "right", labelAt: "left" }),
+  ...column("P1", [SPI2], countup(1, 11, 2), { x: S.spi.x, y: S.spi.y, side: "right", labelAt: "left" }),
+  ...column("P1", [SPI1], countup(2, 12, 2), { x: S.spi.x + 1, y: S.spi.y, side: "right", labelAt: "left" }),
+  ...column("P9", [SAI_A], countup(1, 15, 2), { x: S.sai.x, y: S.sai.y, side: "right", labelAt: "left" }),
+  ...column("P9", [SAI_B], countup(2, 16, 2), { x: S.sai.x + 1, y: S.sai.y, side: "right", labelAt: "left" }),
+  ...line("P12", [FMC_ODD], countdown(19, 2), { x: S.fmc.x, y: S.fmc.y, side: "bottom", labelAt: "top" }),
+  ...line("P12", [FMC_EVEN], countdown(20, 2), { x: S.fmc.x, y: S.fmc.y + 1, side: "bottom", labelAt: "top" }),
+  ...line("P10", [ULPI_ODD], countdown(19, 2), { x: S.ulpi.x, y: S.ulpi.y, side: "bottom", labelAt: "top" }),
+  ...line("P10", [ULPI_EVEN], countdown(20, 2), { x: S.ulpi.x, y: S.ulpi.y + 1, side: "bottom", labelAt: "top" }),
+  ...LCD7_A.map((row, i) => pinOf("P15", row, { x: FFC_PINS.x + i, y: FFC_PINS.rowA, side: "bottom", labelAt: "top" })),
+  ...LCD7_B.map((row, i) => pinOf("P15", row, { x: FFC_PINS.x + i, y: FFC_PINS.rowB, side: "bottom", labelAt: "bottom" })),
+  ...column("CN2", [CN2], countup(1, 8), { x: S.cn2.x, y: S.cn2.y, side: "left", labelAt: "right" }),
+  ...column("CN3", [CN3], countup(1, 6), { x: S.cn3.x, y: S.cn3.y, side: "left", labelAt: "right" }),
+  ...column("CN1", [CN1], countdown(10), { x: S.cn1.x, y: S.cn1.y, side: "right", labelAt: "left" }),
+  ...column("CN4", [CN4], countdown(8), { x: S.cn4.x, y: S.cn4.y, side: "right", labelAt: "left" }),
+  ...line("CN5", [ICSP_ODD], [5, 3, 1], { x: S.icsp.x, y: S.icsp.y, side: "top", labelAt: "top" }),
+  ...line("CN5", [ICSP_EVEN], [6, 4, 2], { x: S.icsp.x, y: S.icsp.y + 1, side: "bottom", labelAt: "bottom" }),
+  { id: "VBAT", label: "VBAT", ...cellAt(onModule(POWER_JMP.vbat.pin)), side: "bottom", labelAt: "bottom", kind: "power", signal: "VBAT", connector: "P16", connectorPin: 8, note: "Backup-domain supply (1.65–3.6 V): with the POWER JMP's VBAT cap off, a battery here keeps the RTC and backup registers through a power cut", printed: true },
+  { id: "VREF+", label: "VREF+", ...cellAt(onModule(POWER_JMP.vref.pin)), side: "bottom", labelAt: "bottom", kind: "power", signal: "VREF+", connector: "P16", connectorPin: 34, note: "The ADC and DAC reference: the POWER JMP's VREF+ cap ties it to the 3.3 V rail, fitted as shipped. With the cap off, a reference wired here sets the full scale of every conversion (1.7 V to VDDA, and within 1.2 V of it: DS10916 Table 63); left open, the converters have none", printed: true },
+  { id: "BOOT0", label: "BOOT0", ...cellAt(onModule(MODULE_PAD.boot0)), side: "left", labelAt: "left", kind: "digital", signal: "BOOT0", connector: "P17", connectorPin: 69, note: "The module's pad P17-69, printed BOOT0, the one place the pin is brought out; through 10 kΩ (MCU.R1) to the boot switch's common: FLASH grounds it, SYSTEM lifts it to 3.3 V (the ST bootloader is not modelled: the core idles in system memory)", printed: true },
   ...pinStrip("P18", P18, 1, "right"),
   ...pinStrip("P19", P19, 0, "right"),
   ...pinStrip("P20", P20, 0, "left"),

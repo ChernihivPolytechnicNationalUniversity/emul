@@ -1,4 +1,4 @@
-import { bodyCrossings, DIR, GRID, objectPins, ownBodies, routeObstacles, unionOf, type Direction, type Point, type Rect } from "./geometry"
+import { DIR, GRID, objectPins, ownBodies, routeObstacles, unionOf, type Direction, type Point, type Rect } from "./geometry"
 import { getDef } from "./registry"
 import type { LegacyWire, PlacedObject } from "./types"
 import { clearPath, type Box } from "./wires/clear-path"
@@ -32,47 +32,6 @@ export function corners(input: readonly Point[]): Point[] {
     if (out.length === pts.length) return out
     pts = out
   }
-}
-
-function stepAt(pts: readonly Point[]): Point[] {
-  const [p, s, n] = pts
-  const corner = (n ? n.x === s.x : true) ? { x: s.x, y: p.y } : { x: p.x, y: s.y }
-  return [p, corner, ...pts.slice(1)]
-}
-
-function slideAt(pts: readonly Point[]): Point[] {
-  const [p, s, n, m] = pts
-  if (!n || !m || diagonal(s, n)) return stepAt(pts)
-  const moved = n.x === s.x ? { x: p.x, y: n.y } : { x: n.x, y: p.y }
-  return diagonal(moved, m) ? stepAt(pts) : [p, moved, ...pts.slice(3)]
-}
-
-function atBothEnds(pts: readonly Point[], fix: (pts: readonly Point[]) => Point[]): Point[] {
-  let out = corners(pts)
-  if (out.length > 1 && diagonal(out[0], out[1])) out = corners(fix(out))
-  const n = out.length
-  if (n > 1 && diagonal(out[n - 2], out[n - 1])) out = corners(fix([...out].reverse()).reverse())
-  return out
-}
-
-function orthogonal(pts: readonly Point[]): Point[] {
-  const out: Point[] = []
-  for (const p of pts) {
-    const last = out[out.length - 1]
-    if (last && diagonal(last, p)) out.push({ x: p.x, y: last.y })
-    out.push(p)
-  }
-  return corners(out)
-}
-
-export const hasDiagonal = (pts: readonly Point[]) => pts.some((p, i) => i > 0 && diagonal(pts[i - 1], p))
-
-export function frozenCandidates(route: readonly Point[], bodies: Rect[]): Point[][] {
-  if (!hasDiagonal(route)) return [corners(route)]
-  const step = orthogonal(atBothEnds(route, stepAt))
-  const slide = orthogonal(atBothEnds(route, slideAt))
-  if (slide.length === step.length && slide.every((p, i) => same(p, step[i]))) return [step]
-  return bodyCrossings(slide, bodies) <= bodyCrossings(step, bodies) ? [slide, step] : [step]
 }
 
 export function wirePins(objects: readonly PlacedObject[]): WirePin[] {

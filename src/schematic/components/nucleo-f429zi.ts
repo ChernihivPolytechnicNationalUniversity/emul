@@ -159,7 +159,6 @@ function header(connector: string, side: Side, firstRow: number, outer: Row[], i
         side,
         labelAt,
         kind: kindOf(label, mcu),
-        stub: left ? Math.round(at.x) : WIDTH - Math.round(at.x),
         mcu,
         signal,
         fn,
@@ -180,8 +179,8 @@ const VCP = { y: -1.3, tx: 43.87, rx: 54.03 }
 const pins: PinDef[] = [
   // The ST-LINK's virtual COM port: USART3 of the target on PD8/PD9, reachable over the USB
   // cable on a real board; here as two pins beside CN1 for a serial terminal.
-  { id: "VCP-TX", label: "VCP TX", ...cell({ x: VCP.tx, y: VCP.y }), side: "top", labelAt: "left", kind: "digital", stub: 1, mcu: "PD8", signal: "STLK_RX", fn: "USART3_TX", note: "Target → host; connect to a terminal's RX", printed: true },
-  { id: "VCP-RX", label: "VCP RX", ...cell({ x: VCP.rx, y: VCP.y }), side: "top", labelAt: "right", kind: "digital", stub: 1, mcu: "PD9", signal: "STLK_TX", fn: "USART3_RX", note: "Host → target; connect to a terminal's TX", printed: true },
+  { id: "VCP-TX", label: "VCP TX", ...cell({ x: VCP.tx, y: VCP.y }), side: "top", labelAt: "left", kind: "digital", mcu: "PD8", signal: "STLK_RX", fn: "USART3_TX", note: "Target → host; connect to a terminal's RX", printed: true },
+  { id: "VCP-RX", label: "VCP RX", ...cell({ x: VCP.rx, y: VCP.y }), side: "top", labelAt: "right", kind: "digital", mcu: "PD9", signal: "STLK_TX", fn: "USART3_RX", note: "Host → target; connect to a terminal's TX", printed: true },
   ...header("CN8", "left", ZIO.cn8, CN8_OUTER, CN8_INNER),
   ...header("CN9", "left", ZIO.cn9, CN9_OUTER, CN9_INNER),
   ...header("CN7", "right", ZIO.cn7 + CN7_SHIFT, CN7_OUTER, CN7_INNER),

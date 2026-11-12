@@ -12,7 +12,7 @@ import { HALF_CELL, onLattice, pointKey, seededIds, type WirePin, type WireSegme
 import { routeThroughBends, type RouteEnd } from "./wires/router"
 import { wiringOf } from "./wire-edits"
 
-export { corners, frozenCandidates, isJunction, JUNCTION, wirePins } from "./freeze"
+export { corners, isJunction, JUNCTION, wirePins } from "./freeze"
 
 const same = (p: Point, q: Point) => p.x === q.x && p.y === q.y
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { examples } from "@/schematic/examples"
-import { GRID, intersects, objectPins, objectRect, Router, snap } from "@/schematic/geometry"
+import { GRID, intersects, objectPins, objectRect, snap } from "@/schematic/geometry"
+import { routeBetween } from "@/schematic/wires/router"
 import { bodyBounds, contactCheck, contourOf, designatorRects, footprints, freeOffset, freeSpot, landingOffset, nearestFreeWithin, placementCheck, ringsToClear, type PlacementScene } from "@/schematic/placement"
 import { allDefs, getDef } from "@/schematic/registry"
 import type { LegacyWire as Wire, PlacedObject } from "@/schematic/types"
@@ -465,7 +466,7 @@ describe("wires keep off the words", () => {
     const q = part("q", "crystal", 0, 0)
     const g = part("g", "oscillator", 0, 4)
     const wire: Wire = { id: "w", from: { object: "q", pin: "1" }, to: { object: "g", pin: "VCC" } }
-    const [route] = new Router(designatorRects).routeAll([q, g], [wire], GRID)
+    const route = { pts: routeBetween({ objects: [q, g], wires: [], parts: {} }, { pin: wire.from }, { pin: wire.to }) ?? [] }
     const labels = designatorRects(q, GRID)
     const enters = (r: { x: number; y: number; w: number; h: number }) =>
       route.pts.some((p, i) => i > 0 && Math.min(p.y, route.pts[i - 1].y) < r.y + r.h && Math.max(p.y, route.pts[i - 1].y) > r.y && Math.min(p.x, route.pts[i - 1].x) < r.x + r.w && Math.max(p.x, route.pts[i - 1].x) > r.x)

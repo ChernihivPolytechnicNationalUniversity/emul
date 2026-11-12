@@ -23,8 +23,8 @@ function pinsOf(p: OpampPreset): PinDef[] {
     { id: "IN-", label: "−", x: 1, y: 2, side: "left", labelAt: "right", kind: "analog", ...on(dip?.inn), note: "Inverting input" },
     { id: "IN+", label: "+", x: 1, y: 4, side: "left", labelAt: "right", kind: "analog", ...on(dip?.inp), note: "Non-inverting input" },
     { id: "OUT", label: "", x: 5, y: 3, side: "right", labelAt: "left", kind: "analog", ...on(dip?.out), note: "Output" },
-    { id: "V+", label: "", x: 3, y: 2, side: "top", labelAt: "bottom", kind: "power", stub: 2, ...on(dip?.vcc), note: "Positive supply" },
-    { id: "V-", label: "", x: 3, y: 4, side: "bottom", labelAt: "top", kind: "power", stub: 2, ...on(dip?.vee), note: "Negative supply, or ground on a single supply" },
+    { id: "V+", label: "", x: 3, y: 2, side: "top", labelAt: "bottom", kind: "power", ...on(dip?.vcc), note: "Positive supply" },
+    { id: "V-", label: "", x: 3, y: 4, side: "bottom", labelAt: "top", kind: "power", ...on(dip?.vee), note: "Negative supply, or ground on a single supply" },
   ]
 }
 

@@ -149,7 +149,7 @@ describe("Open746I-C pin strips follow the board geometry", () => {
       const x = STRIP_COLUMNS[layout.side][odd ? "odd" : "even"]
       const y = layout.top + (layout.reversed ? STRIP_ROWS - 1 - row : row)
       const labelAt = odd ? layout.side : layout.side === "left" ? "right" : "left"
-      expect.soft(actual, expected.id).toMatchObject({ x, y, side: layout.side, stub: odd ? 2 : 3, labelAt })
+      expect.soft(actual, expected.id).toMatchObject({ x, y, side: layout.side, labelAt })
       expect.soft(Number.isInteger(actual.x) && Number.isInteger(actual.y), `${expected.id} lies on the grid`).toBe(true)
     }
   })

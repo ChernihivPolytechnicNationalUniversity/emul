@@ -1,4 +1,4 @@
-import { framePoint, intersects, objectPins, objectRect, orientationOf, placedText, routeBox, Router, standsOnItsDiagonal, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
+import { framePoint, intersects, objectPins, objectRect, orientationOf, placedText, routeBox, standsOnItsDiagonal, unionOf, type Point, type Rect, type RoutedWire } from "./geometry"
 import { getDef } from "./registry"
 import { BoxIndex, BUCKET_CELLS } from "./spatial"
 import { PointGrid } from "./contacts"
@@ -74,8 +74,6 @@ export function designatorRects(object: PlacedObject, grid: number): readonly Re
   labelCache.set(object, { grid, rects })
   return rects
 }
-
-export const fieldRouter = () => new Router(designatorRects)
 
 export type { Lead }
 
@@ -488,13 +486,11 @@ export function ringsToClear(scene: PlacementScene, moving: readonly PlacedObjec
   if (!taken.length || !carried.length) return 0
   const bounds = unionOf(taken)
   const area = unionOf(carried)
-  let longestStub = 1
-  for (const o of moving) for (const { pin } of objectPins(o, scene.grid)) longestStub = Math.max(longestStub, pin.stub ?? 1)
-  const stub = longestStub * scene.grid
-  const x = area.x + from.x - stub
-  const y = area.y + from.y - stub
-  const w = area.w + stub * 2
-  const h = area.h + stub * 2
+  const margin = scene.grid
+  const x = area.x + from.x - margin
+  const y = area.y + from.y - margin
+  const w = area.w + margin * 2
+  const h = area.h + margin * 2
   const cells = Math.min(bounds.x + bounds.w - x, x + w - bounds.x, bounds.y + bounds.h - y, y + h - bounds.y) / scene.grid
   return Math.max(0, Math.floor(cells)) + 1
 }

@@ -26,8 +26,6 @@ export type PinDef = {
   /** Where the label sits relative to the pin. */
   labelAt: Side
   kind: PinKind
-  /** Wire stub length in cells before routing starts (default 1). */
-  stub?: number
   /** MCU pin name, e.g. PA5. */
   mcu?: string
   /** Board signal name, e.g. SPI_A_SCK. */
