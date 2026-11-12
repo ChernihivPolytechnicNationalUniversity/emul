@@ -10,15 +10,16 @@ import { columnCode, rowCode } from "./sheet"
 
 export type RouteEnd = { readonly pin: PinRef } | { readonly at: Point }
 
-export type RerouteRefusal = { readonly refused: "no-clean-path"; readonly at: Point }
+export type RerouteRefusal = { readonly refused: "no-clean-path" | "no-way"; readonly at: Point }
 
 export const REROUTE_REFUSED: Record<RerouteRefusal["refused"], { title: string; why: string }> = {
   "no-clean-path": { title: "Not re-routed", why: "Every way between the wire's ends would run along another net's wire, pass over its pin or bend on it, so the wire stays as it was." },
+  "no-way": { title: "Not re-routed", why: "Every other way between the wire's ends would leave a pin backwards, cross a part or a header's sockets, or come back over itself, so the wire stays as it was." },
 }
 
 export const isRerouteRefusal = (value: unknown): value is RerouteRefusal => typeof value === "object" && value !== null && "refused" in value
 
-export type RouteAround = { readonly ignore?: ReadonlySet<string>; readonly extra?: readonly WireSegment[]; readonly taken?: ReadonlySet<string>; readonly stops?: readonly Point[] }
+export type RouteAround = { readonly ignore?: ReadonlySet<string>; readonly extra?: readonly WireSegment[]; readonly taken?: ReadonlySet<string>; readonly stops?: readonly Point[]; readonly passable?: (pin: WirePin) => boolean }
 
 type Box = { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
 
@@ -142,11 +143,15 @@ type End = { readonly at: Point; readonly pin?: WirePin; readonly header?: Heade
 
 type Slip = { readonly landing: Point; readonly heading: number; readonly points: readonly Point[]; readonly cost: number }
 
-type Context = { readonly wiring: Wiring; readonly ignore: ReadonlySet<string>; readonly extra: readonly WireSegment[]; readonly taken: ReadonlySet<string>; readonly stops: readonly Point[] }
+type Context = { readonly wiring: Wiring; readonly ignore: ReadonlySet<string>; readonly extra: readonly WireSegment[]; readonly taken: ReadonlySet<string>; readonly stops: readonly Point[]; readonly passable: (pin: WirePin) => boolean }
 
 const NOTHING_TAKEN: ReadonlySet<string> = new Set()
 
-const contextOf = (wiring: Wiring, around: RouteAround): Context => ({ wiring, ignore: around.ignore ?? new Set(), extra: around.extra ?? [], taken: around.taken ?? NOTHING_TAKEN, stops: around.stops ?? [] })
+const NO_PIN_PASSABLE = () => false
+
+const contextOf = (wiring: Wiring, around: RouteAround): Context => ({ wiring, ignore: around.ignore ?? new Set(), extra: around.extra ?? [], taken: around.taken ?? NOTHING_TAKEN, stops: around.stops ?? [], passable: around.passable ?? NO_PIN_PASSABLE })
+
+const pinsAt = (context: Context, p: Point) => context.wiring.index.at(p).filter((pin) => !context.passable(pin))
 
 const keyOf = (ref: PinRef) => `${ref.object}:${ref.pin}`
 
@@ -363,7 +368,7 @@ function fieldOf(context: Context, box: Box, ends: readonly End[]): Field {
   for (let y = box.y; y <= y1; y += HALF_CELL) for (const s of sheet.along(rowCode(y), box.x, x1)) if (!ignore.has(s.id)) field.wire(s)
   for (let x = box.x; x <= x1; x += HALF_CELL) for (const s of sheet.along(columnCode(x), box.y, y1)) if (!ignore.has(s.id)) field.wire(s)
   for (const s of extra) field.wire(s)
-  for (const p of wiring.index.within(box)) field.pin(p, context.taken.has(p.key))
+  for (const p of wiring.index.within(box)) if (!context.passable(p)) field.pin(p, context.taken.has(p.key))
   for (const at of context.stops) field.pin({ key: "", at }, true)
   for (const end of ends) if (end.header) field.zone(end.header)
   for (const body of bodiesNear(wiring, box)) {
@@ -405,7 +410,7 @@ function crossingsOn(context: Context, a: Point, b: Point, own: Point): number {
     for (const s of wiring.sheet.along(line, span[0], span[1])) if (!ignore.has(s.id) && !meet(s)) return -1
   }
   for (const s of extra) if (!meet(s)) return -1
-  for (const p of wiring.index.within(box)) if (!near(p.at, own)) return -1
+  for (const p of wiring.index.within(box)) if (!near(p.at, own) && !context.passable(p)) return -1
   for (const at of context.stops) if (!near(at, own) && meetings(a, b, at, at).length) return -1
   for (const body of bodiesNear(wiring, box)) {
     if (runsThrough({ a, b }, body)) return -1
@@ -443,7 +448,7 @@ function slipsAt(context: Context, end: End): SlipAt[] {
         continue
       }
       if (!segmentClear(context, back, landing, pin.at)) continue
-      if (wiresTouching(context, landing).length || context.wiring.index.at(landing).length) continue
+      if (wiresTouching(context, landing).length || pinsAt(context, landing).length) continue
       found.push({ side, landing, half, back, k, crossings })
       break
     }
@@ -469,7 +474,7 @@ function escapesFrom(context: Context, end: End): Escape[] {
     const landing = route[route.length - 1]
     if (route.length < 2 || !isWhole(landing)) return
     for (let i = 1; i < route.length; i++) if (!segmentClear(context, route[i - 1], route[i], end.at)) return
-    if (wiresTouching(context, landing).length || context.wiring.index.at(landing).length) return
+    if (wiresTouching(context, landing).length || pinsAt(context, landing).length) return
     const corners = route.slice(1, -1)
     const last = route[route.length - 2]
     const heading = dirIndex({ x: Math.sign(landing.x - last.x), y: Math.sign(landing.y - last.y) })
@@ -871,12 +876,19 @@ export function rerouted(doc: Schematic, segment: string, newId: NewId, known?: 
   if (samePoint(a, b)) return withSegments(doc, [], run.segments, [a], newId)
   const [from, to] = runEnds(wiring, run.points)
   const route = routeAround(wiring, from, to, { ignore: new Set(run.segments.map((s) => s.id)) })
-  if (!route) return { refused: "no-clean-path", at: a }
+  if (!route) return { refused: blockedByAnotherNet(wiring, run, from, to) ? "no-clean-path" : "no-way", at: a }
   if (sameRoute(route, run.points) || sameRoute([...route].reverse(), run.points)) return doc
   const color = wiring.segmentsById.get(segment)?.color
   const laid: WireSegment[] = []
   for (let i = 1; i < route.length; i++) laid.push(color ? { id: newId(), a: route[i - 1], b: route[i], color } : { id: newId(), a: route[i - 1], b: route[i] })
   return withSegments(doc, laid, run.segments, [a, b], newId)
+}
+
+function blockedByAnotherNet(wiring: Wiring, run: { readonly segments: readonly WireSegment[] }, from: RouteEnd, to: RouteEnd): boolean {
+  const own = wiring.view.netOfSegment(run.segments[0].id)
+  const ignore = new Set(run.segments.map((s) => s.id))
+  for (const s of wiring.segmentsById.values()) if (wiring.view.netOfSegment(s.id) !== own) ignore.add(s.id)
+  return !!routeAround(wiring, from, to, { ignore, passable: (pin) => !pin.socket && wiring.view.netOfPin(pin.key) !== own })
 }
 
 export function reroutedRuns(doc: Schematic, segments: Iterable<string>, newId: NewId, known?: Wiring): { doc: Schematic; refused: RerouteRefusal | null } {
