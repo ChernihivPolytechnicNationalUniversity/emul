@@ -1097,6 +1097,13 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
   React.useLayoutEffect(() => showCut(pending?.d ?? null), [pending, showCut])
 
+  const pressOnWire = (runId: string, world: Point): Point | null => {
+    const run = runById.get(runId)
+    if (!run) return null
+    const id = segmentNearest(run, world)
+    return pressedOn(run.segments.find((segment) => segment.id === id)!, world, backReach())
+  }
+
   const endUnder = (clientX: number, clientY: number): DrawEnd => {
     const under = targetAt(clientX, clientY)
     const world = toWorld(clientX, clientY)
@@ -1105,16 +1112,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       const pin = wiring.sheet.pin(key)
       if (pin) return { kind: "pin", key, at: pin.at }
     }
-    if (under?.kind === "wire") {
-      const run = runById.get(under.id)
-      if (run) {
-        const id = segmentNearest(run, world)
-        const s = run.segments.find((segment) => segment.id === id)!
-        const on = pressedOn(s, world, backReach())
-        if (on) return drawEndAt(wiring, on)
-      }
-    }
-    return drawEndAt(wiring, snapPoint(world))
+    const on = under?.kind === "wire" ? pressOnWire(under.id, world) : null
+    return drawEndAt(wiring, on ?? snapPoint(world))
   }
 
   const openEndNear = (clientX: number, clientY: number): DrawEnd | null => {
@@ -1206,6 +1205,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       if (refusal?.refused === "off-lattice") toast.error(NOT_ON_THE_LATTICE.title, { description: NOT_ON_THE_LATTICE.why })
       if (!refusal || refusal.refused === "off-lattice") return
     }
+    const pressed = targetAt(clientX, clientY)
+    if (pressed?.kind === "wire" && !pressOnWire(pressed.id, toWorld(clientX, clientY))) return
     const under = endUnder(clientX, clientY)
     if (!sch.junction(under.at)) return
     startAt(under, "click")
@@ -1631,6 +1632,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   }, [onKey, onCopy, onCut, onPaste])
 
   const shownCue = continueCue && !pending && wiring.dangling.some((p) => samePoint(p, continueCue.at)) ? continueCue : null
+  const lineModeAt = pending?.d.cursor ?? wireArmed
   const cursor = panning ? "cursor-grabbing" : spaceHeld ? "cursor-grab" : armed ? "cursor-copy" : "cursor-precise"
   const probeReading = sim.probe(PROBE_ID)
   const { selectedObjects, selectedWires, doc: schDoc, setPart } = sch
@@ -2004,13 +2006,13 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               />
               <OpenEndCue cue={shownCue} reach={openEndReach(grid, scale)} grid={grid} scale={scale} />
               <PendingWireLayer pending={pendingLook} grid={grid} scale={scale} part="marks" />
-              {pending && (
+              {lineModeAt && (
                 <div
                   data-slot="line-mode"
                   className="pointer-events-none absolute rounded-sm border border-border bg-popover px-1 leading-none text-popover-foreground tabular-nums shadow-sm"
-                  style={{ left: pending.d.cursor.x + 12 / scale, top: pending.d.cursor.y + 12 / scale, fontSize: 11 / scale, paddingTop: 2 / scale, paddingBottom: 2 / scale, borderWidth: 1 / scale }}
+                  style={{ left: lineModeAt.x + 12 / scale, top: lineModeAt.y + 12 / scale, fontSize: 11 / scale, paddingTop: 2 / scale, paddingBottom: 2 / scale, borderWidth: 1 / scale }}
                 >
-                  {lineModeTag(pending.d.mode ?? lineMode)}
+                  {lineModeTag(pending?.d.mode ?? lineMode)}
                 </div>
               )}
               {armed && armedAt && <PlacementGhost defId={armed} at={armedAt} grid={grid} scale={scale} detail={detail} sim={simStore} colorOf={colorOf} raster={symbolRaster} />}
