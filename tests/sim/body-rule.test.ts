@@ -130,7 +130,7 @@ describe("the final body audit", () => {
       doc, getDef, snap, grid: GRID, crypto: { randomUUID: newId }, placedObject, wireCheck, freeSpot: () => at(0, 0),
       bodyRefusal: bodies.bodyRefusal,
       setDoc: (fn: (d: Schematic) => Schematic) => { doc = fn(doc) },
-      nextRef: () => "R1", setSelectedObjects: () => {}, setSelectedWires: () => {},
+      nextRef: () => "R1", setSelectedObjects: () => {}, setWireSelection: () => {}, selectingWires: () => {},
     })
     add("resistor", at(2, 1), { onRefused: refused })
     expect(doc).toBe(before)

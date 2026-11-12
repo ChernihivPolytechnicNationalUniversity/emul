@@ -578,7 +578,7 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
       const add = sourceCallback<(def: string, center: Point) => PlacedObject>("src/schematic/use-schematic.ts", "add", {
         doc, getDef, snap, grid: GRID, crypto: { randomUUID: () => "R3" }, placedObject, wireCheck, freeSpot,
         setDoc: (fn: (d: Schematic) => Schematic) => { doc = fn(doc) },
-        nextRef: () => "R3", setSelectedObjects: () => {}, setSelectedWires: () => {},
+        nextRef: () => "R3", setSelectedObjects: () => {}, setWireSelection: () => {}, selectingWires: () => {},
       })
       let loaded = () => {}
       const click = sourceCallback<(e: { clientX: number; clientY: number; shiftKey: boolean; altKey: boolean }, def: string) => void>("src/components/field/DotField.tsx", "placeArmed", {

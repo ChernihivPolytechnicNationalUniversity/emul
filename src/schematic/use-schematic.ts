@@ -25,7 +25,7 @@ import { flipSelection, rotateSelection } from "./orient"
 import { flippedWithWires, TurnRun, type Landed } from "./rubber-band"
 import { drawnTo, isRefusal, type DrawEnd, type Drawing, type DrawRefusal, type Near } from "./wire-draw"
 import { junctionAt, type JunctionRefusal } from "./junction-tool"
-import { inRect } from "./wire-select"
+import { carriedSelection, inRect, pressesGoOn, type SelectionWiring, type TurnPresses } from "./wire-select"
 import { withFieldMoved, type FieldKey } from "./fields"
 import type { SpatialIndex } from "./spatial"
 import { WireGraph } from "./wires/graph"
@@ -181,6 +181,13 @@ export function pastedInto(doc: Schematic, clip: Clip, dx: number, dy: number, i
   return doc
 }
 
+type WireSelection = { readonly wires: ReadonlySet<string>; readonly of: SelectionWiring }
+
+const selectingWires = (next: ReadonlySet<string> | ((wires: ReadonlySet<string>) => ReadonlySet<string>)) => (selection: WireSelection): WireSelection => {
+  const wires = typeof next === "function" ? next(selection.wires) : next
+  return wires === selection.wires ? selection : { wires, of: selection.of }
+}
+
 /** Schematic document plus selection and undo history. All coordinates are world px. */
 export function useSchematic(grid: number) {
   const [history, setHistory] = React.useState<History>(() => ({ past: [], present: emptySchematic(), future: [], edits: 0 }))
@@ -193,9 +200,15 @@ export function useSchematic(grid: number) {
     wiringNow.current = wiring
   }, [wiring])
   const [selectedObjects, setSelectedObjects] = React.useState<ReadonlySet<string>>(() => new Set())
-  const [selectedWires, setSelectedWires] = React.useState<ReadonlySet<string>>(() => new Set())
+  const [wireSelection, setWireSelection] = React.useState<WireSelection>(() => ({ wires: new Set(), of: wiring }))
+  let carried = wireSelection
+  if (carried.of !== wiring) {
+    carried = { wires: carriedSelection(carried.wires, carried.of, wiring), of: wiring }
+    setWireSelection(carried)
+  }
+  const selectedWires = carried.wires
   const edits = history.edits
-  const turning = React.useRef<{ ids: string; run: TurnRun; doc: Schematic } | null>(null)
+  const turning = React.useRef<(TurnPresses & { run: TurnRun }) | null>(null)
 
   const setDoc = React.useCallback(
     (fn: (d: Schematic) => Schematic, opts: { silent?: boolean } = {}) => {
@@ -211,12 +224,9 @@ export function useSchematic(grid: number) {
 
   const commitFrom = React.useCallback((base: Schematic, next: Schematic) => setDoc((d) => (d === base ? next : d)), [setDoc])
 
-  /** Selection survives undo only for things that still exist. */
   const pruneSelection = React.useCallback((d: Schematic) => {
     const objects = new Set(d.objects.map((o) => o.id))
-    const wires = new Set(d.wires.map((w) => w.id))
     setSelectedObjects((s) => new Set([...s].filter((id) => objects.has(id))))
-    setSelectedWires((s) => new Set([...s].filter((id) => wires.has(id))))
   }, [])
 
   // Part state and firmware projects are live rather than edits: they are not undone, so
@@ -260,7 +270,7 @@ export function useSchematic(grid: number) {
       if (next === doc) return
       setDoc((d) => d === doc ? next : placedObject(d, obj, undefined, options))
       setSelectedObjects(new Set([obj.id]))
-      setSelectedWires(new Set())
+      setWireSelection(selectingWires(new Set()))
       return obj
     },
     [doc, grid, setDoc],
@@ -269,7 +279,7 @@ export function useSchematic(grid: number) {
   const remove = React.useCallback((objects: ReadonlySet<string>, wires: ReadonlySet<string>) => {
     setDoc((d) => removed(d, objects, wires))
     setSelectedObjects((s) => new Set([...s].filter((id) => !objects.has(id))))
-    setSelectedWires((s) => new Set([...s].filter((id) => !wires.has(id))))
+    setWireSelection(selectingWires((s) => new Set([...s].filter((id) => !wires.has(id)))))
   }, [setDoc])
 
   const removeSelected = React.useCallback(
@@ -280,7 +290,7 @@ export function useSchematic(grid: number) {
   const clear = React.useCallback(() => {
     setDoc(emptySchematic)
     setSelectedObjects(new Set())
-    setSelectedWires(new Set())
+    setWireSelection(selectingWires(new Set()))
   }, [setDoc])
 
   const replace = React.useCallback(
@@ -295,9 +305,7 @@ export function useSchematic(grid: number) {
         { silent: true },
       )
       const objects = new Set(next.objects.map((o) => o.id))
-      const wires = new Set(next.wires.map((w) => w.id))
       setSelectedObjects((s) => ([...s].every((id) => objects.has(id)) ? s : new Set([...s].filter((id) => objects.has(id)))))
-      setSelectedWires((s) => ([...s].every((id) => wires.has(id)) ? s : new Set([...s].filter((id) => wires.has(id)))))
     },
     [setDoc],
   )
@@ -308,11 +316,11 @@ export function useSchematic(grid: number) {
     const modules = checkedLibrary(library)
     setHistory((h) => ({ past: [], present: { ...rest, objects: next.objects.map(checked), ...(modules && { library: modules }) }, future: [], edits: h.edits }))
     setSelectedObjects(new Set())
-    setSelectedWires(new Set())
+    setWireSelection(selectingWires(new Set()))
   }, [])
 
   const selectObject = React.useCallback((id: string, toggle = false) => {
-    setSelectedWires(new Set())
+    setWireSelection(selectingWires(new Set()))
     setSelectedObjects((s) => {
       if (!toggle) return s.has(id) ? s : new Set([id])
       const next = new Set(s)
@@ -324,7 +332,7 @@ export function useSchematic(grid: number) {
 
   const selectWires = React.useCallback((ids: readonly string[], toggle = false) => {
     setSelectedObjects(new Set())
-    setSelectedWires((s) => {
+    setWireSelection(selectingWires((s) => {
       if (!toggle) return ids.every((id) => s.has(id)) && s.size === ids.length ? s : new Set(ids)
       const next = new Set(s)
       const all = ids.every((id) => next.has(id))
@@ -333,17 +341,17 @@ export function useSchematic(grid: number) {
         else next.add(id)
       }
       return next
-    })
+    }))
   }, [])
 
   const selectAll = React.useCallback(() => {
     setSelectedObjects(new Set(doc.objects.map((o) => o.id)))
-    setSelectedWires(new Set(doc.wires.map((w) => w.id)))
+    setWireSelection(selectingWires(new Set(doc.wires.map((w) => w.id))))
   }, [doc])
 
   const deselectAll = React.useCallback(() => {
     setSelectedObjects(new Set())
-    setSelectedWires(new Set())
+    setWireSelection(selectingWires(new Set()))
   }, [])
 
   const selectInRect = React.useCallback(
@@ -351,7 +359,7 @@ export function useSchematic(grid: number) {
       if (!rect) return
       const picked = inRect(doc, rect, grid)
       setSelectedObjects(new Set(picked.objects))
-      setSelectedWires(new Set(picked.wires))
+      setWireSelection(selectingWires(new Set(picked.wires)))
     },
     [doc, grid],
   )
@@ -434,12 +442,12 @@ export function useSchematic(grid: number) {
   const rotate = React.useCallback(
     (ids: ReadonlySet<string>, turn: Turn, index?: SpatialIndex, wires: ReadonlySet<string> = new Set()): Landed | null => {
       if (!ids.size && !wires.size) return null
-      const key = [...[...ids].sort(), "|", ...[...wires].sort()].join("\u0000")
+      const objects = [...ids].sort().join("\u0000")
       const known = turning.current
-      const run = known && known.ids === key && known.doc === doc ? known.run : new TurnRun(doc, wiring, ids, index, wires)
+      const run = known && pressesGoOn(known, objects, wires, doc, wiring) ? known.run : new TurnRun(doc, wiring, ids, index, wires)
       const landed = run.turned(turn)
       if (landed.refused) return landed
-      turning.current = { ids: key, run, doc: landed.doc }
+      turning.current = { objects, wires, of: wiring, run, doc: landed.doc }
       commitFrom(doc, landed.doc)
       return landed
     },
@@ -483,7 +491,7 @@ export function useSchematic(grid: number) {
       const next = drawnTo(doc, wiring, drawing, target, undefined, near)
       if (isRefusal(next)) return next
       commitFrom(doc, next)
-      setSelectedWires(new Set())
+      setWireSelection(selectingWires(new Set()))
       return null
     },
     [doc, wiring, commitFrom],
@@ -526,7 +534,7 @@ export function useSchematic(grid: number) {
       const next = tapWireAt(doc, segmentId, at, from, points, color, undefined, wiring)
       if (next === doc) return false
       setDoc((d) => (d === doc ? next : tapWireAt(d, segmentId, at, from, points, color)))
-      setSelectedWires(new Set())
+      setWireSelection(selectingWires(new Set()))
       return true
     },
     [doc, wiring, setDoc],
@@ -557,7 +565,7 @@ export function useSchematic(grid: number) {
       if (next === doc) return false
       setDoc((d) => d === doc ? next : into(d))
       setSelectedObjects(new Set(ids.values()))
-      setSelectedWires(new Set())
+      setWireSelection(selectingWires(new Set()))
       return true
     },
     [doc, grid, setDoc],

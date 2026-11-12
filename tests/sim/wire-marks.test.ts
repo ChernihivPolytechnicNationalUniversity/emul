@@ -65,6 +65,7 @@ function layer(doc: Schematic, scale = 1) {
       grid: GRID,
       scale,
       selected: new Set<string>(),
+      plates: [],
       hoveredNet: null,
       colorOf,
       netOfWire: (id: string) => w.nets.netOfWire(id),

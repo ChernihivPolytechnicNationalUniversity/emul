@@ -7,6 +7,7 @@ import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-c
 import { CASING_PX, casingTrim, casingWidth, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_HIT_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
 import { wireMarks } from "./wire-marks"
 import type { WireFlow } from "./wire-flow"
+import type { WirePlate } from "./wire-plate"
 
 
 const HANDLE_CELLS = 0.15
@@ -18,6 +19,7 @@ type WireLayerProps = {
   grid: number
   scale: number
   selected: ReadonlySet<string>
+  plates: readonly WirePlate[]
   hoveredNet: string | null
   colorOf: (wireId: string) => WireColorKey
   netOfWire: (wireId: string) => string | undefined
@@ -43,6 +45,7 @@ export const WireLayer = React.memo(function WireLayer({
   grid,
   scale,
   selected,
+  plates,
   hoveredNet,
   colorOf,
   netOfWire,
@@ -64,25 +67,41 @@ export const WireLayer = React.memo(function WireLayer({
 
   const groups = React.useMemo(() => groupByNet(routes, netOfWire), [routes, netOfWire])
   const paths = React.useMemo(() => new Map(routes.map((r) => [r.id, runPath(r.pts, radius, r.leads)])), [routes, radius])
+  const platedEnds = React.useMemo(() => {
+    const ends = new Set<string>()
+    for (const plate of plates) {
+      if (plate.start) ends.add(`${plate.run}:start`)
+      if (plate.end) ends.add(`${plate.run}:end`)
+    }
+    return ends
+  }, [plates])
   const patches = React.useMemo(
     () => [
-      ...routes.flatMap((r) => [r.leads?.start && toPath([r.leads.start, towards(r.pts[0], r.leads.start, -WIRE_PX * px)]), r.leads?.end && toPath([r.leads.end, towards(r.pts[r.pts.length - 1], r.leads.end, -WIRE_PX * px)])].filter((d): d is string => !!d)),
-      ...corners.map((c) => toPath([c.a, c.at, c.b])),
+      ...routes.flatMap((r) => [
+        r.leads?.start && { d: toPath([r.leads.start, towards(r.pts[0], r.leads.start, -WIRE_PX * px)]), plated: platedEnds.has(`${r.id}:start`) },
+        r.leads?.end && { d: toPath([r.leads.end, towards(r.pts[r.pts.length - 1], r.leads.end, -WIRE_PX * px)]), plated: platedEnds.has(`${r.id}:end`) },
+      ].filter((patch): patch is { d: string; plated: boolean } => !!patch)),
+      ...corners.map((c) => ({ d: toPath([c.a, c.at, c.b]), plated: false })),
     ],
-    [routes, corners, px],
+    [routes, corners, px, platedEnds],
   )
   const pathOf = (id: string) => paths.get(id) ?? ""
   const trim = casingTrim(grid)
   const casings = React.useMemo(() => new Map(routes.map((r) => [r.id, toPath(trimRouteEnds(r.pts, trim), radius)])), [routes, radius, trim])
   const casingOf = (id: string) => casings.get(id) ?? ""
+  const tints = React.useMemo(() => {
+    const byRun = new Map<string, WirePlate[]>()
+    for (const plate of plates) byRun.set(plate.run, [...(byRun.get(plate.run) ?? []), plate])
+    return byRun
+  }, [plates])
   const widthOf = (id: string) => (selected.has(id) ? SELECTED_WIRE_PX : WIRE_PX)
 
   return (
     <svg data-slot="wires" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
       {patches.length > 0 && (
         <g data-slot="pin-turns" pointerEvents="none">
-          {patches.map((d, i) => (
-            <path key={i} d={d} fill="none" stroke="var(--background)" strokeWidth={WIRE_PX + CASING_PX} strokeLinecap="butt" strokeLinejoin="miter" vectorEffect="non-scaling-stroke" />
+          {patches.map(({ d, plated }, i) => (
+            <path key={i} d={d} fill="none" stroke={plated ? "var(--selection-tint)" : "var(--background)"} strokeWidth={WIRE_PX + CASING_PX} strokeLinecap="butt" strokeLinejoin="miter" vectorEffect="non-scaling-stroke" />
           ))}
           {corners.map((c) => (
             <path key={`${c.at.x},${c.at.y}`} data-corner={`${c.at.x},${c.at.y}`} d={`M${c.a.x} ${c.a.y} Q${c.at.x} ${c.at.y} ${c.b.x} ${c.b.y}`} fill="none" className="stroke-foreground" strokeWidth={WIRE_PX} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
@@ -97,20 +116,30 @@ export const WireLayer = React.memo(function WireLayer({
           style={{ transition: "opacity 120ms" }}
         >
           <g mask={BODY_MASK}>
-          {wires.map((route) => (
-            <path
-              key={route.id}
-              data-wire={route.id}
-              data-casing=""
-              d={casingOf(route.id)}
-              fill="none"
-              stroke={selected.has(route.id) ? "var(--selection-tint)" : "var(--background)"}
-              strokeWidth={casingWidth(widthOf(route.id))}
-              strokeLinejoin="round"
-              strokeLinecap="butt"
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
+          {wires.map((route) => {
+            const tint = tints.get(route.id) ?? []
+            const whole = tint.some((plate) => plate.whole)
+            const casing = (key: string, d: string, tinted: boolean) => (
+              <path
+                key={key}
+                data-wire={route.id}
+                data-casing=""
+                d={d}
+                fill="none"
+                stroke={tinted ? "var(--selection-tint)" : "var(--background)"}
+                strokeWidth={casingWidth(widthOf(route.id))}
+                strokeLinejoin="round"
+                strokeLinecap="butt"
+                vectorEffect="non-scaling-stroke"
+              />
+            )
+            return (
+              <React.Fragment key={route.id}>
+                {casing(route.id, casingOf(route.id), whole)}
+                {!whole && tint.map((plate) => casing(plate.key, plate.casing, true))}
+              </React.Fragment>
+            )
+          })}
           </g>
           {wires.map((route) => {
             const d = pathOf(route.id)

@@ -5,6 +5,7 @@ import type { WireColorKey } from "@/schematic/wire-colors"
 import { paintField } from "./field-paint"
 import type { WireMarks } from "./wire-marks"
 import { useThemeName } from "./field-palette"
+import type { WirePlate } from "./wire-plate"
 import { deviceScale, MAX_CANVAS_PX, rasterBucket, type SymbolRaster } from "./symbol-raster"
 
 type FieldCanvasProps = {
@@ -18,14 +19,16 @@ type FieldCanvasProps = {
   raster: SymbolRaster
   selectedObjects?: ReadonlySet<string>
   selectedWires?: ReadonlySet<string>
+  plates?: readonly WirePlate[]
   marks?: WireMarks
   /** A search is on: these objects stay bright, the rest of the field dims. */
   lit?: ReadonlySet<string> | null
 }
 
 const NONE: ReadonlySet<string> = new Set()
+const NO_PLATES: readonly WirePlate[] = []
 
-export function FieldCanvas({ objects, routes, view, grid, scale, colorOf, netOf, raster, selectedObjects = NONE, selectedWires = NONE, marks, lit = null }: FieldCanvasProps) {
+export function FieldCanvas({ objects, routes, view, grid, scale, colorOf, netOf, raster, selectedObjects = NONE, selectedWires = NONE, plates = NO_PLATES, marks, lit = null }: FieldCanvasProps) {
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const bucket = rasterBucket(scale)
   const theme = useThemeName()
@@ -44,8 +47,8 @@ export function FieldCanvas({ objects, routes, view, grid, scale, colorOf, netOf
     if (!context) return
 
     context.clearRect(0, 0, width, height)
-    paintField(context, canvas, { objects, routes, view, grid, pixels, device, theme, colorOf, netOf, raster, selection: { objects: selectedObjects, wires: selectedWires }, marks, lit })
-  }, [objects, routes, view, grid, bucket, theme, colorOf, netOf, raster, selectedObjects, selectedWires, marks, lit])
+    paintField(context, canvas, { objects, routes, view, grid, pixels, device, theme, colorOf, netOf, raster, selection: { objects: selectedObjects, wires: selectedWires, plates }, marks, lit })
+  }, [objects, routes, view, grid, bucket, theme, colorOf, netOf, raster, selectedObjects, selectedWires, plates, marks, lit])
 
   if (view.w <= 0) return null
   return (

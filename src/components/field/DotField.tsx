@@ -60,9 +60,9 @@ import { Button } from "@/components/ui/button"
 const CodePanel = React.lazy(() => import("@/components/code/CodePanel").then((m) => ({ default: m.CodePanel })))
 const HdlPanel = React.lazy(() => import("@/components/hdl/HdlPanel").then((m) => ({ default: m.HdlPanel })))
 import { ComponentView } from "./ComponentView"
-import { SelectionLayer, type WirePlate } from "./SelectionLayer"
+import { SelectionLayer } from "./SelectionLayer"
+import { wirePlates as platesOf } from "./wire-plate"
 import { BodyMask } from "./BodyMask"
-import { runPath } from "@/schematic/wire-look"
 import { MeasureLayer } from "./MeasureLayer"
 import { PinLayer } from "./PinLayer"
 import { FieldReadout, type RunEnds, ProbeReadout, type HoverTarget } from "./Readout"
@@ -70,7 +70,7 @@ import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
 import { FieldCanvas } from "./FieldCanvas"
 import { marksBesideTheBand, wireMarks } from "./wire-marks"
-import { dotRadius, OPEN_END_CELLS, openEndReach, WIRE_HIT_PX, wireCornerRadius } from "./wire-style"
+import { casingTrim, dotRadius, OPEN_END_CELLS, openEndReach, WIRE_HIT_PX, wireCornerRadius } from "./wire-style"
 import { exportPng } from "./export-image"
 import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
@@ -1625,13 +1625,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   )
   const wirePlates = React.useMemo(() => {
     const routeOf = new Map(visibleRoutes.map((r) => [r.id, r]))
-    return [...selectedRuns].flatMap((id): WirePlate[] => {
-      const run = runById.get(id)
-      const route = routeOf.get(id)
-      if (!run || !route) return []
-      if (run.segments.every((s) => selectedWires.has(s.id))) return [{ key: id, run: id, d: runPath(route.pts, wireCornerRadius(grid), route.leads), whole: true }]
-      return run.segments.filter((s) => selectedWires.has(s.id)).map((s) => ({ key: s.id, run: id, d: `M${s.a.x} ${s.a.y} L${s.b.x} ${s.b.y}`, whole: false }))
-    })
+    const runs = [...selectedRuns].flatMap((id) => runById.get(id) ?? [])
+    return platesOf(runs, (id) => routeOf.get(id), selectedWires, wireCornerRadius(grid), casingTrim(grid))
   }, [selectedRuns, selectedWires, runById, visibleRoutes, grid])
   // --- field explorer --------------------------------------------------------
   const isPhone = useIsMobile()
@@ -1928,9 +1923,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               </div>
               {detail.canvas ? (
                 <>
-                  <FieldCanvas objects={staticObjects} routes={staticRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} netOf={nets.netOfWire} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} marks={staticMarks} lit={lit} />
+                  <FieldCanvas objects={staticObjects} routes={staticRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} netOf={nets.netOfWire} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} plates={wirePlates} marks={staticMarks} lit={lit} />
                   <div ref={dragLayerRef} data-slot="field-drag-layer" className="pointer-events-none absolute top-0 left-0">
-                    {lifted.size > 0 && <FieldCanvas objects={liftedObjects} routes={liftedRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} netOf={nets.netOfWire} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} marks={liftedMarks} />}
+                    {lifted.size > 0 && <FieldCanvas objects={liftedObjects} routes={liftedRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} netOf={nets.netOfWire} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} plates={wirePlates} marks={liftedMarks} />}
                   </div>
                 </>
               ) : (
@@ -1948,6 +1943,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 grid={grid}
                 scale={scale}
                 selected={selectedRuns}
+                plates={wirePlates}
                 hoveredNet={hoveredNet}
                 colorOf={colorOf}
                 netOfWire={nets.netOfWire}
