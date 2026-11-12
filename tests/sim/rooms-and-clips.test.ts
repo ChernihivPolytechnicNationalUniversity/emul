@@ -184,7 +184,9 @@ describe("the clipboard carries the version, its wires as segments, and nothing 
     const clip = (segments: WireSegment[]) => JSON.stringify({ emul: { objects: [], wires: [], segments, parts: {} }, version: SCHEMATIC_VERSION })
     const overlapping = clipFromClipboard(clip([{ id: "a", a: { x: 0, y: 0 }, b: { x: 4 * GRID, y: 0 } }, { id: "b", a: { x: 2 * GRID, y: 0 }, b: { x: 6 * GRID, y: 0 } }]))
     expect.soft(overlapping?.clip.wires.map((s) => [s.a.x, s.b.x]), "two overlapping wires merged into one").toEqual([[0, 6 * GRID]])
-    expect.soft(clipFromClipboard(clip([{ id: "d", a: { x: 0, y: 0 }, b: { x: GRID, y: GRID } }])), "a diagonal wire: no clip").toBeNull()
+    expect.soft(clipFromClipboard(clip([{ id: "d", a: { x: 0, y: 0 }, b: { x: GRID, y: 5 } }])), "a wire with an end off the half-cell lattice: no clip").toBeNull()
+    const diagonal = { id: "d", a: { x: 0, y: 0 }, b: { x: 2 * GRID, y: GRID } }
+    expect.soft(clipFromClipboard(clip([diagonal]))?.clip.wires, "a diagonal between lattice points is a wire since phase 7 (design.md §6.11 rule 3): the clip keeps it").toEqual([diagonal])
     expect.soft(clipFromClipboard(clip([{ id: "d", a: { x: 0, y: 0 }, b: { x: GRID, y: 0 } }, { id: "d", a: { x: 0, y: GRID }, b: { x: GRID, y: GRID } }])), "two wires with one id: no clip").toBeNull()
   })
 

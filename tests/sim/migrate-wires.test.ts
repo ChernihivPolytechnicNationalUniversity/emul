@@ -481,9 +481,12 @@ describe("every old file still opens, and the same way in every tab (findings 3.
 
   it("a file this version cannot read says why; one stamped now but out of normal form opens in it", async () => {
     const r = (id: string, x: number): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: 0, props: { ref: id } })
-    const diagonal: Schematic = { objects: [r("R1", 0)], wires: [{ id: "d", a: { x: 0, y: 0 }, b: { x: GRID, y: GRID } }], parts: {} }
-    const refused = await openedFile(await projectFile("diagonal", diagonal), "diagonal.emul")
-    expect.soft("failure" in refused && refused.failure, "the reason, with the wire").toMatch(/^diagonal\.emul could not be brought up to this version of εmul: .*\bd\b/)
+    const offLattice: Schematic = { objects: [r("R1", 0)], wires: [{ id: "d", a: { x: 0, y: 0 }, b: { x: GRID, y: 5 } }], parts: {} }
+    const refused = await openedFile(await projectFile("off-lattice", offLattice), "off-lattice.emul")
+    expect.soft("failure" in refused && refused.failure, "the reason, with the wire").toMatch(/^off-lattice\.emul could not be brought up to this version of εmul: .*\bd\b/)
+    const slant = { id: "d", a: { x: 0, y: 0 }, b: { x: 2 * GRID, y: GRID } }
+    const diagonal = await openedFile(await projectFile("diagonal", { objects: [r("R1", 4)], wires: [slant], parts: {} }), "diagonal.emul")
+    expect.soft("doc" in diagonal && { wires: diagonal.doc.wires, notes: diagonal.notes }, "a diagonal between lattice points opens as drawn, nothing to say (design.md §6.11 rules 3 and 13)").toEqual({ wires: [slant], notes: [] })
     expect.soft(await openedFile(new Blob(["not a project"]), "notes.txt"), "not a project").toEqual({ failure: "notes.txt: not an .emul project or a zipped STM32 project." })
     const overlapping: Schematic = { objects: [], wires: [{ id: "a", a: { x: 0, y: 0 }, b: { x: 4 * GRID, y: 0 } }, { id: "b", a: { x: 2 * GRID, y: 0 }, b: { x: 6 * GRID, y: 0 } }], parts: {} }
     const opened = await openedFile(await projectFile("overlapping", overlapping), "overlapping.emul")
