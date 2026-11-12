@@ -168,17 +168,21 @@ DAEs): every node is tied through a conductance g to an anchor — the companion
 pseudo-time — and Newton solves the anchored step. A pseudo-step that settles within 10 iterations (SPICE's ITL4)
 moves the anchor to its solution and divides g by 4; one that does not is retried from the anchor with g sixteen
 times larger (SPICE cuts a time step that fails by 8). It starts at 1 S from where the span began and stops once g
-is below GMIN, the leak every node already has, or after 100 pseudo-steps; Newton alone then solves the step from
-the last anchor. The anchors are the parasitic capacitance the model leaves out, and where a circuit missing it
+is below GMIN, the leak every node already has, after 200 pseudo-steps (twice the most a switch of the astable took),
+or when a pseudo-step fails below 100 · GMIN — there a node held by GMIN alone, a floating subcircuit, is as badly
+conditioned with the anchor as without it, and more pseudo-steps change nothing. Newton alone (10 iterations) then
+solves the step from the last anchor; failing that, the step keeps its least-moving iterate as before. The anchors are the parasitic capacitance the model leaves out, and where a circuit missing it
 jumps is defined by what small parasitic capacitances would do (Sastry & Desoer, 1981); at the end they carry no
 current, so the result is a root of the step's own equations. The switch lands in the step the fold falls in,
 which places the edge to within a step, and a step Newton settles is not touched.
 
 Before, such a step kept the iterate that had moved least, which is no solution: the capacitors took their charge
 and current from it, the next step started from the last operating point that had settled (the memo, from before
-the switch), and the transistor astable of `tests/sim/astable-solver.test.ts` drifted by +19…+265 µs a
-half-period and sometimes switched back. A switch now costs about 250 factorizations, fewer than the six failed
-steps of 60 iterations it used to take.
+the switch), and the transistor astable of `tests/sim/astable-solver.test.ts` drifted by +19…+405 µs a
+half-period and sometimes switched back; an NE555 with TRIG left open held it at 5000 V (0.5 µA into GMIN). A
+switch now costs about 250 factorizations, fewer than the six failed steps of 60 iterations it used to take; a
+floating circuit whose failures the fallback cannot cure pays about a tenth more (`tests/sim/physics.test.ts`, the
+regulator grounded while it runs).
 
 ## Buzzers
 
