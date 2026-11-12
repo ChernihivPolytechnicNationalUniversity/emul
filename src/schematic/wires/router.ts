@@ -570,6 +570,7 @@ function stepCosts(field: Field, startCell: number, targetCell: number, startOut
     if (heading === START && cell === startCell && startOut >= 0 && step === opposite(startOut)) return BLOCKED
     const next = field.neighbour(cell, step)
     if (next < 0) return OUTSIDE
+    if (next === startCell) return BLOCKED
     const horizontal = step % 2 === 0
     const edge = step === 0 || step === 1 ? cell : next
     if ((horizontal ? field.hBlock : field.vBlock)[edge]) return BLOCKED
@@ -706,9 +707,26 @@ function chosen(from: End, to: End, found: Search): Point[] | null {
     if (!tail) continue
     candidate([...s.points, ...tail.points], 0.5, false, true, isEndSlip(tail, ends))
   }
-  if (!candidates.length) return null
-  candidates.sort((a, b) => b.ok - a.ok || Number(b.axis) - Number(a.axis) || a.first - b.first || compareLists(a.points, b.points))
-  return candidates[0].points
+  const clean = candidates.filter((c) => !comesBack(c.points))
+  if (!clean.length) return null
+  clean.sort((a, b) => b.ok - a.ok || Number(b.axis) - Number(a.axis) || a.first - b.first || compareLists(a.points, b.points))
+  return clean[0].points
+}
+
+function comesBack(points: readonly Point[]): boolean {
+  const seen = new Set([`${points[0].x},${points[0].y}`])
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]
+    const b = points[i]
+    const dx = Math.sign(b.x - a.x) * HALF_CELL
+    const dy = Math.sign(b.y - a.y) * HALF_CELL
+    for (let k = 1; k <= halfStepsOf(a, b); k++) {
+      const code = `${a.x + dx * k},${a.y + dy * k}`
+      if (seen.has(code)) return true
+      seen.add(code)
+    }
+  }
+  return false
 }
 
 const isEndSlip = (tail: Tail, ends: readonly Slip[]) => ends.some((e) => e.points.length > 0 && tail.points.length >= e.points.length && e.points.every((p, i) => near(tail.points[tail.points.length - e.points.length + i], p)))
