@@ -831,7 +831,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (band.size) setBanded(band)
     drag.begin({
       ...planMove(content, docObjects, EMPTY_IDS, EMPTY_IDS, toWorld(e.clientX, e.clientY), grid),
-      rubber: rubberFor(content, (dx, dy) => segmentDrag.frame(dx, dy), band),
+      rubber: rubberFor(content, (dx, dy) => segmentDrag.frame(dx, dy), band, { ...carriedCover([], grid), runsNear: runsNear(sch.doc.wires, (segment) => wiring.runBySegment.get(segment), grid) }),
     })
   })
 
@@ -1959,6 +1959,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               <div ref={overlayRef} data-slot="dot-field-overlay" className="contents">
                 {children}
               </div>
+              <svg data-slot="conflict-glow" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
+                <g data-band="" />
+                <PendingWireLayer pending={pendingLook} grid={grid} scale={scale} part="glow" />
+              </svg>
               {detail.canvas ? (
                 <>
                   <FieldCanvas objects={staticObjects} routes={staticRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} netOf={nets.netOfWire} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} marks={staticMarks} lit={lit} />

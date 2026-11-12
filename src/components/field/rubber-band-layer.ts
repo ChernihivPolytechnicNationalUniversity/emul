@@ -1,6 +1,6 @@
 import { runsOf, type Run } from "@/schematic/circuit"
 import { boxesMeet, segmentBox } from "@/schematic/body-crossing"
-import { bendsOf, dragConflictMarks } from "@/schematic/conflict-marks"
+import { bendsOf, dragConflictMarks, type Stretch } from "@/schematic/conflict-marks"
 import { BoxIndex } from "@/schematic/spatial"
 import { BODY_EDGE_CELLS, BODY_MASK, type BodyMaskShapes, type CarriedCover } from "./body-mask"
 import type { Point, Rect } from "@/schematic/geometry"
@@ -12,7 +12,7 @@ import { onLattice, pointKey, samePoint, type WirePin, type WireSegment } from "
 import type { WireSheet } from "@/schematic/wires/sheet"
 import { SELECTION_BANDS } from "./selection-geometry"
 import { conflictGlowPaths, leadPatchPaths, wireCasingPath, wireStrokePath } from "./wire-paths"
-import { CASING_PX, casingWidth, CONFLICT_PX, WIRE_PX } from "./wire-style"
+import { CASING_PX, casingWidth, CONFLICT_PX, glowCutWidth, WIRE_PX } from "./wire-style"
 
 const SVG_NS = "http://www.w3.org/2000/svg"
 
@@ -238,7 +238,7 @@ export class RubberBandLayer {
   private layer: SVGGElement | null = null
   private readonly always: ReadonlySet<string>
   private readonly cover: BandCover | undefined
-  private carried: { defs: SVGDefsElement; shifted: SVGGElement } | null = null
+  private carried: { defs: SVGDefsElement; shifted: SVGGElement; glowing: SVGGElement } | null = null
   private readonly coveredCasings = new Map<string, SVGElement[]>()
 
   constructor(root: ParentNode, look: RubberLook, always: ReadonlySet<string> = new Set(), cover?: BandCover) {
@@ -248,8 +248,8 @@ export class RubberBandLayer {
     this.cover = cover
   }
 
-  private carriedMask(): SVGGElement | null {
-    if (this.carried?.defs.isConnected) return this.carried.shifted
+  private carriedMask(): { shifted: SVGGElement; glowing: SVGGElement } | null {
+    if (this.carried?.defs.isConnected) return this.carried
     const svg = this.host()?.parentNode
     if (!this.cover || !svg) return null
     const defs = document.createElementNS(SVG_NS, "defs")
@@ -257,21 +257,25 @@ export class RubberBandLayer {
     const everywhere = svgElement("rect", { ...EVERYWHERE, fill: "white" })
     const shifted = document.createElementNS(SVG_NS, "g")
     appendMaskShapes(shifted, this.cover.shapes, Math.max(BODY_EDGE_CELLS * this.look.grid, 2 * CASINGS_KEEP_OFF_PX * this.look.pixel()))
-    mask.append(everywhere, shifted)
+    const glowing = document.createElementNS(SVG_NS, "g")
+    mask.append(everywhere, shifted, glowing)
     defs.append(mask)
     svg.append(defs)
-    this.carried = { defs, shifted }
-    return shifted
+    this.carried = { defs, shifted, glowing }
+    return this.carried
   }
 
-  private coverCarried(offset: Point) {
+  private coverCarried(offset: Point, glow: readonly string[], glowing: readonly Stretch[]) {
     const cover = this.cover
-    const shifted = cover && this.carriedMask()
-    if (!cover || !shifted) return
-    shifted.setAttribute("transform", `translate(${offset.x} ${offset.y})`)
-    const reach = Math.max(this.look.grid, (CASINGS_KEEP_OFF_PX + casingWidth(WIRE_PX)) * this.look.pixel())
+    const mask = cover && this.carriedMask()
+    if (!cover || !mask) return
+    mask.shifted.setAttribute("transform", `translate(${offset.x} ${offset.y})`)
+    const px = this.look.pixel()
+    mask.glowing.replaceChildren(...glow.map((d) => svgElement("path", { d, fill: "none", stroke: "black", "stroke-width": glowCutWidth(px), "stroke-linecap": "round", "stroke-linejoin": "round" })))
+    const reach = Math.max(this.look.grid, (CASINGS_KEEP_OFF_PX + casingWidth(WIRE_PX)) * px)
+    const grown = (box: Rect, by: Point) => ({ x: box.x + by.x - reach, y: box.y + by.y - reach, w: box.w + 2 * reach, h: box.h + 2 * reach })
     const near = new Set<string>()
-    for (const box of cover.boxes) for (const run of cover.runsNear({ x: box.x + offset.x - reach, y: box.y + offset.y - reach, w: box.w + 2 * reach, h: box.h + 2 * reach })) near.add(run)
+    for (const box of [...cover.boxes.map((b) => grown(b, offset)), ...glowing.map((s) => grown(boxOfPoints(s), ORIGIN))]) for (const run of cover.runsNear(box)) near.add(run)
     for (const [run, casings] of this.coveredCasings) {
       if (near.has(run) && casings.every((c) => c.isConnected)) continue
       for (const casing of casings) casing.removeAttribute("mask")
@@ -292,6 +296,10 @@ export class RubberBandLayer {
     this.carried = null
   }
 
+  private glowHost(): SVGGElement | null {
+    return this.root.querySelector<SVGGElement>("[data-slot=conflict-glow] > g[data-band]")
+  }
+
   private host(): SVGGElement | null {
     if (this.layer?.isConnected) return this.layer
     this.layer = this.root.querySelector<SVGGElement>("[data-slot=rubber-band] > g")
@@ -300,7 +308,6 @@ export class RubberBandLayer {
 
   show(frame: DragFrame, offset: Point = ORIGIN) {
     const band = bandOf(frame, this.look, this.always)
-    this.coverCarried(offset)
     for (const [id, saved] of this.hidden) {
       if (band.lifted.has(id)) continue
       for (const { element, display } of saved) element.style.display = display
@@ -313,7 +320,10 @@ export class RubberBandLayer {
       this.hidden.set(id, saved)
     }
     this.hideMarks(band.covered)
-    this.paint(band.wires, frame.blocked, band.marks, bandGlow(frame, band.wires, this.look.grid))
+    const glowing = frame.blocked ? dragConflictMarks(frame, undefined, this.look.grid).stretches : []
+    const glow = glowing.length ? conflictGlowPaths(glowing, bendsOf(band.wires.map((w) => w.pts)), this.look.grid) : []
+    this.coverCarried(offset, glow, glowing)
+    this.paint(band.wires, frame.blocked, band.marks, glow)
   }
 
   clear() {
@@ -360,17 +370,19 @@ export class RubberBandLayer {
     layer.replaceChildren()
     layer.toggleAttribute("data-blocked", blocked)
     const { grid } = this.look
+    const px = this.look.pixel()
+    this.glowHost()?.replaceChildren(...(glow.length ? [conflictGlow(glow, px)] : []))
     const casings = document.createElementNS(SVG_NS, "g")
     casings.setAttribute("mask", BODY_MASK)
-    if (this.carried) {
-      const offCarried = document.createElementNS(SVG_NS, "g")
-      offCarried.setAttribute("mask", CARRIED_MASK)
-      offCarried.append(casings)
-      layer.append(offCarried)
-    } else layer.append(casings)
+    let outer: SVGGElement = casings
+    if (this.carried) outer = wrapped(outer, CARRIED_MASK)
+    else if (glow.length) {
+      layer.append(glowCut(glow, px))
+      outer = wrapped(outer, GLOW_CUT_MASK)
+    }
+    layer.append(outer)
     for (const wire of wires) casings.append(stroked(wireCasingPath(wire, grid), "var(--background)", casingWidth(WIRE_PX), "butt"))
     for (const wire of wires) for (const d of leadPatchPaths(wire, this.look.pixel())) layer.append(stroked(d, "var(--background)", WIRE_PX + CASING_PX, "butt", "miter"))
-    if (glow.length) layer.append(conflictGlow(glow, this.look.pixel()))
     for (const wire of wires) {
       const path = stroked(wireStrokePath(wire, grid), wireColorVar(wire.color), WIRE_PX, "round")
       path.setAttribute("data-points", wire.pts.map((p) => `${p.x},${p.y}`).join(" "))
@@ -405,6 +417,31 @@ function appendMaskShapes(parent: SVGGElement, shapes: BodyMaskShapes, width: nu
   for (const points of shapes.bodies) parent.append(svgElement("polygon", { points: points.map((p) => `${p.x},${p.y}`).join(" "), ...black }))
   for (const [a, b] of shapes.leads) parent.append(svgElement("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, ...black }))
   for (const r of shapes.texts) parent.append(svgElement("rect", { x: r.x, y: r.y, width: r.w, height: r.h, ...black }))
+}
+
+function boxOfPoints(points: readonly Point[]): Rect {
+  const xs = points.map((p) => p.x)
+  const ys = points.map((p) => p.y)
+  const x = Math.min(...xs)
+  const y = Math.min(...ys)
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y }
+}
+
+const GLOW_CUT_ID = "rubber-band-glow-cut"
+
+const GLOW_CUT_MASK = `url(#${GLOW_CUT_ID})`
+
+function wrapped(inner: SVGGElement, mask: string): SVGGElement {
+  const outer = svgElement("g", { mask })
+  outer.append(inner)
+  return outer
+}
+
+function glowCut(paths: readonly string[], px: number): SVGMaskElement {
+  const mask = svgElement("mask", { id: GLOW_CUT_ID, maskUnits: "userSpaceOnUse", ...EVERYWHERE })
+  mask.append(svgElement("rect", { ...EVERYWHERE, fill: "white" }))
+  for (const d of paths) mask.append(svgElement("path", { d, fill: "none", stroke: "black", "stroke-width": glowCutWidth(px), "stroke-linecap": "round", "stroke-linejoin": "round" }))
+  return mask
 }
 
 function conflictGlow(paths: readonly string[], px: number): SVGGElement {

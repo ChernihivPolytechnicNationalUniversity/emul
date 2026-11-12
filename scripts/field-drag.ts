@@ -271,7 +271,7 @@ async function farDropAndWireCopy(page: Page) {
   await page.mouse.move(below.x, below.y, { steps: 8 })
   await page.waitForTimeout(250)
   const refusedPreview = await countOf(page, "[data-slot^=pending-wire][data-refused]")
-  const refusedGlow = await countOf(page, "[data-slot=pending-wire-route] [data-conflict] path")
+  const refusedGlow = await countOf(page, "[data-slot=conflict-glow] [data-slot=pending-wire-glow] path")
   await page.mouse.click(below.x, below.y)
   await page.waitForTimeout(400)
   await page.keyboard.press("Escape")

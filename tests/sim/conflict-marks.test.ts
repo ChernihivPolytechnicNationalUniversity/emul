@@ -241,28 +241,37 @@ describe("the glow is drawn under exactly the marked stretches, joined where the
   })
 })
 
-describe("the pending wire keeps its own colour and glows under the refused stretch only", () => {
-  const html = (conflict?: readonly Stretch[]) =>
+describe("the pending wire keeps its own colour and glows under the refused stretch only, beneath the parts, its casing cut there", () => {
+  const html = (part: "route" | "glow", conflict?: readonly Stretch[]) =>
     renderToStaticMarkup(
       React.createElement(PendingWireLayer, {
         pending: { points: [at(7, 7), at(7, 11), at(15, 11)], corners: [], color: "blue", refused: !!conflict, landing: false, conflict },
         grid: GRID,
         scale: 2,
-        part: "route",
+        part,
       }),
     )
+  const lying = [[at(7, 11), at(15, 11)]]
 
-  it("refused: one glow under the lying leg, the dashes still blue, nothing red", () => {
-    const refused = html([[at(7, 11), at(15, 11)]])
-    expect.soft(refused, "the glow group").toContain("data-conflict")
-    expect.soft(refused.match(/stroke="var\(--conflict\)"/g)?.length, "one glowing path").toBe(1)
-    expect.soft(refused, "the wire's colour").toContain("var(--wire-blue)")
-    expect.soft(refused, "no red").not.toContain("--destructive")
-    expect.soft(refused, "the glow sized for this zoom").toContain("--conflict-px:0.5px")
+  it("refused: one glow under the lying leg, drawn in the glow layer and sized for this zoom", () => {
+    const glow = html("glow", lying)
+    expect.soft(glow, "the glow group").toContain('data-slot="pending-wire-glow"')
+    expect.soft(glow.match(/stroke="var\(--conflict\)"/g)?.length, "one glowing path").toBe(1)
+    expect.soft(glow, "the glow sized for this zoom").toContain("--conflict-px:0.5px")
   })
 
-  it("allowed: no glow at all", () => {
-    expect.soft(html(), "plain").not.toContain("data-conflict")
+  it("refused: the route keeps its blue dashes, no red, no glow of its own, and its casing is cut where the glow is so nothing white sits over it", () => {
+    const route = html("route", lying)
+    expect.soft(route, "the wire's colour").toContain("var(--wire-blue)")
+    expect.soft(route, "no red").not.toContain("--destructive")
+    expect.soft(route, "the glow is not in the route").not.toContain("var(--conflict)")
+    expect.soft(route, "the casing under a cut").toContain('mask="url(#pending-wire-glow-cut)"')
+    expect.soft(route.match(/stroke="black"/g)?.length, "one cut, along the glow").toBe(1)
+  })
+
+  it("allowed: no glow, no cut", () => {
+    expect.soft(html("glow"), "nothing in the glow layer").toBe("")
+    expect.soft(html("route"), "plain casing").not.toContain("glow-cut")
   })
 })
 
