@@ -476,8 +476,7 @@ const PRIMARY_BEND = BEND * PRIMARY
 
 const slipCost = (s: SlipAt) => 2 * PRIMARY_BEND + s.crossings * CROSSING * PRIMARY + (2 * s.k + 2)
 
-function search(context: Context, from: End, to: End, box: Box, startSlips: readonly SlipAt[], endSlips: readonly SlipAt[], startEscapes: readonly Escape[], endEscapes: readonly Escape[]): Search {
-  const field = fieldOf(context, box, [from, to])
+function search(field: Field, from: End, to: End, startSlips: readonly SlipAt[], endSlips: readonly SlipAt[], startEscapes: readonly Escape[], endEscapes: readonly Escape[]): Search {
   const states = field.cols * field.rows * HEADINGS
   const g = new Float64Array(states).fill(Infinity)
   const startCell = field.cellOf(from.at)
@@ -764,9 +763,11 @@ export function routeAround(wiring: Wiring, from: RouteEnd, to: RouteEnd, around
   const endEscapes = escapesFrom(context, b)
   if ((!isWhole(a.at) && !startEscapes.length) || (!isWhole(b.at) && !endEscapes.length)) return null
   const reach = [a.at, b.at, ...startSlips.flatMap((s) => [s.landing, s.back]), ...endSlips.flatMap((s) => [s.landing, s.back]), ...startEscapes.map((e) => e.landing), ...endEscapes.map((e) => e.landing)]
-  for (let pad = FIRST_PAD_CELLS; ; pad *= 2) {
-    const found = search(context, a, b, windowAround(reach, pad), startSlips, endSlips, startEscapes, endEscapes)
-    if (Number.isFinite(found.best) || !found.overflow || pad >= LAST_PAD_CELLS) return chosen(a, b, found)
+  for (let pad = FIRST_PAD_CELLS; ; pad = Math.min(2 * pad, LAST_PAD_CELLS)) {
+    const field = fieldOf(context, windowAround(reach, pad), [a, b])
+    const found = search(field, a, b, startSlips, endSlips, startEscapes, endEscapes)
+    if (!found.overflow || pad >= LAST_PAD_CELLS) return chosen(a, b, found)
+    if (!Number.isFinite(found.best) && !search(field, b, a, endSlips, startSlips, endEscapes, startEscapes).overflow) return null
   }
 }
 

@@ -118,20 +118,20 @@ export function buildMetronome(grid: number, opts: { tempo?: string; pitch?: str
   const any = diodeX.map((x) => node(x, 37))
   const feedback = node(76, 25)
   join(j(taps[3]), j(feedback))
-  const leds = outputs.map((q, k) => {
+  const stages = outputs.map((q, k) => {
     const y = rows[k]
     const r = place("resistor", 82, y - 1, { value: "330 Ω" })
     const led = place("led", 89, y - 1, { value: "red", ref: `LED${k + 1}` })
     const d = vert("diode", diodeX[k] - 1, 31, diode)
     if (k === 0) join([u4, q], j(taps[k]))
     else via([u4, q], j(taps[k]), [fanTurns[k], 10 + k], [fanTurns[k], y])
-    join(j(taps[k]), [r, "1"])
     join([r, "2"], [led, "1"])
     join([led, "2"], j(ret[k]))
     via(k === 3 ? j(feedback) : j(taps[k]), [d, "1"], [tapX[k], stairY[k]], [diodeX[k], stairY[k]])
     join([d, "2"], j(any[k]))
-    return led
+    return { led, r }
   })
+  const leds = stages.map((stage) => stage.led)
   join(...ret.map(j))
 
   const q4 = flip(place("npn", 97, 24, bc547("Q4")))
@@ -309,6 +309,7 @@ export function buildMetronome(grid: number, opts: { tempo?: string; pitch?: str
   join([buzzer, "2"], j(neg), [q5, "D"])
   join(j(pos), j(posClamp), [dBuzz, "2"])
   join([dBuzz, "1"], j(negClamp), j(neg))
+  stages.forEach(({ r }, k) => join(j(taps[k]), [r, "1"]))
 
   return { doc, parts: { u1, u2, u3, u4, vr1, vr2, vr3, leds, sw, bat, buzzer } }
 }
