@@ -200,3 +200,21 @@ describe("the completion is offered from any start and after corners, the corner
   })
 })
 
+describe("the row taken after the fact is shown while the end is held over the socket, and the click lays what is shown (the main session's decision on review B's question 5; design.md §13.9)", () => {
+  it("R1 → RESET while D45's wire passes RESET's socket: the preview carries D45's wire on its half-cell slip, and the release lays exactly the drawn wire and that slip", () => {
+    const doc = docOf([board("nucleo-f429zi"), resistor("R4", -12, 18), resistor("R1", -6, 15)], [{ id: "d45", a: at(6, 19), b: at(-8, 19) }])
+    const wiring = wiringOf(new WireGraph(), doc)
+    const started = startDrawing(wiring, drawEndAt(wiring, at(-2, 16)))
+    if (isRefusal(started)) throw new Error(started.refused)
+    const d = pointerAt(started, at(5, 19))
+    const target = drawEndAt(wiring, at(5, 19))
+    const preview = previewOf(doc, wiring, d, target)
+    expect.soft(preview.refused, "offered").toBeNull()
+    expect.soft(preview.moved.map((m) => m.run), "D45's run moves").toEqual([wiring.runBySegment.get("d45")?.id])
+    const slip = preview.moved[0]?.points ?? []
+    expect.soft(slip.some((p) => p.y === at(0, 19.5).y || p.y === at(0, 18.5).y), `on a half row out of RESET's: ${JSON.stringify(cellsOf(slip))}`).toBe(true)
+    const after = drawnTo(doc, wiring, d, target, drawnId)
+    expect.soft(isRefusal(after) ? after.refused : halfSteps(after.wires), "the release lays the preview: the drawn wire and D45's on the slip shown").toEqual(halfSteps([...legsOf(preview.points), ...legsOf(slip)]))
+  })
+})
+

@@ -42,7 +42,9 @@ export type Drawing = {
 
 export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "body" | "socket" | "nothing"; readonly at: Point; readonly nets: readonly string[] }
 
-export type DrawPreview = { readonly points: readonly Point[]; readonly refused: DrawRefusal | null; readonly routed: boolean }
+export type MovedRun = { readonly run: string; readonly points: readonly Point[] }
+
+export type DrawPreview = { readonly points: readonly Point[]; readonly refused: DrawRefusal | null; readonly routed: boolean; readonly moved: readonly MovedRun[] }
 
 export const isRefusal = (value: unknown): value is DrawRefusal => typeof value === "object" && value !== null && "refused" in value
 
@@ -355,7 +357,7 @@ const piecesOf = (points: readonly Point[], id: string): WireSegment[] => points
 
 type Moved = { readonly run: Run; readonly points: readonly Point[] }
 
-type Plan = DrawPreview & { readonly moved: readonly Moved[] }
+type Plan = Omit<DrawPreview, "moved"> & { readonly moved: readonly Moved[] }
 
 function throughABody(doc: Schematic, points: readonly Point[], near?: Near): DrawRefusal | null {
   for (let i = 1; i < points.length; i++) {
@@ -400,8 +402,8 @@ function planOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: DrawEnd, ne
 }
 
 export function previewOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: DrawEnd, near?: Near): DrawPreview {
-  const { points, refused, routed } = planOf(doc, wiring, d, target, near)
-  return { points, refused, routed }
+  const { points, refused, routed, moved } = planOf(doc, wiring, d, target, near)
+  return { points, refused, routed, moved: moved.map((m) => ({ run: m.run.id, points: m.points })) }
 }
 
 export function withCorner(doc: Schematic, wiring: Wiring, d: Drawing, at: Point): Drawing | DrawRefusal {

@@ -34,10 +34,10 @@ import { useEvent } from "@/hooks/use-event"
 import { clipboardDefIds, clipboardText, clipFromClipboard, pasteLanding, useSchematic, type Clip } from "@/schematic/use-schematic"
 import { pressedOn, travellingWires } from "@/schematic/wire-edits"
 import { CONTACT_OPENED, DRAG_REFUSED, PartDrag, SegmentDrag, TURN_REFUSED, UNLAID, WIRE_MOVE_REFUSED, WIRES_REFUSED, type Landed } from "@/schematic/rubber-band"
-import { DEFAULT_LINE_MODE, DRAW_REFUSED, PASTE_REFUSED, backAlong, cutBack, laysClear, drawEndAt, flipPosture, isRefusal, lineModeTag, nextLineMode, pointerAt, previewOf, startDrawing, withCorner, withLineMode, withoutCorner, type CutBack, type DrawEnd, type Drawing, type DrawRefusal, type LineMode } from "@/schematic/wire-draw"
+import { DEFAULT_LINE_MODE, DRAW_REFUSED, PASTE_REFUSED, backAlong, cutBack, laysClear, drawEndAt, flipPosture, isRefusal, lineModeTag, nextLineMode, pointerAt, previewOf, startDrawing, withCorner, withLineMode, withoutCorner, type CutBack, type DrawEnd, type Drawing, type DrawRefusal, type LineMode, type MovedRun } from "@/schematic/wire-draw"
 import { crossingNear, JUNCTION_REFUSED, NOT_ON_THE_LATTICE } from "@/schematic/junction-tool"
 import { segmentNearest } from "@/schematic/wire-select"
-import type { DragFrame } from "@/schematic/wires/drag"
+import type { DragFrame, DragPiece } from "@/schematic/wires/drag"
 import { samePoint } from "@/schematic/wires/segment"
 import { announceUpgrade } from "@/hooks/use-projects"
 import { contactCheck, designatorRects, freeSpot, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
@@ -200,6 +200,7 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
 type ScreenPoint = { x: number; y: number }
 
 const EMPTY_IDS: ReadonlySet<string> = new Set()
+const NO_MOVED: readonly MovedRun[] = []
 const NO_PEERS: readonly PeerSelection[] = []
 const FIELD_OPEN_KEY = "emul.field.open"
 const savedFieldOpen = () => {
@@ -1065,38 +1066,43 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         }
       : null
 
-  const cutBand = React.useRef<{ layer: RubberBandLayer; banded: boolean; at: string } | null>(null)
-  const cutFrame = (cut: CutBack): DragFrame => ({
-    pieces: cut.kept ? [{ id: cut.kept.id, a: cut.kept.a, b: cut.kept.b, kind: "stretched", net: nets.netOfWire(cut.run) ?? cut.run, source: cut.removed[cut.removed.length - 1].id, ...(cut.kept.color && { color: cut.kept.color }) }] : [],
-    replaced: new Set(cut.removed.map((s) => s.id)),
-    pins: new Map(),
-    blocked: false,
-    conflicts: [],
-    reroutes: [],
-    joins: [],
-  })
-  const showCut = useEvent((d: Drawing | null) => {
+  const heldBand = React.useRef<{ layer: RubberBandLayer; banded: boolean; at: string; runs: string } | null>(null)
+  const heldFrame = (cut: CutBack | null, moved: readonly MovedRun[]): DragFrame => {
+    const pieces: DragPiece[] = cut?.kept ? [{ id: cut.kept.id, a: cut.kept.a, b: cut.kept.b, kind: "stretched", net: nets.netOfWire(cut.run) ?? cut.run, source: cut.removed[cut.removed.length - 1].id, ...(cut.kept.color && { color: cut.kept.color }) }] : []
+    const replaced = new Set(cut?.removed.map((s) => s.id) ?? [])
+    for (const { run: id, points } of moved) {
+      const run = runById.get(id)
+      if (!run) continue
+      for (const s of run.segments) replaced.add(s.id)
+      const source = run.segments[0]
+      for (let i = 1; i < points.length; i++) pieces.push({ id: `${id}:${i}`, a: points[i - 1], b: points[i], kind: "moved", net: nets.netOfWire(id) ?? id, source: source.id, ...(source.color && { color: source.color }) })
+    }
+    return { pieces, replaced, pins: new Map(), blocked: false, conflicts: [], reroutes: [], joins: [] }
+  }
+  const showHeld = useEvent((d: Drawing | null, moved: readonly MovedRun[]) => {
     const back = d?.back
-    const at = d && back && !samePoint(back.at, d.from.at) ? `${back.at.x},${back.at.y}` : ""
-    if (cutBand.current?.at === at) return
-    const cut = d && at ? cutBack(wiring, d) : null
+    const cutAt = d && back && !samePoint(back.at, d.from.at) ? `${back.at.x},${back.at.y}` : ""
+    const at = `${cutAt}|${moved.map((m) => `${m.run}:${m.points.map((p) => `${p.x},${p.y}`).join(" ")}`).join("|")}`
+    if ((heldBand.current?.at ?? "|") === at) return
+    const cut = d && cutAt ? cutBack(wiring, d) : null
     const content = contentRef.current
-    if (!cut || !content) {
-      if (!cutBand.current) return
-      cutBand.current.layer.clear()
-      if (cutBand.current.banded) setBanded(EMPTY_IDS)
-      cutBand.current = null
-      return
+    const runs = [...(cut ? [cut.run] : []), ...moved.map((m) => m.run)]
+    const runsKey = runs.join(" ")
+    if (heldBand.current && (heldBand.current.runs !== runsKey || !content)) {
+      heldBand.current.layer.clear()
+      if (heldBand.current.banded) setBanded(EMPTY_IDS)
+      heldBand.current = null
     }
-    if (!cutBand.current) {
-      const band: ReadonlySet<string> = detail.canvas ? new Set(runById.get(cut.run)?.segments.map((s) => s.id)) : EMPTY_IDS
+    if (!runs.length || !content) return
+    if (!heldBand.current) {
+      const band: ReadonlySet<string> = detail.canvas ? new Set(runs.flatMap((id) => runById.get(id)?.segments.map((s) => s.id) ?? [])) : EMPTY_IDS
       if (band.size) setBanded(band)
-      cutBand.current = { layer: new RubberBandLayer(content, rubberLook(), band), banded: band.size > 0, at }
+      heldBand.current = { layer: new RubberBandLayer(content, rubberLook(), band), banded: band.size > 0, at, runs: runsKey }
     }
-    cutBand.current.at = at
-    cutBand.current.layer.show(cutFrame(cut))
+    heldBand.current.at = at
+    heldBand.current.layer.show(heldFrame(cut, moved))
   })
-  React.useLayoutEffect(() => showCut(pending?.d ?? null), [pending, showCut])
+  React.useLayoutEffect(() => showHeld(pending?.d ?? null, pending && preview && !preview.refused ? preview.moved : NO_MOVED), [pending, preview, showHeld])
 
   const pressOnWire = (runId: string, world: Point): Point | null => {
     const run = runById.get(runId)
