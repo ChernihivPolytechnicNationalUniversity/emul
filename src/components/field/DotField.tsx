@@ -1505,6 +1505,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
     if ((pending || wireArmed) && matchesAny(e, KEYMAP.lineMode)) {
       e.preventDefault()
+      if (e.repeat) return
       const next = nextLineMode(lineMode)
       setLineMode(next)
       if (pending) setPending({ ...pending, d: withLineMode(pending.d, next) })
