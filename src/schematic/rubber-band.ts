@@ -335,7 +335,7 @@ export class SegmentDrag {
     const sheet = current.sheet
     this.segment = sheet.segment(segment)
     const detach = !!options.detach
-    const chain = !this.segment ? null : detach ? current.runBySegment.get(segment)?.segments ?? [this.segment] : freeChain(sheet, this.segment)
+    const chain = !this.segment ? null : detach ? [this.segment] : freeChain(sheet, this.segment)
     this.free = chain !== null
     const around = new Surroundings(doc, new Set(), [], index)
     const wires = chain ? chain.map((s) => s.id) : [segment]

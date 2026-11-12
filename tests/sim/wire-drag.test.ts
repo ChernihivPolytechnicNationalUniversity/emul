@@ -641,7 +641,7 @@ describe("the rubber band wired to the document: dragging parts and segments (de
   })
 })
 
-describe("Alt on a wire detaches it: the run moves alone, any way, and leaves what it touched (design.md §6.3; KiCad M, OrCAD Alt, Altium Ctrl+drag)", () => {
+describe("Alt on a wire detaches the segment under the pointer: it moves alone, any way, and leaves what it touched (design.md §6.3; KiCad M, OrCAD Alt, Altium Ctrl+drag)", () => {
   const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
   const by = (x: number, y: number) => [x * GRID, y * GRID] as const
   const resistor = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
@@ -695,16 +695,16 @@ describe("Alt on a wire detaches it: the run moves alone, any way, and leaves wh
     expect.soft(geometryOf(slant.doc.wires), "Alt, left and down: both at once").toEqual(geometryOf([...spine, wire(at(9, 12), at(17, 12))]))
   })
 
-  it("a whole run goes, corners and all, and the pins it left are open: Alt is the part's Alt for a wire (design.md §6.3)", () => {
+  it("only the segment under the pointer goes, as Alt moves a part alone: its neighbours stay where they were and hang open where it left them (design.md §6.3; the user, 2026-11-12)", () => {
     const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 4)], chain(at(4, 1), at(7, 1), at(7, 5), at(10, 5)))
     const upright = doc.wires.find((s) => s.a.x === s.b.x)!
-    expect.soft(new SegmentDrag(doc, wiringFor(doc), upright.id).landed(...by(0, -3)).doc, "plain, along itself: nothing moves").toBe(doc)
+    expect.soft(new SegmentDrag(doc, wiringFor(doc), upright.id).landed(...by(-4, 3)).doc.wires.length, "plain, the same press keeps the wire whole").toBe(3)
     const drag = altDrag(doc, upright.id)
-    expect.soft([...drag.touched].sort(), "the band lifts the whole run and nothing else").toEqual(doc.wires.map((s) => s.id).sort())
-    const landed = drag.landed(...by(0, -3), counter("u"))
-    expect.soft(geometryOf(landed.doc.wires), "the run three cells up, its shape kept").toEqual(geometryOf(chain(at(4, -2), at(7, -2), at(7, 2), at(10, 2))))
-    expect.soft(danglingEnds(viewOf(landed.doc)), "its ends open where they landed").toEqual([at(4, -2), at(10, 2)])
-    expect.soft(nets(landed.doc), "R1 and R2 off it").toEqual([])
+    expect.soft([...drag.touched], "the band lifts that segment and nothing else").toEqual([upright.id])
+    const landed = drag.landed(...by(-4, 3), counter("u"))
+    expect.soft(geometryOf(landed.doc.wires), "the upright moved alone, both legs where they were").toEqual(geometryOf([wire(at(4, 1), at(7, 1)), wire(at(3, 4), at(3, 8)), wire(at(7, 5), at(10, 5))]))
+    expect.soft(sortedPoints(danglingEnds(viewOf(landed.doc))), "the legs open where it left them, its own ends open where it landed").toEqual(sortedPoints([at(3, 4), at(3, 8), at(7, 1), at(7, 5)]))
+    expect.soft(nets(landed.doc), "R1 and R2 parted").toEqual([])
     expect.soft(normal(landed.doc), "normal form").toEqual([])
   })
 

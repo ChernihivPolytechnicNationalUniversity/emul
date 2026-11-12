@@ -167,8 +167,7 @@ describe("random edits on every example against an oracle of explained joins (re
             tally.detached++
             const at = landed.at
             const net = view.netOfSegment(s.id) ?? `wire:${s.id}`
-            const run = wiring.runBySegment.get(s.id)!.segments
-            const explains = run.flatMap((r) => [r.a, r.b]).map((p) => ({ at: { x: p.x + at.x, y: p.y + at.y }, net }))
+            const explains = [s.a, s.b].map((p) => ({ at: { x: p.x + at.x, y: p.y + at.y }, net }))
             report("alt-segment", aw, doc, landed, explains, new Set(), found)
           } catch (e) {
             found.push(`alt-segment ${aw}: threw ${(e as Error).message}`)
