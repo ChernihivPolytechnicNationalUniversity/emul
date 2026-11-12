@@ -1,16 +1,19 @@
-import { JUNCTION, wiresAsSegments } from "./migrate-wires"
+import { JUNCTION, wirePins, wiresAsSegments } from "./migrate-wires"
 import { getMeta, need, withLibrary } from "./registry"
 import { withFieldAt, type FieldKey } from "./fields"
 import type { TextAnchor } from "./geometry"
-import type { LegacySchematic, LegacyWire, PartState, PlacedObject, Rotation, Schematic } from "./types"
+import type { LegacySchematic, LegacyWire, PartState, PinRef, PlacedObject, Rotation, Schematic } from "./types"
+import { normalise } from "./wires/normal-form"
 import type { WireSegment } from "./wires/segment"
 
-type Built = { doc: Schematic; hubs: PlacedObject[]; connections: LegacyWire[]; key: string; wires: readonly WireSegment[] }
+type Straight = { readonly from: PinRef; readonly to: PinRef }
+
+type Built = { doc: Schematic; hubs: PlacedObject[]; connections: LegacyWire[]; straights: Straight[]; key: string; wires: readonly WireSegment[] }
 
 const built = new WeakMap<Schematic, Built>()
 
 const fingerprint = (state: Built) =>
-  `${state.doc.objects.map((o) => `${o.id}|${o.def}|${o.x}|${o.y}|${o.rotation ?? 0}|${o.mirror ? 1 : 0}|${o.props?.ref ?? ""}|${o.props?.value ?? ""}`).join(";")}#${state.hubs.map((o) => `${o.x},${o.y}`).join(";")}#${state.connections.map((w) => `${w.id}|${w.from.object}:${w.from.pin}|${w.to.object}:${w.to.pin}|${(w.points ?? []).map((p) => `${p.x},${p.y}`).join(" ")}|${w.color ?? ""}`).join(",")}#${(state.doc.library ?? []).map((m) => `${m.id}:${m.built}:${m.name}`).join(",")}`
+  `${state.doc.objects.map((o) => `${o.id}|${o.def}|${o.x}|${o.y}|${o.rotation ?? 0}|${o.mirror ? 1 : 0}|${o.props?.ref ?? ""}|${o.props?.value ?? ""}`).join(";")}#${state.hubs.map((o) => `${o.x},${o.y}`).join(";")}#${state.connections.map((w) => `${w.id}|${w.from.object}:${w.from.pin}|${w.to.object}:${w.to.pin}|${(w.points ?? []).map((p) => `${p.x},${p.y}`).join(" ")}|${w.color ?? ""}`).join(",")}#${state.straights.map((w) => `${w.from.object}:${w.from.pin}>${w.to.object}:${w.to.pin}`).join(",")}#${(state.doc.library ?? []).map((m) => `${m.id}:${m.built}:${m.name}`).join(",")}`
 
 function frozen(state: Built): readonly WireSegment[] {
   const key = fingerprint(state)
@@ -22,8 +25,20 @@ function frozen(state: Built): readonly WireSegment[] {
   const moved = doc.objects.filter((o) => placed.has(o.id) && (placed.get(o.id)!.x !== o.x || placed.get(o.id)!.y !== o.y))
   if (moved.length) throw new Error(`the drawing places parts where no wire can end on their pins: ${moved.map((o) => o.props?.ref ?? o.id).join(", ")}`)
   state.key = key
-  state.wires = Object.freeze(doc.wires)
+  state.wires = Object.freeze(state.straights.length ? withStraights(doc.wires, doc.objects, state.straights, () => `~${piece++}`) : doc.wires)
   return state.wires
+}
+
+function withStraights(wires: readonly WireSegment[], objects: readonly PlacedObject[], straights: readonly Straight[], newId: () => string): readonly WireSegment[] {
+  const pins = wirePins(objects)
+  const at = new Map(pins.map((p) => [p.key, p.at] as const))
+  const end = (ref: PinRef) => {
+    const point = at.get(`${ref.object}:${ref.pin}`)
+    if (!point) throw new Error(`a straight wire ends on ${ref.object}:${ref.pin}, which is no pin of the drawing`)
+    return point
+  }
+  const added = straights.map((w): WireSegment => ({ id: newId(), a: end(w.from), b: end(w.to) }))
+  return normalise([...wires, ...added], pins, { segments: added }, newId)
 }
 
 function stateOf(doc: Schematic): Built {
@@ -61,10 +76,11 @@ export function absorb(doc: Schematic, other: Schematic) {
   doc.objects.push(...other.objects)
   into.hubs.push(...from.hubs)
   into.connections.push(...from.connections)
+  into.straights.push(...from.straights)
 }
 
-function registered(doc: Schematic, hubs: PlacedObject[], connections: LegacyWire[]): Built {
-  const state: Built = { doc, hubs, connections, key: "", wires: Object.freeze([]) }
+function registered(doc: Schematic, hubs: PlacedObject[], connections: LegacyWire[], straights: Straight[] = []): Built {
+  const state: Built = { doc, hubs, connections, straights, key: "", wires: Object.freeze([]) }
   Object.defineProperty(doc, "wires", { enumerable: true, configurable: true, get: () => frozen(state) })
   built.set(doc, state)
   return state
@@ -72,9 +88,9 @@ function registered(doc: Schematic, hubs: PlacedObject[], connections: LegacyWir
 
 export function copied(doc: Schematic): Schematic {
   const state = stateOf(doc)
-  const { objects, parts, library, hubs, connections } = structuredClone({ objects: doc.objects, parts: doc.parts, library: doc.library, hubs: state.hubs, connections: state.connections })
+  const { objects, parts, library, hubs, connections, straights } = structuredClone({ objects: doc.objects, parts: doc.parts, library: doc.library, hubs: state.hubs, connections: state.connections, straights: state.straights })
   const copy = { objects, parts, ...(library && { library }) } as unknown as Schematic
-  registered(copy, hubs, connections)
+  registered(copy, hubs, connections, straights)
   return copy
 }
 
@@ -122,5 +138,8 @@ export function builder(grid: number) {
   const field = (o: PlacedObject, key: FieldKey, x: number, y: number) => {
     Object.assign(o, withFieldAt(o, key, { x: x * grid, y: y * grid }, grid, need(o.def)))
   }
-  return { doc, place, wire, node, field }
+  const straight = (a: PlacedObject, pinA: string, b: PlacedObject, pinB: string): void => {
+    state.straights.push({ from: { object: a.id, pin: pinA }, to: { object: b.id, pin: pinB } })
+  }
+  return { doc, place, wire, node, field, straight }
 }

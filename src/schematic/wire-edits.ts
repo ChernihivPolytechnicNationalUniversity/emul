@@ -10,10 +10,10 @@ import { clearOf, Conductors } from "./wires/conductors"
 import { WireGraph, type WireNets } from "./wires/graph"
 import { routeThroughBends, type RouteEnd } from "./wires/router"
 import { OverlayMap } from "./wires/overlay-map"
-import { lineCodeOf, columnCode, rowCode, WireSheet } from "./wires/sheet"
+import { lineCodeOf, columnCode, rowCode, slants, WireSheet } from "./wires/sheet"
 import { commitEdit, normalise, normaliseEdit } from "./wires/normal-form"
 import { splicedAt } from "./splice"
-import { contains, exactPointCode, highOf, lowOf, samePoint, seededIds, type PointCode, type WirePin, type WireSegment } from "./wires/segment"
+import { contains, exactPointCode, highOf, latticePointNear, lineOf, lowOf, samePoint, seededIds, type PointCode, type WirePin, type WireSegment } from "./wires/segment"
 
 export { pinsOf } from "./pin-index"
 import { documentPins, editedObjects, translatedObjects, translationOf, pinsOf, type PinState } from "./pin-index"
@@ -147,6 +147,37 @@ function segmentsFrom(wires: readonly WireSegment[], known: ReturnType<typeof ne
   return [...out]
 }
 
+function collinearFrom(wires: readonly WireSegment[], known: ReturnType<typeof nearbySheet>, s: WireSegment): readonly WireSegment[] {
+  if (!slants(s)) {
+    const along = s.a.y === s.b.y ? "x" : "y"
+    return segmentsFrom(wires, known, lineCodeOf(s), Math.min(s.a[along], s.b[along]), Math.max(s.a[along], s.b[along]))
+  }
+  const line = lineOf(s)
+  const lo = Math.min(s.a.x, s.b.x)
+  const hi = Math.max(s.a.x, s.b.x)
+  const overlaps = (t: WireSegment) => slants(t) && lineOf(t) === line && Math.min(t.a.x, t.b.x) <= hi && Math.max(t.a.x, t.b.x) >= lo
+  if (known && !known.steps.length) return known.sheet.alongSegment(s)
+  if (!known) return wires.filter(overlaps)
+  const out = new Set(known.sheet.alongSegment(s))
+  for (const step of known.steps) {
+    for (const t of step.removed) out.delete(t)
+    for (const t of step.added) if (overlaps(t)) out.add(t)
+  }
+  return [...out]
+}
+
+function slantsThroughFrom(wires: readonly WireSegment[], known: ReturnType<typeof nearbySheet>, p: Point): readonly WireSegment[] {
+  const passes = (t: WireSegment) => slants(t) && contains(t, p)
+  if (known && !known.steps.length) return known.sheet.slantsThrough(p)
+  if (!known) return wires.filter(passes)
+  const out = new Set(known.sheet.slantsThrough(p))
+  for (const step of known.steps) {
+    for (const t of step.removed) out.delete(t)
+    for (const t of step.added) if (passes(t)) out.add(t)
+  }
+  return [...out]
+}
+
 function positionOf(wires: readonly WireSegment[], order: ReadonlyMap<WireSegment, number>, segment: WireSegment): number {
   const rank = order.get(segment)
   if (rank === undefined) return -1
@@ -171,16 +202,19 @@ function localCommit(doc: Schematic, add: readonly WireSegment[], remove: readon
     visited.add(key)
     for (const s of along(rowCode(p.y), p.x, p.x)) near.add(s)
     for (const s of along(columnCode(p.x), p.y, p.y)) near.add(s)
+    for (const s of slantsThroughFrom(doc.wires, known, p)) near.add(s)
   }
   const sheet = known && !known.steps.length ? known.sheet : undefined
   const throughAll = (list: readonly Point[]) => {
     if (!sheet) { for (const p of list) through(p); return }
+    const slanting = sheet.slantsThrough.bind(sheet)
     const rows = new Map<number, number[]>()
     const columns = new Map<number, number[]>()
     for (const p of list) {
       const key = exactPointCode(p)
       if (visited.has(key)) continue
       visited.add(key)
+      for (const s of slanting(p)) near.add(s)
       const row = rows.get(p.y)
       if (row) row.push(p.x)
       else rows.set(p.y, [p.x])
@@ -206,8 +240,7 @@ function localCommit(doc: Schematic, add: readonly WireSegment[], remove: readon
   for (const s of [...add, ...remove]) {
     through(s.a)
     through(s.b)
-    const along = s.a.y === s.b.y ? "x" : "y"
-    for (const t of segmentsFrom(doc.wires, known, lineCodeOf(s), Math.min(s.a[along], s.b[along]), Math.max(s.a[along], s.b[along]))) near.add(t)
+    for (const t of collinearFrom(doc.wires, known, s)) near.add(t)
   }
   if (!near.size && !add.length && !remove.length) return { wires: doc.wires, added: [], removed: [] }
   const spans = [...near, ...add]
@@ -217,8 +250,7 @@ function localCommit(doc: Schematic, add: readonly WireSegment[], remove: readon
     const box = { x: Math.min(s.a.x, s.b.x), y: Math.min(s.a.y, s.b.y), w: Math.abs(s.a.x - s.b.x), h: Math.abs(s.a.y - s.b.y) }
     for (const pin of index.within(box)) pins.set(pin.key, pin)
     if (known) {
-      const axis = s.a.y === s.b.y ? "x" : "y"
-      for (const segment of known.sheet.segmentsMarked(lineCodeOf(s), Math.min(s.a[axis], s.b[axis]), Math.max(s.a[axis], s.b[axis]))) near.add(segment)
+      for (const segment of known.sheet.segmentsMarkedOn(s)) near.add(segment)
       through(s.a)
       through(s.b)
     }
@@ -309,13 +341,30 @@ export function connectPins(doc: Schematic, from: PinRef, to: PinRef, points: re
   return withSegments(doc, segmentsAlong(pts, color, newId), [], [], newId)
 }
 
+function latticePointOn(s: WireSegment, at: Point, reach: number): Point | null {
+  const inner = latticePointNear(s, at, reach)
+  let best: Point | null = null
+  let distance = reach
+  for (const p of inner ? [s.a, s.b, inner] : [s.a, s.b]) {
+    const d = Math.hypot(p.x - at.x, p.y - at.y)
+    if (d <= distance) {
+      best = p
+      distance = d
+    }
+  }
+  return best
+}
+
 export function nearestOn(s: WireSegment, at: Point): Point {
+  if (slants(s)) return latticePointOn(s, at, Infinity)!
   const horizontal = s.a.y === s.b.y
   const lo = horizontal ? Math.min(s.a.x, s.b.x) : Math.min(s.a.y, s.b.y)
   const hi = horizontal ? Math.max(s.a.x, s.b.x) : Math.max(s.a.y, s.b.y)
   const along = Math.min(hi, Math.max(lo, snap(horizontal ? at.x : at.y, GRID)))
   return horizontal ? { x: along, y: s.a.y } : { x: s.a.x, y: along }
 }
+
+export const pressedOn = (s: WireSegment, at: Point, reach: number): Point | null => (slants(s) ? latticePointOn(s, at, reach) : nearestOn(s, at))
 
 export function tapWireAt(doc: Schematic, segmentId: string, at: Point, from: PinRef, points: readonly Point[] = [], color?: WireColorKey, newId: NewId = randomId, known?: Wiring): Schematic {
   const tapped = doc.wires.find((s) => s.id === segmentId)
@@ -546,8 +595,9 @@ function shiftedLook(look: NetLook, d: Point, view: WireNets): NetLook {
   const routeOf = new Map<string, RoutedWire>()
   for (const [id, route] of look.routeOf) {
     const pins = look.turned.leads.get(id)
-    const leads = pins && { ...(pins.start && { start: leadEnd(view.pin(pins.start)!) }), ...(pins.end && { end: leadEnd(view.pin(pins.end)!) }) }
-    routeOf.set(id, leads ? { id, pts: route.pts.map(by), owner: [], leads } : { id, pts: route.pts.map(by), owner: [] })
+    const pts = route.pts.map(by)
+    const leads = pins && { ...(pins.start && { start: leadEnd(view.pin(pins.start)!, pts[1]) }), ...(pins.end && { end: leadEnd(view.pin(pins.end)!, pts[pts.length - 2]) }) }
+    routeOf.set(id, leads ? { id, pts, owner: [], leads } : { id, pts, owner: [] })
   }
   return {
     runOf,

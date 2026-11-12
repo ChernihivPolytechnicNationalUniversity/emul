@@ -18,14 +18,16 @@ import { circuitOf } from "@/schematic/circuit"
 import { examples } from "@/schematic/examples"
 import { GRID, objectPins, routeBox, touches, type Point } from "@/schematic/geometry"
 import type { HdlModule, PlacedObject, Schematic } from "@/schematic/types"
-import { moved, placedObject, recoloured, removed, travellingWires, withModule, withSegments, wireOrder, wiringOf, type Wiring } from "@/schematic/wire-edits"
+import { clipOf, moved, placedObject, recoloured, removed, travellingWires, withModule, withSegments, wireOrder, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
 import { isRerouteRefusal, rerouted, routeBetween } from "@/schematic/wires/router"
-import { PartDrag, SegmentDrag, TurnRun } from "@/schematic/rubber-band"
+import { flippedWithWires, PartDrag, SegmentDrag, TurnRun } from "@/schematic/rubber-band"
+import { pastedInto } from "@/schematic/use-schematic"
 import { lineCodeOf, WireSheet, type SheetMark } from "@/schematic/wires/sheet"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
 import type { FieldKey } from "@/schematic/fields"
 import { sourceCallback } from "../lib/source-callback"
+import { crossingNear, junctionAt } from "@/schematic/junction-tool"
 
 function random(seed: number) {
   let s = seed >>> 0
@@ -380,6 +382,118 @@ describe("the maintained field commit has the same findings and queries as a fre
   })
 })
 
+function slantShape(sheet: WireSheet, wires: readonly WireSegment[], pins: readonly WirePin[]) {
+  const ids = (list: readonly WireSegment[]) => list.map((s) => s.id).sort().join(" ")
+  const marks = (list: readonly SheetMark[]) => list.map((m) => `${m.at.x},${m.at.y}:${m.segment?.id ?? m.pin!.key}`).sort().join(" ")
+  const out: string[] = []
+  for (const s of wires) {
+    const steps = segmentKeys.latticePointsInside(s)
+    out.push(`${s.id} along[${ids(sheet.alongSegment(s))}] marks[${marks(sheet.marksOn(s))}] through[${steps.map((p) => ids(sheet.through(p))).join("|")}] a[${ids(sheet.through(s.a))}] b[${ids(sheet.through(s.b))}]`)
+  }
+  for (const p of pins) out.push(`${p.key} through[${ids(sheet.through(p.at))}] near[${ids(sheet.within(p.at, GRID))}]`)
+  return out.sort()
+}
+
+describe("diagonals on the kept wiring and sheet (design.md §6.11 rules 3–9, §11: kept equals fresh at any angle, and the local commit equals the global one)", () => {
+  it.each(["metronome", "logic", "power-supply"])("%s: thirty edits laying, dragging, joining, recolouring and deleting diagonals leave the wiring and the sheet equal to fresh ones", (id) => {
+    const rng = random(id.length * 7121)
+    let doc: Schematic = { ...examples.find((e) => e.id === id)!.build(GRID) }
+    const graph = new WireGraph()
+    let known = wiringOf(graph, doc)
+    let n = 0
+    const newId = () => `q${n++}`
+    const slopes = [{ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 1, y: -1 }, { x: 3, y: -2 }, { x: 1, y: 2 }]
+    const slanted = () => doc.wires.filter((s) => s.a.x !== s.b.x && s.a.y !== s.b.y)
+    let laid = 0
+    for (let step = 0; step < 30; step++) {
+      const action = step < 6 || step % 2 === 0 ? 0 : rng.int(0, 6)
+      const d = () => rng.pick([-2, -1, 1, 2]) * GRID
+      if (action === 0) {
+        const existing = slanted()
+        const on = existing.length && rng.next() < 0.7 ? rng.pick(existing) : null
+        const inside = on ? segmentKeys.latticePointsInside(on) : []
+        const from = on ? rng.pick([on.a, on.b, ...inside]) : rng.pick(doc.wires.flatMap((s) => [s.a, s.b]))
+        const own = on ? segmentKeys.slopeOf(on) : null
+        const slope = own && rng.next() < 0.4 ? { x: own.run, y: own.rise } : rng.pick([...slopes, { x: 1, y: 0 }, { x: 0, y: 1 }])
+        const k = rng.int(1, 4) * (rng.next() < 0.5 ? 1 : -1) * segmentKeys.HALF_CELL
+        const add = [{ id: `diag${step}`, a: from, b: { x: from.x + slope.x * k, y: from.y + slope.y * k } }]
+        let a = 0
+        let b = 0
+        const expected = commitEdit(doc.wires, pinsOf(doc.objects), { add, points: [add[0].a, add[0].b] }, () => `g${step}_${a++}`)
+        doc = withSegments(doc, add, [], [add[0].a, add[0].b], () => `g${step}_${b++}`)
+        expect.soft(doc.wires, `${id} step ${step}: the local commit lays the diagonal as the global normaliser does`).toEqual(expected.wires)
+        laid++
+      } else if (action === 1) doc = new PartDrag(doc, known, { objects: new Set([rng.pick(doc.objects).id]) }).landed(d(), d(), newId).doc
+      else if (action === 2 && slanted().length) doc = new SegmentDrag(doc, known, rng.pick(slanted()).id).landed(d(), d(), newId).doc
+      else if (action === 3 && slanted().length) doc = removed(doc, new Set(), new Set([rng.pick(slanted()).id]), newId)
+      else if (action === 4 && slanted().length) doc = recoloured(doc, [[rng.pick(slanted()).id, rng.pick(["red", "blue", undefined] as const)]], newId)
+      else if (action === 5 && slanted().length) {
+        const s = rng.pick(slanted())
+        const crossing = crossingNear(known, { x: (s.a.x + s.b.x) / 2, y: (s.a.y + s.b.y) / 2 }, Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y) / 2)
+        const joined = crossing ? junctionAt(doc, known, crossing.at, newId) : null
+        if (joined && !("refused" in joined)) doc = joined
+      } else doc = moved(doc, new Map(doc.objects.map((o) => [o.id, { x: o.x, y: o.y }])), GRID, -GRID, newId, known)
+      known = wiringOf(graph, doc)
+      const fresh = wiringOf(new WireGraph(), doc)
+      expect.soft(shape(known), `${id} step ${step} (action ${action}): the wiring`).toEqual(shape(fresh))
+      expect.soft(slantShape(known.sheet, doc.wires, known.pins), `${id} step ${step} (action ${action}): the sheet at any angle`).toEqual(slantShape(WireSheet.of(doc.wires, known.pins), doc.wires, known.pins))
+      expect.soft(fresh.circuit, `${id} step ${step}: the store's circuit is the one the solver builds`).toEqual(circuitOf(doc))
+    }
+    expect.soft(laid, "diagonals were laid").toBeGreaterThan(5)
+    expect.soft(slanted().length, "and some are still there at the end").toBeGreaterThan(0)
+  })
+
+  it.each(["metronome", "logic", "power-supply", "bridge"])("%s: turns, mirrors, pastes, deletes, undos and redos around diagonals leave the wiring and the sheet equal to fresh ones", (id) => {
+    const rng = random(id.length * 911)
+    let doc: Schematic = { ...examples.find((e) => e.id === id)!.build(GRID) }
+    const graph = new WireGraph()
+    let known = wiringOf(graph, doc)
+    let n = 0
+    const newId = () => `r${n++}`
+    const history: Schematic[] = [doc]
+    let cursor = 0
+    const done = new Set<string>()
+    const slopes = [{ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 1, y: -1 }, { x: 3, y: -2 }, { x: 1, y: 2 }]
+    const slanted = () => doc.wires.filter((s) => s.a.x !== s.b.x && s.a.y !== s.b.y)
+    for (let step = 0; step < 40; step++) {
+      const kind = step < 6 || step % 3 === 0 ? "lay" : rng.pick(["turn", "mirror", "paste", "delete", "undo", "redo"] as const)
+      let next: Schematic | null = null
+      if (kind === "lay") {
+        const on = slanted().length && rng.next() < 0.6 ? rng.pick(slanted()) : null
+        const from = on ? rng.pick([on.a, on.b, ...segmentKeys.latticePointsInside(on)]) : rng.pick(doc.wires.flatMap((s) => [s.a, s.b]))
+        const slope = rng.pick(slopes)
+        const k = rng.int(1, 4) * (rng.next() < 0.5 ? 1 : -1) * segmentKeys.HALF_CELL
+        const add = [{ id: `diag${step}`, a: from, b: { x: from.x + slope.x * k, y: from.y + slope.y * k } }]
+        next = withSegments(doc, add, [], [add[0].a, add[0].b], newId)
+      } else if (kind === "turn") {
+        const parts = new Set(rng.next() < 0.5 ? [rng.pick(doc.objects).id] : doc.objects.slice(0, 3).map((o) => o.id))
+        next = new TurnRun(doc, known, parts, undefined, new Set(rng.next() < 0.5 ? slanted().slice(0, 2).map((s) => s.id) : [])).turned(rng.next() < 0.5 ? 1 : -1, newId).doc
+      } else if (kind === "mirror") {
+        next = flippedWithWires(doc, known, new Set([rng.pick(doc.objects).id]), rng.next() < 0.5 ? "horizontal" : "vertical", newId, undefined, new Set(rng.next() < 0.5 ? slanted().slice(0, 1).map((s) => s.id) : [])).doc
+      } else if (kind === "paste") {
+        const clip = clipOf(doc, new Set(doc.objects.slice(0, 2).map((o) => o.id)))
+        if (clip) next = pastedInto(doc, clip, 0, 40 * GRID, (old) => `p${step}-${old}`, newId)
+      } else if (kind === "delete" && slanted().length) next = removed(doc, new Set(), new Set([rng.pick(slanted()).id]), newId)
+      else if (kind === "undo" && cursor > 0) doc = history[(cursor = Math.max(0, cursor - rng.int(1, 3)))]
+      else if (kind === "redo" && cursor < history.length - 1) doc = history[++cursor]
+      if (next) {
+        doc = next
+        history.length = cursor + 1
+        history.push(doc)
+        cursor++
+      }
+      if (doc.wires !== known.source.wires) done.add(kind)
+      known = wiringOf(graph, doc)
+      const fresh = wiringOf(new WireGraph(), doc)
+      expect.soft(shape(known), `${id} step ${step} (${kind}): the wiring`).toEqual(shape(fresh))
+      expect.soft(slantShape(known.sheet, doc.wires, known.pins), `${id} step ${step} (${kind}): the sheet at any angle`).toEqual(slantShape(WireSheet.of(doc.wires, known.pins), doc.wires, known.pins))
+    }
+    expect.soft([...done].sort(), "set up: the wires changed by laying, turning, mirroring, pasting or deleting, and by an undo").toEqual(expect.arrayContaining(["lay", "undo"]))
+    expect.soft(done.size, "and by at least four kinds of edit").toBeGreaterThanOrEqual(4)
+    expect.soft(slanted().length, "diagonals present at the end").toBeGreaterThan(0)
+  })
+})
+
 describe("local commit indexes preserve the document and the gesture's starting state", () => {
   it.each(["system-exam", "power-supply", "nucleo-74hc595"])("%s: the indexed normaliser produces the same segments as the full normaliser", (id) => {
     const rng = random(id.length * 407)
@@ -452,6 +566,19 @@ describe("local commit indexes preserve the document and the gesture's starting 
       previous = next
     }
   })
+})
+
+it("a snapshot of the sheet keeps answering for its own wiring at any angle after the live sheet takes a delta on the same slanted lines (the turn run's starting sheet, design.md §6.6, §6.11 rule 9)", () => {
+  const c = (x: number, y: number) => ({ x: x * GRID, y: y * GRID })
+  const pins: WirePin[] = [{ key: "R1:2", at: c(4, 1) }, { key: "R2:1", at: c(10, 5) }]
+  const before: WireSegment[] = [{ id: "d", a: c(4, 1), b: c(10, 5) }, { id: "far", a: c(16, 9), b: c(22, 13) }, { id: "x", a: c(4, 5), b: c(10, 1) }]
+  const live = WireSheet.of(before, pins)
+  const kept = live.snapshot()
+  const stretched: WireSegment = { id: "d2", a: c(4, 1), b: c(13, 7) }
+  live.apply({ removed: [before[0], before[2]], added: [stretched, { id: "x2", a: c(4, 5), b: c(13, 3) }] })
+  const after = [stretched, before[1], { id: "x2", a: c(4, 5), b: c(13, 3) }]
+  expect.soft(slantShape(kept, before, pins), "the snapshot answers as a fresh sheet of the wires it was taken from").toEqual(slantShape(WireSheet.of(before, pins), before, pins))
+  expect.soft(slantShape(live, after, pins), "the live sheet answers as a fresh sheet of the wires after the delta").toEqual(slantShape(WireSheet.of(after, pins), after, pins))
 })
 
 it("the sheet shifted with the whole drawing then edited locally still answers as a fresh sheet", () => {

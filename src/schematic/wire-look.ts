@@ -1,5 +1,5 @@
 import type { Run } from "./circuit"
-import { GRID, toPath, type Point } from "./geometry"
+import { GRID, toPath, turnTangent, type Point } from "./geometry"
 import { exactPointCode, type PointCode, type WirePin } from "./wires/segment"
 
 const LEAD_CELLS = 0.3
@@ -10,7 +10,12 @@ export type PinCorner = { at: Point; a: Point; b: Point }
 
 export type TurnPins = { leads: Map<string, { start?: string; end?: string }>; corners: (readonly [string, string])[] }
 
-export const leadEnd = (pin: WirePin): Point => ({ x: pin.at.x - pin.out!.x * LEAD_CELLS * GRID, y: pin.at.y - pin.out!.y * LEAD_CELLS * GRID })
+const leadTangent = (pin: WirePin, toward?: Point) => LEAD_CELLS * GRID * (toward ? Math.min(1, turnTangent(pin.out!.x, pin.out!.y, toward.x - pin.at.x, toward.y - pin.at.y)) : 1)
+
+export const leadEnd = (pin: WirePin, toward?: Point): Point => {
+  const along = leadTangent(pin, toward)
+  return { x: pin.at.x - pin.out!.x * along, y: pin.at.y - pin.out!.y * along }
+}
 
 export function turnsAtPins(runs: readonly Run[], pins: readonly WirePin[]): { leads: Map<string, Leads>; corners: PinCorner[]; pins: TurnPins } {
   const pinsAt = new Map<PointCode, WirePin[]>()
@@ -32,9 +37,8 @@ export function turnsAtPins(runs: readonly Run[], pins: readonly WirePin[]): { l
     if (here?.length !== 1 || endsAt.get(key) !== 1) return undefined
     const pin = here[0]
     if (!pin.out || pin.socket) return undefined
-    const d = { x: Math.sign(next.x - at.x), y: Math.sign(next.y - at.y) }
-    if (d.x * pin.out.x + d.y * pin.out.y !== 0) return undefined
-    return pin
+    const turns = pin.out.x * (next.y - at.y) - pin.out.y * (next.x - at.x) !== 0
+    return turns ? pin : undefined
   }
   const leads = new Map<string, Leads>()
   const turned: TurnPins = { leads: new Map(), corners: [] }
@@ -44,7 +48,7 @@ export function turnsAtPins(runs: readonly Run[], pins: readonly WirePin[]): { l
     const start = leadAt(pts[0], pts[1])
     const end = leadAt(pts[pts.length - 1], pts[pts.length - 2])
     if (!start && !end) continue
-    leads.set(run.id, { ...(start && { start: leadEnd(start) }), ...(end && { end: leadEnd(end) }) })
+    leads.set(run.id, { ...(start && { start: leadEnd(start, pts[1]) }), ...(end && { end: leadEnd(end, pts[pts.length - 2]) }) })
     turned.leads.set(run.id, { ...(start && { start: start.key }), ...(end && { end: end.key }) })
   }
   const corners: PinCorner[] = []
@@ -68,15 +72,16 @@ export function runPath(pts: readonly Point[], radius: number, leads?: Leads): s
   const core = [...pts]
   let head = ""
   let tail = ""
+  const tangent = (lead: Point, pin: Point, next: Point) => radius * Math.min(1, turnTangent(pin.x - lead.x, pin.y - lead.y, next.x - pin.x, next.y - pin.y))
   if (leads.start) {
-    const r = Math.min(radius, Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y) / 2)
+    const r = Math.min(tangent(leads.start, pts[0], pts[1]), Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y) / 2)
     const p1 = towards(pts[0], pts[1], r)
     head = `M${leads.start.x} ${leads.start.y} Q${pts[0].x} ${pts[0].y} ${p1.x} ${p1.y}`
     core[0] = p1
   }
   if (leads.end) {
     const n = pts.length
-    const r = Math.min(radius, Math.hypot(pts[n - 1].x - pts[n - 2].x, pts[n - 1].y - pts[n - 2].y) / 2)
+    const r = Math.min(tangent(leads.end, pts[n - 1], pts[n - 2]), Math.hypot(pts[n - 1].x - pts[n - 2].x, pts[n - 1].y - pts[n - 2].y) / 2)
     const pn = towards(pts[n - 1], pts[n - 2], r)
     tail = ` Q${pts[n - 1].x} ${pts[n - 1].y} ${leads.end.x} ${leads.end.y}`
     core[n - 1] = pn

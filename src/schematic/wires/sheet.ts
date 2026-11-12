@@ -1,6 +1,6 @@
 import type { Point } from "../types"
 import type { WireDelta } from "./graph"
-import { highOf, isHorizontal, lowOf, type WirePin, type WireSegment } from "./segment"
+import { contains, diagonalLine, distanceToSegment, HALF_CELL, highOf, isHorizontal, latticePointsInside, lowOf, samePoint, slopeKey, slopeOf, type LineKey, type Slope, type WirePin, type WireSegment } from "./segment"
 
 export type SheetMark = { readonly at: Point; readonly segment?: WireSegment; readonly pin?: WirePin }
 
@@ -15,6 +15,25 @@ export const rowCode = (y: number): LineCode => y * 2
 export const columnCode = (x: number): LineCode => x * 2 + 1
 
 export const lineCodeOf = (s: { a: Point; b: Point }): LineCode => (isHorizontal(s as WireSegment) ? rowCode(s.a.y) : columnCode(s.a.x))
+
+export const slants = (s: { a: Point; b: Point }) => s.a.x !== s.b.x && s.a.y !== s.b.y
+
+export function latticeAlong(s: { a: Point; b: Point }): Point[] {
+  if (samePoint(s.a, s.b)) return [s.a]
+  if (!Number.isInteger((s.b.x - s.a.x) / HALF_CELL) || !Number.isInteger((s.b.y - s.a.y) / HALF_CELL)) return [s.a, s.b]
+  return [s.a, ...latticePointsInside(s), s.b]
+}
+
+const slopes = new Map<string, Slope>()
+
+function slopeNamed(key: string): Slope {
+  let slope = slopes.get(key)
+  if (!slope) {
+    const [run, rise] = key.split(",").map(Number)
+    slopes.set(key, slope = { run, rise })
+  }
+  return slope
+}
 
 type Placed = { readonly mark: SheetMark; readonly along: number; readonly line: LineCode }
 
@@ -109,6 +128,8 @@ export class WireSheet {
   private ends = new Map<number, WireSegment[]>()
   private pinsAtPoint = new Map<number, WirePin[]>()
   private lines = new Map<LineCode, Line>()
+  private slanted = new Map<LineKey, Line>()
+  private slopeCounts = new Map<string, number>()
   private placed = new Map<WireSegment | WirePin, Placed[]>()
 
   static of(wires: readonly WireSegment[], pins: readonly WirePin[]): WireSheet {
@@ -130,10 +151,19 @@ export class WireSheet {
       if (known) known.push(...entries)
       else sheet.placed.set(owner, entries)
     }
+    const slantRuns = new Map<LineKey, WireSegment[]>()
     for (const s of wires) {
       if (sheet.segments.has(s.id)) throw new Error(`two wires share the id ${s.id}`)
       sheet.segments.set(s.id, s)
-      gather(runs, lineCodeOf(s), s)
+      if (slants(s)) {
+        const slope = slopeOf(s)
+        const key = slopeKey(slope)
+        sheet.slopeCounts.set(key, (sheet.slopeCounts.get(key) ?? 0) + 1)
+        const line = diagonalLine(slope, s.a)
+        const list = slantRuns.get(line)
+        if (list) list.push(s)
+        else slantRuns.set(line, [s])
+      } else gather(runs, lineCodeOf(s), s)
       for (const end of [s.a, s.b]) {
         gather(sheet.ends, pointCode(end), s)
         place(s, end, { at: end, segment: s })
@@ -146,12 +176,14 @@ export class WireSheet {
       place(p, p.at, { at: p.at, pin: p })
     }
     for (const code of new Set([...runs.keys(), ...marks.keys()])) sheet.line(code).load(runs.get(code) ?? [], marks.get(code) ?? [])
+    for (const [key, list] of slantRuns) sheet.slant(key).load(list, [])
     return sheet
   }
 
   private shared = false
   private ownedMaps = true
   private ownedLines = new Set<LineCode>()
+  private ownedSlants = new Set<LineKey>()
 
   snapshot(): WireSheet {
     const copy = new WireSheet()
@@ -160,6 +192,8 @@ export class WireSheet {
     copy.ends = this.ends
     copy.pinsAtPoint = this.pinsAtPoint
     copy.lines = this.lines
+    copy.slanted = this.slanted
+    copy.slopeCounts = this.slopeCounts
     copy.placed = this.placed
     copy.pinSource = this.pinSource
     copy.segmentSource = this.segmentSource
@@ -167,6 +201,7 @@ export class WireSheet {
     copy.shared = this.shared = true
     copy.ownedMaps = this.ownedMaps = false
     this.ownedLines = new Set()
+    this.ownedSlants = new Set()
     return copy
   }
 
@@ -177,6 +212,8 @@ export class WireSheet {
     this.ends = new Map(this.ends)
     this.pinsAtPoint = new Map(this.pinsAtPoint)
     this.lines = new Map(this.lines)
+    this.slanted = new Map(this.slanted)
+    this.slopeCounts = new Map(this.slopeCounts)
     this.placed = new Map(this.placed)
     this.ownedMaps = true
   }
@@ -233,7 +270,84 @@ export class WireSheet {
   }
 
   through(p: Point): WireSegment[] {
-    return [...this.along(rowCode(p.y), p.x, p.x), ...this.along(columnCode(p.x), p.y, p.y)]
+    const out = [...this.along(rowCode(p.y), p.x, p.x), ...this.along(columnCode(p.x), p.y, p.y)]
+    if (this.slopeCounts.size) for (const s of this.slantsThrough(p)) out.push(s)
+    return out
+  }
+
+  slantsThrough(p: Point): WireSegment[] {
+    const out: WireSegment[] = []
+    if (!this.slopeCounts.size) return out
+    const local = this.local(p)
+    for (const key of this.slopeCounts.keys()) this.slanted.get(diagonalLine(slopeNamed(key), local))?.overlapping(local.x, local.x, out)
+    const mapped = this.segmentSource || this.offset.x || this.offset.y ? out.map((s) => this.segment(s.id)!) : out
+    return mapped.filter((s) => contains(s, p))
+  }
+
+  within(p: Point, reach: number): WireSegment[] {
+    const found = new Set<WireSegment>()
+    const take = (list: readonly WireSegment[]) => {
+      for (const s of list) if (!found.has(s) && distanceToSegment(s, p) <= reach) found.add(s)
+    }
+    const first = (v: number) => Math.ceil((v - reach) / HALF_CELL) * HALF_CELL
+    for (let y = first(p.y); y <= p.y + reach; y += HALF_CELL) take(this.along(rowCode(y), p.x - reach, p.x + reach))
+    for (let x = first(p.x); x <= p.x + reach; x += HALF_CELL) take(this.along(columnCode(x), p.y - reach, p.y + reach))
+    const local = this.local(p)
+    for (const key of this.slopeCounts.keys()) {
+      const slope = slopeNamed(key)
+      const spread = reach * Math.hypot(slope.run, slope.rise)
+      const centre = slope.rise * local.x - slope.run * local.y
+      const out: WireSegment[] = []
+      for (let offset = Math.ceil((centre - spread) / HALF_CELL) * HALF_CELL; offset <= centre + spread; offset += HALF_CELL) this.slanted.get(`d${slope.run},${slope.rise},${offset + 0}`)?.overlapping(local.x - reach, local.x + reach, out)
+      take(this.segmentSource || this.offset.x || this.offset.y ? out.map((s) => this.segment(s.id)!) : out)
+    }
+    return [...found]
+  }
+
+  slantsWithin(box: { x: number; y: number; w: number; h: number }): WireSegment[] {
+    const out: WireSegment[] = []
+    if (!this.slanted.size) return out
+    const x = box.x - this.offset.x
+    const y = box.y - this.offset.y
+    const found: WireSegment[] = []
+    for (const line of this.slanted.values()) line.overlapping(x, x + box.w, found)
+    for (const s of found) if (Math.max(s.a.y, s.b.y) >= y && Math.min(s.a.y, s.b.y) <= y + box.h) out.push(s)
+    return this.segmentSource || this.offset.x || this.offset.y ? out.map((s) => this.segment(s.id)!) : out
+  }
+
+  alongSegment(s: { a: Point; b: Point }): WireSegment[] {
+    if (!slants(s)) {
+      const horizontal = s.a.y === s.b.y
+      return horizontal ? this.along(rowCode(s.a.y), Math.min(s.a.x, s.b.x), Math.max(s.a.x, s.b.x)) : this.along(columnCode(s.a.x), Math.min(s.a.y, s.b.y), Math.max(s.a.y, s.b.y))
+    }
+    const out: WireSegment[] = []
+    const a = this.local(s.a)
+    const b = this.local(s.b)
+    this.slanted.get(diagonalLine(slopeOf(s), a))?.overlapping(Math.min(a.x, b.x), Math.max(a.x, b.x), out)
+    return this.segmentSource || this.offset.x || this.offset.y ? out.map((t) => this.segment(t.id)!) : out
+  }
+
+  marksOn(s: { a: Point; b: Point }): SheetMark[] {
+    if (!slants(s)) {
+      const horizontal = s.a.y === s.b.y
+      return horizontal ? this.marks(rowCode(s.a.y), Math.min(s.a.x, s.b.x), Math.max(s.a.x, s.b.x)) : this.marks(columnCode(s.a.x), Math.min(s.a.y, s.b.y), Math.max(s.a.y, s.b.y))
+    }
+    const out: SheetMark[] = []
+    for (const at of latticeAlong(s)) {
+      for (const segment of this.endsAt(at)) out.push({ at, segment })
+      for (const pin of this.pinsAt(at)) out.push({ at, pin })
+    }
+    return out
+  }
+
+  segmentsMarkedOn(s: { a: Point; b: Point }): WireSegment[] {
+    if (!slants(s)) {
+      const horizontal = s.a.y === s.b.y
+      return horizontal ? this.segmentsMarked(rowCode(s.a.y), Math.min(s.a.x, s.b.x), Math.max(s.a.x, s.b.x)) : this.segmentsMarked(columnCode(s.a.x), Math.min(s.a.y, s.b.y), Math.max(s.a.y, s.b.y))
+    }
+    const out: WireSegment[] = []
+    for (const at of latticeAlong(s)) for (const segment of this.endsAt(at)) out.push(segment)
+    return out
   }
 
   segmentsMarked(line: LineCode, lo: number, hi: number): WireSegment[] {
@@ -278,6 +392,38 @@ export class WireSheet {
     if (this.lines.get(code)?.empty) this.lines.delete(code)
   }
 
+  private slant(key: LineKey): Line {
+    let line = this.slanted.get(key)
+    if (!line) this.slanted.set(key, (line = new Line()))
+    else if (this.shared && !this.ownedSlants.has(key)) { this.slanted.set(key, line = line.copy()); this.ownedSlants.add(key) }
+    return line
+  }
+
+  private attachRun(s: WireSegment) {
+    if (!slants(s)) return this.line(lineCodeOf(s)).addRun(s)
+    const slope = slopeOf(s)
+    const key = slopeKey(slope)
+    this.slopeCounts.set(key, (this.slopeCounts.get(key) ?? 0) + 1)
+    this.slant(diagonalLine(slope, s.a)).addRun(s)
+  }
+
+  private detachRun(s: WireSegment) {
+    if (!slants(s)) {
+      const code = lineCodeOf(s)
+      this.line(code).removeRun(s)
+      this.release(code)
+      return
+    }
+    const slope = slopeOf(s)
+    const key = slopeKey(slope)
+    const count = (this.slopeCounts.get(key) ?? 1) - 1
+    if (count > 0) this.slopeCounts.set(key, count)
+    else this.slopeCounts.delete(key)
+    const line = diagonalLine(slope, s.a)
+    this.slant(line).removeRun(s)
+    if (this.slanted.get(line)?.empty) this.slanted.delete(line)
+  }
+
   private mark(owner: WireSegment | WirePin, at: Point, mark: SheetMark) {
     const entries: Placed[] = [
       { mark, along: at.x, line: rowCode(at.y) },
@@ -303,7 +449,7 @@ export class WireSheet {
     const known = this.segments.get(s.id)
     if (known) this.detachSegment(known)
     this.segments.set(s.id, s)
-    this.line(lineCodeOf(s)).addRun(s)
+    this.attachRun(s)
     for (const end of [s.a, s.b]) {
       const code = pointCode(end)
       const list = this.ends.get(code)
@@ -316,9 +462,7 @@ export class WireSheet {
     const held = this.segments.get(s.id)
     if (!held) return
     this.segments.delete(s.id)
-    const code = lineCodeOf(held)
-    this.line(code).removeRun(held)
-    this.release(code)
+    this.detachRun(held)
     for (const end of [held.a, held.b]) {
       const at = pointCode(end)
       const list = this.ends.get(at)?.filter((t) => t !== held)

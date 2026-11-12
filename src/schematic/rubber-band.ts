@@ -9,7 +9,7 @@ import type { PlacedObject, Point, Schematic } from "./types"
 import { keepSheet, detachedMove, moved, pinsOf, travellingIn, travellingWires, wiringOf, withSegments, type NewId, type Wiring } from "./wire-edits"
 import { normalOffset, planDrag, translate, type DragBox, type DragCommit, type DragConflict, type DragFrame, type DragMove, type DragPlan } from "./wires/drag"
 import { WireGraph, type WireNets } from "./wires/graph"
-import { HALF_CELL, samePoint, type WirePin, type WireSegment } from "./wires/segment"
+import { entersBox, HALF_CELL, isDiagonal, samePoint, type WirePin, type WireSegment } from "./wires/segment"
 import { WireSheet } from "./wires/sheet"
 
 export type Carried = { readonly objects: ReadonlySet<string>; readonly wires?: ReadonlySet<string> }
@@ -116,7 +116,7 @@ function withWholeFreeChains(sheet: WireSheet, wires: ReadonlySet<string>): Read
 
 const drawnBody = (o: PlacedObject): Rect => footprint(o, GRID)?.box ?? objectRect(o, GRID)
 
-const crosses = (a: Point, b: Point, r: Rect) => Math.max(a.x, b.x) > r.x && Math.min(a.x, b.x) < r.x + r.w && Math.max(a.y, b.y) > r.y && Math.min(a.y, b.y) < r.y + r.h
+const crosses = (a: Point, b: Point, r: Rect) => entersBox({ a, b }, r)
 
 const middleOf = (r: Rect): Point => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 })
 
@@ -361,7 +361,7 @@ export class SegmentDrag {
     const asked = this.offsetOf(dx, dy)
     if (!plan || !this.segment || (!asked.x && !asked.y)) return { doc: this.doc, unlaid: [], at: ZERO }
     if (this.stale) return { doc: this.doc, unlaid: [], at: ZERO, refused: [] }
-    const axis = this.free ? undefined : asked.x ? "x" : "y"
+    const axis = this.free || isDiagonal(this.segment) ? undefined : asked.x ? "x" : "y"
     const at = this.frame(dx, dy).blocked ? nearestWhere(asked, (p) => !this.frameAt(plan, p).blocked && (p.x !== 0 || p.y !== 0), 4, axis) : asked
     if (!at) return { doc: this.doc, unlaid: [], at: ZERO, refused: this.frame(dx, dy).conflicts }
     const commit = plan.commit(at, newId, { keepUnlaid: true })

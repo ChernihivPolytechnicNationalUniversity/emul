@@ -7,6 +7,8 @@ import { dotGridPosition, dotGridStyle, type DotGrid } from "./dot-grid"
 import { easeFactor, frameClock } from "./easing"
 
 export type Viewport = { x: number; y: number; scale: number }
+
+export const holdsPan = (e: Pick<KeyboardEvent, "code" | "repeat" | "shiftKey" | "defaultPrevented">) => e.code === "Space" && !e.repeat && !e.defaultPrevented && !e.shiftKey
 export type Point = { x: number; y: number }
 
 export const MIN_SCALE = 0.1
@@ -280,7 +282,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
       const typing = ownsKeys(e.target) || typesAhead(e.target) || (e.target as HTMLElement | null)?.tagName === "INPUT"
-      if (e.code === "Space" && !e.repeat && !typing && !e.defaultPrevented) {
+      if (holdsPan(e) && !typing) {
         e.preventDefault()
         setSpaceHeld(true)
       }

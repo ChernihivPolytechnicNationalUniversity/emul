@@ -79,7 +79,9 @@ const boxesOverlap = (a: Rect, b: Rect) => a.x + a.w > b.x + EPS && b.x + b.w > 
 
 const wireCrossesBox = (s: Pick<WireSegment, "a" | "b">, box: Rect) => s.a.y === s.b.y
   ? s.a.y > box.y + EPS && s.a.y < box.y + box.h - EPS && Math.max(s.a.x, s.b.x) > box.x + EPS && Math.min(s.a.x, s.b.x) < box.x + box.w - EPS
-  : s.a.x > box.x + EPS && s.a.x < box.x + box.w - EPS && Math.max(s.a.y, s.b.y) > box.y + EPS && Math.min(s.a.y, s.b.y) < box.y + box.h - EPS
+  : s.a.x === s.b.x
+    ? s.a.x > box.x + EPS && s.a.x < box.x + box.w - EPS && Math.max(s.a.y, s.b.y) > box.y + EPS && Math.min(s.a.y, s.b.y) < box.y + box.h - EPS
+    : overlapping(cornersOf(box), [s.a, s.b])
 
 const contourBoxes = new WeakMap<readonly Point[], Rect | null>()
 

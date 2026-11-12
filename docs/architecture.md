@@ -149,6 +149,41 @@ delayed output reaches the other. Edges an MCU makes a few nanoseconds apart are
 with whatever its parts answer, so a part's reply can overtake a second MCU edge less than its propagation delay
 behind the first.
 
+## When Newton does not settle
+
+The device models carry no charge of their own — a BJT has no junction capacitance — so a latch tipping over
+(two transistors cross-coupled through capacitors, an astable multivibrator) is a jump, an impasse point of the
+circuit's equations (Chua & Deng, 1989). Where the loop gain passes one, the step's equations fold: the branch the
+circuit was on ends partway through the step, and the only root left is on the other branch, volts away. Newton
+from the step's start cannot get there — near the fold the Jacobian is all but singular, the iterates chatter and
+the junction limiting keeps each one within a few VT of the last. ngspice has the same trouble on the same netlist
+(`tests/data/multivibrator/`): with the trapezoid it gives up at the first switch ("timestep too small",
+1.25·10⁻¹⁸ s, node b1), with Gear it spends thousands of sub-nanosecond steps at every switch until an iterate
+happens to land on the far branch. Cutting the step does not help a fixed-step engine: a shorter step still has to
+cross the same fold.
+
+A step whose Newton iteration runs out (60 iterations) on a matrix that is not singular is therefore solved again
+by pseudo-transient continuation (`pseudoTransient`; Kelley & Keyes, 1998; Coffey, Kelley & Keyes, 2003, for
+DAEs): every node is tied through a conductance g to an anchor — the companion of a capacitor to ground in a
+pseudo-time — and Newton solves the anchored step. A pseudo-step that settles within 10 iterations (SPICE's ITL4)
+moves the anchor to its solution and divides g by 4; one that does not is retried from the anchor with g sixteen
+times larger (SPICE cuts a time step that fails by 8). It starts at 1 S from where the span began and stops once g
+is below GMIN, the leak every node already has, after 200 pseudo-steps (twice the most a switch of the astable took),
+or when a pseudo-step fails below 100 · GMIN — there a node held by GMIN alone, a floating subcircuit, is as badly
+conditioned with the anchor as without it, and more pseudo-steps change nothing. Newton alone (10 iterations) then
+solves the step from the last anchor; failing that, the step keeps its least-moving iterate as before. The anchors are the parasitic capacitance the model leaves out, and where a circuit missing it
+jumps is defined by what small parasitic capacitances would do (Sastry & Desoer, 1981); at the end they carry no
+current, so the result is a root of the step's own equations. The switch lands in the step the fold falls in,
+which places the edge to within a step, and a step Newton settles is not touched.
+
+Before, such a step kept the iterate that had moved least, which is no solution: the capacitors took their charge
+and current from it, the next step started from the last operating point that had settled (the memo, from before
+the switch), and the transistor astable of `tests/sim/astable-solver.test.ts` drifted by +19…+405 µs a
+half-period and sometimes switched back; an NE555 with TRIG left open held it at 5000 V (0.5 µA into GMIN). A
+switch now costs about 250 factorizations, fewer than the six failed steps of 60 iterations it used to take; a
+floating circuit whose failures the fallback cannot cure pays about a tenth more (`tests/sim/physics.test.ts`, the
+regulator grounded while it runs).
+
 ## Buzzers
 
 Every preset in `BUZZER_PRESETS` (`src/sim/buzzer.ts`, with the physics) is a datasheet and a

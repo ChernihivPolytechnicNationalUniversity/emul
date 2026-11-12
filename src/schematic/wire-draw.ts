@@ -5,8 +5,7 @@ import type { PinRef, PlacedObject, Point, Schematic } from "./types"
 import type { WireColorKey } from "./wire-colors"
 import { withSegments, type NewId, type Wiring } from "./wire-edits"
 import { routeAround, runEnds } from "./wires/router"
-import { highOf, lowOf, samePoint, type WirePin, type WireSegment } from "./wires/segment"
-import { columnCode, rowCode } from "./wires/sheet"
+import { along, greatestDivisor, HALF_CELL, highOf, lineOf, lowOf, pointOnLine, samePoint, type WirePin, type WireSegment } from "./wires/segment"
 import { bodiesOf, crossedBody, segmentBox } from "./body-crossing"
 
 export type DrawEnd =
@@ -24,6 +23,10 @@ export type CutBack = { readonly run: string; readonly removed: readonly WireSeg
 
 type Click = { readonly added: number; readonly axis: Axis | null; readonly flipped: boolean }
 
+export type LineMode = "90" | "45" | "any"
+
+export const DEFAULT_LINE_MODE: LineMode = "90"
+
 export type Drawing = {
   readonly from: DrawEnd
   readonly heading?: Point
@@ -34,6 +37,7 @@ export type Drawing = {
   readonly flipped: boolean
   readonly color?: WireColorKey
   readonly back?: Retraction
+  readonly mode?: LineMode
 }
 
 export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "body" | "nothing"; readonly at: Point; readonly nets: readonly string[] }
@@ -54,6 +58,18 @@ export const DRAW_REFUSED: Record<DrawRefusal["refused"], { title: string; why: 
   body: { title: "Not through a part", why: "A wire goes round a part's body, never across it. Lay a corner beside the part." },
   nothing: { title: "No wire to lay", why: "The wire would have no length." },
 }
+
+const LINE_MODES: readonly LineMode[] = ["90", "45", "any"]
+
+const LINE_MODE_TAGS: Record<LineMode, string> = { "90": "90°", "45": "45°", any: "∠" }
+
+export const nextLineMode = (mode: LineMode): LineMode => LINE_MODES[(LINE_MODES.indexOf(mode) + 1) % LINE_MODES.length]
+
+export const lineModeTag = (mode: LineMode): string => LINE_MODE_TAGS[mode]
+
+export const withLineMode = (d: Drawing, mode: LineMode): Drawing => ({ ...d, mode })
+
+const modeOf = (d: Drawing): LineMode => d.mode ?? DEFAULT_LINE_MODE
 
 const other = (axis: Axis): Axis => (axis === "x" ? "y" : "x")
 
@@ -107,12 +123,13 @@ function nearestOnPath(path: readonly Point[], p: Point, grid: number): { at: Po
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1]
     const b = path[i]
-    const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / grid
+    const slanted = a.x !== b.x && a.y !== b.y
+    const steps = slanted ? greatestDivisor((b.x - a.x) / HALF_CELL, (b.y - a.y) / HALF_CELL) : Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / grid
     if (!steps) continue
     const length2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2
     const t = Math.min(1, Math.max(0, ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / length2))
-    const k = Math.round(t * steps) / steps
-    const at = { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }
+    const k = Math.round(t * steps)
+    const at = slanted ? { x: a.x + ((b.x - a.x) * k) / steps, y: a.y + ((b.y - a.y) * k) / steps } : { x: a.x + (b.x - a.x) * (k / steps), y: a.y + (b.y - a.y) * (k / steps) }
     const distance = Math.hypot(p.x - a.x - (b.x - a.x) * t, p.y - a.y - (b.y - a.y) * t)
     if (distance < best.distance) best = { at, distance }
   }
@@ -156,10 +173,25 @@ function withoutRepeats(points: readonly Point[]): Point[] {
   return out
 }
 
-function pointsTo(d: Drawing, to: Point): Point[] {
+function fortyFiveTo(last: Point, to: Point, flipped: boolean): Point[] {
+  const dx = to.x - last.x
+  const dy = to.y - last.y
+  const short = Math.min(Math.abs(dx), Math.abs(dy))
+  if (!short || Math.abs(dx) === Math.abs(dy)) return [to]
+  const slant = { x: Math.sign(dx) * short, y: Math.sign(dy) * short }
+  return [flipped ? { x: last.x + slant.x, y: last.y + slant.y } : { x: to.x - slant.x, y: to.y - slant.y }, to]
+}
+
+function legTo(d: Drawing, to: Point): Point[] {
   const last = lastOf(d)
-  const corner = firstAxis(d, to) === "x" ? { x: to.x, y: last.y } : { x: last.x, y: to.y }
-  return withoutRepeats([startOf(d), ...d.corners, corner, to])
+  const mode = modeOf(d)
+  if (mode === "any") return [to]
+  if (mode === "45") return fortyFiveTo(last, to, d.flipped)
+  return [firstAxis(d, to) === "x" ? { x: to.x, y: last.y } : { x: last.x, y: to.y }, to]
+}
+
+function pointsTo(d: Drawing, to: Point): Point[] {
+  return withoutRepeats([startOf(d), ...d.corners, ...legTo(d, to)])
 }
 
 export function cutBack(wiring: Wiring, d: Drawing, newId: NewId = randomId): CutBack | null {
@@ -225,26 +257,24 @@ function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: reado
   const pinNet = (key: string) => view.netOfPin(key) ?? `pin:${key}`
   const refuse = (refused: DrawRefusal["refused"], at: Point, net: string): DrawRefusal => ({ refused, at, nets: [...own, net] })
   for (let i = 1; i < points.length; i++) {
-    const a = points[i - 1]
-    const b = points[i]
-    const horizontal = a.y === b.y
-    const line = horizontal ? rowCode(a.y) : columnCode(a.x)
-    const lo = horizontal ? Math.min(a.x, b.x) : Math.min(a.y, b.y)
-    const hi = horizontal ? Math.max(a.x, b.x) : Math.max(a.y, b.y)
-    const on = (v: number): Point => (horizontal ? { x: v, y: a.y } : { x: a.x, y: v })
-    for (const s of sheet.along(line, lo, hi)) {
+    const leg = { a: points[i - 1], b: points[i] }
+    const horizontal = leg.a.y === leg.b.y
+    const slanted = !horizontal && leg.a.x !== leg.b.x
+    const lo = lowOf(leg)
+    const hi = highOf(leg)
+    for (const s of sheet.alongSegment(leg)) {
       if (ignore.has(s.id)) continue
       const net = segmentNet(s)
-      if (!own.has(net) && Math.min(hi, highOf(s)) - Math.max(lo, lowOf(s)) > 0) return refuse("along", on(Math.max(lo, lowOf(s))), net)
+      if (!own.has(net) && Math.min(hi, highOf(s)) - Math.max(lo, lowOf(s)) > 0) return refuse("along", pointOnLine(lineOf(leg), Math.max(lo, lowOf(s))), net)
     }
-    for (const mark of sheet.marks(line, lo, hi)) {
-      const v = horizontal ? mark.at.x : mark.at.y
+    for (const mark of sheet.marksOn(leg)) {
+      const v = along(leg, mark.at)
       if (v <= lo || v >= hi) continue
       if (mark.segment) {
         if (ignore.has(mark.segment.id)) continue
         const net = segmentNet(mark.segment)
         if (!own.has(net)) return refuse("over", mark.at, net)
-      } else if (mark.pin && (!mark.pin.socket || acrossItsRow(mark.pin, horizontal))) {
+      } else if (mark.pin && (!mark.pin.socket || slanted || acrossItsRow(mark.pin, horizontal))) {
         const net = pinNet(mark.pin.key)
         if (!own.has(net)) return refuse("over", mark.at, net)
       }
@@ -323,7 +353,7 @@ function planOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: DrawEnd, ne
   let points: readonly Point[] = pointsTo(d, end.at)
   let refused = refusalFor(points)
   let routed = false
-  if (d.from.kind === "pin" && end.kind === "pin" && !d.corners.length && (refused || crossesABody(doc, points, near))) {
+  if (modeOf(d) === "90" && d.from.kind === "pin" && end.kind === "pin" && !d.corners.length && (refused || crossesABody(doc, points, near))) {
     const route = completion(doc, wiring, d.from.key, end.key, ignore)
     if (route) {
       points = withoutRepeats(route)
@@ -358,7 +388,7 @@ export function withCorner(doc: Schematic, wiring: Wiring, d: Drawing, at: Point
   if (corners.length === d.corners.length) return { ...d, cursor: at }
   const last = corners.at(-1)!
   const before = points.at(-2)!
-  const axis: Axis = last.y === before.y ? "y" : "x"
+  const axis: Axis | null = last.y === before.y ? "y" : last.x === before.x ? "x" : null
   return { ...d, cursor: at, corners, clicks: [...d.clicks, { added: corners.length - d.corners.length, axis: d.axis, flipped: d.flipped }], axis, flipped: false }
 }
 
@@ -391,13 +421,12 @@ export function laysClear(wiring: Wiring, segments: readonly { readonly a: Point
   for (const { a, b } of segments) {
     if (samePoint(a, b)) continue
     if (doc && throughABody(doc, [a, b])) return false
-    const horizontal = a.y === b.y
-    const line = horizontal ? rowCode(a.y) : columnCode(a.x)
-    const lo = horizontal ? Math.min(a.x, b.x) : Math.min(a.y, b.y)
-    const hi = horizontal ? Math.max(a.x, b.x) : Math.max(a.y, b.y)
-    for (const s of sheet.along(line, lo, hi)) if (Math.min(hi, highOf(s)) - Math.max(lo, lowOf(s)) > 0) return false
-    for (const mark of sheet.marks(line, lo, hi)) {
-      const v = horizontal ? mark.at.x : mark.at.y
+    const leg = { a, b }
+    const lo = lowOf(leg)
+    const hi = highOf(leg)
+    for (const s of sheet.alongSegment(leg)) if (Math.min(hi, highOf(s)) - Math.max(lo, lowOf(s)) > 0) return false
+    for (const mark of sheet.marksOn(leg)) {
+      const v = along(leg, mark.at)
       if (v > lo && v < hi && (mark.segment || !mark.pin?.socket)) return false
     }
   }

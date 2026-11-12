@@ -126,10 +126,9 @@ describe("the normal form: N1–N4 after every edit, one source of truth for the
     expect.soft(junctionsOf(wireNets(fourWay, pins)), "a dot").toEqual([c(2, 2)])
   })
 
-  it("zero-length pieces vanish, and anything that is not a horizontal or vertical run on the half-cell lattice is refused", () => {
+  it("zero-length pieces vanish, and an end off the half-cell lattice is refused", () => {
     const pins = [pin("A:1", c(0, 0)), pin("B:1", c(4, 0))]
     expect.soft(geometryOf(normalise([w(c(0, 0), c(4, 0)), w(c(2, 0), c(2, 0))], pins, undefined, ids())), "a point is no wire").toEqual(geometryOf([w(c(0, 0), c(4, 0))]))
-    expect.soft(() => normalise([w(c(0, 0), c(1, 1))], pins), "a diagonal").toThrow(/neither horizontally nor vertically/)
     expect.soft(() => normalise([w({ x: 5, y: 0 }, c(1, 0))], pins), "off the lattice").toThrow(/off the half-cell lattice/)
     expect.soft(geometryOf(normalise([w({ x: HALF_CELL, y: 0 }, c(2, 0))], pins, undefined, ids())), "a half cell is on it").toEqual([`(1, 0)→(4, 0)`])
   })
