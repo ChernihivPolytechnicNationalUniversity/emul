@@ -12,10 +12,6 @@ export type Direction = Side | "top-right" | "bottom-right" | "bottom-left" | "t
 /** A pin as it sits on the field: rotated coordinates, and a direction that may be diagonal. */
 export type PlacedPin = Omit<PinDef, "side" | "labelAt"> & { side: Direction; labelAt: Direction }
 
-export type Facing = Direction | "any"
-
-export const facingOf = (pin: Pick<PlacedPin, "side" | "kind">): Facing => (pin.kind === "node" ? "any" : pin.side)
-
 const DIRECTIONS: Direction[] = [
   "top",
   "top-right",

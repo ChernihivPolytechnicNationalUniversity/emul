@@ -556,7 +556,6 @@ export const nucleoSerial: Example = {
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
-    // VCP pins sit on the ST-LINK zone's left edge at y 4 (TX) and 6 (RX), stubs 2 cells out.
     const term = place("serial-terminal", -12, 3, { baud: "115200" })
     wire(u, "VCP-TX", term, "RX")
     wire(u, "VCP-RX", term, "TX")

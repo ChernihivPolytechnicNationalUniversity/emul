@@ -12,7 +12,6 @@ import {
   partKey,
   type ComponentDef,
   type PartState,
-  type PinRef,
   type PlacedObject,
   type Schematic,
   type BoardDebug,
@@ -20,7 +19,7 @@ import {
 } from "./types"
 import { isHdlDef } from "./hdl"
 import type { WireColorKey } from "./wire-colors"
-import { clipOf, connectPins, moved, inNormalForm, placedObject, recoloured, removed, reoriented, tapWireAt, wiringOf, withModule, withSegments } from "./wire-edits"
+import { clipOf, moved, inNormalForm, placedObject, recoloured, removed, reoriented, wiringOf, withModule, withSegments } from "./wire-edits"
 import { flipSelection, rotateSelection } from "./orient"
 import { flippedWithWires, TurnRun, type Landed } from "./rubber-band"
 import { drawnTo, isRefusal, type DrawEnd, type Drawing, type DrawRefusal, type Near } from "./wire-draw"
@@ -486,17 +485,6 @@ export function useSchematic(grid: number) {
 
   const land = React.useCallback((base: Schematic, landed: Landed) => commitFrom(base, landed.doc), [commitFrom])
 
-  const addWire = React.useCallback(
-    (from: PinRef, to: PinRef, points: Point[] = [], color?: WireColorKey): boolean => {
-      if (from.object === to.object && from.pin === to.pin) return true
-      const next = connectPins(doc, from, to, points, color, undefined, wiring)
-      if (next === doc) return false
-      setDoc((d) => (d === doc ? next : connectPins(d, from, to, points, color)))
-      return true
-    },
-    [doc, wiring, setDoc],
-  )
-
   const setWireColors = React.useCallback(
     (entries: Iterable<readonly [string, WireColorKey | undefined]>) => {
       const next = new Map(entries)
@@ -504,17 +492,6 @@ export function useSchematic(grid: number) {
       setDoc((d) => recoloured(d, next))
     },
     [setDoc],
-  )
-
-  const tapWire = React.useCallback(
-    (segmentId: string, at: Point, from: PinRef, points: Point[] = [], color?: WireColorKey): boolean => {
-      const next = tapWireAt(doc, segmentId, at, from, points, color, undefined, wiring)
-      if (next === doc) return false
-      setDoc((d) => (d === doc ? next : tapWireAt(d, segmentId, at, from, points, color)))
-      setSelectedWires(new Set())
-      return true
-    },
-    [doc, wiring, setDoc],
   )
 
   const reroute = React.useCallback((): RerouteRefusal | null => {
@@ -587,8 +564,6 @@ export function useSchematic(grid: number) {
     setDebug,
     setModule,
     removeModule,
-    addWire,
-    tapWire,
     setWireColors,
     reroute,
     setPart,
