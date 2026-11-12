@@ -34,7 +34,7 @@ export const QUICK_RECENT = 6
 
 const entryOf = (id: string): PaletteEntry | undefined => {
   const def = getMeta(id)
-  return def && { key: id, name: def.name, def }
+  return def && !def.retired ? { key: id, name: def.name, def } : undefined
 }
 
 /** For a blank query: favourites, then recent parts that are not favourites; each part once. */

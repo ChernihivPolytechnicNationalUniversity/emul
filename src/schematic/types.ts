@@ -458,7 +458,7 @@ export type NoDatasheet = {
 }
 
 /** A part as the generated catalogue lists it (catalogue.gen.ts): the icon by name, the file its definition loads from. */
-export type CatalogueEntry = Pick<ComponentDef, "id" | "name" | "description" | "category" | "keywords" | "width" | "height" | "prefix" | "chip" | "board"> & {
+export type CatalogueEntry = Pick<ComponentDef, "id" | "name" | "description" | "category" | "keywords" | "width" | "height" | "prefix" | "chip" | "board" | "retired"> & {
   icon: string
   file: string
 }
@@ -466,6 +466,7 @@ export type CatalogueEntry = Pick<ComponentDef, "id" | "name" | "description" | 
 export type ComponentDef = {
   id: string
   name: string
+  retired?: boolean
   description?: string
   /** Palette group: one of the closed list in categories.ts. */
   category: Category
