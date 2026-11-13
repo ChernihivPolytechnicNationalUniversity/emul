@@ -4,8 +4,7 @@ import { getDef } from "@/schematic/registry"
 import type { PlacedObject } from "@/schematic/types"
 import { placementOf, SELECTION_BANDS, selectionOutline, type Outline } from "./selection-geometry"
 import { SELECTED_WIRE_PX } from "./wire-style"
-
-export type WirePlate = { key: string; run: string; d: string; whole: boolean }
+import type { WirePlate } from "./wire-plate"
 
 type SelectionLayerProps = {
   objects: readonly PlacedObject[]

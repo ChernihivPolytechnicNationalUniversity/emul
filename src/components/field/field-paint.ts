@@ -10,6 +10,7 @@ import { CASING_PX, casingTrim, casingWidth, dotRadius, OPEN_END_CELLS, SELECTED
 import type { WireMarks } from "./wire-marks"
 import { BODY_EDGE_CELLS, bodyMaskShapes } from "./body-mask"
 import { BoxIndex } from "@/schematic/spatial"
+import type { WirePlate } from "./wire-plate"
 
 const wirePaths = new WeakMap<RoutedWire, Path2D>()
 
@@ -50,16 +51,35 @@ function outlinePathsOf(def: ComponentDef, object: PlacedObject) {
 
 const TINT: Record<string, string> = { "var(--selection)": "var(--selection-tint)", "var(--selection-feather)": "var(--selection-tint-feather)" }
 
-type Selection = { objects: ReadonlySet<string>; wires: ReadonlySet<string> }
+type Selection = { objects: ReadonlySet<string>; wires: ReadonlySet<string>; plates?: readonly WirePlate[] }
 
-function paintSelection(context: CanvasRenderingContext2D, host: Element, objects: readonly PlacedObject[], routes: readonly RoutedWire[], selection: Selection, grid: number, screenPx: (px: number) => number) {
-  const radius = wireCornerRadius(grid)
+const platePaths = new WeakMap<WirePlate, { band: Path2D; casing: Path2D }>()
+
+function platePath(plate: WirePlate) {
+  const cached = platePaths.get(plate)
+  if (cached) return cached
+  const paths = { band: new Path2D(plate.d), casing: new Path2D(plate.casing) }
+  platePaths.set(plate, paths)
+  return paths
+}
+
+function platesAmong(routes: readonly RoutedWire[], plates: readonly WirePlate[] | undefined): WirePlate[] {
+  if (!plates?.length) return []
+  const drawn = new Set(routes.map((r) => r.id))
+  return plates.filter((plate) => drawn.has(plate.run))
+}
+
+function paintSelection(context: CanvasRenderingContext2D, host: Element, objects: readonly PlacedObject[], plates: readonly WirePlate[], selection: Selection, grid: number, screenPx: (px: number) => number) {
   for (const { margin, color } of SELECTION_BANDS) {
     const tint = cssColor(host, TINT[color])
     context.strokeStyle = tint
     context.fillStyle = tint
     context.lineWidth = screenPx(SELECTED_WIRE_PX + margin * 2)
-    for (const route of routes) if (selection.wires.has(route.id)) context.stroke(wirePath(route, radius))
+    for (const plate of plates) {
+      context.lineCap = plate.whole ? "round" : "butt"
+      context.stroke(platePath(plate).band)
+    }
+    context.lineCap = "round"
     for (const object of objects) {
       if (!selection.objects.has(object.id)) continue
       const def = getDef(object.def)
@@ -182,10 +202,10 @@ function clipCasings(context: CanvasRenderingContext2D, index: BoxIndex<CasingMa
   })
 }
 
-export type MarkPaint = { radius: number; screenPx: (px: number) => number; pixels: number; device: number; grid: number; casing: string; ink: string; colorFor: (key: WireColorKey) => string; colorOf: (wireId: string) => WireColorKey }
+export type MarkPaint = { radius: number; screenPx: (px: number) => number; pixels: number; device: number; grid: number; casing: string; ink: string; colorFor: (key: WireColorKey) => string; colorOf: (wireId: string) => WireColorKey; tint?: string; plated?: ReadonlySet<string> }
 
 export function paintMarks(context: CanvasRenderingContext2D, routes: readonly RoutedWire[], marks: WireMarks, wire: MarkPaint) {
-  const { radius, screenPx, pixels, device, grid, casing, ink, colorFor, colorOf } = wire
+  const { radius, screenPx, pixels, device, grid, casing, ink, colorFor, colorOf, tint = casing, plated } = wire
   const turning = routes.filter((r) => r.leads)
   const patch = (from: Point, to: Point) => {
     context.beginPath()
@@ -197,14 +217,16 @@ export function paintMarks(context: CanvasRenderingContext2D, routes: readonly R
   context.lineWidth = screenPx(WIRE_PX + CASING_PX)
   context.strokeStyle = casing
   const pinMark = grid * PIN_MARK_CELLS + screenPx(1)
-  const hiddenUpTo = (lead: Point, pin: Point) => {
+  const hiddenUpTo = (lead: Point, pin: Point, under = casing) => {
+    context.strokeStyle = under
     patch(lead, pin)
-    context.fillStyle = casing
+    context.fillStyle = under
     context.fillRect(pin.x - pinMark, pin.y - pinMark, pinMark * 2, pinMark * 2)
   }
+  const underEnd = (run: string, end: "start" | "end") => (plated?.has(`${run}:${end}`) ? tint : casing)
   for (const r of turning) {
-    if (r.leads?.start) hiddenUpTo(r.leads.start, r.pts[0])
-    if (r.leads?.end) hiddenUpTo(r.leads.end, r.pts[r.pts.length - 1])
+    if (r.leads?.start) hiddenUpTo(r.leads.start, r.pts[0], underEnd(r.id, "start"))
+    if (r.leads?.end) hiddenUpTo(r.leads.end, r.pts[r.pts.length - 1], underEnd(r.id, "end"))
   }
   for (const c of marks.corners) {
     hiddenUpTo(c.a, c.at)
@@ -263,7 +285,10 @@ export function paintField(context: CanvasRenderingContext2D, host: Element, { o
   const selectedWire = (id: string) => selection?.wires.has(id) ?? false
   context.lineCap = "round"
   context.lineJoin = "round"
-  if (selection && (selection.objects.size || selection.wires.size)) paintSelection(context, host, objects, routes, selection, grid, screenPx)
+  const plates = platesAmong(routes, selection?.plates)
+  if (selection && (selection.objects.size || plates.length)) paintSelection(context, host, objects, plates, selection, grid, screenPx)
+  const wholeRuns = new Set(plates.filter((p) => p.whole).map((p) => p.run))
+  const tintedChains = plates.filter((p) => !p.whole)
   if (lit) context.globalAlpha = DIMMED
   const widthOf = (id: string) => (selectedWire(id) ? SELECTED_WIRE_PX : WIRE_PX)
   const plate = selection?.wires.size ? cssColor(host, "var(--selection-tint)") : casing
@@ -273,9 +298,14 @@ export function paintField(context: CanvasRenderingContext2D, host: Element, { o
     context.save()
     if (masks) clipCasings(context, masks, net, view, grid, screenPx(casingWidth(SELECTED_WIRE_PX)))
     for (const route of net) {
-      context.strokeStyle = selectedWire(route.id) ? plate : casing
+      context.strokeStyle = wholeRuns.has(route.id) ? plate : casing
       context.lineWidth = screenPx(casingWidth(widthOf(route.id)))
       context.stroke(casingPath(route, radius, trim))
+      for (const chain of tintedChains) {
+        if (chain.run !== route.id) continue
+        context.strokeStyle = plate
+        context.stroke(platePath(chain).casing)
+      }
     }
     context.restore()
     context.lineCap = "round"
@@ -307,7 +337,8 @@ export function paintField(context: CanvasRenderingContext2D, host: Element, { o
     context.save()
     context.setTransform(pixels, 0, 0, pixels, -view.x * pixels, -view.y * pixels)
     if (lit) context.globalAlpha = DIMMED
-    paintMarks(context, routes, marks, { radius, screenPx, pixels, device, grid, casing, ink: cssColor(host, "var(--foreground)"), colorFor, colorOf })
+    const plated = new Set(plates.flatMap((p) => [...(p.start ? [`${p.run}:start`] : []), ...(p.end ? [`${p.run}:end`] : [])]))
+    paintMarks(context, routes, marks, { radius, screenPx, pixels, device, grid, casing, ink: cssColor(host, "var(--foreground)"), colorFor, colorOf, tint: plate, plated })
     context.restore()
   }
 }

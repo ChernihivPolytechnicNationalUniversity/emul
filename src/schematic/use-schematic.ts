@@ -24,7 +24,7 @@ import { flipSelection, rotateSelection } from "./orient"
 import { flippedWithWires, TurnRun, type Landed } from "./rubber-band"
 import { drawnTo, isRefusal, type DrawEnd, type Drawing, type DrawRefusal, type Near } from "./wire-draw"
 import { junctionAt, type JunctionRefusal } from "./junction-tool"
-import { inRect } from "./wire-select"
+import { carriedSelection, inRect, pressesGoOn, type SelectionWiring, type TurnPresses } from "./wire-select"
 import { withFieldMoved, type FieldKey } from "./fields"
 import type { SpatialIndex } from "./spatial"
 import { WireGraph } from "./wires/graph"
@@ -193,9 +193,16 @@ export function useSchematic(grid: number) {
     wiringNow.current = wiring
   }, [wiring])
   const [selectedObjects, setSelectedObjects] = React.useState<ReadonlySet<string>>(() => new Set())
-  const [selectedWires, setSelectedWires] = React.useState<ReadonlySet<string>>(() => new Set())
+  const [selectedWireIds, setSelectedWires] = React.useState<ReadonlySet<string>>(() => new Set())
+  const [selectionOf, setSelectionOf] = React.useState<SelectionWiring>(wiring)
+  let selectedWires = selectedWireIds
+  if (selectionOf !== wiring) {
+    selectedWires = carriedSelection(selectedWireIds, selectionOf, wiring)
+    setSelectedWires(selectedWires)
+    setSelectionOf(wiring)
+  }
   const edits = history.edits
-  const turning = React.useRef<{ ids: string; run: TurnRun; doc: Schematic } | null>(null)
+  const turning = React.useRef<(TurnPresses & { run: TurnRun }) | null>(null)
 
   const setDoc = React.useCallback(
     (fn: (d: Schematic) => Schematic, opts: { silent?: boolean } = {}) => {
@@ -214,9 +221,7 @@ export function useSchematic(grid: number) {
   /** Selection survives undo only for things that still exist. */
   const pruneSelection = React.useCallback((d: Schematic) => {
     const objects = new Set(d.objects.map((o) => o.id))
-    const wires = new Set(d.wires.map((w) => w.id))
     setSelectedObjects((s) => new Set([...s].filter((id) => objects.has(id))))
-    setSelectedWires((s) => new Set([...s].filter((id) => wires.has(id))))
   }, [])
 
   // Part state and firmware projects are live rather than edits: they are not undone, so
@@ -295,9 +300,7 @@ export function useSchematic(grid: number) {
         { silent: true },
       )
       const objects = new Set(next.objects.map((o) => o.id))
-      const wires = new Set(next.wires.map((w) => w.id))
       setSelectedObjects((s) => ([...s].every((id) => objects.has(id)) ? s : new Set([...s].filter((id) => objects.has(id)))))
-      setSelectedWires((s) => ([...s].every((id) => wires.has(id)) ? s : new Set([...s].filter((id) => wires.has(id)))))
     },
     [setDoc],
   )
@@ -434,12 +437,12 @@ export function useSchematic(grid: number) {
   const rotate = React.useCallback(
     (ids: ReadonlySet<string>, turn: Turn, index?: SpatialIndex, wires: ReadonlySet<string> = new Set()): Landed | null => {
       if (!ids.size && !wires.size) return null
-      const key = [...[...ids].sort(), "|", ...[...wires].sort()].join("\u0000")
+      const objects = [...ids].sort().join("\u0000")
       const known = turning.current
-      const run = known && known.ids === key && known.doc === doc ? known.run : new TurnRun(doc, wiring, ids, index, wires)
+      const run = known && pressesGoOn(known, objects, wires, doc, wiring) ? known.run : new TurnRun(doc, wiring, ids, index, wires)
       const landed = run.turned(turn)
       if (landed.refused) return landed
-      turning.current = { ids: key, run, doc: landed.doc }
+      turning.current = { objects, wires, of: wiring, run, doc: landed.doc }
       commitFrom(doc, landed.doc)
       return landed
     },
