@@ -437,7 +437,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     },
     [nets, colorOf],
   )
-  const [hoveredWire, setHoveredWire] = React.useState<string | null>(null)
+  const [hovered, setHovered] = React.useState<{ readonly wire: string; readonly on: Schematic } | null>(null)
+  const hoveredWire = hovered?.on === sch.doc ? hovered.wire : null
+  const setHoveredWire = (wire: string | null) => setHovered(wire === null ? null : { wire, on: sch.doc })
   const hoveredNet = hoveredWire === null ? null : (nets.netOfWire(hoveredWire) ?? null)
   const [flow] = React.useState(() => new WireFlow())
   React.useEffect(() => () => flow.dispose(), [flow])
@@ -1327,7 +1329,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     wirePress.current = { segment, x: e.clientX, y: e.clientY, pointer: e.pointerId, element: e.currentTarget }
   })
   const onWirePointerEnter = useEvent((id: string) => {
-    if (pending || drag.active || marquee.isDragging()) return
+    if (armed || paletteDrag.active || pending || drag.active || marquee.isDragging()) return
     setHoveredWire(id)
   })
   const onWirePointerLeave = useEvent(() => setHoveredWire(null))
@@ -1421,6 +1423,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         return
       }
       sch.deselectAll()
+      setHoveredWire(null)
       marquee.start(e)
     }
   }

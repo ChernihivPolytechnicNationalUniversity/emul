@@ -1023,6 +1023,49 @@ async function noPluggingIntoHeaders(page: Page) {
   expect("…nor sent home: the board's edge is nearer to the drop", Math.hypot(landed.x - q.x, landed.y - q.y) > GRID / 2, true)
 }
 
+const dimmedNets = (page: Page) => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-net]")].filter((g) => g.classList.contains("opacity-25")).length)
+
+async function noFadeLeftAfterADrop(page: Page) {
+  console.log("\nno net is left faded after a part lands on a wire (the user, 2026-11-13: an inductor dragged from the palette onto a wire left every other net pale)")
+  const doc: Schematic = {
+    objects: [resistorAt("R1", 2, 10), resistorAt("R6", 2, 14), resistorAt("R7", 24, 14)],
+    wires: [{ id: "a", a: cellPoint(6, 11), b: cellPoint(24, 11) }, { id: "b", a: cellPoint(6, 15), b: cellPoint(24, 15), color: "blue" }],
+    parts: {},
+  }
+  await openDoc(page, "palette-onto-wire", doc)
+  await page.addStyleTag({ content: "[data-sonner-toaster]{display:none!important}" })
+  const frame = await fieldFrame(page)
+  const tile = (await page.getByRole("button", { name: "Inductor", exact: true }).boundingBox())!
+  const onTheWire = frame.toScreen(cellPoint(10, 11))
+  const drop = frame.toScreen(cellPoint(14, 11))
+  await page.mouse.move(tile.x + tile.width / 2, tile.y + tile.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(onTheWire.x, onTheWire.y, { steps: 20 })
+  await page.mouse.move(drop.x, drop.y, { steps: 10 })
+  await page.waitForTimeout(200)
+  expect("an inductor carried from the palette along a wire dims no net: a part in hand is not a wire hovered", await dimmedNets(page), 0)
+  await page.mouse.up()
+  await page.waitForTimeout(800)
+  expect("dropped onto the wire it is put in series, and no net is dimmed", [await countOf(page, "[data-body]"), await dimmedNets(page)], [4, 0])
+  const away = frame.toScreen(cellPoint(14, 20))
+  await page.mouse.move(away.x, away.y, { steps: 8 })
+  await page.mouse.click(away.x, away.y)
+  await page.waitForTimeout(300)
+  expect("moved away and clicked on empty field: still no net dimmed", await dimmedNets(page), 0)
+  const onBlue = frame.toScreen(cellPoint(18, 15))
+  await page.mouse.move(onBlue.x, onBlue.y, { steps: 8 })
+  await page.waitForTimeout(300)
+  expect("hovering a wire still lights its net and fades the rest", (await dimmedNets(page)) > 0, true)
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(600)
+  expect("an edit under a resting pointer ends the hover: it belonged to the document before it", await dimmedNets(page), 0)
+  await page.mouse.move(away.x, away.y, { steps: 8 })
+  const r6 = frame.toScreen(cellPoint(4, 15))
+  const onA = frame.toScreen(cellPoint(14, 11))
+  await dragBy(page, r6, onA)
+  expect("a part moved onto a wire and dropped leaves no net dimmed either", await dimmedNets(page), 0)
+}
+
 async function freedSlotTakesTheDrop(page: Page) {
   console.log("\na crystal dropped half on a neighbour beside a freed slot")
   const pitch = { x: 5, y: 2 }
@@ -1127,7 +1170,7 @@ try {
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
+const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, noFadeLeftAfterADrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
 try {
   for (const section of sections) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
