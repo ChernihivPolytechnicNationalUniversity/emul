@@ -269,6 +269,9 @@
   opacity: 0.55;
   filter: blur(calc(3 * var(--conflict-px, 1px)));
 }
+.dark [data-conflict-glow] {
+  opacity: 0.85;
+}
 [data-conflict]:not([data-slot="field-drag-layer"]),
 [data-slot="field-drag-layer"][data-conflict]:has([data-slot="field-canvas"]) {
   filter: drop-shadow(0 0 var(--conflict-px, 1px) var(--conflict)) drop-shadow(0 0 calc(2.5 * var(--conflict-px, 1px)) var(--conflict)) drop-shadow(0 0 calc(6 * var(--conflict-px, 1px)) var(--conflict));
