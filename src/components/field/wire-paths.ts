@@ -17,6 +17,8 @@ export function leadPatchPaths({ pts, leads }: WireRoute, px: number): string[] 
   return patches
 }
 
+export const conflictCutPaths = (stretches: readonly Stretch[], grid: number): string[] => chained(stretches).map((line) => toPath(line, wireCornerRadius(grid)))
+
 export function conflictGlowPaths(stretches: readonly Stretch[], bendAt: (p: Point) => boolean, grid: number): string[] {
   const radius = wireCornerRadius(grid)
   return chained(stretches).map((line) => toPath(trimmedAtBends(line, bendAt, radius), radius))

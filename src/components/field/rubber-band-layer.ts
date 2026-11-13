@@ -11,7 +11,7 @@ import { normalise } from "@/schematic/wires/normal-form"
 import { onLattice, pointKey, samePoint, type WirePin, type WireSegment } from "@/schematic/wires/segment"
 import type { WireSheet } from "@/schematic/wires/sheet"
 import { SELECTION_BANDS } from "./selection-geometry"
-import { conflictGlowPaths, leadPatchPaths, wireCasingPath, wireStrokePath } from "./wire-paths"
+import { conflictCutPaths, conflictGlowPaths, leadPatchPaths, wireCasingPath, wireStrokePath } from "./wire-paths"
 import { CASING_PX, casingWidth, CONFLICT_PX, glowCutWidth, WIRE_PX } from "./wire-style"
 
 const SVG_NS = "http://www.w3.org/2000/svg"
@@ -322,7 +322,7 @@ export class RubberBandLayer {
     this.hideMarks(band.covered)
     const glowing = frame.blocked ? dragConflictMarks(frame, undefined, this.look.grid).stretches : []
     const glow = glowing.length ? conflictGlowPaths(glowing, bendsOf(band.wires.map((w) => w.pts)), this.look.grid) : []
-    this.coverCarried(offset, glow, glowing)
+    this.coverCarried(offset, conflictCutPaths(glowing, this.look.grid), glowing)
     this.paint(band.wires, frame.blocked, band.marks, glow)
   }
 
@@ -376,10 +376,6 @@ export class RubberBandLayer {
     casings.setAttribute("mask", BODY_MASK)
     let outer: SVGGElement = casings
     if (this.carried) outer = wrapped(outer, CARRIED_MASK)
-    else if (glow.length) {
-      layer.append(glowCut(glow, px))
-      outer = wrapped(outer, GLOW_CUT_MASK)
-    }
     layer.append(outer)
     for (const wire of wires) casings.append(stroked(wireCasingPath(wire, grid), "var(--background)", casingWidth(WIRE_PX), "butt"))
     for (const wire of wires) for (const d of leadPatchPaths(wire, this.look.pixel())) layer.append(stroked(d, "var(--background)", WIRE_PX + CASING_PX, "butt", "miter"))
@@ -427,26 +423,15 @@ function boxOfPoints(points: readonly Point[]): Rect {
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y }
 }
 
-const GLOW_CUT_ID = "rubber-band-glow-cut"
-
-const GLOW_CUT_MASK = `url(#${GLOW_CUT_ID})`
-
 function wrapped(inner: SVGGElement, mask: string): SVGGElement {
   const outer = svgElement("g", { mask })
   outer.append(inner)
   return outer
 }
 
-function glowCut(paths: readonly string[], px: number): SVGMaskElement {
-  const mask = svgElement("mask", { id: GLOW_CUT_ID, maskUnits: "userSpaceOnUse", ...EVERYWHERE })
-  mask.append(svgElement("rect", { ...EVERYWHERE, fill: "white" }))
-  for (const d of paths) mask.append(svgElement("path", { d, fill: "none", stroke: "black", "stroke-width": glowCutWidth(px), "stroke-linecap": "round", "stroke-linejoin": "round" }))
-  return mask
-}
-
 function conflictGlow(paths: readonly string[], px: number): SVGGElement {
   const glow = document.createElementNS(SVG_NS, "g")
-  glow.setAttribute("data-conflict", "")
+  glow.setAttribute("data-conflict-glow", "")
   glow.style.setProperty("--conflict-px", `${px}px`)
   for (const d of paths) glow.append(stroked(d, "var(--conflict)", CONFLICT_PX, "round"))
   return glow

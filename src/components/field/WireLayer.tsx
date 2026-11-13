@@ -6,7 +6,7 @@ import type { PinCorner } from "@/schematic/wire-look"
 import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
 import { bendsOf, type Stretch } from "@/schematic/conflict-marks"
 import { CASING_PX, casingWidth, CONFLICT_PX, glowCutWidth, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_HIT_PX, WIRE_PX } from "./wire-style"
-import { conflictGlowPaths, leadPatchPaths, wireCasingPath, wireStrokePath } from "./wire-paths"
+import { conflictCutPaths, conflictGlowPaths, leadPatchPaths, wireCasingPath, wireStrokePath } from "./wire-paths"
 import { wireMarks } from "./wire-marks"
 import type { WireFlow } from "./wire-flow"
 
@@ -249,11 +249,12 @@ function Pending({ pending, grid, px, handleR, part }: { pending: PendingLook; g
   const d = wireStrokePath({ pts }, grid)
   const color = wireColorVar(pending.color)
   const glow = pending.conflict?.length ? conflictGlowPaths(pending.conflict, bendsOf([pts]), grid) : []
+  const cut = pending.conflict?.length ? conflictCutPaths(pending.conflict, grid) : []
   const end = pts[pts.length - 1]
   if (part === "glow") {
     if (!glow.length) return null
     return (
-      <g data-slot="pending-wire-glow" data-conflict="" style={{ ["--conflict-px" as string]: `${px}px` }}>
+      <g data-slot="pending-wire-glow" data-conflict-glow="" style={{ ["--conflict-px" as string]: `${px}px` }}>
         {glow.map((g, i) => (
           <path key={i} d={g} fill="none" stroke="var(--conflict)" strokeWidth={CONFLICT_PX} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         ))}
@@ -272,7 +273,7 @@ function Pending({ pending, grid, px, handleR, part }: { pending: PendingLook; g
   }
   return (
     <g pointerEvents="none">
-      {glow.length > 0 && <GlowCut id={PENDING_GLOW_CUT} paths={glow} px={px} />}
+      {cut.length > 0 && <GlowCut id={PENDING_GLOW_CUT} paths={cut} px={px} />}
       <g mask={glow.length > 0 ? `url(#${PENDING_GLOW_CUT})` : undefined}>
         <path mask={BODY_MASK} d={wireCasingPath({ pts }, grid)} fill="none" stroke="var(--background)" strokeWidth={casingWidth(WIRE_PX)} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
       </g>

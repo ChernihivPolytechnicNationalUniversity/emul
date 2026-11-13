@@ -8,7 +8,9 @@ export const CROSSING_GAP_PX = 3
 
 export const casingWidth = (wirePx: number) => wirePx + 2 * CROSSING_GAP_PX
 export const CONFLICT_PX = casingWidth(WIRE_PX)
-export const glowCutWidth = (px: number) => Math.max(1, px) * casingWidth(WIRE_PX) + 2 * px
+const CONFLICT_BLUR_PX = 3
+const CONFLICT_REACH_PX = CONFLICT_PX / 2 + 3 * CONFLICT_BLUR_PX
+export const glowCutWidth = (px: number) => 2 * (CONFLICT_REACH_PX * px + (casingWidth(WIRE_PX) / 2) * Math.max(1, px))
 export const WIRE_HIT_PX = 14
 
 export const wireCornerRadius = (grid: number) => CORNER * grid
