@@ -6,7 +6,7 @@ import type { WireColorKey } from "./wire-colors"
 import { withSegments, type NewId, type Wiring } from "./wire-edits"
 import { routeAround, runEnds, type RouteEnd } from "./wires/router"
 import { along, greatestDivisor, HALF_CELL, highOf, lineOf, lowOf, pointOnLine, samePoint, type WirePin, type WireSegment } from "./wires/segment"
-import { bodiesOf, crossedBody, segmentBox } from "./body-crossing"
+import { bodiesOf, bodyRefusal, crossedBody, segmentBox } from "./body-crossing"
 
 export type DrawEnd =
   | { readonly kind: "pin"; readonly key: string; readonly at: Point }
@@ -50,7 +50,7 @@ export const isRefusal = (value: unknown): value is DrawRefusal => typeof value 
 
 const randomId: NewId = () => crypto.randomUUID()
 
-export const PASTE_REFUSED = { title: "Nowhere clean to paste", why: "Every place near the paste lays a pasted wire along another net's wire or over its pin." }
+export const PASTE_REFUSED = { title: "Nowhere clean to paste", why: "The paste would lay a wire through a part's body, along another net's wire or over its pin, so nothing changed." }
 
 export const DRAW_REFUSED: Record<DrawRefusal["refused"], { title: string; why: string }> = {
   along: { title: "Not along another net's wire", why: "A wire lying on another net's wire would join the two without saying so. End the wire on it to join them on purpose." },
@@ -439,7 +439,8 @@ export function drawnTo(doc: Schematic, wiring: Wiring, d: Drawing, target: Draw
     lay(route, run.segments[0].color)
     ends.push(route[0], route[route.length - 1])
   }
-  return withSegments(doc, segments, removed, ends, newId)
+  const result = withSegments(doc, segments, removed, ends, newId)
+  return bodyRefusal(doc, result) ?? result
 }
 
 export function laysClear(wiring: Wiring, segments: readonly { readonly a: Point; readonly b: Point }[], doc?: Schematic): boolean {

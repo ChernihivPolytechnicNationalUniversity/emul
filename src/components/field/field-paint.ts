@@ -8,6 +8,8 @@ import { SELECTION_BANDS, selectionOutline } from "./selection-geometry"
 import { PIN_MARK_CELLS, type SymbolRaster } from "./symbol-raster"
 import { CASING_PX, casingTrim, casingWidth, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
 import type { WireMarks } from "./wire-marks"
+import { BODY_EDGE_CELLS, bodyMaskShapes } from "./body-mask"
+import { BoxIndex } from "@/schematic/spatial"
 
 const wirePaths = new WeakMap<RoutedWire, Path2D>()
 
@@ -118,6 +120,68 @@ function byNet(routes: readonly RoutedWire[], netOf: ((wireId: string) => string
   return [...nets.values()]
 }
 
+type CasingMask = { box: Rect } & ({ polygon: readonly Point[] } | { lead: readonly [Point, Point] } | { text: Rect })
+
+const casingMasks = new WeakMap<readonly PlacedObject[], { grid: number; index: BoxIndex<CasingMask> }>()
+
+function casingMaskIndex(objects: readonly PlacedObject[], grid: number): BoxIndex<CasingMask> {
+  const cached = casingMasks.get(objects)
+  if (cached?.grid === grid) return cached.index
+  const shapes = bodyMaskShapes(objects, grid)
+  const radius = BODY_EDGE_CELLS * grid / 2
+  const bounds = (points: readonly Point[]): Rect => {
+    const x = Math.min(...points.map((p) => p.x)) - radius
+    const y = Math.min(...points.map((p) => p.y)) - radius
+    return { x, y, w: Math.max(...points.map((p) => p.x)) + radius - x, h: Math.max(...points.map((p) => p.y)) + radius - y }
+  }
+  const masks: CasingMask[] = [
+    ...shapes.bodies.map((polygon) => ({ box: bounds(polygon), polygon })),
+    ...shapes.leads.map((lead) => ({ box: bounds(lead), lead })),
+    ...shapes.texts.map((text) => ({ box: text, text })),
+  ]
+  const index = new BoxIndex(masks, (mask) => mask.box, 16 * grid)
+  casingMasks.set(objects, { grid, index })
+  return index
+}
+
+function clipCasings(context: CanvasRenderingContext2D, index: BoxIndex<CasingMask>, routes: readonly RoutedWire[], view: Rect, grid: number, width: number) {
+  const points = routes.flatMap((r) => r.pts)
+  const margin = Math.max(width, 3 * grid)
+  const x = Math.min(...points.map((p) => p.x)) - margin
+  const y = Math.min(...points.map((p) => p.y)) - margin
+  const box = { x, y, w: Math.max(...points.map((p) => p.x)) + margin - x, h: Math.max(...points.map((p) => p.y)) + margin - y }
+  const beginHole = () => {
+    context.beginPath()
+    context.rect(view.x, view.y, view.w, view.h)
+  }
+  const clipLead = ([a, b]: readonly [Point, Point]) => {
+    const angle = Math.atan2(b.y - a.y, b.x - a.x)
+    const radius = BODY_EDGE_CELLS * grid / 2
+    beginHole()
+    context.moveTo(a.x + Math.sin(angle) * radius, a.y - Math.cos(angle) * radius)
+    context.arc(b.x, b.y, radius, angle - Math.PI / 2, angle + Math.PI / 2)
+    context.arc(a.x, a.y, radius, angle + Math.PI / 2, angle + 3 * Math.PI / 2)
+    context.closePath()
+    context.clip("evenodd")
+  }
+  index.some(box, (mask) => {
+    if ("lead" in mask) clipLead(mask.lead)
+    else if ("text" in mask) {
+      beginHole()
+      context.rect(mask.text.x, mask.text.y, mask.text.w, mask.text.h)
+      context.clip("evenodd")
+    } else if (mask.polygon.length) {
+      beginHole()
+      context.moveTo(mask.polygon[0].x, mask.polygon[0].y)
+      for (const p of mask.polygon.slice(1)) context.lineTo(p.x, p.y)
+      context.closePath()
+      context.clip("evenodd")
+      mask.polygon.forEach((p, i) => clipLead([p, mask.polygon[(i + 1) % mask.polygon.length]]))
+    }
+    return false
+  })
+}
+
 export type MarkPaint = { radius: number; screenPx: (px: number) => number; pixels: number; device: number; grid: number; casing: string; ink: string; colorFor: (key: WireColorKey) => string; colorOf: (wireId: string) => WireColorKey }
 
 export function paintMarks(context: CanvasRenderingContext2D, routes: readonly RoutedWire[], marks: WireMarks, wire: MarkPaint) {
@@ -203,13 +267,17 @@ export function paintField(context: CanvasRenderingContext2D, host: Element, { o
   if (lit) context.globalAlpha = DIMMED
   const widthOf = (id: string) => (selectedWire(id) ? SELECTED_WIRE_PX : WIRE_PX)
   const plate = selection?.wires.size ? cssColor(host, "var(--selection-tint)") : casing
+  const masks = routes.length ? casingMaskIndex(objects, grid) : undefined
   for (const net of byNet(routes, netOf)) {
     context.lineCap = "butt"
+    context.save()
+    if (masks) clipCasings(context, masks, net, view, grid, screenPx(casingWidth(SELECTED_WIRE_PX)))
     for (const route of net) {
       context.strokeStyle = selectedWire(route.id) ? plate : casing
       context.lineWidth = screenPx(casingWidth(widthOf(route.id)))
       context.stroke(casingPath(route, radius, trim))
     }
+    context.restore()
     context.lineCap = "round"
     for (const route of net) {
       context.strokeStyle = colorFor(colorOf(route.id))

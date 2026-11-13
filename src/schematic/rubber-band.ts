@@ -4,7 +4,7 @@ import { GRID, objectRect, snap, type FlipAxis, type Rect, type Turn } from "./g
 import { flipLine, flipSelection, selectionStep, turnedAbout, turnedSelection, turnPivot } from "./orient"
 import { designatorRects, footprint } from "./placement"
 import { BoxIndex, SpatialIndex } from "./spatial"
-import { bodiesOf, crossable, crossedBody, segmentBox, shiftedBody, spliceSpan, staysThrough, type Body } from "./body-crossing"
+import { bodiesOf, bodyRefusal, crossable, crossedBody, segmentBox, shiftedBody, spliceSpan, staysThrough, type Body, type Touched } from "./body-crossing"
 import type { PlacedObject, Point, Schematic } from "./types"
 import { keepSheet, detachedMove, moved, pinsOf, travellingIn, travellingWires, wiringOf, withSegments, type NewId, type Wiring } from "./wire-edits"
 import { normalOffset, planDrag, translate, type DragBox, type DragCommit, type DragConflict, type DragFrame, type DragMove, type DragPlan } from "./wires/drag"
@@ -28,15 +28,22 @@ export const WIRES_REFUSED = { title: "Not done: the wires could not follow", wh
 
 export const CONTACT_OPENED = { title: "contact opened", why: "No wire could join those pins again without touching another net, so they are open now. Draw the wire or move the part." }
 
-export const TURN_REFUSED = { title: "Not turned", why: "Turning it would put a pin on a crossing of two wires or on another net's wire, so nothing changed." }
+export const TURN_REFUSED = { title: "Not turned", why: "Turning or mirroring it would lay a wire through a part's body or put a pin on a crossing or another net's wire, so nothing changed." }
 
-export const WIRE_MOVE_REFUSED = { title: "Wire not moved", why: "There it would lie along another net's wire or end on another net's pin, so it stayed where it was." }
+export const WIRE_MOVE_REFUSED = { title: "Wire not moved", why: "There it would cross a part's body, lie along another net's wire or end on another net's pin, so it stayed where it was." }
 
-export const DRAG_REFUSED = { title: "Nowhere clean to put it", why: "Every place near the drop puts a pin on a crossing of two wires or lays a wire along another net's wire." }
+export const DRAG_REFUSED = { title: "Nowhere clean to put it", why: "The drop would lay a wire through a part's body, put a pin on a crossing or lay a wire along another net's wire, so nothing changed." }
 
 const ZERO: Point = { x: 0, y: 0 }
 
 const EMPTY_FRAME: DragFrame = { pieces: [], replaced: new Set(), pins: new Map(), blocked: false, conflicts: [], reroutes: [], joins: [] }
+
+const touchedBy = (edit: DragCommit["edit"], objects: ReadonlySet<string>, coversChecked: boolean): Touched => ({ wires: edit.add ?? [], objects, coversChecked })
+
+function auditedLanding(before: Schematic, result: Landed, touched?: Touched): Landed {
+  const refusal = bodyRefusal(before, result.doc, touched)
+  return refusal ? { doc: before, unlaid: [], at: ZERO, refused: [{ at: refusal.at, reason: "body", piece: refusal.nets[0], nets: refusal.nets }] } : result
+}
 
 const objectOf = (key: string) => key.slice(0, key.indexOf(":"))
 
@@ -289,8 +296,8 @@ export class PartDrag {
 
   landed(dx: number, dy: number, newId: NewId = randomId): Landed {
     const plan = this.plan
-    if (this.detach) return { doc: detachedMove(this.doc, this.from, dx, dy, newId), unlaid: [], at: { x: dx, y: dy } }
-    if (!plan) return { doc: moved(this.doc, this.from, dx, dy, newId, this.wiring), unlaid: [], at: { x: dx, y: dy } }
+    if (this.detach) return auditedLanding(this.doc, { doc: detachedMove(this.doc, this.from, dx, dy, newId), unlaid: [], at: { x: dx, y: dy } })
+    if (!plan) return auditedLanding(this.doc, { doc: moved(this.doc, this.from, dx, dy, newId, this.wiring), unlaid: [], at: { x: dx, y: dy } })
     if (this.stale) return { doc: this.doc, unlaid: [], at: ZERO, refused: [] }
     const asked = { x: dx, y: dy }
     const clean = this.blocked(dx, dy) ? nearestWhere(asked, (p) => !this.blocked(p.x, p.y)) : asked
@@ -303,7 +310,8 @@ export class PartDrag {
       return p ? { ...o, x: p.x + at.x, y: p.y + at.y } : o
     })
     const targets = new Map(commit.pins.map((p) => [`${p.at.x},${p.at.y}`, p.key] as const))
-    return { doc: splicedAt(committed(this.doc, objects, commit, newId), this.from.keys(), newId), unlaid: unlaidOf(commit, (p) => targets.get(`${p.x},${p.y}`)), at }
+    const doc = splicedAt(committed(this.doc, objects, commit, newId), this.from.keys(), newId)
+    return auditedLanding(this.doc, { doc, unlaid: unlaidOf(commit, (p) => targets.get(`${p.x},${p.y}`)), at }, touchedBy(commit.edit, new Set(this.from.keys()), !!clean))
   }
 }
 
@@ -366,7 +374,8 @@ export class SegmentDrag {
     if (!at) return { doc: this.doc, unlaid: [], at: ZERO, refused: this.frame(dx, dy).conflicts }
     const commit = plan.commit(at, newId, { keepUnlaid: true })
     if (!commit) return { doc: this.doc, unlaid: [], at: ZERO, refused: plan.frame(at).conflicts }
-    return { doc: committed(this.doc, this.doc.objects, commit, newId), unlaid: unlaidOf(commit, () => undefined), at }
+    const doc = committed(this.doc, this.doc.objects, commit, newId)
+    return auditedLanding(this.doc, { doc, unlaid: unlaidOf(commit, () => undefined), at }, touchedBy(commit.edit, new Set(), true))
   }
 }
 
@@ -408,7 +417,8 @@ function reshaped(base: Schematic, wiring: Base, ids: ReadonlySet<string>, targe
   const commit = plan.commit(move, newId, { keepUnlaid: true }) ?? planDrag(sheet, wiring.view, { ...request, keepFarEnds: true }).commit(move, newId, { keepUnlaid: true })
   if (!commit) return { doc: base, unlaid: [], at: ZERO, refused: plan.frame(move).conflicts }
   const targets = new Map(commit.pins.map((p) => [`${p.at.x},${p.at.y}`, p.key] as const))
-  return { doc: committed(base, target.objects, commit, newId), unlaid: unlaidOf(commit, (p) => targets.get(`${p.x},${p.y}`)), at: ZERO }
+  const doc = committed(base, target.objects, commit, newId)
+  return auditedLanding(base, { doc, unlaid: unlaidOf(commit, (p) => targets.get(`${p.x},${p.y}`)), at: ZERO }, touchedBy(commit.edit, ids, false))
 }
 
 export class TurnRun {
