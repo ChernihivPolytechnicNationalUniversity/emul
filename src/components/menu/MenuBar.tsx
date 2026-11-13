@@ -378,6 +378,11 @@ export function MenuBar({
         <MenubarMenu>
           <MenubarTrigger>Help</MenubarTrigger>
           <MenubarContent>
+            <MenubarItem onClick={act((f) => f.showShortcuts())}>
+              Keyboard shortcuts
+              <MenubarShortcut>{labelFor(KEYMAP.shortcuts)}</MenubarShortcut>
+            </MenubarItem>
+            <MenubarSeparator />
             <MenubarItem closeOnClick={false}>
               Version
               <MenubarShortcut className="text-foreground">{config.version}</MenubarShortcut>
