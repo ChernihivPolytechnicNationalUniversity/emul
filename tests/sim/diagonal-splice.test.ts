@@ -186,6 +186,23 @@ describe("a part on its diagonal dropped onto a diagonal wire is cut into it (th
     }
   })
 
+  it("added onto a diagonal stretch that a branch or another part's pin meets between its pins, the part is not cut in: the stretch stays drawn", () => {
+    const w = DIAMOND_WIRES[0]
+    const r3 = partAt("R3", "resistor", { rotation: 45, mirror: false }, [at(16, 3), at(19, 6)], { x: 0, y: 0 })
+    const covered = (doc: Schematic) => doc.wires.filter((s) => (s.b.y - s.a.y) * (w.to.x - w.from.x) === (s.b.x - s.a.x) * (w.to.y - w.from.y) && (s.a.x - w.from.x) * (w.to.y - w.from.y) === (s.a.y - w.from.y) * (w.to.x - w.from.x) && Math.min(s.a.x, s.b.x) >= c(16) && Math.max(s.a.x, s.b.x) <= c(19)).reduce((sum, s) => sum + Math.abs(s.b.x - s.a.x), 0)
+    const sides = DIAMOND_WIRES.slice(1).map((s) => seg(s.from, s.to))
+    for (const [name, extra, wires, drawn] of [
+      ["a branch from (17, 4)", [], [seg(w.from, w.to), seg(at(17, 4), at(17, 10))], 3],
+      ["R6's pin on (17, 4)", [resistor("R6", 16, 4, 90)], [seg(w.from, w.to)], 3],
+      ["a gap from (17, 4) to (18, 5)", [], [seg(w.from, at(17, 4)), seg(at(18, 5), w.to)], 2],
+    ] as const) {
+      const doc = docOf([...diamondParts(), ...extra], [...sides, ...wires])
+      const added = placedObject(doc, r3, newId)
+      expect.soft(covered(added), `${name}: the wire between (16, 3) and (19, 6) as it was drawn`).toBe(c(drawn))
+      expect.soft(normalForm(added), `${name}: normal form`).toEqual([])
+    }
+  })
+
   it("Alt suppresses the cut on a diagonal as on a straight wire: the wire stays whole and the part sits on it at both pins", () => {
     const w = DIAMOND_WIRES[0]
     const u = stepOf(w)
@@ -228,6 +245,16 @@ describe("a drop onto a diagonal wire that does not fit keeps the refusal and th
     const branch = seg(at(17, 4), at(17, 10))
     const doc = docOf([...diamondParts(), resistor("R6", 16, 10, 90)], [...DIAMOND_WIRES.map((w) => seg(w.from, w.to)), branch])
     for (const o of alongOf("resistor", DIAMOND_WIRES[0])) expectRefused(`branch inside, ${named(o)}`, dropOnto(doc, partAt("R3", "resistor", o, [at(16, 3), at(19, 6)])), doc.wires)
+  })
+
+  it("a branch meets the wire beside a lead, between a pin and the body, and runs away clear of the body: still not cut, on a diagonal as on a straight wire", () => {
+    const half = (x: number, y: number): Point => ({ x: c(x), y: c(y) })
+    for (const branch of [seg(half(16.5, 3.5), half(16.5, -3)), seg(half(18.5, 5.5), half(27, 5.5))]) {
+      const doc = docOf(diamondParts(), [...DIAMOND_WIRES.map((w) => seg(w.from, w.to)), branch])
+      for (const o of alongOf("resistor", DIAMOND_WIRES[0])) expectRefused(`branch from ${shown(branch.a)}, ${named(o)}`, dropOnto(doc, partAt("R3", "resistor", o, [at(16, 3), at(19, 6)])), doc.wires)
+    }
+    const straight = docOf([resistor("R1", 0, 0), resistor("R2", 16, 0)], [seg(at(4, 1), at(16, 1)), seg(half(6.5, 1), half(6.5, -4))])
+    expectRefused("straight wire, branch beside the lead", dropOnto(straight, resistor("R3", 6 + 40, 40)), straight.wires)
   })
 
   it("the pins beside the wire, off its lattice: a diagonal on the half cell runs through the body", () => {
