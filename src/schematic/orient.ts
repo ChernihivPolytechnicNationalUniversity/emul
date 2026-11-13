@@ -1,5 +1,6 @@
 import { diagonalSquare, flipped, nextRotation, objectRect, objectSize, orientationOf, snap, unionOf, type FlipAxis, type Point, type Rect, type Step, type Turn } from "./geometry"
 import { getDef } from "./registry"
+import { turnLanding } from "./placement"
 import type { ComponentDef, PlacedObject, Schematic } from "./types"
 
 function reoriented(object: PlacedObject, axis: FlipAxis): PlacedObject {
@@ -91,4 +92,15 @@ export function flipLine(doc: Schematic, ids: ReadonlySet<string>, axis: FlipAxi
   const starts = rects.map((r) => (horizontal ? r.x : r.y))
   const ends = rects.map((r) => (horizontal ? r.x + r.w : r.y + r.h))
   return snap(Math.min(...starts) + Math.max(...ends), grid)
+}
+
+export type InPlace = { readonly doc: Schematic; readonly shift: Point }
+
+export function landedInPlace(before: Schematic, after: Schematic, ids: ReadonlySet<string>, grid: number): InPlace | null {
+  if (after === before) return { doc: after, shift: { x: 0, y: 0 } }
+  const chosen = (doc: Schematic) => doc.objects.filter((o) => ids.has(o.id))
+  const shift = turnLanding(after.objects, chosen(before), chosen(after), grid)
+  if (!shift) return null
+  if (!shift.x && !shift.y) return { doc: after, shift }
+  return { doc: { ...after, objects: after.objects.map((o) => (ids.has(o.id) ? { ...o, x: o.x + shift.x, y: o.y + shift.y } : o)) }, shift }
 }

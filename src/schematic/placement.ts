@@ -403,9 +403,10 @@ export function wireCheck(scene: PlacementScene, moving: readonly PlacedObject[]
     })
 }
 
-export function contactCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
+export function contactCheck(scene: PlacementScene, moving: readonly PlacedObject[], keep: readonly Point[] = []): (dx: number, dy: number) => boolean {
   const ids = new Set(moving.map((o) => o.id))
   const fixed = pinGridOf(scene.objects.filter((o) => !ids.has(o.id)), scene.grid)
+  for (const p of keep) for (const pin of fixed.at(p.x, p.y)) fixed.remove(pin)
   const pins = moving.flatMap((o) => objectPins(o, scene.grid).map(({ point }) => point))
   return (dx, dy) => pins.some((p) => fixed.has(p.x + dx, p.y + dy))
 }
@@ -445,6 +446,14 @@ function nearestFree(refuse: readonly Refuse[], grid: number, from: Point, { rin
 
 export function freeOffset(refuse: readonly Refuse[], grid: number, from: Point = { x: 0, y: 0 }, rings = SEARCH_RINGS, firstRing = 1): Point | null {
   return refused(refuse, from.x, from.y) ? nearestFree(refuse, grid, from, { rings, firstRing }) : from
+}
+
+export const TURN_REACH = 4
+
+export function turnLanding(objects: readonly PlacedObject[], before: readonly PlacedObject[], after: readonly PlacedObject[], grid: number): Point | null {
+  const scene = { objects, routes: [], grid }
+  const kept = before.flatMap((o) => objectPins(o, grid).map(({ point }) => point))
+  return freeOffset([placementCheck(scene, after), contactCheck(scene, after, kept)], grid, { x: 0, y: 0 }, TURN_REACH)
 }
 
 const SWEEP_DIRECTIONS = [

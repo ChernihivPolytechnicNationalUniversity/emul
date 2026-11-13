@@ -1,12 +1,12 @@
 import { editedObjects } from "./pin-index"
 import { splicedAt } from "./splice"
 import { GRID, objectRect, snap, type FlipAxis, type Rect, type Turn } from "./geometry"
-import { flipLine, flipSelection, selectionStep, turnedAbout, turnedSelection, turnPivot } from "./orient"
+import { flipLine, flipSelection, landedInPlace, selectionStep, turnedAbout, turnedSelection, turnPivot } from "./orient"
 import { designatorRects, footprint } from "./placement"
 import { BoxIndex, SpatialIndex } from "./spatial"
 import { bodiesOf, crossable, crossedBody, segmentBox, shiftedBody, spliceSpan, staysThrough, type Body } from "./body-crossing"
 import type { PlacedObject, Point, Schematic } from "./types"
-import { keepSheet, detachedMove, moved, pinsOf, travellingIn, travellingWires, wiringOf, withSegments, type NewId, type Wiring } from "./wire-edits"
+import { keepSheet, detachedMove, moved, pinsOf, reoriented, travellingIn, travellingWires, wiringOf, withSegments, type NewId, type Wiring } from "./wire-edits"
 import { normalOffset, planDrag, translate, type DragBox, type DragCommit, type DragConflict, type DragFrame, type DragMove, type DragPlan } from "./wires/drag"
 import { WireGraph, type WireNets } from "./wires/graph"
 import { entersBox, HALF_CELL, isDiagonal, samePoint, type WirePin, type WireSegment } from "./wires/segment"
@@ -16,7 +16,7 @@ export type Carried = { readonly objects: ReadonlySet<string>; readonly wires?: 
 
 export type Unlaid = { readonly at: Point; readonly net: string; readonly pin?: string; readonly kept: boolean }
 
-export type Landed = { readonly doc: Schematic; readonly unlaid: readonly Unlaid[]; readonly at: Point; readonly refused?: readonly DragConflict[] }
+export type Landed = { readonly doc: Schematic; readonly unlaid: readonly Unlaid[]; readonly at: Point; readonly refused?: readonly DragConflict[]; readonly crowded?: true }
 
 export type DragOptions = { readonly detach?: boolean; readonly index?: SpatialIndex }
 
@@ -29,6 +29,8 @@ export const WIRES_REFUSED = { title: "Not done: the wires could not follow", wh
 export const CONTACT_OPENED = { title: "contact opened", why: "No wire could join those pins again without touching another net, so they are open now. Draw the wire or move the part." }
 
 export const TURN_REFUSED = { title: "Not turned", why: "Turning it would put a pin on a crossing of two wires or on another net's wire, so nothing changed." }
+
+export const TURN_CROWDED = { title: "Not turned", why: "Turned there it would lie on another part, and no free spot is near enough to move it to, so nothing changed. Make room around it first." }
 
 export const WIRE_MOVE_REFUSED = { title: "Wire not moved", why: "There it would lie along another net's wire or end on another net's pin, so it stayed where it was." }
 
@@ -457,9 +459,10 @@ export class TurnRun {
     const pivot = turnPivot(this.start, this.ids, GRID, boxes)
     if (!pivot) return this.last
     const step = selectionStep(this.start, this.ids, this.wires.size > 0)
-    const target = turnedSelection(this.start, this.ids, steps, GRID, { pivot, step })
+    const target = landedInPlace(this.start, turnedSelection(this.start, this.ids, steps, GRID, { pivot, step }), this.ids, GRID)
+    if (!target) return { ...this.last, refused: [], crowded: true }
     const degrees = steps * step
-    const landed = reshaped(this.start, this.wiring(), this.ids, target, (at) => turnedAbout(at, pivot, degrees), newId, this.index, { degrees, wires: this.wires })
+    const landed = reshaped(this.start, this.wiring(), this.ids, target.doc, (at) => shiftedBy(turnedAbout(at, pivot, degrees), target.shift), newId, this.index, { degrees, wires: this.wires })
     if (landed.refused) return { ...this.last, refused: landed.refused }
     if (!this.own && this.live && isCurrent(this.start, this.live)) {
       this.own = { view: this.live.graph.snapshot(), sheet: this.live.sheet.snapshot() }
@@ -477,10 +480,23 @@ export function flippedWithWires(doc: Schematic, wiring: Wiring | undefined, ids
   const boxes = wireBoxes(doc, whole)
   const line = flipLine(doc, ids, axis, GRID, boxes)
   if (line === null) return { doc, unlaid: [], at: ZERO }
-  const target = flipSelection(doc, ids, axis, GRID, boxes.length ? line : undefined)
-  const mirrored = (at: Point): Point => (axis === "horizontal" ? { x: line - at.x, y: at.y } : { x: at.x, y: line - at.y })
-  return reshaped(doc, base, ids, target, mirrored, newId, index, { wires: whole })
+  const target = landedInPlace(doc, flipSelection(doc, ids, axis, GRID, boxes.length ? line : undefined), ids, GRID)
+  if (!target) return { doc, unlaid: [], at: ZERO, refused: [], crowded: true }
+  const mirrored = (at: Point): Point => shiftedBy(axis === "horizontal" ? { x: line - at.x, y: at.y } : { x: at.x, y: line - at.y }, target.shift)
+  return reshaped(doc, base, ids, target.doc, mirrored, newId, index, { wires: whole })
 }
+
+const shiftedBy = (p: Point, d: Point): Point => ({ x: p.x + d.x, y: p.y + d.y })
+
+function aloneInPlace(doc: Schematic, after: Schematic, ids: ReadonlySet<string>, newId: NewId): Landed {
+  const target = landedInPlace(doc, after, ids, GRID)
+  if (!target) return { doc, unlaid: [], at: ZERO, refused: [], crowded: true }
+  return { doc: reoriented(doc, target.doc, ids, newId), unlaid: [], at: target.shift }
+}
+
+export const turnedAlone = (doc: Schematic, ids: ReadonlySet<string>, turn: Turn, newId: NewId = randomId): Landed => aloneInPlace(doc, turnedSelection(doc, ids, turn, GRID), ids, newId)
+
+export const flippedAlone = (doc: Schematic, ids: ReadonlySet<string>, axis: FlipAxis, newId: NewId = randomId): Landed => aloneInPlace(doc, flipSelection(doc, ids, axis, GRID), ids, newId)
 
 function wireBoxes(doc: Schematic, wires: ReadonlySet<string>): Rect[] {
   if (!wires.size) return []
