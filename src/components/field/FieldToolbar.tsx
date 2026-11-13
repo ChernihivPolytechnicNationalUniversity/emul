@@ -1,5 +1,5 @@
 import * as React from "react"
-import { CrosshairIcon, FlipHorizontal2Icon, FlipVertical2Icon, HandIcon, MousePointer2Icon, RotateCwIcon, RouteIcon, SquarePlusIcon, Trash2Icon } from "lucide-react"
+import { CrosshairIcon, HandIcon, MousePointer2Icon, SquarePlusIcon } from "lucide-react"
 import { KEYMAP, labelFor } from "@/lib/keymap"
 import type { Keys } from "@/lib/keys"
 import { TOOL_GROUPS, WIRE_MODE_CHOICES, type ToolId, type ToolSpec } from "@/lib/tools"
@@ -17,31 +17,20 @@ function WireIcon(props: React.ComponentProps<"svg">) {
   )
 }
 
-function JoinIcon(props: React.ComponentProps<"svg">) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" {...props}>
-      <path d="M3 12h18M12 3v18" />
-      <circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" />
-    </svg>
-  )
-}
-
 const ICONS: Record<ToolId, React.ComponentType<React.ComponentProps<"svg">>> = {
   select: MousePointer2Icon,
   hand: HandIcon,
   wire: WireIcon,
-  join: JoinIcon,
   part: SquarePlusIcon,
   probe: CrosshairIcon,
 }
 
-const KEYCAP = "inline-flex h-4 min-w-4 items-center justify-center rounded-[4px] px-0.5 font-mono text-[10px] leading-none pointer-coarse:hidden"
+const KEYCAP = "inline-flex h-4 min-w-4 items-center justify-center rounded-[4px] border border-b-2 px-1 font-mono text-[10px] leading-none pointer-coarse:hidden"
 
 const keyOf = (keys: Keys) => labelFor(keys)
 
 export type StripContext =
   | { kind: "wire"; mode: LineMode; onMode: (mode: LineMode) => void }
-  | { kind: "selection"; wires: boolean; objects: boolean; onRotate: () => void; onFlip: (axis: "horizontal" | "vertical") => void; onReroute: () => void; onDelete: () => void }
   | { kind: "hint"; text: string }
 
 type FieldToolbarProps = {
@@ -97,7 +86,7 @@ function ToolButton({ tool, pressed, onPress }: { tool: ToolSpec; pressed: boole
         <span data-slot="tool-name" className="max-lg:hidden">
           {tool.name}
         </span>
-        <kbd className={cn(KEYCAP, pressed ? "bg-primary-foreground/15 text-primary-foreground" : "bg-muted text-muted-foreground")}>{key}</kbd>
+        <kbd className={cn(KEYCAP, pressed ? "border-primary-foreground/40 text-primary-foreground" : "bg-background text-foreground/70")}>{key}</kbd>
       </TooltipTrigger>
       <TooltipContent side="bottom" className={tool.note ? "flex-col items-start gap-0.5" : undefined}>
         <span>
@@ -113,7 +102,6 @@ function ToolStrip({ context }: { context: StripContext }) {
   return (
     <div data-slot="tool-strip" className="pointer-events-auto flex max-w-full items-center gap-2 overflow-x-auto rounded-lg border bg-background/95 p-1 text-xs whitespace-nowrap shadow-sm backdrop-blur-sm" {...stopField}>
       {context.kind === "wire" && <WireModes mode={context.mode} onMode={context.onMode} />}
-      {context.kind === "selection" && <SelectionActions context={context} />}
       {context.kind === "hint" && <span className="px-2 py-1 text-muted-foreground">{context.text}</span>}
     </div>
   )
@@ -148,51 +136,8 @@ function WireModes({ mode, onMode }: { mode: LineMode; onMode: (mode: LineMode) 
           </Tooltip>
         ))}
       </div>
-      <kbd className={cn(KEYCAP, "h-5 bg-muted px-1 text-muted-foreground")}>{lineKey}</kbd>
+      <kbd className={cn(KEYCAP, "h-5 bg-background text-foreground/70")}>{lineKey}</kbd>
       <span className="pr-2 text-muted-foreground pointer-coarse:hidden">/ which leg first · Backspace takes a corner back · Enter finishes · 0–9, C, M colour · Esc stops</span>
-    </>
-  )
-}
-
-type SelectionContext = Extract<StripContext, { kind: "selection" }>
-
-function SelectionActions({ context }: { context: SelectionContext }) {
-  const actions = [
-    { id: "rotate", name: `Rotate 45° (${labelFor(KEYMAP.rotateBack)} back)`, keys: KEYMAP.rotate, Icon: RotateCwIcon, run: context.onRotate, show: true },
-    { id: "flip-horizontal", name: "Flip horizontally", keys: KEYMAP.flipHorizontal, Icon: FlipHorizontal2Icon, run: () => context.onFlip("horizontal"), show: true },
-    { id: "flip-vertical", name: "Flip vertically", keys: KEYMAP.flipVertical, Icon: FlipVertical2Icon, run: () => context.onFlip("vertical"), show: true },
-    { id: "reroute", name: "Re-route the wire", keys: KEYMAP.reroute, Icon: RouteIcon, run: context.onReroute, show: context.wires },
-    { id: "delete", name: "Delete", keys: KEYMAP.remove, Icon: Trash2Icon, run: context.onDelete, show: true },
-  ]
-  return (
-    <>
-      {actions
-        .filter((action) => action.show)
-        .map(({ id, name, keys, Icon, run }) => (
-          <Tooltip key={id}>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  data-action={id}
-                  aria-label={name}
-                  aria-keyshortcuts={labelFor(keys)}
-                  onClick={run}
-                  className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 font-medium outline-none hover:bg-muted pointer-coarse:h-11 focus-visible:ring-2 focus-visible:ring-ring"
-                />
-              }
-            >
-              <Icon className="size-3.5" aria-hidden />
-              <kbd className={cn(KEYCAP, "bg-muted text-muted-foreground")}>{labelFor(keys)}</kbd>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              {name} — {labelFor(keys)}
-            </TooltipContent>
-          </Tooltip>
-        ))}
-      <span className="pr-2 text-muted-foreground pointer-coarse:hidden">
-        {context.wires ? "0–9, C, M colour · Shift paints the whole net" : `${labelFor(KEYMAP.rotateAlone)} turns a part without its wires`}
-      </span>
     </>
   )
 }

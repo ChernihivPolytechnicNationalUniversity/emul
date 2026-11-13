@@ -15,7 +15,7 @@ const SECTIONS: readonly { title: string; entries: readonly Entry[] }[] = [
       ["Hand", "toolHand"],
       ["Pan from any tool", () => ["Space + drag", "Middle button + drag", "Scroll"]],
       ["Wire", "toolWire"],
-      ["Join wires where they cross", "toolJoin"],
+      ["Join the wires crossing under the pointer", "joinHere"],
       ["Add part", "addHere"],
       ["Probe", "measure"],
     ],

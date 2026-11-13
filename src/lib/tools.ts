@@ -7,7 +7,7 @@ const byLetterFirst = (keys: Keys): Keys => {
   return [first, ...rest]
 }
 
-export type ToolId = "select" | "hand" | "wire" | "join" | "part" | "probe"
+export type ToolId = "select" | "hand" | "wire" | "part" | "probe"
 
 export type ToolSpec = { readonly id: ToolId; readonly name: string; readonly keys: Keys; readonly hint: string; readonly note?: string }
 
@@ -18,7 +18,6 @@ export const TOOL_GROUPS: readonly (readonly ToolSpec[])[] = [
   ],
   [
     { id: "wire", name: "Wire", keys: KEYMAP.toolWire, hint: "Click a pin or a wire to start, click to bend, click a pin to end" },
-    { id: "join", name: "Join", keys: KEYMAP.toolJoin, hint: "Click where two wires cross to join them" },
     { id: "part", name: "Add part", keys: byLetterFirst(KEYMAP.addHere), hint: "Type a part's name, Enter places it" },
   ],
   [{ id: "probe", name: "Probe", keys: KEYMAP.measure, hint: "Click two points to read the voltage between them", note: "With a wire selected or being drawn, M paints it magenta" }],

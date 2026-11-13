@@ -31,7 +31,7 @@ const BINDINGS = {
   toolSelect: { key: "v" },
   toolHand: { key: "h" },
   toolWire: { key: "w" },
-  toolJoin: { key: "j" },
+  joinHere: { key: "j" },
   shortcuts: { key: "?", shift: "either" },
   measure: { key: "m" },
   lineMode: { key: " ", shift: true },

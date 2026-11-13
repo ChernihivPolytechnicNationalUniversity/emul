@@ -1631,7 +1631,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         { keys: KEYMAP.toolSelect, run: () => chooseTool("select") },
         { keys: KEYMAP.toolHand, run: () => chooseTool("hand") },
         { keys: KEYMAP.toolWire, run: () => chooseTool("wire") },
-        { keys: KEYMAP.toolJoin, run: () => chooseTool("join") },
+        { keys: KEYMAP.joinHere, run: () => pointerClient.current && joinUnderPointer(pointerClient.current) },
       ]
       if (dispatch(e, picked)) return
     }
@@ -1704,11 +1704,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       ? { kind: "wire", mode: pending?.d.mode ?? lineMode, onMode: chooseLineMode }
       : measure.active
         ? { kind: "hint", text: hintOf("probe") }
-        : tool === "join" || tool === "hand"
+        : tool === "hand"
           ? { kind: "hint", text: hintOf(tool) }
-          : sch.selectedObjects.size > 0 || sch.selectedWires.size > 0
-            ? { kind: "selection", wires: sch.selectedWires.size > 0, objects: sch.selectedObjects.size > 0, onRotate: () => turn(1), onFlip: (axis) => mirror(axis), onReroute: rerouteSelected, onDelete: sch.removeSelected }
-            : null
+          : null
   const cursor = panning ? "cursor-grabbing" : spaceHeld || tool === "hand" ? "cursor-grab" : armed ? "cursor-copy" : "cursor-precise"
   const probeReading = sim.probe(PROBE_ID)
   const { selectedObjects, selectedWires, doc: schDoc, setPart } = sch
@@ -1975,11 +1973,6 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 return startPan(e)
               }
               if (!primaryClick(e)) return
-              if (tool === "join" && !armed) {
-                e.stopPropagation()
-                joinUnderPointer({ x: e.clientX, y: e.clientY })
-                return chooseTool("select")
-              }
               if (drag.active) {
                 e.stopPropagation()
                 endMove()
@@ -2152,6 +2145,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               active={activeColors}
               overridden={anyOverridden}
               onPick={paintSelected}
+              onReroute={rerouteSelected}
+              onDelete={sch.removeSelected}
               onPointerDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
             />
@@ -2221,6 +2216,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         <ContextMenuItem onClick={() => openQuick(menuClient.current)}>
           Add here…
           <ContextMenuShortcut>{labelFor(KEYMAP.addHere[1])}</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem data-action="join-here" onClick={() => menuClient.current && joinUnderPointer(menuClient.current)}>
+          Join wires here
+          <ContextMenuShortcut>{labelFor(KEYMAP.joinHere)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!sch.canUndo} onClick={sch.undo}>

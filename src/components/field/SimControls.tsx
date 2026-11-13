@@ -139,7 +139,7 @@ function Instrument({ action, name, keys, open, onToggle, Icon }: InstrumentProp
     <Tooltip>
       <TooltipTrigger render={<Button variant={open ? "default" : "outline"} size="sm" data-action={action} aria-pressed={open} aria-label={name} aria-keyshortcuts={keys} onClick={onToggle} />}>
         <Icon />
-        <kbd className={cn("inline-flex h-4 min-w-4 items-center justify-center rounded-[4px] px-0.5 font-mono text-[10px] leading-none pointer-coarse:hidden", open ? "bg-primary-foreground/15" : "bg-muted text-muted-foreground")}>{keys}</kbd>
+        <kbd className={cn("inline-flex h-4 min-w-4 items-center justify-center rounded-[4px] px-0.5 font-mono text-[10px] leading-none pointer-coarse:hidden", open ? "border border-b-2 border-primary-foreground/40" : "border border-b-2 bg-background text-foreground/70")}>{keys}</kbd>
       </TooltipTrigger>
       <TooltipContent>
         {name} — {keys}
