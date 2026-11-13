@@ -43,9 +43,21 @@ const shoot = (page: Page, name: string) => (SHOTS ? page.screenshot({ path: joi
 const LANDING_TIMEOUT_MS = 15_000
 const pageTitle = (page: Page) => page.evaluate(() => document.title)
 
+async function loadApp(page: Page) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.goto(DEV_SERVER, { waitUntil: "domcontentloaded" })
+      await page.waitForSelector("[data-slot=dot-field-viewport]", { timeout: 20_000 })
+      return
+    } catch (e) {
+      if (attempt === 3) throw e
+      console.log(`  (the page did not load, attempt ${attempt}: ${(e as Error).message.split("\n")[0]})`)
+    }
+  }
+}
+
 async function openDoc(page: Page, name: string, doc: Schematic) {
-  await page.goto(DEV_SERVER, { waitUntil: "domcontentloaded" })
-  await page.waitForSelector("[data-slot=dot-field-viewport]")
+  await loadApp(page)
   const landing = Date.now() + LANDING_TIMEOUT_MS
   while ((await pageTitle(page)).startsWith("εmul") && Date.now() < landing) await page.waitForTimeout(100)
   await page.setInputFiles("input[type=file]", { name: `${name}.emul`, mimeType: "application/octet-stream", buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name, schematic: stamped(doc) })) })
