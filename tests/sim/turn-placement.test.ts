@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { GRID, intersects, objectPins, type FlipAxis, type Point } from "@/schematic/geometry"
 import { wirePins } from "@/schematic/migrate-wires"
 import { flipSelection, turnedSelection } from "@/schematic/orient"
-import { contactCheck, footprints, placementCheck, TURN_REACH, type PlacementScene } from "@/schematic/placement"
+import { contactCheck, footprints, placementCheck, turnReach, type PlacementScene } from "@/schematic/placement"
 import { flippedAlone, flippedWithWires, TurnRun, turnedAlone, type Landed } from "@/schematic/rubber-band"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import { inNormalForm, wiringOf } from "@/schematic/wire-edits"
@@ -63,8 +63,9 @@ function expectNearest(before: Schematic, inPlace: Schematic, after: Schematic, 
   const foreign = new Set(pinsOf(inPlace.objects.filter((o) => !ids.has(o.id))).map(key).filter((k) => !kept.has(k)))
   const contacts = (dx: number, dy: number) => pinsOf(moved).some((p) => foreign.has(key({ x: p.x + dx, y: p.y + dy })))
   const nearer: [number, number][] = []
-  for (let dx = -TURN_REACH; dx <= TURN_REACH; dx++)
-    for (let dy = -TURN_REACH; dy <= TURN_REACH; dy++) if (dx * dx + dy * dy < squared && !bodies(c(dx), c(dy)) && !contacts(c(dx), c(dy))) nearer.push([dx, dy])
+  const reach = turnReach(moved, GRID)
+  for (let dx = -reach; dx <= reach; dx++)
+    for (let dy = -reach; dy <= reach; dy++) if (dx * dx + dy * dy < squared && !bodies(c(dx), c(dy)) && !contacts(c(dx), c(dy))) nearer.push([dx, dy])
   expect.soft(nearer, `${what}: no free spot nearer than (${shift.x}, ${shift.y})`).toEqual([])
 }
 
@@ -214,11 +215,32 @@ describe("a part turned or mirrored in place lands on the nearest free spot, as 
     expect.soft(shape(landed.doc.wires, { x: 0, y: 0 }), "the same wires, bend for bend, as the block mirrored in the open, moved by the landing").toEqual(shape(free.doc.wires, shift))
   })
 
+  it("the reach grows with what is turned: a lone resistor's box side plus two cells, a block's by the block's box", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 0, 1), resistor("R3", 4, 1), resistor("R4", 8, 1)])
+    expect.soft(turnReach([objectOf(doc, "R2")], GRID), "a 4 × 2 resistor: 4 + 2").toBe(6)
+    expect.soft(turnReach(chosen(turnedSelection(doc, R2, 2, GRID), R2), GRID), "upright, 2 × 4: still 6").toBe(6)
+    expect.soft(turnReach(chosen(doc, new Set(["R2", "R3", "R4"])), GRID), "three in a row, 12 × 2: 12 + 2").toBe(14)
+  })
+
+  it("a long block turned upright across a row lands past the row, further than a small part's reach", () => {
+    const row = [resistor("A1", 0, 0), resistor("A2", 4, 0), resistor("A3", 8, 0), resistor("A4", 12, 0)]
+    const block = new Set(["R2", "R3", "R4", "R5"])
+    const doc = docOf([...row, resistor("R2", 0, 1), resistor("R3", 4, 1), resistor("R4", 8, 1), resistor("R5", 12, 1)])
+    const inPlace = turnedSelection(doc, block, 2, GRID)
+    expect.soft(placementCheck(sceneOf(inPlace), chosen(inPlace, block))(0, 0), "set up: upright where it stands, the block crosses the row").toBe(true)
+    const landed = pressR(doc, block, 2)
+    expect.soft(landed.refused, "turned, not refused").toBeUndefined()
+    expectStandsClear(landed.doc, block, "the long block")
+    expectNearest(doc, inPlace, landed.doc, block, "the long block")
+    const moved = Math.hypot(objectOf(landed.doc, "R2").x - objectOf(inPlace, "R2").x, objectOf(landed.doc, "R2").y - objectOf(inPlace, "R2").y) / GRID
+    expect.soft(moved, "set up: the free spot is more than a lone resistor's reach away").toBeGreaterThan(6)
+  })
+
   it("a part with no free spot within reach is not turned at all, and says why", () => {
     const rows: PlacedObject[] = []
     for (let y = -10; y <= 11; y++) for (let x = -12; x <= 12; x += 4) if (!(x === 0 && y === 1)) rows.push(resistor(`F${x},${y}`, x, y))
     const doc = docOf([...rows, resistor("R2", 0, 1)])
-    expect.soft(TURN_REACH, "set up: the bank reaches further than a turn may move a part").toBeLessThan(8)
+    for (const presses of [1, 2]) expect.soft(turnReach(chosen(turnedSelection(doc, R2, presses, GRID), R2), GRID), `set up: the bank reaches further than a turn of ${presses} presses may move R2`).toBeLessThan(8)
     expect.soft(placementCheck(sceneOf(doc), [objectOf(doc, "R2")])(0, 0), "set up: R2 sits in a packed bank of resistors, allowed").toBe(false)
     for (const [what, landed] of [
       ["R", pressR(doc, R2, 1)],

@@ -448,12 +448,18 @@ export function freeOffset(refuse: readonly Refuse[], grid: number, from: Point 
   return refused(refuse, from.x, from.y) ? nearestFree(refuse, grid, from, { rings, firstRing }) : from
 }
 
-export const TURN_REACH = 4
+export const TURN_MARGIN_CELLS = 2
+
+export function turnReach(turned: readonly PlacedObject[], grid: number): number {
+  if (!turned.length) return TURN_MARGIN_CELLS
+  const box = unionOf(turned.map((o) => objectRect(o, grid)))
+  return Math.ceil(Math.max(box.w, box.h) / grid) + TURN_MARGIN_CELLS
+}
 
 export function turnLanding(objects: readonly PlacedObject[], before: readonly PlacedObject[], after: readonly PlacedObject[], grid: number): Point | null {
   const scene = { objects, routes: [], grid }
   const kept = before.flatMap((o) => objectPins(o, grid).map(({ point }) => point))
-  return freeOffset([placementCheck(scene, after), contactCheck(scene, after, kept)], grid, { x: 0, y: 0 }, TURN_REACH)
+  return freeOffset([placementCheck(scene, after), contactCheck(scene, after, kept)], grid, { x: 0, y: 0 }, turnReach(after, grid))
 }
 
 const SWEEP_DIRECTIONS = [
