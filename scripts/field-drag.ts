@@ -8,7 +8,7 @@ import { examples, lab1Stand } from "@/schematic/examples"
 import { bodyCentre, GRID, objectPins, objectRect, orientationOf, type Point, type Turn } from "@/schematic/geometry"
 import { SCHEMATIC_VERSION, stamped } from "@/schematic/migrate"
 import { rotateSelection } from "@/schematic/orient"
-import { bodyBounds, contourOf } from "@/schematic/placement"
+import { bodyBounds, contourOf, placementCheck } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 
@@ -966,6 +966,44 @@ async function bridgeBuiltByHand(page: Page) {
   }
 }
 
+const placedNow = async (page: Page): Promise<PlacedObject[]> => {
+  const drawnParts = await page.evaluate(() =>
+    [...document.querySelectorAll("[data-body]")].map((e) => {
+      const svg = e.querySelector<SVGSVGElement>("[data-slot=component]")!
+      return { id: e.getAttribute("data-body")!, def: svg.dataset.def!, left: parseFloat(svg.style.left), top: parseFloat(svg.style.top), w: parseFloat(svg.style.width), h: parseFloat(svg.style.height), transform: svg.style.transform }
+    }),
+  )
+  return drawnParts.map(({ id, def, left, top, w, h, transform }) => {
+    const rotation = Number(transform.match(/rotate\((-?\d+)deg\)/)?.[1] ?? 0) as PlacedObject["rotation"]
+    const mirror = transform.includes("scaleX(-1)")
+    const centre = bodyCentre(getDef(def)!, { rotation: rotation ?? 0, mirror })
+    const at = (v: number) => Math.round(v / GRID) * GRID
+    return { id, def, x: at(left + w / 2 - centre.x * GRID), y: at(top + h / 2 - centre.y * GRID), ...(rotation && { rotation }), ...(mirror && { mirror }) }
+  })
+}
+
+async function turnedBesideANeighbour(page: Page) {
+  console.log("\nR on a resistor lying just under another: it turns beside it, never onto it (the user, 2026-11-13)")
+  const start: Schematic = { objects: [resistorAt("R1", 10, 10), resistorAt("R2", 10, 11)], wires: [], parts: {} }
+  await openDoc(page, "turn-beside", start)
+  const frame = await fieldFrame(page)
+  const onR2 = frame.toScreen(cellPoint(12, 12))
+  await page.mouse.click(onR2.x, onR2.y)
+  for (const press of [1, 2]) {
+    await page.keyboard.press("r")
+    await page.waitForTimeout(600)
+    const placed = await placedNow(page)
+    const r1 = placed.find((o) => o.id === "R1")!
+    const r2 = placed.find((o) => o.id === "R2")!
+    const clear = !placementCheck({ objects: placed, routes: [], grid: GRID }, [r2])(0, 0)
+    console.log(`  press ${press}: R2 at (${r2.x / GRID}, ${r2.y / GRID}) cells, ${r2.rotation ?? 0}°`)
+    expect(`press ${press}: R2 turned ${45 * press}°`, r2.rotation ?? 0, 45 * press)
+    expect(`press ${press}: no body on R1's, no lead or pin on R1`, clear, true)
+    expect(`press ${press}: R1 stays where it was`, [r1.x, r1.y, r1.rotation ?? 0], [start.objects[0].x, start.objects[0].y, 0])
+    await shoot(page, `turned-beside-${press}`)
+  }
+}
+
 async function addingLandsInView(page: Page) {
   console.log("\na part added over a big board")
   const doc = await open(page, "lab1-running-light")
@@ -1127,7 +1165,9 @@ try {
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const sections = [contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
+const only = process.env.ONLY?.split(",")
+const every = [turnedBesideANeighbour, contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
+const sections = only ? every.filter((section) => only.includes(section.name)) : every
 try {
   for (const section of sections) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
