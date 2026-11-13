@@ -824,7 +824,7 @@ async function contactsFollowTheDrag(page: Page) {
   const lcd = doc.objects.find((o) => o.def === "lcd7-f")!
   const board = doc.objects.find((o) => o.def === "open746i-c")!
   const docked = await box(page, lcd.id)
-  const cell = docked.width / getDef("lcd7-f")!.width
+  const cell = GRID * (await page.evaluate(() => new DOMMatrix(getComputedStyle(document.querySelector("[data-slot=dot-field-content]")!).transform).a))
   const dockedWorld = await (await fieldFrame(page)).worldOf(lcd.id)
   const grab = { x: docked.x + docked.width / 2, y: docked.y + LCD_BEZEL_CELLS * cell }
   const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-body]")?.getAttribute("data-body"), grab)
