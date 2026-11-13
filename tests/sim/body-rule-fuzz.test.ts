@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { checked } from "@/schematic/checker"
 import { bodiesOf } from "@/schematic/body-crossing"
 import { examples } from "@/schematic/examples"
-import { GRID, type Point } from "@/schematic/geometry"
+import { GRID, objectPins, type Point } from "@/schematic/geometry"
 import { flippedWithWires, PartDrag, SegmentDrag, TurnRun } from "@/schematic/rubber-band"
 import type { PlacedObject, Rotation, Schematic } from "@/schematic/types"
 import { pasteLanding, pastedInto } from "@/schematic/use-schematic"
-import { drawEndAt, drawnTo, isRefusal, pointerAt, startDrawing } from "@/schematic/wire-draw"
+import { drawEndAt, drawnTo, isRefusal, pointerAt, startDrawing, withLineMode, type LineMode } from "@/schematic/wire-draw"
 import { inNormalForm, placedObject, wiringOf } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
+import { reroutedRuns } from "@/schematic/wires/router"
 import { random } from "../lib/wire-reference"
 
 const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
@@ -36,12 +37,12 @@ function randomScene(seed: number): Schematic {
 }
 
 describe("seeded edits never introduce wire/body crossings", () => {
-  it("checks every example and random scenes with drags, turns, X/Y, pastes, placements and drawing", () => {
+  it("checks every example and random scenes with drags, turns, X/Y, pastes, placements, drawing, diagonals, the router's completion and re-route", () => {
     let uuid = 0
     vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation(() => `00000000-0000-4000-8000-${(++uuid).toString(16).padStart(12, "0")}`)
     const scenes = [...examples.map((e) => ({ name: e.id, doc: inNormalForm(e.build(GRID)) })), ...Array.from({ length: 24 }, (_, i) => ({ name: `random-${i}`, doc: randomScene(104729 + i * 31) }))]
     const failures: string[] = []
-    const tally = { drag: 0, segment: 0, turn: 0, flip: 0, paste: 0, placement: 0, drawing: 0 }
+    const tally = { drag: 0, segment: 0, turn: 0, flip: 0, paste: 0, placement: 0, drawing: 0, diagonal: 0, completion: 0, reroute: 0 }
     let serial = 0
     const newId = () => `body-fuzz-${serial++}`
     for (const { name, doc } of scenes) {
@@ -91,6 +92,25 @@ describe("seeded edits never introduce wire/body crossings", () => {
         const result = drawnTo(doc, wiring, pointerAt(start, end.at), end, newId)
         inspect("drawing", isRefusal(result) ? doc : result, isRefusal(result))
       }
+      const drawn = (from: Point, to: Point, mode: LineMode) => {
+        const begin = startDrawing(wiring, drawEndAt(wiring, from))
+        if (isRefusal(begin)) return null
+        const end = drawEndAt(wiring, to)
+        return drawnTo(doc, wiring, pointerAt(withLineMode(begin, mode), end.at), end, newId)
+      }
+      for (const mode of ["45", "any"] as const) {
+        const result = drawn({ x: point.x - 3 * GRID, y: point.y - 3 * GRID }, { x: point.x + 5 * GRID, y: point.y + 4 * GRID }, mode)
+        if (result) inspect("diagonal", isRefusal(result) ? doc : result, isRefusal(result))
+      }
+      const onHalfCells = (p: Point) => Number.isInteger((2 * p.x) / GRID) && Number.isInteger((2 * p.y) / GRID)
+      const pins = doc.objects.flatMap((o) => objectPins(o, GRID).filter((p) => onHalfCells(p.point)).map((p) => ({ object: o.id, at: p.point })))
+      const from = pins[rng.int(0, Math.max(0, pins.length - 1))]
+      const to = pins.filter((p) => from && p.object !== from.object)[rng.int(0, Math.max(0, pins.length - 2))]
+      if (from && to) {
+        const result = drawn(from.at, to.at, "90")
+        if (result) inspect("completion", isRefusal(result) ? doc : result, isRefusal(result))
+      }
+      if (doc.wires.length) inspect("reroute", reroutedRuns(doc, [doc.wires[rng.int(0, doc.wires.length - 1)].id], newId, wiring).doc)
       expect(doc, `${name}: source unchanged`).toEqual(snapshot)
     }
     expect(failures.slice(0, 20)).toEqual([])
