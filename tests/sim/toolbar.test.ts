@@ -8,9 +8,9 @@ import { DEFAULT_LINE_MODE, nextLineMode, type LineMode } from "@/schematic/wire
 const press = (key: string, code: string, extra: Partial<KeyPress> = {}): KeyPress => ({ key, code, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...extra })
 
 describe("the main toolbar's content, as the model sets it (docs/emul-toolbar/model.md §5.5, §6)", () => {
-  it("holds the six modes in three groups, in the conventional order: navigate, draw, measure", () => {
-    expect.soft(TOOL_GROUPS.map((group) => group.map((tool) => tool.id)), "model §5.5").toEqual([["select", "hand"], ["wire", "join", "part"], ["probe"]])
-    expect.soft(TOOLS.map((tool) => tool.id), "TOOLS is the groups flattened").toEqual(["select", "hand", "wire", "join", "part", "probe"])
+  it("holds the five modes the model puts on the bar, in three groups: navigate, draw, measure", () => {
+    expect.soft(TOOL_GROUPS.map((group) => group.map((tool) => tool.id)), "model §5.1, §5.5").toEqual([["select", "hand"], ["wire", "part"], ["probe"]])
+    expect.soft(TOOLS.map((tool) => tool.id), "TOOLS is the groups flattened").toEqual(["select", "hand", "wire", "part", "probe"])
   })
 
   it("keeps every group within Cowan's three to five chunks (constraint 4)", () => {
@@ -18,7 +18,7 @@ describe("the main toolbar's content, as the model sets it (docs/emul-toolbar/mo
   })
 
   it("gives each mode the key printed on its button, the one the field answers to (§5.3)", () => {
-    const want: Record<ToolId, string> = { select: "V", hand: "H", wire: "W", join: "J", part: "A", probe: "M" }
+    const want: Record<ToolId, string> = { select: "V", hand: "H", wire: "W", part: "A", probe: "M" }
     for (const tool of TOOLS) expect.soft(labelFor(tool.keys, "windows"), tool.id).toBe(want[tool.id])
     expect.soft(TOOLS.find((t) => t.id === "probe")!.keys, "Probe is the measure binding").toBe(KEYMAP.measure)
     expect.soft(alternatives(TOOLS.find((t) => t.id === "part")!.keys), "Add part answers to A as Quick Insert does").toContainEqual({ key: "a" })
@@ -69,6 +69,11 @@ describe("the keyboard shortcuts list (model §5.6, spec 6)", () => {
   const sections = shortcutSections("windows")
   const rows = sections.flatMap((s) => s.rows)
   const printed = rows.flatMap((r) => r.keys)
+
+  it("keeps J for joining the wires that cross under the pointer, as the right-click menu's Join wires here does", () => {
+    expect.soft(labelFor(KEYMAP.joinHere, "windows"), "J").toBe("J")
+    expect.soft(rows.find((r) => r.binding === "joinHere")?.keys, "listed with its key").toEqual(["J"])
+  })
 
   it("lists every binding of KEYMAP, so the list cannot drift from what the app answers to", () => {
     const named = new Set(rows.map((r) => r.binding).filter(Boolean))

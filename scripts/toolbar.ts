@@ -35,9 +35,21 @@ function chromiumExecutable() {
 const shoot = (page: Page, name: string) => (SHOTS ? page.screenshot({ path: join(SHOTS, `${name}.png`) }) : Promise.resolve())
 const pageTitle = (page: Page) => page.evaluate(() => document.title)
 
+async function loadApp(page: Page) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.goto(DEV_SERVER, { waitUntil: "domcontentloaded" })
+      await page.waitForSelector("[data-slot=dot-field-viewport]", { timeout: 20_000 })
+      return
+    } catch (e) {
+      if (attempt === 3) throw e
+      console.log(`  (the page did not load, attempt ${attempt}: ${(e as Error).message.split("\n")[0]})`)
+    }
+  }
+}
+
 async function openDoc(page: Page, name: string, doc: Schematic) {
-  await page.goto(DEV_SERVER, { waitUntil: "domcontentloaded" })
-  await page.waitForSelector("[data-slot=dot-field-viewport]")
+  await loadApp(page)
   const landing = Date.now() + 15_000
   while ((await pageTitle(page)).startsWith("εmul") && Date.now() < landing) await page.waitForTimeout(100)
   await page.setInputFiles("input[type=file]", { name: `${name}.emul`, mimeType: "application/octet-stream", buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name, schematic: stamped(doc) })) })
@@ -83,7 +95,7 @@ const strip = (page: Page) => page.evaluate(() => document.querySelector("[data-
 const contentTransform = (page: Page) => page.evaluate(() => getComputedStyle(document.querySelector("[data-slot=dot-field-content]")!).transform)
 
 async function barSitsTopCentre(page: Page) {
-  console.log("\nthe bar: top centre of the field, six modes in three groups (model §6.1–6.2)")
+  console.log("\nthe bar: top centre of the field, five modes in three groups (model §6)")
   await openDoc(page, "toolbar-bench", bench())
   const stage = (await rect(page, "[data-slot=dot-field-stage]"))!
   const bar = await rect(page, "[data-slot=field-toolbar]")
@@ -92,15 +104,15 @@ async function barSitsTopCentre(page: Page) {
   expect("it is an ARIA toolbar with a name", await page.evaluate(() => { const b = document.querySelector("[data-slot=field-toolbar]")!; return [b.getAttribute("role"), !!b.getAttribute("aria-label")] }), ["toolbar", true])
   expect("centred on the field within a pixel", Math.abs(bar.x + bar.width / 2 - (stage.x + stage.width / 2)) <= 1, true)
   expect("12 px below the field's top edge", Math.round(bar.y - stage.y), 12)
-  expect("the six modes in order", await page.evaluate(() => [...document.querySelectorAll("[data-slot=field-toolbar] [data-tool]")].map((b) => b.getAttribute("data-tool"))), ["select", "hand", "wire", "join", "part", "probe"])
+  expect("the five modes in order", await page.evaluate(() => [...document.querySelectorAll("[data-slot=field-toolbar] [data-tool]")].map((b) => b.getAttribute("data-tool"))), ["select", "hand", "wire", "part", "probe"])
   expect("three groups, two dividers", await countOf(page, "[data-slot=field-toolbar] [role=separator]"), 2)
   expect("Select is on at the start, nothing else", await pressedTools(page), ["select"])
-  for (const id of ["select", "hand", "wire", "join", "part", "probe"]) {
+  for (const id of ["select", "hand", "wire", "part", "probe"]) {
     const b = (await rect(page, toolButton(id)))!
     expectAtLeast(`${id} is 36 px tall`, Math.round(b.height), 36)
   }
-  expect("each button prints its key", await page.evaluate(() => [...document.querySelectorAll("[data-slot=field-toolbar] [data-tool] kbd")].map((k) => k.textContent)), ["V", "H", "W", "J", "A", "M"])
-  expect("each button names its mode at this width (≥ lg)", await page.evaluate(() => [...document.querySelectorAll("[data-slot=field-toolbar] [data-tool] [data-slot=tool-name]")].map((n) => (n as HTMLElement).offsetWidth > 0)), [true, true, true, true, true, true])
+  expect("each button prints its key", await page.evaluate(() => [...document.querySelectorAll("[data-slot=field-toolbar] [data-tool] kbd")].map((k) => k.textContent)), ["V", "H", "W", "A", "M"])
+  expect("each button names its mode at this width (≥ lg)", await page.evaluate(() => [...document.querySelectorAll("[data-slot=field-toolbar] [data-tool] [data-slot=tool-name]")].map((n) => (n as HTMLElement).offsetWidth > 0)), [true, true, true, true, true])
   await page.hover(toolButton("wire"))
   await page.waitForTimeout(900)
   expect("hovering Wire shows its name and key", await page.evaluate(() => document.querySelector("[data-slot=tooltip-content]")?.textContent?.replace(/\s+/g, " ").trim() ?? null), "Wire — W")
@@ -116,22 +128,19 @@ async function barNeverMoves(page: Page) {
   await page.mouse.click(r1.x, r1.y)
   await page.waitForTimeout(300)
   expect("a part selected: the bar is where it was", await rect(page, "[data-slot=field-toolbar]"), before)
-  expect("and the strip offers the selection's actions with their keys", await page.evaluate(() => [...document.querySelectorAll("[data-slot=tool-strip] [data-action]")].map((b) => [b.getAttribute("data-action"), b.querySelector("kbd")?.textContent])), [["rotate", "R"], ["flip-horizontal", "X"], ["flip-vertical", "Y"], ["delete", "Del"]])
+  expect("no strip for a selection: its actions sit beside it, in the inspector (model §5.1)", await countOf(page, "[data-slot=tool-strip]"), 0)
+  expect("the inspector's actions name their keys", await page.evaluate(() => [...document.querySelectorAll("[data-slot=inspector] [data-action]")].map((b) => b.getAttribute("aria-keyshortcuts"))), ["Shift+R", "R", "X", "Y", "Del"])
   const turnedBefore = await page.evaluate(() => document.querySelector('[data-body="R1"] [data-slot=component]')?.getAttribute("style"))
-  await page.click("[data-slot=tool-strip] [data-action=rotate]")
+  await page.click("[data-slot=inspector] [data-action='Rotate clockwise']")
   await page.waitForTimeout(400)
-  expect("Rotate on the strip turns the part", (await page.evaluate(() => document.querySelector('[data-body="R1"] [data-slot=component]')?.getAttribute("style"))) !== turnedBefore, true)
-  const strip = (await rect(page, "[data-slot=tool-strip]"))!
-  const bar = (await rect(page, "[data-slot=field-toolbar]"))!
-  expect("the strip sits 8 px under the bar", Math.round(strip.y - (bar.y + bar.height)), 8)
+  expect("the inspector's Rotate turns the part", (await page.evaluate(() => document.querySelector('[data-body="R1"] [data-slot=component]')?.getAttribute("style"))) !== turnedBefore, true)
   await page.keyboard.press("Escape")
   await page.waitForTimeout(200)
-  expect("nothing selected, no strip", await countOf(page, "[data-slot=tool-strip]"), 0)
   const frame2 = await fieldFrame(page)
   const wire = frame2.toScreen(cellPoint(24, 18))
   await page.mouse.click(wire.x, wire.y)
   await page.waitForTimeout(300)
-  expect("a wire selected: Re-route joins the strip with T", await page.evaluate(() => document.querySelector("[data-slot=tool-strip] [data-action=reroute] kbd")?.textContent ?? null), "T")
+  expect("a wire selected: its palette offers Re-route and Delete with their keys", await page.evaluate(() => [...document.querySelectorAll("[data-slot=wire-palette] [data-action]")].map((b) => [b.getAttribute("data-action"), b.querySelector("kbd")?.textContent])), [["reroute", "T"], ["delete", "Del"]])
   await page.keyboard.press("Escape")
 }
 
@@ -144,6 +153,9 @@ async function wireToolAndItsModes(page: Page) {
   expect("clicking Wire turns it on", await pressedTools(page), ["wire"])
   expect("the strip shows the three modes, 90° checked", await checkedMode(page), "90")
   expect("the strip names Shift+Space", ((await strip(page)) ?? "").includes("Shift+Space"), true)
+  const stripBox = (await rect(page, "[data-slot=tool-strip]"))!
+  const barBox = (await rect(page, "[data-slot=field-toolbar]"))!
+  expect("the strip sits 8 px under the bar", Math.round(stripBox.y - (barBox.y + barBox.height)), 8)
   expect("three radios, in Shift+Space's order", await page.evaluate(() => [...document.querySelectorAll("[data-slot=tool-strip] [role=radio]")].map((r) => r.getAttribute("data-mode"))), ["90", "45", "any"])
   await page.click("[data-slot=tool-strip] [role=radio][data-mode='45']")
   await page.waitForTimeout(150)
@@ -194,7 +206,7 @@ async function keysSelectTheModes(page: Page) {
   const frame = await fieldFrame(page)
   const bare = frame.toScreen(cellPoint(34, 6))
   await page.mouse.move(bare.x, bare.y)
-  for (const [key, tool] of [["w", "wire"], ["j", "join"], ["h", "hand"], ["m", "probe"], ["v", "select"]] as const) {
+  for (const [key, tool] of [["w", "wire"], ["h", "hand"], ["m", "probe"], ["v", "select"]] as const) {
     await page.keyboard.press(key)
     await page.waitForTimeout(150)
     expect(`${key.toUpperCase()} turns on ${tool}`, await pressedTools(page), [tool])
@@ -227,17 +239,26 @@ async function handTool(page: Page) {
   expect("the strip says how to pan", ((await strip(page)) ?? "").length > 10, true)
 }
 
-async function joinTool(page: Page) {
-  console.log("\nJoin joins a crossing on a click")
+async function joinHere(page: Page) {
+  console.log("\nJoin is off the bar (model §5.1): J joins the crossing under the pointer, as the right-click menu does")
   await openDoc(page, "toolbar-join", bench())
-  const f2 = await fieldFrame(page)
-  await page.click(toolButton("join"))
+  const frame = await fieldFrame(page)
+  const crossing = frame.toScreen(cellPoint(26, 18))
   const dotsBefore = await countOf(page, "[data-junction]")
-  const crossing = f2.toScreen(cellPoint(26, 18))
-  await page.mouse.click(crossing.x, crossing.y)
+  await page.mouse.move(crossing.x, crossing.y)
+  await page.keyboard.press("j")
   await page.waitForTimeout(400)
-  expect("a click on a crossing with Join joins it: a dot appears", await countOf(page, "[data-junction]"), dotsBefore + 1)
-  expect("one join, then back to Select: Join is used once per batch (model §5.3)", await pressedTools(page), ["select"])
+  expect("J over a crossing joins it: a dot appears", await countOf(page, "[data-junction]"), dotsBefore + 1)
+  expect("and the bar stays on Select", await pressedTools(page), ["select"])
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(400)
+  expect("set up: undone", await countOf(page, "[data-junction]"), dotsBefore)
+  await page.mouse.click(crossing.x, crossing.y, { button: "right" })
+  await page.waitForTimeout(300)
+  expect("the right-click menu offers Join wires here with its key", await page.evaluate(() => document.querySelector("[data-action=join-here]")?.textContent?.replace(/\s+/g, " ").trim() ?? null), "Join wires hereJ")
+  await page.click("[data-action=join-here]")
+  await page.waitForTimeout(400)
+  expect("and joins the crossing it was opened on", await countOf(page, "[data-junction]"), dotsBefore + 1)
 }
 
 async function instrumentsAndShortcuts(page: Page) {
@@ -273,7 +294,7 @@ async function narrowAndTouch(browser: Browser) {
   await openDoc(narrow, "toolbar-narrow", bench())
   const stage = (await rect(narrow, "[data-slot=dot-field-stage]"))!
   const bar = (await rect(narrow, "[data-slot=field-toolbar]"))!
-  expect("below lg the names fold away, the keys stay", await narrow.evaluate(() => [...document.querySelectorAll("[data-slot=field-toolbar] [data-tool]")].map((b) => [(b.querySelector("[data-slot=tool-name]") as HTMLElement | null)?.offsetWidth ?? 0, b.querySelector("kbd")?.textContent])), [[0, "V"], [0, "H"], [0, "W"], [0, "J"], [0, "A"], [0, "M"]])
+  expect("below lg the names fold away, the keys stay", await narrow.evaluate(() => [...document.querySelectorAll("[data-slot=field-toolbar] [data-tool]")].map((b) => [(b.querySelector("[data-slot=tool-name]") as HTMLElement | null)?.offsetWidth ?? 0, b.querySelector("kbd")?.textContent])), [[0, "V"], [0, "H"], [0, "W"], [0, "A"], [0, "M"]])
   expect("the bar fits inside the field", bar.x >= stage.x && bar.x + bar.width <= stage.x + stage.width, true)
   const others = await narrow.evaluate(() => [...document.querySelectorAll("[data-slot=dot-field-stage] > *:not(:has([data-slot=field-toolbar]))")].map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0).map((r) => ({ x: r.x, y: r.y, width: r.width, height: r.height })))
   const over = (a: typeof bar, b: typeof bar) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
@@ -289,7 +310,7 @@ async function narrowAndTouch(browser: Browser) {
 
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const sections = [barSitsTopCentre, barNeverMoves, wireToolAndItsModes, keysSelectTheModes, handTool, joinTool, instrumentsAndShortcuts]
+const sections = [barSitsTopCentre, barNeverMoves, wireToolAndItsModes, keysSelectTheModes, handTool, joinHere, instrumentsAndShortcuts]
 for (const section of sections) {
   const page = await browser.newPage({ viewport: { width: 1600, height: 900 } })
   page.on("pageerror", (e) => errors.push(`${section.name}: ${e.message}`))
