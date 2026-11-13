@@ -35,6 +35,15 @@ const usersWire = (): Schematic => ({
   parts: {},
 })
 
+const diagonalWire = (): Schematic => ({
+  objects: [part("R1", "resistor", 4, 6), part("C1", "capacitor-polarized", 14, 9)],
+  wires: [
+    { id: "d", a: c(8, 7), b: c(11, 10) },
+    { id: "e", a: c(11, 10), b: c(14, 10) },
+  ],
+  parts: {},
+})
+
 type Kept = { readonly graph: WireGraph; readonly field: FieldState; readonly view: Rect; readonly doc: Schematic; readonly wiring: Wiring; readonly routes: readonly RoutedWire[] }
 
 function around(doc: Schematic): Rect {
@@ -260,11 +269,46 @@ describe("a selected wire keeps one plate along its drawn path through every edi
     }
   })
 
+  it("a diagonal wire (phase 7), selected and dragged back and forth: after every release it is still selected whole and its plate is its drawn path; its slanted piece selected alone gets the drawn path's stretch", () => {
+    let state = kept(diagonalWire())
+    expect.soft(state.wiring.runs.length, "set up: one wire from R1 to C1 with a 45° piece").toBe(1)
+    const slanted = (doc: Schematic) => doc.wires.filter((s) => s.a.x !== s.b.x && s.a.y !== s.b.y)
+    expect.soft(slanted(state.doc).length, "set up: the 45° piece is kept").toBe(1)
+    let selection: ReadonlySet<string> = new Set(state.wiring.runs[0].segments.map((s) => s.id))
+    const drags: [string, number, number][] = [["d", 1, 0], ["d", -1, 0], ["d", 0, -1], ["d", 0, 1], ["e", 0, 1], ["e", 0, -1], ["d", 2, 0], ["d", -2, 0]]
+    let moved = 0
+    for (const [segment, dx, dy] of drags) {
+      const label = `${segment} by (${dx}, ${dy})`
+      const target = state.wiring.segmentsById.has(segment) ? segment : segment === "d" ? slanted(state.doc)[0]?.id ?? [...selection][0] : [...selection][0]
+      const landed = new SegmentDrag(state.doc, state.wiring, target).landed(dx * GRID, dy * GRID)
+      if (landed.refused?.length || landed.doc === state.doc) continue
+      moved++
+      const after = kept(landed.doc, state)
+      selection = carriedSelection(selection, state.wiring, after.wiring)
+      state = after
+      expect.soft(state.wiring.runs.length, `${label}: still one wire from R1 to C1`).toBe(1)
+      expect.soft(sorted(selection), `${label}: the whole wire stays selected, as a click on it selects it`).toEqual(sorted(state.wiring.runs[0].segments.map((s) => s.id)))
+      const plates = platesOf(state, selection)
+      const route = state.routes[0]
+      expect.soft(plates.map((p) => [p.whole, p.d]), `${label}: one plate, the wire's own drawn path`).toEqual([[true, runPath(route.pts, RADIUS, route.leads)]])
+      expect.soft(plateFaults(state, selection, plates), `${label}: the plate measured against the drawn path`).toEqual([])
+    }
+    expect.soft(moved, "every drag lands").toBe(drags.length)
+    const piece = slanted(state.doc)
+    expect.soft(piece.length, "the wire still has its 45° piece").toBeGreaterThan(0)
+    const alone = new Set(piece.map((s) => s.id))
+    const plates = platesOf(state, alone)
+    expect.soft(plates.length, "the 45° piece alone: one plate").toBe(1)
+    expect.soft(plates[0]?.whole, "not the whole wire's").toBe(false)
+    expect.soft(plateFaults(state, alone, plates), "the 45° piece's plate lies on the drawn path between its bends' middles").toEqual([])
+  })
+
   it("random edits on random documents and on every example — segment drags and drags back, part drags, Alt detach, turns, mirrors, undo: the plate kept on the field is the fresh document's and lies on the drawn path, the routes drawn are the fresh ones, and a wire selected whole stays whole", () => {
     const found: string[] = []
     const tally: Record<string, number> = {}
     for (let seed = 1; seed <= SEEDS * 20; seed++) fuzz("random", randomDoc(seed * 7919), seed, STEPS * 3, found, tally)
     for (let seed = 1; seed <= SEEDS * 4; seed++) fuzz("user's wire", usersWire(), seed, STEPS * 3, found, tally)
+    for (let seed = 1; seed <= SEEDS * 4; seed++) fuzz("diagonal wire", diagonalWire(), seed, STEPS * 3, found, tally)
     for (const example of examples) for (let seed = 1; seed <= SEEDS; seed++) fuzz(example.id, inNormalForm(example.build(GRID)), seed * 31 + example.id.length, STEPS, found, tally)
     expect.soft(found, "no edit leaves a plate off its wire, a kept route or plate unlike a fresh one, or a whole selection cut").toEqual([])
     const scale = SEEDS * STEPS
