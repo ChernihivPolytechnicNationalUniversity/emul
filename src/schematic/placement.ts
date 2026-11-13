@@ -456,10 +456,27 @@ export function turnReach(turned: readonly PlacedObject[], grid: number): number
   return Math.ceil(Math.max(box.w, box.h) / grid) + TURN_MARGIN_CELLS
 }
 
-export function turnLanding(objects: readonly PlacedObject[], before: readonly PlacedObject[], after: readonly PlacedObject[], grid: number): Point | null {
-  const scene = { objects, routes: [], grid }
+const onRoute = (p: Point, { pts }: RoutedWire) =>
+  pts.slice(1).some((b, i) => {
+    const a = pts[i]
+    return (b.x - a.x) * (p.y - a.y) === (b.y - a.y) * (p.x - a.x) && p.x >= Math.min(a.x, b.x) && p.x <= Math.max(a.x, b.x) && p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y)
+  })
+
+export function pinOnWireCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
+  const pins = moving.flatMap((o) => objectPins(o, scene.grid).map(({ point }) => point))
+  const index = new BoxIndex(scene.routes, routeBox, BUCKET_CELLS * scene.grid)
+  return (dx, dy) =>
+    pins.some((pin) => {
+      const p = { x: pin.x + dx, y: pin.y + dy }
+      return index.some({ x: p.x, y: p.y, w: 0, h: 0 }, (route) => onRoute(p, route))
+    })
+}
+
+export function turnLanding(objects: readonly PlacedObject[], routes: readonly RoutedWire[], before: readonly PlacedObject[], after: readonly PlacedObject[], grid: number): Point | null {
+  const scene = { objects, routes, grid }
   const kept = before.flatMap((o) => objectPins(o, grid).map(({ point }) => point))
-  return freeOffset([placementCheck(scene, after), contactCheck(scene, after, kept)], grid, { x: 0, y: 0 }, turnReach(after, grid))
+  const refuse = [placementCheck(scene, after), contactCheck(scene, after, kept), wireCheck(scene, after, false), pinOnWireCheck(scene, after)]
+  return freeOffset(refuse, grid, { x: 0, y: 0 }, turnReach(after, grid))
 }
 
 const SWEEP_DIRECTIONS = [

@@ -1,4 +1,4 @@
-import { diagonalSquare, flipped, nextRotation, objectRect, objectSize, orientationOf, snap, unionOf, type FlipAxis, type Point, type Rect, type Step, type Turn } from "./geometry"
+import { diagonalSquare, flipped, nextRotation, objectRect, objectSize, orientationOf, snap, unionOf, type FlipAxis, type Point, type Rect, type RoutedWire, type Step, type Turn } from "./geometry"
 import { getDef } from "./registry"
 import { turnLanding } from "./placement"
 import type { ComponentDef, PlacedObject, Schematic } from "./types"
@@ -96,10 +96,10 @@ export function flipLine(doc: Schematic, ids: ReadonlySet<string>, axis: FlipAxi
 
 export type InPlace = { readonly doc: Schematic; readonly shift: Point }
 
-export function landedInPlace(before: Schematic, after: Schematic, ids: ReadonlySet<string>, grid: number): InPlace | null {
+export function landedInPlace(before: Schematic, after: Schematic, ids: ReadonlySet<string>, grid: number, staying: readonly RoutedWire[] = []): InPlace | null {
   if (after === before) return { doc: after, shift: { x: 0, y: 0 } }
   const chosen = (doc: Schematic) => doc.objects.filter((o) => ids.has(o.id))
-  const shift = turnLanding(after.objects, chosen(before), chosen(after), grid)
+  const shift = turnLanding(after.objects, staying, chosen(before), chosen(after), grid)
   if (!shift) return null
   if (!shift.x && !shift.y) return { doc: after, shift }
   return { doc: { ...after, objects: after.objects.map((o) => (ids.has(o.id) ? { ...o, x: o.x + shift.x, y: o.y + shift.y } : o)) }, shift }

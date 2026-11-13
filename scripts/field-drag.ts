@@ -8,7 +8,7 @@ import { examples, lab1Stand } from "@/schematic/examples"
 import { bodyCentre, GRID, objectPins, objectRect, orientationOf, type Point, type Turn } from "@/schematic/geometry"
 import { SCHEMATIC_VERSION, stamped } from "@/schematic/migrate"
 import { rotateSelection } from "@/schematic/orient"
-import { bodyBounds, contourOf, placementCheck } from "@/schematic/placement"
+import { bodyBounds, contourOf, placementCheck, wireCheck } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 
@@ -1004,6 +1004,32 @@ async function turnedBesideANeighbour(page: Page) {
   }
 }
 
+const wirePaths = (page: Page) => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire] path[data-base]")].map((e) => e.getAttribute("d")).sort())
+
+async function turnedClearOfWires(page: Page) {
+  console.log("\nR R on an LED above another net's wire: it stands clear of the wire (the user, 2026-11-13)")
+  const wire = { id: "w", a: cellPoint(4, 12), b: cellPoint(20, 12) }
+  await openDoc(page, "turn-clear-of-wire", { objects: [resistorAt("R3", 0, 11), resistorAt("R4", 20, 11), { id: "D1", def: "led", x: 10 * GRID, y: 10 * GRID, props: { ref: "D1" } }], wires: [wire], parts: {} })
+  const frame = await fieldFrame(page)
+  const before = await wirePaths(page)
+  const onLed = frame.toScreen(cellPoint(12, 10.8))
+  await page.mouse.click(onLed.x, onLed.y)
+  for (let k = 0; k < 2; k++) {
+    await page.keyboard.press("r")
+    await page.waitForTimeout(600)
+  }
+  const placed = await placedNow(page)
+  const d1 = placed.find((o) => o.id === "D1")!
+  const pins = objectPins(d1, GRID).map((p) => p.point)
+  const onTheWire = pins.some((p) => p.y === wire.a.y && p.x >= wire.a.x && p.x <= wire.b.x)
+  const across = wireCheck({ objects: placed, routes: [{ id: wire.id, pts: [wire.a, wire.b], owner: [] }], grid: GRID }, [d1], false)(0, 0)
+  console.log(`  D1 at (${d1.x / GRID}, ${d1.y / GRID}) cells, ${d1.rotation ?? 0}°`)
+  expect("the LED stands upright", d1.rotation ?? 0, 90)
+  expect("…its body across no wire and no pin on the wire", [across, onTheWire], [false, false])
+  expect("…and the wire is left as it was", await wirePaths(page), before)
+  await shoot(page, "turned-clear-of-wire")
+}
+
 async function addingLandsInView(page: Page) {
   console.log("\na part added over a big board")
   const doc = await open(page, "lab1-running-light")
@@ -1166,7 +1192,7 @@ try {
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
 const only = process.env.ONLY?.split(",")
-const every = [turnedBesideANeighbour, contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
+const every = [turnedBesideANeighbour, turnedClearOfWires, contactsFollowTheDrag, wiresFollowTheDrag, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench]
 const sections = only ? every.filter((section) => only.includes(section.name)) : every
 try {
   for (const section of sections) {

@@ -1,6 +1,6 @@
 import { editedObjects } from "./pin-index"
 import { splicedAt } from "./splice"
-import { GRID, objectRect, snap, type FlipAxis, type Rect, type Turn } from "./geometry"
+import { GRID, objectRect, snap, type FlipAxis, type Rect, type RoutedWire, type Turn } from "./geometry"
 import { flipLine, flipSelection, landedInPlace, selectionStep, turnedAbout, turnedSelection, turnPivot } from "./orient"
 import { designatorRects, footprint } from "./placement"
 import { BoxIndex, SpatialIndex } from "./spatial"
@@ -82,6 +82,30 @@ function hangingChains(sheet: WireSheet, pins: readonly WirePin[]): Hanging[] {
       }
     }
   return out
+}
+
+function attachedRuns(sheet: WireSheet, pins: readonly WirePin[]): Set<string> {
+  const out = new Set<string>()
+  for (const pin of pins)
+    for (const first of sheet.endsAt(pin.at)) {
+      let at = otherEnd(first, pin.at)
+      let through = first
+      out.add(first.id)
+      while (!sheet.pinsAt(at).length) {
+        const ends = sheet.endsAt(at)
+        if (ends.length !== 2) break
+        through = ends[0] === through ? ends[1] : ends[0]
+        if (out.has(through.id)) break
+        out.add(through.id)
+        at = otherEnd(through, at)
+      }
+    }
+  return out
+}
+
+function stayingRoutes(doc: Schematic, sheet: WireSheet, ids: ReadonlySet<string>, carriedWires: ReadonlySet<string>): RoutedWire[] {
+  const leaving = attachedRuns(sheet, carriedPins(doc, ids))
+  return doc.wires.filter((w) => !leaving.has(w.id) && !carriedWires.has(w.id)).map((w) => ({ id: w.id, pts: [w.a, w.b], owner: [] }))
 }
 
 const hangingRuns = (sheet: WireSheet, pins: readonly WirePin[]): Set<string> => new Set(hangingChains(sheet, pins).flatMap((h) => h.segments.map((s) => s.id)))
@@ -380,8 +404,8 @@ type Shape = { readonly degrees?: number; readonly wires?: ReadonlySet<string> }
 
 function reshaped(base: Schematic, wiring: Base, ids: ReadonlySet<string>, target: Schematic, point: (at: Point) => Point, newId: NewId, index?: SpatialIndex, shape: Shape = {}): Landed {
   const sheet = wiring.sheet
-  const pins = carriedPins(base, ids)
   const after = new Map(pinsOf(target.objects.filter((o) => ids.has(o.id))).map((p) => [p.key, p] as const))
+  const pins = carriedPins(base, ids)
   const square = shape.degrees === undefined || shape.degrees % 90 === 0
   const hanging = hangingChains(sheet, pins)
   const tail = new Map<string, Point>()
@@ -459,7 +483,7 @@ export class TurnRun {
     const pivot = turnPivot(this.start, this.ids, GRID, boxes)
     if (!pivot) return this.last
     const step = selectionStep(this.start, this.ids, this.wires.size > 0)
-    const target = landedInPlace(this.start, turnedSelection(this.start, this.ids, steps, GRID, { pivot, step }), this.ids, GRID)
+    const target = landedInPlace(this.start, turnedSelection(this.start, this.ids, steps, GRID, { pivot, step }), this.ids, GRID, stayingRoutes(this.start, this.wiring().sheet, this.ids, this.wires))
     if (!target) return { ...this.last, refused: [], crowded: true }
     const degrees = steps * step
     const landed = reshaped(this.start, this.wiring(), this.ids, target.doc, (at) => shiftedBy(turnedAbout(at, pivot, degrees), target.shift), newId, this.index, { degrees, wires: this.wires })
@@ -480,7 +504,7 @@ export function flippedWithWires(doc: Schematic, wiring: Wiring | undefined, ids
   const boxes = wireBoxes(doc, whole)
   const line = flipLine(doc, ids, axis, GRID, boxes)
   if (line === null) return { doc, unlaid: [], at: ZERO }
-  const target = landedInPlace(doc, flipSelection(doc, ids, axis, GRID, boxes.length ? line : undefined), ids, GRID)
+  const target = landedInPlace(doc, flipSelection(doc, ids, axis, GRID, boxes.length ? line : undefined), ids, GRID, stayingRoutes(doc, base.sheet, ids, whole))
   if (!target) return { doc, unlaid: [], at: ZERO, refused: [], crowded: true }
   const mirrored = (at: Point): Point => shiftedBy(axis === "horizontal" ? { x: line - at.x, y: at.y } : { x: at.x, y: line - at.y }, target.shift)
   return reshaped(doc, base, ids, target.doc, mirrored, newId, index, { wires: whole })
@@ -489,7 +513,7 @@ export function flippedWithWires(doc: Schematic, wiring: Wiring | undefined, ids
 const shiftedBy = (p: Point, d: Point): Point => ({ x: p.x + d.x, y: p.y + d.y })
 
 function aloneInPlace(doc: Schematic, after: Schematic, ids: ReadonlySet<string>, newId: NewId): Landed {
-  const target = landedInPlace(doc, after, ids, GRID)
+  const target = landedInPlace(doc, after, ids, GRID, stayingRoutes(doc, WireSheet.of(doc.wires, pinsOf(doc.objects)), ids, new Set()))
   if (!target) return { doc, unlaid: [], at: ZERO, refused: [], crowded: true }
   return { doc: reoriented(doc, target.doc, ids, newId), unlaid: [], at: target.shift }
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { GRID, intersects, objectPins, type FlipAxis, type Point } from "@/schematic/geometry"
 import { wirePins } from "@/schematic/migrate-wires"
 import { flipSelection, turnedSelection } from "@/schematic/orient"
-import { contactCheck, footprints, placementCheck, turnReach, type PlacementScene } from "@/schematic/placement"
+import { contactCheck, footprints, placementCheck, turnReach, wireCheck, type PlacementScene } from "@/schematic/placement"
 import { flippedAlone, flippedWithWires, TurnRun, turnedAlone, type Landed } from "@/schematic/rubber-band"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import { inNormalForm, wiringOf } from "@/schematic/wire-edits"
@@ -268,3 +268,58 @@ describe("a part turned or mirrored in place lands on the nearest free spot, as 
     expectNearest(button, flipSelection(button, SW1, "vertical", GRID), mirrored.doc, SW1, "Alt+Y")
   })
 })
+
+const routesOf = (wires: readonly WireSegment[]) => wires.map((w) => ({ id: w.id, pts: [w.a, w.b], owner: [] }))
+const onSegment = (p: Point, { a, b }: WireSegment) =>
+  (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x) === 0 && p.x >= Math.min(a.x, b.x) && p.x <= Math.max(a.x, b.x) && p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y)
+const pinsOnWires = (objects: readonly PlacedObject[], wires: readonly WireSegment[]) => objects.flatMap((o) => objectPins(o, GRID).filter((p) => wires.some((w) => onSegment(p.point, w))).map((p) => `${o.id}:${p.pin.id}`))
+
+describe("a part turned in place lands clear of other nets' wires too (the user, 2026-11-13, of the right-hand picture: «Вот это хорошо»)", () => {
+  const D1 = new Set(["D1"])
+
+  function expectClearOfWires(before: Schematic, after: Schematic, what: string) {
+    const turned = chosen(after, D1)
+    expect.soft(wireCheck({ objects: after.objects, routes: routesOf(before.wires), grid: GRID }, turned, false)(0, 0), `${what}: the body lies across no wire`).toBe(false)
+    expect.soft(pinsOnWires(turned, before.wires), `${what}: no pin on a wire`).toEqual([])
+    expect.soft(after.wires, `${what}: the other net's wire is left as it was`).toEqual(before.wires)
+    const inPlace = turnedSelection(before, D1, 2, GRID)
+    const moved = chosen(inPlace, D1)
+    const landed = objectOf(after, "D1")
+    const shift = { x: (landed.x - moved[0].x) / GRID, y: (landed.y - moved[0].y) / GRID }
+    const squared = shift.x ** 2 + shift.y ** 2
+    expect.soft(squared, `${what}: moved, since in place it lies across the wire`).toBeGreaterThan(0)
+    const scene = sceneOf(inPlace)
+    const bodies = placementCheck(scene, moved)
+    const contacts = contactCheck(scene, moved)
+    const acrossWire = wireCheck({ objects: inPlace.objects, routes: routesOf(before.wires), grid: GRID }, moved, false)
+    const pinOnWire = (dx: number, dy: number) => pinsOnWires(moved.map((o) => ({ ...o, x: o.x + dx, y: o.y + dy })), before.wires).length > 0
+    const reach = turnReach(moved, GRID)
+    const nearer: [number, number][] = []
+    for (let dx = -reach; dx <= reach; dx++)
+      for (let dy = -reach; dy <= reach; dy++)
+        if (dx * dx + dy * dy < squared && !bodies(c(dx), c(dy)) && !contacts(c(dx), c(dy)) && !acrossWire(c(dx), c(dy)) && !pinOnWire(c(dx), c(dy))) nearer.push([dx, dy])
+    expect.soft(nearer, `${what}: no free spot nearer than (${shift.x}, ${shift.y})`).toEqual([])
+  }
+
+  it("an LED above a wire between R3 and R4, turned upright with R R, stands a cell up, clear of the wire, not across it", () => {
+    const doc = docOf([resistor("R3", 0, 11), resistor("R4", 20, 11), part("D1", "led", 10, 10)], [seg(at(4, 12), at(20, 12))])
+    const inPlace = turnedSelection(doc, D1, 2, GRID)
+    expect.soft(wireCheck({ objects: inPlace.objects, routes: routesOf(doc.wires), grid: GRID }, chosen(inPlace, D1), false)(0, 0), "set up: upright where it stands, it lies across the wire").toBe(true)
+    const landed = pressR(doc, D1, 2)
+    expect.soft(landed.refused, "turned").toBeUndefined()
+    expect.soft(objectOf(landed.doc, "D1").rotation, "upright").toBe(90)
+    expectClearOfWires(doc, landed.doc, "R R")
+    expect.soft(partition(landed.doc), "R3 and R4 still on their own net, the LED on none").toEqual(partition(doc))
+  })
+
+  it("a diagonal wire is judged exactly: the LED turned upright across it moves clear of it", () => {
+    const doc = docOf([part("D1", "led", 10, 10)], [seg(at(4, 20), at(20, 4))])
+    const inPlace = turnedSelection(doc, D1, 2, GRID)
+    expect.soft(wireCheck({ objects: inPlace.objects, routes: routesOf(doc.wires), grid: GRID }, chosen(inPlace, D1), false)(0, 0), "set up: upright where it stands, its body lies across the diagonal").toBe(true)
+    expect.soft(pinsOnWires(chosen(doc, D1), doc.wires), "set up: no pin on the diagonal to start with").toEqual([])
+    const landed = pressR(doc, D1, 2)
+    expect.soft(landed.refused, "turned").toBeUndefined()
+    expectClearOfWires(doc, landed.doc, "across the diagonal")
+  })
+})
+
