@@ -20,8 +20,9 @@ export type PartMeta = Omit<CatalogueEntry, "icon" | "file"> & { icon: Icon }
 
 const icons = ICONS as unknown as Record<string, Icon>
 
-export const catalogue: readonly PartMeta[] = CATALOGUE.map(({ icon, file: _file, ...meta }) => ({ ...meta, icon: icons[icon] }))
-const metaById = new Map(catalogue.map((m) => [m.id, m]))
+const everyPart: readonly PartMeta[] = CATALOGUE.map(({ icon, file: _file, ...meta }) => ({ ...meta, icon: icons[icon] }))
+export const catalogue: readonly PartMeta[] = everyPart.filter((m) => !m.retired)
+const metaById = new Map(everyPart.map((m) => [m.id, m]))
 const fileOf = new Map(CATALOGUE.map((e) => [e.id, e.file]))
 
 const byId = new Map<string, ComponentDef>()
@@ -43,6 +44,11 @@ export function getDef(id: string): ComponentDef | undefined {
 /** What the palette, search and menus need of a part: there from the start, no file to wait for. */
 export function getMeta(id: string): PartMeta | ComponentDef | undefined {
   return metaById.get(id) ?? library.get(id)?.def ?? undefined
+}
+
+export function isOffered(id: string): boolean {
+  const meta = getMeta(id)
+  return meta !== undefined && !meta.retired
 }
 
 function loadFile(file: string): Promise<void> {

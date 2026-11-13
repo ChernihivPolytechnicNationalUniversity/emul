@@ -24,7 +24,7 @@ import type { PartMeta } from "@/schematic/registry"
 import type { HdlLanguage } from "emul-shared/hdl"
 import { HdlIcon } from "@/schematic/icons"
 import { isModified } from "@/schematic/hdl"
-import { ensureDefs, getMeta } from "@/schematic/registry"
+import { ensureDefs, getMeta, isOffered } from "@/schematic/registry"
 import { BoardTile } from "./BoardTile"
 import { useQuickLists } from "./recents"
 import { Actions, clickEndsDrag, useDragOut, usePaletteActions, type PaletteActions } from "./palette-actions"
@@ -203,7 +203,7 @@ function QuickChip({ def }: { def: PartMeta }) {
 
 /** Favourite or recent parts: round chips with the part's icon and name, wrapping. */
 function QuickStrip({ label, ids, action }: { label: string; ids: readonly string[]; action?: React.ReactNode }) {
-  const defs = ids.flatMap((id) => getMeta(id) ?? [])
+  const defs = ids.flatMap((id) => (isOffered(id) ? (getMeta(id) ?? []) : []))
   if (defs.length === 0) return null
   return (
     <SidebarGroup className="py-0.5">

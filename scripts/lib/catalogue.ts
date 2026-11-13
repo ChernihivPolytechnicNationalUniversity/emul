@@ -9,8 +9,8 @@ const iconName = new Map<unknown, string>(Object.entries(ICONS).map(([name, icon
 function entryOf(def: ComponentDef, file: string): CatalogueEntry {
   const icon = iconName.get(def.icon)
   if (!icon) throw new Error(`${def.id}: its icon is not one of src/schematic/icons.tsx`)
-  const { id, name, description, category, keywords, width, height, prefix, chip, board } = def
-  return { id, name, description, category, keywords, icon, width, height, prefix, chip, board, file }
+  const { id, name, description, category, keywords, width, height, prefix, chip, board, retired } = def
+  return { id, name, description, category, keywords, icon, width, height, prefix, chip, board, retired, file }
 }
 
 /** The text of catalogue.gen.ts as the parts' files and the examples have it now. */

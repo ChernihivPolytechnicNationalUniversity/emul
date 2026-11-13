@@ -725,14 +725,10 @@ export const transformer: ComponentDef = {
   ],
 }
 
-/**
- * A bare wire node. Wires run pin to pin, so a place where three wires meet — or where one
- * taps another — needs something to meet at; without it, crossing wires simply pass over each
- * other. It has no model: it conducts because every wire on it shares its pin.
- */
 export const junction: ComponentDef = {
   id: "junction",
   name: "Junction",
+  retired: true,
   description: "Wire junction dot",
   keywords: ["node", "dot", "connection"],
   category: "basics",
@@ -741,8 +737,6 @@ export const junction: ComponentDef = {
   height: 2,
   parts: [],
   pins: [{ id: "J", label: "", x: 1, y: 1, side: "right", labelAt: "top", kind: "node" }],
-  // The pin is the dot; the ring around it is what the node is dragged by, so dropping one and
-  // picking it up again moves it rather than starting a wire.
   body: [{ type: "circle", cx: 1, cy: 1, r: 0.6, fill: "grip" }],
 }
 
