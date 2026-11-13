@@ -62,8 +62,8 @@ const resistorAt = (id: string, x: number, y: number, rotation?: 90): PlacedObje
 const bench = (): Schematic => ({
   objects: [resistorAt("R1", 10, 10), resistorAt("R2", 20, 10), resistorAt("R3", 14, 16, 90), resistorAt("R4", 10, 22), resistorAt("R5", 20, 22)],
   wires: [
-    { id: "h", a: cellPoint(14, 26), b: cellPoint(22, 26) },
-    { id: "v", a: cellPoint(18, 24), b: cellPoint(18, 30) },
+    { id: "h", a: cellPoint(22, 18), b: cellPoint(30, 18) },
+    { id: "v", a: cellPoint(26, 15), b: cellPoint(26, 21) },
   ],
   parts: {},
 })
@@ -128,7 +128,7 @@ async function barNeverMoves(page: Page) {
   await page.waitForTimeout(200)
   expect("nothing selected, no strip", await countOf(page, "[data-slot=tool-strip]"), 0)
   const frame2 = await fieldFrame(page)
-  const wire = frame2.toScreen(cellPoint(16, 26))
+  const wire = frame2.toScreen(cellPoint(24, 18))
   await page.mouse.click(wire.x, wire.y)
   await page.waitForTimeout(300)
   expect("a wire selected: Re-route joins the strip with T", await page.evaluate(() => document.querySelector("[data-slot=tool-strip] [data-action=reroute] kbd")?.textContent ?? null), "T")
@@ -210,12 +210,12 @@ async function keysSelectTheModes(page: Page) {
   await page.keyboard.press("Escape")
 }
 
-async function handAndJoin(page: Page) {
-  console.log("\nHand pans with a plain drag; Join joins a crossing on a click")
+async function handTool(page: Page) {
+  console.log("\nHand pans with a plain drag")
   await openDoc(page, "toolbar-hand", bench())
-  const frame = await fieldFrame(page)
   await page.click(toolButton("hand"))
-  const bare = frame.toScreen(cellPoint(34, 6))
+  const stage = (await rect(page, "[data-slot=dot-field-stage]"))!
+  const bare = { x: stage.x + stage.width / 2, y: stage.y + stage.height - 160 }
   const before = await contentTransform(page)
   await page.mouse.move(bare.x, bare.y)
   await page.mouse.down()
@@ -225,16 +225,19 @@ async function handAndJoin(page: Page) {
   expect("a drag with Hand pans the field", (await contentTransform(page)) !== before, true)
   expect("and draws no selection box", await page.evaluate(() => (document.querySelector("[data-slot=dot-field-selection]") as HTMLElement | null)?.style.display ?? "none"), "none")
   expect("the strip says how to pan", ((await strip(page)) ?? "").length > 10, true)
+}
 
+async function joinTool(page: Page) {
+  console.log("\nJoin joins a crossing on a click")
   await openDoc(page, "toolbar-join", bench())
   const f2 = await fieldFrame(page)
   await page.click(toolButton("join"))
   const dotsBefore = await countOf(page, "[data-junction]")
-  const crossing = f2.toScreen(cellPoint(18, 26))
+  const crossing = f2.toScreen(cellPoint(26, 18))
   await page.mouse.click(crossing.x, crossing.y)
   await page.waitForTimeout(400)
   expect("a click on a crossing with Join joins it: a dot appears", await countOf(page, "[data-junction]"), dotsBefore + 1)
-  expect("Join stays on", await pressedTools(page), ["join"])
+  expect("one join, then back to Select: Join is used once per batch (model §5.3)", await pressedTools(page), ["select"])
 }
 
 async function instrumentsAndShortcuts(page: Page) {
@@ -272,7 +275,7 @@ async function narrowAndTouch(browser: Browser) {
   const bar = (await rect(narrow, "[data-slot=field-toolbar]"))!
   expect("below lg the names fold away, the keys stay", await narrow.evaluate(() => [...document.querySelectorAll("[data-slot=field-toolbar] [data-tool]")].map((b) => [(b.querySelector("[data-slot=tool-name]") as HTMLElement | null)?.offsetWidth ?? 0, b.querySelector("kbd")?.textContent])), [[0, "V"], [0, "H"], [0, "W"], [0, "J"], [0, "A"], [0, "M"]])
   expect("the bar fits inside the field", bar.x >= stage.x && bar.x + bar.width <= stage.x + stage.width, true)
-  const others = await narrow.evaluate(() => [...document.querySelectorAll("[data-slot=dot-field-stage] > *:not([data-slot=field-toolbar])")].map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0).map((r) => ({ x: r.x, y: r.y, width: r.width, height: r.height })))
+  const others = await narrow.evaluate(() => [...document.querySelectorAll("[data-slot=dot-field-stage] > *:not(:has([data-slot=field-toolbar]))")].map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0).map((r) => ({ x: r.x, y: r.y, width: r.width, height: r.height })))
   const over = (a: typeof bar, b: typeof bar) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
   expect("and covers no other control on the field", others.filter((o) => o.width < stage.width && over(o, bar)).length, 0)
   await narrow.close()
@@ -286,7 +289,7 @@ async function narrowAndTouch(browser: Browser) {
 
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const sections = [barSitsTopCentre, barNeverMoves, wireToolAndItsModes, keysSelectTheModes, handAndJoin, instrumentsAndShortcuts]
+const sections = [barSitsTopCentre, barNeverMoves, wireToolAndItsModes, keysSelectTheModes, handTool, joinTool, instrumentsAndShortcuts]
 for (const section of sections) {
   const page = await browser.newPage({ viewport: { width: 1600, height: 900 } })
   page.on("pageerror", (e) => errors.push(`${section.name}: ${e.message}`))
