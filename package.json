@@ -20,6 +20,7 @@
     "bench": "tsx --tsconfig tsconfig.app.json scripts/bench.ts",
     "field-bench": "tsx --tsconfig tsconfig.app.json scripts/field-bench.ts",
     "field-drag": "tsx --tsconfig tsconfig.app.json scripts/field-drag.ts",
+    "toolbar": "tsx --tsconfig tsconfig.app.json scripts/toolbar.ts",
     "geom-bench": "tsx --tsconfig tsconfig.app.json scripts/geom-bench.ts",
     "route-bench": "tsx --tsconfig tsconfig.app.json scripts/route-bench.ts",
     "pin-partitions": "tsx --tsconfig tsconfig.app.json scripts/pin-partitions.ts",
