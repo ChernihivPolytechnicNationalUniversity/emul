@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { alternatives, matchesAny, type KeyPress } from "@/lib/keys"
 import { KEYMAP, keymapFor, labelFor } from "@/lib/keymap"
 import { shortcutSections } from "@/lib/shortcut-list"
-import { TOOL_GROUPS, TOOLS, WIRE_MODE_CHOICES, type ToolId } from "@/lib/tools"
+import { pressesKey, TOOL_GROUPS, TOOLS, WIRE_MODE_CHOICES, type ToolId } from "@/lib/tools"
 import { DEFAULT_LINE_MODE, nextLineMode, type LineMode } from "@/schematic/wire-draw"
 
 const press = (key: string, code: string, extra: Partial<KeyPress> = {}): KeyPress => ({ key, code, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...extra })
@@ -48,6 +48,15 @@ describe("the main toolbar's content, as the model sets it (docs/emul-toolbar/mo
     expect.soft(!!matchesAny(press("ц", "KeyW"), wire.keys), "Russian ЙЦУКЕН: Ц sits on W").toBe(true)
     const hand = TOOLS.find((t) => t.id === "hand")!
     expect.soft(!!matchesAny(press("р", "KeyH"), hand.keys), "Russian: Р sits on H").toBe(true)
+  })
+
+  it("reaches W and J by their place where the layout types punctuation there, as the field always did (coverage: keyboard row)", () => {
+    expect.soft(pressesKey(press("'", "KeyW"), KEYMAP.toolWire), "Hebrew types an apostrophe on W's place").toBe(true)
+    expect.soft(pressesKey(press("z", "KeyW"), KEYMAP.toolWire), "AZERTY's Z on W's place still arms a wire").toBe(true)
+    expect.soft(pressesKey(press("w", "KeyZ"), KEYMAP.toolWire), "AZERTY's W, typed").toBe(true)
+    expect.soft(pressesKey(press("w", "KeyW", { ctrlKey: true }), KEYMAP.toolWire), "never with Ctrl").toBe(false)
+    expect.soft(pressesKey(press("W", "KeyW", { shiftKey: true }), KEYMAP.toolSelect), "W's place is not V").toBe(false)
+    expect.soft(pressesKey(press("ח", "KeyJ"), KEYMAP.joinHere), "Hebrew on J's place").toBe(true)
   })
 })
 

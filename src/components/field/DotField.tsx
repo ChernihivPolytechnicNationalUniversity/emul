@@ -95,7 +95,7 @@ import { checkProblems, runtimeProblems, sortProblems, staticProblems } from "@/
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useSizeClass } from "@/hooks/use-size-class"
 import { useSampled } from "@/hooks/use-sampled"
-import { toolSpec, type ToolId } from "@/lib/tools"
+import { pressesKey, toolSpec, type ToolId } from "@/lib/tools"
 import { FieldToolbar, type StripContext } from "./FieldToolbar"
 import { ShortcutsDialog } from "./ShortcutsDialog"
 
@@ -1626,14 +1626,17 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       }
     }
     const plain = !e.ctrlKey && !e.metaKey && !e.altKey
-    if (!pending && plain) {
+    if (!pending && plain && !e.repeat) {
       const picked = [
         { keys: KEYMAP.toolSelect, run: () => chooseTool("select") },
         { keys: KEYMAP.toolHand, run: () => chooseTool("hand") },
         { keys: KEYMAP.toolWire, run: () => chooseTool("wire") },
         { keys: KEYMAP.joinHere, run: () => pointerClient.current && joinUnderPointer(pointerClient.current) },
-      ]
-      if (dispatch(e, picked)) return
+      ].find(({ keys }) => pressesKey(e, keys))
+      if (picked) {
+        e.preventDefault()
+        return void picked.run()
+      }
     }
     if (!pending && !e.repeat && matchesAny(e, KEYMAP.shortcuts)) {
       e.preventDefault()

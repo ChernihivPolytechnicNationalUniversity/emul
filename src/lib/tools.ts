@@ -1,5 +1,5 @@
 import { KEYMAP } from "./keymap"
-import { alternatives, type Keys } from "./keys"
+import { alternatives, matchesAny, type KeyPress, type Keys } from "./keys"
 import { lineModeTag, nextLineMode, DEFAULT_LINE_MODE, type LineMode } from "@/schematic/wire-draw"
 
 const byLetterFirst = (keys: Keys): Keys => {
@@ -24,6 +24,12 @@ export const TOOL_GROUPS: readonly (readonly ToolSpec[])[] = [
 ]
 
 export const TOOLS: readonly ToolSpec[] = TOOL_GROUPS.flat()
+
+export function pressesKey(e: KeyPress, keys: Keys): boolean {
+  if (matchesAny(e, keys)) return true
+  if (e.ctrlKey || e.metaKey || e.altKey) return false
+  return alternatives(keys).some((shortcut) => !shortcut.mod && !shortcut.alt && !shortcut.shift && /^[a-z]$/.test(shortcut.key) && e.code === `Key${shortcut.key.toUpperCase()}`)
+}
 
 export const toolSpec = (id: ToolId): ToolSpec => TOOLS.find((tool) => tool.id === id)!
 
