@@ -96,7 +96,8 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { useSizeClass } from "@/hooks/use-size-class"
 import { useSampled } from "@/hooks/use-sampled"
 import { pressesKey, toolSpec, type ToolId } from "@/lib/tools"
-import { FieldToolbar, type StripContext } from "./FieldToolbar"
+import { FieldToolbar, ToolHint } from "./FieldToolbar"
+import { TOOLBAR_CLEARANCE } from "./use-viewport"
 import { ShortcutsDialog } from "./ShortcutsDialog"
 
 type FieldTool = Exclude<ToolId, "part" | "probe">
@@ -202,6 +203,8 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
   /** How many problems the field has, for the sheet's tab. */
   onProblemCount?: (count: number) => void
   projectName?: string
+  belowBanner?: boolean
+  toolSlot?: HTMLElement | null
 }
 
 /** A point on screen, px from the window's corner: an event's clientX and clientY. */
@@ -242,8 +245,8 @@ const keyRef = (key: string): PinRef => ({ object: key.slice(0, key.indexOf(":")
 type Pending = { d: Drawing; mode: "drag" | "click"; target: DrawEnd | null; moved: boolean }
 
 
-export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, armed = null, onArmedChange, onPlaced, onHdlImport, peerSelections = NO_PEERS, onSelectionShare, fieldSlot = null, onFieldPicked, onProblemCount, projectName, children, ...props }: DotFieldProps) {
-  const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, show, toWorld, isPanStart, startPan, movePan, endPan, setOnPinchStart } = useViewport(grid)
+export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, armed = null, onArmedChange, onPlaced, onHdlImport, peerSelections = NO_PEERS, onSelectionShare, fieldSlot = null, onFieldPicked, onProblemCount, projectName, belowBanner = false, toolSlot = null, children, ...props }: DotFieldProps) {
+  const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, show, toWorld, isPanStart, startPan, movePan, endPan, setOnPinchStart } = useViewport(grid, undefined, toolSlot ? 0 : TOOLBAR_CLEARANCE)
   const marquee = useSelection(toWorld, worldPerPixel)
   const { boxRef: marqueeRef } = marquee
   const sch = useSchematic(grid)
@@ -1456,6 +1459,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     onPointerWorld?.(toWorld(e.clientX, e.clientY))
     if (armed && e.pointerType !== "touch") setArmedAt(toWorld(e.clientX, e.clientY))
     if (movePan(e)) return
+    if (tool === "hand") return
     const press = wirePress.current
     if (press && !drag.active && Math.hypot(e.clientX - press.x, e.clientY - press.y) >= TAP_SLOP) {
       wirePress.current = null
@@ -1702,14 +1706,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const lineModeAt = pending?.d.cursor ?? (measure.active ? null : wireArmed)
   const activeTool: ToolId = measure.active ? "probe" : quick || armed ? "part" : tool
   const hintOf = (id: ToolId) => `${toolSpec(id).hint} · Esc stops`
-  const stripContext: StripContext | null =
-    tool === "wire" || pending || wireArmed
-      ? { kind: "wire", mode: pending?.d.mode ?? lineMode, onMode: chooseLineMode }
-      : measure.active
-        ? { kind: "hint", text: hintOf("probe") }
-        : tool === "hand"
-          ? { kind: "hint", text: hintOf(tool) }
-          : null
+  const wireHint = `${toolSpec("wire").hint} · / which leg first · Backspace takes a corner back · Enter finishes · 0–9, C, M colour · Esc stops`
+  const toolHint = armed ? null : tool === "wire" || pending || wireArmed ? wireHint : measure.active ? hintOf("probe") : tool === "hand" ? hintOf("hand") : null
   const cursor = panning ? "cursor-grabbing" : spaceHeld || tool === "hand" ? "cursor-grab" : armed ? "cursor-copy" : "cursor-precise"
   const probeReading = sim.probe(PROBE_ID)
   const { selectedObjects, selectedWires, doc: schDoc, setPart } = sch
@@ -1905,7 +1903,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   // Docked under the explorer while it is open; floating over the field otherwise (and on a phone, across its top, at most half the field high).
   const inspector = (
   <Inspector
-    className={fieldDocked ? "max-h-none w-full gap-3 rounded-none border-0 py-3 shadow-none ring-0" : "absolute top-12 right-3 max-h-[calc(100%-9rem)] max-md:top-3 max-md:left-14 max-md:w-auto max-md:max-h-[45%]"}
+    className={fieldDocked ? "max-h-none w-full gap-3 rounded-none border-0 py-3 shadow-none ring-0" : "absolute top-12 right-3 max-h-[calc(100%-9rem)] max-md:top-3 max-md:left-[4.75rem] max-md:[@media(max-height:460px)]:left-32 max-md:w-auto max-md:max-h-[45%]"}
     selected={selectedObjectList}
     damage={sim.damage}
     sim={sim}
@@ -2113,10 +2111,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 style={{ display: "none" }}
               />
             </div>
+            {tool === "hand" && <div data-slot="hand-overlay" aria-hidden className={cn("absolute inset-0 z-[5]", panning ? "cursor-grabbing" : "cursor-grab")} />}
           </div>
 
           <ProbeReadout
-            className="absolute bottom-16 left-4 max-md:bottom-24"
+            className="absolute bottom-16 left-4 max-md:bottom-24 [@media(max-height:460px)]:left-32"
             tips={tips}
             reading={probeReading}
             sim={sim}
@@ -2144,7 +2143,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           />
           {selectedWireList.length > 0 && selectedObjectList.length === 0 && (
             <WirePalette
-              className="absolute top-3 right-3"
+              className="absolute top-12 right-3 max-md:top-3 max-md:right-3"
               active={activeColors}
               overridden={anyOverridden}
               onPick={paintSelected}
@@ -2169,7 +2168,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               Cancel wire
             </Button>
           )}
-          <FieldToolbar active={activeTool} onTool={chooseTool} strip={stripContext} />
+          {(() => {
+            const bar = <FieldToolbar docked={!!toolSlot} active={activeTool} onTool={chooseTool} wireMode={pending?.d.mode ?? lineMode} onWireMode={chooseLineMode} showAngles={!armed && !measure.active && (tool === "wire" || !!pending)} />
+            return toolSlot ? createPortal(bar, toolSlot) : bar
+          })()}
+          {toolHint && <ToolHint text={toolHint} className={belowBanner ? "top-14" : undefined} />}
           <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
           <ScaleBar className="absolute right-4 bottom-14" scale={scale} grid={grid} />
           <ZoomControls className="absolute right-4 bottom-4" scale={scale} onZoomIn={zoomIn} onZoomOut={zoomOut} onReset={reset} />

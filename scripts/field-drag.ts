@@ -825,6 +825,7 @@ async function contactsFollowTheDrag(page: Page) {
   const board = doc.objects.find((o) => o.def === "open746i-c")!
   const docked = await box(page, lcd.id)
   const cell = docked.width / getDef("lcd7-f")!.width
+  const dockedWorld = await (await fieldFrame(page)).worldOf(lcd.id)
   const grab = { x: docked.x + docked.width / 2, y: docked.y + LCD_BEZEL_CELLS * cell }
   const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-body]")?.getAttribute("data-body"), grab)
   expect("the grab point is on the LCD", hit, lcd.id)
@@ -865,7 +866,7 @@ async function contactsFollowTheDrag(page: Page) {
   await page.waitForTimeout(500)
   const away = await box(page, lcd.id)
   const regrab = { x: away.x + away.width / 2, y: away.y + LCD_BEZEL_CELLS * cell }
-  expect(`the LCD moved ${LIFT_CELLS} cells`, Math.round((away.y + PAN_PX - docked.y) / cell), LIFT_CELLS)
+  expect(`the LCD moved ${LIFT_CELLS} cells`, Math.round(((await (await fieldFrame(page)).worldOf(lcd.id)).y - dockedWorld.y) / GRID), LIFT_CELLS)
   await page.mouse.move(regrab.x, regrab.y)
   await page.mouse.down()
   await page.mouse.move(regrab.x, regrab.y - LIFT_CELLS * cell, { steps: 12 })
