@@ -107,6 +107,8 @@ async function barSitsTopCentre(page: Page) {
   expect("the five modes in order", await page.evaluate(() => [...document.querySelectorAll("[data-slot=field-toolbar] [data-tool]")].map((b) => b.getAttribute("data-tool"))), ["select", "hand", "wire", "part", "probe"])
   expect("three groups, two dividers", await countOf(page, "[data-slot=field-toolbar] [role=separator]"), 2)
   expect("Select is on at the start, nothing else", await pressedTools(page), ["select"])
+  const barBottom = bar.y + bar.height
+  expect("a document opened is fitted below the bar: no part under it", await page.evaluate((bottom) => [...document.querySelectorAll("[data-body] [data-slot=component]")].filter((e) => e.getBoundingClientRect().top < bottom).length, barBottom), 0)
   for (const id of ["select", "hand", "wire", "part", "probe"]) {
     const b = (await rect(page, toolButton(id)))!
     expectAtLeast(`${id} is 36 px tall`, Math.round(b.height), 36)
