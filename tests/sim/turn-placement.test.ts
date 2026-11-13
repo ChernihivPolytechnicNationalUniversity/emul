@@ -323,3 +323,41 @@ describe("a part turned in place lands clear of other nets' wires too (the user,
   })
 })
 
+describe("a turn that puts the part's pins back on the points they held changes only the part (the user, 2026-11-13: «если резисторы соединены и мы поворачиваем, то провод не появляется, просто поворот и всё»)", () => {
+  const R2 = new Set(["R2"])
+  const shorted = (doc: Schematic, id: string) => partition(doc).some((net) => net.includes(`${id}:1`) && net.includes(`${id}:2`))
+
+  function expectOnlyTurned(doc: Schematic, landed: Landed, what: string, rotation: number) {
+    expect.soft(landed.refused, `${what}: done`).toBeUndefined()
+    const r2 = objectOf(landed.doc, "R2")
+    expect.soft([r2.x, r2.y, r2.rotation ?? 0, !!r2.mirror], `${what}: R2 turned where it stood`).toEqual([objectOf(doc, "R2").x, objectOf(doc, "R2").y, rotation, false])
+    expect.soft(landed.doc.wires, `${what}: the wires exactly as they were, no new segment`).toEqual(doc.wires)
+    expect.soft(shorted(landed.doc, "R2"), `${what}: R2's two pins are not joined to each other`).toBe(false)
+  }
+
+  it("R1 and R2 butted pin to pin: a half turn of R2 lays no wire, and R1 now meets R2's pin 2", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 4, 0)])
+    const landed = pressR(doc, R2, 4)
+    expectOnlyTurned(doc, landed, "butted", 180)
+    expect.soft(partition(landed.doc), "the nets as the geometry says").toEqual([["R1:2", "R2:2"]])
+  })
+
+  it("R1 and R2 joined by a short wire, R2 wired on to R5: a half turn of R2 keeps every wire, and each now meets the other pin", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 6, 0), resistor("R5", 14, 0)], [seg(at(4, 1), at(6, 1)), seg(at(10, 1), at(14, 1))])
+    const landed = pressR(doc, R2, 4)
+    expectOnlyTurned(doc, landed, "wired", 180)
+    expect.soft(partition(landed.doc), "the nets as the geometry says").toEqual([["R1:2", "R2:2"], ["R2:1", "R5:1"]])
+  })
+
+  it("an LED, whose ends are not interchangeable, still carries each wire with its own pin on a half turn (design.md §13.17)", () => {
+    const doc = docOf([resistor("R1", 0, 0), part("D1", "led", 6, 0)], [seg(at(4, 1), at(6, 1))])
+    const landed = pressR(doc, new Set(["D1"]), 4)
+    expect.soft(landed.refused, "turned").toBeUndefined()
+    expect.soft(partition(landed.doc), "the anode still on R1").toEqual([["D1:1", "R1:2"]])
+  })
+
+  it("⇧R four times is the same half turn the other way", () => {
+    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 6, 0)], [seg(at(4, 1), at(6, 1))])
+    expectOnlyTurned(doc, pressR(doc, R2, 4, -1), "⇧R", 180)
+  })
+})

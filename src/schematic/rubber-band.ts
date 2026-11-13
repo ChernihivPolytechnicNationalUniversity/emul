@@ -3,9 +3,10 @@ import { splicedAt } from "./splice"
 import { GRID, objectRect, snap, type FlipAxis, type Rect, type RoutedWire, type Turn } from "./geometry"
 import { flipLine, flipSelection, landedInPlace, selectionStep, turnedAbout, turnedSelection, turnPivot } from "./orient"
 import { designatorRects, footprint } from "./placement"
+import { getDef } from "./registry"
 import { BoxIndex, SpatialIndex } from "./spatial"
 import { bodiesOf, crossable, crossedBody, segmentBox, shiftedBody, spliceSpan, staysThrough, type Body } from "./body-crossing"
-import type { PlacedObject, Point, Schematic } from "./types"
+import type { ComponentDef, PlacedObject, Point, Schematic } from "./types"
 import { keepSheet, detachedMove, moved, pinsOf, reoriented, travellingIn, travellingWires, wiringOf, withSegments, type NewId, type Wiring } from "./wire-edits"
 import { normalOffset, planDrag, translate, type DragBox, type DragCommit, type DragConflict, type DragFrame, type DragMove, type DragPlan } from "./wires/drag"
 import { WireGraph, type WireNets } from "./wires/graph"
@@ -106,6 +107,27 @@ function attachedRuns(sheet: WireSheet, pins: readonly WirePin[]): Set<string> {
 function stayingRoutes(doc: Schematic, sheet: WireSheet, ids: ReadonlySet<string>, carriedWires: ReadonlySet<string>): RoutedWire[] {
   const leaving = attachedRuns(sheet, carriedPins(doc, ids))
   return doc.wires.filter((w) => !leaving.has(w.id) && !carriedWires.has(w.id)).map((w) => ({ id: w.id, pts: [w.a, w.b], owner: [] }))
+}
+
+const pointKey = (p: Point) => `${p.x},${p.y}`
+
+const SYMMETRIC_ELEMENTS = new Set(["R", "C", "L", "SW"])
+
+function endsInterchangeable(def: ComponentDef): boolean {
+  if (def.pins.length !== 2 || def.pins.some((pin) => pin.label || pin.kind === "node")) return false
+  const ends = new Set(def.pins.map((pin) => pin.id))
+  return (def.model ?? []).every((element) => SYMMETRIC_ELEMENTS.has(element.kind) && "a" in element && "b" in element && ends.has(String(element.a)) && ends.has(String(element.b)) && element.a !== element.b)
+}
+
+function pinsThatMove(doc: Schematic, pins: readonly WirePin[], after: ReadonlyMap<string, WirePin>): readonly WirePin[] {
+  const pointsOf = (list: Iterable<WirePin>, id: string) => [...list].filter((p) => objectOf(p.key) === id).map((p) => pointKey(p.at)).sort().join(" ")
+  const swapped = new Set(
+    doc.objects.filter((o) => {
+      const def = getDef(o.def)
+      return def && endsInterchangeable(def) && pointsOf(pins, o.id) !== "" && pointsOf(pins, o.id) === pointsOf(after.values(), o.id)
+    }).map((o) => o.id),
+  )
+  return swapped.size ? pins.filter((p) => !swapped.has(objectOf(p.key))) : pins
 }
 
 const hangingRuns = (sheet: WireSheet, pins: readonly WirePin[]): Set<string> => new Set(hangingChains(sheet, pins).flatMap((h) => h.segments.map((s) => s.id)))
@@ -405,7 +427,8 @@ type Shape = { readonly degrees?: number; readonly wires?: ReadonlySet<string> }
 function reshaped(base: Schematic, wiring: Base, ids: ReadonlySet<string>, target: Schematic, point: (at: Point) => Point, newId: NewId, index?: SpatialIndex, shape: Shape = {}): Landed {
   const sheet = wiring.sheet
   const after = new Map(pinsOf(target.objects.filter((o) => ids.has(o.id))).map((p) => [p.key, p] as const))
-  const pins = carriedPins(base, ids)
+  const carried = carriedPins(base, ids)
+  const pins = shape.degrees === undefined ? carried : pinsThatMove(base, carried, after)
   const square = shape.degrees === undefined || shape.degrees % 90 === 0
   const hanging = hangingChains(sheet, pins)
   const tail = new Map<string, Point>()

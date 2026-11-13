@@ -1007,7 +1007,7 @@ async function turnedBesideANeighbour(page: Page) {
 const wirePaths = (page: Page) => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire] path[data-base]")].map((e) => e.getAttribute("d")).sort())
 
 async function turnedClearOfWires(page: Page) {
-  console.log("\nR R on an LED above another net's wire: it stands clear of the wire (the user, 2026-11-13)")
+  console.log("\nR R on an LED above another net's wire: it stands clear of the wire, and a half turn of joined resistors lays no wire (the user, 2026-11-13)")
   const wire = { id: "w", a: cellPoint(4, 12), b: cellPoint(20, 12) }
   await openDoc(page, "turn-clear-of-wire", { objects: [resistorAt("R3", 0, 11), resistorAt("R4", 20, 11), { id: "D1", def: "led", x: 10 * GRID, y: 10 * GRID, props: { ref: "D1" } }], wires: [wire], parts: {} })
   const frame = await fieldFrame(page)
@@ -1028,6 +1028,25 @@ async function turnedClearOfWires(page: Page) {
   expect("…its body across no wire and no pin on the wire", [across, onTheWire], [false, false])
   expect("…and the wire is left as it was", await wirePaths(page), before)
   await shoot(page, "turned-clear-of-wire")
+  for (const [name, wires] of [
+    ["butted", []],
+    ["joined", [{ id: "j", a: cellPoint(4, 1), b: cellPoint(6, 1) }]],
+  ] as const) {
+    const r2 = resistorAt("R2", name === "butted" ? 4 : 6, 0)
+    await openDoc(page, `half-turn-${name}`, { objects: [resistorAt("R1", 0, 0), r2], wires: [...wires], parts: {} })
+    const f = await fieldFrame(page)
+    const was = await wirePaths(page)
+    const on = f.toScreen({ x: r2.x + 2 * GRID, y: r2.y + GRID })
+    await page.mouse.click(on.x, on.y)
+    for (let k = 0; k < 4; k++) {
+      await page.keyboard.press("r")
+      await page.waitForTimeout(500)
+    }
+    const turned = (await placedNow(page)).find((o) => o.id === "R2")!
+    expect(`${name}: R2 half-turned where it stood`, [turned.x, turned.y, turned.rotation ?? 0], [r2.x, r2.y, 180])
+    expect(`${name}: no wire laid, the wires exactly as they were`, await wirePaths(page), was)
+    await shoot(page, `half-turn-${name}`)
+  }
 }
 
 async function addingLandsInView(page: Page) {
