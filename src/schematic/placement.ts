@@ -472,8 +472,17 @@ export function pinOnWireCheck(scene: PlacementScene, moving: readonly PlacedObj
     })
 }
 
+const NEARBY_MARGIN_CELLS = 6
+
+function within(area: Rect, objects: readonly PlacedObject[], routes: readonly RoutedWire[], grid: number): { objects: readonly PlacedObject[]; routes: readonly RoutedWire[] } {
+  return { objects: objects.filter((o) => intersects(objectRect(o, grid), area)), routes: routes.filter((r) => intersects(routeBox(r), area)) }
+}
+
 export function turnLanding(objects: readonly PlacedObject[], routes: readonly RoutedWire[], before: readonly PlacedObject[], after: readonly PlacedObject[], grid: number, unclean?: Refuse): Point | null {
-  const scene = { objects, routes, grid }
+  const reach = turnReach(after, grid) + NEARBY_MARGIN_CELLS
+  const box = unionOf([...before, ...after].map((o) => objectRect(o, grid)))
+  const area = { x: box.x - reach * grid, y: box.y - reach * grid, w: box.w + 2 * reach * grid, h: box.h + 2 * reach * grid }
+  const scene = { ...within(area, objects, routes, grid), grid }
   const kept = before.flatMap((o) => objectPins(o, grid).map(({ point }) => point))
   const refuse = [placementCheck(scene, after), contactCheck(scene, after, kept), wireCheck(scene, after, false), pinOnWireCheck(scene, after), ...(unclean ? [unclean] : [])]
   return freeOffset(refuse, grid, { x: 0, y: 0 }, turnReach(after, grid))

@@ -131,7 +131,7 @@ function endsInterchangeable(def: ComponentDef): boolean {
 function pinsThatMove(doc: Schematic, pins: readonly WirePin[], after: ReadonlyMap<string, WirePin>): readonly WirePin[] {
   const pointsOf = (list: Iterable<WirePin>, id: string) => [...list].filter((p) => objectOf(p.key) === id).map((p) => pointKey(p.at)).sort().join(" ")
   const swapped = new Set(
-    doc.objects.filter((o) => {
+    [...new Set(pins.map((p) => objectOf(p.key)))].flatMap((id) => doc.objects.find((o) => o.id === id) ?? []).filter((o) => {
       const def = getDef(o.def)
       return def && endsInterchangeable(def) && pointsOf(pins, o.id) !== "" && pointsOf(pins, o.id) === pointsOf(after.values(), o.id)
     }).map((o) => o.id),
@@ -521,13 +521,17 @@ export class TurnRun {
     const step = selectionStep(this.start, this.ids, this.wires.size > 0)
     const degrees = steps * step
     const landedAt = (target: InPlace, ids: NewId) => reshaped(this.start, this.wiring(), this.ids, target.doc, (at) => shiftedBy(turnedAbout(at, pivot, degrees), target.shift), ids, this.index, { degrees, wires: this.wires })
-    const crossesABody = (target: InPlace) => !!landedAt(target, probeIds()).refused?.some((c) => c.reason === "body")
-    const target = landedInPlace(this.start, turnedSelection(this.start, this.ids, steps, GRID, { pivot, step }), this.ids, GRID, stayingRoutes(this.start, this.wiring().sheet, this.ids, this.wires), crossesABody)
+    const crossesABody = (landed: Landed) => !!landed.refused?.some((c) => c.reason === "body")
+    const turned = turnedSelection(this.start, this.ids, steps, GRID, { pivot, step })
+    const staying = stayingRoutes(this.start, this.wiring().sheet, this.ids, this.wires)
+    const nearest = landedInPlace(this.start, turned, this.ids, GRID, staying)
+    const first = nearest && landedAt(nearest, newId)
+    const target = !first || !crossesABody(first) ? nearest : landedInPlace(this.start, turned, this.ids, GRID, staying, (shifted) => crossesABody(landedAt(shifted, probeIds())))
     if (!target) {
       this.steps = steps
       return { ...this.last, refused: [], crowded: true }
     }
-    const landed = landedAt(target, newId)
+    const landed = target === nearest && first ? first : landedAt(target, newId)
     if (landed.refused) {
       this.steps = steps
       return { ...this.last, refused: landed.refused }
@@ -563,8 +567,11 @@ function probeIds(): NewId {
 
 function aloneInPlace(doc: Schematic, after: Schematic, ids: ReadonlySet<string>, newId: NewId): Landed {
   const landedAt = (target: InPlace, fresh: NewId) => auditedLanding(doc, { doc: reoriented(doc, target.doc, ids, fresh), unlaid: [], at: target.shift })
-  const crossesABody = (target: InPlace) => !!landedAt(target, probeIds()).refused?.length
-  const target = landedInPlace(doc, after, ids, GRID, stayingRoutes(doc, WireSheet.of(doc.wires, pinsOf(doc.objects)), ids, new Set()), crossesABody)
+  const staying = stayingRoutes(doc, WireSheet.of(doc.wires, pinsOf(doc.objects)), ids, new Set())
+  const nearest = landedInPlace(doc, after, ids, GRID, staying)
+  const first = nearest && landedAt(nearest, newId)
+  if (first && !first.refused?.length) return first
+  const target = landedInPlace(doc, after, ids, GRID, staying, (shifted) => !!landedAt(shifted, probeIds()).refused?.length)
   if (!target) return { doc, unlaid: [], at: ZERO, refused: [], crowded: true }
   return landedAt(target, newId)
 }
