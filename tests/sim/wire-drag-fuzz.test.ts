@@ -17,7 +17,7 @@ const SEEDS = Number(process.env.FUZZ_SEEDS ?? 2)
 const ONLY = process.env.FUZZ_ONLY
 
 const contains = (s: WireSegment, p: Point) =>
-  s.a.y === s.b.y ? p.y === s.a.y && p.x >= Math.min(s.a.x, s.b.x) && p.x <= Math.max(s.a.x, s.b.x) : p.x === s.a.x && p.y >= Math.min(s.a.y, s.b.y) && p.y <= Math.max(s.a.y, s.b.y)
+  (s.b.x - s.a.x) * (p.y - s.a.y) - (s.b.y - s.a.y) * (p.x - s.a.x) === 0 && p.x >= Math.min(s.a.x, s.b.x) && p.x <= Math.max(s.a.x, s.b.x) && p.y >= Math.min(s.a.y, s.b.y) && p.y <= Math.max(s.a.y, s.b.y)
 const same = (p: Point, q: Point) => p.x === q.x && p.y === q.y
 
 type Explain = { at: Point; net: string }
@@ -215,6 +215,20 @@ describe("random edits on every example against an oracle of explained joins (re
     }
     expect.soft(found, "no unexplained join").toEqual([])
   }, 600_000)
+})
+
+describe("the oracle of explained joins sees a conductor at any angle (the phase 6 verification's fuzz, seed 125)", () => {
+  it("a part dropped with its pin inside another net's diagonal wire joins it, and the oracle counts that join as explained by the carried pin", () => {
+    const cell = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
+    const resistor = (id: string, x: number, y: number): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: y * GRID, props: { ref: id } })
+    const doc = inNormalForm({ objects: [resistor("R1", 0, 0), resistor("R2", 20, 20)], wires: [{ id: "slant", a: cell(4, 1), b: cell(10, 7) }], parts: {} })
+    const carried = new Set(["R2"])
+    const landed = new PartDrag(doc, wiringOf(new WireGraph(), doc), { objects: carried }).landed(-17 * GRID, -17 * GRID)
+    expect.soft(landed.at, "dropped where it was let go").toEqual(cell(-17, -17))
+    expect.soft(pinsOf(landed.doc.objects).find((p) => p.key === "R2:2")?.at, "R2's right pin inside the diagonal").toEqual(cell(7, 4))
+    expect.soft(referencePartition(landed.doc.wires, pinsOf(landed.doc.objects)), "R2 joined to R1's net").toEqual([["R1:2", "R2:2"]])
+    expect.soft(unexplained(doc, landed.doc, carriedPinExplains(doc, landed.doc, carried), carried), "the join explained by the carried pin").toEqual([])
+  })
 })
 
 describe("random drops of a part on its diagonal onto a diamond of diagonal wires (the user, 2026-11-13)", () => {
