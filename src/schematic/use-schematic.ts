@@ -19,9 +19,8 @@ import {
 } from "./types"
 import { isHdlDef } from "./hdl"
 import type { WireColorKey } from "./wire-colors"
-import { clipOf, moved, inNormalForm, placedObject, recoloured, removed, reoriented, wiringOf, withModule, withSegments } from "./wire-edits"
-import { flipSelection, rotateSelection } from "./orient"
-import { flippedWithWires, TurnRun, type Landed } from "./rubber-band"
+import { clipOf, moved, inNormalForm, placedObject, recoloured, removed, wiringOf, withModule, withSegments } from "./wire-edits"
+import { flippedAlone, flippedWithWires, turnedAlone, TurnRun, type Landed } from "./rubber-band"
 import { drawnTo, isRefusal, type DrawEnd, type Drawing, type DrawRefusal, type Near } from "./wire-draw"
 import { junctionAt, type JunctionRefusal } from "./junction-tool"
 import { carriedSelection, inRect, pressesGoOn, type SelectionWiring, type TurnPresses } from "./wire-select"
@@ -460,25 +459,23 @@ export function useSchematic(grid: number) {
   )
 
   const rotateAlone = React.useCallback(
-    (ids: ReadonlySet<string>, turn: Turn) => {
-      if (!ids.size) return
-      const next = reoriented(doc, rotateSelection(doc, ids, turn, grid), ids)
-      const refused = bodyRefusal(doc, next)
-      if (refused) return refused
-      commitFrom(doc, next)
+    (ids: ReadonlySet<string>, turn: Turn): Landed | null => {
+      if (!ids.size) return null
+      const landed = turnedAlone(doc, ids, turn)
+      if (!landed.refused) commitFrom(doc, landed.doc)
+      return landed
     },
-    [doc, grid, commitFrom],
+    [doc, commitFrom],
   )
 
   const flipAlone = React.useCallback(
-    (ids: ReadonlySet<string>, axis: FlipAxis) => {
-      if (!ids.size) return
-      const next = reoriented(doc, flipSelection(doc, ids, axis, grid), ids)
-      const refused = bodyRefusal(doc, next)
-      if (refused) return refused
-      commitFrom(doc, next)
+    (ids: ReadonlySet<string>, axis: FlipAxis): Landed | null => {
+      if (!ids.size) return null
+      const landed = flippedAlone(doc, ids, axis)
+      if (!landed.refused) commitFrom(doc, landed.doc)
+      return landed
     },
-    [doc, grid, commitFrom],
+    [doc, commitFrom],
   )
 
   const draw = React.useCallback(

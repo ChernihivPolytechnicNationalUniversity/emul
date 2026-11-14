@@ -4,12 +4,11 @@ import { checked } from "@/schematic/checker"
 import { GRID, objectPins, snap, type Point } from "@/schematic/geometry"
 import { wireCheck } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
-import { flipSelection, rotateSelection } from "@/schematic/orient"
-import { flippedWithWires, PartDrag, TurnRun } from "@/schematic/rubber-band"
+import { flippedAlone, flippedWithWires, PartDrag, turnedAlone, TurnRun, type Landed } from "@/schematic/rubber-band"
 import type { PlacedObject, Rotation, Schematic } from "@/schematic/types"
 import { pasteLanding, pastedInto } from "@/schematic/use-schematic"
 import { drawEndAt, drawnTo, isRefusal, pointerAt, startDrawing } from "@/schematic/wire-draw"
-import { inNormalForm, placedObject, reoriented, wiringOf } from "@/schematic/wire-edits"
+import { inNormalForm, placedObject, wiringOf } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
 import { sourceCallback } from "../lib/source-callback"
 
@@ -29,16 +28,16 @@ function turningScene(x: number, y: number) {
 }
 
 describe("the final body audit", () => {
-  it.each([45, 90])("refuses a %i degree turn whose committed wires cross the neighbour", (degrees) => {
+  it.each([45, 90])("a %i degree turn whose committed wires would cross the neighbour where it stands never commits them: it lands where they are clean, or is refused", (degrees) => {
     const doc = turningScene(degrees === 45 ? -1 : 0, 2)
     expect(crossings(doc)).toEqual([])
     const snapshot = structuredClone(doc)
-    const run = new TurnRun(doc, wiringFor(doc), new Set(["moving"]), undefined, degrees === 90 ? new Set(doc.wires.map((s) => s.id)) : undefined)
+    const wires = degrees === 90 ? new Set(doc.wires.map((s) => s.id)) : undefined
+    const run = new TurnRun(doc, wiringFor(doc), new Set(["moving"]), undefined, wires)
     const result = run.turned(1, newId)
-    expect(result.refused).toEqual(expect.arrayContaining([expect.objectContaining({ reason: "body" })]))
-    expect(result.doc).toBe(doc)
-    expect(run.doc).toBe(doc)
-    expect(doc).toEqual(snapshot)
+    expect.soft(crossings(result.doc), "no wire through a body after the turn").toEqual([])
+    expect.soft(result.refused ? result.doc === doc && run.doc === doc : result.doc !== doc, "refused and nothing committed, or a clean landing").toBe(true)
+    expect.soft(doc, "the document turned is untouched").toEqual(snapshot)
   })
 
   it("refuses X when its committed wires cross the neighbour", () => {
@@ -57,18 +56,19 @@ describe("the final body audit", () => {
     expect(result.doc).toBe(doc)
   })
 
-  it.each(["rotateAlone", "flipAlone"])("%s cannot turn a body over a static wire", (name) => {
+  it.each(["rotateAlone", "flipAlone"])("%s cannot turn a body over a static wire: it is refused or lands where its body is clear (fix/rotate-placement's nearest clean spot)", (name) => {
     const doc = name === "rotateAlone"
       ? docOf([resistor("moving", 0, 0)], [wire(at(1, 1.5), at(2, 1.5))])
       : docOf([resistor("moving", 0, 0, 45)], [wire(at(0, 2), at(1, 2))])
     expect(crossings(doc)).toEqual([])
     let after = doc
     const run = sourceCallback<(ids: Set<string>, direction: 1 | "horizontal") => unknown>("src/schematic/use-schematic.ts", name, {
-      doc, grid: GRID, reoriented, rotateSelection, flipSelection, bodyRefusal: bodies.bodyRefusal,
+      doc, turnedAlone, flippedAlone,
       commitFrom: (_before: Schematic, next: Schematic) => { after = next },
     })
-    expect(run(new Set(["moving"]), name === "rotateAlone" ? 1 : "horizontal")).toMatchObject({ refused: "body" })
-    expect(after).toBe(doc)
+    const landed = run(new Set(["moving"]), name === "rotateAlone" ? 1 : "horizontal") as Landed
+    expect.soft(crossings(after), "no wire through a body after the turn").toEqual([])
+    expect.soft(landed.refused ? after === doc : after === landed.doc && after !== doc, "refused and nothing committed, or the clean landing committed").toBe(true)
   })
 
   it.each(["horizontal", "vertical"] as const)("refuses a %s flip that covers a static wire with the part itself", (axis) => {

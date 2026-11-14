@@ -35,7 +35,7 @@ import { addsToSelection, primaryClick } from "@/lib/pointer"
 import { useEvent } from "@/hooks/use-event"
 import { clipboardDefIds, clipboardText, clipFromClipboard, pasteLanding, useSchematic, type Clip } from "@/schematic/use-schematic"
 import { pressedOn, travellingWires } from "@/schematic/wire-edits"
-import { CONTACT_OPENED, DRAG_REFUSED, PartDrag, SegmentDrag, TURN_REFUSED, UNLAID, WIRE_MOVE_REFUSED, WIRES_REFUSED, type Landed } from "@/schematic/rubber-band"
+import { CONTACT_OPENED, DRAG_REFUSED, PartDrag, SegmentDrag, TURN_CROWDED, TURN_REFUSED, UNLAID, WIRE_MOVE_REFUSED, WIRES_REFUSED, type Landed } from "@/schematic/rubber-band"
 import { DEFAULT_LINE_MODE, DRAW_REFUSED, PASTE_REFUSED, backAlong, cutBack, laysClear, drawEndAt, flipPosture, isRefusal, lineModeTag, nextLineMode, pointerAt, previewOf, startDrawing, withCorner, withLineMode, withoutCorner, type CutBack, type DrawEnd, type Drawing, type DrawRefusal, type LineMode, type MovedRun } from "@/schematic/wire-draw"
 import { crossingNear, JUNCTION_REFUSED, NOT_ON_THE_LATTICE } from "@/schematic/junction-tool"
 import { dragConflictMarks, refusedStretches } from "@/schematic/conflict-marks"
@@ -631,7 +631,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const [unlaid, setUnlaid] = React.useState<{ at: readonly Point[]; edits: number } | null>(null)
   const reportLanding = useEvent((landed: Landed, gesture: "drop" | "turn" | "wire" = "drop") => {
     if (landed.refused) {
-      const text = landed.refused.length ? { drop: DRAG_REFUSED, turn: TURN_REFUSED, wire: WIRE_MOVE_REFUSED }[gesture] : WIRES_REFUSED
+      const text = landed.crowded ? TURN_CROWDED : landed.refused.length ? { drop: DRAG_REFUSED, turn: TURN_REFUSED, wire: WIRE_MOVE_REFUSED }[gesture] : WIRES_REFUSED
       toast.error(text.title, { description: text.why })
     }
     if (!landed.unlaid.length) return
@@ -646,21 +646,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   })
 
   const turn = useEvent((direction: Turn, alone = false) => {
-    if (alone) {
-      const refused = sch.rotateAlone(sch.selectedObjects, direction)
-      if (refused) toast.error(TURN_REFUSED.title, { description: TURN_REFUSED.why })
-      return
-    }
-    const landed = sch.rotate(sch.selectedObjects, direction, index, sch.selectedWires)
+    const landed = alone ? sch.rotateAlone(sch.selectedObjects, direction) : sch.rotate(sch.selectedObjects, direction, index, sch.selectedWires)
     if (landed) reportLanding(landed, "turn")
   })
   const mirror = useEvent((axis: FlipAxis, alone = false) => {
-    if (alone) {
-      const refused = sch.flipAlone(sch.selectedObjects, axis)
-      if (refused) toast.error(TURN_REFUSED.title, { description: TURN_REFUSED.why })
-      return
-    }
-    const landed = sch.flip(sch.selectedObjects, axis, index, sch.selectedWires)
+    const landed = alone ? sch.flipAlone(sch.selectedObjects, axis) : sch.flip(sch.selectedObjects, axis, index, sch.selectedWires)
     if (landed) reportLanding(landed, "turn")
   })
 

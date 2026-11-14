@@ -8,7 +8,7 @@ import { examples, lab1Stand } from "@/schematic/examples"
 import { bodyCentre, GRID, objectPins, objectRect, orientationOf, type Point, type Turn } from "@/schematic/geometry"
 import { SCHEMATIC_VERSION, stamped } from "@/schematic/migrate"
 import { rotateSelection } from "@/schematic/orient"
-import { bodyBounds, contourOf } from "@/schematic/placement"
+import { bodyBounds, contourOf, placementCheck, wireCheck } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 
@@ -1084,6 +1084,89 @@ async function bridgeBuiltByHand(page: Page) {
   }
 }
 
+const placedNow = async (page: Page): Promise<PlacedObject[]> => {
+  const drawnParts = await page.evaluate(() =>
+    [...document.querySelectorAll("[data-body]")].map((e) => {
+      const svg = e.querySelector<SVGSVGElement>("[data-slot=component]")!
+      return { id: e.getAttribute("data-body")!, def: svg.dataset.def!, left: parseFloat(svg.style.left), top: parseFloat(svg.style.top), w: parseFloat(svg.style.width), h: parseFloat(svg.style.height), transform: svg.style.transform }
+    }),
+  )
+  return drawnParts.map(({ id, def, left, top, w, h, transform }) => {
+    const rotation = Number(transform.match(/rotate\((-?\d+)deg\)/)?.[1] ?? 0) as PlacedObject["rotation"]
+    const mirror = transform.includes("scaleX(-1)")
+    const centre = bodyCentre(getDef(def)!, { rotation: rotation ?? 0, mirror })
+    const at = (v: number) => Math.round(v / GRID) * GRID
+    return { id, def, x: at(left + w / 2 - centre.x * GRID), y: at(top + h / 2 - centre.y * GRID), ...(rotation && { rotation }), ...(mirror && { mirror }) }
+  })
+}
+
+async function turnedBesideANeighbour(page: Page) {
+  console.log("\nR on a resistor lying just under another: it turns beside it, never onto it (the user, 2026-11-13)")
+  const start: Schematic = { objects: [resistorAt("R1", 10, 10), resistorAt("R2", 10, 11)], wires: [], parts: {} }
+  await openDoc(page, "turn-beside", start)
+  const frame = await fieldFrame(page)
+  const onR2 = frame.toScreen(cellPoint(12, 12))
+  await page.mouse.click(onR2.x, onR2.y)
+  for (const press of [1, 2]) {
+    await page.keyboard.press("r")
+    await page.waitForTimeout(600)
+    const placed = await placedNow(page)
+    const r1 = placed.find((o) => o.id === "R1")!
+    const r2 = placed.find((o) => o.id === "R2")!
+    const clear = !placementCheck({ objects: placed, routes: [], grid: GRID }, [r2])(0, 0)
+    console.log(`  press ${press}: R2 at (${r2.x / GRID}, ${r2.y / GRID}) cells, ${r2.rotation ?? 0}°`)
+    expect(`press ${press}: R2 turned ${45 * press}°`, r2.rotation ?? 0, 45 * press)
+    expect(`press ${press}: no body on R1's, no lead or pin on R1`, clear, true)
+    expect(`press ${press}: R1 stays where it was`, [r1.x, r1.y, r1.rotation ?? 0], [start.objects[0].x, start.objects[0].y, 0])
+    await shoot(page, `turned-beside-${press}`)
+  }
+}
+
+const wirePaths = (page: Page) => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire] path[data-base]")].map((e) => e.getAttribute("d")).sort())
+
+async function turnedClearOfWires(page: Page) {
+  console.log("\nR R on an LED above another net's wire: it stands clear of the wire, and a half turn of joined resistors lays no wire (the user, 2026-11-13)")
+  const wire = { id: "w", a: cellPoint(4, 12), b: cellPoint(20, 12) }
+  await openDoc(page, "turn-clear-of-wire", { objects: [resistorAt("R3", 0, 11), resistorAt("R4", 20, 11), { id: "D1", def: "led", x: 10 * GRID, y: 10 * GRID, props: { ref: "D1" } }], wires: [wire], parts: {} })
+  const frame = await fieldFrame(page)
+  const before = await wirePaths(page)
+  const onLed = frame.toScreen(cellPoint(12, 10.8))
+  await page.mouse.click(onLed.x, onLed.y)
+  for (let k = 0; k < 2; k++) {
+    await page.keyboard.press("r")
+    await page.waitForTimeout(600)
+  }
+  const placed = await placedNow(page)
+  const d1 = placed.find((o) => o.id === "D1")!
+  const pins = objectPins(d1, GRID).map((p) => p.point)
+  const onTheWire = pins.some((p) => p.y === wire.a.y && p.x >= wire.a.x && p.x <= wire.b.x)
+  const across = wireCheck({ objects: placed, routes: [{ id: wire.id, pts: [wire.a, wire.b], owner: [] }], grid: GRID }, [d1], false)(0, 0)
+  console.log(`  D1 at (${d1.x / GRID}, ${d1.y / GRID}) cells, ${d1.rotation ?? 0}°`)
+  expect("the LED stands upright", d1.rotation ?? 0, 90)
+  expect("…its body across no wire and no pin on the wire", [across, onTheWire], [false, false])
+  expect("…and the wire is left as it was", await wirePaths(page), before)
+  await shoot(page, "turned-clear-of-wire")
+  for (const [name, wires] of [
+    ["butted", []],
+    ["joined", [{ id: "j", a: cellPoint(4, 1), b: cellPoint(6, 1) }]],
+  ] as const) {
+    const r2 = resistorAt("R2", name === "butted" ? 4 : 6, 0)
+    await openDoc(page, `half-turn-${name}`, { objects: [resistorAt("R1", 0, 0), r2], wires: [...wires], parts: {} })
+    const f = await fieldFrame(page)
+    const was = await wirePaths(page)
+    const on = f.toScreen({ x: r2.x + 2 * GRID, y: r2.y + GRID })
+    await page.mouse.click(on.x, on.y)
+    for (let k = 0; k < 4; k++) {
+      await page.keyboard.press("r")
+      await page.waitForTimeout(500)
+    }
+    const turned = (await placedNow(page)).find((o) => o.id === "R2")!
+    expect(`${name}: R2 half-turned where it stood`, [turned.x, turned.y, turned.rotation ?? 0], [r2.x, r2.y, 180])
+    expect(`${name}: no wire laid, the wires exactly as they were`, await wirePaths(page), was)
+    await shoot(page, `half-turn-${name}`)
+  }
+}
+
 async function addingLandsInView(page: Page) {
   console.log("\na part added over a big board")
   const doc = await open(page, "lab1-running-light")
@@ -1543,8 +1626,8 @@ try {
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const everySection = [contactsFollowTheDrag, wiresFollowTheDrag, plateAfterDragBackAndForth, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, diagonalSplice, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, noFadeLeftAfterADrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench, phaseSixChecks]
-const chosen = process.env.SECTIONS?.split(",")
+const everySection = [turnedBesideANeighbour, turnedClearOfWires, contactsFollowTheDrag, wiresFollowTheDrag, plateAfterDragBackAndForth, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, diagonalSplice, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, noFadeLeftAfterADrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench, phaseSixChecks]
+const chosen = (process.env.SECTIONS ?? process.env.ONLY)?.split(",")
 const sections = chosen ? everySection.filter((section) => chosen.includes(section.name)) : everySection
 try {
   for (const section of sections) {

@@ -403,14 +403,15 @@ export function wireCheck(scene: PlacementScene, moving: readonly PlacedObject[]
     })
 }
 
-export function contactCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
+export function contactCheck(scene: PlacementScene, moving: readonly PlacedObject[], keep: readonly Point[] = []): (dx: number, dy: number) => boolean {
   const ids = new Set(moving.map((o) => o.id))
   const fixed = pinGridOf(scene.objects.filter((o) => !ids.has(o.id)), scene.grid)
+  for (const p of keep) for (const pin of fixed.at(p.x, p.y)) fixed.remove(pin)
   const pins = moving.flatMap((o) => objectPins(o, scene.grid).map(({ point }) => point))
   return (dx, dy) => pins.some((p) => fixed.has(p.x + dx, p.y + dy))
 }
 
-type Refuse = (dx: number, dy: number) => boolean
+export type Refuse = (dx: number, dy: number) => boolean
 
 const refused = (refuse: readonly Refuse[], dx: number, dy: number) => refuse.some((r) => r(dx, dy))
 
@@ -445,6 +446,37 @@ function nearestFree(refuse: readonly Refuse[], grid: number, from: Point, { rin
 
 export function freeOffset(refuse: readonly Refuse[], grid: number, from: Point = { x: 0, y: 0 }, rings = SEARCH_RINGS, firstRing = 1): Point | null {
   return refused(refuse, from.x, from.y) ? nearestFree(refuse, grid, from, { rings, firstRing }) : from
+}
+
+export const TURN_MARGIN_CELLS = 2
+
+export function turnReach(turned: readonly PlacedObject[], grid: number): number {
+  if (!turned.length) return TURN_MARGIN_CELLS
+  const box = unionOf(turned.map((o) => objectRect(o, grid)))
+  return Math.ceil(Math.max(box.w, box.h) / grid) + TURN_MARGIN_CELLS
+}
+
+const onRoute = (p: Point, { pts }: RoutedWire) =>
+  pts.slice(1).some((b, i) => {
+    const a = pts[i]
+    return (b.x - a.x) * (p.y - a.y) === (b.y - a.y) * (p.x - a.x) && p.x >= Math.min(a.x, b.x) && p.x <= Math.max(a.x, b.x) && p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y)
+  })
+
+export function pinOnWireCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
+  const pins = moving.flatMap((o) => objectPins(o, scene.grid).map(({ point }) => point))
+  const index = new BoxIndex(scene.routes, routeBox, BUCKET_CELLS * scene.grid)
+  return (dx, dy) =>
+    pins.some((pin) => {
+      const p = { x: pin.x + dx, y: pin.y + dy }
+      return index.some({ x: p.x, y: p.y, w: 0, h: 0 }, (route) => onRoute(p, route))
+    })
+}
+
+export function turnLanding(objects: readonly PlacedObject[], routes: readonly RoutedWire[], before: readonly PlacedObject[], after: readonly PlacedObject[], grid: number, unclean?: Refuse): Point | null {
+  const scene = { objects, routes, grid }
+  const kept = before.flatMap((o) => objectPins(o, grid).map(({ point }) => point))
+  const refuse = [placementCheck(scene, after), contactCheck(scene, after, kept), wireCheck(scene, after, false), pinOnWireCheck(scene, after), ...(unclean ? [unclean] : [])]
+  return freeOffset(refuse, grid, { x: 0, y: 0 }, turnReach(after, grid))
 }
 
 const SWEEP_DIRECTIONS = [

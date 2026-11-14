@@ -1,12 +1,13 @@
 import { editedObjects } from "./pin-index"
 import { splicedAt } from "./splice"
-import { GRID, objectRect, snap, type FlipAxis, type Rect, type Turn } from "./geometry"
-import { flipLine, flipSelection, selectionStep, turnedAbout, turnedSelection, turnPivot } from "./orient"
+import { GRID, objectRect, snap, type FlipAxis, type Rect, type RoutedWire, type Turn } from "./geometry"
+import { flipLine, flipSelection, landedInPlace, type InPlace, selectionStep, turnedAbout, turnedSelection, turnPivot } from "./orient"
 import { designatorRects, footprint } from "./placement"
+import { getDef } from "./registry"
 import { BoxIndex, SpatialIndex } from "./spatial"
 import { bodiesOf, bodyRefusal, crossable, crossedBody, segmentBox, shiftedBody, spliceSpan, staysThrough, type Body, type Touched } from "./body-crossing"
-import type { PlacedObject, Point, Schematic } from "./types"
-import { keepSheet, detachedMove, moved, pinsOf, travellingIn, travellingWires, wiringOf, withSegments, type NewId, type Wiring } from "./wire-edits"
+import type { ComponentDef, PlacedObject, Point, Schematic } from "./types"
+import { keepSheet, detachedMove, moved, pinsOf, reoriented, travellingIn, travellingWires, wiringOf, withSegments, type NewId, type Wiring } from "./wire-edits"
 import { normalOffset, planDrag, translate, type DragBox, type DragCommit, type DragConflict, type DragFrame, type DragMove, type DragPlan } from "./wires/drag"
 import { WireGraph, type WireNets } from "./wires/graph"
 import { entersBox, HALF_CELL, isDiagonal, samePoint, type WirePin, type WireSegment } from "./wires/segment"
@@ -16,7 +17,7 @@ export type Carried = { readonly objects: ReadonlySet<string>; readonly wires?: 
 
 export type Unlaid = { readonly at: Point; readonly net: string; readonly pin?: string; readonly kept: boolean }
 
-export type Landed = { readonly doc: Schematic; readonly unlaid: readonly Unlaid[]; readonly at: Point; readonly refused?: readonly DragConflict[] }
+export type Landed = { readonly doc: Schematic; readonly unlaid: readonly Unlaid[]; readonly at: Point; readonly refused?: readonly DragConflict[]; readonly crowded?: true }
 
 export type DragOptions = { readonly detach?: boolean; readonly index?: SpatialIndex }
 
@@ -29,6 +30,8 @@ export const WIRES_REFUSED = { title: "Not done: the wires could not follow", wh
 export const CONTACT_OPENED = { title: "contact opened", why: "No wire could join those pins again without touching another net, so they are open now. Draw the wire or move the part." }
 
 export const TURN_REFUSED = { title: "Not turned", why: "Turning or mirroring it would lay a wire through a part's body or put a pin on a crossing or another net's wire, so nothing changed." }
+
+export const TURN_CROWDED = { title: "Not turned", why: "Turned there it would lie on another part, and no free spot is near enough to move it to, so nothing changed. Make room around it first." }
 
 export const WIRE_MOVE_REFUSED = { title: "Wire not moved", why: "There it would cross a part's body, lie along another net's wire or end on another net's pin, so it stayed where it was." }
 
@@ -87,6 +90,51 @@ function hangingChains(sheet: WireSheet, pins: readonly WirePin[]): Hanging[] {
       }
     }
   return out
+}
+
+function attachedRuns(sheet: WireSheet, pins: readonly WirePin[]): Set<string> {
+  const out = new Set<string>()
+  for (const pin of pins)
+    for (const first of sheet.endsAt(pin.at)) {
+      let at = otherEnd(first, pin.at)
+      let through = first
+      out.add(first.id)
+      while (!sheet.pinsAt(at).length) {
+        const ends = sheet.endsAt(at)
+        if (ends.length !== 2) break
+        through = ends[0] === through ? ends[1] : ends[0]
+        if (out.has(through.id)) break
+        out.add(through.id)
+        at = otherEnd(through, at)
+      }
+    }
+  return out
+}
+
+function stayingRoutes(doc: Schematic, sheet: WireSheet, ids: ReadonlySet<string>, carriedWires: ReadonlySet<string>): RoutedWire[] {
+  const leaving = attachedRuns(sheet, carriedPins(doc, ids))
+  return doc.wires.filter((w) => !leaving.has(w.id) && !carriedWires.has(w.id)).map((w) => ({ id: w.id, pts: [w.a, w.b], owner: [] }))
+}
+
+const pointKey = (p: Point) => `${p.x},${p.y}`
+
+const SYMMETRIC_ELEMENTS = new Set(["R", "C", "L", "SW"])
+
+function endsInterchangeable(def: ComponentDef): boolean {
+  if (def.pins.length !== 2 || def.pins.some((pin) => pin.label || pin.kind === "node")) return false
+  const ends = new Set(def.pins.map((pin) => pin.id))
+  return (def.model ?? []).every((element) => SYMMETRIC_ELEMENTS.has(element.kind) && "a" in element && "b" in element && ends.has(String(element.a)) && ends.has(String(element.b)) && element.a !== element.b)
+}
+
+function pinsThatMove(doc: Schematic, pins: readonly WirePin[], after: ReadonlyMap<string, WirePin>): readonly WirePin[] {
+  const pointsOf = (list: Iterable<WirePin>, id: string) => [...list].filter((p) => objectOf(p.key) === id).map((p) => pointKey(p.at)).sort().join(" ")
+  const swapped = new Set(
+    doc.objects.filter((o) => {
+      const def = getDef(o.def)
+      return def && endsInterchangeable(def) && pointsOf(pins, o.id) !== "" && pointsOf(pins, o.id) === pointsOf(after.values(), o.id)
+    }).map((o) => o.id),
+  )
+  return swapped.size ? pins.filter((p) => !swapped.has(objectOf(p.key))) : pins
 }
 
 const hangingRuns = (sheet: WireSheet, pins: readonly WirePin[]): Set<string> => new Set(hangingChains(sheet, pins).flatMap((h) => h.segments.map((s) => s.id)))
@@ -387,8 +435,9 @@ type Shape = { readonly degrees?: number; readonly wires?: ReadonlySet<string> }
 
 function reshaped(base: Schematic, wiring: Base, ids: ReadonlySet<string>, target: Schematic, point: (at: Point) => Point, newId: NewId, index?: SpatialIndex, shape: Shape = {}): Landed {
   const sheet = wiring.sheet
-  const pins = carriedPins(base, ids)
   const after = new Map(pinsOf(target.objects.filter((o) => ids.has(o.id))).map((p) => [p.key, p] as const))
+  const carried = carriedPins(base, ids)
+  const pins = shape.degrees === undefined ? carried : pinsThatMove(base, carried, after)
   const square = shape.degrees === undefined || shape.degrees % 90 === 0
   const hanging = hangingChains(sheet, pins)
   const tail = new Map<string, Point>()
@@ -467,10 +516,19 @@ export class TurnRun {
     const pivot = turnPivot(this.start, this.ids, GRID, boxes)
     if (!pivot) return this.last
     const step = selectionStep(this.start, this.ids, this.wires.size > 0)
-    const target = turnedSelection(this.start, this.ids, steps, GRID, { pivot, step })
     const degrees = steps * step
-    const landed = reshaped(this.start, this.wiring(), this.ids, target, (at) => turnedAbout(at, pivot, degrees), newId, this.index, { degrees, wires: this.wires })
-    if (landed.refused) return { ...this.last, refused: landed.refused }
+    const landedAt = (target: InPlace, ids: NewId) => reshaped(this.start, this.wiring(), this.ids, target.doc, (at) => shiftedBy(turnedAbout(at, pivot, degrees), target.shift), ids, this.index, { degrees, wires: this.wires })
+    const crossesABody = (target: InPlace) => !!landedAt(target, probeIds()).refused?.some((c) => c.reason === "body")
+    const target = landedInPlace(this.start, turnedSelection(this.start, this.ids, steps, GRID, { pivot, step }), this.ids, GRID, stayingRoutes(this.start, this.wiring().sheet, this.ids, this.wires), crossesABody)
+    if (!target) {
+      this.steps = steps
+      return { ...this.last, refused: [], crowded: true }
+    }
+    const landed = landedAt(target, newId)
+    if (landed.refused) {
+      this.steps = steps
+      return { ...this.last, refused: landed.refused }
+    }
     if (!this.own && this.live && isCurrent(this.start, this.live)) {
       this.own = { view: this.live.graph.snapshot(), sheet: this.live.sheet.snapshot() }
       keepSheet(this.start.wires, this.own.sheet)
@@ -487,10 +545,30 @@ export function flippedWithWires(doc: Schematic, wiring: Wiring | undefined, ids
   const boxes = wireBoxes(doc, whole)
   const line = flipLine(doc, ids, axis, GRID, boxes)
   if (line === null) return { doc, unlaid: [], at: ZERO }
-  const target = flipSelection(doc, ids, axis, GRID, boxes.length ? line : undefined)
-  const mirrored = (at: Point): Point => (axis === "horizontal" ? { x: line - at.x, y: at.y } : { x: at.x, y: line - at.y })
-  return reshaped(doc, base, ids, target, mirrored, newId, index, { wires: whole })
+  const target = landedInPlace(doc, flipSelection(doc, ids, axis, GRID, boxes.length ? line : undefined), ids, GRID, stayingRoutes(doc, base.sheet, ids, whole))
+  if (!target) return { doc, unlaid: [], at: ZERO, refused: [], crowded: true }
+  const mirrored = (at: Point): Point => shiftedBy(axis === "horizontal" ? { x: line - at.x, y: at.y } : { x: at.x, y: line - at.y }, target.shift)
+  return reshaped(doc, base, ids, target.doc, mirrored, newId, index, { wires: whole })
 }
+
+const shiftedBy = (p: Point, d: Point): Point => ({ x: p.x + d.x, y: p.y + d.y })
+
+function probeIds(): NewId {
+  let n = 0
+  return () => `\0probe:${n++}`
+}
+
+function aloneInPlace(doc: Schematic, after: Schematic, ids: ReadonlySet<string>, newId: NewId): Landed {
+  const landedAt = (target: InPlace, fresh: NewId) => auditedLanding(doc, { doc: reoriented(doc, target.doc, ids, fresh), unlaid: [], at: target.shift })
+  const crossesABody = (target: InPlace) => !!landedAt(target, probeIds()).refused?.length
+  const target = landedInPlace(doc, after, ids, GRID, stayingRoutes(doc, WireSheet.of(doc.wires, pinsOf(doc.objects)), ids, new Set()), crossesABody)
+  if (!target) return { doc, unlaid: [], at: ZERO, refused: [], crowded: true }
+  return landedAt(target, newId)
+}
+
+export const turnedAlone = (doc: Schematic, ids: ReadonlySet<string>, turn: Turn, newId: NewId = randomId): Landed => aloneInPlace(doc, turnedSelection(doc, ids, turn, GRID), ids, newId)
+
+export const flippedAlone = (doc: Schematic, ids: ReadonlySet<string>, axis: FlipAxis, newId: NewId = randomId): Landed => aloneInPlace(doc, flipSelection(doc, ids, axis, GRID), ids, newId)
 
 function wireBoxes(doc: Schematic, wires: ReadonlySet<string>): Rect[] {
   if (!wires.size) return []
