@@ -59,9 +59,6 @@ export const WireLayer = React.memo(function WireLayer({
   onWirePointerEnter,
   onWirePointerLeave,
 }: WireLayerProps) {
-  React.useEffect(() => {
-    flow.setScale(scale)
-  }, [flow, scale])
   const px = 1 / scale
   const dotR = dotRadius(grid, scale)
   const marks = React.useMemo(() => wireMarks(routes, dots, dangling, corners, colorOf, true), [routes, dots, dangling, corners, colorOf])

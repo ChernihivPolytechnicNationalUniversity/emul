@@ -156,6 +156,23 @@ describe("the wire flow slides to every phase the solver sends, whatever the fir
   })
 })
 
+describe("the wire flow runs at one speed on screen whatever the zoom (the user, 2026-11-14: «при увеличении масштаба электрика сверх сильно ускоряется»)", () => {
+  it("a phase the solver sends moves the dash by that many screen pixels, and the flow takes no zoom to scale it by", () => {
+    expect.soft(Object.getOwnPropertyNames(WireFlow.prototype), "nothing for the field to pass its zoom to").not.toContain("setScale")
+    {
+      const frames = fakeFrames()
+      const { flow, dash, currents } = flowingWire()
+      flow.push(currents, new Map([["w", 0]]), true, false)
+      frames.run((f) => frames.now + f * FRAME_MS)
+      frames.advance(PUSH_EVERY_MS)
+      flow.push(currents, new Map([["w", PHASE_STEP]]), true, false)
+      const pushedAt = frames.now
+      frames.run((f) => pushedAt + f * FRAME_MS)
+      expect.soft(Number(dash.style.strokeDashoffset), "the dash's offset in screen pixels").toBe(-PHASE_STEP)
+    }
+  })
+})
+
 describe("a wheel zoom moves from its first frame, however far behind the clock the frame stamps run (BUGS.md, 312 ms)", () => {
   const zoom = (lagMs: number) => {
     fakeFrames()
