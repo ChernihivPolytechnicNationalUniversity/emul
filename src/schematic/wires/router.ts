@@ -489,7 +489,7 @@ function slipsAt(context: Context, end: End): SlipAt[] {
       const landing = plus(back, across, HALF_CELL)
       const crossings = crossingsOn(context, half, back, pin.at)
       if (crossings < 0) {
-        if (crossingsOn(context, half, plus(back, pin.out, -GRID), pin.at) < 0) break
+        if (crossingsOn(context, half, plus(back, pin.out, -HALF_CELL), pin.at) < 0) break
         continue
       }
       if (!segmentClear(context, back, landing, pin.at)) continue
@@ -847,7 +847,10 @@ export function routeThrough(wiring: Wiring, ends: readonly RouteEnd[], around: 
   const extra = [...(around.extra ?? [])]
   const points: Point[] = []
   for (let i = 1; i < ends.length; i++) {
-    const later = ends.slice(i + 1).flatMap((end) => ("at" in end ? [end.at] : []))
+    const later = ends.slice(i + 1).flatMap((end) => {
+      const at = "at" in end ? end.at : wiring.index.pin(keyOf(end.pin))?.at
+      return at ? [at] : []
+    })
     const leg = routeAround(wiring, ends[i - 1], ends[i], { ...around, extra, stops: [...(around.stops ?? []), ...later] })
     if (!leg) return null
     for (let k = 1; k < leg.length; k++) extra.push({ id: `leg ${i}.${k}`, a: leg[k - 1], b: leg[k] })
