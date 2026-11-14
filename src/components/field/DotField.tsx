@@ -38,11 +38,12 @@ import { pressedOn, travellingWires } from "@/schematic/wire-edits"
 import { CONTACT_OPENED, DRAG_REFUSED, PartDrag, SegmentDrag, TURN_REFUSED, UNLAID, WIRE_MOVE_REFUSED, WIRES_REFUSED, type Landed } from "@/schematic/rubber-band"
 import { DEFAULT_LINE_MODE, DRAW_REFUSED, PASTE_REFUSED, backAlong, cutBack, laysClear, drawEndAt, flipPosture, isRefusal, lineModeTag, nextLineMode, pointerAt, previewOf, startDrawing, withCorner, withLineMode, withoutCorner, type CutBack, type DrawEnd, type Drawing, type DrawRefusal, type LineMode, type MovedRun } from "@/schematic/wire-draw"
 import { crossingNear, JUNCTION_REFUSED, NOT_ON_THE_LATTICE } from "@/schematic/junction-tool"
+import { dragConflictMarks, refusedStretches } from "@/schematic/conflict-marks"
 import { segmentNearest } from "@/schematic/wire-select"
 import type { DragFrame, DragPiece } from "@/schematic/wires/drag"
 import { samePoint } from "@/schematic/wires/segment"
 import { announceUpgrade } from "@/hooks/use-projects"
-import { contactCheck, designatorRects, freeSpot, landingOffset, placementCheck, type PlacementScene } from "@/schematic/placement"
+import { contactCheck, designatorRects, freeSpot, landingOffset, placementCheck, placementClashes, type PlacementScene } from "@/schematic/placement"
 import { toast } from "sonner"
 import { REROUTE_REFUSED } from "@/schematic/wires/router"
 import { DT } from "@/sim/speeds"
@@ -79,7 +80,8 @@ import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
 import { labelArea, labelCanvasFits, SymbolRaster, TextRaster } from "./symbol-raster"
 import { OpenEndCue, PendingWireLayer, WireLayer, type ContinueCue, type PendingLook } from "./WireLayer"
-import { RubberBandLayer, type RubberLook } from "./rubber-band-layer"
+import { RubberBandLayer, runsNear, type BandCover, type RubberLook } from "./rubber-band-layer"
+import { carriedCover } from "./body-mask"
 import { GhostLayer, PlacementGhost, type Ghost } from "./GhostLayer"
 import { MoveDrag, planMove } from "./move-drag"
 import { ContactPreview } from "./contact-preview"
@@ -450,7 +452,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     },
     [nets, colorOf],
   )
-  const [hoveredWire, setHoveredWire] = React.useState<string | null>(null)
+  const [hovered, setHovered] = React.useState<{ readonly wire: string; readonly on: Schematic } | null>(null)
+  const hoveredWire = hovered?.on === sch.doc ? hovered.wire : null
+  const setHoveredWire = (wire: string | null) => setHovered(wire === null ? null : { wire, on: sch.doc })
   const hoveredNet = hoveredWire === null ? null : (nets.netOfWire(hoveredWire) ?? null)
   const [flow] = React.useState(() => new WireFlow())
   React.useEffect(() => () => flow.dispose(), [flow])
@@ -788,14 +792,14 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   }))
   const dragging = React.useRef<{ kind: "parts"; drag: PartDrag; base: Schematic; detach: boolean; bodies: (dx: number, dy: number) => boolean } | { kind: "segment"; drag: SegmentDrag; base: Schematic } | null>(null)
   const rubberNow = React.useRef<RubberBandLayer | null>(null)
-  const rubberFor = (content: ParentNode, frameAt: (dx: number, dy: number) => DragFrame, always: ReadonlySet<string> = EMPTY_IDS) => {
-    const layer = new RubberBandLayer(content, rubberLook(), always)
+  const rubberFor = (content: ParentNode, frameAt: (dx: number, dy: number) => DragFrame, always: ReadonlySet<string> = EMPTY_IDS, cover?: BandCover) => {
+    const layer = new RubberBandLayer(content, rubberLook(), always, cover)
     rubberNow.current = layer
     const still = frameAt(0, 0)
     return {
       show: (dx: number, dy: number) => {
         const frame = frameAt(dx, dy)
-        layer.show(frame)
+        layer.show(frame, { x: dx, y: dy })
       },
       clear: () => {
         if (always.size) layer.show(still)
@@ -818,7 +822,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const pinsDrawn = detail.pins && !detail.canvas
     const detach = e.altKey
     const partDrag = new PartDrag(sch.doc, wiring, { objects: moving }, { detach, index })
-    const bodies = placementCheck(scene(), docObjects.filter((o) => moving.has(o.id)))
+    const carried = docObjects.filter((o) => moving.has(o.id))
+    const bodies = placementCheck(scene(), carried)
+    const clashes = placementClashes(scene(), carried)
     dragging.current = { kind: "parts", drag: partDrag, base: sch.doc, detach, bodies }
     const band = detail.canvas && !detach ? partDrag.touched : EMPTY_IDS
     if (band.size) setBanded(band)
@@ -827,9 +833,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         element: detail.canvas || labelsOnCanvas ? dragLayerRef.current : null,
         whole: detail.canvas,
       }),
-      blocked: (dx, dy) => bodies(dx, dy) || partDrag.blocked(dx, dy),
+      blocked: (dx, dy) => clashes(dx, dy).size > 0 || partDrag.blocked(dx, dy),
+      conflicting: (dx, dy) => dragConflictMarks(partDrag.frame(dx, dy), clashes(dx, dy), grid).parts,
+      pixel: bandPixel,
       contacts: pinsDrawn ? new ContactPreview(content, contactsAfterMove(docObjects, moving, grid, (area) => index.query(area)), { grid, wired: (key: string) => nets.connected(key), netColor: pinNetColor }) : undefined,
-      rubber: detach ? undefined : rubberFor(content, (dx, dy) => partDrag.frame(dx, dy), band),
+      rubber: detach ? undefined : rubberFor(content, (dx, dy) => partDrag.frame(dx, dy), band, moving.size < docObjects.length ? { ...carriedCover(carried, grid), runsNear: runsNear(sch.doc.wires, (segment) => wiring.runBySegment.get(segment), grid) } : undefined),
     })
   })
 
@@ -842,7 +850,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (band.size) setBanded(band)
     drag.begin({
       ...planMove(content, docObjects, EMPTY_IDS, EMPTY_IDS, toWorld(e.clientX, e.clientY), grid),
-      rubber: rubberFor(content, (dx, dy) => segmentDrag.frame(dx, dy), band),
+      rubber: rubberFor(content, (dx, dy) => segmentDrag.frame(dx, dy), band, { ...carriedCover([], grid), runsNear: runsNear(sch.doc.wires, (segment) => wiring.runBySegment.get(segment), grid) }),
     })
   })
 
@@ -1080,6 +1088,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           color: pending.d.color ?? colorOfEnd(pending.d.from) ?? colorOfEnd(pending.target) ?? DEFAULT_SIGNAL_COLOR,
           refused: !!preview.refused,
           landing: !!pending.target && pending.target.kind !== "field",
+          conflict: refusedStretches(preview.points, preview.refused, grid),
         }
       : null
 
@@ -1342,7 +1351,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     wirePress.current = { segment, x: e.clientX, y: e.clientY, pointer: e.pointerId, element: e.currentTarget }
   })
   const onWirePointerEnter = useEvent((id: string) => {
-    if (pending || drag.active || marquee.isDragging()) return
+    if (armed || paletteDrag.active || pending || drag.active || marquee.isDragging()) return
     setHoveredWire(id)
   })
   const onWirePointerLeave = useEvent(() => setHoveredWire(null))
@@ -1436,6 +1445,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         return
       }
       sch.deselectAll()
+      setHoveredWire(null)
       marquee.start(e)
     }
   }
@@ -1969,6 +1979,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               <div ref={overlayRef} data-slot="dot-field-overlay" className="contents">
                 {children}
               </div>
+              <svg data-slot="conflict-glow" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
+                <g data-band="" />
+                <PendingWireLayer pending={pendingLook} grid={grid} scale={scale} part="glow" />
+              </svg>
               {detail.canvas ? (
                 <>
                   <FieldCanvas objects={staticObjects} routes={staticRoutes} view={view} grid={grid} scale={scale} colorOf={colorOf} netOf={nets.netOfWire} raster={symbolRaster} selectedObjects={selectedObjects} selectedWires={selectedRuns} plates={wirePlates} marks={staticMarks} lit={lit} />

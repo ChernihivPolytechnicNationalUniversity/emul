@@ -14,11 +14,29 @@ export type MovePlan = {
   svgGroups: SVGGElement[]
   rigidWires: RigidWire[]
   blocked?: (dx: number, dy: number) => boolean
+  conflicting?: (dx: number, dy: number) => ReadonlySet<string>
+  pixel?: () => number
   contacts?: { show: (dx: number, dy: number) => void }
   rubber?: { show: (dx: number, dy: number) => void; clear: () => void }
 }
 
 const HANDLE_ATTRIBUTES = ["data-pins", "data-plate"] as const
+
+const NOTHING: ReadonlySet<string> = new Set()
+
+const partOf = (element: Element) => element.getAttribute("data-body") ?? element.getAttribute("data-pins")
+
+function inConflict(element: Element, conflicting: ReadonlySet<string>): boolean {
+  const part = partOf(element)
+  if (part !== null) return conflicting.has(part)
+  return element.getAttribute("data-slot") === "field-drag-layer" && conflicting.size > 0
+}
+
+function markConflict(element: HTMLElement | SVGElement, on: boolean, px: number) {
+  element.toggleAttribute("data-conflict", on)
+  if (on) element.style.setProperty("--conflict-px", `${px}px`)
+  else element.style.removeProperty("--conflict-px")
+}
 
 function reattach(plan: MovePlan) {
   for (let i = 0; i < plan.svgGroups.length; i++) {
@@ -160,7 +178,12 @@ export class MoveDrag {
     reattach(plan)
     for (const group of plan.svgGroups) group.setAttribute("transform", svgTranslate)
     const blocked = moved && (plan.blocked?.(dx, dy) ?? false)
-    for (const element of [...plan.bodies, ...plan.svgGroups]) element.toggleAttribute("data-blocked", blocked)
+    const conflicting = moved ? (plan.conflicting?.(dx, dy) ?? NOTHING) : NOTHING
+    const px = plan.pixel?.() ?? 1
+    for (const element of [...plan.bodies, ...plan.svgGroups]) {
+      element.toggleAttribute("data-blocked", blocked)
+      markConflict(element, inConflict(element, conflicting), px)
+    }
     plan.contacts?.show(dx, dy)
     if (moved) plan.rubber?.show(dx, dy)
     else plan.rubber?.clear()

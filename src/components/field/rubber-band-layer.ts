@@ -1,14 +1,18 @@
 import { runsOf, type Run } from "@/schematic/circuit"
-import { BODY_MASK } from "./body-mask"
-import type { Point } from "@/schematic/geometry"
+import { boxesMeet, segmentBox } from "@/schematic/body-crossing"
+import { bendsOf, dragConflictMarks, type Stretch } from "@/schematic/conflict-marks"
+import { BoxIndex } from "@/schematic/spatial"
+import { BODY_EDGE_CELLS, BODY_MASK, type BodyMaskShapes, type CarriedCover } from "./body-mask"
+import type { Point, Rect } from "@/schematic/geometry"
 import { wireColorVar, type WireColorKey } from "@/schematic/wire-colors"
 import { turnsAtPins, type Leads } from "@/schematic/wire-look"
 import type { DragFrame } from "@/schematic/wires/drag"
 import { normalise } from "@/schematic/wires/normal-form"
 import { onLattice, pointKey, samePoint, type WirePin, type WireSegment } from "@/schematic/wires/segment"
 import type { WireSheet } from "@/schematic/wires/sheet"
-import { leadPatchPaths, wireCasingPath, wireStrokePath } from "./wire-paths"
-import { CASING_PX, casingWidth, SELECTED_WIRE_PX, WIRE_PX } from "./wire-style"
+import { SELECTION_BANDS } from "./selection-geometry"
+import { conflictCutPaths, conflictGlowPaths, leadPatchPaths, wireCasingPath, wireStrokePath } from "./wire-paths"
+import { CASING_PX, casingWidth, CONFLICT_PX, glowCutWidth, WIRE_PX } from "./wire-style"
 
 const SVG_NS = "http://www.w3.org/2000/svg"
 
@@ -191,6 +195,36 @@ export function bandOf(frame: DragFrame, look: BandLook, always: ReadonlySet<str
   return { lifted, wires: bandRuns(drawn, look.sheet, hidden, frame.pins, frame.blocked), marks, covered }
 }
 
+export const bandGlow = (frame: DragFrame, wires: readonly BandRun[], grid: number): string[] => (frame.blocked ? conflictGlowPaths(dragConflictMarks(frame, undefined, grid).stretches, bendsOf(wires.map((w) => w.pts)), grid) : [])
+
+export type BandCover = CarriedCover & { readonly runsNear: (box: Rect) => Iterable<string> }
+
+export function runsNear(wires: readonly WireSegment[], runOf: (segment: string) => Run | undefined, grid: number): (box: Rect) => Set<string> {
+  let index: BoxIndex<WireSegment> | null = null
+  return (box) => {
+    index ??= new BoxIndex(wires, segmentBox, 16 * grid)
+    const runs = new Set<string>()
+    index.some(box, (s) => {
+      const run = boxesMeet(segmentBox(s), box) ? runOf(s.id) : undefined
+      if (run) runs.add(run.id)
+      return false
+    })
+    return runs
+  }
+}
+
+const CARRIED_MASK_ID = "rubber-band-carried-mask"
+
+const CARRIED_MASK = `url(#${CARRIED_MASK_ID})`
+
+const EVERYWHERE = { x: -1e7, y: -1e7, width: 2e7, height: 2e7 }
+
+const ORIGIN: Point = { x: 0, y: 0 }
+
+const CONFLICT_GLOW_REACH_PX = 1 + 2.5 + 6
+
+const CASINGS_KEEP_OFF_PX = Math.max(CONFLICT_GLOW_REACH_PX, ...SELECTION_BANDS.map((band) => band.margin)) + 2
+
 const SVG_MARKS = "[data-slot=wire-marks] > [data-junction], [data-slot=wire-marks] > [data-dangling], [data-corner]"
 
 const markPoint = (element: Element) => element.getAttribute("data-junction") ?? element.getAttribute("data-dangling") ?? element.getAttribute("data-corner")
@@ -203,11 +237,67 @@ export class RubberBandLayer {
   private marksAt: Map<string, SVGElement[]> | null = null
   private layer: SVGGElement | null = null
   private readonly always: ReadonlySet<string>
+  private readonly cover: BandCover | undefined
+  private carried: { defs: SVGDefsElement; shifted: SVGGElement; glowing: SVGGElement } | null = null
+  private readonly coveredCasings = new Map<string, SVGElement[]>()
 
-  constructor(root: ParentNode, look: RubberLook, always: ReadonlySet<string> = new Set()) {
+  constructor(root: ParentNode, look: RubberLook, always: ReadonlySet<string> = new Set(), cover?: BandCover) {
     this.root = root
     this.look = look
     this.always = always
+    this.cover = cover
+  }
+
+  private carriedMask(): { shifted: SVGGElement; glowing: SVGGElement } | null {
+    if (this.carried?.defs.isConnected) return this.carried
+    const svg = this.host()?.parentNode
+    if (!this.cover || !svg) return null
+    const defs = document.createElementNS(SVG_NS, "defs")
+    const mask = svgElement("mask", { id: CARRIED_MASK_ID, maskUnits: "userSpaceOnUse", ...EVERYWHERE })
+    const everywhere = svgElement("rect", { ...EVERYWHERE, fill: "white" })
+    const shifted = document.createElementNS(SVG_NS, "g")
+    appendMaskShapes(shifted, this.cover.shapes, Math.max(BODY_EDGE_CELLS * this.look.grid, 2 * CASINGS_KEEP_OFF_PX * this.look.pixel()))
+    const glowing = document.createElementNS(SVG_NS, "g")
+    mask.append(everywhere, shifted, glowing)
+    defs.append(mask)
+    svg.append(defs)
+    this.carried = { defs, shifted, glowing }
+    return this.carried
+  }
+
+  private coverCarried(offset: Point, glow: readonly string[], glowing: readonly Stretch[]) {
+    const cover = this.cover
+    const mask = cover && this.carriedMask()
+    if (!cover || !mask) return
+    mask.shifted.setAttribute("transform", `translate(${offset.x} ${offset.y})`)
+    const px = this.look.pixel()
+    mask.glowing.replaceChildren(...glow.map((d) => svgElement("path", { d, fill: "none", stroke: "black", "stroke-width": glowCutWidth(px), "stroke-linecap": "round", "stroke-linejoin": "round" })))
+    const reach = Math.max(this.look.grid, (CASINGS_KEEP_OFF_PX + casingWidth(WIRE_PX)) * px)
+    const grown = (box: Rect, by: Point) => ({ x: box.x + by.x - reach, y: box.y + by.y - reach, w: box.w + 2 * reach, h: box.h + 2 * reach })
+    const near = new Set<string>()
+    for (const box of [...cover.boxes.map((b) => grown(b, offset)), ...glowing.map((s) => grown(boxOfPoints(s), ORIGIN))]) for (const run of cover.runsNear(box)) near.add(run)
+    for (const [run, casings] of this.coveredCasings) {
+      if (near.has(run) && casings.every((c) => c.isConnected)) continue
+      for (const casing of casings) casing.removeAttribute("mask")
+      this.coveredCasings.delete(run)
+    }
+    for (const run of near) {
+      if (this.coveredCasings.has(run)) continue
+      const casings = [...this.root.querySelectorAll<SVGElement>(`[data-casing][data-wire="${CSS.escape(run)}"]`)]
+      for (const casing of casings) casing.setAttribute("mask", CARRIED_MASK)
+      this.coveredCasings.set(run, casings)
+    }
+  }
+
+  private uncoverCarried() {
+    for (const casings of this.coveredCasings.values()) for (const casing of casings) casing.removeAttribute("mask")
+    this.coveredCasings.clear()
+    this.carried?.defs.remove()
+    this.carried = null
+  }
+
+  private glowHost(): SVGGElement | null {
+    return this.root.querySelector<SVGGElement>("[data-slot=conflict-glow] > g[data-band]")
   }
 
   private host(): SVGGElement | null {
@@ -216,7 +306,7 @@ export class RubberBandLayer {
     return this.layer
   }
 
-  show(frame: DragFrame) {
+  show(frame: DragFrame, offset: Point = ORIGIN) {
     const band = bandOf(frame, this.look, this.always)
     for (const [id, saved] of this.hidden) {
       if (band.lifted.has(id)) continue
@@ -230,7 +320,10 @@ export class RubberBandLayer {
       this.hidden.set(id, saved)
     }
     this.hideMarks(band.covered)
-    this.paint(band.wires, frame.blocked, band.marks)
+    const glowing = frame.blocked ? dragConflictMarks(frame, undefined, this.look.grid).stretches : []
+    const glow = glowing.length ? conflictGlowPaths(glowing, bendsOf(band.wires.map((w) => w.pts)), this.look.grid) : []
+    this.coverCarried(offset, conflictCutPaths(glowing, this.look.grid), glowing)
+    this.paint(band.wires, frame.blocked, band.marks, glow)
   }
 
   clear() {
@@ -238,7 +331,8 @@ export class RubberBandLayer {
     this.hidden.clear()
     this.hideMarks(new Set())
     this.marksAt = null
-    this.paint([], false, { open: [], dots: [] })
+    this.uncoverCarried()
+    this.paint([], false, { open: [], dots: [] }, [])
   }
 
   private markIndex(): Map<string, SVGElement[]> {
@@ -270,15 +364,19 @@ export class RubberBandLayer {
       }
   }
 
-  private paint(wires: readonly BandRun[], blocked: boolean, marks: BandMarks) {
+  private paint(wires: readonly BandRun[], blocked: boolean, marks: BandMarks, glow: readonly string[]) {
     const layer = this.host()
     if (!layer) return
     layer.replaceChildren()
     layer.toggleAttribute("data-blocked", blocked)
     const { grid } = this.look
+    const px = this.look.pixel()
+    this.glowHost()?.replaceChildren(...(glow.length ? [conflictGlow(glow, px)] : []))
     const casings = document.createElementNS(SVG_NS, "g")
     casings.setAttribute("mask", BODY_MASK)
-    layer.append(casings)
+    let outer: SVGGElement = casings
+    if (this.carried) outer = wrapped(outer, CARRIED_MASK)
+    layer.append(outer)
     for (const wire of wires) {
       const casing = stroked(wireCasingPath(wire, grid), "var(--background)", casingWidth(WIRE_PX), "butt")
       casing.setAttribute("data-band-casing", "")
@@ -286,27 +384,61 @@ export class RubberBandLayer {
     }
     for (const wire of wires) for (const d of leadPatchPaths(wire, this.look.pixel())) layer.append(stroked(d, "var(--background)", WIRE_PX + CASING_PX, "butt", "miter"))
     for (const wire of wires) {
-      const path = stroked(wireStrokePath(wire, grid), blocked ? "var(--destructive)" : wireColorVar(wire.color), blocked ? SELECTED_WIRE_PX : WIRE_PX, "round")
+      const path = stroked(wireStrokePath(wire, grid), wireColorVar(wire.color), WIRE_PX, "round")
       path.setAttribute("data-points", wire.pts.map((p) => `${p.x},${p.y}`).join(" "))
       layer.append(path)
     }
-    const stroke = (color: WireColorKey) => (blocked ? "var(--destructive)" : wireColorVar(color))
     const dotR = this.look.dotRadius()
     for (const { at, color } of marks.dots) {
       const dot = document.createElementNS(SVG_NS, "g")
       dot.setAttribute("data-band-junction", pointKey(at))
-      dot.append(circle(at, dotR, stroke(color)))
+      dot.append(circle(at, dotR, wireColorVar(color)))
       layer.append(dot)
     }
     for (const { at, color } of marks.open) {
       const ring = circle(at, this.look.ringRadius, "var(--background)")
       ring.setAttribute("data-band-dangling", pointKey(at))
-      ring.setAttribute("stroke", stroke(color))
-      ring.setAttribute("stroke-width", String(blocked ? SELECTED_WIRE_PX : WIRE_PX))
+      ring.setAttribute("stroke", wireColorVar(color))
+      ring.setAttribute("stroke-width", String(WIRE_PX))
       ring.setAttribute("vector-effect", "non-scaling-stroke")
       layer.append(ring)
     }
   }
+}
+
+function svgElement<K extends keyof SVGElementTagNameMap>(tag: K, attributes: Record<string, string | number>): SVGElementTagNameMap[K] {
+  const element = document.createElementNS(SVG_NS, tag)
+  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, String(value))
+  return element
+}
+
+function appendMaskShapes(parent: SVGGElement, shapes: BodyMaskShapes, width: number) {
+  const black = { fill: "black", stroke: "black", "stroke-width": width, "stroke-linejoin": "round", "stroke-linecap": "round" }
+  for (const points of shapes.bodies) parent.append(svgElement("polygon", { points: points.map((p) => `${p.x},${p.y}`).join(" "), ...black }))
+  for (const [a, b] of shapes.leads) parent.append(svgElement("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, ...black }))
+  for (const r of shapes.texts) parent.append(svgElement("rect", { x: r.x, y: r.y, width: r.w, height: r.h, ...black }))
+}
+
+function boxOfPoints(points: readonly Point[]): Rect {
+  const xs = points.map((p) => p.x)
+  const ys = points.map((p) => p.y)
+  const x = Math.min(...xs)
+  const y = Math.min(...ys)
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y }
+}
+
+function wrapped(inner: SVGGElement, mask: string): SVGGElement {
+  const outer = svgElement("g", { mask })
+  outer.append(inner)
+  return outer
+}
+
+function conflictGlow(paths: readonly string[], px: number): SVGGElement {
+  const glow = document.createElementNS(SVG_NS, "g")
+  glow.setAttribute("data-conflict-glow", "")
+  glow.style.setProperty("--conflict-px", `${px}px`)
+  for (const d of paths) glow.append(stroked(d, "var(--conflict)", CONFLICT_PX, "round"))
+  return glow
 }
 
 function stroked(d: string, stroke: string, width: number, cap: "butt" | "round", join: "round" | "miter" = "round"): SVGPathElement {

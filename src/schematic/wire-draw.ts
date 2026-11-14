@@ -40,7 +40,7 @@ export type Drawing = {
   readonly mode?: LineMode
 }
 
-export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "body" | "socket" | "nothing"; readonly at: Point; readonly nets: readonly string[] }
+export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "body" | "socket" | "nothing"; readonly at: Point; readonly nets: readonly string[]; readonly leg?: number }
 
 export type MovedRun = { readonly run: string; readonly points: readonly Point[] }
 
@@ -256,7 +256,7 @@ function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: reado
   const own = new Set([netOfEnd(wiring, from), netOfEnd(wiring, target)].filter((n): n is string => n !== undefined))
   const segmentNet = (s: WireSegment) => view.netOfSegment(s.id) ?? `wire:${s.id}`
   const pinNet = (key: string) => view.netOfPin(key) ?? `pin:${key}`
-  const refuse = (refused: DrawRefusal["refused"], at: Point, net: string): DrawRefusal => ({ refused, at, nets: [...own, net] })
+  const refuse = (refused: DrawRefusal["refused"], at: Point, net: string, leg?: number): DrawRefusal => ({ refused, at, nets: [...own, net], ...(leg !== undefined && { leg }) })
   for (let i = 1; i < points.length; i++) {
     const leg = { a: points[i - 1], b: points[i] }
     const horizontal = leg.a.y === leg.b.y
@@ -266,7 +266,7 @@ function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: reado
     for (const s of sheet.alongSegment(leg)) {
       if (ignore.has(s.id)) continue
       const net = segmentNet(s)
-      if (!own.has(net) && Math.min(hi, highOf(s)) - Math.max(lo, lowOf(s)) > 0) return refuse("along", pointOnLine(lineOf(leg), Math.max(lo, lowOf(s))), net)
+      if (!own.has(net) && Math.min(hi, highOf(s)) - Math.max(lo, lowOf(s)) > 0) return refuse("along", pointOnLine(lineOf(leg), Math.max(lo, lowOf(s))), net, i - 1)
     }
     for (const mark of sheet.marksOn(leg)) {
       const v = along(leg, mark.at)
@@ -274,10 +274,10 @@ function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: reado
       if (mark.segment) {
         if (ignore.has(mark.segment.id)) continue
         const net = segmentNet(mark.segment)
-        if (!own.has(net)) return refuse("over", mark.at, net)
+        if (!own.has(net)) return refuse("over", mark.at, net, i - 1)
       } else if (mark.pin && (!mark.pin.socket || slanted || !!mark.pin.shunt || acrossItsRow(mark.pin, horizontal))) {
         const net = pinNet(mark.pin.key)
-        if (!own.has(net)) return refuse("over", mark.at, net)
+        if (!own.has(net)) return refuse("over", mark.at, net, i - 1)
       }
     }
   }
@@ -362,7 +362,7 @@ function throughABody(doc: Schematic, points: readonly Point[], near?: Near): Dr
     const s = { a: points[i - 1], b: points[i] }
     const box = segmentBox(s)
     const crossed = crossedBody(s, bodiesOf(near ? near(box) : doc.objects))
-    if (crossed) return { refused: "body", at: { x: crossed.box.x + crossed.box.w / 2, y: crossed.box.y + crossed.box.h / 2 }, nets: [] }
+    if (crossed) return { refused: "body", at: { x: crossed.box.x + crossed.box.w / 2, y: crossed.box.y + crossed.box.h / 2 }, nets: [], leg: i - 1 }
   }
   return null
 }

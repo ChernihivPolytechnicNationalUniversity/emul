@@ -4,8 +4,9 @@ import { cn } from "@/lib/utils"
 import { toPath, type Point, type RoutedWire } from "@/schematic/geometry"
 import type { PinCorner } from "@/schematic/wire-look"
 import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
-import { CASING_PX, casingWidth, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_HIT_PX, WIRE_PX } from "./wire-style"
-import { leadPatchPaths, wireCasingPath, wireStrokePath } from "./wire-paths"
+import { bendsOf, type Stretch } from "@/schematic/conflict-marks"
+import { CASING_PX, casingWidth, CONFLICT_PX, glowCutWidth, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_HIT_PX, WIRE_PX } from "./wire-style"
+import { conflictCutPaths, conflictGlowPaths, leadPatchPaths, wireCasingPath, wireStrokePath } from "./wire-paths"
 import { wireMarks } from "./wire-marks"
 import type { WireFlow } from "./wire-flow"
 import type { WirePlate } from "./wire-plate"
@@ -230,16 +231,32 @@ export function OpenEndCue({ cue, reach, grid, scale }: { cue: ContinueCue | nul
   )
 }
 
-type PendingPart = "route" | "marks"
+type PendingPart = "route" | "marks" | "glow"
 
-export type PendingLook = { points: readonly Point[]; corners: readonly Point[]; color: WireColorKey; refused: boolean; landing: boolean }
+export type PendingLook = { points: readonly Point[]; corners: readonly Point[]; color: WireColorKey; refused: boolean; landing: boolean; conflict?: readonly Stretch[] }
 
 export function PendingWireLayer({ pending, grid, scale, part }: { pending: PendingLook | null; grid: number; scale: number; part: PendingPart }) {
   if (!pending || pending.points.length < 1) return null
+  if (part === "glow") return <Pending pending={pending} grid={grid} px={1 / scale} handleR={handleRadius(grid, scale)} part={part} />
   return (
     <svg data-slot={`pending-wire-${part}`} data-refused={pending.refused ? "" : undefined} className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
-      <Pending pending={pending} grid={grid} handleR={handleRadius(grid, scale)} part={part} />
+      <Pending pending={pending} grid={grid} px={1 / scale} handleR={handleRadius(grid, scale)} part={part} />
     </svg>
+  )
+}
+
+const PENDING_GLOW_CUT = "pending-wire-glow-cut"
+
+const EVERYWHERE = { x: -1e7, y: -1e7, width: 2e7, height: 2e7 }
+
+function GlowCut({ id, paths, px }: { id: string; paths: readonly string[]; px: number }) {
+  return (
+    <mask id={id} maskUnits="userSpaceOnUse" {...EVERYWHERE}>
+      <rect {...EVERYWHERE} fill="white" />
+      {paths.map((d, i) => (
+        <path key={i} d={d} fill="none" stroke="black" strokeWidth={glowCutWidth(px)} strokeLinecap="round" strokeLinejoin="round" />
+      ))}
+    </mask>
   )
 }
 
@@ -258,11 +275,23 @@ function handleRadius(grid: number, scale: number) {
   return Math.min(Math.max(HANDLE_CELLS * grid, HANDLE_MIN_PX / scale), HANDLE_MAX_PX / scale)
 }
 
-function Pending({ pending, grid, handleR, part }: { pending: PendingLook; grid: number; handleR: number; part: PendingPart }) {
+function Pending({ pending, grid, px, handleR, part }: { pending: PendingLook; grid: number; px: number; handleR: number; part: PendingPart }) {
   const pts = pending.points
   const d = wireStrokePath({ pts }, grid)
-  const color = pending.refused ? "var(--destructive)" : wireColorVar(pending.color)
+  const color = wireColorVar(pending.color)
+  const glow = pending.conflict?.length ? conflictGlowPaths(pending.conflict, bendsOf([pts]), grid) : []
+  const cut = pending.conflict?.length ? conflictCutPaths(pending.conflict, grid) : []
   const end = pts[pts.length - 1]
+  if (part === "glow") {
+    if (!glow.length) return null
+    return (
+      <g data-slot="pending-wire-glow" data-conflict-glow="" style={{ ["--conflict-px" as string]: `${px}px` }}>
+        {glow.map((g, i) => (
+          <path key={i} d={g} fill="none" stroke="var(--conflict)" strokeWidth={CONFLICT_PX} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        ))}
+      </g>
+    )
+  }
   if (part === "marks") {
     return (
       <g pointerEvents="none">
@@ -275,7 +304,10 @@ function Pending({ pending, grid, handleR, part }: { pending: PendingLook; grid:
   }
   return (
     <g pointerEvents="none">
-      <path mask={BODY_MASK} d={wireCasingPath({ pts }, grid)} fill="none" stroke="var(--background)" strokeWidth={casingWidth(WIRE_PX)} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+      {cut.length > 0 && <GlowCut id={PENDING_GLOW_CUT} paths={cut} px={px} />}
+      <g mask={glow.length > 0 ? `url(#${PENDING_GLOW_CUT})` : undefined}>
+        <path mask={BODY_MASK} d={wireCasingPath({ pts }, grid)} fill="none" stroke="var(--background)" strokeWidth={casingWidth(WIRE_PX)} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+      </g>
       <path
         d={d}
         fill="none"

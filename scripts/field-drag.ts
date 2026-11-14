@@ -107,6 +107,7 @@ const dots = (page: Page, id: string) =>
   }, id)
 
 const blockedNow = (page: Page, id: string) => page.evaluate((objectId) => document.querySelector(`[data-body="${CSS.escape(objectId)}"]`)?.hasAttribute("data-blocked") ?? false, id)
+const glowsNow = (page: Page, id: string) => page.evaluate((objectId) => document.querySelector(`[data-body="${CSS.escape(objectId)}"]`)?.hasAttribute("data-conflict") ?? false, id)
 
 const cellPoint = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
 const resistorAt = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
@@ -367,11 +368,12 @@ async function farDropAndWireCopy(page: Page) {
   await page.mouse.move(below.x, below.y, { steps: 8 })
   await page.waitForTimeout(250)
   const refusedPreview = await countOf(page, "[data-slot^=pending-wire][data-refused]")
+  const refusedGlow = await countOf(page, "[data-slot=conflict-glow] [data-slot=pending-wire-glow] path")
   await page.mouse.click(below.x, below.y)
   await page.waitForTimeout(400)
   await page.keyboard.press("Escape")
   await page.waitForTimeout(300)
-  expect("a wire drawn straight across R1's body turns red and lays nothing (the user, 2026-11-11: no wire on a part)", [refusedPreview > 0, await countOf(page, "[data-slot=wires] [data-wire]")], [true, 0])
+  expect("a wire drawn straight across R1's body is refused, glows under the leg that crosses it, and lays nothing (the user, 2026-11-11: no wire on a part)", [refusedPreview > 0, refusedGlow, await countOf(page, "[data-slot=wires] [data-wire]")], [true, 1, 0])
   await openDoc(page, "armed-double-click", { objects: [resistorAt("R1", 10, 10)], wires: [{ id: "w", a: cellPoint(9, 13), b: cellPoint(15, 13) }], parts: {} })
   const armedFrame = await fieldFrame(page)
   await page.addStyleTag({ content: "[data-sonner-toaster]{display:none!important}" })
@@ -709,7 +711,7 @@ async function phaseFiveChecks(page: Page) {
   await openDoc(page, "right-angle", { objects: [diodeAt("D5", 10, 10, 90), diodeAt("D6", 20, 20)], wires: [], parts: {} })
   let f = await fieldFrame(page)
   await dragBy(page, f.toScreen(cellPoint(22, 21)), f.toScreen(cellPoint(13, 10)), false)
-  expect("held with its anode on D5's upper pin at a right angle, D6 is not drawn as blocked (findings 4.U12)", await blockedNow(page, "D6"), false)
+  expect("held with its anode on D5's upper pin at a right angle, D6 is not drawn as blocked and does not glow (findings 4.U12)", [await blockedNow(page, "D6"), await glowsNow(page, "D6")], [false, false])
   await page.mouse.up()
   await page.waitForTimeout(800)
   expect("dropped there, D6 stays where it was let go", await f.worldOf("D6"), { x: 11 * GRID, y: 9 * GRID })
@@ -864,7 +866,7 @@ async function contactsFollowTheDrag(page: Page) {
   expect("3 cells down, before release: no LCD dot is left", (await dots(page, lcd.id)).contact, 0)
   expect("…nor on P15", (await dots(page, board.id)).contact, before.board.contact - before.lcd.contact)
   await to(0, 2)
-  expect("2 cells down, its FFC tail over the board's: the plate is red (on the board, pins in no socket)", await blockedNow(page, lcd.id), true)
+  expect("2 cells down, its FFC tail over the board's: blocked, and the LCD glows (on the board, pins in no socket)", [await blockedNow(page, lcd.id), await glowsNow(page, lcd.id)], [true, true])
   await to(0, 3)
   await zoomAcrossPinDetail(page)
   await to(0, 4)
@@ -1128,7 +1130,7 @@ async function noPluggingIntoHeaders(page: Page) {
   const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-body]")?.getAttribute("data-body"), grab)
   expect("the grab point is on the crystal", hit, q.id)
   await dragBy(page, grab, frame.toScreen(crystalMiddle({ ...q, ...target })), false)
-  expect(`over ${left.key.split(":")[1]} and the pin four cells on, the plate is red`, await blockedNow(page, q.id), true)
+  expect(`over ${left.key.split(":")[1]} and the pin four cells on: blocked, and the crystal glows`, [await blockedNow(page, q.id), await glowsNow(page, q.id)], [true, true])
   await page.mouse.up()
   await page.waitForTimeout(800)
   const landed = await frame.worldOf(q.id)
@@ -1137,6 +1139,49 @@ async function noPluggingIntoHeaders(page: Page) {
   expect("…it is off the board, its outline and its P15 tab", onTheBoard(await box(page, q.id), await box(page, board.id)), false)
   expect("…and nothing of it is plugged in", (await dots(page, q.id)).contact, 0)
   expect("…nor sent home: the board's edge is nearer to the drop", Math.hypot(landed.x - q.x, landed.y - q.y) > GRID / 2, true)
+}
+
+const dimmedNets = (page: Page) => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-net]")].filter((g) => g.classList.contains("opacity-25")).length)
+
+async function noFadeLeftAfterADrop(page: Page) {
+  console.log("\nno net is left faded after a part lands on a wire (the user, 2026-11-13: an inductor dragged from the palette onto a wire left every other net pale)")
+  const doc: Schematic = {
+    objects: [resistorAt("R1", 2, 10), resistorAt("R6", 2, 14), resistorAt("R7", 24, 14)],
+    wires: [{ id: "a", a: cellPoint(6, 11), b: cellPoint(24, 11) }, { id: "b", a: cellPoint(6, 15), b: cellPoint(24, 15), color: "blue" }],
+    parts: {},
+  }
+  await openDoc(page, "palette-onto-wire", doc)
+  await page.addStyleTag({ content: "[data-sonner-toaster]{display:none!important}" })
+  const frame = await fieldFrame(page)
+  const tile = (await page.getByRole("button", { name: "Inductor", exact: true }).boundingBox())!
+  const onTheWire = frame.toScreen(cellPoint(10, 11))
+  const drop = frame.toScreen(cellPoint(14, 11))
+  await page.mouse.move(tile.x + tile.width / 2, tile.y + tile.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(onTheWire.x, onTheWire.y, { steps: 20 })
+  await page.mouse.move(drop.x, drop.y, { steps: 10 })
+  await page.waitForTimeout(200)
+  expect("an inductor carried from the palette along a wire dims no net: a part in hand is not a wire hovered", await dimmedNets(page), 0)
+  await page.mouse.up()
+  await page.waitForTimeout(800)
+  expect("dropped onto the wire it is put in series, and no net is dimmed", [await countOf(page, "[data-body]"), await dimmedNets(page)], [4, 0])
+  const away = frame.toScreen(cellPoint(14, 20))
+  await page.mouse.move(away.x, away.y, { steps: 8 })
+  await page.mouse.click(away.x, away.y)
+  await page.waitForTimeout(300)
+  expect("moved away and clicked on empty field: still no net dimmed", await dimmedNets(page), 0)
+  const onBlue = frame.toScreen(cellPoint(18, 15))
+  await page.mouse.move(onBlue.x, onBlue.y, { steps: 8 })
+  await page.waitForTimeout(300)
+  expect("hovering a wire still lights its net and fades the rest", (await dimmedNets(page)) > 0, true)
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(600)
+  expect("an edit under a resting pointer ends the hover: it belonged to the document before it", await dimmedNets(page), 0)
+  await page.mouse.move(away.x, away.y, { steps: 8 })
+  const r6 = frame.toScreen(cellPoint(4, 15))
+  const onA = frame.toScreen(cellPoint(14, 11))
+  await dragBy(page, r6, onA)
+  expect("a part moved onto a wire and dropped leaves no net dimmed either", await dimmedNets(page), 0)
 }
 
 async function freedSlotTakesTheDrop(page: Page) {
@@ -1150,7 +1195,7 @@ async function freedSlotTakesTheDrop(page: Page) {
   const slot = { x: pitch.x * GRID, y: pitch.y * GRID }
   const drop = { x: slot.x + 2 * GRID, y: slot.y }
   await dragBy(page, frame.toScreen(crystalMiddle(mover)), frame.toScreen(crystalMiddle({ ...mover, ...drop })), false)
-  expect("two cells right of the slot its lead lies along its neighbour's: red", await blockedNow(page, mover.id), true)
+  expect("two cells right of the slot its lead lies along its neighbour's: blocked, and it glows", [await blockedNow(page, mover.id), await glowsNow(page, mover.id)], [true, true])
   await page.mouse.up()
   await page.waitForTimeout(800)
   const landed = await frame.worldOf(mover.id)
@@ -1446,7 +1491,7 @@ try {
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const sections = [contactsFollowTheDrag, wiresFollowTheDrag, plateAfterDragBackAndForth, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench, phaseSixChecks]
+const sections = [contactsFollowTheDrag, wiresFollowTheDrag, plateAfterDragBackAndForth, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, noFadeLeftAfterADrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench, phaseSixChecks]
 try {
   for (const section of sections) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })

@@ -287,7 +287,9 @@ const shiftedLead = ([p, q]: Lead, dx: number, dy: number): Lead => [
 
 const shiftedPoint = (p: Point, dx: number, dy: number): Point => ({ x: p.x + dx, y: p.y + dy })
 
-export function placementCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
+type MoverHits = { readonly movers: readonly PlacedObject[]; readonly at: (dx: number, dy: number) => (mover: number) => boolean }
+
+function moverHits(scene: PlacementScene, moving: readonly PlacedObject[]): MoverHits | null {
   const ids = new Set(moving.map((o) => o.id))
   const place = (object: PlacedObject): Placed | null => {
     if (isJunction(object)) return null
@@ -299,7 +301,7 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
   const pinsOf = (object: PlacedObject) => objectPins(object, scene.grid).map((p) => p.point)
   const movers = moving.map(place).filter((p): p is Placed => p !== null)
   const others = scene.objects.filter((o) => !ids.has(o.id)).map(place).filter((p): p is Placed => p !== null)
-  if (!movers.length || !others.length) return () => false
+  if (!movers.length || !others.length) return null
   const nearby = new BoxIndex(others, (o) => o.box, BUCKET_CELLS * scene.grid)
   const hit = (a: Quad, b: Quad) => intersects(a.box, b.box) && overlap(a.corners, b.corners)
   const hitsAny = (a: readonly Quad[], list: readonly Quad[]) => a.some((q) => list.some((b) => hit(q, b)))
@@ -334,7 +336,7 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
     const whollyFilled = holes.pins.every((h) => !filledConnectors.has(h.connector!) || plugs.grid.has(h.x + socketAt.x - plugAt.x, h.y + socketAt.y - plugAt.y))
     return whollyPlugged && whollyFilled
   }
-  return (dx, dy) => {
+  const at = (dx: number, dy: number) => {
     const bodies: Quad[][] = []
     const bodyAt = (i: number) => (bodies[i] ??= movers[i].contour.map((q) => moved(q, dx, dy)))
     const leadsAt = (i: number) => movers[i].leads.map((lead) => shiftedLead(lead, dx, dy))
@@ -357,8 +359,32 @@ export function placementCheck(scene: PlacementScene, moving: readonly PlacedObj
       if (pins.some((p) => insideAny(other.contour, p) || other.leads.some((lead) => onLead(p, lead)))) return true
       return pinsOf(other.object).some((p) => insideAny(body, p) || leads.some((lead) => onLead(p, lead)))
     }
-    for (let i = 0; i < movers.length; i++) if (nearby.some(shiftedRect(movers[i].box, dx, dy), (other) => collides(i, other))) return true
-    return false
+    return (i: number) => nearby.some(shiftedRect(movers[i].box, dx, dy), (other) => collides(i, other))
+  }
+  return { movers: movers.map((m) => m.object), at }
+}
+
+export function placementCheck(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => boolean {
+  const hits = moverHits(scene, moving)
+  if (!hits) return () => false
+  return (dx, dy) => {
+    const hit = hits.at(dx, dy)
+    return hits.movers.some((_, i) => hit(i))
+  }
+}
+
+const NONE: ReadonlySet<string> = new Set()
+
+export function placementClashes(scene: PlacementScene, moving: readonly PlacedObject[]): (dx: number, dy: number) => ReadonlySet<string> {
+  const hits = moverHits(scene, moving)
+  if (!hits) return () => NONE
+  let last: { dx: number; dy: number; clashing: ReadonlySet<string> } | null = null
+  return (dx, dy) => {
+    if (last?.dx === dx && last.dy === dy) return last.clashing
+    const hit = hits.at(dx, dy)
+    const clashing = new Set(hits.movers.filter((_, i) => hit(i)).map((o) => o.id))
+    last = { dx, dy, clashing }
+    return clashing
   }
 }
 
