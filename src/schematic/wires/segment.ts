@@ -49,6 +49,8 @@ export const isDiagonal = (s: Pick<WireSegment, "a" | "b">) => s.a.x !== s.b.x &
 
 export const isOrthogonal = (s: Pick<WireSegment, "a" | "b">) => (s.a.x === s.b.x) !== (s.a.y === s.b.y)
 
+export const passesAlongItsRow = (pin: WirePin, s: Pick<WireSegment, "a" | "b">) => !!pin.socket && !pin.shunt && !!pin.out && (s.a.y === s.b.y ? pin.out.y === 0 : s.a.x === s.b.x && pin.out.x === 0)
+
 export function greatestDivisor(a: number, b: number): number {
   a = Math.abs(a)
   b = Math.abs(b)

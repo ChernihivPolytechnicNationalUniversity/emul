@@ -5,7 +5,7 @@ import type { PinRef, PlacedObject, Point, Schematic } from "./types"
 import type { WireColorKey } from "./wire-colors"
 import { withSegments, type NewId, type Wiring } from "./wire-edits"
 import { routeAround, runEnds, type RouteEnd } from "./wires/router"
-import { along, greatestDivisor, HALF_CELL, highOf, lineOf, lowOf, pointOnLine, samePoint, type WirePin, type WireSegment } from "./wires/segment"
+import { along, greatestDivisor, HALF_CELL, highOf, lineOf, lowOf, passesAlongItsRow, pointOnLine, samePoint, type WireSegment } from "./wires/segment"
 import { bodiesOf, bodyRefusal, crossedBody, segmentBox } from "./body-crossing"
 
 export type DrawEnd =
@@ -247,8 +247,6 @@ function netOfEnd(wiring: Wiring, end: DrawEnd): string | undefined {
 
 const NO_IDS: ReadonlySet<string> = new Set()
 
-const acrossItsRow = (pin: WirePin, horizontal: boolean) => !pin.out || (horizontal ? pin.out.x === 0 : pin.out.y === 0)
-
 function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: readonly Point[], ignore: ReadonlySet<string> = NO_IDS): DrawRefusal | null {
   if (target.kind === "crossing") return { refused: "crossing", at: target.at, nets: [] }
   const sheet = wiring.sheet
@@ -259,8 +257,6 @@ function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: reado
   const refuse = (refused: DrawRefusal["refused"], at: Point, net: string, leg?: number): DrawRefusal => ({ refused, at, nets: [...own, net], ...(leg !== undefined && { leg }) })
   for (let i = 1; i < points.length; i++) {
     const leg = { a: points[i - 1], b: points[i] }
-    const horizontal = leg.a.y === leg.b.y
-    const slanted = !horizontal && leg.a.x !== leg.b.x
     const lo = lowOf(leg)
     const hi = highOf(leg)
     for (const s of sheet.alongSegment(leg)) {
@@ -275,7 +271,7 @@ function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: reado
         if (ignore.has(mark.segment.id)) continue
         const net = segmentNet(mark.segment)
         if (!own.has(net)) return refuse("over", mark.at, net, i - 1)
-      } else if (mark.pin && (!mark.pin.socket || slanted || !!mark.pin.shunt || acrossItsRow(mark.pin, horizontal))) {
+      } else if (mark.pin && !passesAlongItsRow(mark.pin, leg)) {
         const net = pinNet(mark.pin.key)
         if (!own.has(net)) return refuse("over", mark.at, net, i - 1)
       }
@@ -457,7 +453,7 @@ export function laysClear(wiring: Wiring, segments: readonly { readonly a: Point
     for (const s of sheet.alongSegment(leg)) if (Math.min(hi, highOf(s)) - Math.max(lo, lowOf(s)) > 0) return false
     for (const mark of sheet.marksOn(leg)) {
       const v = along(leg, mark.at)
-      if (v > lo && v < hi && (mark.segment || !mark.pin?.socket)) return false
+      if (v > lo && v < hi && (mark.segment || (mark.pin && !passesAlongItsRow(mark.pin, leg)))) return false
     }
   }
   return true
