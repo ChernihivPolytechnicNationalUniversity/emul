@@ -11,8 +11,8 @@ import { getDef, setLibrary } from "@/schematic/registry"
 import type { HdlModule, PlacedObject, Schematic } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
-import { FlowSolver, wireCurrents } from "@/sim/flow"
-import { referenceWireCurrents } from "../lib/flow-reference"
+import { FlowSolver } from "@/sim/flow"
+import { flowNetOf, referenceWireCurrents, schematicTies } from "../lib/flow-reference"
 import counter from "./hdl/counter.json"
 
 const c = (x: number, y: number) => ({ x: x * GRID, y: y * GRID })
@@ -82,17 +82,18 @@ describe("the circuit handed to the solver (design.md §2)", () => {
 describe("current along the wires (design.md §9)", () => {
   const flow = (runs: [string, string, string][], pins: Record<string, string>) => ({ runs: runs.map(([id, a, b]) => ({ id, a, b })), pins })
   const inNetlist = (...keys: string[]) => new Map(keys.map((k) => [k, 1]))
+  const wireCurrents = (f: FlowGraph, pinNet: ReadonlyMap<string, number>, terminal: (key: string) => number) => new FlowSolver(f, flowNetOf(pinNet)).currents(terminal).wires
 
   it("a chain carries the same current in every run, signed from each run's first point to its last", () => {
     const f = flow([["r1", "A", "B"], ["r2", "B", "C"]], { "P1:1": "A", "P2:1": "C" })
-    const amps = wireCurrents(f, inNetlist("P1:1", "P2:1"), new Set(), (k) => (k === "P1:1" ? 1 : k === "P2:1" ? -1 : 0))
+    const amps = wireCurrents(f, inNetlist("P1:1", "P2:1"), (k) => (k === "P1:1" ? 1 : k === "P2:1" ? -1 : 0))
     expect.soft(amps.get("r1")!, "from C towards A, against r1's direction").toBeNear(-1, 1e-12)
     expect.soft(amps.get("r2")!, "and against r2's").toBeNear(-1, 1e-12)
   })
 
   it("a loop splits the current evenly between its two ways round, and a run closed on itself carries none", () => {
     const f = flow([["top", "A", "B"], ["bottom", "A", "B"], ["ring", "C", "C"]], { "P1:1": "A", "P2:1": "B", "P3:1": "C" })
-    const amps = wireCurrents(f, inNetlist("P1:1", "P2:1", "P3:1"), new Set(), (k) => (k === "P1:1" ? -2 : k === "P2:1" ? 2 : 0))
+    const amps = wireCurrents(f, inNetlist("P1:1", "P2:1", "P3:1"), (k) => (k === "P1:1" ? -2 : k === "P2:1" ? 2 : 0))
     expect.soft(amps.get("top")!, "half each way").toBeNear(1, 1e-12)
     expect.soft(amps.get("bottom")!, "half each way").toBeNear(1, 1e-12)
     expect.soft(amps.get("ring"), "nothing round a closed run").toBe(0)
@@ -100,7 +101,7 @@ describe("current along the wires (design.md §9)", () => {
 
   it("a net no element of the netlist touches carries nothing", () => {
     const f = flow([["r1", "A", "B"]], { "P1:1": "A", "P2:1": "B" })
-    const amps = wireCurrents(f, new Map(), new Set(), () => 1)
+    const amps = wireCurrents(f, new Map(), () => 1)
     expect.soft(amps.get("r1"), "left at zero").toBe(0)
   })
 })
@@ -185,15 +186,15 @@ describe("found by phase 3's reviews", () => {
         if (next() < 0.25) ground.add(key)
       }
       const flow: FlowGraph = { runs, pins }
-      const solver = new FlowSolver(flow, pinNet, ground)
+      const solver = new FlowSolver(flow, flowNetOf(pinNet, ground))
       const injection = new Map(Object.keys(pins).map((key) => [key, Math.round((next() * 4 - 2) * 100) / 100]))
       const terminal = (key: string) => injection.get(key) ?? 0
-      const reference = referenceWireCurrents(flow, pinNet, ground, terminal)
-      const now = solver.currents(terminal)
+      const reference = referenceWireCurrents(flow, pinNet, schematicTies(ground), terminal)
+      const now = solver.currents(terminal).wires
       for (const [id, amps] of reference) expect.soft(now.get(id), `round ${round}, ${id}, every terminal at once`).toBeNear(amps, 1e-9)
       for (const key of Object.keys(pins)) {
-        const unit = solver.unit(key)
-        for (const [id, amps] of referenceWireCurrents(flow, pinNet, ground, (k) => (k === key ? 1 : 0))) expect.soft(unit.get(id) ?? 0, `round ${round}, ${key} → ${id}`).toBeNear(amps, 1e-9)
+        const unit = solver.unit(key).wires
+        for (const [id, amps] of referenceWireCurrents(flow, pinNet, schematicTies(ground), (k) => (k === key ? 1 : 0))) expect.soft(unit.get(id) ?? 0, `round ${round}, ${key} → ${id}`).toBeNear(amps, 1e-9)
       }
     }
   })
@@ -202,14 +203,14 @@ describe("found by phase 3's reviews", () => {
     const doc = examples.find((e) => e.id === "power-supply")!.build(GRID)
     const circuit = circuitOf(doc)
     const net = buildNetlist(circuit)
-    const solver = new FlowSolver(circuit.flow, net.pinNet, net.groundKeys)
+    const solver = new FlowSolver(circuit.flow, net)
     const keys = Object.keys(circuit.flow.pins).filter((key) => net.pinNet.has(key))
     expect.soft(keys.length, "terminals to try").toBeGreaterThan(5)
     for (const key of keys) {
-      const afresh = [...referenceWireCurrents(circuit.flow, net.pinNet, net.groundKeys, (k) => (k === key ? 1 : 0))].filter(([, amps]) => Math.abs(amps) > 1e-12)
-      const once = [...solver.unit(key)].filter(([, amps]) => Math.abs(amps) > 1e-12)
+      const afresh = [...referenceWireCurrents(circuit.flow, net.pinNet, net.groundTies, (k) => (k === key ? 1 : 0))].filter(([, amps]) => Math.abs(amps) > 1e-12)
+      const once = [...solver.unit(key).wires].filter(([, amps]) => Math.abs(amps) > 1e-12)
       expect.soft(once.map(([id]) => id).sort(), `${key}: the runs it drives`).toEqual(afresh.map(([id]) => id).sort())
-      for (const [id, amps] of afresh) expect.soft(solver.unit(key).get(id), `${key} → ${id}`).toBeNear(amps, 1e-9)
+      for (const [id, amps] of afresh) expect.soft(solver.unit(key).wires.get(id), `${key} → ${id}`).toBeNear(amps, 1e-9)
     }
   })
 })

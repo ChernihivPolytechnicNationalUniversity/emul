@@ -5,6 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@11.1.2",
   "scripts": {
+    "prepare": "node -e \"import('husky').then((h) => process.stdout.write(h.default()), (e) => { if (e.code !== 'ERR_MODULE_NOT_FOUND') throw e })\"",
     "dev": "vite",
     "api": "pnpm --filter emul-api dev",
     "collab": "pnpm --filter emul-api collab:dev",
@@ -62,6 +63,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
+    "husky": "^9.1.7",
     "lexical": "0.53.0",
     "oxlint": "^1.81.0",
     "playwright-core": "^1.63.0",

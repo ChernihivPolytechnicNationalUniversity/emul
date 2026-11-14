@@ -1,6 +1,18 @@
 import type { FlowGraph } from "@/schematic/circuit"
+import type { FlowNet } from "@/sim/flow"
+import type { GroundTie } from "@/sim/netlist"
 
-export function referenceWireCurrents(flow: FlowGraph, pinNet: Map<string, number>, groundKeys: Set<string>, terminal: (key: string) => number): Map<string, number> {
+export const schematicTies = (keys: Iterable<string>): ReadonlyMap<string, GroundTie> => new Map([...keys].map((key) => [key, "schematic"] as const))
+
+export const flowNetOf = (pinNet: ReadonlyMap<string, number>, groundKeys: Iterable<string> = []): FlowNet => ({
+  pinNet: new Map(pinNet),
+  groundTies: schematicTies(groundKeys),
+  contacts: new Map(),
+  conductorOf: new Map(),
+  partShorts: [],
+})
+
+export function referenceWireCurrents(flow: FlowGraph, pinNet: ReadonlyMap<string, number>, groundTies: ReadonlyMap<string, GroundTie>, terminal: (key: string) => number): Map<string, number> {
   const result = new Map<string, number>()
   const members = new Map<string, string[]>()
   for (const [key, v] of Object.entries(flow.pins)) {
@@ -44,9 +56,13 @@ export function referenceWireCurrents(flow: FlowGraph, pinNet: Map<string, numbe
     }
     if (!keys.some((k) => members.get(k)?.some((key) => pinNet.get(key) !== undefined))) continue
     const index = new Map(keys.map((k, i) => [k, i]))
-    const fixed = new Set<number>()
-    for (const k of keys) if (members.get(k)?.some((key) => groundKeys.has(key))) fixed.add(index.get(k)!)
-    if (fixed.size === 0) fixed.add(0)
+    const rank = (key: string) => ({ reference: 1, schematic: 2, none: 0 })[groundTies.get(key) ?? "none"]
+    const best = Math.max(0, ...keys.flatMap((k) => (members.get(k) ?? []).map(rank)))
+    const tiesAt = (k: string) => (best ? (members.get(k)?.filter((key) => rank(key) === best).length ?? 0) : 0)
+    const ties = keys.reduce((sum, k) => sum + tiesAt(k), 0)
+    const imbalance = keys.reduce((sum, k) => sum - injected(k), 0)
+    const entering = (k: string) => -injected(k) - (ties ? (imbalance * tiesAt(k)) / ties : 0)
+    const fixed = new Set<number>([Math.max(0, keys.findIndex((k) => tiesAt(k) > 0))])
     const free = keys.map((_, i) => i).filter((i) => !fixed.has(i))
     const pos = new Map(free.map((i, j) => [i, j]))
     const m = free.length
@@ -58,7 +74,7 @@ export function referenceWireCurrents(flow: FlowGraph, pinNet: Map<string, numbe
       const row = pos.get(i)
       for (const { run } of adj.get(k)!) runs.add(run)
       if (row === undefined) continue
-      b[row] = -injected(k)
+      b[row] = entering(k)
       for (const { other } of adj.get(k)!) {
         const j = index.get(other)!
         L[row * m + row] += 1

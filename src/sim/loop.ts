@@ -486,6 +486,7 @@ export class SimLoop {
    * 50 ms of a 1 kHz square wave would alias to whatever phase it happens to land on.
    */
   private flow: { id: string; slots: Int32Array; coefs: Float64Array }[] = []
+  private leads: { key: string; slots: Int32Array; coefs: Float64Array }[] = []
   private flowSolver: FlowSolver | null = null
   private flowSigned = new Float64Array(0)
   private flowAbs = new Float64Array(0)
@@ -1964,25 +1965,33 @@ export class SimLoop {
   private buildFlow(engine: Engine) {
     const { net } = engine
     const { index, keys } = engine.terminalSlots
-    const perWire = new Map<string, { slots: number[]; coefs: number[] }>()
-    const solver = new FlowSolver(this.doc.flow, net.pinNet, net.groundKeys)
+    const solver = new FlowSolver(this.doc.flow, net)
     this.flowSolver = solver
+    const perWire = new Map<string, { slots: number[]; coefs: number[] }>()
+    const perLead = new Map<string, { slots: number[]; coefs: number[] }>()
+    const add = (forms: Map<string, { slots: number[]; coefs: number[] }>, id: string, slot: number, amps: number) => {
+      if (amps === 0) return
+      let f = forms.get(id)
+      if (!f) {
+        f = { slots: [], coefs: [] }
+        forms.set(id, f)
+      }
+      f.slots.push(slot)
+      f.coefs.push(amps)
+    }
     for (const key of keys) {
       const slot = index.get(key)!
-      for (const [id, amps] of solver.unit(key)) {
-        if (amps === 0) continue
-        let f = perWire.get(id)
-        if (!f) {
-          f = { slots: [], coefs: [] }
-          perWire.set(id, f)
-        }
-        f.slots.push(slot)
-        f.coefs.push(amps)
-      }
+      const unit = solver.unit(key)
+      for (const [id, amps] of unit.wires) add(perWire, id, slot, amps)
+      for (const [pin, amps] of unit.leads) add(perLead, pin, slot, amps)
     }
     this.flow = this.doc.flow.runs.map((r) => {
       const f = perWire.get(r.id)
       return { id: r.id, slots: Int32Array.from(f?.slots ?? []), coefs: Float64Array.from(f?.coefs ?? []) }
+    })
+    this.leads = solver.leadPins.map((key) => {
+      const f = perLead.get(key)
+      return { key, slots: Int32Array.from(f?.slots ?? []), coefs: Float64Array.from(f?.coefs ?? []) }
     })
     this.flowSigned = new Float64Array(this.flow.length)
     this.flowAbs = new Float64Array(this.flow.length)
@@ -2356,7 +2365,8 @@ export class SimLoop {
       this.flowSeconds = 0
     } else {
       // No steps since the last snapshot (paused): report the instantaneous distribution.
-      for (const [id, amps] of (this.flowSolver ?? new FlowSolver(this.doc.flow, net.pinNet, net.groundKeys)).currents((k) => terminals.get(k) ?? 0)) {
+      for (const f of this.flow) wireCurrent[f.id] = wireCurrentAbs[f.id] = 0
+      for (const [id, amps] of (this.flowSolver ?? new FlowSolver(this.doc.flow, net)).currents((k) => terminals.get(k) ?? 0).wires) {
         wireCurrent[id] = amps
         wireCurrentAbs[id] = Math.abs(amps)
       }
@@ -2365,6 +2375,12 @@ export class SimLoop {
     for (const key of net.pinNet.keys()) {
       const amps = terminals.get(key)
       if (amps !== undefined) pinCurrent[key] = amps
+    }
+    const tc = engine.terminalSlots.current
+    for (const { key, slots, coefs } of this.leads) {
+      let amps = 0
+      for (let k = 0; k < slots.length; k++) amps += coefs[k] * tc[slots[k]]
+      pinCurrent[key] = amps
     }
     const probeReadings = engine.probeReadings()
     const probes: Snapshot["probes"] = {}

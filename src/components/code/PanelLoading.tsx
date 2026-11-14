@@ -1,6 +1,6 @@
-import { LoaderCircleIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Skeleton as Base } from "@/components/ui/skeleton"
+import { EmulLoader } from "@/components/ui/emul-loader"
 
 /** The panel's bars, a shade darker than the stock skeleton so they show on the white panel. */
 const Skeleton = ({ className, ...props }: React.ComponentProps<typeof Base>) => <Base className={cn("bg-foreground/10", className)} {...props} />
@@ -10,7 +10,7 @@ const LINES = [62, 48, 0, 34, 40, 0, 70, 56, 58, 0, 44, 66, 30, 52, 0, 38, 60, 2
 
 /**
  * What a code panel shows while its chunk (Monaco and the editor) downloads: the panel's own
- * outline, an explorer and a file of pulsing lines, and a spinner saying what is coming.
+ * outline, an explorer and a file of pulsing lines, and the εmul loop saying what is coming.
  */
 export function PanelLoading({ className, explorer = true, label = "Loading the editor…" }: { className?: string; explorer?: boolean; label?: string }) {
   return (
@@ -33,8 +33,8 @@ export function PanelLoading({ className, explorer = true, label = "Loading the 
         </div>
       </div>
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <div className="flex items-center gap-2 rounded-full border bg-background px-4 py-2 text-sm text-muted-foreground shadow-md">
-          <LoaderCircleIcon className="size-4 motion-safe:animate-spin" />
+        <div className="flex flex-col items-center gap-1 rounded-xl border bg-background px-6 pt-3 pb-4 text-sm text-muted-foreground shadow-md">
+          <EmulLoader className="size-20" />
           {label}
         </div>
       </div>

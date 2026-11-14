@@ -263,7 +263,7 @@ const suppliesCircuit = circuitOf(supplies)
 const suppliesNet = buildNetlist(suppliesCircuit)
 const terminals = Object.keys(suppliesCircuit.flow.pins).filter((key) => suppliesNet.pinNet.has(key))
 const flowBuilt = time(() => {
-  const solver = new FlowSolver(suppliesCircuit.flow, suppliesNet.pinNet, suppliesNet.groundKeys)
+  const solver = new FlowSolver(suppliesCircuit.flow, suppliesNet)
   for (const key of terminals) solver.unit(key)
 }, 3)
 console.log(`  an old file's ${CHAIN} resistors chained on their diagonals, moved onto the lattice: ${ms(lattice)}; a drag's placement check set up on ${BOARDS} boards: ${ms(dragStart)}`)
