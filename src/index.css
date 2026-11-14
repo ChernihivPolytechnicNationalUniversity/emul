@@ -284,6 +284,7 @@
   opacity: 0.22;
 }
 
-[data-slot="dot-field-content"][data-view-moving] g[mask] {
+[data-slot="dot-field-content"][data-view-moving] g[mask],
+[data-slot="dot-field-content"][data-dragging] g[mask] {
   mask: none;
 }

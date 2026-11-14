@@ -127,6 +127,7 @@ export class MoveDrag {
   }
 
   begin(plan: MovePlan) {
+    if (plan.root instanceof Element) plan.root.toggleAttribute("data-dragging", true)
     this.plan = plan
     this.pointer = null
     this.offset = { x: 0, y: 0 }
@@ -153,6 +154,7 @@ export class MoveDrag {
     }
     if (plan && (this.offset.x || this.offset.y)) this.paint(plan, 0, 0)
     const { x: dx, y: dy } = plan && at ? snappedOffset(plan, at) : { x: 0, y: 0 }
+    if (plan?.root instanceof Element) plan.root.removeAttribute("data-dragging")
     this.plan = null
     this.pointer = null
     this.offset = { x: 0, y: 0 }
