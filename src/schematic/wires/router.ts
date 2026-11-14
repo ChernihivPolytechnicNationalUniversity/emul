@@ -19,7 +19,7 @@ export const REROUTE_REFUSED: Record<RerouteRefusal["refused"], { title: string;
 
 export const isRerouteRefusal = (value: unknown): value is RerouteRefusal => typeof value === "object" && value !== null && "refused" in value
 
-export type RouteAround = { readonly ignore?: ReadonlySet<string>; readonly extra?: readonly WireSegment[]; readonly taken?: ReadonlySet<string>; readonly stops?: readonly Point[]; readonly passable?: (pin: WirePin) => boolean; readonly own?: readonly WireSegment[] }
+export type RouteAround = { readonly settle?: boolean; readonly ignore?: ReadonlySet<string>; readonly extra?: readonly WireSegment[]; readonly taken?: ReadonlySet<string>; readonly stops?: readonly Point[]; readonly passable?: (pin: WirePin) => boolean; readonly own?: readonly WireSegment[] }
 
 type Box = { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
 
@@ -835,10 +835,13 @@ export function routeAround(wiring: Wiring, from: RouteEnd, to: RouteEnd, around
   const endEscapes = escapesFrom(context, b)
   if ((!isWhole(a.at) && !startEscapes.length) || (!isWhole(b.at) && !endEscapes.length)) return null
   const reach = [a.at, b.at, ...startSlips.flatMap((s) => [s.landing, s.back]), ...endSlips.flatMap((s) => [s.landing, s.back]), ...startEscapes.map((e) => e.landing), ...endEscapes.map((e) => e.landing)]
+  let previous = Infinity
   for (let pad = FIRST_PAD_CELLS; ; pad = Math.min(2 * pad, LAST_PAD_CELLS)) {
     const field = fieldOf(context, windowAround(reach, pad), [a, b])
     const found = search(field, a, b, startSlips, endSlips, startEscapes, endEscapes)
-    if (!found.overflow || pad >= LAST_PAD_CELLS) return chosen(a, b, found)
+    const settled = !!around.settle && Number.isFinite(found.best) && found.best === previous
+    if (!found.overflow || pad >= LAST_PAD_CELLS || settled) return chosen(a, b, found)
+    previous = found.best
     if (!Number.isFinite(found.best) && !search(field, b, a, endSlips, startSlips, endEscapes, startEscapes).overflow) return null
   }
 }
