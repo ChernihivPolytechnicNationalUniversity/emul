@@ -18,6 +18,7 @@ export type DragRequest = {
   readonly solid?: (box: DragBox) => readonly DragBox[]
   readonly rerouteConflicts?: boolean
   readonly keepFarEnds?: boolean
+  readonly detach?: boolean
 }
 
 export type DragMove = {
@@ -104,6 +105,8 @@ type MovingPoint = {
 }
 
 type FarEnd = { readonly key: number; readonly at: Point; readonly kind: "fixed" | "dangling" | "free"; readonly segments: readonly WireSegment[] }
+
+type Rejoined = { readonly at: Point; readonly halves: readonly [WireSegment, WireSegment] }
 
 type Probe = { readonly id: string; readonly a: Point; readonly b: Point; readonly net: string; readonly rigidA: boolean; readonly rigidB: boolean; readonly own?: WireSegment }
 
@@ -252,6 +255,7 @@ export class DragPlan {
   private readonly rigid: WireSegment[] = []
   private readonly rigidSet = new Set<WireSegment>()
   private readonly carriedPins = new Set<string>()
+  private readonly rejoined: Rejoined[] = []
   readonly unplugged: WirePin[] = []
   readonly sheet: WireSheet
   private readonly nets: WireNets
@@ -287,16 +291,23 @@ export class DragPlan {
       gather(s.a)
       gather(s.b)
     }
+    const detach = !!request.detach
     for (const [key, entry] of gathered) {
       const own: WireSegment[] = []
       const loose: WireSegment[] = []
+      const left: WireSegment[] = []
       for (const s of sheet.endsAt(entry.at)) {
-        if (carriedWires.has(s) || gathered.has(pointCode(otherEnd(s, entry.at)))) {
+        if (carriedWires.has(s) || (!detach && gathered.has(pointCode(otherEnd(s, entry.at))))) {
           own.push(s)
           this.rigidSet.add(s)
-        } else loose.push(s)
+        } else if (detach) left.push(s)
+        else loose.push(s)
       }
-      const anchors = sheet.pinsAt(entry.at).filter((p) => !this.carriedPins.has(p.key))
+      if (detach) {
+        const halves = straightThrough(sheet, entry.at, left)
+        if (halves) this.rejoined.push({ at: entry.at, halves })
+      }
+      const anchors = detach ? [] : sheet.pinsAt(entry.at).filter((p) => !this.carriedPins.has(p.key))
       const kind = anchors.length ? "anchored" : entry.pins.length && loose.length >= 2 ? "branch" : "moving"
       this.moving.set(key, { key, at: entry.at, pins: entry.pins, anchors, rigid: own, loose, kind })
     }
@@ -322,6 +333,7 @@ export class DragPlan {
     for (const s of this.rigid) out.add(s.id)
     for (const point of this.moving.values()) for (const s of point.loose) out.add(s.id)
     for (const far of this.farEnds.values()) for (const s of far.segments) out.add(s.id)
+    for (const { halves } of this.rejoined) for (const s of halves) out.add(s.id)
     return out
   }
 
@@ -516,9 +528,19 @@ export class DragPlan {
     return this.rigid
   }
 
+  get rejoinedThrough(): readonly Rejoined[] {
+    return this.rejoined
+  }
+
   isRigid(s: WireSegment) {
     return this.rigidSet.has(s)
   }
+}
+
+function straightThrough(sheet: WireSheet, at: Point, left: readonly WireSegment[]): readonly [WireSegment, WireSegment] | null {
+  if (left.length !== 2 || sheet.pinsAt(at).length) return null
+  const [first, second] = left
+  return lineOf(first) === lineOf(second) && first.color === second.color ? [first, second] : null
 }
 
 export function planDrag(sheet: WireSheet, nets: WireNets, request: DragRequest): DragPlan {
@@ -554,6 +576,7 @@ class FrameBuilder {
   build(): DragFrame {
     if (this.resolveTargets()) return EMPTY_FRAME
     for (const s of this.plan.rigidSegments) this.gone.add(s)
+    for (const { halves } of this.plan.rejoinedThrough) for (const s of halves) this.gone.add(s)
     for (const point of this.plan.points) {
       if (point.kind !== "moving") continue
       this.follows.add(point.key)
@@ -563,6 +586,7 @@ class FrameBuilder {
     this.shiftFarEnds()
     this.collectAffected()
     this.placePins()
+    this.placeRejoined()
     this.placeRigid()
     this.placeStays()
     this.placeShaped()
@@ -772,6 +796,14 @@ class FrameBuilder {
         for (const other of others) this.conflicts.push({ at, reason: "pin", pin: pin.key, nets: [net, other] })
         this.index.addMark(at, net, !!pin.socket)
       }
+    }
+  }
+
+  private placeRejoined() {
+    for (const { at, halves } of this.plan.rejoinedThrough) {
+      const [first, second] = halves
+      for (const s of halves) this.replaced.add(s.id)
+      this.place(pieceOf(first.id, otherEnd(first, at), otherEnd(second, at), "stretched", this.plan.netOfSegment(first), first.color, first.id), false, false)
     }
   }
 

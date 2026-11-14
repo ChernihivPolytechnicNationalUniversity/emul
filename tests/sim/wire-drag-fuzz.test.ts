@@ -114,9 +114,9 @@ function report(kind: string, where: string, before: Schematic, landed: Landed, 
 }
 
 describe("random edits on every example against an oracle of explained joins (review of phase 4, Claude 1)", () => {
-  it("part drags, segment drags, turns and mirrors on the examples join no net but where a carried pin or carried free end lands", () => {
+  it("part drags, segment drags, Alt segment drags, turns and mirrors on the examples join no net but where a carried pin or carried free end lands", () => {
     const found: string[] = []
-    const tally = { drags: 0, refused: 0, segments: 0, turns: 0, flips: 0, unlaid: 0 }
+    const tally = { drags: 0, refused: 0, segments: 0, detached: 0, turns: 0, flips: 0, unlaid: 0 }
     for (const { id, doc } of docs) {
       const wiring = wiringOf(new WireGraph(), doc)
       const view = wiring.view
@@ -161,6 +161,20 @@ describe("random edits on every example against an oracle of explained joins (re
             report("segment", sw, doc, landed, explains, new Set(), found)
           } catch (e) {
             found.push(`segment ${sw}: threw ${(e as Error).message}`)
+          }
+          const altRng = random(seed * 7919 + id.length * 17 + id.charCodeAt(0))
+          const ax = altRng.int(-6, 6) * GRID
+          const ay = altRng.int(-6, 6) * GRID
+          const aw = `${id} seed ${seed} segment ${s.id} alt by (${ax / GRID},${ay / GRID})`
+          try {
+            const landed = new SegmentDrag(doc, wiring, s.id, undefined, { detach: true }).landed(ax, ay)
+            tally.detached++
+            const at = landed.at
+            const net = view.netOfSegment(s.id) ?? `wire:${s.id}`
+            const explains = [s.a, s.b].map((p) => ({ at: { x: p.x + at.x, y: p.y + at.y }, net }))
+            report("alt-segment", aw, doc, landed, explains, new Set(), found)
+          } catch (e) {
+            found.push(`alt-segment ${aw}: threw ${(e as Error).message}`)
           }
         }
         const presses = [1, -1, 2, -2, 3][rng.int(0, 4)]
