@@ -256,6 +256,7 @@ async function plateAfterDragBackAndForth(page: Page) {
   await page.mouse.move(aside.x, aside.y)
   await page.waitForTimeout(200)
   await shoot(page, "plate-after-drag")
+}
 
 const teeingWire = (): Schematic => ({
   objects: [resistorAt("R1", 19, 2, 90), resistorAt("R2", 19, 14, 90)],
@@ -1645,6 +1646,7 @@ async function phaseSixChecks(page: Page) {
   await page.waitForTimeout(600)
   expect("T on a run with no clean path: the toast names the refusal (design.md §7; REROUTE_REFUSED)", (await toastTexts()).some((t) => t.startsWith("Not re-routed")), true)
   expect("and the run stays as it was", await runCells(), before)
+}
 
 async function diagonalSplice(page: Page) {
   console.log("\nthe field: a part on its diagonal dropped onto a diagonal wire is cut into it (the user, 2026-11-13)")
