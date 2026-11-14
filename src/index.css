@@ -283,3 +283,7 @@
 [data-slot="dot-field-content"][data-dim] [data-slot="field-text"] {
   opacity: 0.22;
 }
+
+[data-slot="dot-field-content"][data-view-moving] g[mask] {
+  mask: none;
+}

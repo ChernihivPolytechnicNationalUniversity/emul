@@ -13,6 +13,8 @@ export type Point = { x: number; y: number }
 
 export const MIN_SCALE = 0.1
 export const MAX_SCALE = 8
+const VIEW_SETTLE_MS = 160
+
 const ZOOM_STEP = 1.2
 /** Time constant of the zoom follow animation: the view closes ~63% of the gap per TAU_MS. */
 const TAU_MS = 70
@@ -107,10 +109,16 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     })
   }, [measure])
 
+  const settling = React.useRef(0)
   const paint = React.useCallback(
     (v: Viewport, animating = false) => {
       const content = contentRef.current
-      if (content) content.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`
+      if (content) {
+        content.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`
+        content.toggleAttribute("data-view-moving", true)
+        window.clearTimeout(settling.current)
+        settling.current = window.setTimeout(() => content.removeAttribute("data-view-moving"), VIEW_SETTLE_MS)
+      }
       overlayRef.current?.style.setProperty("--field-scale", String(v.scale))
       const container = containerRef.current
       if (!container) return
