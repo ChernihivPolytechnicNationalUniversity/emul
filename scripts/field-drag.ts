@@ -1481,6 +1481,58 @@ async function phaseSixChecks(page: Page) {
   await page.waitForTimeout(600)
   expect("T on a run with no clean path: the toast names the refusal (design.md §7; REROUTE_REFUSED)", (await toastTexts()).some((t) => t.startsWith("Not re-routed")), true)
   expect("and the run stays as it was", await runCells(), before)
+
+async function diagonalSplice(page: Page) {
+  console.log("\nthe field: a part on its diagonal dropped onto a diagonal wire is cut into it (the user, 2026-11-13)")
+  const diamond = (r3: PlacedObject): Schematic => ({
+    objects: [resistorAt("R1", 10, 0), resistorAt("R2", 21, 9, 90), resistorAt("R4", 10, 20), resistorAt("R5", 1, 9, 90), r3],
+    wires: [
+      { id: "se", a: cellPoint(14, 1), b: cellPoint(22, 9) },
+      { id: "sw", a: cellPoint(22, 13), b: cellPoint(14, 21) },
+      { id: "nw", a: cellPoint(10, 21), b: cellPoint(2, 13) },
+      { id: "ne", a: cellPoint(2, 9), b: cellPoint(10, 1) },
+    ],
+    parts: {},
+  })
+  const diagonalR3 = (rotation: 45 | 135): PlacedObject => ({ id: "R3", def: "resistor", x: 16 * GRID, y: 15 * GRID, rotation, props: { ref: "R3" } })
+  const onTheSouthEastSide = () =>
+    page.evaluate(
+      (cell) =>
+        [...document.querySelectorAll("[data-slot=wires] [data-wire][data-points]")]
+          .map((e) => (e.getAttribute("data-points") ?? "").split(" ").map((p) => p.split(",").map(Number)))
+          .filter((pts) => pts.every(([x, y]) => y - x === -13 * cell))
+          .map((pts) => [pts[0], pts[pts.length - 1]].sort((p, q) => p[0] - q[0]).flat().map((v) => v / cell))
+          .sort((a, b) => a[0] - b[0]),
+      GRID,
+    )
+  const middle = cellPoint(17.5, 16.5)
+  const onTheWire = cellPoint(17.5, 4.5)
+
+  await openDoc(page, "diagonal-splice", diamond(diagonalR3(45)))
+  let f = await fieldFrame(page)
+  const home = await f.worldOf("R3")
+  const movedBy = async () => {
+    const now = await f.worldOf("R3")
+    return { x: (now.x - home.x) / GRID, y: (now.y - home.y) / GRID }
+  }
+  await dragBy(page, f.toScreen(middle), f.toScreen(onTheWire), false)
+  expect("R3 on its 45° diagonal held over the R1–R2 diagonal, its pins on (16, 3) and (19, 6): not drawn as blocked and no glow", [await blockedNow(page, "R3"), await glowsNow(page, "R3")], [false, false])
+  await page.mouse.up()
+  await page.waitForTimeout(800)
+  expect("dropped there, R3 stays where it was let go, twelve cells up", await movedBy(), { x: 0, y: -12 })
+  expect("and the R1–R2 diagonal is cut under it: R1 to (16, 3) and (19, 6) to R2, no open end", [await onTheSouthEastSide(), await countOf(page, "[data-dangling]")], [[[14, 1, 16, 3], [19, 6, 22, 9]], 0])
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(500)
+  expect("one Undo takes back the drop and the cut together: R3 home, the diagonal whole", [await movedBy(), await onTheSouthEastSide()], [{ x: 0, y: 0 }, [[14, 1, 22, 9]]])
+
+  await openDoc(page, "diagonal-across", diamond(diagonalR3(135)))
+  f = await fieldFrame(page)
+  const across = await f.worldOf("R3")
+  await dragBy(page, f.toScreen(middle), f.toScreen(onTheWire), false)
+  expect("R3 on the other diagonal held across the R1–R2 diagonal: drawn as blocked and glowing", [await blockedNow(page, "R3"), await glowsNow(page, "R3")], [true, true])
+  await page.mouse.up()
+  await page.waitForTimeout(800)
+  expect("let go across it, R3 does not stay there and the diagonal stays whole", [JSON.stringify(await f.worldOf("R3")) !== JSON.stringify({ x: across.x, y: across.y - 12 * GRID }), await onTheSouthEastSide()], [true, [[14, 1, 22, 9]]])
 }
 
 try {
@@ -1491,7 +1543,9 @@ try {
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const sections = [contactsFollowTheDrag, wiresFollowTheDrag, plateAfterDragBackAndForth, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, noFadeLeftAfterADrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench, phaseSixChecks]
+const everySection = [contactsFollowTheDrag, wiresFollowTheDrag, plateAfterDragBackAndForth, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, diagonalSplice, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, noFadeLeftAfterADrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench, phaseSixChecks]
+const chosen = process.env.SECTIONS?.split(",")
+const sections = chosen ? everySection.filter((section) => chosen.includes(section.name)) : everySection
 try {
   for (const section of sections) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })

@@ -122,32 +122,26 @@ function liesOn(p: Point, s: Segment): boolean {
 
 const twoTerminal = (body: Body) => getDef(body.object.def)?.pins.length === 2 && body.pins.length === 2
 
-export type SpliceSpan = { readonly horizontal: boolean; readonly line: number; readonly lo: number; readonly hi: number }
+export type SpliceSpan = { readonly a: Point; readonly b: Point }
 
 export function spliceSpan(body: Body, near: readonly Segment[]): SpliceSpan | null {
   if (!twoTerminal(body)) return null
-  const [p, q] = body.pins.map((pin) => pin.at)
-  const horizontal = Math.abs(p.y - q.y) < EPS
-  if (!horizontal && Math.abs(p.x - q.x) >= EPS) return null
-  const line = horizontal ? p.y : p.x
-  const across = (pt: Point) => (horizontal ? pt.y : pt.x)
-  const coord = (pt: Point) => (horizontal ? pt.x : pt.y)
-  const lo = Math.min(coord(p), coord(q))
-  const hi = Math.max(coord(p), coord(q))
-  const onLine = near.filter((w) => Math.abs(across(w.a) - line) < EPS && Math.abs(across(w.b) - line) < EPS)
-  let reach = lo
-  for (const [a, b] of onLine.map((w) => [Math.min(coord(w.a), coord(w.b)), Math.max(coord(w.a), coord(w.b))]).sort((u, v) => u[0] - v[0])) if (a <= reach + EPS && b > reach) reach = b
-  if (reach < hi - EPS) return null
-  const inside = (e: Point) => Math.abs(across(e) - line) < EPS && coord(e) > lo + EPS && coord(e) < hi - EPS
+  const [a, b] = body.pins.map((pin) => pin.at)
+  const length = Math.hypot(b.x - a.x, b.y - a.y)
+  if (length < EPS) return null
+  const span = { a, b }
+  const offLine = (p: Point) => Math.abs((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) > EPS * length
+  const along = (p: Point) => ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / length
+  const onLine = near.filter((w) => !offLine(w.a) && !offLine(w.b))
+  let reach = 0
+  for (const [lo, hi] of onLine.map((w) => [Math.min(along(w.a), along(w.b)), Math.max(along(w.a), along(w.b))]).sort((u, v) => u[0] - v[0])) if (lo <= reach + EPS && hi > reach) reach = hi
+  if (reach < length - EPS) return null
+  const inside = (e: Point) => !offLine(e) && along(e) > EPS && along(e) < length - EPS
   if (near.some((w) => !onLine.includes(w) && (inside(w.a) || inside(w.b)))) return null
-  return { horizontal, line, lo, hi }
+  return span
 }
 
-const withinSpan = (piece: Segment, span: SpliceSpan) => {
-  const across = (pt: Point) => (span.horizontal ? pt.y : pt.x)
-  const coord = (pt: Point) => (span.horizontal ? pt.x : pt.y)
-  return [piece.a, piece.b].every((e) => Math.abs(across(e) - span.line) < EPS && coord(e) >= span.lo - EPS && coord(e) <= span.hi + EPS)
-}
+const withinSpan = (piece: Segment, span: SpliceSpan) => liesOn(piece.a, span) && liesOn(piece.b, span)
 
 export function staysThrough(s: Segment, body: Body, span: SpliceSpan | null = null): boolean {
   const along = (p: Point) => (p.x - s.a.x) * (s.b.x - s.a.x) + (p.y - s.a.y) * (s.b.y - s.a.y)

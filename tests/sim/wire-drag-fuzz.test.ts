@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest"
+import { checked } from "@/schematic/checker"
 import { examples } from "@/schematic/examples"
-import { GRID } from "@/schematic/geometry"
+import { diagonalSquare, GRID, objectPins } from "@/schematic/geometry"
+import { contactCheck, placementCheck } from "@/schematic/placement"
+import { allDefs } from "@/schematic/registry"
 import { flipLine, selectionStep, turnedAbout, turnPivot } from "@/schematic/orient"
 import { flippedWithWires, PartDrag, SegmentDrag, TurnRun, type Landed } from "@/schematic/rubber-band"
-import type { Point, Schematic } from "@/schematic/types"
+import type { PlacedObject, Point, Rotation, Schematic } from "@/schematic/types"
 import { inNormalForm, pinsOf, travellingWires, wiringOf, type Wiring } from "@/schematic/wire-edits"
 import { WireGraph, wireNets } from "@/schematic/wires/graph"
 import type { WireSegment } from "@/schematic/wires/segment"
+import { diagonalNormalFormViolations, diagonalPartition, exactlyOn } from "../lib/diagonal-reference"
 import { normalFormViolations, random, referencePartition } from "../lib/wire-reference"
 
 const SEEDS = Number(process.env.FUZZ_SEEDS ?? 2)
@@ -196,5 +200,84 @@ describe("random edits on every example against an oracle of explained joins (re
       }
     }
     expect.soft(found, "no unexplained join").toEqual([])
+  }, 600_000)
+})
+
+describe("random drops of a part on its diagonal onto a diamond of diagonal wires (the user, 2026-11-13)", () => {
+  const cell = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
+  const resistor = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
+  const sides = [
+    [cell(14, 1), cell(22, 9)],
+    [cell(22, 13), cell(14, 21)],
+    [cell(10, 21), cell(2, 13)],
+    [cell(2, 9), cell(10, 1)],
+  ] as const
+  const diamond = (): Schematic =>
+    inNormalForm({
+      objects: [resistor("R1", 10, 0), resistor("R2", 21, 9, 90), resistor("R4", 10, 20), resistor("R5", 1, 9, 90)],
+      wires: sides.map(([a, b], i) => ({ id: `side${i}`, a, b })),
+      parts: {},
+    })
+  const diagonalDefs = allDefs().filter((def) => diagonalSquare(def) !== null)
+  const ROTATIONS: readonly Rotation[] = [45, 135, 225, 315]
+  const pinsOfAll = (doc: Schematic) => pinsOf(doc.objects).map((p) => ({ key: p.key, at: p.at, socket: p.socket }))
+
+  it("a drop never joins two nets of the fixed parts, never breaks one but through the part, leaves no wire under a body, keeps the normal form, and cuts the part in wherever both its pins land on one side", () => {
+    const found: string[] = []
+    const tally = { drops: 0, cut: 0, moved: 0 }
+    const before = diamond()
+    const fixed = pinsOfAll(before)
+    const beforeGroups = diagonalPartition(before.wires, fixed)
+    const groupBefore = (key: string) => beforeGroups.find((g) => g.includes(key)) ?? [key]
+    for (let seed = 1; seed <= 150 * SEEDS; seed++) {
+      const rng = random(seed * 7919 + 17)
+      const def = rng.pick(diagonalDefs)
+      const rotation = rng.pick(ROTATIONS)
+      const mirror = rng.chance(0.5)
+      const [a, b] = rng.pick(sides)
+      const step = { x: Math.sign(b.x - a.x) * GRID, y: Math.sign(b.y - a.y) * GRID }
+      const k = rng.int(0, 8)
+      const target = { x: a.x + step.x * k + rng.int(-1, 1) * (rng.chance(0.6) ? 0 : GRID), y: a.y + step.y * k + rng.int(-1, 1) * (rng.chance(0.6) ? 0 : GRID) }
+      const origin = objectPins({ id: "X", def: def.id, x: 0, y: 0, rotation, mirror }, GRID)
+      const lead = origin[rng.int(0, origin.length - 1)].point
+      const part: PlacedObject = { id: "X3", def: def.id, x: target.x - lead.x + 40 * GRID, y: target.y - lead.y + 40 * GRID, rotation, mirror, props: { ref: "X3" } }
+      const doc = inNormalForm({ ...before, objects: [...before.objects, part] })
+      const where = `seed ${seed}: ${def.id} ${rotation}°${mirror ? "m" : ""} pin on (${target.x / GRID}, ${target.y / GRID})`
+      try {
+        const landed = new PartDrag(doc, wiringOf(new WireGraph(), doc), { objects: new Set(["X3"]) }).landed(-40 * GRID, -40 * GRID)
+        tally.drops++
+        const after = landed.doc
+        const pins = pinsOfAll(after)
+        const [p, q] = pins.filter((pin) => pin.key.startsWith("X3:"))
+        const groups = diagonalPartition(after.wires, pins)
+        const fixedOf = (g: readonly string[]) => g.filter((key) => !key.startsWith("X3:"))
+        for (const g of groups) {
+          const own = fixedOf(g)
+          if (own.some((key) => !groupBefore(own[0]).includes(key))) found.push(`${where}: joined ${own.join(",")}`)
+        }
+        const contracted = diagonalPartition([...after.wires, { a: p.at, b: q.at }], pins)
+        for (const g of beforeGroups) if (!contracted.some((h) => g.every((key) => h.includes(key)))) found.push(`${where}: broke ${g.join(",")}`)
+        const nf = diagonalNormalFormViolations(after.wires, pins)
+        if (nf.length) found.push(`${where}: normal form ${nf.slice(0, 2).join("; ")}`)
+        const through = checked(after).filter((f) => f.kind === "wire-through-body")
+        if (through.length) found.push(`${where}: a wire through a body at (${landed.at.x / GRID}, ${landed.at.y / GRID})`)
+        const asked = landed.at.x === -40 * GRID && landed.at.y === -40 * GRID
+        if (!asked) tally.moved++
+        const onOneSide = (u: Point, v: Point) => sides.some(([s, t]) => exactlyOn({ a: s, b: t }, u) && exactlyOn({ a: s, b: t }, v))
+        const [u, v] = objectPins({ ...part, x: part.x - 40 * GRID, y: part.y - 40 * GRID }, GRID).map((pin) => pin.point)
+        const scene = { objects: doc.objects, routes: [], grid: GRID }
+        const roomy = !placementCheck(scene, [part])(-40 * GRID, -40 * GRID) && !contactCheck(scene, [part])(-40 * GRID, -40 * GRID)
+        if (onOneSide(u, v) && roomy && !asked) found.push(`${where}: both pins on one side with room for the body, but moved to (${landed.at.x / GRID}, ${landed.at.y / GRID})`)
+        if (onOneSide(p.at, q.at)) {
+          tally.cut++
+          if (groups.some((g) => g.includes(p.key) && g.includes(q.key))) found.push(`${where}: landed with both pins on one side, not cut in`)
+        }
+      } catch (e) {
+        found.push(`${where}: threw ${(e as Error).message}`)
+      }
+    }
+    expect.soft(tally.cut, "drops that land along a side").toBeGreaterThan(20)
+    expect.soft(tally.moved, "drops that do not fit").toBeGreaterThan(20)
+    expect.soft(found, "every drop explained").toEqual([])
   }, 600_000)
 })

@@ -138,6 +138,14 @@ export function segmentsOnLine(wires: readonly WireSegment[], line: number, lo: 
   return segmentsFrom(wires, nearbySheet(wires), line, lo, hi)
 }
 
+export const segmentsCollinear = (wires: readonly WireSegment[], span: { a: Point; b: Point }): readonly WireSegment[] => collinearFrom(wires, nearbySheet(wires), span)
+
+export function segmentsEndingAt(wires: readonly WireSegment[], p: Point): WireSegment[] {
+  const known = nearbySheet(wires)
+  const passing = [...segmentsFrom(wires, known, rowCode(p.y), p.x, p.x), ...segmentsFrom(wires, known, columnCode(p.x), p.y, p.y), ...slantsThroughFrom(wires, known, p)]
+  return [...new Set(passing)].filter((s) => samePoint(s.a, p) || samePoint(s.b, p))
+}
+
 function segmentsFrom(wires: readonly WireSegment[], known: ReturnType<typeof nearbySheet>, line: number, lo: number, hi: number): readonly WireSegment[] {
   if (known && !known.steps.length) return known.sheet.along(line, lo, hi)
   if (!known) return wires.filter((s) => lineCodeOf(s) === line && Math.min(s.a.x === s.b.x ? s.a.y : s.a.x, s.a.x === s.b.x ? s.b.y : s.b.x) <= hi && Math.max(s.a.x === s.b.x ? s.a.y : s.a.x, s.a.x === s.b.x ? s.b.y : s.b.x) >= lo)
@@ -149,7 +157,7 @@ function segmentsFrom(wires: readonly WireSegment[], known: ReturnType<typeof ne
   return [...out]
 }
 
-function collinearFrom(wires: readonly WireSegment[], known: ReturnType<typeof nearbySheet>, s: WireSegment): readonly WireSegment[] {
+function collinearFrom(wires: readonly WireSegment[], known: ReturnType<typeof nearbySheet>, s: { a: Point; b: Point }): readonly WireSegment[] {
   if (!slants(s)) {
     const along = s.a.y === s.b.y ? "x" : "y"
     return segmentsFrom(wires, known, lineCodeOf(s), Math.min(s.a[along], s.b[along]), Math.max(s.a[along], s.b[along]))
