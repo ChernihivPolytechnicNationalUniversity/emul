@@ -475,7 +475,22 @@ export function pinOnWireCheck(scene: PlacementScene, moving: readonly PlacedObj
 const NEARBY_MARGIN_CELLS = 6
 
 function within(area: Rect, objects: readonly PlacedObject[], routes: readonly RoutedWire[], grid: number): { objects: readonly PlacedObject[]; routes: readonly RoutedWire[] } {
-  return { objects: objects.filter((o) => intersects(objectRect(o, grid), area)), routes: routes.filter((r) => intersects(routeBox(r), area)) }
+  const right = area.x + area.w
+  const bottom = area.y + area.h
+  const meets = ({ pts }: RoutedWire) => {
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (const p of pts) {
+      if (p.x < minX) minX = p.x
+      if (p.x > maxX) maxX = p.x
+      if (p.y < minY) minY = p.y
+      if (p.y > maxY) maxY = p.y
+    }
+    return minX <= right && maxX >= area.x && minY <= bottom && maxY >= area.y
+  }
+  return { objects: objects.filter((o) => intersects(objectRect(o, grid), area)), routes: routes.filter(meets) }
 }
 
 export function turnLanding(objects: readonly PlacedObject[], routes: readonly RoutedWire[], before: readonly PlacedObject[], after: readonly PlacedObject[], grid: number, unclean?: Refuse): Point | null {
