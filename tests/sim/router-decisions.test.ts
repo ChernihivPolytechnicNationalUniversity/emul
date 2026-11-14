@@ -301,3 +301,42 @@ describe("a wire drawn out of a header's inner socket slips past the outer socke
     expect.soft([preview.refused, preview.routed], "a clean L as drawn").toEqual([null, false])
   })
 })
+
+describe("an inner socket whose row is closed past a free outer socket is still reached, by the half-cell slip (the user, 2026-11-14: D32 behind D37 with D33's wire running along the row)", () => {
+  const existing = [at(23, 39), at(23, 38.5), at(26, 38.5), at(26, 38), at(30, 38)]
+  const wires: WireSegment[] = existing.slice(1).map((b, i) => ({ id: `w${i}`, a: existing[i], b }))
+  const doc = docOf([board("nucleo-f429zi")], wires)
+  const wiring = wiringOf(new WireGraph(), doc)
+  const drawn = () => {
+    let drawing = startDrawing(wiring, drawEndAt(wiring, at(30, 36))) as Drawing
+    for (const p of [at(30, 37), at(30, 38), at(27, 38), at(23, 38)]) drawing = pointerAt(drawing, p)
+    return drawing
+  }
+  const runsAlong = (points: readonly Point[]) =>
+    points.slice(1).some((b, i) => wires.some((w) => segmentsMeet({ a: points[i], b }, w) && (points[i].x === b.x ? w.a.x === w.b.x && w.a.x === b.x : w.a.y === w.b.y && w.a.y === b.y)))
+
+  it("guard: D32 is the inner socket (23, 38) behind D37 (24, 38), and the wire runs from D33 (23, 39)", () => {
+    const pins = objectPins(board("nucleo-f429zi"), GRID)
+    const cell = (label: string) => cellsOf([pins.find((p) => p.pin.label === label)!.point])[0]
+    expect.soft([cell("D32"), cell("D37"), cell("D33")]).toEqual([[23, 38], [24, 38], [23, 39]])
+  })
+
+  it("from the field at (30, 36) to D32 in 90°: routed, not refused, from the field point to D32, nothing along D33's wire, and the click lays what is shown", () => {
+    const preview = previewOf(doc, wiring, drawn(), drawEndAt(wiring, at(23, 38)))
+    expect.soft(preview.refused, "not refused").toBeNull()
+    expect.soft(preview.routed, "routed round the closed row").toBe(true)
+    expect.soft(cellsOf([preview.points[0], preview.points.at(-1)!]), "from the field point to D32").toEqual([[30, 36], [23, 38]])
+    expect.soft(runsAlong(preview.points), `nothing along D33's wire: ${JSON.stringify(cellsOf(preview.points))}`).toBe(false)
+    const laid = drawnTo(doc, wiring, drawn(), drawEndAt(wiring, at(23, 38)))
+    expect.soft(isRefusal(laid) ? laid.refused : "laid", "the click lays it").toBe("laid")
+  })
+
+  it("the same row with nothing past D37 keeps the straight way in along the row", () => {
+    const bare = docOf([board("nucleo-f429zi")])
+    const bareWiring = wiringOf(new WireGraph(), bare)
+    let drawing = startDrawing(bareWiring, drawEndAt(bareWiring, at(30, 36))) as Drawing
+    for (const p of [at(30, 37), at(30, 38), at(27, 38), at(23, 38)]) drawing = pointerAt(drawing, p)
+    const preview = previewOf(bare, bareWiring, drawing, drawEndAt(bareWiring, at(23, 38)))
+    expect.soft([preview.refused, cellsOf(preview.points)], "the plain L along row 38").toEqual([null, [[30, 36], [30, 38], [23, 38]]])
+  })
+})
