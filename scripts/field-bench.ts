@@ -294,14 +294,37 @@ async function measure(page: Page, run: () => Promise<void>): Promise<Phase> {
   return summarise(taken.frames, taken.longTasks, wall)
 }
 
-async function sweep(page: Page, origin: { x: number; y: number }) {
+type Heading = { x: 1 | -1; y: 1 | -1 }
+
+const HEADINGS: readonly Heading[] = [
+  { x: 1, y: 1 },
+  { x: -1, y: -1 },
+  { x: 1, y: -1 },
+  { x: -1, y: 1 },
+]
+
+async function sweep(page: Page, origin: { x: number; y: number }, heading: Heading = HEADINGS[0]) {
   await page.mouse.move(origin.x, origin.y)
   await page.mouse.down()
   for (let step = 1; step <= DRAG_STEPS; step++) {
-    await page.mouse.move(origin.x + step * STEP_PITCH.x, origin.y + step * STEP_PITCH.y)
+    await page.mouse.move(origin.x + step * STEP_PITCH.x * heading.x, origin.y + step * STEP_PITCH.y * heading.y)
     await page.waitForTimeout(STEP_MS)
   }
   await page.mouse.up()
+}
+
+async function cleanHeading(page: Page, origin: { x: number; y: number }): Promise<Heading> {
+  for (const heading of HEADINGS) {
+    const before = await componentOrigins(page)
+    await sweep(page, origin, heading)
+    await page.waitForTimeout(300)
+    const landed = Math.abs((await componentOrigins(page)) - before) > 1
+    if (!landed) continue
+    await page.keyboard.press("Control+z")
+    await page.waitForTimeout(400)
+    return heading
+  }
+  return HEADINGS[0]
 }
 
 async function panWithSpaceHeld(page: Page) {
@@ -559,9 +582,10 @@ async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChe
     const target = await largestComponentInView(page)
     if (!target) throw new Error(`no component sits inside the viewport at ${Math.round(zoom * 100)}% zoom`)
 
+    const heading = await cleanHeading(page, target)
     await instrument(page)
     const settled = await componentOrigins(page)
-    const drag = await measure(page, () => sweep(page, target))
+    const drag = await measure(page, () => sweep(page, target, heading))
     const moved = Math.abs((await componentOrigins(page)) - settled) > 1
     console.log(phaseLine("drag", drag))
     await page.keyboard.press("Escape")
