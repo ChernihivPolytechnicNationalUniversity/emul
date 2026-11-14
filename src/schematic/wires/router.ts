@@ -30,6 +30,15 @@ const DIRS: readonly Point[] = [
   { x: 0, y: -1 },
 ]
 
+const FORM_SIGNS: readonly Point[] = [
+  { x: 0, y: 0 },
+  { x: 1, y: 1 },
+  { x: 1, y: -1 },
+  { x: -1, y: 1 },
+  { x: -1, y: -1 },
+]
+const LEAVING_FORMS = FORM_SIGNS.length
+
 const START = 4
 const HEADINGS = 5
 const BEND = 2
@@ -99,6 +108,14 @@ class Heap {
     return this.keys[0]
   }
 
+  get cheapestCost() {
+    return this.costs[0]
+  }
+
+  forEach(visit: (key: number, state: number, cost: number) => void) {
+    for (let at = 0; at < this.keys.length; at++) visit(this.keys[at], this.states[at], this.costs[at])
+  }
+
   push(key: number, state: number, cost: number) {
     let at = this.keys.length
     this.keys.push(key)
@@ -118,7 +135,12 @@ class Heap {
   }
 
   pop(): { state: number; cost: number } {
-    const top = { state: this.states[0], cost: this.costs[0] }
+    const cost = this.costs[0]
+    return { state: this.popState(), cost }
+  }
+
+  popState(): number {
+    const top = this.states[0]
     const key = this.keys.pop()!
     const state = this.states.pop()!
     const cost = this.costs.pop()!
@@ -213,15 +235,31 @@ class Field {
   }
 
   pointOf(cell: number): Point {
-    return { x: this.x0 + (cell % this.cols) * GRID, y: this.y0 + Math.floor(cell / this.cols) * GRID }
+    return { x: this.xOf(cell), y: this.yOf(cell) }
+  }
+
+  xOf(cell: number): number {
+    return this.x0 + (cell % this.cols) * GRID
+  }
+
+  yOf(cell: number): number {
+    return this.y0 + Math.floor(cell / this.cols) * GRID
+  }
+
+  offer(into: Float64Array, slot: number, cell: number, step: number, cost: number, sign: number) {
+    const i = (cell % this.cols) + DIRS[step].x
+    const j = Math.floor(cell / this.cols) + DIRS[step].y
+    for (let form = 0; form < LEAVING_FORMS; form++) {
+      const at = slot * LEAVING_FORMS + form
+      into[at] = Math.min(into[at], cost + sign * WHOLE_STEP * (FORM_SIGNS[form].x * i + FORM_SIGNS[form].y * j))
+    }
   }
 
   neighbour(cell: number, step: number): number {
-    const i = cell % this.cols
-    const j = (cell - i) / this.cols
-    const ni = i + DIRS[step].x
-    const nj = j + DIRS[step].y
-    return ni >= 0 && nj >= 0 && ni < this.cols && nj < this.rows ? nj * this.cols + ni : -1
+    if (step === 0) return (cell % this.cols) + 1 < this.cols ? cell + 1 : -1
+    if (step === 1) return cell + this.cols < this.cols * this.rows ? cell + this.cols : -1
+    if (step === 2) return cell % this.cols > 0 ? cell - 1 : -1
+    return cell >= this.cols ? cell - this.cols : -1
   }
 
   private columnRange(lo: number, hi: number, strict: boolean): [number, number] {
@@ -336,15 +374,17 @@ class Field {
   }
 
   body(body: Body) {
-    const box = body.box
-    const [c0, c1] = this.columnRange(box.x - GRID, box.x + box.w + GRID, false)
-    const [r0, r1] = this.rowRange(box.y - GRID, box.y + box.h + GRID, false)
-    for (let j = r0; j <= r1; j++)
-      for (let i = c0; i <= c1; i++) {
-        const p = { x: this.x0 + i * GRID, y: this.y0 + j * GRID }
-        if (i + 1 < this.cols && closedBy(body, p, { x: p.x + GRID, y: p.y })) this.hBlock[j * this.cols + i] = 1
-        if (j + 1 < this.rows && closedBy(body, p, { x: p.x, y: p.y + GRID })) this.vBlock[j * this.cols + i] = 1
-      }
+    const { across, down } = edgesClosedBy(body)
+    for (let k = 0; k < across.length; k += 2) {
+      const i = (across[k] - this.x0) / GRID
+      const j = (across[k + 1] - this.y0) / GRID
+      if (i >= 0 && j >= 0 && i + 1 < this.cols && j < this.rows) this.hBlock[j * this.cols + i] = 1
+    }
+    for (let k = 0; k < down.length; k += 2) {
+      const i = (down[k] - this.x0) / GRID
+      const j = (down[k + 1] - this.y0) / GRID
+      if (i >= 0 && j >= 0 && i < this.cols && j + 1 < this.rows) this.vBlock[j * this.cols + i] = 1
+    }
   }
 
   lead([pin, inner]: readonly [Point, Point]) {
@@ -396,6 +436,27 @@ function alongOutline(body: Body, a: Point, b: Point): boolean {
 }
 
 const closedBy = (body: Body, a: Point, b: Point) => runsThrough({ a, b }, body) || alongOutline(body, a, b)
+
+type ClosedEdges = { readonly across: readonly number[]; readonly down: readonly number[] }
+
+const closedEdges = new WeakMap<Body, ClosedEdges>()
+
+function edgesClosedBy(body: Body): ClosedEdges {
+  const known = closedEdges.get(body)
+  if (known) return known
+  const box = body.box
+  const across: number[] = []
+  const down: number[] = []
+  for (let y = Math.ceil((box.y - GRID) / GRID) * GRID; y <= box.y + box.h + GRID; y += GRID)
+    for (let x = Math.ceil((box.x - GRID) / GRID) * GRID; x <= box.x + box.w + GRID; x += GRID) {
+      const p = { x, y }
+      if (closedBy(body, p, { x: x + GRID, y })) across.push(x, y)
+      if (closedBy(body, p, { x, y: y + GRID })) down.push(x, y)
+    }
+  const edges = { across, down }
+  closedEdges.set(body, edges)
+  return edges
+}
 
 function bodiesNear(wiring: Wiring, box: Box): Body[] {
   return bodiesOf(wiring.index.spatial.query(box).filter((o) => !getDef(o.def)?.pinsAreSockets))
@@ -541,13 +602,13 @@ function escapesFrom(context: Context, end: End): Escape[] {
   return found
 }
 
-type Search = { field: Field; g: Float64Array; best: number; overflow: boolean; startCell: number; targetCell: number; starts: readonly Slip[]; ends: readonly (Slip & { readonly cell: number })[] }
+type Search = { field: Field; g: Float64Array; heap: Heap; best: number; overflow: boolean; leaving: Float64Array; startCell: number; targetCell: number; starts: readonly Slip[]; ends: readonly (Slip & { readonly cell: number })[] }
 
 const PRIMARY_BEND = BEND * PRIMARY
 
 const slipCost = (s: SlipAt) => 2 * PRIMARY_BEND + s.crossings * CROSSING * PRIMARY + (2 * s.k + 2)
 
-function search(field: Field, from: End, to: End, startSlips: readonly SlipAt[], endSlips: readonly SlipAt[], startEscapes: readonly Escape[], endEscapes: readonly Escape[]): Search {
+function search(field: Field, from: End, to: End, startSlips: readonly SlipAt[], endSlips: readonly SlipAt[], startEscapes: readonly Escape[], endEscapes: readonly Escape[], smaller?: Search): Search {
   const states = field.cols * field.rows * HEADINGS
   const g = new Float64Array(states).fill(Infinity)
   const startCell = field.cellOf(from.at)
@@ -555,9 +616,9 @@ function search(field: Field, from: End, to: End, startSlips: readonly SlipAt[],
   const startOut = from.pin?.out ? dirIndex(from.pin.out) : -1
   const targetOut = to.pin?.out ? dirIndex(to.pin.out) : -1
   const goal = to.at
-  const lowerBends = (p: Point, heading: number) => {
-    const dx = goal.x - p.x
-    const dy = goal.y - p.y
+  const lowerBends = (x: number, y: number, heading: number) => {
+    const dx = goal.x - x
+    const dy = goal.y - y
     if (!dx && !dy) return 0
     if (heading === START) return dx && dy ? 1 : 0
     const d = DIRS[heading]
@@ -566,7 +627,7 @@ function search(field: Field, from: End, to: End, startSlips: readonly SlipAt[],
     if (!side) return ahead > 0 ? 0 : 2
     return ahead >= 0 ? 1 : 2
   }
-  const estimate = (p: Point, heading: number) => lowerBends(p, heading) * PRIMARY_BEND + ((Math.abs(goal.x - p.x) + Math.abs(goal.y - p.y)) / GRID) * WHOLE_STEP
+  const estimate = (x: number, y: number, heading: number) => lowerBends(x, y, heading) * PRIMARY_BEND + ((Math.abs(goal.x - x) + Math.abs(goal.y - y)) / GRID) * WHOLE_STEP
   const starts: Slip[] = [
     ...startSlips.map((s) => ({ landing: s.landing, heading: dirIndex({ x: Math.sign(s.landing.x - s.back.x), y: Math.sign(s.landing.y - s.back.y) }), points: [s.half, s.back], cost: slipCost(s) })),
     ...startEscapes.map((e) => ({ landing: e.landing, heading: e.heading, points: e.corners, cost: e.cost })),
@@ -584,22 +645,26 @@ function search(field: Field, from: End, to: End, startSlips: readonly SlipAt[],
       return [{ landing: e.landing, heading: dirIndex({ x: Math.sign(next.x - e.landing.x), y: Math.sign(next.y - e.landing.y) }), points, cost: e.cost, cell }]
     }),
   ]
-  const result: Search = { field, g, best: Infinity, overflow: false, startCell, targetCell, starts, ends }
-  if ((startCell < 0 && !starts.length) || (targetCell < 0 && !ends.length)) return result
   const heap = new Heap()
-  const open = (state: number, cost: number, p: Point, heading: number) => {
+  const result: Search = { field, g, heap, best: smaller?.best ?? Infinity, overflow: false, leaving: new Float64Array(4 * LEAVING_FORMS).fill(Infinity), startCell, targetCell, starts, ends }
+  if ((startCell < 0 && !starts.length) || (targetCell < 0 && !ends.length)) return result
+  const open = (state: number, cost: number, x: number, y: number, heading: number) => {
     if (cost >= g[state]) return
     g[state] = cost
-    heap.push(cost + estimate(p, heading), state, cost)
+    heap.push(cost + estimate(x, y, heading), state, cost)
   }
-  if (startCell >= 0) open(startCell * HEADINGS + START, 0, from.at, START)
-  for (const s of starts) {
-    const cell = field.cellOf(s.landing)
-    if (cell >= 0) open(cell * HEADINGS + s.heading, s.cost, s.landing, s.heading)
+  if (smaller) carryOver(smaller, result, estimate)
+  else {
+    if (startCell >= 0) open(startCell * HEADINGS + START, 0, from.at.x, from.at.y, START)
+    for (const s of starts) {
+      const cell = field.cellOf(s.landing)
+      if (cell >= 0) open(cell * HEADINGS + s.heading, s.cost, s.landing.x, s.landing.y, s.heading)
+    }
   }
   const stepCost = stepCosts(field, startCell, targetCell, startOut, targetOut)
   while (heap.size && heap.key <= result.best) {
-    const { state, cost } = heap.pop()
+    const cost = heap.cheapestCost
+    const state = heap.popState()
     if (cost > g[state]) continue
     const cell = Math.floor(state / HEADINGS)
     const heading = state % HEADINGS
@@ -611,21 +676,120 @@ function search(field: Field, from: End, to: End, startSlips: readonly SlipAt[],
       const extra = endSlipCost(heading, end)
       if (extra >= 0) result.best = Math.min(result.best, cost + extra)
     }
-    const here = field.pointOf(cell)
+    const x = field.xOf(cell)
+    const y = field.yOf(cell)
     for (let step = 0; step < 4; step++) {
       const w = stepCost(cell, heading, step)
       if (w === BLOCKED) continue
       if (w === OUTSIDE) {
         const turned = heading !== START && step !== heading
-        const out = plus(here, DIRS[step], GRID)
-        if (cost + (turned ? PRIMARY_BEND : 0) + WHOLE_STEP + estimate(out, step) <= result.best) result.overflow = true
+        const left = cost + (turned ? PRIMARY_BEND : 0) + WHOLE_STEP
+        field.offer(result.leaving, step, cell, step, left, 1)
+        if (left + estimate(x + DIRS[step].x * GRID, y + DIRS[step].y * GRID, step) <= result.best) result.overflow = true
         continue
       }
-      const next = field.neighbour(cell, step)
-      open(next * HEADINGS + step, cost + w, field.pointOf(next), step)
+      open(field.neighbour(cell, step) * HEADINGS + step, cost + w, x + DIRS[step].x * GRID, y + DIRS[step].y * GRID, step)
     }
   }
   return result
+}
+
+function carryOver(smaller: Search, larger: Search, estimate: (x: number, y: number, heading: number) => number) {
+  const from = smaller.field
+  const to = larger.field
+  const di = (from.x0 - to.x0) / GRID
+  const dj = (from.y0 - to.y0) / GRID
+  const moved = (state: number) => {
+    const cell = Math.floor(state / HEADINGS)
+    const i = cell % from.cols
+    const j = (cell - i) / from.cols
+    return ((j + dj) * to.cols + i + di) * HEADINGS + (state % HEADINGS)
+  }
+  for (let state = 0; state < smaller.g.length; state++) if (Number.isFinite(smaller.g[state])) larger.g[moved(state)] = smaller.g[state]
+  smaller.heap.forEach((key, state, cost) => larger.heap.push(key, moved(state), cost))
+  for (let cell = 0; cell < from.cols * from.rows; cell++) {
+    const i = cell % from.cols
+    const j = (cell - i) / from.cols
+    if (i > 0 && j > 0 && i < from.cols - 1 && j < from.rows - 1) continue
+    for (let h = 0; h < HEADINGS; h++) {
+      const cost = smaller.g[cell * HEADINGS + h]
+      if (!Number.isFinite(cost)) continue
+      const state = moved(cell * HEADINGS + h)
+      const at = Math.floor(state / HEADINGS)
+      larger.heap.push(cost + estimate(to.xOf(at), to.yOf(at), h), state, cost)
+    }
+  }
+}
+
+const bendsBetween = (outward: number, inward: number) => (inward === outward ? 4 : inward === opposite(outward) ? 2 : 3)
+
+function cheapestLeaving(found: Search): number {
+  let cheapest = Infinity
+  for (let step = 0; step < 4; step++) cheapest = Math.min(cheapest, found.leaving[step * LEAVING_FORMS])
+  return cheapest
+}
+
+function enteringCost(field: Field, startCell: number, targetCell: number, targetOut: number, cell: number, heading: number): number {
+  if (cell === startCell) return BLOCKED
+  if (cell === targetCell) return targetOut === heading ? BLOCKED : WHOLE_STEP
+  const horizontal = heading % 2 === 0
+  const flags = field.node[cell]
+  if (flags & STOP || flags & (horizontal ? NO_H : NO_V)) return BLOCKED
+  return (flags & (horizontal ? THROUGH_V : THROUGH_H) ? CROSSING * PRIMARY : 0) + WHOLE_STEP
+}
+
+function returning(from: End, to: End, found: Search, budget: number): Float64Array {
+  const { field, startCell, targetCell, ends } = found
+  const startOut = from.pin?.out ? dirIndex(from.pin.out) : -1
+  const targetOut = to.pin?.out ? dirIndex(to.pin.out) : -1
+  const stepCost = stepCosts(field, startCell, targetCell, startOut, targetOut)
+  const entering = new Float64Array(4 * LEAVING_FORMS).fill(Infinity)
+  const rest = new Float64Array(field.cols * field.rows * HEADINGS).fill(Infinity)
+  const heap = new Heap()
+  const open = (state: number, cost: number) => {
+    if (cost > budget || cost >= rest[state]) return
+    rest[state] = cost
+    heap.push(cost, state, cost)
+  }
+  if (targetCell >= 0) for (let h = 0; h < START; h++) open(targetCell * HEADINGS + h, 0)
+  for (const end of ends)
+    for (let h = 0; h < START; h++) {
+      const extra = endSlipCost(h, end)
+      if (extra >= 0) open(end.cell * HEADINGS + h, extra)
+    }
+  while (heap.size) {
+    const { state, cost } = heap.pop()
+    if (cost > rest[state]) continue
+    const heading = state % HEADINGS
+    if (heading === START) continue
+    const cell = Math.floor(state / HEADINGS)
+    const before = field.neighbour(cell, opposite(heading))
+    if (before < 0) {
+      const entry = enteringCost(field, startCell, targetCell, targetOut, cell, heading)
+      if (entry >= 0) field.offer(entering, heading, cell, opposite(heading), cost + entry, -1)
+      continue
+    }
+    if (before === targetCell) continue
+    for (let h = 0; h < HEADINGS; h++) {
+      if (h === START && before !== startCell) continue
+      const w = stepCost(before, h, heading)
+      if (w >= 0) open(before * HEADINGS + h, cost + w)
+    }
+  }
+  return entering
+}
+
+function leavesAndReturnsWithin(from: End, to: End, found: Search): boolean {
+  const cheapest = cheapestLeaving(found)
+  if (!Number.isFinite(found.best) || !Number.isFinite(cheapest)) return Number.isFinite(cheapest)
+  const entering = returning(from, to, found, found.best - cheapest - 2 * PRIMARY_BEND)
+  for (let outward = 0; outward < 4; outward++)
+    for (let inward = 0; inward < 4; inward++) {
+      let apart = -Infinity
+      for (let form = 0; form < LEAVING_FORMS; form++) apart = Math.max(apart, found.leaving[outward * LEAVING_FORMS + form] + entering[inward * LEAVING_FORMS + form])
+      if (bendsBetween(outward, inward) * PRIMARY_BEND + apart <= found.best) return true
+    }
+  return false
 }
 
 function endSlipCost(heading: number, end: { readonly heading: number; readonly cost: number }): number {
@@ -836,13 +1000,19 @@ export function routeAround(wiring: Wiring, from: RouteEnd, to: RouteEnd, around
   if ((!isWhole(a.at) && !startEscapes.length) || (!isWhole(b.at) && !endEscapes.length)) return null
   const reach = [a.at, b.at, ...startSlips.flatMap((s) => [s.landing, s.back]), ...endSlips.flatMap((s) => [s.landing, s.back]), ...startEscapes.map((e) => e.landing), ...endEscapes.map((e) => e.landing)]
   let previous = Infinity
+  let smaller: Search | undefined
+  let fromTheFarEnd: Search | undefined
   for (let pad = FIRST_PAD_CELLS; ; pad = Math.min(2 * pad, LAST_PAD_CELLS)) {
     const field = fieldOf(context, windowAround(reach, pad), [a, b])
-    const found = search(field, a, b, startSlips, endSlips, startEscapes, endEscapes)
+    const found = search(field, a, b, startSlips, endSlips, startEscapes, endEscapes, smaller)
+    smaller = found
     const settled = !!around.settle && Number.isFinite(found.best) && found.best === previous
-    if (!found.overflow || pad >= LAST_PAD_CELLS || settled) return chosen(a, b, found)
+    if (!found.overflow || pad >= LAST_PAD_CELLS || settled || !leavesAndReturnsWithin(a, b, found)) return chosen(a, b, found)
     previous = found.best
-    if (!Number.isFinite(found.best) && !search(field, b, a, endSlips, startSlips, endEscapes, startEscapes).overflow) return null
+    if (Number.isFinite(found.best)) continue
+    fromTheFarEnd = search(field, b, a, endSlips, startSlips, endEscapes, startEscapes, fromTheFarEnd)
+    const farEndLeaves = Number.isFinite(fromTheFarEnd.best) ? search(field, b, a, endSlips, startSlips, endEscapes, startEscapes).overflow : fromTheFarEnd.overflow
+    if (!farEndLeaves) return null
   }
 }
 

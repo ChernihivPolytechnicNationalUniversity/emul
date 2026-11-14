@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { bodiesOf } from "@/schematic/body-crossing"
 import { checked } from "@/schematic/checker"
+import { examples } from "@/schematic/examples"
 import { GRID, type Point } from "@/schematic/geometry"
 import { wirePins, wiresAsSegments } from "@/schematic/migrate-wires"
 import { placementCheck } from "@/schematic/placement"
@@ -282,6 +283,48 @@ describe("B4, new scenes: a target nothing can enter is refused at once, and eve
     expect.soft(free.route, "guard: R3 reached").toBe(true)
     expect.soft(sealed.route, "R2:1 cannot be entered").toBe(false)
     expect.soft(sealed.lines <= 2 * free.lines, `decided at once (${sealed.lines} lines against ${free.lines})`).toBe(true)
+  })
+  const firstAnswers = (doc: Schematic, from: string, to: readonly string[]) => {
+    const wiring = wiringFor(doc)
+    return to.map((key) => {
+      const started = performance.now()
+      routeBetween(doc, refOf(from), refOf(key), wiring)
+      return { key, ms: performance.now() - started }
+    })
+  }
+  const spread = (times: readonly number[]) => {
+    const sorted = [...times].sort((a, b) => a - b)
+    return { median: sorted[sorted.length >> 1], max: sorted[sorted.length - 1] }
+  }
+  it("lab1-f746: from R2's free pin to every pin of the STM32, the first answer: median under 15 ms, none over 120 ms", () => {
+    const doc = examples.find((e) => e.id === "lab1-f746")!.build(GRID)
+    const from = wirePins(doc.objects).find((p) => p.at.x === c(-10) && p.at.y === c(38))
+    const chip = doc.objects.find((o) => o.def === "stm32f746ig")
+    expect.soft(from?.key.endsWith(":1"), "guard: R2's free pin at (-10, 38)").toBe(true)
+    expect.soft(chip, "guard: the STM32").toBeDefined()
+    if (!from || !chip) return
+    const answers = firstAnswers(doc, from.key, wirePins([chip]).map((p) => p.key))
+    const { median, max } = spread(answers.map((a) => a.ms))
+    expect.soft(answers.length, "guard: pins timed").toBeGreaterThan(140)
+    expect.soft(median, `median ${median.toFixed(1)} ms`).toBeLessThan(15)
+    expect.soft(answers.filter((a) => a.ms > 120).map((a) => `${a.key}: ${a.ms.toFixed(0)} ms`), `no stall (max ${max.toFixed(0)} ms)`).toEqual([])
+  })
+  it("lab1-f746, system-exam and open746-touch: from a free pin beside the drawing to every pin of the biggest part, no single answer takes over 120 ms", () => {
+    const slow: string[] = []
+    let timed = 0
+    for (const id of ["lab1-f746", "system-exam", "open746-touch"]) {
+      const built = examples.find((e) => e.id === id)!.build(GRID)
+      const big = [...built.objects].sort((a, b) => wirePins([b]).length - wirePins([a]).length)[0]
+      const xs = wirePins(built.objects).map((p) => p.at.x / GRID)
+      const ys = wirePins(built.objects).map((p) => p.at.y / GRID)
+      const doc = { ...built, objects: [...built.objects, resistor("RZ", Math.max(...xs) + 6, Math.min(...ys))] }
+      for (const a of firstAnswers(doc, "RZ:1", wirePins([big]).map((p) => p.key))) {
+        timed++
+        if (a.ms > 120) slow.push(`${id} RZ:1 → ${a.key}: ${a.ms.toFixed(0)} ms`)
+      }
+    }
+    expect.soft(timed, "guard: pins timed").toBeGreaterThan(50)
+    expect.soft(slow, "no stall").toEqual([])
   })
 })
 
