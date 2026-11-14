@@ -259,3 +259,45 @@ describe("a pin's own label no longer cuts a wire of that pin (the main session'
     expect.soft((html.match(/>\+</g) ?? []).length + (html.match(/>−</g) ?? []).length, "both labels still drawn").toBe(2)
   })
 })
+
+describe("a wire drawn out of a header's inner socket slips past the outer socket's wire on its own, the pointer still over the field (the user, 2026-11-14: «нажал на D23, веду его прямо и заворачиваю»)", () => {
+  const along = (points: readonly Point[], wire: WireSegment) =>
+    points.slice(1).some((b, i) => {
+      const a = points[i]
+      return a.y === b.y && a.y === wire.a.y && Math.max(Math.min(a.x, b.x), Math.min(wire.a.x, wire.b.x)) < Math.min(Math.max(a.x, b.x), Math.max(wire.a.x, wire.b.x))
+    })
+  const d10: WireSegment = { id: "d10", a: at(24, 20), b: at(34, 20) }
+  const doc = docOf([board("nucleo-f429zi")], [d10, { id: "down", a: at(34, 20), b: at(34, 26) }])
+  const wiring = wiringOf(new WireGraph(), doc)
+
+  it("from D23 along its row and up, as the user drew it: no refusal, nothing laid along D10's wire, ending where the pointer is", () => {
+    let drawing = startDrawing(wiring, drawEndAt(wiring, at(23, 20))) as Drawing
+    for (const p of [at(26, 20), at(31, 20), at(31, 18), at(31, 16)]) drawing = pointerAt(drawing, p)
+    const preview = previewOf(doc, wiring, drawing, drawEndAt(wiring, at(31, 16)))
+    expect.soft(preview.refused, "not refused as along another net's wire").toBeNull()
+    expect.soft(preview.routed, "routed round it").toBe(true)
+    expect.soft(along(preview.points, d10), `nothing along D10's wire: ${JSON.stringify(cellsOf(preview.points))}`).toBe(false)
+    expect.soft(cellsOf([preview.points[0], preview.points.at(-1)!]), "from D23 to the pointer").toEqual([[23, 20], [31, 16]])
+    const laid = drawnTo(doc, wiring, drawing, drawEndAt(wiring, at(31, 16)))
+    expect.soft(isRefusal(laid) ? laid.refused : "laid", "the click lays it").toBe("laid")
+  })
+
+  it("a click there places the corner on the route shown, at once: one click, no refusal (the user, 2026-11-14: «надо прям несколько раз нажать, чтобы вот эту ошибку обойти»)", () => {
+    let drawing = startDrawing(wiring, drawEndAt(wiring, at(23, 20))) as Drawing
+    for (const p of [at(26, 20), at(31, 20), at(31, 18), at(31, 16)]) drawing = pointerAt(drawing, p)
+    const shown = previewOf(doc, wiring, drawing, drawEndAt(wiring, at(31, 16)))
+    const cornered = withCorner(doc, wiring, drawing, at(31, 16))
+    expect.soft(isRefusal(cornered) ? cornered.refused : "placed", "the first click places it").toBe("placed")
+    if (isRefusal(cornered)) return
+    expect.soft(cellsOf([cornered.from.at, ...cornered.corners]), "the corners are the route the preview showed").toEqual(cellsOf(shown.points))
+    const next = previewOf(doc, wiring, pointerAt(cornered, at(36, 16)), drawEndAt(wiring, at(36, 16)))
+    expect.soft(next.refused, "and the drawing goes on from there").toBeNull()
+  })
+
+  it("a plain L that is clean is drawn as it is, not routed", () => {
+    let drawing = startDrawing(wiring, drawEndAt(wiring, at(40, 10))) as Drawing
+    drawing = pointerAt(drawing, at(44, 14))
+    const preview = previewOf(doc, wiring, drawing, drawEndAt(wiring, at(44, 14)))
+    expect.soft([preview.refused, preview.routed], "a clean L as drawn").toEqual([null, false])
+  })
+})

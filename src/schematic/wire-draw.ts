@@ -325,13 +325,14 @@ function pointsBehind(drawn: readonly Point[]): Point[] {
   return behind
 }
 
-function completion(doc: Schematic, wiring: Wiring, d: Drawing, start: RouteEnd, to: string, ignore: ReadonlySet<string>): readonly Point[] | null {
+function completion(doc: Schematic, wiring: Wiring, d: Drawing, start: RouteEnd, to: RouteEnd, ignore: ReadonlySet<string>): readonly Point[] | null {
   let known = completions.get(doc)
   if (!known) completions.set(doc, (known = new Map()))
   const drawn = [startOf(d), ...d.corners]
-  const key = `${drawn.map((p) => `${p.x},${p.y}`).join(" ")}>${to}|${[...ignore].join(" ")}`
+  const target = "pin" in to ? `${to.pin.object}:${to.pin.pin}` : `@${to.at.x},${to.at.y}`
+  const key = `${drawn.map((p) => `${p.x},${p.y}`).join(" ")}>${target}|${[...ignore].join(" ")}`
   if (!known.has(key)) {
-    const route = routeAround(wiring, start, { pin: keyOf(to) }, { ignore, stops: pointsBehind(drawn) })
+    const route = routeAround(wiring, start, to, { ignore, stops: pointsBehind(drawn) })
     known.set(key, route && withoutRepeats([...drawn.slice(0, -1), ...route]))
   }
   return known.get(key)!
@@ -376,8 +377,10 @@ function planOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: DrawEnd, ne
   let refused = refusalFor(points)
   let routed = false
   const start = completionStart(d)
-  if (modeOf(d) === "90" && start && end.kind === "pin" && (refused || crossesABody(doc, points, near))) {
-    const route = completion(doc, wiring, d, start, end.key, ignore)
+  const fromASocket = d.from.kind === "pin" && wiring.sheet.pinsAt(d.from.at).some((pin) => pin.socket)
+  const routeEnd: RouteEnd | null = end.kind === "pin" ? { pin: keyOf(end.key) } : end.kind === "field" && fromASocket ? { at: end.at } : null
+  if (modeOf(d) === "90" && start && routeEnd && (refused || crossesABody(doc, points, near))) {
+    const route = completion(doc, wiring, d, start, routeEnd, ignore)
     if (route) {
       points = route
       refused = refusalFor(points)
@@ -404,9 +407,12 @@ export function previewOf(doc: Schematic, wiring: Wiring, d: Drawing, target?: D
 }
 
 export function withCorner(doc: Schematic, wiring: Wiring, d: Drawing, at: Point): Drawing | DrawRefusal {
-  const points = pointsTo(d, at)
-  const refused = refusalOf(wiring, d.from, { kind: "field", at }, points) ?? throughABody(doc, points)
-  if (refused) return refused
+  const plain = pointsTo(d, at)
+  const refusedPlain = refusalOf(wiring, d.from, { kind: "field", at }, plain) ?? throughABody(doc, plain)
+  const plan = refusedPlain ? planOf(doc, wiring, d, { kind: "field", at }) : null
+  const routed = plan && plan.routed && !plan.refused && !plan.moved.length
+  if (refusedPlain && !routed) return refusedPlain
+  const points = routed ? plan.points : plain
   const corners = points.slice(1)
   if (corners.length === d.corners.length) return { ...d, cursor: at }
   const last = corners.at(-1)!
