@@ -277,7 +277,6 @@ export const nucleoBlink: Example = {
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
-    // D13 is CN7 pin 10 at (26,17); its stub runs 3 cells out to (29,17).
     const r = place("resistor", 32, 16, { value: "220 Ω", power: "0.25" })
     const led = place("led", 38, 16, { value: "red", imax: "20 mA" })
     const gnd = place("ground", 45, 18)
@@ -526,7 +525,6 @@ export const nucleoPwm: Example = {
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
-    // D6 is CN10 pin 4 (PE9) at (25,25), inner column; its stub runs 4 cells out to (29,25).
     const r = place("resistor", 34, 24, { value: "330 Ω", power: "0.25" })
     const led = place("led", 40, 24, { value: "green", imax: "20 mA" })
     const gnd = place("ground", 47, 30)
