@@ -2197,7 +2197,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
           <ScaleBar className="absolute right-4 bottom-14" scale={scale} grid={grid} />
           <ZoomControls className="absolute right-4 bottom-4" scale={scale} onZoomIn={zoomIn} onZoomOut={zoomOut} onReset={reset} />
-          {hover && <FieldReadout target={hover.target} x={hover.x} y={hover.y} objects={sch.doc.objects} runEnds={runEnds} sim={sim} />}
+          {hover && !pending && <FieldReadout target={hover.target} x={hover.x} y={hover.y} objects={sch.doc.objects} runEnds={runEnds} sim={sim} />}
         </div>
         {scopeOpen && (
           <Scope

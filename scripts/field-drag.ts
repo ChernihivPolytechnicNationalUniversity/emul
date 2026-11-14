@@ -1452,6 +1452,33 @@ const cellsOfPath = (d: string | null) => {
   return kept.map((m) => [Number(m[2]) / GRID, Number(m[3]) / GRID])
 }
 
+async function noReadoutWhileDrawing(page: Page) {
+  console.log("\na pin's readout shows on hover, not while a wire is drawn over the pin (the user, 2026-11-14)")
+  await openDoc(page, "readout-while-drawing", { objects: [{ id: "U1", def: "nucleo-f429zi", x: 0, y: 0, props: { ref: "U1" } }], wires: [], parts: {} })
+  await zoomTo(page, 0)
+  const f = await fieldFrame(page)
+  const pin = f.toScreen(cellPoint(23, 38))
+  const readouts = () => countOf(page, "[data-slot=field-readout]")
+  await page.mouse.move(pin.x, pin.y, { steps: 4 })
+  await page.waitForTimeout(500)
+  expect("hovered with nothing in hand, the pin shows its readout", await readouts(), 1)
+  await page.mouse.down()
+  const away = f.toScreen(cellPoint(23, 34))
+  await page.mouse.move(away.x, away.y, { steps: 8 })
+  await page.waitForTimeout(500)
+  expect("pressed on that pin and drawn away from it: no readout card left behind", [await countOf(page, "[data-slot^=pending-wire]") > 0, await readouts()], [true, 0])
+  await page.mouse.up()
+  await page.keyboard.press("Escape")
+  const start = f.toScreen(cellPoint(30, 36))
+  await page.mouse.move(start.x, start.y, { steps: 4 })
+  await page.mouse.dblclick(start.x, start.y)
+  await page.waitForTimeout(300)
+  await page.mouse.move(pin.x, pin.y, { steps: 8 })
+  await page.waitForTimeout(500)
+  expect("a wire being drawn over the same pin: no readout card in the way", [await countOf(page, "[data-slot^=pending-wire]") > 0, await readouts()], [true, 0])
+  await page.keyboard.press("Escape")
+}
+
 async function phaseSixChecks(page: Page) {
   console.log("\nthe router in the editor: the completion mid-gesture, the row taken after the fact, re-route with T and the menu (phase 6, design.md §6.1, §7, §13.9, §13.22)")
   const previewCells = () => page.evaluate(() => document.querySelector("[data-slot=pending-wire-route] path:not([mask])")?.getAttribute("d") ?? null).then(cellsOfPath)
@@ -1709,7 +1736,7 @@ try {
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
 const errors: string[] = []
-const everySection = [turnedBesideANeighbour, turnedClearOfWires, contactsFollowTheDrag, wiresFollowTheDrag, modifiersOnAWire, plateAfterDragBackAndForth, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, diagonalSplice, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, noFadeLeftAfterADrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench, phaseSixChecks]
+const everySection = [noReadoutWhileDrawing, turnedBesideANeighbour, turnedClearOfWires, contactsFollowTheDrag, wiresFollowTheDrag, modifiersOnAWire, plateAfterDragBackAndForth, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, diagonalSplice, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, noFadeLeftAfterADrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench, phaseSixChecks]
 const chosen = (process.env.SECTIONS ?? process.env.ONLY)?.split(",")
 const sections = chosen ? everySection.filter((section) => chosen.includes(section.name)) : everySection
 try {
