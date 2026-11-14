@@ -194,8 +194,9 @@ const componentOrigins = (page: Page) =>
     return sum
   })
 
-const largestComponentInView = (page: Page) =>
+const componentsInView = (page: Page) =>
   page.evaluate((margin) => {
+    const grabs: { x: number; y: number; width: number }[] = []
     const safe = { left: margin.left, right: innerWidth - margin.right, top: margin.top, bottom: innerHeight - margin.bottom }
     const candidates: { element: Element; box: DOMRect; area: number; overlap: { left: number; right: number; top: number; bottom: number } }[] = []
     for (const element of document.querySelectorAll("[data-slot=component]")) {
@@ -221,11 +222,14 @@ const largestComponentInView = (page: Page) =>
       for (const point of points) {
         if (point.x < safe.left || point.x > safe.right || point.y < safe.top || point.y > safe.bottom) continue
         if (document.elementFromPoint(point.x, point.y)?.closest("[data-slot=component]") !== candidate.element) continue
-        return { x: point.x, y: point.y, width: box.width }
+        grabs.push({ x: point.x, y: point.y, width: box.width })
+        break
       }
     }
-    return null
+    return grabs
   }, GRAB_MARGIN)
+
+const largestComponentInView = async (page: Page) => (await componentsInView(page))[0] ?? null
 
 const wiredPartInView = (page: Page, ids: readonly string[]) =>
   page.evaluate(
@@ -313,18 +317,21 @@ async function sweep(page: Page, origin: { x: number; y: number }, heading: Head
   await page.mouse.up()
 }
 
-async function cleanHeading(page: Page, origin: { x: number; y: number }): Promise<Heading> {
-  for (const heading of HEADINGS) {
-    const before = await componentOrigins(page)
-    await sweep(page, origin, heading)
-    await page.waitForTimeout(300)
-    const landed = Math.abs((await componentOrigins(page)) - before) > 1
-    if (!landed) continue
-    await page.keyboard.press("Control+z")
-    await page.waitForTimeout(400)
-    return heading
-  }
-  return HEADINGS[0]
+const LANDING_CANDIDATES = 5
+
+async function landingDrag(page: Page): Promise<{ target: { x: number; y: number }; heading: Heading } | null> {
+  for (const target of (await componentsInView(page)).slice(0, LANDING_CANDIDATES))
+    for (const heading of HEADINGS) {
+      const before = await componentOrigins(page)
+      await sweep(page, target, heading)
+      await page.waitForTimeout(300)
+      const landed = Math.abs((await componentOrigins(page)) - before) > 1
+      if (!landed) continue
+      await page.keyboard.press("Control+z")
+      await page.waitForTimeout(400)
+      return { target, heading }
+    }
+  return null
 }
 
 async function panWithSpaceHeld(page: Page) {
@@ -579,10 +586,10 @@ async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChe
       check("all visible components are selected", selected === visible && visible > 0, `${selected}/${visible}`)
     }
 
-    const target = await largestComponentInView(page)
-    if (!target) throw new Error(`no component sits inside the viewport at ${Math.round(zoom * 100)}% zoom`)
+    const largest = await largestComponentInView(page)
+    if (!largest) throw new Error(`no component sits inside the viewport at ${Math.round(zoom * 100)}% zoom`)
 
-    const heading = await cleanHeading(page, target)
+    const { target, heading } = (await landingDrag(page)) ?? { target: largest, heading: HEADINGS[0] }
     await instrument(page)
     const settled = await componentOrigins(page)
     const drag = await measure(page, () => sweep(page, target, heading))
