@@ -4,7 +4,7 @@ import type { WireColorKey } from "../wire-colors"
 import type { WireNets } from "./graph"
 import { LATTICE_ACROSS_H, LATTICE_ACROSS_V, LATTICE_END, LATTICE_PASS, latticeBoxAround, routeOnLattice } from "./lattice-route"
 import type { NewId, WireEdit } from "./normal-form"
-import { along, contains, cross, diagonalLine, HALF_CELL, highOf, isDiagonal, isHorizontal, lineOf, lowOf, pointOnLine, samePoint, slopeKey, slopeOf, type LineKey, type Slope, type WirePin, type WireSegment } from "./segment"
+import { along, contains, cross, diagonalLine, HALF_CELL, highOf, isDiagonal, isHorizontal, lineOf, lowOf, passesAlongItsRow, pointOnLine, samePoint, slopeKey, slopeOf, type LineKey, type Slope, type WirePin, type WireSegment } from "./segment"
 import { columnCode, latticeAlong, pointCode, rowCode, type WireSheet } from "./sheet"
 
 export type DragBox = { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
@@ -114,9 +114,14 @@ type Touch = { readonly at: Point; readonly own: string; readonly net: string }
 
 type Verdict = { readonly conflicts: DragConflict[]; readonly touches: Touch[] }
 
-type FrameMark = { readonly along: number; readonly at: Point; readonly net: string; readonly socket: boolean }
+type FrameMark = { readonly along: number; readonly at: Point; readonly net: string; readonly pin?: WirePin }
 
 type Placed = { readonly a: Point; readonly net: string; readonly lo: number; readonly hi: number }
+
+function latticePassOf(pin: WirePin): number {
+  if (!pin.socket || pin.shunt || !pin.out) return LATTICE_END
+  return pin.out.y === 0 ? LATTICE_ACROSS_V : LATTICE_ACROSS_H
+}
 
 class FrameIndex {
   private readonly runs = new Map<LineKey, Placed[]>()
@@ -135,16 +140,16 @@ class FrameIndex {
     const list = this.runs.get(line)
     if (list) list.push(placed)
     else this.runs.set(line, [placed])
-    this.addMark(a, net, false)
-    this.addMark(b, net, false)
+    this.addMark(a, net)
+    this.addMark(b, net)
   }
 
-  addMark(at: Point, net: string, socket: boolean) {
-    this.markOn(rowCode(at.y), { along: at.x, at, net, socket })
-    this.markOn(columnCode(at.x), { along: at.y, at, net, socket })
+  addMark(at: Point, net: string, pin?: WirePin) {
+    this.markOn(rowCode(at.y), { along: at.x, at, net, pin })
+    this.markOn(columnCode(at.x), { along: at.y, at, net, pin })
     const code = pointCode(at)
     const list = this.points.get(code)
-    const mark = { along: at.x, at, net, socket }
+    const mark = { along: at.x, at, net, pin }
     if (list) list.push(mark)
     else this.points.set(code, [mark])
   }
@@ -641,6 +646,10 @@ class FrameBuilder {
     return this.targets.get(point.key)!
   }
 
+  private landedPin(pin: WirePin): WirePin {
+    return { ...pin, out: this.headingAfter(pin) }
+  }
+
   private headingAfter(pin: WirePin): Point | undefined {
     const heading = this.plan.headingOf(pin.key)
     if (!heading) return undefined
@@ -779,11 +788,15 @@ class FrameBuilder {
     for (const pins of lists) {
       for (const pin of pins) {
         const at = this.pinTargets.get(pin.key)!
+        const landed = this.landedPin(pin)
         const net = this.plan.netOfPin(pin)
         for (const s of this.sheet.through(at)) {
           if (this.gone.has(s)) continue
-          if (pin.socket && !samePoint(s.a, at) && !samePoint(s.b, at)) continue
           const other = this.plan.netOfSegment(s)
+          if (landed.socket && !samePoint(s.a, at) && !samePoint(s.b, at)) {
+            if (other !== net && !passesAlongItsRow(landed, s)) this.conflicts.push({ at, reason: "over", pin: pin.key, nets: [net, other] })
+            continue
+          }
           if (other !== net) this.touch(at, net, other)
         }
         for (const p of this.sheet.pinsAt(at)) {
@@ -794,7 +807,7 @@ class FrameBuilder {
         const others: string[] = []
         this.index.othersAt(at, net, others)
         for (const other of others) this.conflicts.push({ at, reason: "pin", pin: pin.key, nets: [net, other] })
-        this.index.addMark(at, net, !!pin.socket)
+        this.index.addMark(at, net, landed)
       }
     }
   }
@@ -927,7 +940,7 @@ class FrameBuilder {
     const targets: { at: Point; pin: WirePin }[] = []
     const targetsByLine = new Map<LineKey, { at: Point; pin: WirePin }[]>()
     for (const [key, at] of this.pinTargets) {
-      const pin = this.sheet.pin(key)!
+      const pin = this.landedPin(this.sheet.pin(key)!)
       targets.push({ at, pin })
       add(targetsByLine, rowCode(at.y), { at, pin })
       add(targetsByLine, columnCode(at.x), { at, pin })
@@ -953,7 +966,7 @@ class FrameBuilder {
       for (const mark of this.sheet.marksOn(p)) {
         if (mark.segment) {
           if (!removed.has(mark.segment.id) && bad(this.plan.netOfSegment(mark.segment))) found = true
-        } else if (mark.pin && !this.plan.isCarried(mark.pin) && (!mark.pin.socket || isEnd(p.a, p.b, mark.at)) && bad(this.plan.netOfPin(mark.pin))) found = true
+        } else if (mark.pin && !this.plan.isCarried(mark.pin) && (!passesAlongItsRow(mark.pin, p) || isEnd(p.a, p.b, mark.at)) && bad(this.plan.netOfPin(mark.pin))) found = true
       }
       for (const end of [p.a, p.b]) for (const s of this.sheet.through(end)) if (!removed.has(s.id) && bad(this.plan.netOfSegment(s))) found = true
       for (const q of byLine.get(line) ?? []) {
@@ -967,7 +980,7 @@ class FrameBuilder {
             out.add(q)
           }
       const onIt = isDiagonal(p) ? targets.filter(({ at }) => contains(p, at)) : (targetsByLine.get(line) ?? []).filter(({ at }) => along(p, at) >= lo && along(p, at) <= hi)
-      for (const { at, pin } of onIt) if ((!pin.socket || isEnd(p.a, p.b, at)) && bad(this.plan.netOfPin(pin))) found = true
+      for (const { at, pin } of onIt) if ((!passesAlongItsRow(pin, p) || isEnd(p.a, p.b, at)) && bad(this.plan.netOfPin(pin))) found = true
       if (found) out.add(p)
     }
     return out
@@ -1031,7 +1044,7 @@ class FrameBuilder {
           other = this.plan.netOfSegment(mark.segment)
         } else {
           const pin = mark.pin!
-          if (this.plan.isCarried(pin) || pin.socket) continue
+          if (this.plan.isCarried(pin) || passesAlongItsRow(pin, probe)) continue
           other = this.plan.netOfPin(pin)
         }
         if (other !== probe.net) conflicts.push(clashOf(probe, mark.at, other, "over"))
@@ -1041,7 +1054,7 @@ class FrameBuilder {
       if (placed.net !== probe.net && Math.min(hi, placed.hi) - Math.max(lo, placed.lo) > 0) conflicts.push(clashOf(probe, onLineOf(probe, Math.max(lo, placed.lo)), placed.net, "along"))
     for (const mark of this.index.marksAlong(probe)) {
       const at = along(probe, mark.at)
-      if (at > lo && at < hi && !mark.socket && mark.net !== probe.net) conflicts.push(clashOf(probe, mark.at, mark.net, "over"))
+      if (at > lo && at < hi && !(mark.pin && passesAlongItsRow(mark.pin, probe)) && mark.net !== probe.net) conflicts.push(clashOf(probe, mark.at, mark.net, "over"))
     }
     this.examineEnd(probe, probe.a, probe.rigidA, conflicts, touches)
     this.examineEnd(probe, probe.b, probe.rigidB, conflicts, touches)
@@ -1297,7 +1310,7 @@ class FrameBuilder {
       for (const mark of this.sheet.marks(columnCode(x), box.y, box.y + box.h)) {
         const pin = mark.pin
         if (!pin || this.plan.isCarried(pin) || this.plan.netOfPin(pin) === net) continue
-        flag(pin.at, pin.socket ? LATTICE_PASS : LATTICE_END)
+        flag(pin.at, latticePassOf(pin))
       }
     }
     const slant = (s: { a: Point; b: Point }) => {
@@ -1311,7 +1324,7 @@ class FrameBuilder {
     }
     for (const [key, at] of this.pinTargets) {
       const pin = this.sheet.pin(key)!
-      if (this.plan.netOfPin(pin) !== net) flag(at, pin.socket ? LATTICE_PASS : LATTICE_END)
+      if (this.plan.netOfPin(pin) !== net) flag(at, latticePassOf(this.landedPin(pin)))
     }
     const strictlyIn = (p: Point, r: DragBox) => p.x > r.x && p.x < r.x + r.w && p.y > r.y && p.y < r.y + r.h
     for (const body of this.plan.solidIn(box)) {
