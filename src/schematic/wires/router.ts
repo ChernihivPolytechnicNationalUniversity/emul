@@ -537,9 +537,10 @@ function slipsAt(context: Context, end: End): SlipAt[] {
   if (!pin?.socket || !pin.out || !header) return []
   const outer = plus(pin.at, pin.out, GRID)
   if (!context.wiring.index.at(outer).some((p) => p.socket && objectOfPin(context.wiring, p.key) === objectOfPin(context.wiring, pin.key))) return []
-  if (!wiresTouching(context, outer).length && !context.wiring.index.at(outer).some((p) => context.taken.has(p.key))) return []
   const first = header.clearAt - alongOut(pin.at, pin.out)
   if (!Number.isInteger(first) || first < 2) return []
+  const outerTaken = wiresTouching(context, outer).length > 0 || context.wiring.index.at(outer).some((p) => context.taken.has(p.key))
+  if (!outerTaken && crossingsOn(context, outer, plus(pin.at, pin.out, first * GRID), outer) >= 0) return []
   const found: SlipAt[] = []
   for (const side of [1, -1]) {
     const across = { x: header.across.x * side, y: header.across.y * side }
