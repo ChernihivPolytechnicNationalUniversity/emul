@@ -149,6 +149,7 @@ export default function App() {
   )
   /** On a phone: the palette sheet's Field tab, the field's problem count, a tap that lowers the sheet. */
   const [fieldSlot, setFieldSlot] = React.useState<HTMLElement | null>(null)
+  const [toolSlot, setToolSlot] = React.useState<HTMLElement | null>(null)
   const [problemCount, setProblemCount] = React.useState(0)
   const [fieldPeek, setFieldPeek] = React.useState(0)
   const onFieldPicked = React.useCallback(() => setFieldPeek((n) => n + 1), [])
@@ -395,6 +396,7 @@ export default function App() {
             width={paletteWidth}
             onWidthChange={setPaletteWidth}
             field={{ slot: setFieldSlot, count: problemCount, peek: fieldPeek }}
+            toolSlot={setToolSlot}
             sidebar={{
               onPick: (item) => {
                 setArmed(null)
@@ -437,6 +439,8 @@ export default function App() {
               onFieldPicked={onFieldPicked}
               onProblemCount={setProblemCount}
               projectName={projects.current?.name}
+              belowBanner={!!projects.shared}
+              toolSlot={toolSlot}
             >
               <LiveCursors peers={live.peers} />
             </DotField>

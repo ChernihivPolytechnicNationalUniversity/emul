@@ -24,6 +24,7 @@ type PaletteHostProps = {
   sidebar: SidebarProps
   /** On a phone, the sheet's second tab: the field explorer, drawn by the field into this slot. */
   field?: FieldTab
+  toolSlot?: (slot: HTMLElement | null) => void
 }
 
 /** The field explorer as a tab of the phone's sheet. */
@@ -41,7 +42,7 @@ export type FieldTab = {
  * to a column of group icons; that column on a tablet, a group sliding out over the field; a sheet
  * from the side when the screen is short; a sheet from the bottom on a phone held upright.
  */
-export function PaletteHost({ mode, widthClass, open, onOpenChange, width, onWidthChange, sidebar, field }: PaletteHostProps) {
+export function PaletteHost({ mode, widthClass, open, onOpenChange, width, onWidthChange, sidebar, field, toolSlot }: PaletteHostProps) {
   if (mode === "bottom-sheet") return <BottomSheet open={open} onOpenChange={onOpenChange} sidebar={sidebar} hasField={!!field} fieldSlot={field?.slot} fieldCount={field?.count ?? 0} fieldPeek={field?.peek ?? 0} />
   if (mode === "side-sheet")
     return (
@@ -55,7 +56,7 @@ export function PaletteHost({ mode, widthClass, open, onOpenChange, width, onWid
         </SheetContent>
       </Sheet>
     )
-  if (mode === "rail" || !open) return <RailWithFlyout sidebar={sidebar} />
+  if (mode === "rail" || !open) return <RailWithFlyout sidebar={sidebar} toolSlot={toolSlot} />
   return <Dock width={width} widthClass={widthClass} onWidthChange={onWidthChange} onFold={() => onOpenChange(false)} sidebar={sidebar} />
 }
 
@@ -147,7 +148,7 @@ function RailButton({ item, shown, onClick }: { item: RailItem; shown: boolean; 
 }
 
 /** The palette folded to a column of icons: search, favourites, a group each. A click slides the group out over the field. */
-function RailWithFlyout({ sidebar }: { sidebar: SidebarProps }) {
+function RailWithFlyout({ sidebar, toolSlot }: { sidebar: SidebarProps; toolSlot?: (slot: HTMLElement | null) => void }) {
   const [shown, setShown] = React.useState<string | null>(null)
   const library = useLibrary()
   const quick = useQuickLists()
@@ -186,8 +187,14 @@ function RailWithFlyout({ sidebar }: { sidebar: SidebarProps }) {
   const flyoutSidebar: SidebarProps = { ...sidebar, onArm: (item) => (close(), sidebar.onArm?.(item)), onPick: (item) => (close(), sidebar.onPick?.(item)) }
 
   return (
-    <div ref={host} data-slot="palette-rail" className="relative z-30 flex h-full shrink-0 border-r bg-sidebar" style={{ width: RAIL_PX }}>
-      <nav aria-label="Part groups" className="flex w-full flex-col items-center gap-0.5 overflow-y-auto py-1.5">
+    <div ref={host} data-slot="palette-rail" className="relative z-30 flex h-full shrink-0 flex-col items-center border-r bg-sidebar" style={{ width: RAIL_PX }}>
+      {toolSlot && (
+        <>
+          <div ref={toolSlot} data-slot="rail-tools" className="flex shrink-0 flex-col items-center pt-1.5" />
+          <div role="separator" className="mt-1 h-px w-5 shrink-0 bg-sidebar-border" />
+        </>
+      )}
+      <nav aria-label="Part groups" className="flex min-h-0 w-full flex-1 flex-col items-center gap-0.5 overflow-y-auto py-1.5">
         {tools.map((item) => (
           <RailButton key={item.id} item={item} shown={shown === item.id} onClick={() => setShown((s) => (s === item.id ? null : item.id))} />
         ))}

@@ -50,7 +50,14 @@ export function followTarget(view: { current: Viewport }, target: { current: Vie
  * - touch: two fingers pinch-zoom and pan together; whatever the first finger had started is
  *   cancelled through `onPinchStart`, and the fingers' events go no further while they pinch
  */
-export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scale: 0.5 }) {
+export const TOOLBAR_CLEARANCE = 12 + 54 + 8
+
+export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scale: 0.5 }, leftClearance = TOOLBAR_CLEARANCE) {
+  const clearance = React.useRef(leftClearance)
+  React.useLayoutEffect(() => {
+    clearance.current = leftClearance
+  }, [leftClearance])
+  const leftEdge = (margin: number) => Math.max(margin, clearance.current)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const contentRef = React.useRef<HTMLDivElement>(null)
   const overlayRef = React.useRef<HTMLDivElement>(null)
@@ -191,10 +198,11 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     (r: { x: number; y: number; w: number; h: number }, margin = 48, maxScale = MAX_SCALE) => {
       const { width, height } = measure()
       if (!width || !height) return
-      const scale = clamp(Math.min((width - 2 * margin) / r.w, (height - 2 * margin) / r.h, maxScale), MIN_SCALE, MAX_SCALE)
+      const left = leftEdge(margin)
+      const scale = clamp(Math.min((width - left - margin) / r.w, (height - 2 * margin) / r.h, maxScale), MIN_SCALE, MAX_SCALE)
       animateTo({
         scale,
-        x: width / 2 - (r.x + r.w / 2) * scale,
+        x: (left + width - margin) / 2 - (r.x + r.w / 2) * scale,
         y: height / 2 - (r.y + r.h / 2) * scale,
       })
     },
@@ -205,16 +213,16 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
       const { width, height } = measure()
       if (!width || !height) return
       const t = target.current
-      const along = (start: number, length: number, offset: number, screen: number) => {
+      const along = (start: number, length: number, offset: number, screen: number, low: number) => {
         const from = start * t.scale + offset
         const to = (start + length) * t.scale + offset
-        if (to - from > screen - 2 * margin) return screen / 2 - (from + to) / 2
-        if (from < margin) return margin - from
+        if (to - from > screen - low - margin) return (low + screen - margin) / 2 - (from + to) / 2
+        if (from < low) return low - from
         if (to > screen - margin) return screen - margin - to
         return 0
       }
-      const dx = along(r.x, r.w, t.x, width)
-      const dy = along(r.y, r.h, t.y, height)
+      const dx = along(r.x, r.w, t.x, width, leftEdge(margin))
+      const dy = along(r.y, r.h, t.y, height, margin)
       if (dx || dy) animateTo({ ...t, x: t.x + dx, y: t.y + dy })
     },
     [animateTo, measure],
@@ -232,9 +240,10 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
       let scale = t.scale
       const side = Math.max(1, Math.min(r.w, r.h))
       if (side * scale < minPx) scale = Math.max(scale, Math.min(minPx / side, maxScale))
-      scale = clamp(Math.min(scale, (width - 2 * margin) / Math.max(1, r.w), (height - 2 * margin) / Math.max(1, r.h)), MIN_SCALE, MAX_SCALE)
+      const left = leftEdge(margin)
+      scale = clamp(Math.min(scale, (width - left - margin) / Math.max(1, r.w), (height - 2 * margin) / Math.max(1, r.h)), MIN_SCALE, MAX_SCALE)
       if (scale === t.scale) return reveal(r, margin)
-      animateTo({ scale, x: width / 2 - (r.x + r.w / 2) * scale, y: height / 2 - (r.y + r.h / 2) * scale })
+      animateTo({ scale, x: (left + width - margin) / 2 - (r.x + r.w / 2) * scale, y: height / 2 - (r.y + r.h / 2) * scale })
     },
     [animateTo, measure, reveal],
   )

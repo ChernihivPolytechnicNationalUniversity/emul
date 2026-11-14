@@ -97,6 +97,12 @@ import { checkProblems, runtimeProblems, sortProblems, staticProblems } from "@/
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useSizeClass } from "@/hooks/use-size-class"
 import { useSampled } from "@/hooks/use-sampled"
+import { pressesKey, toolSpec, type ToolId } from "@/lib/tools"
+import { FieldToolbar, ToolHint } from "./FieldToolbar"
+import { TOOLBAR_CLEARANCE } from "./use-viewport"
+import { ShortcutsDialog } from "./ShortcutsDialog"
+
+type FieldTool = Exclude<ToolId, "part" | "probe">
 
 /** 1 cell = 2.54 mm (0.1"), the standard header pitch, so pins land on grid nodes. */
 const GRID = FIELD_GRID
@@ -133,6 +139,7 @@ export type DotFieldHandle = {
   toggleScope: () => void
   toggleLogic: () => void
   toggleCode: () => void
+  showShortcuts: () => void
   /** Show the code of the board with this designator. */
   openCode: (ref: string) => void
   newHdl: (language: HdlLanguage) => void
@@ -198,6 +205,8 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
   /** How many problems the field has, for the sheet's tab. */
   onProblemCount?: (count: number) => void
   projectName?: string
+  belowBanner?: boolean
+  toolSlot?: HTMLElement | null
 }
 
 /** A point on screen, px from the window's corner: an event's clientX and clientY. */
@@ -238,8 +247,8 @@ const keyRef = (key: string): PinRef => ({ object: key.slice(0, key.indexOf(":")
 type Pending = { d: Drawing; mode: "drag" | "click"; target: DrawEnd | null; moved: boolean }
 
 
-export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, armed = null, onArmedChange, onPlaced, onHdlImport, peerSelections = NO_PEERS, onSelectionShare, fieldSlot = null, onFieldPicked, onProblemCount, projectName, children, ...props }: DotFieldProps) {
-  const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, show, toWorld, isPanStart, startPan, movePan, endPan, setOnPinchStart } = useViewport(grid)
+export function DotField({ ref, className, grid = GRID, onSelectionChange, onChange, onStateChange, onPointerWorld, onMovePreview, onWirePreview, ghosts, armed = null, onArmedChange, onPlaced, onHdlImport, peerSelections = NO_PEERS, onSelectionShare, fieldSlot = null, onFieldPicked, onProblemCount, projectName, belowBanner = false, toolSlot = null, children, ...props }: DotFieldProps) {
+  const { containerRef, contentRef, overlayRef, scale, view, worldPerPixel, panning, spaceHeld, zoomIn, zoomOut, reset, fitTo, reveal, show, toWorld, isPanStart, startPan, movePan, endPan, setOnPinchStart } = useViewport(grid, undefined, toolSlot ? 0 : TOOLBAR_CLEARANCE)
   const marquee = useSelection(toWorld, worldPerPixel)
   const { boxRef: marqueeRef } = marquee
   const sch = useSchematic(grid)
@@ -276,6 +285,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   // --- logic analyser ----------------------------------------------------------
   const [logicOpen, setLogicOpen] = React.useState(false)
+  const [tool, setTool] = React.useState<FieldTool>("select")
+  const [shortcutsOpen, setShortcutsOpen] = React.useState(false)
+  const toggleProbe = useEvent(() => {
+    setTool("select")
+    measure.toggle()
+  })
   const [logicSpan, setLogicSpan] = React.useState<number>(LOGIC_SPANS[7])
   const [decoder, setDecoder] = React.useState<DecoderConfig>(DEFAULT_DECODER)
   const [logic] = React.useState(() => new LogicStore())
@@ -726,10 +741,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       },
       setSpeed,
       setTextScale,
-      toggleProbe: measure.toggle,
+      toggleProbe,
       toggleScope: () => setScopeOpen((o) => !o),
       toggleLogic: () => setLogicOpen((o) => !o),
       toggleCode: () => setCodeOpen((o) => !o),
+      showShortcuts: () => setShortcutsOpen(true),
       openCode: (ref) => {
         const board = sch.doc.objects.find((o) => o.props?.ref === ref)
         if (board) setCodeBoardId(board.id)
@@ -750,7 +766,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       find: () => explorerKeys.current?.find(),
       nextProblem: () => explorerKeys.current?.nextProblem(),
     }),
-    [addFreeLoaded, inOrder, placed, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, measure.toggle, exportImage, newHdl, turn, mirror],
+    [addFreeLoaded, inOrder, placed, load, viewCenter, fitTo, grid, sch, undo, redo, cut, copy, paste, duplicate, zoomIn, zoomOut, reset, restart, trace, logic, toggleProbe, exportImage, newHdl, turn, mirror],
   )
 
   // --- moving objects -------------------------------------------------------
@@ -1457,6 +1473,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (armed && e.pointerType !== "touch") setArmedAt(toWorld(e.clientX, e.clientY))
     if (movePan(e)) return
     pressTravelled(e)
+    if (tool === "hand") return
     const press = wirePress.current
     if (press && !drag.active && Math.hypot(e.clientX - press.x, e.clientY - press.y) >= TAP_SLOP) {
       wirePress.current = null
@@ -1471,7 +1488,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       follow(e.clientX, e.clientY)
       return
     }
-    if (wireArmed) {
+    if (!measure.active && (wireArmed || (tool === "wire" && !armed))) {
       setWireArmed(endUnder(e.clientX, e.clientY).at)
       return
     }
@@ -1526,6 +1543,24 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const refusal = sch.junction(crossingUnder(client.x, client.y)?.at ?? snapPoint(toWorld(client.x, client.y)))
     if (refusal) toast.error(JUNCTION_REFUSED[refusal.refused].title, { description: JUNCTION_REFUSED[refusal.refused].why })
   })
+  const chooseTool = useEvent((next: ToolId) => {
+    if (next === "part") return void openQuick()
+    if (next === "probe") {
+      setWireArmed(null)
+      setPending(null)
+      if (!measure.active) toggleProbe()
+      return
+    }
+    if (measure.active) measure.stop()
+    setPending(null)
+    setTool(next)
+    const pointer = pointerClient.current
+    setWireArmed(next === "wire" && pointer ? endUnder(pointer.x, pointer.y).at : null)
+  })
+  const chooseLineMode = useEvent((mode: LineMode) => {
+    setLineMode(mode)
+    if (pending) setPending({ ...pending, d: withLineMode(pending.d, mode) })
+  })
   const onKey = useEvent((e: KeyboardEvent) => {
     if (composing(e)) return
     const where = keyTarget(e)
@@ -1551,10 +1586,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if ((pending || wireArmed) && matchesAny(e, KEYMAP.lineMode)) {
       e.preventDefault()
       if (e.repeat) return
-      const next = nextLineMode(lineMode)
-      setLineMode(next)
-      if (pending) setPending({ ...pending, d: withLineMode(pending.d, next) })
-      return
+      return chooseLineMode(nextLineMode(lineMode))
     }
     if (pending && e.key === "Backspace") {
       e.preventDefault()
@@ -1575,6 +1607,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (matches(e, KEYMAP.deselect) && e.isTrusted && !e.defaultPrevented) {
       // A part in hand is put down first; the selection stays.
       if (armed) return void onArmedChange?.(null)
+      if (pending && tool === "wire") return setPending(null)
+      if (tool !== "select") return chooseTool("select")
       if (measure.active) measure.stop()
       sch.deselectAll()
       setPending(null)
@@ -1612,20 +1646,27 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         return view.run()
       }
     }
-    const pointer = pointerClient.current
     const plain = !e.ctrlKey && !e.metaKey && !e.altKey
-    if (!pending && pointer && plain && (e.key.toLowerCase() === "w" || e.code === "KeyW")) {
-      e.preventDefault()
-      return setWireArmed(endUnder(pointer.x, pointer.y).at)
+    if (!pending && plain && !e.repeat) {
+      const picked = [
+        { keys: KEYMAP.toolSelect, run: () => chooseTool("select") },
+        { keys: KEYMAP.toolHand, run: () => chooseTool("hand") },
+        { keys: KEYMAP.toolWire, run: () => chooseTool("wire") },
+        { keys: KEYMAP.joinHere, run: () => pointerClient.current && joinUnderPointer(pointerClient.current) },
+      ].find(({ keys }) => pressesKey(e, keys))
+      if (picked) {
+        e.preventDefault()
+        return void picked.run()
+      }
     }
-    if (!pending && pointer && plain && (e.key.toLowerCase() === "j" || e.code === "KeyJ")) {
+    if (!pending && !e.repeat && matchesAny(e, KEYMAP.shortcuts)) {
       e.preventDefault()
-      return joinUnderPointer(pointer)
+      return setShortcutsOpen(true)
     }
     const selected = () => sch.selectedObjects.size > 0
     const turnable = () => selected() || sch.selectedWires.size > 0
     dispatch(e, [
-      { keys: KEYMAP.measure, run: () => measure.toggle() },
+      { keys: KEYMAP.measure, run: () => (measure.active ? toggleProbe() : chooseTool("probe")) },
       { keys: KEYMAP.scope, run: () => setScopeOpen((o) => !o) },
       { keys: KEYMAP.logic, run: () => setLogicOpen((o) => !o) },
       { keys: KEYMAP.rotate, when: turnable, run: () => turn(1) },
@@ -1679,8 +1720,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   }, [onKey, onCopy, onCut, onPaste])
 
   const shownCue = continueCue && !pending && wiring.dangling.some((p) => samePoint(p, continueCue.at)) ? continueCue : null
-  const lineModeAt = pending?.d.cursor ?? wireArmed
-  const cursor = panning ? "cursor-grabbing" : spaceHeld ? "cursor-grab" : armed ? "cursor-copy" : "cursor-precise"
+  const lineModeAt = pending?.d.cursor ?? (measure.active ? null : wireArmed)
+  const activeTool: ToolId = measure.active ? "probe" : quick || armed ? "part" : tool
+  const hintOf = (id: ToolId) => `${toolSpec(id).hint} · Esc stops`
+  const wireHint = `${toolSpec("wire").hint} · / which leg first · Backspace takes a corner back · Enter finishes · 0–9, C, M colour · Esc stops`
+  const toolHint = armed ? null : tool === "wire" || pending || wireArmed ? wireHint : measure.active ? hintOf("probe") : tool === "hand" ? hintOf("hand") : null
+  const cursor = panning ? "cursor-grabbing" : spaceHeld || tool === "hand" ? "cursor-grab" : armed ? "cursor-copy" : "cursor-precise"
   const probeReading = sim.probe(PROBE_ID)
   const { selectedObjects, selectedWires, doc: schDoc, setPart } = sch
   const selectedObjectList = React.useMemo(
@@ -1875,7 +1920,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   // Docked under the explorer while it is open; floating over the field otherwise (and on a phone, across its top, at most half the field high).
   const inspector = (
   <Inspector
-    className={fieldDocked ? "max-h-none w-full gap-3 rounded-none border-0 py-3 shadow-none ring-0" : "absolute top-12 right-3 max-h-[calc(100%-9rem)] max-md:top-3 max-md:left-14 max-md:w-auto max-md:max-h-[45%]"}
+    className={fieldDocked ? "max-h-none w-full gap-3 rounded-none border-0 py-3 shadow-none ring-0" : "absolute top-12 right-3 max-h-[calc(100%-9rem)] max-md:top-3 max-md:left-[4.75rem] max-md:[@media(max-height:460px)]:left-32 max-md:w-auto max-md:max-h-[45%]"}
     selected={selectedObjectList}
     damage={sim.damage}
     sim={sim}
@@ -1941,6 +1986,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 menuClient.current = { x: e.clientX, y: e.clientY }
               }
               wirePress.current = null
+              if (tool === "hand" && e.button === 0 && !armed) {
+                e.stopPropagation()
+                return startPan(e)
+              }
               if (!primaryClick(e)) return
               if (drag.active) {
                 e.stopPropagation()
@@ -1948,7 +1997,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               } else if (pending?.mode === "drag") {
                 e.stopPropagation()
                 releaseDrawing(e.clientX, e.clientY)
-              } else if (wireArmed) {
+              } else if (!pending && !armed && !measure.active && !spaceHeld && (wireArmed || tool === "wire")) {
                 e.stopPropagation()
                 setWireArmed(null)
                 startAt(endUnder(e.clientX, e.clientY), "click")
@@ -2083,10 +2132,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 style={{ display: "none" }}
               />
             </div>
+            {tool === "hand" && <div data-slot="hand-overlay" aria-hidden className={cn("absolute inset-0 z-[5]", panning ? "cursor-grabbing" : "cursor-grab")} />}
           </div>
 
           <ProbeReadout
-            className="absolute bottom-16 left-4 max-md:bottom-24"
+            className="absolute bottom-16 left-4 max-md:bottom-24 [@media(max-height:460px)]:left-32"
             tips={tips}
             reading={probeReading}
             sim={sim}
@@ -2099,8 +2149,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             sim={sim}
             speed={speed}
             started={started}
-            probing={measure.active}
-            onProbeToggle={measure.toggle}
+            scopeOpen={scopeOpen}
+            logicOpen={logicOpen}
+            onScopeToggle={() => setScopeOpen((o) => !o)}
+            onLogicToggle={() => setLogicOpen((o) => !o)}
             onToggle={() => setSimRunning((r) => !r)}
             onRestart={() => {
               restart()
@@ -2112,10 +2164,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
           />
           {selectedWireList.length > 0 && selectedObjectList.length === 0 && (
             <WirePalette
-              className="absolute top-3 right-3"
+              className="absolute top-12 right-3 max-md:top-3 max-md:right-3"
               active={activeColors}
               overridden={anyOverridden}
               onPick={paintSelected}
+              onReroute={rerouteSelected}
+              onDelete={sch.removeSelected}
               onPointerDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
             />
@@ -2135,6 +2189,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               Cancel wire
             </Button>
           )}
+          {(() => {
+            const bar = <FieldToolbar docked={!!toolSlot} active={activeTool} onTool={chooseTool} wireMode={pending?.d.mode ?? lineMode} onWireMode={chooseLineMode} showAngles={!armed && !measure.active && (tool === "wire" || !!pending)} />
+            return toolSlot ? createPortal(bar, toolSlot) : bar
+          })()}
+          {toolHint && <ToolHint text={toolHint} className={belowBanner ? "top-14" : undefined} />}
+          <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
           <ScaleBar className="absolute right-4 bottom-14" scale={scale} grid={grid} />
           <ZoomControls className="absolute right-4 bottom-4" scale={scale} onZoomIn={zoomIn} onZoomOut={zoomOut} onReset={reset} />
           {hover && <FieldReadout target={hover.target} x={hover.x} y={hover.y} objects={sch.doc.objects} runEnds={runEnds} sim={sim} />}
@@ -2183,6 +2243,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
         <ContextMenuItem onClick={() => openQuick(menuClient.current)}>
           Add here…
           <ContextMenuShortcut>{labelFor(KEYMAP.addHere[1])}</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem data-action="join-here" onClick={() => menuClient.current && joinUnderPointer(menuClient.current)}>
+          Join wires here
+          <ContextMenuShortcut>{labelFor(KEYMAP.joinHere)}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!sch.canUndo} onClick={sch.undo}>

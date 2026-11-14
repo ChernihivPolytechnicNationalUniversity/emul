@@ -43,9 +43,21 @@ const shoot = (page: Page, name: string) => (SHOTS ? page.screenshot({ path: joi
 const LANDING_TIMEOUT_MS = 15_000
 const pageTitle = (page: Page) => page.evaluate(() => document.title)
 
+async function loadApp(page: Page) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.goto(DEV_SERVER, { waitUntil: "domcontentloaded" })
+      await page.waitForSelector("[data-slot=dot-field-viewport]", { timeout: 20_000 })
+      return
+    } catch (e) {
+      if (attempt === 3) throw e
+      console.log(`  (the page did not load, attempt ${attempt}: ${(e as Error).message.split("\n")[0]})`)
+    }
+  }
+}
+
 async function openDoc(page: Page, name: string, doc: Schematic) {
-  await page.goto(DEV_SERVER, { waitUntil: "domcontentloaded" })
-  await page.waitForSelector("[data-slot=dot-field-viewport]")
+  await loadApp(page)
   const landing = Date.now() + LANDING_TIMEOUT_MS
   while ((await pageTitle(page)).startsWith("εmul") && Date.now() < landing) await page.waitForTimeout(100)
   await page.setInputFiles("input[type=file]", { name: `${name}.emul`, mimeType: "application/octet-stream", buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name, schematic: stamped(doc) })) })
@@ -915,7 +927,8 @@ async function contactsFollowTheDrag(page: Page) {
   const lcd = doc.objects.find((o) => o.def === "lcd7-f")!
   const board = doc.objects.find((o) => o.def === "open746i-c")!
   const docked = await box(page, lcd.id)
-  const cell = docked.width / getDef("lcd7-f")!.width
+  const cell = GRID * (await page.evaluate(() => new DOMMatrix(getComputedStyle(document.querySelector("[data-slot=dot-field-content]")!).transform).a))
+  const dockedWorld = await (await fieldFrame(page)).worldOf(lcd.id)
   const grab = { x: docked.x + docked.width / 2, y: docked.y + LCD_BEZEL_CELLS * cell }
   const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-body]")?.getAttribute("data-body"), grab)
   expect("the grab point is on the LCD", hit, lcd.id)
@@ -956,7 +969,7 @@ async function contactsFollowTheDrag(page: Page) {
   await page.waitForTimeout(500)
   const away = await box(page, lcd.id)
   const regrab = { x: away.x + away.width / 2, y: away.y + LCD_BEZEL_CELLS * cell }
-  expect(`the LCD moved ${LIFT_CELLS} cells`, Math.round((away.y + PAN_PX - docked.y) / cell), LIFT_CELLS)
+  expect(`the LCD moved ${LIFT_CELLS} cells`, Math.round(((await (await fieldFrame(page)).worldOf(lcd.id)).y - dockedWorld.y) / GRID), LIFT_CELLS)
   await page.mouse.move(regrab.x, regrab.y)
   await page.mouse.down()
   await page.mouse.move(regrab.x, regrab.y - LIFT_CELLS * cell, { steps: 12 })
