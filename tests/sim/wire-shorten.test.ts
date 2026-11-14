@@ -136,14 +136,26 @@ describe("shortening a wire from its open end by drawing back along it, as Zip r
     expect.soft(pinPartition(viewOf(after)), "R2 and R3 still one net").toEqual([["R2:2", "R3:1"]])
   })
 
-  it("the end never stops on another net's wire crossing this one: refused there, fine a cell either side (design.md §6.7)", () => {
+  it("cut back to another net's wire crossing this one, the end stops on that wire and joins it: a T with a dot, as any end laid on a wire (the user, 2026-11-12: «хочу тыкнуть в другой провод»; design.md §6.4)", () => {
     const crossing = seg(at(7, 3), at(13, 3))
     const doc = docOf([resistor("R1", 0, 0)], [...path(at(4, 1), at(10, 1), at(10, 5)), crossing])
     const { wiring, d } = drawing(doc, at(10, 5))
     const onIt = pointerAt(d, at(10, 3))
-    expect.soft(previewOf(doc, wiring, onIt).refused?.refused, "the preview is refused on the crossing").toBe("crossing")
-    expect.soft(isRefusal(drawnTo(doc, wiring, onIt, drawEndAt(wiring, at(10, 3)), newId)), "and the release is refused").toBe(true)
-    expect.soft(isRefusal(drawnTo(doc, wiring, onIt, field(at(10, 3)), newId)), "and Enter there too").toBe(true)
+    expect.soft(previewOf(doc, wiring, onIt).refused, "the preview is not refused there").toBeNull()
+    const tee = [...path(at(4, 1), at(10, 1), at(10, 3)), seg(at(7, 3), at(10, 3)), seg(at(10, 3), at(13, 3))]
+    for (const [how, target] of [["a click on the other wire", drawEndAt(wiring, at(10, 3))], ["Enter there", field(at(10, 3))]] as const) {
+      const joined = drawnTo(doc, wiring, onIt, target, newId)
+      if (isRefusal(joined)) {
+        expect.soft(joined.refused, `${how}: refused`).toBeUndefined()
+        continue
+      }
+      expect.soft(geometryOf(joined.wires), `${how}: the wire ends on the other one, which is split there`).toEqual(geometryOf(tee))
+      expect.soft(junctionsOf(viewOf(joined)), `${how}: a dot at the T`).toEqual([at(10, 3)])
+      expect.soft(sortedPoints(danglingEnds(viewOf(joined))), `${how}: only the other wire's two ends stay open`).toEqual(sortedPoints([at(7, 3), at(13, 3)]))
+      const left = joined.wires.find((s) => geometryOf([s])[0] === geometryOf([seg(at(7, 3), at(10, 3))])[0])
+      expect.soft(left && viewOf(joined).netOfSegment(left.id), `${how}: the other wire is on R1's net now`).toBe(viewOf(joined).netOfPin("R1:2"))
+      expect.soft(normalFormViolations(joined.wires, wirePins(joined.objects)), `${how}: in normal form`).toEqual([])
+    }
     const below = pointerAt(d, at(10, 4))
     expect.soft(previewOf(doc, wiring, below).refused, "a cell before it is fine").toBeNull()
     const beyond = committed(doc, wiring, towards(d, at(10, 4), at(10, 3), at(10, 2)), drawEndAt(wiring, at(10, 2)))

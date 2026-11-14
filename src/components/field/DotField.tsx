@@ -782,6 +782,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     },
     sheet: wiring.sheet,
     ringRadius: OPEN_END_CELLS * grid,
+    casingTrim: casingTrim(grid),
     dotRadius: bandDotRadius,
     pixel: bandPixel,
   }))
