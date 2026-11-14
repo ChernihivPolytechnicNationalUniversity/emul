@@ -1,11 +1,14 @@
-import type { Run } from "@/schematic/circuit"
+import { runsOf, type Run } from "@/schematic/circuit"
 import { BODY_MASK } from "./body-mask"
 import type { Point } from "@/schematic/geometry"
 import { wireColorVar, type WireColorKey } from "@/schematic/wire-colors"
+import { turnsAtPins, type Leads } from "@/schematic/wire-look"
 import type { DragFrame } from "@/schematic/wires/drag"
-import { pointKey, samePoint, type WireSegment } from "@/schematic/wires/segment"
+import { normalise } from "@/schematic/wires/normal-form"
+import { onLattice, pointKey, samePoint, type WirePin, type WireSegment } from "@/schematic/wires/segment"
 import type { WireSheet } from "@/schematic/wires/sheet"
-import { casingWidth, SELECTED_WIRE_PX, WIRE_PX } from "./wire-style"
+import { leadPatchPaths, wireCasingPath, wireStrokePath } from "./wire-paths"
+import { CASING_PX, casingWidth, SELECTED_WIRE_PX, WIRE_PX } from "./wire-style"
 
 const SVG_NS = "http://www.w3.org/2000/svg"
 
@@ -14,8 +17,8 @@ export type RubberLook = {
   colorOfRun: (run: string) => WireColorKey
   colorOfNet: (net: string) => WireColorKey
   sheet: WireSheet
+  grid: number
   ringRadius: number
-  casingTrim: number
   dotRadius: () => number
   pixel: () => number
 }
@@ -25,6 +28,12 @@ export type BandPiece = { readonly a: Point; readonly b: Point; readonly color: 
 export type BandMark = { readonly at: Point; readonly color: WireColorKey }
 
 export type BandMarks = { readonly open: readonly BandMark[]; readonly dots: readonly BandMark[] }
+
+export type BandRun = { readonly id: string; readonly pts: readonly Point[]; readonly leads?: Leads; readonly color: WireColorKey }
+
+export type BandLook = Pick<RubberLook, "runOf" | "colorOfRun" | "colorOfNet" | "sheet">
+
+export type Band = { readonly lifted: ReadonlyMap<string, Run>; readonly wires: readonly BandRun[]; readonly marks: BandMarks; readonly covered: ReadonlySet<string> }
 
 const isEndOf = (s: { a: Point; b: Point }, p: Point) => samePoint(s.a, p) || samePoint(s.b, p)
 
@@ -72,16 +81,114 @@ export function bandMarks(drawn: readonly BandPiece[], sheet: WireSheet, hidden:
   return { open, dots }
 }
 
-export function bandCasings(drawn: readonly { readonly a: Point; readonly b: Point }[], trim: number): { a: Point; b: Point }[] {
-  const ends = new Map<string, number>()
-  for (const { a, b } of drawn) for (const p of [a, b]) ends.set(pointKey(p), (ends.get(pointKey(p)) ?? 0) + 1)
-  const lone = (p: Point) => ends.get(pointKey(p)) === 1
-  return drawn.map(({ a, b }) => {
-    const length = Math.hypot(b.x - a.x, b.y - a.y)
-    const t = length ? Math.min(trim, length / 2) / length : 0
-    const inward = (from: Point, to: Point) => ({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t })
-    return { a: lone(a) ? inward(a, b) : a, b: lone(b) ? inward(b, a) : b }
+const liesOn = (s: { a: Point; b: Point }, p: Point) =>
+  (s.b.x - s.a.x) * (p.y - s.a.y) === (s.b.y - s.a.y) * (p.x - s.a.x) &&
+  p.x >= Math.min(s.a.x, s.b.x) &&
+  p.x <= Math.max(s.a.x, s.b.x) &&
+  p.y >= Math.min(s.a.y, s.b.y) &&
+  p.y <= Math.max(s.a.y, s.b.y)
+
+function pinsLanded(sheet: WireSheet, carried: ReadonlyMap<string, Point>): WirePin[] {
+  const landed: WirePin[] = []
+  for (const [key, at] of carried) {
+    const pin = sheet.pin(key)
+    if (pin) landed.push({ ...pin, at })
+  }
+  return landed
+}
+
+const alongOf = (s: { a: Point; b: Point }) => {
+  const dx = s.b.x - s.a.x
+  const dy = s.b.y - s.a.y
+  return (p: Point) => (p.x - s.a.x) * dx + (p.y - s.a.y) * dy
+}
+
+function uncovered(s: WireSegment, covering: readonly WireSegment[]): WireSegment[] {
+  if (!covering.length) return [s]
+  const along = alongOf(s)
+  const end = along(s.b)
+  const cuts = [s.a, s.b, ...covering.flatMap((t) => [t.a, t.b]).filter((p) => along(p) > 0 && along(p) < end)].sort((p, q) => along(p) - along(q))
+  const left: WireSegment[] = []
+  for (let i = 1; i < cuts.length; i++) {
+    const [a, b] = [cuts[i - 1], cuts[i]]
+    if (samePoint(a, b)) continue
+    const middle = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+    if (!covering.some((t) => liesOn(t, middle))) left.push({ id: `${s.id}:${i}`, a, b, color: s.color })
+  }
+  return left
+}
+
+const offTheField = (segments: readonly WireSegment[], sheet: WireSheet, hidden: ReadonlySet<string>) => segments.flatMap((s) => uncovered(s, sheet.alongSegment(s).filter((t) => !hidden.has(t.id))))
+
+type Contacts = { pins: WirePin[]; junctions: WirePin[] }
+
+function contactsOf(segments: readonly WireSegment[], sheet: WireSheet, hidden: ReadonlySet<string>, carried: ReadonlyMap<string, Point>): Contacts {
+  const pins = new Map<string, WirePin>()
+  const junctions = new Map<string, WirePin>()
+  const junction = (at: Point) => junctions.set(pointKey(at), { key: `junction:${pointKey(at)}`, at })
+  const landed = pinsLanded(sheet, carried)
+  for (const s of segments) {
+    for (const mark of sheet.marksOn(s)) {
+      if (mark.segment && !hidden.has(mark.segment.id)) junction(mark.at)
+      if (mark.pin && !carried.has(mark.pin.key)) pins.set(mark.pin.key, mark.pin)
+    }
+    for (const pin of landed) if (liesOn(s, pin.at)) pins.set(pin.key, pin)
+    for (const at of [s.a, s.b]) if (sheet.through(at).some((t) => !hidden.has(t.id))) junction(at)
+  }
+  const wired = new Set(junctions.keys())
+  const free = [...pins.values()].filter((pin) => !wired.has(pointKey(pin.at)))
+  return { pins: free, junctions: [...junctions.values(), ...[...pins.values()].filter((pin) => wired.has(pointKey(pin.at)))] }
+}
+
+function normalBand(segments: readonly WireSegment[], stops: readonly WirePin[]): readonly WireSegment[] {
+  const onGrid = segments.filter((s) => onLattice(s.a) && onLattice(s.b))
+  if (!onGrid.length) return segments
+  let serial = 0
+  const normal = normalise(onGrid, stops, undefined, () => `band:n${++serial}`)
+  return onGrid.length === segments.length ? normal : [...normal, ...segments.filter((s) => !onLattice(s.a) || !onLattice(s.b))]
+}
+
+export function bandRuns(drawn: readonly BandPiece[], sheet: WireSheet, hidden: ReadonlySet<string>, carried: ReadonlyMap<string, Point>, blocked = false): BandRun[] {
+  const segments: WireSegment[] = []
+  drawn.forEach(({ a, b, color }, i) => {
+    if (!samePoint(a, b)) segments.push({ id: `band:${i}`, a, b, color })
   })
+  const shown = blocked ? segments : offTheField(segments, sheet, hidden)
+  if (!shown.length) return []
+  const { pins, junctions } = contactsOf(shown, sheet, hidden, carried)
+  const stops = [...pins, ...junctions]
+  const runs = runsOf(normalBand(shown, stops), stops)
+  const { leads } = turnsAtPins(runs, pins)
+  return runs.map((run) => {
+    const lead = leads.get(run.id)
+    return { id: run.id, pts: run.points, color: run.segments[0].color!, ...(lead && { leads: lead }) }
+  })
+}
+
+export function bandOf(frame: DragFrame, look: BandLook, always: ReadonlySet<string> = new Set()): Band {
+  const lifted = new Map<string, Run>()
+  for (const id of [...always, ...frame.replaced]) {
+    const run = look.runOf(id)
+    if (run) lifted.set(run.id, run)
+  }
+  const drawn: BandPiece[] = []
+  for (const run of lifted.values()) for (const s of run.segments) if (!frame.replaced.has(s.id)) drawn.push({ a: s.a, b: s.b, color: s.color ?? look.colorOfRun(run.id) })
+  for (const piece of frame.pieces) {
+    const run = piece.source !== undefined ? look.runOf(piece.source) : undefined
+    drawn.push({ a: piece.a, b: piece.b, color: piece.color ?? (run ? look.colorOfRun(run.id) : look.colorOfNet(piece.net)) })
+  }
+  const hidden = new Set<string>()
+  const covered = new Set<string>()
+  for (const run of lifted.values()) {
+    for (const s of run.segments) hidden.add(s.id)
+    for (const p of run.points) covered.add(pointKey(p))
+  }
+  for (const piece of drawn) {
+    covered.add(pointKey(piece.a))
+    covered.add(pointKey(piece.b))
+  }
+  const marks = drawn.length ? bandMarks(drawn, look.sheet, hidden, frame.pins) : { open: [], dots: [] }
+  return { lifted, wires: bandRuns(drawn, look.sheet, hidden, frame.pins, frame.blocked), marks, covered }
 }
 
 const SVG_MARKS = "[data-slot=wire-marks] > [data-junction], [data-slot=wire-marks] > [data-dangling], [data-corner]"
@@ -110,45 +217,20 @@ export class RubberBandLayer {
   }
 
   show(frame: DragFrame) {
-    const runs = new Map<string, Run>()
-    for (const id of this.always) {
-      const run = this.look.runOf(id)
-      if (run) runs.set(run.id, run)
-    }
-    for (const id of frame.replaced) {
-      const run = this.look.runOf(id)
-      if (run) runs.set(run.id, run)
-    }
+    const band = bandOf(frame, this.look, this.always)
     for (const [id, saved] of this.hidden) {
-      if (runs.has(id)) continue
+      if (band.lifted.has(id)) continue
       for (const { element, display } of saved) element.style.display = display
       this.hidden.delete(id)
     }
-    for (const id of runs.keys()) {
+    for (const id of band.lifted.keys()) {
       if (this.hidden.has(id)) continue
       const saved = [...this.root.querySelectorAll<SVGElement>(`[data-wire="${CSS.escape(id)}"]`)].map((element) => ({ element, display: element.style.display }))
       for (const { element } of saved) element.style.display = "none"
       this.hidden.set(id, saved)
     }
-    const drawn: BandPiece[] = []
-    const kept = (s: WireSegment) => !frame.replaced.has(s.id)
-    for (const run of runs.values()) for (const s of run.segments) if (kept(s)) drawn.push({ a: s.a, b: s.b, color: s.color ?? this.look.colorOfRun(run.id) })
-    for (const piece of frame.pieces) {
-      const run = piece.source !== undefined ? this.look.runOf(piece.source) : undefined
-      drawn.push({ a: piece.a, b: piece.b, color: piece.color ?? (run ? this.look.colorOfRun(run.id) : this.look.colorOfNet(piece.net)) })
-    }
-    const hiddenSegments = new Set<string>()
-    const covered = new Set<string>()
-    for (const run of runs.values()) {
-      for (const s of run.segments) hiddenSegments.add(s.id)
-      for (const p of run.points) covered.add(pointKey(p))
-    }
-    for (const piece of drawn) {
-      covered.add(pointKey(piece.a))
-      covered.add(pointKey(piece.b))
-    }
-    this.hideMarks(covered)
-    this.paint(drawn, frame.blocked, drawn.length ? bandMarks(drawn, this.look.sheet, hiddenSegments, frame.pins) : { open: [], dots: [] })
+    this.hideMarks(band.covered)
+    this.paint(band.wires, frame.blocked, band.marks)
   }
 
   clear() {
@@ -188,34 +270,24 @@ export class RubberBandLayer {
       }
   }
 
-  private paint(drawn: readonly BandPiece[], blocked: boolean, marks: BandMarks) {
+  private paint(wires: readonly BandRun[], blocked: boolean, marks: BandMarks) {
     const layer = this.host()
     if (!layer) return
     layer.replaceChildren()
     layer.toggleAttribute("data-blocked", blocked)
+    const { grid } = this.look
     const casings = document.createElementNS(SVG_NS, "g")
     casings.setAttribute("mask", BODY_MASK)
     layer.append(casings)
-    for (const { a, b } of bandCasings(drawn, this.look.casingTrim)) {
-      const path = document.createElementNS(SVG_NS, "path")
-      path.setAttribute("d", `M${a.x} ${a.y} L${b.x} ${b.y}`)
-      path.setAttribute("fill", "none")
-      path.setAttribute("stroke", "var(--background)")
-      path.setAttribute("stroke-width", String(casingWidth(WIRE_PX)))
-      path.setAttribute("stroke-linecap", "butt")
-      path.setAttribute("vector-effect", "non-scaling-stroke")
-      path.setAttribute("data-band-casing", "")
-      casings.append(path)
+    for (const wire of wires) {
+      const casing = stroked(wireCasingPath(wire, grid), "var(--background)", casingWidth(WIRE_PX), "butt")
+      casing.setAttribute("data-band-casing", "")
+      casings.append(casing)
     }
-    for (const { a, b, color } of drawn) {
-      const path = document.createElementNS(SVG_NS, "path")
-      path.setAttribute("d", `M${a.x} ${a.y} L${b.x} ${b.y}`)
-      path.setAttribute("fill", "none")
-      path.setAttribute("stroke", blocked ? "var(--destructive)" : wireColorVar(color))
-      path.setAttribute("stroke-width", String(blocked ? SELECTED_WIRE_PX : WIRE_PX))
-      path.setAttribute("stroke-linecap", "round")
-      path.setAttribute("vector-effect", "non-scaling-stroke")
-      path.setAttribute("data-piece", `${a.x} ${a.y} ${b.x} ${b.y}`)
+    for (const wire of wires) for (const d of leadPatchPaths(wire, this.look.pixel())) layer.append(stroked(d, "var(--background)", WIRE_PX + CASING_PX, "butt", "miter"))
+    for (const wire of wires) {
+      const path = stroked(wireStrokePath(wire, grid), blocked ? "var(--destructive)" : wireColorVar(wire.color), blocked ? SELECTED_WIRE_PX : WIRE_PX, "round")
+      path.setAttribute("data-points", wire.pts.map((p) => `${p.x},${p.y}`).join(" "))
       layer.append(path)
     }
     const stroke = (color: WireColorKey) => (blocked ? "var(--destructive)" : wireColorVar(color))
@@ -235,6 +307,18 @@ export class RubberBandLayer {
       layer.append(ring)
     }
   }
+}
+
+function stroked(d: string, stroke: string, width: number, cap: "butt" | "round", join: "round" | "miter" = "round"): SVGPathElement {
+  const path = document.createElementNS(SVG_NS, "path")
+  path.setAttribute("d", d)
+  path.setAttribute("fill", "none")
+  path.setAttribute("stroke", stroke)
+  path.setAttribute("stroke-width", String(width))
+  path.setAttribute("stroke-linecap", cap)
+  path.setAttribute("stroke-linejoin", join)
+  path.setAttribute("vector-effect", "non-scaling-stroke")
+  return path
 }
 
 function circle(at: Point, r: number, fill: string): SVGCircleElement {

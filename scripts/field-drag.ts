@@ -117,7 +117,12 @@ const wiredPair = (): Schematic => ({
 })
 const countOf = (page: Page, selector: string) => page.evaluate((s) => document.querySelectorAll(s).length, selector)
 const pieces = (page: Page) =>
-  page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-piece]")].map((e) => e.getAttribute("data-piece")!.split(" ").map(Number)))
+  page.evaluate(() =>
+    [...document.querySelectorAll("[data-slot=rubber-band] [data-points]")].flatMap((e) => {
+      const pts = e.getAttribute("data-points")!.split(" ").map((p) => p.split(",").map(Number))
+      return pts.slice(1).map((p, i) => [...pts[i], ...p])
+    }),
+  )
 const orthogonal = (piece: number[]) => piece[0] === piece[2] || piece[1] === piece[3]
 
 async function wiresFollowTheDrag(page: Page) {
@@ -127,8 +132,13 @@ async function wiresFollowTheDrag(page: Page) {
   await dragBy(page, frame.toScreen(cellPoint(22, 11)), frame.toScreen(cellPoint(22, 14)), false)
   const drawn = await pieces(page)
   expect("mid-drag the rubber band draws the wire, every piece horizontal or vertical", drawn.length > 0 && drawn.every(orthogonal), true)
+  const bandPaths = await page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-points]")].map((e) => e.getAttribute("d")!))
+  await shoot(page, "drag-with-wires-mid")
+  expect("mid-drag the Z is one path with both bends rounded, not pieces with square corners (the user, 2026-11-12)", bandPaths.map((d) => (d.match(/Q/g) ?? []).length), [2])
   await page.mouse.up()
   await page.waitForTimeout(800)
+  const fieldPaths = await page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire] path[data-base]")].map((e) => e.getAttribute("d")!))
+  expect("the band drew exactly the path the field draws after the drop", bandPaths.every((d) => fieldPaths.includes(d)), true)
   expect("dropped: R2 three cells lower", (await frame.worldOf("R2")).y, 13 * GRID)
   expect("dropped: the wire still reaches R2, no open end", await countOf(page, "[data-dangling]"), 0)
   await shoot(page, "drag-with-wires")
@@ -164,7 +174,7 @@ async function plateAfterDragBackAndForth(page: Page) {
         plates: [...document.querySelectorAll("[data-slot=selection] path[data-wire]")].filter((e) => getComputedStyle(e).display !== "none").map((p) => ({ whole: p.hasAttribute("data-whole"), d: p.getAttribute("d") })),
         casings: [...document.querySelectorAll("[data-slot=wires] path[data-casing]")].filter((e) => getComputedStyle(e).display !== "none").map((p) => p.getAttribute("stroke")),
         patches: [...document.querySelectorAll("[data-slot=pin-turns] > path:not([data-corner])")].map((p) => p.getAttribute("stroke")),
-        pieces: document.querySelectorAll("[data-slot=rubber-band] [data-piece]").length,
+        pieces: document.querySelectorAll("[data-slot=rubber-band] [data-points]").length,
       }
     })
   type Pick = (points: number[][]) => number
@@ -603,10 +613,13 @@ async function shorteningFromAnOpenEnd(page: Page) {
   const bandRings = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-band-dangling]")].map((e) => e.getAttribute("data-band-dangling")))
   const bandPieces = () =>
     page.evaluate(() =>
-      [...document.querySelectorAll("[data-slot=rubber-band] [data-piece]")]
-        .map((e) => {
-          const [ax, ay, bx, by] = e.getAttribute("data-piece")!.split(" ").map(Number)
-          return ax < bx || (ax === bx && ay <= by) ? `${ax} ${ay} ${bx} ${by}` : `${bx} ${by} ${ax} ${ay}`
+      [...document.querySelectorAll("[data-slot=rubber-band] [data-points]")]
+        .flatMap((e) => {
+          const pts = e.getAttribute("data-points")!.split(" ").map((p) => p.split(",").map(Number))
+          return pts.slice(1).map(([bx, by], i) => {
+            const [ax, ay] = pts[i]
+            return ax < bx || (ax === bx && ay <= by) ? `${ax} ${ay} ${bx} ${by}` : `${bx} ${by} ${ax} ${ay}`
+          })
         })
         .sort(),
     )
@@ -678,8 +691,8 @@ async function shorteningFromAnOpenEnd(page: Page) {
   const casingEnds = () =>
     page.evaluate(() =>
       [...document.querySelectorAll("[data-slot=rubber-band] [data-band-casing]")].flatMap((e) => {
-        const [ax, ay, bx, by] = (e.getAttribute("d") ?? "").replace(/[ML]/g, " ").trim().split(/\s+/).map(Number)
-        return [`${ax},${ay}`, `${bx},${by}`]
+        const n = (e.getAttribute("d") ?? "").match(/-?\d+(\.\d+)?(e-?\d+)?/g)!.map(Number)
+        return [`${n[0]},${n[1]}`, `${n[n.length - 2]},${n[n.length - 1]}`]
       }),
     )
   expect("clicked on the open end and drawn back to the other net's wire across it: nothing refused, a dot shows the T it would make (the user, 2026-11-12)", [await countOf(page, "[data-slot^=pending-wire][data-refused], [data-slot=rubber-band] > g[data-blocked]"), await page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-band-junction]")].map((e) => e.getAttribute("data-band-junction")))], [0, [key(20, 13)]])
@@ -1242,7 +1255,7 @@ async function phaseSixChecks(page: Page) {
     )
   const shownRuns = () => page.evaluate(() => [...document.querySelectorAll<SVGElement>("[data-slot=wires] [data-wire][data-points]")].filter((e) => e.style.display !== "none").map((e) => e.getAttribute("data-points")))
   const bandCells = () =>
-    page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-piece]")].map((e) => e.getAttribute("data-piece")!.split(" ").map(Number))).then((pieces) =>
+    pieces(page).then((pieces) =>
       pieces.map(([ax, ay, bx, by]) => (ax < bx || (ax === bx && ay <= by) ? [ax, ay, bx, by] : [bx, by, ax, ay]).map((v) => v / GRID).join(" ")).sort(),
     )
   const piecesOf = (cells: number[][]) => cells.slice(1).map(([x, y], i) => ([cells[i][0], cells[i][1], x, y] as number[])).map(([ax, ay, bx, by]) => (ax < bx || (ax === bx && ay <= by) ? [ax, ay, bx, by] : [bx, by, ax, ay]).join(" ")).sort()

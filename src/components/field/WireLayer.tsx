@@ -1,10 +1,11 @@
 import * as React from "react"
 import { BODY_MASK } from "./body-mask"
 import { cn } from "@/lib/utils"
-import { toPath, trimRouteEnds, type Point, type RoutedWire } from "@/schematic/geometry"
-import { runPath, towards, type PinCorner } from "@/schematic/wire-look"
+import { toPath, type Point, type RoutedWire } from "@/schematic/geometry"
+import type { PinCorner } from "@/schematic/wire-look"
 import { wireColorVar, wireFlowVar, type WireColorKey } from "@/schematic/wire-colors"
-import { CASING_PX, casingTrim, casingWidth, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_HIT_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
+import { CASING_PX, casingWidth, dotRadius, OPEN_END_CELLS, SELECTED_WIRE_PX, WIRE_HIT_PX, WIRE_PX } from "./wire-style"
+import { leadPatchPaths, wireCasingPath, wireStrokePath } from "./wire-paths"
 import { wireMarks } from "./wire-marks"
 import type { WireFlow } from "./wire-flow"
 import type { WirePlate } from "./wire-plate"
@@ -60,13 +61,12 @@ export const WireLayer = React.memo(function WireLayer({
   React.useEffect(() => {
     flow.setScale(scale)
   }, [flow, scale])
-  const radius = wireCornerRadius(grid)
   const px = 1 / scale
   const dotR = dotRadius(grid, scale)
   const marks = React.useMemo(() => wireMarks(routes, dots, dangling, corners, colorOf, true), [routes, dots, dangling, corners, colorOf])
 
   const groups = React.useMemo(() => groupByNet(routes, netOfWire), [routes, netOfWire])
-  const paths = React.useMemo(() => new Map(routes.map((r) => [r.id, runPath(r.pts, radius, r.leads)])), [routes, radius])
+  const paths = React.useMemo(() => new Map(routes.map((r) => [r.id, wireStrokePath(r, grid)])), [routes, grid])
   const platedEnds = React.useMemo(() => {
     const ends = new Set<string>()
     for (const plate of plates) {
@@ -77,17 +77,18 @@ export const WireLayer = React.memo(function WireLayer({
   }, [plates])
   const patches = React.useMemo(
     () => [
-      ...routes.flatMap((r) => [
-        r.leads?.start && { d: toPath([r.leads.start, towards(r.pts[0], r.leads.start, -WIRE_PX * px)]), plated: platedEnds.has(`${r.id}:start`) },
-        r.leads?.end && { d: toPath([r.leads.end, towards(r.pts[r.pts.length - 1], r.leads.end, -WIRE_PX * px)]), plated: platedEnds.has(`${r.id}:end`) },
-      ].filter((patch): patch is { d: string; plated: boolean } => !!patch)),
-      ...corners.map((c) => ({ d: toPath([c.a, c.at, c.b]), plated: false })),
+      ...routes.flatMap((r) =>
+        (["start", "end"] as const).flatMap((side) => {
+          const lead = r.leads?.[side]
+          return lead ? leadPatchPaths({ pts: r.pts, leads: { [side]: lead } }, px).map((d) => ({ wire: r.id, d, plated: platedEnds.has(`${r.id}:${side}`) })) : []
+        }),
+      ),
+      ...corners.map((c) => ({ wire: undefined, d: toPath([c.a, c.at, c.b]), plated: false })),
     ],
     [routes, corners, px, platedEnds],
   )
   const pathOf = (id: string) => paths.get(id) ?? ""
-  const trim = casingTrim(grid)
-  const casings = React.useMemo(() => new Map(routes.map((r) => [r.id, toPath(trimRouteEnds(r.pts, trim), radius)])), [routes, radius, trim])
+  const casings = React.useMemo(() => new Map(routes.map((r) => [r.id, wireCasingPath(r, grid)])), [routes, grid])
   const casingOf = (id: string) => casings.get(id) ?? ""
   const tints = React.useMemo(() => {
     const byRun = new Map<string, WirePlate[]>()
@@ -100,8 +101,8 @@ export const WireLayer = React.memo(function WireLayer({
     <svg data-slot="wires" className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
       {patches.length > 0 && (
         <g data-slot="pin-turns" pointerEvents="none">
-          {patches.map(({ d, plated }, i) => (
-            <path key={i} d={d} fill="none" stroke={plated ? "var(--selection-tint)" : "var(--background)"} strokeWidth={WIRE_PX + CASING_PX} strokeLinecap="butt" strokeLinejoin="miter" vectorEffect="non-scaling-stroke" />
+          {patches.map(({ wire, d, plated }, i) => (
+            <path key={i} d={d} fill="none" stroke={plated ? "var(--selection-tint)" : "var(--background)"} strokeWidth={WIRE_PX + CASING_PX} strokeLinecap="butt" strokeLinejoin="miter" vectorEffect="non-scaling-stroke" data-wire={wire} />
           ))}
           {corners.map((c) => (
             <path key={`${c.at.x},${c.at.y}`} data-corner={`${c.at.x},${c.at.y}`} d={`M${c.a.x} ${c.a.y} Q${c.at.x} ${c.at.y} ${c.b.x} ${c.b.y}`} fill="none" className="stroke-foreground" strokeWidth={WIRE_PX} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
@@ -237,7 +238,7 @@ export function PendingWireLayer({ pending, grid, scale, part }: { pending: Pend
   if (!pending || pending.points.length < 1) return null
   return (
     <svg data-slot={`pending-wire-${part}`} data-refused={pending.refused ? "" : undefined} className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
-      <Pending pending={pending} grid={grid} radius={wireCornerRadius(grid)} handleR={handleRadius(grid, scale)} part={part} />
+      <Pending pending={pending} grid={grid} handleR={handleRadius(grid, scale)} part={part} />
     </svg>
   )
 }
@@ -257,9 +258,9 @@ function handleRadius(grid: number, scale: number) {
   return Math.min(Math.max(HANDLE_CELLS * grid, HANDLE_MIN_PX / scale), HANDLE_MAX_PX / scale)
 }
 
-function Pending({ pending, grid, radius, handleR, part }: { pending: PendingLook; grid: number; radius: number; handleR: number; part: PendingPart }) {
+function Pending({ pending, grid, handleR, part }: { pending: PendingLook; grid: number; handleR: number; part: PendingPart }) {
   const pts = pending.points
-  const d = toPath([...pts], radius)
+  const d = wireStrokePath({ pts }, grid)
   const color = pending.refused ? "var(--destructive)" : wireColorVar(pending.color)
   const end = pts[pts.length - 1]
   if (part === "marks") {
@@ -274,7 +275,7 @@ function Pending({ pending, grid, radius, handleR, part }: { pending: PendingLoo
   }
   return (
     <g pointerEvents="none">
-      <path mask={BODY_MASK} d={toPath(trimRouteEnds([...pts], casingTrim(grid)), radius)} fill="none" stroke="var(--background)" strokeWidth={casingWidth(WIRE_PX)} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+      <path mask={BODY_MASK} d={wireCasingPath({ pts }, grid)} fill="none" stroke="var(--background)" strokeWidth={casingWidth(WIRE_PX)} strokeLinejoin="round" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
       <path
         d={d}
         fill="none"

@@ -781,8 +781,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       return run ? colorOf(run) : DEFAULT_SIGNAL_COLOR
     },
     sheet: wiring.sheet,
+    grid,
     ringRadius: OPEN_END_CELLS * grid,
-    casingTrim: casingTrim(grid),
     dotRadius: bandDotRadius,
     pixel: bandPixel,
   }))

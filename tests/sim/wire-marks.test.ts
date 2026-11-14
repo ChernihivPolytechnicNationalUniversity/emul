@@ -11,7 +11,8 @@ import { WireLayer } from "@/components/field/WireLayer"
 import { WireFlow } from "@/components/field/wire-flow"
 import { wireMarks } from "@/components/field/wire-marks"
 import { casingTrim, WIRE_PX } from "@/components/field/wire-style"
-import { bandCasings, bandMarks, type BandPiece } from "@/components/field/rubber-band-layer"
+import { bandMarks, bandRuns, type BandPiece } from "@/components/field/rubber-band-layer"
+import { wireCasingPath } from "@/components/field/wire-paths"
 import { WireSheet } from "@/schematic/wires/sheet"
 import { PIN_MARK_CELLS } from "@/components/field/symbol-raster"
 
@@ -240,23 +241,35 @@ describe("the rubber band's casings stop short of its ends, as a laid wire's do:
   const p = (x: number, y: number): Point => ({ x: c(x), y: c(y) })
   const piece = (a: Point, b: Point): BandPiece => ({ a, b, color: "red" })
   const trim = casingTrim(GRID)
-  const shown = (casings: readonly { a: Point; b: Point }[]) => casings.map(({ a, b }) => `${a.x},${a.y} ${b.x},${b.y}`)
+  const endsOf = (d: string) => {
+    const n = d.match(/-?\d+(\.\d+)?(e-?\d+)?/g)!.map(Number)
+    return [`${n[0]},${n[1]}`, `${n[n.length - 2]},${n[n.length - 1]}`].sort().join(" ")
+  }
+  const casingEnds = (pieces: readonly BandPiece[], sheet = WireSheet.of([], [])) => bandRuns(pieces, sheet, new Set(), new Map()).map((run) => endsOf(wireCasingPath(run, GRID))).sort()
+  const at = (x: number, y: number) => `${x},${y}`
 
-  it("a lone piece ending on another wire: its casing is trimmed at both ends, by the laid wire's trim", () => {
-    expect(shown(bandCasings([piece(p(10, 5), p(10, 3))], trim))).toEqual([`${c(10)},${c(5) - trim} ${c(10)},${c(3) + trim}`])
+  it("a piece ending on another wire: its casing is trimmed at both ends, by the laid wire's trim", () => {
+    const sheet = WireSheet.of([seg("other", p(6, 3), p(14, 3))], [])
+    expect(casingEnds([piece(p(10, 5), p(10, 3))], sheet)).toEqual([[at(c(10), c(3) + trim), at(c(10), c(5) - trim)].sort().join(" ")])
   })
 
   it("an L: trimmed at its two ends, unbroken round its corner", () => {
-    expect(shown(bandCasings([piece(p(4, 1), p(10, 1)), piece(p(10, 1), p(10, 3))], trim))).toEqual([`${c(4) + trim},${c(1)} ${c(10)},${c(1)}`, `${c(10)},${c(1)} ${c(10)},${c(3) - trim}`])
+    expect(casingEnds([piece(p(4, 1), p(10, 1)), piece(p(10, 1), p(10, 3))])).toEqual([[at(c(4) + trim, c(1)), at(c(10), c(3) - trim)].sort().join(" ")])
   })
 
-  it("a branch ending on the middle of a piece: the branch's end is trimmed, the piece it meets runs on whole there", () => {
-    const casings = shown(bandCasings([piece(p(0, 2), p(8, 2)), piece(p(4, 2), p(4, 6))], trim))
-    expect(casings).toEqual([`${c(0) + trim},${c(2)} ${c(8) - trim},${c(2)}`, `${c(4)},${c(2) + trim} ${c(4)},${c(6) - trim}`])
+  it("a branch ending on the middle of a piece: three wires meeting at a T, each trimmed there as the field trims a laid T", () => {
+    expect(casingEnds([piece(p(0, 2), p(8, 2)), piece(p(4, 2), p(4, 6))])).toEqual(
+      [
+        [at(c(0) + trim, c(2)), at(c(4) - trim, c(2))],
+        [at(c(4) + trim, c(2)), at(c(8) - trim, c(2))],
+        [at(c(4), c(2) + trim), at(c(4), c(6) - trim)],
+      ]
+        .map((ends) => ends.sort().join(" "))
+        .sort(),
+    )
   })
 
   it("a piece shorter than two trims keeps its middle, as trimRouteEnds does", () => {
-    const short = shown(bandCasings([piece(p(2, 2), { x: c(2) + trim, y: c(2) })], trim))
-    expect(short).toEqual([`${c(2) + trim / 2},${c(2)} ${c(2) + trim / 2},${c(2)}`])
+    expect(casingEnds([piece(p(2, 2), { x: c(2) + trim, y: c(2) })])).toEqual([[at(c(2) + trim / 2, c(2)), at(c(2) + trim / 2, c(2))].join(" ")])
   })
 })
