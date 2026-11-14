@@ -2114,10 +2114,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
               {armed && armedAt && <PlacementGhost defId={armed} at={armedAt} grid={grid} scale={scale} detail={detail} sim={simStore} colorOf={colorOf} raster={symbolRaster} />}
               {quick && quickPreview && <PlacementGhost defId={quickPreview} at={quick.world} grid={grid} scale={scale} detail={detail} sim={simStore} colorOf={colorOf} raster={symbolRaster} />}
               {markRect && (
-                <div data-slot="field-hover-mark" className="pointer-events-none absolute rounded-md ring-2 ring-sky-500/70" style={{ left: markRect.x - 4 / scale, top: markRect.y - 4 / scale, width: markRect.w + 8 / scale, height: markRect.h + 8 / scale, ["--tw-ring-width" as string]: `${2 / scale}px` }} />
+                <div data-slot="field-hover-mark" className="pointer-events-none absolute rounded-md ring-2 ring-selection/70" style={{ left: markRect.x - 4 / scale, top: markRect.y - 4 / scale, width: markRect.w + 8 / scale, height: markRect.h + 8 / scale, ["--tw-ring-width" as string]: `${2 / scale}px` }} />
               )}
               {pinRect && (
-                <div data-slot="field-pin-mark" className="pointer-events-none absolute rounded-full border-amber-500 motion-safe:animate-pulse" style={{ left: pinRect.x + pinRect.w / 2 - 10 / scale, top: pinRect.y + pinRect.h / 2 - 10 / scale, width: 20 / scale, height: 20 / scale, borderWidth: 3 / scale }} />
+                <div data-slot="field-pin-mark" className="pointer-events-none absolute rounded-full border-warning motion-safe:animate-pulse" style={{ left: pinRect.x + pinRect.w / 2 - 10 / scale, top: pinRect.y + pinRect.h / 2 - 10 / scale, width: 20 / scale, height: 20 / scale, borderWidth: 3 / scale }} />
               )}
               {wireArmed && <PendingWireLayer pending={{ points: [wireArmed], corners: [], color: DEFAULT_SIGNAL_COLOR, refused: false, landing: false }} grid={grid} scale={scale} part="marks" />}
               {ghosts && ghosts.length > 0 && (
