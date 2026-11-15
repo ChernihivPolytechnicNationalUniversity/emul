@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { STM32F429ZI, STM32F746IG } from "@/mcu/chip"
 import { parsePad, Stm32 } from "@/mcu/stm32f429"
-import { builder } from "@/schematic/builder"
+import { builder, connect } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { partKey, pinKey } from "@/schematic/types"
@@ -187,7 +187,7 @@ describe("backup SRAM on the Open746I-C with a CR2032 on VBAT, through two power
   const cell = { id: "cell", def: "battery", x: 30 * GRID, y: 60 * GRID, props: { chem: "li-mno2", cells: "1", capacity: "220 mAh" } }
   const gnd = { id: "g", def: "ground", x: 34 * GRID, y: 66 * GRID, props: {} }
   doc.objects.push(cell, gnd)
-  doc.wires.push(
+  connect(doc, 
     { id: "w1", from: { object: cell.id, pin: "+" }, to: { object: u.id, pin: "VBAT" } },
     { id: "w2", from: { object: gnd.id, pin: "GND" }, to: { object: u.id, pin: "P24-1" } },
     { id: "w3", from: { object: cell.id, pin: "-" }, to: { object: gnd.id, pin: "GND" } },

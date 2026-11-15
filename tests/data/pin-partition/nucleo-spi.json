@@ -1,0 +1,13 @@
+{
+  "source": "example nucleo-spi",
+  "objects": [
+    "U1 (nucleo-f429zi)",
+    "U2 (nucleo-f429zi)"
+  ],
+  "nets": [
+    ["U1.CN7-10","U2.CN9-14"],
+    ["U1.CN7-12","U2.CN9-18"],
+    ["U1.CN7-14","U2.CN9-20"],
+    ["U1.CN7-16","U2.CN9-16"]
+  ]
+}

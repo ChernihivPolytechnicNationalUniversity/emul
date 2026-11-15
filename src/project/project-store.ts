@@ -1,4 +1,4 @@
-import { objectIndex, objectRect, resolvePinIn, GRID } from "@/schematic/geometry"
+import { objectRect, GRID } from "@/schematic/geometry"
 import { stamped, upgraded, type Upgrade } from "@/schematic/migrate"
 import { defIds, ensureDefs } from "@/schematic/registry"
 import type { Schematic } from "@/schematic/types"
@@ -58,6 +58,14 @@ export type ReadProject = Upgrade & { name?: string }
 
 export async function readProjectFile(file: Blob): Promise<ReadProject | null> {
   return readProjectBytes(new Uint8Array(await file.arrayBuffer()))
+}
+
+export async function openedFile(file: Blob, name: string): Promise<ReadProject | { failure: string }> {
+  try {
+    return (await readProjectFile(file)) ?? { failure: `${name}: not an .emul project or a zipped STM32 project.` }
+  } catch (e) {
+    return { failure: `${name} could not be brought up to this version of εmul: ${e instanceof Error ? e.message : String(e)}` }
+  }
 }
 
 async function readProjectBytes(raw: Uint8Array): Promise<ReadProject | null> {
@@ -130,14 +138,8 @@ export function thumbnail(doc: Schematic): Thumb | undefined {
     .sort((a, b) => b.w * b.h - a.w * a.h)
     .slice(0, THUMB_OBJECTS)
     .flatMap((r) => [q(r.x - x0), q(r.y - y0), q(r.w), q(r.h)])
-  const index = objectIndex(doc.objects)
   const lines: number[] = []
-  for (const wire of doc.wires.slice(0, THUMB_WIRES)) {
-    const a = resolvePinIn(index, wire.from, GRID)
-    const b = resolvePinIn(index, wire.to, GRID)
-    if (!a || !b) continue
-    lines.push(q(a.point.x - x0), q(a.point.y - y0), q(b.point.x - x0), q(b.point.y - y0))
-  }
+  for (const wire of doc.wires.slice(0, THUMB_WIRES)) lines.push(q(wire.a.x - x0), q(wire.a.y - y0), q(wire.b.x - x0), q(wire.b.y - y0))
   return { w: q(w), h: q(h), rects, lines }
 }
 

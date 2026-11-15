@@ -1,7 +1,7 @@
 import { pinContacts } from "./contacts"
 import { objectIndex } from "./geometry"
 import { getDef, getPin } from "./registry"
-import { pinKey, type PinKind, type PinRef, type PlacedObject, type Wire } from "./types"
+import { pinKey, type LegacyWire, type PinKind, type PinRef, type PlacedObject } from "./types"
 
 export type NetMap = {
   netOfPin: (key: string) => string | undefined
@@ -29,7 +29,7 @@ export const emptyNets = (): NetMap => ({
   connected: () => false,
 })
 
-export function buildNets(objects: readonly PlacedObject[], wires: readonly Wire[], grid: number): NetMap {
+export function legacyNets(objects: readonly PlacedObject[], wires: readonly LegacyWire[], grid: number): NetMap {
   const parent = new Map<string, string>()
   const find = (k: string): string => {
     let p = parent.get(k)
@@ -109,3 +109,4 @@ export function buildNets(objects: readonly PlacedObject[], wires: readonly Wire
     connected: (key) => parent.has(key),
   }
 }
+

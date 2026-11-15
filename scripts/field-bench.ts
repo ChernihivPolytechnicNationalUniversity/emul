@@ -5,6 +5,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { chromium, type Browser, type Page } from "playwright-core"
 import { GRID, objectPins, objectRect } from "@/schematic/geometry"
+import { stamped } from "@/schematic/migrate"
 import type { Schematic } from "@/schematic/types"
 import { boardDocuments, stressDocuments } from "./lib/stress"
 
@@ -27,6 +28,8 @@ const DEV_SERVER = process.env.EMUL_URL ?? "http://localhost:5173/"
 const VIEWPORT = { width: 1600, height: 1000 }
 const LOAD_TIMEOUT_MS = 120_000
 const SETTLE_MS = 2500
+const LANDING_TIMEOUT_MS = 15_000
+const TITLE_HOLD_MS = 1000
 const WORKING_ZOOM = 0.48
 const CANVAS_BAND_ZOOM = 0.14
 const CANVAS_BAND_OBJECTS = 1200
@@ -44,7 +47,7 @@ const GRAB_MARGIN = { left: 120, right: 260, top: 120, bottom: 160 }
 type FieldProbe = { frames: number[]; longTasks: number[]; previous: number; sample: FrameRequestCallback }
 type Phase = { frames: number; median: number; p95: number; worst: number; longTasks: number; blocked: number; wall: number }
 type FieldNodes = { total: number; path: number; circle: number; text: number }
-type Measured = { objects: number; wires: number; pins: number; zoom: number; nodes: FieldNodes; mountMs: number; moved: boolean; drag: Phase; pan: Phase; wheelZoom: Phase; idle: Phase }
+type Measured = { objects: number; wires: number; pins: number; zoom: number; nodes: FieldNodes; mountMs: number; moved: boolean; drag: Phase; wired: Phase | null; pan: Phase; wheelZoom: Phase; idle: Phase }
 
 const buildRevision = (directory: string) => Number(directory.split("-")[1])
 
@@ -91,18 +94,51 @@ async function waitUntilDrawn(page: Page) {
   throw new Error("the field never settled")
 }
 
+const pageTitle = (page: Page) => page.evaluate(() => document.title)
+
+async function landingSettled(page: Page) {
+  const deadline = Date.now() + LANDING_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (!(await pageTitle(page)).startsWith("εmul")) return
+    await page.waitForTimeout(100)
+  }
+  throw new Error(`the landing example never arrived in ${LANDING_TIMEOUT_MS / 1000} s: the upload could still be replaced by it`)
+}
+
+async function stillShows(page: Page, name: string) {
+  const title = await pageTitle(page)
+  if (!title.startsWith(`${name} `)) throw new Error(`the field left ${name} for “${title}” mid-measurement`)
+}
+
+async function holdsTitle(page: Page, name: string) {
+  const deadline = Date.now() + LOAD_TIMEOUT_MS
+  let since = 0
+  while (Date.now() < deadline) {
+    const title = await pageTitle(page)
+    if (!title.startsWith(`${name} `)) since = 0
+    else if (!since) since = Date.now()
+    else if (Date.now() - since >= TITLE_HOLD_MS) return
+    await page.waitForTimeout(100)
+  }
+  throw new Error(`the field never settled on ${name}: it shows “${await pageTitle(page)}”`)
+}
+
 async function openField(browser: Browser, doc: Schematic) {
   const page = await browser.newPage({ viewport: VIEWPORT })
   await page.goto(DEV_SERVER, { waitUntil: "domcontentloaded" })
   await page.waitForSelector("[data-slot=dot-field-viewport]")
+  await landingSettled(page)
+  const name = `stress-${doc.objects.length}`
   const started = Date.now()
   await page.setInputFiles("input[type=file]", {
-    name: `stress-${doc.objects.length}.emul`,
+    name: `${name}.emul`,
     mimeType: "application/octet-stream",
-    buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name: `stress-${doc.objects.length}`, schematic: doc })),
+    buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name, schematic: stamped(doc) })),
   })
+  await holdsTitle(page, name)
   await waitUntilDrawn(page)
   const mountMs = Date.now() - started
+  console.log(`  on screen: “${await pageTitle(page)}”`)
   await page.waitForSelector("[data-slot=zoom-controls]")
   await page.waitForTimeout(SETTLE_MS)
   return { page, mountMs }
@@ -158,8 +194,9 @@ const componentOrigins = (page: Page) =>
     return sum
   })
 
-const largestComponentInView = (page: Page) =>
+const componentsInView = (page: Page) =>
   page.evaluate((margin) => {
+    const grabs: { x: number; y: number; width: number }[] = []
     const safe = { left: margin.left, right: innerWidth - margin.right, top: margin.top, bottom: innerHeight - margin.bottom }
     const candidates: { element: Element; box: DOMRect; area: number; overlap: { left: number; right: number; top: number; bottom: number } }[] = []
     for (const element of document.querySelectorAll("[data-slot=component]")) {
@@ -185,11 +222,32 @@ const largestComponentInView = (page: Page) =>
       for (const point of points) {
         if (point.x < safe.left || point.x > safe.right || point.y < safe.top || point.y > safe.bottom) continue
         if (document.elementFromPoint(point.x, point.y)?.closest("[data-slot=component]") !== candidate.element) continue
-        return { x: point.x, y: point.y, width: box.width }
+        grabs.push({ x: point.x, y: point.y, width: box.width })
+        break
       }
     }
-    return null
+    return grabs
   }, GRAB_MARGIN)
+
+const largestComponentInView = async (page: Page) => (await componentsInView(page))[0] ?? null
+
+const wiredPartInView = (page: Page, ids: readonly string[]) =>
+  page.evaluate(
+    ({ ids, margin }) => {
+      const safe = { left: margin.left, right: innerWidth - margin.right, top: margin.top, bottom: innerHeight - margin.bottom }
+      for (const id of ids) {
+        const element = document.querySelector(`[data-body="${CSS.escape(id)}"] [data-slot=component]`)
+        if (!element) continue
+        const box = element.getBoundingClientRect()
+        const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+        if (point.x < safe.left || point.x > safe.right || point.y < safe.top || point.y > safe.bottom) continue
+        if (document.elementFromPoint(point.x, point.y)?.closest("[data-slot=component]") !== element) continue
+        return point
+      }
+      return null
+    },
+    { ids, margin: GRAB_MARGIN },
+  )
 
 async function instrument(page: Page) {
   await page.evaluate(() => {
@@ -240,14 +298,40 @@ async function measure(page: Page, run: () => Promise<void>): Promise<Phase> {
   return summarise(taken.frames, taken.longTasks, wall)
 }
 
-async function sweep(page: Page, origin: { x: number; y: number }) {
+type Heading = { x: 1 | -1; y: 1 | -1 }
+
+const HEADINGS: readonly Heading[] = [
+  { x: 1, y: 1 },
+  { x: -1, y: -1 },
+  { x: 1, y: -1 },
+  { x: -1, y: 1 },
+]
+
+async function sweep(page: Page, origin: { x: number; y: number }, heading: Heading = HEADINGS[0]) {
   await page.mouse.move(origin.x, origin.y)
   await page.mouse.down()
   for (let step = 1; step <= DRAG_STEPS; step++) {
-    await page.mouse.move(origin.x + step * STEP_PITCH.x, origin.y + step * STEP_PITCH.y)
+    await page.mouse.move(origin.x + step * STEP_PITCH.x * heading.x, origin.y + step * STEP_PITCH.y * heading.y)
     await page.waitForTimeout(STEP_MS)
   }
   await page.mouse.up()
+}
+
+const LANDING_CANDIDATES = 5
+
+async function landingDrag(page: Page): Promise<{ target: { x: number; y: number }; heading: Heading } | null> {
+  for (const target of (await componentsInView(page)).slice(0, LANDING_CANDIDATES))
+    for (const heading of HEADINGS) {
+      const before = await componentOrigins(page)
+      await sweep(page, target, heading)
+      await page.waitForTimeout(300)
+      const landed = Math.abs((await componentOrigins(page)) - before) > 1
+      if (!landed) continue
+      await page.keyboard.press("Control+z")
+      await page.waitForTimeout(400)
+      return { target, heading }
+    }
+  return null
 }
 
 async function panWithSpaceHeld(page: Page) {
@@ -480,7 +564,9 @@ async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChe
   console.log(`\n${doc.objects.length} objects / ${doc.wires.length} wires / ${pins} pins`)
   const { page, mountMs } = await openField(browser, doc)
   try {
+    const shown = `stress-${doc.objects.length}`
     const zoom = await normaliseZoom(page)
+    await stillShows(page, shown)
     const nodes = await fieldNodes(page)
     console.log(`  loaded in ${mountMs} ms, zoom ${Math.round(zoom * 100)}%, ${nodes.total} nodes in the field (path ${nodes.path}, circle ${nodes.circle}, text ${nodes.text})`)
 
@@ -500,14 +586,21 @@ async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChe
       check("all visible components are selected", selected === visible && visible > 0, `${selected}/${visible}`)
     }
 
-    const target = await largestComponentInView(page)
-    if (!target) throw new Error(`no component sits inside the viewport at ${Math.round(zoom * 100)}% zoom`)
+    const largest = await largestComponentInView(page)
+    if (!largest) throw new Error(`no component sits inside the viewport at ${Math.round(zoom * 100)}% zoom`)
 
+    const { target, heading } = (await landingDrag(page)) ?? { target: largest, heading: HEADINGS[0] }
     await instrument(page)
     const settled = await componentOrigins(page)
-    const drag = await measure(page, () => sweep(page, target))
+    const drag = await measure(page, () => sweep(page, target, heading))
     const moved = Math.abs((await componentOrigins(page)) - settled) > 1
     console.log(phaseLine("drag", drag))
+    await page.keyboard.press("Escape")
+    await page.waitForTimeout(300)
+    const wiredIds = doc.objects.filter((o) => o.def === "resistor" || o.def === "led").map((o) => o.id)
+    const small = await wiredPartInView(page, wiredIds)
+    const wired = small ? await measure(page, () => sweep(page, small)) : null
+    if (wired) console.log(phaseLine("drag with wires", wired))
     const pan = await measure(page, () => panWithSpaceHeld(page))
     console.log(phaseLine("pan", pan))
     const wheelZoom = await measure(page, () => pinchZoom(page))
@@ -515,7 +608,8 @@ async function measureDocument(browser: Browser, doc: Schematic, extra: ExtraChe
     const idle = await measure(page, () => page.waitForTimeout(IDLE_MS))
     console.log(phaseLine("idle", idle))
 
-    return { objects: doc.objects.length, wires: doc.wires.length, pins, zoom, nodes, mountMs, moved, drag, pan, wheelZoom, idle }
+    await stillShows(page, shown)
+    return { objects: doc.objects.length, wires: doc.wires.length, pins, zoom, nodes, mountMs, moved, drag, wired, pan, wheelZoom, idle }
   } finally {
     await page.close()
   }
@@ -541,12 +635,13 @@ function report(results: Measured[]) {
 
   console.log("\nWhat a frame costs while the pointer is down")
   table(
-    ["objects", "drag p95", "drag worst", "drag blocked", "pan p95", "pan blocked", "zoom p95", "zoom blocked", "idle p95"],
+    ["objects", "drag p95", "drag worst", "drag blocked", "wired p95", "pan p95", "pan blocked", "zoom p95", "zoom blocked", "idle p95"],
     results.map((r) => [
       String(r.objects),
       ms(r.drag.p95),
       ms(r.drag.worst),
       blocked(r.drag),
+      r.wired ? ms(r.wired.p95) : "—",
       ms(r.pan.p95),
       blocked(r.pan),
       ms(r.wheelZoom.p95),
@@ -615,6 +710,8 @@ for (const result of results) {
   check(`${result.objects} objects: the view was normalised`, result.zoom >= WORKING_ZOOM, `zoomed to ${zoom}, wanted ${Math.round(WORKING_ZOOM * 100)}% or more`)
   check(`${result.objects} objects: the drag moved a component`, result.moved, result.moved ? "moved" : "nothing was grabbed")
   atMost(`${result.objects} objects: drag p95`, result.drag.p95, limit.dragP95)
+  if (result.wired) atMost(`${result.objects} objects: drag with wires p95`, result.wired.p95, limit.dragP95)
+  else if (!boards) check(`${result.objects} objects: a wired part was dragged`, false, "no resistor or LED in view")
   atMost(`${result.objects} objects: pan p95`, result.pan.p95, limit.panP95)
   atMost(`${result.objects} objects: zoom p95`, result.wheelZoom.p95, limit.zoomP95)
 }

@@ -3,6 +3,7 @@ import { isExactShortcutMatch } from "lexical"
 import { describe, expect, it } from "vitest"
 import { alternatives, matches, type KeyPress, type Shortcut } from "@/lib/keys"
 import { KEYMAP } from "@/lib/keymap"
+import { pressesKey } from "@/lib/tools"
 
 type Layout = Record<string, string[]>
 type Platform = "pc" | "mac"
@@ -13,6 +14,7 @@ const SHIFTED = 1
 const ALT_GRAPH = 2
 
 const SHORTCUTS = Object.entries(KEYMAP).flatMap(([name, keys]) => alternatives(keys).filter((s) => s.key.length === 1).map((s) => ({ name, shortcut: s })))
+const READ_BY_PLACE = new Set(["toolSelect", "toolHand", "toolWire", "joinHere"])
 const redoBy = (key: string) => alternatives(KEYMAP.redo).find((s) => s.key === key)!
 const latinLayout = (layout: Layout) => [..."abcdefghijklmnopqrstuvwxyz"].every((letter) => Object.values(layout).some((levels) => levels[PLAIN] === letter))
 
@@ -24,7 +26,7 @@ function virtualKey(layout: Layout, code: string): number {
   return 0
 }
 
-function press(layout: Layout, code: string, level: number, platform: Platform, mod: boolean): KeyPress {
+function press(layout: Layout, code: string, level: number, platform: Platform, mod: boolean, alt = false): KeyPress {
   const altGraph = level === ALT_GRAPH
   const typed = platform === "mac" && mod && !latinLayout(layout) ? LAYOUTS.us[code][level] : layout[code][level]
   return {
@@ -33,7 +35,7 @@ function press(layout: Layout, code: string, level: number, platform: Platform, 
     keyCode: virtualKey(layout, code),
     ctrlKey: (platform === "pc" && mod) || altGraph,
     metaKey: platform === "mac" && mod,
-    altKey: altGraph,
+    altKey: altGraph || alt,
     shiftKey: level === SHIFTED,
     getModifierState: (name) => name === "AltGraph" && altGraph,
   }
@@ -85,7 +87,8 @@ describe("shortcuts on 22 keyboard layouts, as libxkbcommon types them", () => {
         const levels = shortcut.shift === "either" ? [PLAIN, SHIFTED] : [shortcut.shift ? SHIFTED : PLAIN]
         const reachable = levels.map((level) => ({ level, code: labelledKey(layout, shortcut.key, level) })).filter((p) => p.code)
         if (!reachable.length) continue
-        if (!reachable.some(({ code, level }) => matches(press(layout, code!, level, "pc", !!shortcut.mod), shortcut))) missed.push(`${name} ${binding} ${shortcut.key}`)
+        const fires = (e: KeyPress) => (READ_BY_PLACE.has(binding) ? pressesKey(e, shortcut) : matches(e, shortcut))
+        if (!reachable.some(({ code, level }) => fires(press(layout, code!, level, "pc", !!shortcut.mod, !!shortcut.alt)))) missed.push(`${name} ${binding} ${shortcut.key}`)
       }
     }
     expect.soft(missed, "shortcuts that no key on the layout reaches").toEqual([])

@@ -1,0 +1,10 @@
+{
+  "source": "tests/data/before-the-lattice/tolerance-stacked-0.0101.emul",
+  "objects": [
+    "R0 (resistor)",
+    "R1 (resistor)",
+    "R2 (resistor)",
+    "R3 (resistor)"
+  ],
+  "nets": []
+}

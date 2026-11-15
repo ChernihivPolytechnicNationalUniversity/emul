@@ -357,6 +357,7 @@ function ProblemRow({ problem, active, byId, onClick, onHover }: { problem: Prob
     <button
       type="button"
       role="option"
+      data-problem={problem.key}
       aria-selected={active}
       onClick={onClick}
       onPointerEnter={() => onHover(problem.object ?? null)}
@@ -424,7 +425,7 @@ export function FieldToggle({ problems, onOpen, className }: { problems: readonl
   const worst: Severity | null = counts.error ? "error" : counts.warning ? "warning" : null
   const n = counts.error + counts.warning
   return (
-    <Button variant="ghost" size="icon-sm" className={cn("relative", className)} onClick={onOpen} aria-label={n ? `Show the field: ${n} problems` : "Show the field"} title={`Field: parts and problems · ${labelFor(KEYMAP.find)} finds`}>
+    <Button data-slot="field-toggle" variant="ghost" size="icon-sm" className={cn("relative", className)} onClick={onOpen} aria-label={n ? `Show the field: ${n} problems` : "Show the field"} title={`Field: parts and problems · ${labelFor(KEYMAP.find)} finds`}>
       <PanelRightIcon />
       {worst && (
         <span className={cn("absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white tabular-nums ring-2 ring-background", worst === "error" ? "bg-red-600" : "bg-amber-500")}>{n}</span>

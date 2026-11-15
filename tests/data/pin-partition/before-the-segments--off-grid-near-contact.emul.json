@@ -1,0 +1,11 @@
+{
+  "source": "tests/data/before-the-segments/off-grid-near-contact.emul",
+  "objects": [
+    "A (resistor)",
+    "B (resistor)",
+    "G (ground)"
+  ],
+  "nets": [
+    ["A.2","B.1"]
+  ]
+}

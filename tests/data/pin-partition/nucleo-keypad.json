@@ -1,0 +1,20 @@
+{
+  "source": "example nucleo-keypad",
+  "objects": [
+    "SW1 (keypad-4x4)",
+    "TERM1 (serial-terminal)",
+    "U1 (nucleo-f429zi)"
+  ],
+  "nets": [
+    ["SW1.C1","U1.CN10-10"],
+    ["SW1.C2","U1.CN10-12"],
+    ["SW1.C3","U1.CN10-14"],
+    ["SW1.C4","U1.CN10-16"],
+    ["SW1.R1","U1.CN10-2"],
+    ["SW1.R2","U1.CN10-4"],
+    ["SW1.R3","U1.CN10-6"],
+    ["SW1.R4","U1.CN10-8"],
+    ["TERM1.RX","U1.VCP-TX"],
+    ["TERM1.TX","U1.VCP-RX"]
+  ]
+}

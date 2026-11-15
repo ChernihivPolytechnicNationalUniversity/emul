@@ -1,0 +1,10 @@
+{
+  "source": "tests/lib/schematic-cases.ts two-pin-contact-dot",
+  "objects": [
+    "LED1 (led)",
+    "R1 (resistor)"
+  ],
+  "nets": [
+    ["LED1.1","R1.2"]
+  ]
+}

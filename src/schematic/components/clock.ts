@@ -116,11 +116,11 @@ export const oscillator: ComponentDef = {
   pins: [
     { id: "VCC", label: "VCC", x: 2, y: 0, side: "top", labelAt: "right", kind: "power", note: "3.3 V supply" },
     { id: "GND", label: "GND", x: 2, y: 3, side: "bottom", labelAt: "right", kind: "gnd" },
-    { id: "OUT", label: "OUT", x: 4, y: 1.5, side: "right", labelAt: "top", kind: "digital", note: "Clock output; not drawn as a waveform" },
+    { id: "OUT", label: "OUT", x: 4, y: 2, side: "right", labelAt: "top", kind: "digital", note: "Clock output; not drawn as a waveform" },
   ],
   body: [
     { type: "rect", x: 0.5, y: 0.5, w: 3, h: 2, rx: 0.2, fill: "none" },
-    { type: "path", d: "M2 0 V0.5 M2 2.5 V3 M3.5 1.5 H4" },
+    { type: "path", d: "M2 0 V0.5 M2 2.5 V3 M3.5 2 H4" },
     { type: "path", d: "M1 1.9 H1.4 V1.1 H1.8 V1.9 H2.2 V1.1 H2.6 V1.9 H3", muted: true },
     { type: "text", x: 2.9, y: 0.35, text: "{ref}", size: 0.3, anchor: "end" },
     { type: "text", x: 2, y: 2.25, text: "{value}", size: 0.28, muted: true },

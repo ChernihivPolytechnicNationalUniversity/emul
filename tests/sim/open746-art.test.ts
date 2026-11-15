@@ -10,7 +10,8 @@ import { sheetTexts } from "@/components/field/symbol-raster"
 import { cellAt, EDGE_MARGIN_CELLS, FRAME, MODULE_AT, MODULE_COLUMNS, MODULE_PAD, onModule, SMD_MM, type Edge } from "@/schematic/components/open746i-c-art"
 import { bodyBounds } from "@/schematic/body"
 import { examples } from "@/schematic/examples"
-import { objectPins, routeAll, UPRIGHT, type Point } from "@/schematic/geometry"
+import { objectPins, UPRIGHT, type Point } from "@/schematic/geometry"
+import { routeBetween } from "@/schematic/wires/router"
 import { pinContacts } from "@/schematic/contacts"
 import { blocksOf, boxesMeet, boxInside, boxMeetsPolygon, homeOf, isPrintedName, marksOf, MAX_PRINTED_GROWTH, partBox, pointInPolygon, printedBox, printedGrowth, ruleCrossesBox, rulesOf, switchContacts, type Box } from "@/schematic/printed-text"
 import { getDef, allDefs } from "@/schematic/registry"
@@ -376,8 +377,9 @@ describe("the board's printed names lie over the wires, on a knockout of their g
   })
 
   it("a real route from I2C1 to the strip is knocked out under every name it passes and nowhere else", () => {
-    const doc = { objects: [placed], wires: [{ id: "w1", from: { object: "U1", pin: "P4-8" }, to: { object: "U1", pin: "P21-28" } }] }
-    const routes = routeAll(doc.objects, doc.wires, GRID)
+    const route = routeBetween({ objects: [placed], wires: [], parts: {} }, { pin: { object: "U1", pin: "P4-8" } }, { pin: { object: "U1", pin: "P21-28" } })
+    expect(route, "the router finds the route").not.toBeNull()
+    const routes = route ? [{ id: "w1", pts: [...route], owner: [] }] : []
     const crossed = printedNameLayout(board, UPRIGHT).filter((n) => {
       const b = printedNameBox(n, printedNameSize(n, 1), 0.6)
       return crossedBy({ x: b.x * GRID, y: b.y * GRID, w: b.w * GRID, h: b.h * GRID }, routes.map((r) => r.pts))
@@ -637,9 +639,10 @@ describe("the POWER JMP: the module's 2 × 2 header with both caps fitted, as it
     expect(near("POWER JMP").x).toBeGreaterThan(vref.x)
   })
 
-  it("stands where the module's photo prints it: the label columns at 13.0 and 15.6 mm, the header's right and bottom edges at 16.85 and 17.7 mm (module20.png, 20 px/mm)", () => {
+  it("stands where the module's photo prints it, moved no more than the quarter cell that puts VBAT and VREF+ on the half-cell lattice: the label columns at 13.0 and 15.6 mm, the header's right and bottom edges at 16.85 and 17.7 mm (module20.png, 20 px/mm)", () => {
     const PHOTO = { vbatX: 13.0, vrefX: 15.6, right: 16.85, bottom: 17.7 }
-    const TOLERANCE_MM = 0.35
+    const TOLERANCE_MM = 0.35 + 2.54 / 4
+    for (const id of ["VBAT", "VREF+"]) expect.soft([pin(id).x * 2, pin(id).y * 2].every(Number.isInteger), `${id} on the half-cell lattice`).toBe(true)
     expect(Math.abs(toModuleMm(vbat).x - PHOTO.vbatX)).toBeLessThanOrEqual(TOLERANCE_MM)
     expect(Math.abs(toModuleMm(vref).x - PHOTO.vrefX)).toBeLessThanOrEqual(TOLERANCE_MM)
     const header = solids.find((b) => b.fill === "connector" && pointInPolygon(pin("VREF+"), b.points))!
@@ -723,7 +726,7 @@ describe("at 150 % and 200 % every name the board prints is drawn larger, and no
   })
 })
 
-describe("a 7\" LCD docked on P15 covers the names the board prints under it, as FIELD.md has it (review, 2026-10-13)", () => {
+describe("a 7\" LCD docked on P15 covers the names the board prints under it (review, 2026-10-13)", () => {
   const doc = examples.find((e) => e.id === "open746-lcd")!.build(GRID)
   const boardObject = doc.objects.find((o) => o.def === "open746i-c")!
   const lcdObject = doc.objects.find((o) => o.def === "lcd7-f")!

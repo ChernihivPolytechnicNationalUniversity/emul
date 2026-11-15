@@ -1,0 +1,19 @@
+{
+  "source": "tests/data/before-the-segments/metronome-supply-stub-crossing.emul",
+  "objects": [
+    "R1 (resistor)",
+    "R2 (resistor)",
+    "R3 (resistor)",
+    "supply@-2,-1 (supply)"
+  ],
+  "nets": [
+    [
+      "R1.1",
+      "supply@-2,-1.V"
+    ],
+    [
+      "R2.2",
+      "R3.1"
+    ]
+  ]
+}

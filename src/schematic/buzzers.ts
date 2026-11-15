@@ -10,7 +10,7 @@ type Cell = [number, number]
 function sheet(grid: number) {
   const b = builder(grid)
   const vert = (def: string, x: number, y: number, props: Record<string, string> = {}) => b.place(def, x, y, props, 90)
-  const node = (x: number, y: number) => b.place("junction", x - 1, y - 1)
+  const node = b.node
   const gnd = (x: number, y: number): Pin => [b.place("ground", x - 1, y), "GND"]
   const j = (n: PlacedObject): Pin => [n, "J"]
   const join = (...pins: Pin[]) => {

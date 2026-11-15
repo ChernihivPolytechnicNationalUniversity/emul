@@ -1,0 +1,7 @@
+{
+  "source": "example blackpill-f401cc-blink",
+  "objects": [
+    "U1 (weact-blackpill-f401cc)"
+  ],
+  "nets": []
+}

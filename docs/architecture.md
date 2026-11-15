@@ -4,9 +4,14 @@
 
 - `src/mcu/` — the emulator: `cpu.ts`, `decode.ts`, `jit.ts` (blocks compiled to JavaScript), `scs.ts` (NVIC/SysTick/SCB), `mpu.ts` (the MPU and the unprivileged PPB rule, checked in front of the bus only while they can refuse something), `bus.ts`, `periph/*`, `chip.ts` (profiles), `supply.ts` (the supply-current tables a profile may carry: base by HCLK, per-peripheral µA/MHz, low-power and VBAT rows), `stm32f429.ts` (the SoC class `Stm32`), `debugger.ts` (breakpoints and stepping, beside the core), `core-worker.ts` (one core in a worker of its own)
 - `src/sim/` — analog engine (`engine.ts`), netlist, the current on wires and in pin leads (`flow.ts`), the co-simulation loop (`loop.ts`) and its worker, `core-host.ts` (a core in this thread or in a worker, over a SharedArrayBuffer), digital parts (`digital.ts`)
-- `src/schematic/` — component definitions (`components/*`, each file loaded the first time one of its parts is wanted: listed in `parts.ts`, named in the generated `catalogue.gen.ts` that the palette and search run on; `pnpm catalogue` after changing a part or an example, a test fails while it is stale), examples, geometry, `mcu-model.ts`; wiring in `nets.ts` (the net map), `wiring.ts` (connect, tap), `wire-colors.ts` (palette, shortcuts, the automatic rule)
+- `src/schematic/` — component definitions (`components/*`, each file loaded the first time one of its parts is wanted: listed in `parts.ts`, named in the generated `catalogue.gen.ts` that the palette and search run on; `pnpm catalogue` after changing a part or an example, a test fails while it is stale), examples, `mcu-model.ts`, and the schematic model:
+  - `wires/` — wiring stored as segments on the half-cell lattice: `segment.ts` (the segment, exact integer geometry at any angle), `normal-form.ts` (the normal form after every edit, and `commitEdit`'s delta), `graph.ts` (nets, junction dots, dangling ends and the pin partition, updated from each delta), `sheet.ts` (the index of segments and pins by row, column and slope), `drag.ts` (the rubber band: a plan at pointer-down, a frame per offset, the release audit), `router.ts` (A* over whole cells and headings: the completion while drawing, re-route, the upgrade) with `headers.ts` (a board header's sides and printed names), `lattice-route.ts` (a dragged wire's private run laid again), `clear-path.ts` and `conductors.ts` (the half-cell search that lays a wire clear of other nets), `overlay-map.ts` (immutable layered maps for the kept indexes)
+  - `circuit.ts` — runs (chains of segments), the flow graph and the `Circuit` the solver takes: the pin partition, the wired pins, the flow graph
+  - `wire-edits.ts` (connect, tap, delete, move, turn, copy, `withSegments`, and `wiringOf`: the runs, routes, net map, dots and circuit a commit derives, net by net), `wire-draw.ts` (drawing as a pure state: ends, posture, line modes 90°/45°/any, completion, refusals, shortening), `rubber-band.ts` (`PartDrag`, `SegmentDrag`, `TurnRun`, flips: the rubber band on documents), `wire-select.ts` (what a click and the marquee select, and the selection carried through edits), `junction-tool.ts` (`J` on a crossing), `splice.ts` (a two-pin part dropped into a wire), `body-crossing.ts` (no wire through a part's body), `conflict-marks.ts`, `wire-look.ts` (turns at pins, rounded run paths), `wire-colors.ts` (palette, shortcuts, the automatic rule)
+  - `geometry.ts` (orientation, the 3 × 3 diagonal, pin placement, boxes and paths), `pin-index.ts` (placed pins kept per object), `placement.ts` and `body.ts` (a part occupies its drawn body and leads; where it may land), `fields.ts` (designator and value as fields, KiCad's autoplacer), `checker.ts` (the light ERC behind the explorer's Problems), `contacts.ts` (pins on pins), `spatial.ts` (bucket indexes), `field-state.ts` (the commit pipeline the store and the benches share), `use-schematic.ts` (the document, selection and undo)
+  - `migrate.ts` (version steps on load), `migrate-lattice.ts` (old parts onto the pin lattice), `migrate-wires.ts` and `freeze.ts` (old pin-to-pin wires frozen into segments), `nets.ts` (the net map's type and the old model's nets, which only the upgrade reads)
+- `src/components/` — the React UI; `field/` is the schematic field (`DotField.tsx` and its layers: `WireLayer.tsx`, `PinLayer.tsx`, `SelectionLayer.tsx`, `FieldCanvas.tsx` with `field-paint.ts` for the canvas band and the PNG export, `rubber-band-layer.ts` for a drag frame written straight to the DOM, `move-drag.ts`, `wire-flow.ts`, `wire-paths.ts`, `wire-plate.ts`, `FieldToolbar.tsx`), `code/` is the editor panel (Monaco, explorer, tabs, build output), `debug/` its debugger toolbar and panes
 - `src/debug/` — the debugger's reading of an image: `dwarf/*` (DWARF 2–5: units, line programs, range and location lists, call frame information, expressions, macros), `lines.ts` (the line table, shared by the core and the editor), `info.ts`, `unwind.ts`, `values.ts` and `eval.ts` (values and C expressions over a stop's memory), `disasm.ts`, `sources.ts` (where a file the image names comes from); `session.ts` is the UI's controller for the whole bench
-- `src/components/` — the React UI; `code/` is the editor panel (Monaco, explorer, tabs, build output), `debug/` its debugger toolbar and panes
 - `src/project/` — a board's firmware project: file operations that mirror the API's rules, the template, the build-service client, and the STM32 project import and export (`cubemx.ts` reads the `.ioc` and decides what to keep; `entries.ts` turns a picked folder, a drop or a `.zip` into files, `.zip`s through `src/lib/zip.ts`; `cubeide.ts` makes an STM32CubeIDE project from a board's code, its `.cproject` and `.project` from the templates in `cubeide/`, the drivers and the build service's files from the site's `/st/` through `st-sources`' index)
 - `firmware/` — test firmware and HAL apps (`hal/Src/main.c` blink, `square.c`, `pwm.c`, `uart.c`, `spi.c`, `spi-slave.c`, `i2c.c`, `dma.c`, `adc.c`, `wdg.c`), the lab's CubeIDE project (`lab1/`), the Open746I-C demos (`lcd/`), the ADC benches (`adc/`: an idle core for register-level tests, the sample-and-hold scan, the lecturer's F767 ADC exemplar ported), the labs' variants (`labs/`), and their built images in `examples/` for the test scripts; the site bundles the sources as the examples' projects (`src/schematic/projects.ts`)
 - `scripts/` — the test drivers above
@@ -148,6 +153,41 @@ sorted by time and go out once the delivery is over. A clock shared by two chips
 delayed output reaches the other. Edges an MCU makes a few nanoseconds apart are still delivered one by one, each
 with whatever its parts answer, so a part's reply can overtake a second MCU edge less than its propagation delay
 behind the first.
+
+## When Newton does not settle
+
+The device models carry no charge of their own — a BJT has no junction capacitance — so a latch tipping over
+(two transistors cross-coupled through capacitors, an astable multivibrator) is a jump, an impasse point of the
+circuit's equations (Chua & Deng, 1989). Where the loop gain passes one, the step's equations fold: the branch the
+circuit was on ends partway through the step, and the only root left is on the other branch, volts away. Newton
+from the step's start cannot get there — near the fold the Jacobian is all but singular, the iterates chatter and
+the junction limiting keeps each one within a few VT of the last. ngspice has the same trouble on the same netlist
+(`tests/data/multivibrator/`): with the trapezoid it gives up at the first switch ("timestep too small",
+1.25·10⁻¹⁸ s, node b1), with Gear it spends thousands of sub-nanosecond steps at every switch until an iterate
+happens to land on the far branch. Cutting the step does not help a fixed-step engine: a shorter step still has to
+cross the same fold.
+
+A step whose Newton iteration runs out (60 iterations) on a matrix that is not singular is therefore solved again
+by pseudo-transient continuation (`pseudoTransient`; Kelley & Keyes, 1998; Coffey, Kelley & Keyes, 2003, for
+DAEs): every node is tied through a conductance g to an anchor — the companion of a capacitor to ground in a
+pseudo-time — and Newton solves the anchored step. A pseudo-step that settles within 10 iterations (SPICE's ITL4)
+moves the anchor to its solution and divides g by 4; one that does not is retried from the anchor with g sixteen
+times larger (SPICE cuts a time step that fails by 8). It starts at 1 S from where the span began and stops once g
+is below GMIN, the leak every node already has, after 200 pseudo-steps (twice the most a switch of the astable took),
+or when a pseudo-step fails below 100 · GMIN — there a node held by GMIN alone, a floating subcircuit, is as badly
+conditioned with the anchor as without it, and more pseudo-steps change nothing. Newton alone (10 iterations) then
+solves the step from the last anchor; failing that, the step keeps its least-moving iterate as before. The anchors are the parasitic capacitance the model leaves out, and where a circuit missing it
+jumps is defined by what small parasitic capacitances would do (Sastry & Desoer, 1981); at the end they carry no
+current, so the result is a root of the step's own equations. The switch lands in the step the fold falls in,
+which places the edge to within a step, and a step Newton settles is not touched.
+
+Before, such a step kept the iterate that had moved least, which is no solution: the capacitors took their charge
+and current from it, the next step started from the last operating point that had settled (the memo, from before
+the switch), and the transistor astable of `tests/sim/astable-solver.test.ts` drifted by +19…+405 µs a
+half-period and sometimes switched back; an NE555 with TRIG left open held it at 5000 V (0.5 µA into GMIN). A
+switch now costs about 250 factorizations, fewer than the six failed steps of 60 iterations it used to take; a
+floating circuit whose failures the fallback cannot cure pays about a tenth more (`tests/sim/physics.test.ts`, the
+regulator grounded while it runs).
 
 ## Buzzers
 

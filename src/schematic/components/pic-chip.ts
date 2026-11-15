@@ -16,7 +16,6 @@ type Package = { name: string; pins: [number, string][]; source: string }
 
 const WIDTH = 10
 const TOP = 4
-const STUB = 2
 
 /** Alternate functions for the pin notes (DS40044G Table 3-2). */
 export const PIC_ALT: Record<string, string> = {
@@ -69,7 +68,6 @@ export function picChip(chip: PicProfile, pkg: Package, description: string, id 
           side,
           labelAt: side === "left" ? "right" : "left",
           kind: g.kind ?? (/^RA[0-3]$/.test(name) ? "analog" : "digital"),
-          stub: STUB,
           mcu: isPort ? name : undefined,
           connector: pkg.name,
           connectorPin: nums[0],

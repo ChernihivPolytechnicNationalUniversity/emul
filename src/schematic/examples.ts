@@ -1,6 +1,6 @@
 import { BatteryMediumIcon, CircleDashedIcon, CpuIcon, NetworkIcon, ZapIcon } from "lucide-react"
 import type { OptLevel } from "emul-shared/source"
-import { builder } from "./builder"
+import { builder, placedByHand } from "./builder"
 import { need } from "./registry"
 import { systemExam } from "./exam"
 import { transistorLogic } from "./logic"
@@ -48,12 +48,10 @@ const powerSupply: Example = {
     const mains = place("ac-source", 0, 4)
     const t = place("transformer", 4, 4)
     const diode = { value: "1N4007", vf: "0.7", imax: "1 A", vrev: "1000 V" }
-    // The bridge is drawn the usual way, as a diamond: the four diodes sit on 45° and their
-    // stubs meet on the grid at ~ (13,6) and (21,6), + (17,2) and − (17,10).
-    const d1 = place("diode", 13, 2, diode, 315)
-    const d2 = place("diode", 17, 2, diode, 225)
-    const d3 = place("diode", 13, 6, diode, 225)
-    const d4 = place("diode", 17, 6, diode, 315)
+    const d1 = place("diode", 14, 3, diode, 315)
+    const d2 = place("diode", 17, 3, diode, 225)
+    const d3 = place("diode", 14, 6, diode, 225)
+    place("diode", 17, 6, diode, 315)
     const c = place("capacitor-polarized", 26, 2, { value: "1000 µF", vmax: "25 V" }, 90)
     const load = place("resistor", 30, 2, { value: "1 kΩ", power: "0.5" }, 90)
     const r = place("resistor", 34, 2, { value: "1 kΩ", power: "0.25" }, 90)
@@ -64,24 +62,32 @@ const powerSupply: Example = {
     wire(mains, "-", t, "P2")
     // Secondary into the two ~ corners; the far one takes the usual detour under the bridge.
     wire(t, "S1", d1, "1")
-    wire(d1, "1", d3, "2")
     wire(t, "S2", d2, "1", [
       [10, 16],
       [24, 16],
       [24, 6],
     ])
-    wire(d2, "1", d4, "2")
     // + corner out to the filter and the load.
-    wire(d1, "2", d2, "2")
-    wire(d2, "2", c, "1")
-    wire(c, "1", load, "1")
-    wire(load, "1", r, "1")
+    wire(d1, "2", c, "1", [
+      [17, 1],
+      [27, 1],
+    ])
+    wire(c, "1", load, "1", [
+      [27, 1],
+      [31, 1],
+    ])
+    wire(load, "1", r, "1", [
+      [31, 1],
+      [35, 1],
+    ])
     // R2 and the LED are butted pin to pin: touching pins conduct, so no wire is drawn here.
     // − corner down to ground, and the returns along it.
-    wire(d3, "1", d4, "1")
     wire(d3, "1", gnd, "GND")
     wire(c, "2", gnd, "GND")
-    wire(load, "2", c, "2")
+    wire(load, "2", c, "2", [
+      [31, 7],
+      [27, 7],
+    ])
     wire(led, "2", load, "2")
     return doc
   },
@@ -132,10 +138,9 @@ const bridge: Example = {
     const { doc, place, wire } = builder(grid)
     // Designators follow the sketch rather than the order the parts are placed in.
     const r = (ref: string, value: string) => ({ ref, value, power: "0.25" })
-    // The diamond: four arms on 45°, meeting at (13,6) left, (21,6) right, (17,2) top, (17,10) bottom.
-    const r1 = place("resistor", 13, 2, r("R1", "1 kΩ"), 315)
-    const r2 = place("resistor", 17, 2, r("R2", "2.2 kΩ"), 225)
-    const r6 = place("resistor", 13, 6, r("R6", "3.3 kΩ"), 225)
+    const r1 = place("resistor", 14, 3, r("R1", "1 kΩ"), 315)
+    place("resistor", 17, 3, r("R2", "2.2 kΩ"), 225)
+    const r6 = place("resistor", 14, 6, r("R6", "3.3 kΩ"), 225)
     const r7 = place("resistor", 17, 6, r("R7", "680 Ω"), 315)
     const r3 = place("resistor", 15, 5, r("R3", "4.7 kΩ"))
     const r4 = place("resistor", 4, 1, r("R4", "1.5 kΩ"), 90)
@@ -145,16 +150,12 @@ const bridge: Example = {
     // A is the top rail: the supply, R4 and the top corner of the bridge are one node.
     wire(v, "V", r4, "1")
     wire(r4, "1", r1, "2", [[5, 0], [17, 0]])
-    wire(r1, "2", r2, "2")
     // Left corner.
-    wire(r4, "2", r1, "1")
-    wire(r1, "1", r6, "2")
-    wire(r1, "1", r3, "1", [[13, 6]])
+    wire(r4, "2", r1, "1", [[5, 6]])
+    wire(r1, "1", r3, "1")
     // Right corner.
-    wire(r2, "1", r7, "2")
-    wire(r3, "2", r7, "2", [[21, 6]])
+    wire(r3, "2", r7, "2")
     // Bottom corner out through R5 to B, which is ground.
-    wire(r6, "1", r7, "1")
     wire(r6, "1", r5, "2", [[17, 12]])
     wire(r5, "1", g, "GND", [[5, 12]])
     return doc
@@ -221,7 +222,7 @@ const chargeBoostChips: Example = {
     wire(led1, "2", u1, "CHRG")
     wire(led2, "2", u1, "STDBY")
     wire(u1, "BAT", bat, "+")
-    wire(bat, "+", u2, "VDD")
+    wire(bat, "+", u2, "VDD", [[28, 4], [28, 9], [26, 9]])
     wire(bat, "-", u2, "GND")
     wire(u2, "VM", gnd(28, 17), "GND")
     wire(bat, "+", u3, "IN")
@@ -276,7 +277,6 @@ export const nucleoBlink: Example = {
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
-    // D13 is CN7 pin 10 at (26,17); its stub runs 3 cells out to (29,17).
     const r = place("resistor", 32, 16, { value: "220 Ω", power: "0.25" })
     const led = place("led", 38, 16, { value: "red", imax: "20 mA" })
     const gnd = place("ground", 45, 18)
@@ -405,7 +405,7 @@ export const touchDemo: Example = {
     // The CP2102's side of USART1: TX and RX on the USART1 JMP's right column, at (45, 7) and (45, 8).
     const term = place("serial-terminal", 34, -9, { baud: "115200" })
     wire(u, "VCP-TX", term, "RX")
-    wire(u, "VCP-RX", term, "TX")
+    wire(u, "VCP-RX", term, "TX", [[48, 8], [48, -11], [33, -11], [33, -6]])
     doc.parts[`${u.id}:OTG_VBUS`] = { on: false }
     return doc
   },
@@ -525,7 +525,6 @@ export const nucleoPwm: Example = {
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
-    // D6 is CN10 pin 4 (PE9) at (25,25), inner column; its stub runs 4 cells out to (29,25).
     const r = place("resistor", 34, 24, { value: "330 Ω", power: "0.25" })
     const led = place("led", 40, 24, { value: "green", imax: "20 mA" })
     const gnd = place("ground", 47, 30)
@@ -533,7 +532,7 @@ export const nucleoPwm: Example = {
     wire(r, "2", led, "1")
     wire(led, "2", gnd, "GND", [[46, 25], [46, 29], [48, 29]])
     // Board ground is CN10 pin 5, right below D6.
-    wire(u, "CN10-5", gnd, "GND", [[31, 26], [31, 31], [50, 31], [50, 29], [48, 29]])
+    wire(u, "CN10-5", gnd, "GND", [[31, 26], [31, 29], [48, 29]])
     // TIM4 input capture on D26 (PB6, CN10-13) fed from LD1's PWM on D33 (PB0, CN10-31).
     wire(u, "CN10-13", u, "CN10-31", [[33, 30], [33, 39]])
     return doc
@@ -555,7 +554,6 @@ export const nucleoSerial: Example = {
   build(grid) {
     const { doc, place, wire } = builder(grid)
     const u = place("nucleo-f429zi", 0, 0)
-    // VCP pins sit on the ST-LINK zone's left edge at y 4 (TX) and 6 (RX), stubs 2 cells out.
     const term = place("serial-terminal", -12, 3, { baud: "115200" })
     wire(u, "VCP-TX", term, "RX")
     wire(u, "VCP-RX", term, "TX")
@@ -617,8 +615,8 @@ export const nucleoI2c: Example = {
     const gnd = place("ground", 42, 20)
     wire(u, "CN7-2", mem, "SCL", [[33, 13], [33, 11]])
     wire(u, "CN7-4", mem, "SDA", [[35, 14], [35, 12]])
-    wire(rail, "V", r1, "1")
-    wire(rail, "V", r2, "1")
+    wire(rail, "V", r1, "1", [[38, 2], [37, 2]])
+    wire(rail, "V", r2, "1", [[38, 2], [39, 2]])
     wire(r1, "2", mem, "SCL")
     wire(r2, "2", mem, "SDA")
     wire(rail, "V", mem, "VCC", [[38, 2], [43, 2]])
@@ -628,7 +626,10 @@ export const nucleoI2c: Example = {
     wire(mem, "A1", gnd, "GND", [[48, 12]])
     wire(mem, "A2", gnd, "GND", [[48, 13]])
     wire(mem, "WP", gnd, "GND", [[39, 14], [39, 18], [43, 18]])
-    return doc
+    return placedByHand(doc, grid, [
+      ["R1", "ref", 36.45, 4.75, "end"],
+      ["R1", "value", 36.45, 5.25, "end"],
+    ])
   },
 }
 

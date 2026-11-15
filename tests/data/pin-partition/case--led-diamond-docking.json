@@ -1,0 +1,13 @@
+{
+  "source": "tests/lib/schematic-cases.ts led-diamond-docking",
+  "objects": [
+    "LED1 (led)",
+    "LED2 (led)",
+    "LED3 (led)",
+    "LED4 (led)"
+  ],
+  "nets": [
+    ["LED1.1","LED3.1"],
+    ["LED2.2","LED4.2"]
+  ]
+}

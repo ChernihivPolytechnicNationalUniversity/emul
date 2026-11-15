@@ -3,6 +3,7 @@ import type { NetMap } from "@/schematic/nets"
 import { pinKey, type Damage, type PinDef, type PlacedObject } from "@/schematic/types"
 import type { McuStatus } from "@/sim/loop"
 import { compareRefs } from "./field-index"
+import { LEVEL_OF, type CheckKind, type Finding } from "@/schematic/checker"
 
 // What is wrong on the field, one flat list, worst first. Two kinds of check:
 //   static — read from the bench itself, always on: a chip with no supply or no ground wired, a
@@ -28,6 +29,7 @@ export type Problem = {
   detail: string
   /** What to do about it. */
   fix?: string
+  at?: { x: number; y: number }
 }
 
 /**
@@ -73,6 +75,46 @@ export function staticProblems(objects: readonly PlacedObject[], nets: Pick<NetM
       out.push({ key: `${o.id}:no-firmware`, severity: "info", object: o.id, title: `${who} has no firmware`, detail: "Nothing runs until code is built or loaded.", fix: "Open its code (⌘J) and Compile, or drop an .elf on it." })
   }
   return out
+}
+
+const severityOf = (kind: CheckKind): Severity => (LEVEL_OF[kind] === "warning" ? "warning" : "info")
+
+const CHECK_FIX: Record<CheckKind, string> = {
+  "dangling-end": "Connect it, delete the wire, or press Q on it to mark it as meant to stay open.",
+  "unconnected-pin": "Wire it, or press Q on it to mark it as meant to stay open.",
+  "wire-through-body": "Lead the wire round the part.",
+  "field-on-wire": "Drag the text clear of the wire.",
+  "field-on-body": "Drag the text clear of the part.",
+  "fields-overlap": "Drag one of the texts aside.",
+  "parallel-too-close": "Move one of the wires a whole cell away.",
+}
+
+const CHECK_DETAIL: Record<CheckKind, string> = {
+  "dangling-end": "A wire end touches no pin and no other wire.",
+  "unconnected-pin": "Nothing is wired to this pin.",
+  "wire-through-body": "A wire crosses the part's drawn body.",
+  "field-on-wire": "The text lies over a wire.",
+  "field-on-body": "The text lies over another part.",
+  "fields-overlap": "Two texts lie over each other.",
+  "parallel-too-close": "Wires closer than a cell blur together (ГОСТ 2.701 asks for 3 mm between parallel lines).",
+}
+
+/** The schematic checker's findings (design.md §6.8), as problems of the field. */
+export const checkKeyOf = (f: Finding) => `check:${f.kind}:${f.at.x},${f.at.y}:${[...f.objects].sort().join("+")}:${[...f.segments].sort().join("+")}:${[...(f.fields ?? [])].sort().join("+")}`
+
+export const isWarning = (f: Finding) => LEVEL_OF[f.kind] === "warning"
+
+export function checkProblems(findings: readonly Finding[]): Problem[] {
+  return findings.map((f) => ({
+    key: checkKeyOf(f),
+    severity: severityOf(f.kind),
+    ...(f.objects.length === 1 && { object: f.objects[0] }),
+    ...(f.kind === "unconnected-pin" && f.pin && { pin: f.pin }),
+    title: f.text,
+    detail: CHECK_DETAIL[f.kind],
+    fix: CHECK_FIX[f.kind],
+    at: f.at,
+  }))
 }
 
 /** What the running simulation reports, as the explorer needs it. */

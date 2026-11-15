@@ -1,4 +1,5 @@
-import { CrosshairIcon, GaugeIcon, PauseIcon, PlayIcon, RotateCcwIcon, TriangleAlertIcon, Volume2Icon, VolumeXIcon } from "lucide-react"
+import { ActivityIcon, BinaryIcon, GaugeIcon, PauseIcon, PlayIcon, RotateCcwIcon, TriangleAlertIcon, Volume2Icon, VolumeXIcon } from "lucide-react"
+import { KEYMAP, labelFor } from "@/lib/keymap"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -41,15 +42,16 @@ type SimControlsProps = React.ComponentProps<"div"> & {
   speed: number
   /** False before the first step: there is nothing to start over from. */
   started: boolean
-  /** Whether clicks on the field are placing probe tips. */
-  probing: boolean
-  onProbeToggle: () => void
+  scopeOpen: boolean
+  logicOpen: boolean
+  onScopeToggle: () => void
+  onLogicToggle: () => void
   onToggle: () => void
   onRestart: () => void
   onSpeedChange: (speed: number) => void
 }
 
-export function SimControls({ sim, speed, started, probing, onProbeToggle, onToggle, onRestart, onSpeedChange, className, ...props }: SimControlsProps) {
+export function SimControls({ sim, speed, started, scopeOpen, logicOpen, onScopeToggle, onLogicToggle, onToggle, onRestart, onSpeedChange, className, ...props }: SimControlsProps) {
   // A heavy circuit (an MCU rendering a display) can't keep up with the setting: the gauge then
   // reads the achieved speed, not the wish, and says so.
   const lagging = sim.running && sim.rate !== null && sim.rate < speed * LAGGING
@@ -109,12 +111,8 @@ export function SimControls({ sim, speed, started, probing, onProbeToggle, onTog
         </DropdownMenu>
         {benchAudio.available && <SoundControl />}
         <ButtonGroupSeparator />
-        <Tooltip>
-          <TooltipTrigger render={<Button variant={probing ? "default" : "outline"} size="icon-sm" onClick={onProbeToggle} aria-pressed={probing} />}>
-            <CrosshairIcon />
-          </TooltipTrigger>
-          <TooltipContent>{probing ? "Stop probing (M)" : "Probe the voltage between two points (M)"}</TooltipContent>
-        </Tooltip>
+        <Instrument action="scope" name="Oscilloscope" keys={labelFor(KEYMAP.scope)} open={scopeOpen} onToggle={onScopeToggle} Icon={ActivityIcon} />
+        <Instrument action="logic" name="Logic analyser" keys={labelFor(KEYMAP.logic)} open={logicOpen} onToggle={onLogicToggle} Icon={BinaryIcon} />
       </ButtonGroup>
       {sim.live && (
         <Badge variant="secondary" className="tabular-nums">
@@ -131,6 +129,22 @@ export function SimControls({ sim, speed, started, probing, onProbeToggle, onTog
         </Tooltip>
       )}
     </div>
+  )
+}
+
+type InstrumentProps = { action: string; name: string; keys: string; open: boolean; onToggle: () => void; Icon: React.ComponentType<{ className?: string }> }
+
+function Instrument({ action, name, keys, open, onToggle, Icon }: InstrumentProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<Button variant={open ? "default" : "outline"} size="sm" data-action={action} aria-pressed={open} aria-label={name} aria-keyshortcuts={keys} onClick={onToggle} />}>
+        <Icon />
+        <kbd className={cn("inline-flex h-4 min-w-4 items-center justify-center rounded-[4px] px-0.5 font-mono text-[10px] leading-none pointer-coarse:hidden", open ? "border border-b-2 border-primary-foreground/40" : "border border-b-2 bg-background text-foreground/70")}>{keys}</kbd>
+      </TooltipTrigger>
+      <TooltipContent>
+        {name} — {keys}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

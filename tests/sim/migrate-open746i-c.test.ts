@@ -5,10 +5,11 @@ import { pinContacts } from "@/schematic/contacts"
 import { lcdDemo } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { RENUMBERED_SINCE_1_28 } from "@/schematic/migrate-open746i-c"
-import { SCHEMATIC_VERSION, stamped, upgraded, versionOf } from "@/schematic/migrate"
+import { legacyUpgraded, SCHEMATIC_VERSION, stamped, upgraded, versionOf } from "@/schematic/migrate"
 import { parseProject, readProjectFile, schematicText } from "@/project/project-store"
 import { getDef } from "@/schematic/registry"
-import type { PinKind, PlacedObject, Rotation, Schematic, Wire } from "@/schematic/types"
+import type { LegacySchematic, LegacyWire as Wire, PinKind, PlacedObject, Rotation, Schematic } from "@/schematic/types"
+import { pinPartition } from "../lib/pin-partition"
 
 type TablePin = { label: string; mcu: string | null; kind: PinKind; connector: string | null; x: number; y: number }
 
@@ -34,31 +35,41 @@ function signalNow(id: string): string | undefined {
 }
 
 const open746 = (at: Partial<PlacedObject> = {}): PlacedObject => ({ id: "U1", def: "open746i-c", x: 0, y: 0, props: { ref: "U1" }, ...at })
-const doc = (objects: PlacedObject[], wires: Wire[] = [], parts: Schematic["parts"] = {}): Schematic => ({ objects, wires, parts })
-const lcdTouching = (d: Schematic, lcd: PlacedObject) => [...pinContacts(d.objects, GRID).groups.keys()].filter((key) => key.startsWith(`${lcd.id}:`)).length
+const doc = (objects: PlacedObject[], wires: Wire[] = [], parts: Schematic["parts"] = {}): LegacySchematic => ({ objects, wires, parts })
+const lcdTouching = (d: Pick<Schematic, "objects">, lcd: PlacedObject) => [...pinContacts(d.objects, GRID).groups.keys()].filter((key) => key.startsWith(`${lcd.id}:`)).length
 
 describe("a project saved on emul 1.28.0 keeps its Open746I-C wiring now that P1, P4, P10 and P11 are numbered as on the board", () => {
   it("the brigade's lab 2 file drives its red, green and blue ballasts from PD12, PD13 and PD14 again", async () => {
     const bytes = readFileSync(join(DATA, "lab2-rgb-pwm.emul"))
-    const saved = (JSON.parse(bytes.toString("utf8")) as { schematic: Schematic }).schematic
+    const saved = (JSON.parse(bytes.toString("utf8")) as { schematic: LegacySchematic }).schematic
     expect(versionOf(saved), "a 1.28.0 file carries no schematic version").toBe(1)
 
-    const otherEnds = (d: Schematic, id: string) => d.wires.flatMap((w) => (w.from.object === id ? [w.to] : w.to.object === id ? [w.from] : []))
-    const padOfBallast = (d: Schematic, ledRef: string) => {
+    const otherEnds = (d: LegacySchematic, id: string) => d.wires.flatMap((w) => (w.from.object === id ? [w.to] : w.to.object === id ? [w.from] : []))
+    const padOfBallast = (d: LegacySchematic, ledRef: string) => {
       const led = d.objects.find((o) => o.props?.ref === ledRef)!
       const ballast = otherEnds(d, led.id).find((e) => d.objects.find((o) => o.id === e.object)?.def === "resistor")!
       const onBoard = otherEnds(d, ballast.object).find((e) => d.objects.find((o) => o.id === e.object)?.def === "open746i-c")!
       return signalNow(onBoard.pin)
     }
-    const colours = (d: Schematic) => ({ red: padOfBallast(d, "VD1R"), green: padOfBallast(d, "VD1G"), blue: padOfBallast(d, "VD1B") })
+    const colours = (d: LegacySchematic) => ({ red: padOfBallast(d, "VD1R"), green: padOfBallast(d, "VD1G"), blue: padOfBallast(d, "VD1B") })
+    const padNow = (d: Schematic, ledRef: string) => {
+      const nets = pinPartition(d)
+      const netOf = (key: string) => nets.find((g) => g.includes(key)) ?? []
+      const ballast = netOf(`${ledRef}.1`).concat(netOf(`${ledRef}.2`)).find((key) => key.startsWith("R"))!
+      const other = `${ballast.slice(0, ballast.indexOf("."))}.${ballast.endsWith(".1") ? "2" : "1"}`
+      return signalNow(netOf(other).find((key) => key.startsWith("U1."))!.slice(3))
+    }
+    const coloursNow = (d: Schematic) => ({ red: padNow(d, "VD1R"), green: padNow(d, "VD1G"), blue: padNow(d, "VD1B") })
 
     expect(colours(saved), "taken as it was saved, the renumbered P4 sends green to ground and red to PD13").toEqual({ red: "PD13", green: "GND", blue: "PD14" })
 
     const read = await readProjectFile(new Blob([bytes]))
     expect(read, "the file reads as a project").not.toBeNull()
-    expect(colours(read!.doc), "opened: TIM4 CH1–CH3 as the brief and the firmware have them").toEqual({ red: "PD12", green: "PD13", blue: "PD14" })
+    expect(coloursNow(read!.doc), "opened: TIM4 CH1–CH3 as the brief and the firmware have them").toEqual({ red: "PD12", green: "PD13", blue: "PD14" })
     expect(versionOf(read!.doc)).toBe(SCHEMATIC_VERSION)
-    expect(read!.notes).toEqual(["U1: 2 wire ends on P4 moved to keep the same signals, now that these pins are numbered as on the board itself."])
+    expect(read!.notes, "the renumbering only: the phase 6 router lays U1 P4-7 → R2 2 clear through its own bends, where the old router's stubs ran it over another net (design.md §13.22)").toEqual([
+      "U1: 2 wire ends on P4 moved to keep the same signals, now that these pins are numbered as on the board itself.",
+    ])
   })
 
   it("a wire on every pin of the 1.28.0 board ends on the same signal, and no wire moves onto another rail", () => {
@@ -69,7 +80,7 @@ describe("a project saved on emul 1.28.0 keeps its Open746I-C wiring now that P1
       { id: "across", from: { object: "U1", pin: "P4-3" }, to: { object: "U1", pin: "P1-11" } },
     ]
     const before = doc([open746(), resistor], wires)
-    const { doc: after, notes } = upgraded(before)
+    const { doc: after, notes } = legacyUpgraded(before)
 
     pins.forEach((pin, i) => expect.soft(signalNow(after.wires[i].from.pin), `${pin} (${signalIn1_28(pin)})`).toBe(signalIn1_28(pin)))
     const across = after.wires.at(-1)!
@@ -105,7 +116,7 @@ describe("a project saved on emul 1.28.0 keeps its Open746I-C wiring now that P1
     const lcd: PlacedObject = { id: "LCD", def: "lcd7-f", x: lx * GRID, y: ly * GRID, rotation }
     const before = doc([u, lcd])
     expect(lcdTouching(before, lcd), "off P15 on today's board").toBeLessThan(40)
-    const after = upgraded(before).doc
+    const after = legacyUpgraded(before).doc
     const moved = after.objects.find((o) => o.id === "LCD")!
     expect(lcdTouching(after, moved), "all forty FFC lines touch P15 again").toBe(40)
     expect(after.objects.find((o) => o.id === "U1"), "the board stays where it was").toBe(u)
@@ -113,7 +124,7 @@ describe("a project saved on emul 1.28.0 keeps its Open746I-C wiring now that P1
 
   it("an LCD that was not docked stays where it was", () => {
     const lcd: PlacedObject = { id: "LCD", def: "lcd7-f", x: 4 * GRID, y: 80 * GRID }
-    const after = upgraded(doc([open746(), lcd])).doc
+    const after = legacyUpgraded(doc([open746(), lcd])).doc
     expect(after.objects.find((o) => o.id === "LCD")).toBe(lcd)
   })
 
@@ -135,10 +146,15 @@ describe("a project saved on emul 1.28.0 keeps its Open746I-C wiring now that P1
     expect(upgraded(newer).doc).toBe(newer)
 
     const plain = doc([{ id: "R1", def: "resistor", x: 0, y: 0 }], [{ id: "w", from: { object: "R1", pin: "1" }, to: { object: "R1", pin: "2" } }])
+    const legacy = legacyUpgraded(plain)
+    expect(legacy.doc).toEqual(plain)
+    expect(legacy.doc.objects).toBe(plain.objects)
+    expect(legacy.doc.wires).toBe(plain.wires)
+    expect(legacy.notes).toEqual([])
     const { doc: same, notes } = upgraded(plain)
-    expect(same).toEqual({ ...plain, version: SCHEMATIC_VERSION })
-    expect(same.objects).toBe(plain.objects)
-    expect(same.wires).toBe(plain.wires)
+    expect(versionOf(same)).toBe(SCHEMATIC_VERSION)
+    expect(same.objects).toEqual(plain.objects)
+    expect(pinPartition(same), "the wire from pin to pin of the resistor, frozen").toEqual([["resistor@0,0.1", "resistor@0,0.2"]])
     expect(notes).toEqual([])
   })
 
@@ -146,20 +162,20 @@ describe("a project saved on emul 1.28.0 keeps its Open746I-C wiring now that P1
     const wires: Wire[] = [
       { id: "w1", from: { object: "U1", pin: "P4-5" }, to: { object: "U1", pin: "P20-11" } },
     ]
-    const { doc: after, notes } = upgraded(doc([open746()], wires))
+    const { doc: after, notes } = legacyUpgraded(doc([open746()], wires))
     expect(after.wires).toEqual(wires)
     expect(notes).toEqual([])
-    expect(versionOf(after)).toBe(SCHEMATIC_VERSION)
+    expect(versionOf(upgraded(doc([open746()], wires)).doc)).toBe(SCHEMATIC_VERSION)
   })
 
   it("what the app stores is stamped, so a project upgraded once is never upgraded again", async () => {
     const old = doc([open746()], [{ id: "w1", from: { object: "U1", pin: "P4-5" }, to: { object: "U1", pin: "P4-9" } }])
     const first = (await parseProject(JSON.stringify(old)))!
-    expect(first.doc.wires[0].from.pin).not.toBe("P4-5")
+    expect(pinPartition(first.doc), "the wire's ends renumbered").toEqual([["U1.P4-3", "U1.P4-7"]])
     expect(first.notes.length).toBe(1)
     const again = (await parseProject(schematicText(first.doc)))!
     expect(again.doc.wires).toEqual(first.doc.wires)
     expect(again.notes).toEqual([])
-    expect(JSON.parse(schematicText(doc([]))).version).toBe(SCHEMATIC_VERSION)
+    expect(JSON.parse(schematicText({ objects: [], wires: [], parts: {} })).version).toBe(SCHEMATIC_VERSION)
   })
 })

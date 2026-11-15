@@ -1,0 +1,34 @@
+{
+  "source": "example ne555-flasher",
+  "objects": [
+    "BT1 (battery)",
+    "C1 (capacitor-polarized)",
+    "C2 (capacitor)",
+    "ground@0,18 (ground)",
+    "ground@11,30 (ground)",
+    "ground@27,23 (ground)",
+    "ground@30,29 (ground)",
+    "ground@38,31 (ground)",
+    "LED1 (led)",
+    "LED2 (led)",
+    "R1 (resistor)",
+    "R2 (resistor)",
+    "R3 (resistor)",
+    "R4 (resistor)",
+    "U1 (ne555)"
+  ],
+  "nets": [
+    ["BT1.-","ground@0,18.GND"],
+    ["BT1.+","R1.1","R4.1","U1.RESET","U1.VCC"],
+    ["C1.1","R2.2","U1.THRES","U1.TRIG"],
+    ["C1.2","ground@11,30.GND"],
+    ["C2.1","U1.CTRL"],
+    ["C2.2","ground@30,29.GND"],
+    ["ground@27,23.GND","U1.GND"],
+    ["ground@38,31.GND","LED1.2"],
+    ["LED1.1","R3.2"],
+    ["LED2.1","R4.2"],
+    ["LED2.2","R3.1","U1.OUT"],
+    ["R1.2","R2.1","U1.DIS"]
+  ]
+}

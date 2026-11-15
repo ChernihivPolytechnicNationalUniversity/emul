@@ -12,11 +12,12 @@ type TextCanvasProps = {
   scale: number
   text: SheetText
   raster: TextRaster
+  bare: (object: PlacedObject) => ReadonlySet<string>
 }
 
-type Drawn = { surface: string; objects: readonly PlacedObject[] }
+type Drawn = { surface: string; objects: readonly PlacedObject[]; bare: ReadonlyMap<string, string> }
 
-export function TextCanvas({ objects, view, grid, scale, text, raster }: TextCanvasProps) {
+export function TextCanvas({ objects, view, grid, scale, text, raster, bare }: TextCanvasProps) {
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const drawn = React.useRef<Drawn | null>(null)
   const theme = useThemeName()
@@ -49,7 +50,7 @@ export function TextCanvas({ objects, view, grid, scale, text, raster }: TextCan
 
     const placed = (object: PlacedObject): (Rect & { sheet: Symbol; stretch: number }) | null => {
       const def = getDef(object.def)
-      const sheet = def && raster.get(def, orientationOf(object), grid, pixels, text)
+      const sheet = def && raster.get(def, orientationOf(object), grid, pixels, text, undefined, bare(object))
       if (!sheet) return null
       const stretch = pixels / sheet.scale
       const rect = objectRect(object, grid)
@@ -69,8 +70,9 @@ export function TextCanvas({ objects, view, grid, scale, text, raster }: TextCan
 
     const surface = `${width}x${height}|${view.x},${view.y}|${pixels}|${text.boost}|${text.pinSize}|${theme}`
     const before = drawn.current
-    const patch = before?.surface === surface ? changedArea(before.objects, objects, placed) : "everything"
-    drawn.current = { surface, objects }
+    const bareNow = new Map(objects.map((object) => [object.id, [...bare(object)].sort().join(" ")]))
+    const patch = before?.surface === surface ? changedArea(before, objects, bareNow, placed) : "everything"
+    drawn.current = { surface, objects, bare: bareNow }
 
     if (patch === "nothing") return
     if (patch !== "everything") {
@@ -91,7 +93,7 @@ export function TextCanvas({ objects, view, grid, scale, text, raster }: TextCan
     canvas.height = height
     context.clearRect(0, 0, width, height)
     for (const object of objects) blit(object)
-  }, [objects, view, grid, scale, text, theme, fonts, raster])
+  }, [objects, view, grid, scale, text, theme, fonts, raster, bare])
 
   if (view.w <= 0) return null
   return (
@@ -105,16 +107,16 @@ export function TextCanvas({ objects, view, grid, scale, text, raster }: TextCan
 }
 
 function changedArea(
-  before: readonly PlacedObject[],
+  { objects: before, bare: bareBefore }: Drawn,
   after: readonly PlacedObject[],
+  bareAfter: ReadonlyMap<string, string>,
   placed: (object: PlacedObject) => Rect | null,
 ): Rect | "nothing" | "everything" {
-  if (before === after) return "nothing"
   const now = new Set(after.map((o) => o.id))
   const was = new Map(before.map((o) => [o.id, o]))
   const changed: PlacedObject[] = []
   for (const object of before) if (!now.has(object.id)) changed.push(object)
-  for (const object of after) if (was.get(object.id) !== object) changed.push(object)
+  for (const object of after) if (was.get(object.id) !== object || bareBefore.get(object.id) !== bareAfter.get(object.id)) changed.push(object)
   if (changed.length === 0) return "nothing"
   if (changed.length > before.length / 4) return "everything"
   let minX = Infinity

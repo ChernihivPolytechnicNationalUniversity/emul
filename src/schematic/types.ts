@@ -7,6 +7,7 @@ import type { ClockSource } from "@/mcu/periph/rcc"
 import type { Category } from "./categories"
 import type { Icon } from "./icons"
 import type { WireColorKey } from "./wire-colors"
+import type { WireSegment } from "./wires/segment"
 
 /** Direction pointing outward from the component; wires leave the pin this way. */
 export type Side = "left" | "right" | "top" | "bottom"
@@ -25,8 +26,6 @@ export type PinDef = {
   /** Where the label sits relative to the pin. */
   labelAt: Side
   kind: PinKind
-  /** Wire stub length in cells before routing starts (default 1). */
-  stub?: number
   /** MCU pin name, e.g. PA5. */
   mcu?: string
   /** Board signal name, e.g. SPI_A_SCK. */
@@ -459,7 +458,7 @@ export type NoDatasheet = {
 }
 
 /** A part as the generated catalogue lists it (catalogue.gen.ts): the icon by name, the file its definition loads from. */
-export type CatalogueEntry = Pick<ComponentDef, "id" | "name" | "description" | "category" | "keywords" | "width" | "height" | "prefix" | "chip" | "board"> & {
+export type CatalogueEntry = Pick<ComponentDef, "id" | "name" | "description" | "category" | "keywords" | "width" | "height" | "prefix" | "chip" | "board" | "retired"> & {
   icon: string
   file: string
 }
@@ -467,6 +466,7 @@ export type CatalogueEntry = Pick<ComponentDef, "id" | "name" | "description" | 
 export type ComponentDef = {
   id: string
   name: string
+  retired?: boolean
   description?: string
   /** Palette group: one of the closed list in categories.ts. */
   category: Category
@@ -598,6 +598,8 @@ export type PinRef = { object: string; pin: string }
 /** Clockwise rotation in degrees, in 45° steps so components can sit on a diagonal. */
 export type Rotation = 0 | 45 | 90 | 135 | 180 | 225 | 270 | 315
 
+export type FieldAnchorInDefinitionCells = { x: number; y: number; anchor?: "start" | "middle" | "end" }
+
 export type PlacedObject = {
   id: string
   /** ComponentDef id. */
@@ -610,6 +612,7 @@ export type PlacedObject = {
   mirror?: boolean
   /** ref, value and other per-instance props. */
   props?: Record<string, string>
+  fieldAt?: Partial<Record<"ref" | "value", FieldAnchorInDefinitionCells>>
   /**
    * Firmware sources of a board or chip (a def with `chip`), as the build service takes them.
    * Edited outside the undo history, like part state: ⌘Z on the field never touches the code.
@@ -636,11 +639,10 @@ export type BoardDebug = {
 
 export type Point = { x: number; y: number }
 
-export type Wire = {
+export type LegacyWire = {
   id: string
   from: PinRef
   to: PinRef
-  /** User-placed bend points in world px (snapped); the router connects them orthogonally. */
   points?: Point[]
   color?: WireColorKey
 }
@@ -670,7 +672,7 @@ export type HdlModule = {
 
 export type Schematic = {
   objects: PlacedObject[]
-  wires: Wire[]
+  wires: WireSegment[]
   /** Keyed by partKey(objectId, partId). */
   parts: Record<string, PartState>
   library?: HdlModule[]
@@ -678,5 +680,7 @@ export type Schematic = {
 
 export const partKey = (object: string, part: string) => `${object}:${part}`
 export const pinKey = (object: string, pin: string) => `${object}:${pin}`
+
+export type LegacySchematic = Omit<Schematic, "wires"> & { wires: LegacyWire[] }
 
 export const emptySchematic = (): Schematic => ({ objects: [], wires: [], parts: {} })

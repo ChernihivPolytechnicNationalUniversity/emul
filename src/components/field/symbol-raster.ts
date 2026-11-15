@@ -1,4 +1,4 @@
-import { objectRect, objectSize, orientPin, placedText, type Orientation, type Point, type Rect } from "@/schematic/geometry"
+import { bodyCentre, drawnBody, objectRect, objectSize, orientPin, placedText, type Orientation, type Point, type Rect } from "@/schematic/geometry"
 import type { BodyShape, ComponentDef, PlacedObject } from "@/schematic/types"
 import { paintShape, SOON_BADGE, soonBadge, textBoost, textColor, textFont } from "./body-paint"
 import type { FieldPalette } from "./field-palette"
@@ -7,7 +7,7 @@ import { boxCorners, KNOCKOUT_OPACITY, labelKnockout, labelOrigin, OVERBAR_WEIGH
 import { printedNames } from "./printed-names"
 import { grownAt, printedGrowth } from "@/schematic/printed-text"
 
-const PIN_MARK_CELLS = 0.16
+export const PIN_MARK_CELLS = 0.16
 const MARGIN_PX = 4
 const MAX_SYMBOL_PX = 4096
 
@@ -92,11 +92,12 @@ export class SymbolRaster {
     context.save()
     const unrotatedWidth = def.width * grid
     const unrotatedHeight = def.height * grid
-    context.translate((worldWidth * scale) / 2, (worldHeight * scale) / 2)
+    const centre = bodyCentre(def, orientation)
+    context.translate(centre.x * grid * scale, centre.y * grid * scale)
     turnInto(context, orientation)
     context.scale(scale, scale)
     context.translate(-unrotatedWidth / 2, -unrotatedHeight / 2)
-    this.paintBody(context, def, grid, scale, palette)
+    this.paintBody(context, def, orientation, grid, scale, palette)
     context.restore()
 
     context.save()
@@ -107,7 +108,7 @@ export class SymbolRaster {
     return { image: canvas, originX: MARGIN_PX, originY: MARGIN_PX, scale, width, height }
   }
 
-  private paintBody(context: CanvasRenderingContext2D, def: ComponentDef, grid: number, scale: number, palette: FieldPalette) {
+  private paintBody(context: CanvasRenderingContext2D, def: ComponentDef, orientation: Orientation, grid: number, scale: number, palette: FieldPalette) {
     const { hollow } = selectionOutline(def)
     if (hollow) {
       const backdrop = new Path2D()
@@ -115,7 +116,7 @@ export class SymbolRaster {
       context.fillStyle = palette.text.inverse
       context.fill(backdrop)
     }
-    for (const shape of def.body) paintShape(context, shape, grid, scale, palette)
+    for (const shape of drawnBody(def, orientation)) paintShape(context, shape, grid, scale, palette)
   }
 
   private paintPinMarks(context: CanvasRenderingContext2D, def: ComponentDef, orientation: Orientation, grid: number, palette: FieldPalette) {
@@ -175,6 +176,7 @@ const TEXT_ANCHOR: Record<"start" | "middle" | "end", CanvasTextAlign> = { start
 export type SheetText = { boost: number; pinSize: number }
 
 const NOTHING_HIDDEN: ReadonlySet<BodyText> = new Set()
+const NO_PIN_BARE: ReadonlySet<string> = new Set()
 
 const UNSEEN = 0.001
 
@@ -221,7 +223,7 @@ export class TextRaster {
     return Math.min(scale, MAX_SHEET_PX / world.w, MAX_SHEET_PX / world.h, Math.sqrt(MAX_SHEET_AREA / (world.w * world.h)))
   }
 
-  get(def: ComponentDef, orientation: Orientation, grid: number, scale: number, text: SheetText, hidden = NOTHING_HIDDEN): Symbol | null {
+  get(def: ComponentDef, orientation: Orientation, grid: number, scale: number, text: SheetText, hidden = NOTHING_HIDDEN, bare = NO_PIN_BARE): Symbol | null {
     const palette = this.palette
     if (!palette) return null
     if (scale !== this.drawnAt) {
@@ -229,16 +231,16 @@ export class TextRaster {
       this.cache.clear()
     }
     const drawAt = this.fitting(def, orientation, grid, scale)
-    if (hidden.size) return this.draw(def, orientation, grid, drawAt, text, palette, hidden)
-    const id = `${key(def, orientation, palette.theme, drawAt)}|${text.boost}|${text.pinSize}`
+    if (hidden.size) return this.draw(def, orientation, grid, drawAt, text, palette, hidden, bare)
+    const id = `${key(def, orientation, palette.theme, drawAt)}|${text.boost}|${text.pinSize}|${[...bare].sort().join(" ")}`
     const cached = this.cache.get(id)
     if (cached) return cached
-    const drawn = this.draw(def, orientation, grid, drawAt, text, palette)
+    const drawn = this.draw(def, orientation, grid, drawAt, text, palette, NOTHING_HIDDEN, bare)
     if (drawn) this.cache.set(id, drawn)
     return drawn
   }
 
-  private draw(def: ComponentDef, orientation: Orientation, grid: number, scale: number, text: SheetText, palette: FieldPalette, hidden = NOTHING_HIDDEN): Symbol | null {
+  private draw(def: ComponentDef, orientation: Orientation, grid: number, scale: number, text: SheetText, palette: FieldPalette, hidden = NOTHING_HIDDEN, bare = NO_PIN_BARE): Symbol | null {
     const box = objectSize(def, orientation.rotation)
     const margin = LABEL_MARGIN_CELLS * grid * scale
     const width = Math.max(1, Math.ceil(box.w * grid * scale + margin * 2))
@@ -270,6 +272,7 @@ export class TextRaster {
       context.restore()
     }
     for (const { label, pin } of labelled) {
+      if (bare.has(label.id)) continue
       const knockout = labelKnockout(label.text, label.anchor, text.pinSize, advance)
       atLabel(pin, label, () => paintKnockout(context, knockout, groundColor(label.ground, palette), grid))
     }
@@ -291,7 +294,8 @@ export class TextRaster {
     context.restore()
 
     context.save()
-    context.translate((box.w * grid * scale) / 2, (box.h * grid * scale) / 2)
+    const centre = bodyCentre(def, orientation)
+    context.translate(centre.x * grid * scale, centre.y * grid * scale)
     turnInto(context, orientation)
     context.scale(scale, scale)
     context.translate((-def.width * grid) / 2, (-def.height * grid) / 2)

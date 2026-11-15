@@ -1,0 +1,8 @@
+{
+  "source": "tests/data/emul-1.42.0/dw03-beside-a-resistor.emul",
+  "objects": [
+    "R1 (resistor)",
+    "U1 (dw03)"
+  ],
+  "nets": []
+}

@@ -8,6 +8,9 @@
  */
 import { describe, expect, it } from "vitest"
 import { builder } from "@/schematic/builder"
+import { wirePins } from "@/schematic/migrate-wires"
+import { removed } from "@/schematic/wire-edits"
+import { danglingEnds, wireNets } from "@/schematic/wires/graph"
 import { GRID } from "@/schematic/geometry"
 import { partKey, pinKey, type PartState, type Schematic } from "@/schematic/types"
 import { SimLoop, type Probe, type Snapshot } from "@/sim/loop"
@@ -666,6 +669,28 @@ describe("bench physics", () => {
     expect.soft(snap.damage[q.id], "the MOSFET died of the spike").toBeTruthy()
     expect.soft(peak, "the scope's trace holds the spike (V)").toBeGreaterThan(55)
     expect.soft(buckets, "and no buckets were lost to the rebuild").toBe(Math.floor(snap.time / 2e-3))
+  })
+
+  it("a part deleted from a running circuit leaves its wires hanging: the loop opens, the current stops, nothing burns", () => {
+    const { doc, place, wire } = builder(GRID)
+    const bat = place("dc-source", 0, 0, { value: "5 V" })
+    const r = place("resistor", 6, 0, { value: "220 Ω", power: "0.25" })
+    const led = place("led", 12, 0, { value: "red" })
+    const gnd = place("ground", 3, 6)
+    wire(bat, "+", r, "1")
+    wire(r, "2", led, "1")
+    wire(led, "2", gnd, "GND")
+    wire(bat, "-", gnd, "GND")
+    const bench = start({ ...doc })
+    const lit = bench.run(0.2)
+    expect.soft(reading(lit, r.id).current * 1e3, "about 14 mA before (mA)").toBeNear(14, 2)
+    const without = removed({ ...doc }, new Set([r.id]), new Set())
+    expect.soft(danglingEnds(wireNets(without.wires, wirePins(without.objects))).length, "two wire ends hang where R1's pins were").toBe(2)
+    bench.loop.setDoc(without)
+    const open = bench.run(0.2)
+    expect.soft(open.parts[partKey(led.id, "LED")]?.on ?? false, "the LED goes dark").toBe(false)
+    expect.soft(Math.abs(reading(open, bat.id).current), "no current from the source beyond the solver's leakage (A)").toBeLessThan(1e-8)
+    expect.soft(failures(open), "nothing burns").toBe("")
   })
 
   describe("a 12 V series regulator behind a bridge and 5000 µF", () => {

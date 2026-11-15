@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { LogicStore } from "@/components/logic/logic-store"
 import { parseElf } from "@/mcu/elf"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
@@ -103,7 +103,7 @@ async function record(bench: Bench = AS_BUILT): Promise<Recording> {
     for (const [pin, strip] of Object.entries(EEPROM_STRAPPED_TO_0X51)) added.wire(eeprom, pin, u, strip)
   }
   doc.objects.push(...added.doc.objects)
-  doc.wires.push(...added.doc.wires)
+  connect(doc, ...connections(added.doc))
   const loop = new SimLoop()
   if (bench.workers) loop.spawnCore = spawnNodeCore
   loop.setDoc(doc)

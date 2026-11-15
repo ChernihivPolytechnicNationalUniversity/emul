@@ -1,5 +1,5 @@
 import { BinaryIcon } from "lucide-react"
-import { builder } from "./builder"
+import { builder, placedByHand } from "./builder"
 import type { Example } from "./examples"
 import type { PlacedObject, Schematic } from "./types"
 
@@ -31,13 +31,11 @@ const LED_R = { value: "330 Ω", power: "0.25" }
 type Gate = { a: PlacedObject; b?: PlacedObject; out: PlacedObject }
 
 export function buildLogic(grid: number): LogicBench {
-  const { doc, place, wire } = builder(grid)
+  const { doc, place, wire, node } = builder(grid)
   const rail = (x: number, y: number) => place("supply", x, y, V5)
   const gnd = (x: number, y: number) => place("ground", x, y)
   /** Vertical two-pin part: pin 1 on top at (x+1, y), pin 2 below at (x+1, y+4). */
   const vert = (def: string, x: number, y: number, props: Record<string, string>) => place(def, x, y, props, 90)
-  /** A junction whose pin sits at (x, y). */
-  const node = (x: number, y: number) => place("junction", x - 1, y - 1)
 
   /**
    * Inverter cell: P-channel over N-channel, gates tied. Input junction at (ox−2, oy+6),
@@ -206,5 +204,13 @@ export const transistorLogic: Example = {
   name: "Transistor logic",
   description: "CMOS NOT, NAND and NOR gates from discrete MOSFETs, and a half adder built out of them. Flip the switches, watch the LEDs.",
   icon: BinaryIcon,
-  build: (grid) => buildLogic(grid).doc,
+  build: (grid) =>
+    placedByHand(buildLogic(grid).doc, grid, [
+      ["Q9", "ref", 77.5, 17, "start"],
+      ["Q9", "value", 77.5, 17.5, "start"],
+      ["Q17", "ref", 19.5, 79, "start"],
+      ["Q17", "value", 19.5, 79.5, "start"],
+      ["Q23", "ref", 65.5, 66, "start"],
+      ["Q23", "value", 65.5, 66.5, "start"],
+    ]),
 }

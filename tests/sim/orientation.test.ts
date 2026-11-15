@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest"
-import { DIR, flipped, GRID, objectPins, objectRect, objectSize, orientationOf, orientPin, pinPoint, placedText, routeAll, UPRIGHT, type Orientation, type Point } from "@/schematic/geometry"
+import { flipped, GRID, objectPins, objectRect, objectSize, orientationOf, orientPin, pinPoint, placedText, UPRIGHT, type Orientation, type Point } from "@/schematic/geometry"
+import { legacyOf } from "@/schematic/builder"
 import { examples } from "@/schematic/examples"
 import { flipSelection, rotateSelection } from "@/schematic/orient"
+import { bodiesOf, crossedBody } from "@/schematic/body-crossing"
 import { footprint } from "@/schematic/placement"
+import { wiringOf } from "@/schematic/wire-edits"
+import { WireGraph } from "@/schematic/wires/graph"
+import { routeBetween, type RouteEnd } from "@/schematic/wires/router"
 import { getDef, allDefs } from "@/schematic/registry"
-import type { PlacedObject, Rotation } from "@/schematic/types"
+import type { PlacedObject, Rotation, Schematic } from "@/schematic/types"
 
 const ROTATIONS: Rotation[] = [0, 45, 90, 135, 180, 225, 270, 315]
 const ORIENTATIONS: Orientation[] = ROTATIONS.flatMap((rotation) => [{ rotation, mirror: false }, { rotation, mirror: true }])
@@ -108,7 +113,7 @@ describe("a component mirrors the way schematic editors mirror", () => {
 describe("a selection mirrors as one block, the way schematic editors mirror a block", () => {
   const bridge = examples.find((e) => e.id === "bridge")!.build(GRID)
   const everything = new Set(bridge.objects.map((o) => o.id))
-  const pinsOf = (doc: typeof bridge) => new Map(doc.wires.flatMap((w) => [w.from, w.to]).map((ref) => [`${ref.object}:${ref.pin}`, pinPoint(doc.objects.find((o) => o.id === ref.object)!, ref.pin, GRID)!]))
+  const pinsOf = (doc: Schematic) => new Map(doc.objects.flatMap((o) => objectPins(o, GRID).map((p) => [p.key, p.point] as const)))
 
   it("a single part mirrors where it stands", () => {
     const one = bridge.objects[0]
@@ -118,14 +123,14 @@ describe("a selection mirrors as one block, the way schematic editors mirror a b
     expect(after.mirror).toBe(true)
   })
 
-  it("the whole circuit mirrors about one line, every wire still on its pins; a diagonal part within half a cell of it", () => {
-    const diagonal = (key: string) => (bridge.objects.find((o) => key.startsWith(`${o.id}:`))!.rotation ?? 0) % 90 !== 0
+  it("the whole circuit mirrors about one line, every pin, the parts on their diagonals exactly too", () => {
+    expect.soft(bridge.objects.some((o) => (o.rotation ?? 0) % 90 !== 0), "the bridge has diagonal parts").toBe(true)
     for (const axis of ["horizontal", "vertical"] as const) {
       const before = pinsOf(bridge)
       const after = pinsOf(flipSelection(bridge, everything, axis, GRID))
       const sum = (key: string) => (axis === "horizontal" ? after.get(key)!.x + before.get(key)!.x : after.get(key)!.y + before.get(key)!.y)
-      const line = sum([...before.keys()].find((key) => !diagonal(key))!)
-      for (const key of before.keys()) expect(Math.abs(sum(key) - line), `${axis} ${key}`).toBeLessThanOrEqual(diagonal(key) ? GRID / 2 + 1e-6 : 1e-6)
+      const line = sum([...before.keys()][0])
+      for (const key of before.keys()) expect.soft(Math.abs(sum(key) - line), `${axis} ${key}`).toBeLessThanOrEqual(1e-6)
     }
   })
 
@@ -133,49 +138,47 @@ describe("a selection mirrors as one block, the way schematic editors mirror a b
     for (const axis of ["horizontal", "vertical"] as const) expect(flipSelection(flipSelection(bridge, everything, axis, GRID), everything, axis, GRID)).toEqual(bridge)
   })
 
-  it("the bends of a wire inside the block mirror with it; a mirrored part stores only what it needs", () => {
-    const withBend = { ...bridge, wires: bridge.wires.map((w, i) => (i === 0 ? { ...w, points: [{ x: GRID * 3, y: GRID * 5 }] } : w)) }
-    const doc = flipSelection(withBend, everything, "vertical", GRID)
-    expect(doc.wires[0].points![0].x).toBe(GRID * 3)
-    expect(doc.wires[0].points![0].y).not.toBe(GRID * 5)
+  it("until wires follow a drag (phase 4) the stored wires stay where they are; a mirrored part stores only what it needs", () => {
+    const doc = flipSelection(bridge, everything, "vertical", GRID)
+    expect(doc.wires).toBe(bridge.wires)
     const back = flipSelection(doc, everything, "vertical", GRID)
     expect(back.objects.every((o) => o.mirror === undefined)).toBe(true)
   })
 })
 
+function halfTurned(doc: Schematic, ids: ReadonlySet<string>): Schematic {
+  const start = doc.objects.find((o) => ids.has(o.id))!.rotation ?? 0
+  let after = rotateSelection(doc, ids, 1, GRID)
+  while ((after.objects.find((o) => ids.has(o.id))!.rotation ?? 0) !== (start + 180) % 360) after = rotateSelection(after, ids, 1, GRID)
+  return after
+}
+
 describe("a part turned or mirrored in place keeps its wires out of its own body", () => {
-  const crossesBody = (p: Point, q: Point, r: { x: number; y: number; w: number; h: number }) => {
-    const [x0, x1, y0, y1] = [r.x + 0.5, r.x + r.w - 0.5, r.y + 0.5, r.y + r.h - 0.5]
-    if (p.y === q.y) return p.y > y0 && p.y < y1 && Math.max(p.x, q.x) > x0 && Math.min(p.x, q.x) < x1
-    return p.x === q.x && p.x > x0 && p.x < x1 && Math.max(p.y, q.y) > y0 && Math.min(p.y, q.y) < y1
-  }
   const turnsBack = (a: Point, b: Point, c: Point) => {
     const dot = (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)
     const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
     return dot < 0 && Math.abs(cross) < 1e-6
   }
 
-  it("the wires into a turned part lose the bends drawn for the old way round; the rest keep theirs", () => {
+  it("turning or mirroring a part leaves every stored wire where it is", () => {
     const doc = examples.find((e) => e.id === "bridge")!.build(GRID)
     const r5 = doc.objects.find((o) => o.props?.ref === "R5")!
-    const into = (w: (typeof doc.wires)[number]) => w.from.object === r5.id || w.to.object === r5.id
-    expect(doc.wires.filter(into).some((w) => w.points)).toBe(true)
-    for (const after of [flipSelection(doc, new Set([r5.id]), "horizontal", GRID), rotateSelection(doc, new Set([r5.id]), 45, GRID)]) {
-      expect(after.wires.filter(into).every((w) => !w.points)).toBe(true)
-      expect(after.wires.filter((w) => !into(w))).toEqual(doc.wires.filter((w) => !into(w)))
-    }
+    for (const after of [flipSelection(doc, new Set([r5.id]), "horizontal", GRID), rotateSelection(doc, new Set([r5.id]), 1, GRID)]) expect(after.wires).toBe(doc.wires)
   })
 
   const cornered = new Map([
     ["system-exam R9", "in series with L1 pin to pin, so its far end can only reach L1 back along its own body"],
     ["system-exam L1", "in series with R9 pin to pin, so its far end can only reach R9 back along its own body"],
     ["charge-boost A1", "flipped, the way round the module runs through BT1 and SW1, and crossing another part costs more"],
+    ["bridge R3", "one cell from R1 and from R7 on its row: mirrored or half-turned, its wires find no clean way round, and the router refuses rather than cross a body (design.md §13.27)"],
   ])
 
-  it("in every example, no wire of a mirrored or half-turned part runs back through the part, doubles back or meets a pin from the side, but where the way round is blocked", () => {
+  it("in every example, no wire of a mirrored or half-turned part runs back through the part or doubles back, but where the way round is blocked (leaving or entering a pin sideways is free, design.md §7)", () => {
     const issues: string[] = []
     for (const example of examples) {
-      const doc = example.build(GRID)
+      const built = example.build(GRID)
+      const legacy = legacyOf(built)
+      const doc = { ...built, objects: legacy.objects }
       for (const part of doc.objects) {
         const def = getDef(part.def)
         if (!def || def.pins.length > 8 || (part.rotation ?? 0) % 90 !== 0) continue
@@ -183,24 +186,27 @@ describe("a part turned or mirrored in place keeps its wires out of its own body
         for (const [how, after] of [
           ["mirrored", flipSelection(doc, ids, "horizontal", GRID)],
           ["flipped", flipSelection(doc, ids, "vertical", GRID)],
-          ["half-turned", rotateSelection(rotateSelection(rotateSelection(rotateSelection(doc, ids, 45, GRID), ids, 45, GRID), ids, 45, GRID), ids, 45, GRID)],
+          ["half-turned", halfTurned(doc, ids)],
         ] as const) {
           const moved = after.objects.find((o) => o.id === part.id)!
-          const wires = after.wires.filter((w) => w.from.object === part.id || w.to.object === part.id)
-          const body = footprint(moved, GRID)!.box
-          for (const route of routeAll(after.objects, wires, GRID)) {
-            const pts = route.pts
+          const wires = legacy.wires.filter((w) => w.from.object === part.id || w.to.object === part.id).map(({ points: _drawnForTheOldWayRound, ...w }) => w)
+          const ownBody = bodiesOf([moved])
+          const bare: Schematic = { ...after, wires: [] }
+          const field = wiringOf(new WireGraph(), bare)
+          for (const w of wires) {
             const name = `${example.id} ${part.props?.ref ?? part.def} ${how}`
             const known = cornered.has(`${example.id} ${part.props?.ref}`)
-            for (let i = 2; i < pts.length - 1; i++) if (!known && crossesBody(pts[i - 1], pts[i], body)) issues.push(`${name}: through its body`)
-            for (let i = 1; i + 1 < pts.length; i++) if (turnsBack(pts[i - 1], pts[i], pts[i + 1])) issues.push(`${name}: doubles back`)
-            const w = wires.find((x) => x.id === route.id)!
-            if (pts.length < 2) continue
-            for (const [ref, from, to] of [[w.from, pts[0], pts[1]], [w.to, pts[pts.length - 1], pts[pts.length - 2]]] as const) {
-              const pin = objectPins(after.objects.find((o) => o.id === ref.object)!, GRID).find((p) => p.pin.id === ref.pin)!.pin
-              const d = DIR[pin.side]
-              if ((pin.stub ?? 1) > 0 && (Math.sign(to.x - from.x) !== Math.sign(d.x) || Math.sign(to.y - from.y) !== Math.sign(d.y))) issues.push(`${name}: meets ${ref.pin} from the side`)
+            const endOf = (ref: (typeof w)["from"]): RouteEnd => {
+              const o = after.objects.find((x) => x.id === ref.object)!
+              return o.def === "junction" ? { at: pinPoint(o, ref.pin, GRID)! } : { pin: ref }
             }
+            const pts = routeBetween(bare, endOf(w.from), endOf(w.to), field)
+            if (!pts) {
+              if (!known) issues.push(`${name}: no route`)
+              continue
+            }
+            for (let i = 1; i < pts.length; i++) if (!known && crossedBody({ a: pts[i - 1], b: pts[i] }, ownBody)) issues.push(`${name}: through its body`)
+            for (let i = 1; i + 1 < pts.length; i++) if (turnsBack(pts[i - 1], pts[i], pts[i + 1])) issues.push(`${name}: doubles back`)
           }
         }
       }

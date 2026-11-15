@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { STM32F746IG } from "@/mcu/chip"
 import { parseElf } from "@/mcu/elf"
 import { parsePad, Stm32 } from "@/mcu/stm32f429"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
@@ -55,7 +55,7 @@ async function exemplarOn(reference: Reference) {
     b.wire(source, "-", u, GROUND)
   }
   doc.objects.push(...b.doc.objects)
-  doc.wires.push(...b.doc.wires)
+  connect(doc, ...connections(b.doc))
   const loop = new SimLoop()
   loop.setDoc(doc)
   loop.setParts({ ...doc.parts, ...(reference === "fitted" ? {} : { [partKey(u.id, "VREFJ")]: { on: false } }) })

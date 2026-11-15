@@ -1,5 +1,5 @@
 import { AudioWaveformIcon, LightbulbIcon } from "lucide-react"
-import { builder } from "../builder"
+import { builder, placedByHand } from "../builder"
 import type { Example } from "../examples"
 import type { PlacedObject, Rotation } from "../types"
 
@@ -9,8 +9,7 @@ function sheet(grid: number) {
   const b = builder(grid)
   /** A two-pin part standing up: pin 1 at (x + 1, y), pin 2 at (x + 1, y + 4). */
   const vert = (def: string, x: number, y: number, props: Record<string, string> = {}, rotation: Rotation = 90) => b.place(def, x, y, props, rotation)
-  /** A junction whose pin sits at (x, y). */
-  const node = (x: number, y: number) => b.place("junction", x - 1, y - 1)
+  const node = b.node
   /** A ground symbol whose pin sits at (x, y). */
   const gnd = (x: number, y: number) => b.place("ground", x - 1, y)
   /** A supply rail whose pin sits at (x, y): above it, or hanging below it for a negative rail. */
@@ -102,7 +101,10 @@ export const opampFlasher: Example = {
     join([r2, "2"], [gnd(16, 24), "GND"])
     join([rail(21, 4, 9), "V"], [u1, "V+"])
     join([rail(21, 14, -9), "V"], [u1, "V-"])
-    return doc
+    return placedByHand(doc, grid, [
+      ["LED1", "ref", 32.35, 12.1, "end"],
+      ["LED1", "value", 32.35, 12.6, "end"],
+    ])
   },
 }
 

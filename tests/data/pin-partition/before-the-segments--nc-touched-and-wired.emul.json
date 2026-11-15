@@ -1,0 +1,15 @@
+{
+  "source": "tests/data/before-the-segments/nc-touched-and-wired.emul",
+  "objects": [
+    "ground@45,37 (ground)",
+    "R1 (resistor)",
+    "R2 (resistor)",
+    "supply@-35,37 (supply)",
+    "U1 (nucleo-f429zi)"
+  ],
+  "nets": [
+    ["ground@45,37.GND","R1.2"],
+    ["R2.1","U1.CN8-1"],
+    ["R2.2","supply@-35,37.V"]
+  ]
+}

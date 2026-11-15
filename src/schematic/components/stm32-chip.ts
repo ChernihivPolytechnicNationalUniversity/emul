@@ -29,8 +29,6 @@ type Package = { name: string; pins: [number, string][]; source: string; leftPor
 const WIDTH = 12
 /** First pin row; the title block sits above. */
 const TOP = 4
-/** Pin stubs are 2 cells so the package pin number fits over them. */
-const STUB = 2
 
 const PIN_NOTES: Record<string, string> = {
   PH0: "OSC_IN",
@@ -103,7 +101,6 @@ export function stm32Chip(chip: ChipProfile, pkg: Package, description: string):
           side,
           labelAt: side === "left" ? "right" : "left",
           kind: g.kind ?? "digital",
-          stub: STUB,
           mcu: isPort ? name : undefined,
           connector: pkg.name,
           connectorPin: nums[0],

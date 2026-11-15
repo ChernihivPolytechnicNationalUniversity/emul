@@ -1,0 +1,7 @@
+{
+  "source": "example discovery-audio",
+  "objects": [
+    "U1 (stm32f4-discovery)"
+  ],
+  "nets": []
+}

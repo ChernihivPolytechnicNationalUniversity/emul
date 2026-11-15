@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { catalogue } from "@/schematic/registry"
+import { catalogue, ensureDefs, getDef, getMeta, isOffered } from "@/schematic/registry"
 import { searchParts, similarParts } from "@/components/palette/search"
-import { hitEntries } from "@/components/palette/items"
+import { hitEntries, paletteGroups } from "@/components/palette/items"
+import { readIds } from "@/components/palette/recents"
 import type { KeyPress } from "@/lib/keys"
 import {
   opensQuickInsert,
@@ -245,5 +246,29 @@ describe("where the panel stands", () => {
     const at = panelPosition({ x: 180, y: 300 }, panel, narrow)
     expect(at.left).toBeGreaterThanOrEqual(PANEL_MARGIN)
     expect(at.left + panel.width).toBeLessThanOrEqual(narrow.right - PANEL_MARGIN)
+  })
+})
+
+describe("the junction part is retired (design.md §4.5: «removed from the palette; kept registered only so old documents load»; §3.2: a dot is three conductor ends at a point, never a part)", () => {
+  it("no palette group lists it", () => {
+    expect.soft(paletteGroups.flatMap((g) => g.items.map((m) => m.id)), "the palette's rows").not.toContain("junction")
+    expect.soft(catalogue.map((m) => m.id), "the catalogue the palette and the search read").not.toContain("junction")
+  })
+
+  it("no search finds it, by its name or its keywords", () => {
+    for (const query of ["junction", "Junction", "node", "dot", "connection"]) expect.soft(pickableRows(query, [], []).map((e) => e.def.id), `«${query}»`).not.toContain("junction")
+  })
+
+  it("a saved recent or favourite junction is dropped, from Quick Insert and from the palette's strips", () => {
+    expect.soft(readIds(JSON.stringify(["junction", "resistor"])), "storage read back").toEqual(["resistor"])
+    expect.soft(pickableRows("", ["junction", "resistor"], ["junction"]).map((e) => e.def.id), "a blank query's rows").toEqual(["resistor"])
+    expect.soft(isOffered("junction"), "offered").toBe(false)
+    expect.soft(isOffered("resistor"), "an ordinary part is offered").toBe(true)
+  })
+
+  it("an old document's junction still loads: its definition is known, so the upgrade can read its pin and remove it", async () => {
+    await ensureDefs(["junction"])
+    expect.soft(getDef("junction")?.pins.map((p) => p.id), "the junction's one pin").toEqual(["J"])
+    expect.soft(getMeta("junction")?.retired, "known as retired").toBe(true)
   })
 })

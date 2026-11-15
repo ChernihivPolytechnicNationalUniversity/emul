@@ -1,0 +1,88 @@
+{
+  "source": "tests/data/before-the-segments/multi-hc595-r0-mirrored.emul",
+  "objects": [
+    "R1 (resistor)",
+    "R2 (resistor)",
+    "R3 (resistor)",
+    "R4 (resistor)",
+    "R5 (resistor)",
+    "R6 (resistor)",
+    "R7 (resistor)",
+    "R8 (resistor)",
+    "R9 (resistor)",
+    "R10 (resistor)",
+    "R11 (resistor)",
+    "R12 (resistor)",
+    "R13 (resistor)",
+    "R14 (resistor)",
+    "R15 (resistor)",
+    "R16 (resistor)",
+    "U1 (hc595)"
+  ],
+  "nets": [
+    [
+      "R1.1",
+      "U1.SER"
+    ],
+    [
+      "R2.1",
+      "U1.SRCLK"
+    ],
+    [
+      "R3.1",
+      "U1.SRCLR"
+    ],
+    [
+      "R4.1",
+      "U1.RCLK"
+    ],
+    [
+      "R5.1",
+      "U1.OE"
+    ],
+    [
+      "R6.2",
+      "U1.QA"
+    ],
+    [
+      "R7.2",
+      "U1.QB"
+    ],
+    [
+      "R8.2",
+      "U1.QC"
+    ],
+    [
+      "R9.2",
+      "U1.QD"
+    ],
+    [
+      "R10.2",
+      "U1.QE"
+    ],
+    [
+      "R11.2",
+      "U1.QF"
+    ],
+    [
+      "R12.2",
+      "U1.QG"
+    ],
+    [
+      "R13.2",
+      "U1.QH"
+    ],
+    [
+      "R14.2",
+      "U1.QHS"
+    ],
+    [
+      "R15.2",
+      "U1.VCC"
+    ],
+    [
+      "R16.1",
+      "U1.GND"
+    ]
+  ]
+}

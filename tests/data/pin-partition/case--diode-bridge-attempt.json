@@ -1,0 +1,10 @@
+{
+  "source": "tests/lib/schematic-cases.ts diode-bridge-attempt",
+  "objects": [
+    "D1 (diode)",
+    "D2 (diode)",
+    "D3 (diode)",
+    "D4 (diode)"
+  ],
+  "nets": []
+}

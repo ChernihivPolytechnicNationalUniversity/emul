@@ -17,6 +17,8 @@ import { avrChipById } from "@/mcu/avr/chip"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import type { Keys } from "@/lib/keys"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -27,7 +29,7 @@ import { Slider } from "@/components/ui/slider"
 import { familyOf, swapsFor } from "@/schematic/families"
 import { getDef, hdlModule } from "@/schematic/registry"
 import { isHdlDef, isModified } from "@/schematic/hdl"
-import type { FlipAxis } from "@/schematic/geometry"
+import type { FlipAxis, Turn } from "@/schematic/geometry"
 import type { ComponentDef, Damage, PlacedObject, PropField } from "@/schematic/types"
 import type { ClockSource } from "@/mcu/periph/rcc"
 import type { SimReadout } from "@/sim/use-simulation"
@@ -71,7 +73,7 @@ type InspectorProps = Omit<React.ComponentProps<typeof Card>, "onChange"> & {
   /** Open the code panel on this board or chip. */
   onCode?: (id: string) => void
   onHdl?: (defId: string) => void
-  onRotate: (delta: 45 | -45) => void
+  onRotate: (turn: Turn) => void
   onFlip: (axis: FlipAxis) => void
   onDelete: () => void
 }
@@ -119,6 +121,21 @@ function useInspectorTab() {
   return React.useState<InspectorTab>("properties")
 }
 
+type SelectionActionProps = { name: string; keys: Keys; onClick: () => void; Icon: React.ComponentType; className?: string }
+
+function SelectionAction({ name, keys, onClick, Icon, className }: SelectionActionProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<Button variant="ghost" size="icon-sm" onClick={onClick} aria-label={name} aria-keyshortcuts={labelFor(keys)} data-action={name} className={className} />}>
+        <Icon />
+      </TooltipTrigger>
+      <TooltipContent>
+        {name} — {labelFor(keys)}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmware, onSerial, onCode, onHdl, onRotate, onFlip, onDelete, className, ...props }: InspectorProps) {
   const sections = useSectionsOpen()
   const [tab, setTab] = useInspectorTab()
@@ -148,21 +165,11 @@ export function Inspector({ selected, damage, sim, onChange, onVariant, onFirmwa
           </ButtonGroup>
         </CardAction>
         <ButtonGroup className="col-span-2 -ml-2">
-          <Button variant="ghost" size="icon-sm" onClick={() => onRotate(-45)} aria-label="Rotate 45° counter-clockwise" title="Rotate 45° counter-clockwise">
-            <RotateCcwIcon />
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => onRotate(45)} aria-label="Rotate 45° clockwise" title="Rotate 45° clockwise">
-            <RotateCwIcon />
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => onFlip("horizontal")} aria-label="Mirror horizontally" title="Mirror horizontally">
-            <FlipHorizontal2Icon />
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => onFlip("vertical")} aria-label="Mirror vertically" title="Mirror vertically">
-            <FlipVertical2Icon />
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={onDelete} aria-label="Delete" title="Delete" className="ml-auto text-destructive">
-            <Trash2Icon />
-          </Button>
+          <SelectionAction name="Rotate counter-clockwise" keys={KEYMAP.rotateBack} onClick={() => onRotate(-1)} Icon={RotateCcwIcon} />
+          <SelectionAction name="Rotate clockwise" keys={KEYMAP.rotate} onClick={() => onRotate(1)} Icon={RotateCwIcon} />
+          <SelectionAction name="Mirror horizontally" keys={KEYMAP.flipHorizontal} onClick={() => onFlip("horizontal")} Icon={FlipHorizontal2Icon} />
+          <SelectionAction name="Mirror vertically" keys={KEYMAP.flipVertical} onClick={() => onFlip("vertical")} Icon={FlipVertical2Icon} />
+          <SelectionAction name="Delete" keys={KEYMAP.remove} onClick={onDelete} Icon={Trash2Icon} className="ml-auto text-destructive" />
         </ButtonGroup>
       </CardHeader>
       {open && object && def && (

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { parseElf } from "@/mcu/elf"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
@@ -62,7 +62,7 @@ async function pinLab(target: string) {
   u.props = { ...u.props, firmware: "open746-pinlab.elf", firmwareData: PINLAB_ELF.toString("base64") }
   const lead = builder(GRID)
   lead.wire(u, stripPin(DAC_PIN), u, stripPin(target))
-  doc.wires.push(...lead.doc.wires)
+  connect(doc, ...connections(lead.doc))
   const loop = new SimLoop()
   loop.setDoc(doc)
   loop.setParts({ ...doc.parts, ...Object.fromEntries(Object.entries(AS_ON_THE_BENCH).map(([part, state]) => [partKey(u.id, part), state])) })

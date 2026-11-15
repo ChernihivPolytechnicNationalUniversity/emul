@@ -1,11 +1,13 @@
+import { drawsAsField, fieldTemplates, placedFields } from "@/schematic/fields"
 import { pinContacts } from "@/schematic/contacts"
-import { objectRect, objectSize, orientationOf, orientOffset, placedText, routeBox, type Rect, type RoutedWire } from "@/schematic/geometry"
+import { bodyCentre, objectRect, orientationOf, orientOffset, placedText, routeBox, type Rect, type RoutedWire } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
 import { cssColor, paintField } from "./field-paint"
+import type { WireMarks } from "./wire-marks"
 import { readFieldPalette } from "./field-palette"
-import { MAX_PIN_LABEL_CELLS, PIN_LABEL_CELLS } from "./pin-label"
+import { labelsOnTheirWires, MAX_PIN_LABEL_CELLS, PIN_LABEL_CELLS, wiresAtPins } from "./pin-label"
 import { monoAdvanceEm, namesUnderDocked } from "./printed-names"
 import { fixedText, type SymbolRaster, type TextRaster } from "./symbol-raster"
 
@@ -24,6 +26,7 @@ type ExportImage = {
   symbols: SymbolRaster
   texts: TextRaster
   textScale: number
+  marks?: WireMarks
 }
 
 const ALIGN = { start: "left", middle: "center", end: "right" } as const
@@ -42,11 +45,21 @@ function paintLabels(context: CanvasRenderingContext2D, host: Element, objects: 
     const props: Record<string, string> = { ...def.defaults, ...object.props }
     if (def.derive) Object.assign(props, def.derive(props))
     const orientation = orientationOf(object)
-    const box = objectSize(def, orientation.rotation)
-    const cx = object.x + (box.w * grid) / 2
-    const cy = object.y + (box.h * grid) / 2
+    const centre = bodyCentre(def, orientation)
+    const cx = object.x + centre.x * grid
+    const cy = object.y + centre.y * grid
+    for (const field of placedFields(object, grid, def)) {
+      const template = fieldTemplates(def).find((t) => t.key === field.key)!
+      context.save()
+      context.translate((field.at.x - view.x) * pixels, (field.at.y - view.y) * pixels)
+      context.font = `${template.size * textScale * grid * pixels}px ${family}`
+      context.textAlign = ALIGN[field.anchor]
+      context.fillStyle = template.muted ? colors.muted : colors.foreground
+      context.fillText(field.text, 0, 0)
+      context.restore()
+    }
     for (const shape of def.body) {
-      if (shape.type !== "text" || fixedText(shape.text)) continue
+      if (shape.type !== "text" || fixedText(shape.text) || drawsAsField(shape)) continue
       const text = shape.text.replace(/\{(\w+)\}/g, (_, k: string) => props[k] ?? "")
       if (!text) continue
       const placed = placedText(shape.anchor ?? "middle", shape.rotate ?? 0, orientation)
@@ -73,7 +86,7 @@ function bounds(objects: readonly PlacedObject[], routes: readonly RoutedWire[],
   return { x, y, w, h }
 }
 
-export async function exportPng({ host, theme, objects, routes, grid, colorOf, symbols, texts, textScale }: ExportImage): Promise<Blob | null> {
+export async function exportPng({ host, theme, objects, routes, grid, colorOf, symbols, texts, textScale, marks }: ExportImage): Promise<Blob | null> {
   const view = bounds(objects, routes, grid)
   if (!view) return null
   await document.fonts?.ready
@@ -87,14 +100,15 @@ export async function exportPng({ host, theme, objects, routes, grid, colorOf, s
 
   context.fillStyle = cssColor(host, "var(--background)")
   context.fillRect(0, 0, canvas.width, canvas.height)
-  paintField(context, host, { objects, routes, view, grid, pixels, device: pixels, theme, colorOf, raster: symbols })
+  paintField(context, host, { objects, routes, view, grid, pixels, device: pixels, theme, colorOf, raster: symbols, marks })
 
   texts.setPalette(readFieldPalette(host, theme))
   const sheetText = { boost: textScale, pinSize: Math.min(MAX_PIN_LABEL_CELLS, PIN_LABEL_CELLS * textScale) }
   const underDocked = namesUnderDocked(objects, pinContacts(objects, grid).groups, { grid, boost: textScale, advanceEm: monoAdvanceEm() })
+  const wiresAt = wiresAtPins(routes)
   for (const object of objects) {
     const def = getDef(object.def)
-    const sheet = def && texts.get(def, orientationOf(object), grid, pixels, sheetText, underDocked(object))
+    const sheet = def && texts.get(def, orientationOf(object), grid, pixels, sheetText, underDocked(object), labelsOnTheirWires(object, sheetText.pinSize, monoAdvanceEm(), grid, wiresAt))
     if (!sheet) continue
     const stretch = pixels / sheet.scale
     const rect = objectRect(object, grid)

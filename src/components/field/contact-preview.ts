@@ -1,13 +1,12 @@
 import type { ContactChange } from "@/schematic/contacts"
 import { getDef } from "@/schematic/registry"
-import { pinKey, type Wire } from "@/schematic/types"
 import { pinMarker } from "./pin-marker"
 
 type Restore = () => void
 
 export type ContactLook = {
   grid: number
-  wires: readonly Wire[]
+  wired: (pinKey: string) => boolean
   netColor: (pinKey: string) => string | undefined
 }
 
@@ -32,7 +31,6 @@ function setOrRemove(element: Element, name: string, value: string | number | un
 export class ContactPreview {
   private readonly pinsOf = new Map<string, { group: Element; byPin: Map<string, SVGGElement> }>()
   private readonly shown = new Map<string, { group: SVGGElement; restore: Restore }>()
-  private wired: ReadonlySet<string> | null = null
   private readonly root: ParentNode
   private readonly changesAt: (dx: number, dy: number) => ReadonlyMap<string, ContactChange>
   private readonly look: ContactLook
@@ -58,8 +56,7 @@ export class ContactPreview {
   }
 
   private isWired(key: string) {
-    this.wired ??= new Set(this.look.wires.flatMap((w) => [pinKey(w.from.object, w.from.pin), pinKey(w.to.object, w.to.pin)]))
-    return this.wired.has(key)
+    return this.look.wired(key)
   }
 
   private pinElement(object: string, pin: string): SVGGElement | undefined {

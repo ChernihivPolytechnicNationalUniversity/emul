@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest"
 import { STM32F407VG } from "@/mcu/chip"
 import { stm32f4Discovery } from "@/schematic/components/stm32f4-discovery"
-import { builder } from "@/schematic/builder"
+import { builder, disconnect } from "@/schematic/builder"
 import { GRID } from "@/schematic/geometry"
 import { partKey, pinKey, type PlacedObject, type Schematic } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
@@ -76,7 +76,7 @@ function drive(pin: string, on: boolean) {
   doc.parts[partKey(ls.id, "S")] = { on }
   return () => {
     doc.objects.splice(doc.objects.indexOf(ls), 1)
-    doc.wires.splice(doc.wires.indexOf(w), 1)
+    disconnect(doc, w)
   }
 }
 

@@ -1,5 +1,6 @@
 import { getDef, setLibrary } from "@/schematic/registry"
 import { partKey, pinKey, type ComponentDef, type Damage, type PartState, type Schematic } from "@/schematic/types"
+import { circuitIn, type Circuit, type FlowGraph } from "@/schematic/circuit"
 import { parsePad, type PadRef } from "@/mcu/stm32f429"
 import { rcFrequency } from "@/mcu/pic/chip"
 import type { ClockSource } from "@/mcu/periph/rcc"
@@ -425,7 +426,7 @@ export type Snapshot = {
  * No DOM and no React: this is what the worker runs, and what tests drive directly.
  */
 export class SimLoop {
-  private doc: Schematic = { objects: [], wires: [], parts: {} }
+  private doc: Circuit = { objects: [], nets: [], wired: [], flow: { runs: [], pins: {} } }
   private engine: Engine | null = null
   private damage: Record<string, Damage> = {}
   private parts: Record<string, PartState> = {}
@@ -522,8 +523,9 @@ export class SimLoop {
   /** Debug settings by board, for boards whose core does not exist yet (the document has not arrived). */
   private debugConfig = new Map<string, { breakpoints: BreakpointSpec[]; faults: boolean }>()
 
-  setDoc(doc: Schematic) {
-    setLibrary(doc.library)
+  setDoc(input: Schematic | Circuit) {
+    setLibrary(input.library)
+    const doc = circuitIn(input)
     this.doc = doc
     this.stale = true
     this.partDefaults = {}
@@ -538,6 +540,11 @@ export class SimLoop {
     this.syncTerminals()
     this.syncDigitalParts()
     this.syncPanels()
+  }
+
+  setFlow(flow: FlowGraph) {
+    this.doc = { ...this.doc, flow }
+    if (this.engine && !this.stale) this.buildFlow(this.engine)
   }
 
   /** Whether a panel's logic supply pin is up, as the last solve left it. */
@@ -1943,7 +1950,7 @@ export class SimLoop {
     this.pendingEdges.length = 0
     this.pinReaders = []
     const prev = this.engine
-    const next = new Engine(buildNetlist({ ...this.doc, parts: {} }, this.damage, undefined, this.probeKeys()))
+    const next = new Engine(buildNetlist(this.doc, this.damage, this.probeKeys()))
     if (adopt && prev) next.adopt(prev)
     this.engine = next
     this.stale = false
@@ -1958,7 +1965,7 @@ export class SimLoop {
   private buildFlow(engine: Engine) {
     const { net } = engine
     const { index, keys } = engine.terminalSlots
-    const solver = new FlowSolver(this.doc.wires, net)
+    const solver = new FlowSolver(this.doc.flow, net)
     this.flowSolver = solver
     const perWire = new Map<string, { slots: number[]; coefs: number[] }>()
     const perLead = new Map<string, { slots: number[]; coefs: number[] }>()
@@ -1978,9 +1985,9 @@ export class SimLoop {
       for (const [id, amps] of unit.wires) add(perWire, id, slot, amps)
       for (const [pin, amps] of unit.leads) add(perLead, pin, slot, amps)
     }
-    this.flow = this.doc.wires.map((w) => {
-      const f = perWire.get(w.id)
-      return { id: w.id, slots: Int32Array.from(f?.slots ?? []), coefs: Float64Array.from(f?.coefs ?? []) }
+    this.flow = this.doc.flow.runs.map((r) => {
+      const f = perWire.get(r.id)
+      return { id: r.id, slots: Int32Array.from(f?.slots ?? []), coefs: Float64Array.from(f?.coefs ?? []) }
     })
     this.leads = solver.leadPins.map((key) => {
       const f = perLead.get(key)
@@ -2359,7 +2366,7 @@ export class SimLoop {
     } else {
       // No steps since the last snapshot (paused): report the instantaneous distribution.
       for (const f of this.flow) wireCurrent[f.id] = wireCurrentAbs[f.id] = 0
-      for (const [id, amps] of (this.flowSolver ?? new FlowSolver(this.doc.wires, net)).currents((k) => terminals.get(k) ?? 0).wires) {
+      for (const [id, amps] of (this.flowSolver ?? new FlowSolver(this.doc.flow, net)).currents((k) => terminals.get(k) ?? 0).wires) {
         wireCurrent[id] = amps
         wireCurrentAbs[id] = Math.abs(amps)
       }

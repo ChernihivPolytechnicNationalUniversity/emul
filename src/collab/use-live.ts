@@ -1,10 +1,14 @@
 import * as React from "react"
 import { HocuspocusProvider } from "@hocuspocus/provider"
 import * as Y from "yjs"
-import { COLLAB_PATH, ROOM_ELEMENTS, ROOM_META } from "emul-shared/room"
+import { toast } from "sonner"
+import { COLLAB_PATH, ROOM_META } from "emul-shared/room"
 import { useEvent } from "@/hooks/use-event"
+import { announceUpgrade } from "@/hooks/use-projects"
 import type { Point, Schematic } from "@/schematic/types"
-import { join, split } from "./elements"
+import { SCHEMATIC_VERSION } from "@/schematic/migrate"
+import { ensureDefs } from "@/schematic/registry"
+import { formatOf, guestRoom, hostRoom, join, roomDefIds, newerPeers, newerThanThis, olderPeers, onNewerFormat, pushTo, roomOf, type NewerSeen } from "./elements"
 import { anonymousIdentity, withAnimal, type Identity } from "./identity"
 
 export type Move = { ids: string[]; dx: number; dy: number }
@@ -44,6 +48,14 @@ function newRoomId() {
   return Array.from(crypto.getRandomValues(new Uint8Array(10)), (b) => ALPHABET[b % ALPHABET.length]).join("")
 }
 
+function sessionStorageOrNull(): Storage | null {
+  try {
+    return sessionStorage
+  } catch {
+    return null
+  }
+}
+
 export function hostedRoom(): string | null {
   try {
     return sessionStorage.getItem(HOST_KEY)
@@ -80,14 +92,6 @@ export function useLive(merge: (doc: Schematic) => void): Live {
     return s ? join(new Map(s.elements.entries())) : null
   }
 
-  const push = (s: Session, doc: Schematic) => {
-    const next = split(doc)
-    s.ydoc.transact(() => {
-      for (const [k, v] of next) if (s.elements.get(k) !== v) s.elements.set(k, v)
-      for (const k of [...s.elements.keys()]) if (!next.has(k)) s.elements.delete(k)
-    })
-  }
-
   const teardown = useEvent(() => {
     const s = session.current
     session.current = null
@@ -111,9 +115,16 @@ export function useLive(merge: (doc: Schematic) => void): Live {
     new Promise<Session>((resolve, reject) => {
       teardown()
       const ydoc = new Y.Doc()
-      const elements = ydoc.getMap<string>(ROOM_ELEMENTS)
       const meta = ydoc.getMap<string>(ROOM_META)
+      const { elements } = roomOf(ydoc, meta)
       let first = true
+      const warned = new Set<number>()
+      const newerSeen: NewerSeen = { format: SCHEMATIC_VERSION }
+      const newer = (format: number) => {
+        const action = onNewerFormat(sessionStorageOrNull(), id, format, newerSeen)
+        if (action === "reload") location.reload()
+        else if (action === "warn") toast("A newer εmul is in this room", { description: "Reload the page to keep working together: this version cannot read what the newer one writes.", duration: 15000 })
+      }
       const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${COLLAB_PATH}`
       const provider = new HocuspocusProvider({
         url,
@@ -140,9 +151,17 @@ export function useLive(merge: (doc: Schematic) => void): Live {
               cursor: (st.cursor as Point | null) ?? null,
               moving: (st.moving as Move | null) ?? null,
               wire: (st.wire as Point[] | null) ?? null,
+              format: st.format,
               selected: Array.isArray(st.selected) ? (st.selected as string[]) : [],
             }))
           setPeers(others)
+          for (const peer of olderPeers(others)) {
+            if (warned.has(peer.clientId)) continue
+            warned.add(peer.clientId)
+            toast("A tab on an older εmul is in this room", { description: "Its edits don't reach this version, and it doesn't see yours. Ask whoever has it open to reload the page.", duration: 15000 })
+          }
+          const newest = Math.max(0, ...newerPeers(others).map((p) => Number(p.format)))
+          if (newest > SCHEMATIC_VERSION) newer(newest)
           if (others.some((p) => p.animal === meRef.current.animal && p.clientId < own)) {
             const next = withAnimal(meRef.current, new Set(others.map((p) => p.animal)))
             meRef.current = next
@@ -156,6 +175,10 @@ export function useLive(merge: (doc: Schematic) => void): Live {
       setRoom(id)
       setStatus("connecting")
       provider.awareness?.setLocalStateField("user", meRef.current)
+      provider.awareness?.setLocalStateField("format", SCHEMATIC_VERSION)
+      meta.observe(() => {
+        if (session.current === s && newerThanThis({ ydoc, elements, meta })) newer(formatOf({ ydoc, elements, meta }))
+      })
       elements.observe((_e, tx) => {
         if (tx.local) return
         clearTimeout(frame.current)
@@ -175,24 +198,33 @@ export function useLive(merge: (doc: Schematic) => void): Live {
     setHost(true)
     setHostedRoom(id)
     s.meta.set("name", name)
-    if (s.elements.size === 0) push(s, doc)
-    else merge(current()!)
+    await ensureDefs(roomDefIds(s))
+    if (session.current !== s) return
+    const entered = hostRoom(s, doc)
+    if (entered) {
+      merge(entered.doc)
+      announceUpgrade(entered.notes)
+    }
     s.ready = true
   })
 
   const joinRoom = useEvent(async (id: string) => {
     const s = await connect(id)
-    if (s.elements.size === 0) {
+    await ensureDefs(roomDefIds(s))
+    if (session.current !== s) return null
+    const entered = guestRoom(s)
+    if (!entered) {
       leave()
       return null
     }
     s.ready = true
-    return { name: s.meta.get("name") ?? "Live bench", doc: current()! }
+    announceUpgrade(entered.notes)
+    return { name: s.meta.get("name") ?? "Live bench", doc: entered.doc }
   })
 
   const onChange = React.useCallback((doc: Schematic) => {
     const s = session.current
-    if (s?.ready) push(s, doc)
+    if (s?.ready) pushTo(s, doc)
   }, [])
 
   const pending = React.useRef<Record<string, unknown>>({})

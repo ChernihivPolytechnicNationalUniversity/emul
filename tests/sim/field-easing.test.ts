@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { dotGridStyle } from "@/components/field/dot-grid"
+import { dotGridPosition, dotGridStyle } from "@/components/field/dot-grid"
 import { easeFactor, progress } from "@/components/field/easing"
 import { followTarget, type Viewport } from "@/components/field/use-viewport"
 import { WireFlow } from "@/components/field/wire-flow"
@@ -156,6 +156,23 @@ describe("the wire flow slides to every phase the solver sends, whatever the fir
   })
 })
 
+describe("the wire flow runs at one speed on screen whatever the zoom (the user, 2026-11-14: «при увеличении масштаба электрика сверх сильно ускоряется»)", () => {
+  it("a phase the solver sends moves the dash by that many screen pixels, and the flow takes no zoom to scale it by", () => {
+    expect.soft(Object.getOwnPropertyNames(WireFlow.prototype), "nothing for the field to pass its zoom to").not.toContain("setScale")
+    {
+      const frames = fakeFrames()
+      const { flow, dash, currents } = flowingWire()
+      flow.push(currents, new Map([["w", 0]]), true, false)
+      frames.run((f) => frames.now + f * FRAME_MS)
+      frames.advance(PUSH_EVERY_MS)
+      flow.push(currents, new Map([["w", PHASE_STEP]]), true, false)
+      const pushedAt = frames.now
+      frames.run((f) => pushedAt + f * FRAME_MS)
+      expect.soft(Number(dash.style.strokeDashoffset), "the dash's offset in screen pixels").toBe(-PHASE_STEP)
+    }
+  })
+})
+
 describe("a wheel zoom moves from its first frame, however far behind the clock the frame stamps run (BUGS.md, 312 ms)", () => {
   const zoom = (lagMs: number) => {
     fakeFrames()
@@ -193,5 +210,11 @@ describe("the dot grid gives up on a scale it cannot draw instead of looping for
     const style = dotGridStyle(GRID, 1)
     expect(style.backgroundImage).toContain("radial-gradient")
     expect(style.backgroundSize).toBe("20px 20px")
+  })
+  it("puts every dot on a lattice point, where pins and wire ends land, not in the middle of a cell (the user, 2026-11-11: «по каким-то не видимым клеткам»)", () => {
+    expect.soft(dotGridPosition(dotGridStyle(GRID, 1), 7, 3), "a tile's dot is at its centre, so the tile starts half a cell back").toBe("-3px -7px")
+    const coarse = dotGridStyle(GRID, 0.3)
+    expect.soft(coarse.backgroundSize, "set up: two layers, 24 and 12 px").toBe("24px 24px, 12px 12px")
+    expect.soft(dotGridPosition(coarse, 100, 50), "each layer half its own step back").toBe("88px 38px, 94px 44px")
   })
 })

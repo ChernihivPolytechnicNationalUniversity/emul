@@ -1,0 +1,11 @@
+{
+  "source": "example nucleo-serial",
+  "objects": [
+    "TERM1 (serial-terminal)",
+    "U1 (nucleo-f429zi)"
+  ],
+  "nets": [
+    ["TERM1.RX","U1.VCP-TX"],
+    ["TERM1.TX","U1.VCP-RX"]
+  ]
+}

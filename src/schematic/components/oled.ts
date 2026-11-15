@@ -39,7 +39,7 @@ const body = (w: number, h: number, glassH: number) => [
 function i2cModule(id: string, name: string, rows: 64 | 32): ComponentDef {
   const w = 12
   const glassH = rows === 64 ? 4.8 : 2.4
-  const h = glassH + 3.2
+  const h = rows === 64 ? glassH + 3.2 : 6
   const pins: PinDef[] = [
     { id: "GND", label: "GND", x: 3, y: 0, side: "top", labelAt: "bottom", kind: "gnd" },
     { id: "VCC", label: "VCC", x: 5, y: 0, side: "top", labelAt: "bottom", kind: "power", note: "3.3–5 V into the board's 3.3 V regulator" },

@@ -54,7 +54,7 @@ function header(rows: Row[], top: boolean): PinDef[] {
   return rows.map(([id, label, mcu, xMm, note]) => {
     const p = cell({ x: xMm, y: top ? HEADER.top : HEADER.bottom })
     const y = Math.round(p.y)
-    return { id, label, x: Math.round(p.x), y, side: top ? "top" : "bottom", labelAt: top ? "bottom" : "top", kind: kindOf(id, mcu), stub: top ? y : HEIGHT - y, mcu, note, printed: true } satisfies PinDef
+    return { id, label, x: Math.round(p.x), y, side: top ? "top" : "bottom", labelAt: top ? "bottom" : "top", kind: kindOf(id, mcu), mcu, note, printed: true } satisfies PinDef
   })
 }
 

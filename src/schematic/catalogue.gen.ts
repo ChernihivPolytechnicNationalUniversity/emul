@@ -118,7 +118,7 @@ export const CATALOGUE: CatalogueEntry[] = [
   {"id":"pulse-source","name":"Pulse source","description":"Square-wave pulse source","category":"power","keywords":["square wave","PWM","function generator","signal generator","clock"],"icon":"PulseSourceIcon","width":2,"height":4,"prefix":"G","file":"basic"},
   {"id":"transformer","name":"Transformer","description":"Single-phase power transformer","category":"power","keywords":["mains transformer","step-down","coil"],"icon":"TransformerIcon","width":4,"height":4,"prefix":"T","file":"basic"},
   {"id":"ground","name":"Ground","category":"basics","keywords":["GND","0V","earth"],"icon":"GroundIcon","width":2,"height":2,"file":"basic"},
-  {"id":"junction","name":"Junction","description":"Wire junction dot","category":"basics","keywords":["node","dot","connection"],"icon":"JunctionIcon","width":2,"height":2,"file":"basic"},
+  {"id":"junction","name":"Junction","description":"Wire junction dot","category":"basics","keywords":["node","dot","connection"],"icon":"JunctionIcon","width":2,"height":2,"retired":true,"file":"basic"},
   {"id":"supply","name":"Power rail","category":"basics","keywords":["VCC","VDD","5V","3.3V","+5V","power","rail","supply"],"icon":"SupplyIcon","width":2,"height":2,"file":"basic"},
   {"id":"logic-state","name":"Logic state","description":"Toggle 0/1 level source","category":"instruments","keywords":["logic level","toggle","high","low","digital input"],"icon":"LogicStateIcon","width":3,"height":2,"prefix":"LS","file":"basic"},
   {"id":"serial-terminal","name":"Serial terminal","description":"UART console, 8N1","category":"instruments","keywords":["UART","USART","console","serial monitor","terminal","COM port"],"icon":"TerminalIcon","width":5,"height":4,"prefix":"TERM","file":"basic"},
@@ -135,7 +135,7 @@ export const CATALOGUE: CatalogueEntry[] = [
   {"id":"lcd-1602","name":"LCD 1602 (HD44780)","description":"16×2 parallel character LCD","category":"displays","keywords":["LCD","1602","16x2","HD44780","character","KS0066","ST7066","LCD1602","parallel","4-bit","8-bit"],"icon":"CharacterLcdIcon","width":20,"height":9,"prefix":"DS","file":"lcd1602"},
   {"id":"lcd-1602-i2c","name":"LCD 1602 with I²C backpack","description":"16×2 character LCD, I²C","category":"displays","keywords":["LCD","1602","16x2","I2C","IIC","PCF8574","PCF8574AT","backpack","HD44780","LCD1602","0x27","0x3F","character"],"icon":"CharacterLcdIcon","width":20,"height":9,"prefix":"DS","file":"lcd1602"},
   {"id":"oled-ssd1306-i2c","name":"OLED 0.96\" I²C (SSD1306)","description":"128×64 I²C OLED display","category":"displays","keywords":["OLED","SSD1306","I2C","IIC","0x3C","128x64","0.96","display"],"icon":"OledIcon","width":12,"height":8,"prefix":"DS","file":"oled"},
-  {"id":"oled-ssd1306-i2c-32","name":"OLED 0.91\" I²C (SSD1306)","description":"128×32 I²C OLED display","category":"displays","keywords":["OLED","SSD1306","I2C","IIC","0x3C","128x32","0.91","display"],"icon":"OledIcon","width":12,"height":5.6,"prefix":"DS","file":"oled"},
+  {"id":"oled-ssd1306-i2c-32","name":"OLED 0.91\" I²C (SSD1306)","description":"128×32 I²C OLED display","category":"displays","keywords":["OLED","SSD1306","I2C","IIC","0x3C","128x32","0.91","display"],"icon":"OledIcon","width":12,"height":6,"prefix":"DS","file":"oled"},
   {"id":"oled-ssd1306-spi","name":"OLED 0.96\" SPI (SSD1306)","description":"128×64 SPI OLED display","category":"displays","keywords":["OLED","SSD1306","SPI","128x64","0.96","display","7-pin"],"icon":"OledIcon","width":14,"height":8,"prefix":"DS","file":"oled"},
 ]
 

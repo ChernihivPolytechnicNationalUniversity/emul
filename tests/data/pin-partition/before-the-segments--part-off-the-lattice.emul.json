@@ -1,0 +1,10 @@
+{
+  "source": "tests/data/before-the-segments/part-off-the-lattice.emul",
+  "objects": [
+    "R1 (resistor)",
+    "R2 (resistor)"
+  ],
+  "nets": [
+    ["R1.2","R2.1"]
+  ]
+}

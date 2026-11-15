@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { LogicStore } from "@/components/logic/logic-store"
 import { STM32F746IG } from "@/mcu/chip"
 import { parseElf } from "@/mcu/elf"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
@@ -66,7 +66,7 @@ async function capture(props: Record<string, string>, seconds: number, capacitor
     added.wire(c, "2", u, STRIP_GND)
   }
   doc.objects.push(...added.doc.objects)
-  doc.wires.push(...added.doc.wires)
+  connect(doc, ...connections(added.doc))
   const loop = new SimLoop()
   loop.setDoc(doc)
   loop.setParts(doc.parts)

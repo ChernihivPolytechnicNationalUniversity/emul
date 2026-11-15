@@ -4,9 +4,11 @@ import { existsSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { chromium, type Page } from "playwright-core"
-import { examples } from "@/schematic/examples"
-import { GRID, objectPins, objectRect, type Point } from "@/schematic/geometry"
-import { bodyBounds, contourOf } from "@/schematic/placement"
+import { examples, lab1Stand } from "@/schematic/examples"
+import { bodyCentre, GRID, objectPins, objectRect, orientationOf, type Point, type Turn } from "@/schematic/geometry"
+import { SCHEMATIC_VERSION, stamped } from "@/schematic/migrate"
+import { rotateSelection } from "@/schematic/orient"
+import { bodyBounds, contourOf, placementCheck, wireCheck } from "@/schematic/placement"
 import { getDef } from "@/schematic/registry"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 
@@ -38,10 +40,30 @@ function chromiumExecutable() {
 
 const shoot = (page: Page, name: string) => (SHOTS ? page.screenshot({ path: join(SHOTS, `${name}.png`) }) : Promise.resolve())
 
+const LANDING_TIMEOUT_MS = 15_000
+const pageTitle = (page: Page) => page.evaluate(() => document.title)
+
+async function loadApp(page: Page) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.goto(DEV_SERVER, { waitUntil: "domcontentloaded" })
+      await page.waitForSelector("[data-slot=dot-field-viewport]", { timeout: 20_000 })
+      return
+    } catch (e) {
+      if (attempt === 3) throw e
+      console.log(`  (the page did not load, attempt ${attempt}: ${(e as Error).message.split("\n")[0]})`)
+    }
+  }
+}
+
 async function openDoc(page: Page, name: string, doc: Schematic) {
-  await page.goto(DEV_SERVER, { waitUntil: "domcontentloaded" })
-  await page.waitForSelector("[data-slot=dot-field-viewport]")
-  await page.setInputFiles("input[type=file]", { name: `${name}.emul`, mimeType: "application/octet-stream", buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name, schematic: doc })) })
+  await loadApp(page)
+  const landing = Date.now() + LANDING_TIMEOUT_MS
+  while ((await pageTitle(page)).startsWith("εmul") && Date.now() < landing) await page.waitForTimeout(100)
+  await page.setInputFiles("input[type=file]", { name: `${name}.emul`, mimeType: "application/octet-stream", buffer: Buffer.from(JSON.stringify({ format: "emul-project", version: 1, name, schematic: stamped(doc) })) })
+  const opened = Date.now() + LANDING_TIMEOUT_MS
+  while (!(await pageTitle(page)).startsWith(`${name} `) && Date.now() < opened) await page.waitForTimeout(100)
+  if (!(await pageTitle(page)).startsWith(`${name} `)) throw new Error(`the field never showed ${name}: it shows “${await pageTitle(page)}”`)
   await page.waitForSelector("[data-slot=component]")
   await page.waitForTimeout(2000)
   return doc
@@ -93,10 +115,793 @@ const dots = (page: Page, id: string) =>
     const group = document.querySelector(`[data-pins="${CSS.escape(objectId)}"]`)
     const markers = [...(group?.querySelectorAll(":scope > [data-pin] > [data-marker]") ?? [])].filter((m) => m.getAttribute("display") !== "none")
     const contact = markers.filter((m) => Number(m.getAttribute("r")) > 6)
-    return { contact: contact.length, black: contact.filter((m) => m.getAttribute("class")?.includes("fill-foreground")).length }
+    return { contact: contact.length, black: contact.filter((m) => m.getAttribute("class")?.includes("fill-foreground")).length, open: markers.length }
   }, id)
 
 const blockedNow = (page: Page, id: string) => page.evaluate((objectId) => document.querySelector(`[data-body="${CSS.escape(objectId)}"]`)?.hasAttribute("data-blocked") ?? false, id)
+const glowsNow = (page: Page, id: string) => page.evaluate((objectId) => document.querySelector(`[data-body="${CSS.escape(objectId)}"]`)?.hasAttribute("data-conflict") ?? false, id)
+
+const cellPoint = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
+const resistorAt = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "resistor", x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
+const wiredPair = (): Schematic => ({
+  objects: [resistorAt("R1", 10, 10), resistorAt("R2", 20, 10), resistorAt("R3", 14, 16, 90)],
+  wires: [{ id: "w1", a: cellPoint(14, 11), b: cellPoint(20, 11) }],
+  parts: {},
+})
+const countOf = (page: Page, selector: string) => page.evaluate((s) => document.querySelectorAll(s).length, selector)
+const pieces = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll("[data-slot=rubber-band] [data-points]")].flatMap((e) => {
+      const pts = e.getAttribute("data-points")!.split(" ").map((p) => p.split(",").map(Number))
+      return pts.slice(1).map((p, i) => [...pts[i], ...p])
+    }),
+  )
+const orthogonal = (piece: number[]) => piece[0] === piece[2] || piece[1] === piece[3]
+
+async function wiresFollowTheDrag(page: Page) {
+  console.log("\nwires follow a dragged part, and Alt leaves them behind (design.md §6.3)")
+  await openDoc(page, "drag-with-wires", wiredPair())
+  const frame = await fieldFrame(page)
+  await dragBy(page, frame.toScreen(cellPoint(22, 11)), frame.toScreen(cellPoint(22, 14)), false)
+  const drawn = await pieces(page)
+  expect("mid-drag the rubber band draws the wire, every piece horizontal or vertical", drawn.length > 0 && drawn.every(orthogonal), true)
+  const bandPaths = await page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-points]")].map((e) => e.getAttribute("d")!))
+  await shoot(page, "drag-with-wires-mid")
+  expect("mid-drag the Z is one path with both bends rounded, not pieces with square corners (the user, 2026-11-12)", bandPaths.map((d) => (d.match(/Q/g) ?? []).length), [2])
+  await page.mouse.up()
+  await page.waitForTimeout(800)
+  const fieldPaths = await page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire] path[data-base]")].map((e) => e.getAttribute("d")!))
+  expect("the band drew exactly the path the field draws after the drop", bandPaths.every((d) => fieldPaths.includes(d)), true)
+  expect("dropped: R2 three cells lower", (await frame.worldOf("R2")).y, 13 * GRID)
+  expect("dropped: the wire still reaches R2, no open end", await countOf(page, "[data-dangling]"), 0)
+  await shoot(page, "drag-with-wires")
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(300)
+  await page.keyboard.down("Alt")
+  await dragBy(page, frame.toScreen(cellPoint(22, 14)), frame.toScreen(cellPoint(26, 14)))
+  await page.keyboard.up("Alt")
+  expect("Alt-dragged: R2 moved alone, the wire's end hangs where its pin was", await countOf(page, "[data-dangling]"), 1)
+}
+
+async function plateAfterDragBackAndForth(page: Page) {
+  console.log("\na selected wire dragged back and forth keeps one plate along its drawn path, pin to pin (the user, 2026-11-12: «туда-сюда подёргали провод»)")
+  const R1 = cellPoint(8, 7)
+  const C1 = cellPoint(14, 10)
+  await openDoc(page, "plate-after-drag", {
+    objects: [resistorAt("R1", 4, 6), { id: "C1", def: "capacitor-polarized", x: 14 * GRID, y: 9 * GRID, props: { ref: "C1" } }],
+    wires: [
+      { id: "a", a: R1, b: cellPoint(12, 7) },
+      { id: "b", a: cellPoint(12, 7), b: cellPoint(12, 10) },
+      { id: "c", a: cellPoint(12, 10), b: C1 },
+    ],
+    parts: {},
+  })
+  const frame = await fieldFrame(page)
+  const look = () =>
+    page.evaluate(() => {
+      const wire = document.querySelector("[data-slot=wires] g[data-wire][data-points]")
+      return {
+        runs: document.querySelectorAll("[data-slot=wires] g[data-wire][data-points]").length,
+        points: (wire?.getAttribute("data-points") ?? "").split(" ").map((p) => p.split(",").map(Number)),
+        d: wire?.querySelector("path[data-base]")?.getAttribute("d") ?? null,
+        plates: [...document.querySelectorAll("[data-slot=selection] path[data-wire]")].filter((e) => getComputedStyle(e).display !== "none").map((p) => ({ whole: p.hasAttribute("data-whole"), d: p.getAttribute("d") })),
+        casings: [...document.querySelectorAll("[data-slot=wires] path[data-casing]")].filter((e) => getComputedStyle(e).display !== "none").map((p) => p.getAttribute("stroke")),
+        patches: [...document.querySelectorAll("[data-slot=pin-turns] > path:not([data-corner])")].map((p) => p.getAttribute("stroke")),
+        pieces: document.querySelectorAll("[data-slot=rubber-band] [data-points]").length,
+      }
+    })
+  type Pick = (points: number[][]) => number
+  const segmentMiddle = async (pick: Pick) => {
+    const { points } = await look()
+    const k = pick(points)
+    return frame.toScreen({ x: (points[k][0] + points[k + 1][0]) / 2, y: (points[k][1] + points[k + 1][1]) / 2 })
+  }
+  const segments = (points: number[][]) => points.slice(1).map((b, k) => ({ k, a: points[k], b }))
+  const upright: Pick = (points) => segments(points).filter(({ a, b }) => a[0] === b[0]).sort((p, q) => Math.abs(q.b[1] - q.a[1]) - Math.abs(p.b[1] - p.a[1]))[0].k
+  const level = (by: (y: number) => number): Pick => (points) => segments(points).filter(({ a, b }) => a[1] === b[1]).sort((p, q) => by(p.a[1]) - by(q.a[1]))[0].k
+  const top = level((y) => y)
+  const bottom = level((y) => -y)
+  const drags: [string, Pick, number, number, string?][] = [
+    ["the upright left two cells", upright, -2, 0],
+    ["and back", upright, 2, 0],
+    ["the top run up two cells, so the wire turns up right at R1's pin", top, 0, -2, "plate-after-drag-at-r1"],
+    ["the top run down again", top, 0, 2],
+    ["the run into C1 down a cell", bottom, 0, 1, "plate-after-drag-at-c1"],
+    ["and up again", bottom, 0, -1],
+    ["the upright right a cell", upright, 1, 0],
+    ["the top run up a cell", top, 0, -1],
+    ["the upright left two cells", upright, -2, 0],
+    ["the top run back down", top, 0, 1],
+  ]
+  const pastDoubleClick = () => page.waitForTimeout(600)
+  const onUpright = await segmentMiddle(upright)
+  await page.mouse.click(onUpright.x, onUpright.y)
+  await pastDoubleClick()
+  const selected = await look()
+  expect("clicked, the wire's plate is its drawn path, one band per pass", selected.plates.map((p) => p.whole && p.d === selected.d), [true, true])
+  let turned = false
+  for (const [what, pick, dx, dy, shot] of drags) {
+    const from = await segmentMiddle(pick)
+    const cell = frame.toScreen(cellPoint(1, 1)).x - frame.toScreen(cellPoint(0, 0)).x
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(from.x + dx * cell, from.y + dy * cell, { steps: 12 })
+    await page.waitForTimeout(150)
+    const held = await look()
+    expect(`${what}, held: no plate left at the wire's old place, the rubber band draws it`, [held.plates.length, held.pieces > 0], [0, true])
+    await page.mouse.up()
+    await page.waitForTimeout(700)
+    const landed = await look()
+    turned ||= landed.patches.length > 0
+    if (shot) {
+      const aside = frame.toScreen(cellPoint(20, 14))
+      await page.mouse.move(aside.x, aside.y)
+      await page.waitForTimeout(200)
+      await shoot(page, shot)
+    }
+    expect(`${what}, released: still one wire from R1's pin to C1's`, [landed.runs, landed.points[0], landed.points.at(-1)], [1, [R1.x, R1.y], [C1.x, C1.y]])
+    expect(`${what}, released: the wire stays selected whole, its plate one band per pass along its own drawn path`, landed.plates.map((p) => p.whole && p.d === landed.d), [true, true])
+    expect(`${what}, released: its casing is the plate's tint and so is every lead patch under a turn at a pin`, [landed.casings, landed.patches.every((stroke) => stroke === "var(--selection-tint)")], [["var(--selection-tint)"], true])
+    const bare = frame.toScreen(cellPoint(20, 3))
+    await page.mouse.click(bare.x, bare.y)
+    await pastDoubleClick()
+    const again = await segmentMiddle(upright)
+    await page.mouse.click(again.x, again.y)
+    await pastDoubleClick()
+    const clicked = await look()
+    expect(`${what}: the plate kept through the drag is the plate a fresh click draws`, clicked.plates.map((p) => p.d), landed.plates.map((p) => p.d))
+  }
+  expect("one of the drags made the wire turn at a pin, so a lead patch was checked under the plate", turned, true)
+  const aside = frame.toScreen(cellPoint(20, 14))
+  await page.mouse.move(aside.x, aside.y)
+  await page.waitForTimeout(200)
+  await shoot(page, "plate-after-drag")
+}
+
+const teeingWire = (): Schematic => ({
+  objects: [resistorAt("R1", 19, 2, 90), resistorAt("R2", 19, 14, 90)],
+  wires: [{ id: "up", a: cellPoint(20, 6), b: cellPoint(20, 10) }, { id: "down", a: cellPoint(20, 10), b: cellPoint(20, 14) }, { id: "branch", a: cellPoint(12, 10), b: cellPoint(20, 10) }],
+  parts: {},
+})
+
+async function modifiersOnAWire(page: Page) {
+  console.log("\nmodifiers held on a wire and a part: Alt detaches, Shift and Ctrl still drag (the user, 2026-11-12)")
+  const wirePaths = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire] path[data-base]")].map((e) => e.getAttribute("d")).sort())
+  const marks = () => page.evaluate(() => ({ open: [...document.querySelectorAll("[data-dangling]")].map((e) => e.getAttribute("data-dangling")).sort(), dots: [...document.querySelectorAll("[data-junction]")].map((e) => e.getAttribute("data-junction")) }))
+  const point = (x: number, y: number) => `${x * GRID},${y * GRID}`
+  const segment = (ax: number, ay: number, bx: number, by: number) => `M${ax * GRID} ${ay * GRID} L${bx * GRID} ${by * GRID}`
+  const teeAsDrawn = [segment(12, 10, 20, 10), segment(20, 6, 20, 10), segment(20, 10, 20, 14)].sort()
+  const slidDown = [segment(12, 12, 20, 12), segment(20, 6, 20, 12), segment(20, 12, 20, 14)].sort()
+  const heldWith = async (keys: readonly string[], from: Point, to: Point) => {
+    const f = await fieldFrame(page)
+    for (const key of keys) await page.keyboard.down(key)
+    await dragBy(page, f.toScreen(from), f.toScreen(to))
+    for (const key of [...keys].reverse()) await page.keyboard.up(key)
+  }
+  await openDoc(page, "plain-sideways", teeingWire())
+  await heldWith([], cellPoint(15, 10), cellPoint(12, 10))
+  expect("plain, sideways: a wire teeing into another moves only across itself, so nothing moves (design.md §6.3)", await wirePaths(), teeAsDrawn)
+  for (const [name, dx] of [["left", -3], ["right", 3]] as const) {
+    await openDoc(page, `alt-${name}`, teeingWire())
+    await heldWith(["Alt"], cellPoint(15, 10), cellPoint(15 + dx, 10))
+    expect(`Alt, ${name}: the wire goes three cells ${name}, the upright closes up whole`, await wirePaths(), [segment(12 + dx, 10, 20 + dx, 10), segment(20, 6, 20, 14)].sort())
+    expect(`Alt, ${name}: both its ends open, no dot left where it teed in`, await marks(), { open: [point(12 + dx, 10), point(20 + dx, 10)].sort(), dots: [] })
+  }
+  await openDoc(page, "alt-one-leg", { ...hookedWire(), objects: [...hookedWire().objects, resistorAt("F1", -6, -4), resistorAt("F2", 28, 16)] })
+  await heldWith(["Alt"], cellPoint(20, 13), cellPoint(23, 13))
+  expect("Alt on one leg of an L: that leg moves alone, as a part does, and the other stays where it was", await wirePaths(), [segment(14, 11, 20, 11), segment(23, 11, 23, 15)].sort())
+  expect("…the leg left behind hangs open where the moved one was", (await marks()).open, [point(20, 11), point(23, 11), point(23, 15)].sort())
+  await openDoc(page, "alt-shift", teeingWire())
+  await heldWith(["Alt", "Shift"], cellPoint(15, 10), cellPoint(12, 12))
+  expect("Alt with Shift: detached all the same, left and down at once", await wirePaths(), [segment(9, 12, 17, 12), segment(20, 6, 20, 14)].sort())
+  for (const key of ["Shift", "Control"]) {
+    await openDoc(page, `${key.toLowerCase()}-drag`, teeingWire())
+    await heldWith([key], cellPoint(15, 10), cellPoint(15, 12))
+    expect(`${key} held: the press still drags, as a plain one does`, await wirePaths(), slidDown)
+    expect(`${key} held: the dragged wire is selected`, (await countOf(page, "[data-slot=selection] [data-wire]")) > 0, true)
+  }
+  await openDoc(page, "shift-click", teeingWire())
+  const g = await fieldFrame(page)
+  const onWire = g.toScreen(cellPoint(15, 10))
+  await page.keyboard.down("Shift")
+  await page.mouse.click(onWire.x, onWire.y)
+  await page.waitForTimeout(300)
+  const added = await countOf(page, "[data-slot=selection] [data-wire]")
+  await page.waitForTimeout(400)
+  await page.mouse.click(onWire.x, onWire.y)
+  await page.waitForTimeout(300)
+  await page.keyboard.up("Shift")
+  expect("a Shift-click still toggles: the first adds the wire, the second takes it off", [added > 0, await countOf(page, "[data-slot=selection] [data-wire]")], [true, 0])
+  await openDoc(page, "shift-part", wiredPair())
+  const r2 = (await fieldFrame(page)).toScreen(cellPoint(22, 11))
+  await page.mouse.click(r2.x, r2.y)
+  await heldWith(["Shift"], cellPoint(12, 11), cellPoint(12, 14))
+  const parts = await fieldFrame(page)
+  expect("a part Shift-dragged joins the selection and moves with it", [(await parts.worldOf("R1")).y, (await parts.worldOf("R2")).y], [13 * GRID, 13 * GRID])
+  const r1 = parts.toScreen(cellPoint(12, 14))
+  await page.keyboard.down("Control")
+  await page.mouse.click(r1.x, r1.y)
+  await page.keyboard.up("Control")
+  await page.waitForTimeout(300)
+  const plated = await page.evaluate(() => [...new Set([...document.querySelectorAll("[data-slot=selection] [data-plate]")].map((e) => e.getAttribute("data-plate")))])
+  expect("a Ctrl-click on a selected part still takes it off the selection, nothing moved", [plated, (await parts.worldOf("R1")).y], [["R2"], 13 * GRID])
+}
+
+async function drawFromAWire(page: Page) {
+  console.log("\na wire drawn from a wire with W, and the drawing keys (design.md §6.1)")
+  await openDoc(page, "draw-from-wire", wiredPair())
+  const frame = await fieldFrame(page)
+  const onWire = frame.toScreen(cellPoint(15, 11))
+  await page.mouse.move(onWire.x, onWire.y)
+  await page.keyboard.press("w")
+  await page.mouse.click(onWire.x, onWire.y)
+  const pin = frame.toScreen(cellPoint(15, 16))
+  await page.mouse.move(pin.x, pin.y, { steps: 8 })
+  await page.mouse.click(pin.x, pin.y)
+  await page.waitForTimeout(600)
+  expect("W on a wire starts a branch: a dot where it starts", await page.evaluate(() => [...document.querySelectorAll("[data-junction]")].map((e) => e.getAttribute("data-junction"))), [`${15 * GRID},${11 * GRID}`])
+  const lower = frame.toScreen(cellPoint(15, 20))
+  await page.mouse.click(lower.x, lower.y)
+  const corner = frame.toScreen(cellPoint(19, 18))
+  await page.mouse.move(corner.x, corner.y, { steps: 6 })
+  await page.mouse.click(corner.x, corner.y)
+  const further = frame.toScreen(cellPoint(22, 16))
+  await page.mouse.move(further.x, further.y, { steps: 6 })
+  await page.keyboard.press("Backspace")
+  await page.waitForTimeout(200)
+  expect("Backspace takes the corner back, and the wire is still being drawn", await countOf(page, "[data-slot=pending-wire-route] path"), 2)
+  await page.keyboard.press("Enter")
+  await page.waitForTimeout(600)
+  expect("Enter finishes it where the pointer is, the end left hanging", await countOf(page, "[data-dangling]"), 1)
+  const free = frame.toScreen(cellPoint(10, 11))
+  await page.mouse.click(free.x, free.y)
+  const away = frame.toScreen(cellPoint(12, 15))
+  await page.mouse.move(away.x, away.y, { steps: 6 })
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(400)
+  expect("Esc drops the wire being drawn: nothing added", [await countOf(page, "[data-slot=pending-wire-route]"), await countOf(page, "[data-dangling]")], [0, 1])
+  await shoot(page, "draw-from-wire")
+}
+
+async function farDropAndWireCopy(page: Page) {
+  console.log("\na far drop with nowhere clean near it, and copying a wire alone (review of phase 4)")
+  const stand = lab1Stand.build(GRID)
+  await openDoc(page, "far-drop", stand)
+  const chip = stand.objects.find((o) => o.def === "stm32f746ig")!
+  const frame = await fieldFrame(page)
+  const before = await frame.worldOf(chip.id)
+  const middle = { x: chip.x + objectRect(chip, GRID).w / 2, y: chip.y + objectRect(chip, GRID).h / 2 }
+  await dragBy(page, frame.toScreen(middle), frame.toScreen({ x: middle.x + 13 * GRID, y: middle.y + 7 * GRID }))
+  const after = await frame.worldOf(chip.id)
+  const moved = after.x !== before.x || after.y !== before.y
+  const said = await page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].some((e) => (e.textContent ?? "").startsWith("Nowhere clean to put it")))
+  expect("a chip dragged 13 cells with every wire blocked near the drop moves, or, where its wires could only be laid through a part, stays and says why (the user, 2026-11-11)", moved || said, true)
+  await openDoc(page, "copy-a-wire", wiredPair())
+  const wired = await fieldFrame(page)
+  const onWire = wired.toScreen(cellPoint(16, 11))
+  await page.mouse.click(onWire.x, onWire.y)
+  await page.keyboard.press("Control+c")
+  await page.keyboard.press("Control+v")
+  await page.waitForTimeout(700)
+  expect("Ctrl+C and Ctrl+V on a selected segment alone paste it: two new open ends", await countOf(page, "[data-dangling]"), 2)
+  const twoNets: Schematic = {
+    objects: [resistorAt("R1", 10, 10), resistorAt("R2", 20, 10), resistorAt("R4", 10, 16), resistorAt("R5", 20, 16)],
+    wires: [{ id: "a", a: cellPoint(14, 11), b: cellPoint(20, 11) }, { id: "b", a: cellPoint(14, 17), b: cellPoint(20, 17) }],
+    parts: {},
+  }
+  await openDoc(page, "merge-flash", twoNets)
+  const joining = await fieldFrame(page)
+  const fromWire = joining.toScreen(cellPoint(17, 11))
+  await page.mouse.move(fromWire.x, fromWire.y)
+  await page.keyboard.press("w")
+  await page.mouse.click(fromWire.x, fromWire.y)
+  const toWire = joining.toScreen(cellPoint(17, 17))
+  await page.mouse.move(toWire.x, toWire.y, { steps: 6 })
+  const dimmed = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-net]")].filter((e) => getComputedStyle(e).opacity !== "1").length)
+  await page.mouse.click(toWire.x, toWire.y)
+  await page.waitForTimeout(250)
+  const notices = () => page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].map((e) => e.textContent ?? "").filter((t) => /joined|split apart|in series/.test(t)))
+  expect("two nets joined by a drawn wire: no notice and no flash, nothing dimmed (the user, 2026-11-11)", [await notices(), await page.evaluate(() => document.querySelectorAll("[data-slot=wires] [data-flash]").length), await dimmed()], [[], 0, 0])
+  await openDoc(page, "join-unlit", {
+    objects: [resistorAt("R1", 10, 10), resistorAt("R4", 18, 16)],
+    wires: [{ id: "a", a: cellPoint(14, 11), b: cellPoint(17, 11) }, { id: "b", a: cellPoint(22, 17), b: cellPoint(26, 17) }, { id: "c", a: cellPoint(10, 20), b: cellPoint(14, 20) }],
+    parts: {},
+  })
+  const unlit = await fieldFrame(page)
+  await dragBy(page, unlit.toScreen(cellPoint(20, 17)), unlit.toScreen(cellPoint(19, 11)), false)
+  expect("R4 held with its pin on another net's open end: no wire dims before the drop (the user, 2026-11-11)", await dimmed(), 0)
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+  expect("and dropped there: no notice, no flash", [await notices(), await page.evaluate(() => document.querySelectorAll("[data-slot=wires] [data-flash]").length)], [[], 0])
+  await openDoc(page, "stub-wire", { objects: [resistorAt("R1", 10, 10)], wires: [{ id: "stub", a: cellPoint(12, 13), b: cellPoint(13, 13) }], parts: {} })
+  const stubFrame = await fieldFrame(page)
+  const stubMiddle = stubFrame.toScreen(cellPoint(12.5, 13))
+  await page.mouse.click(stubMiddle.x, stubMiddle.y)
+  await page.waitForTimeout(300)
+  expect("a one-cell wire with two open ends: a click on its middle selects it rather than starting a wire from an end (the user, 2026-11-11)", [(await countOf(page, "[data-slot=selection] [data-wire]")) > 0, await countOf(page, "[data-slot^=pending-wire]")], [true, 0])
+  await page.keyboard.press("Delete")
+  await page.waitForTimeout(400)
+  expect("and Delete removes it", await countOf(page, "[data-slot=wires] [data-wire]"), 0)
+  await openDoc(page, "plate-run", { objects: [resistorAt("R1", 10, 10)], wires: [{ id: "l1", a: cellPoint(14, 11), b: cellPoint(15, 11) }, { id: "l2", a: cellPoint(15, 11), b: cellPoint(15, 13) }], parts: {} })
+  const plateFrame = await fieldFrame(page)
+  const onUpright = plateFrame.toScreen(cellPoint(15, 12.3))
+  await page.mouse.click(onUpright.x, onUpright.y)
+  await page.waitForTimeout(300)
+  const plate = await page.evaluate(() => ({
+    plates: [...document.querySelectorAll("[data-slot=selection] [data-wire]")].map((e) => [e.hasAttribute("data-whole"), e.getAttribute("d")]),
+    wire: document.querySelector("[data-slot=wires] [data-wire] path[data-base]")?.getAttribute("d") ?? null,
+  }))
+  expect("a click on one leg of an L selects the whole wire, and its plate is drawn along the wire's own rounded path (the user, 2026-11-11)", plate.plates.length > 0 && plate.plates.every(([whole, d]) => whole && d === plate.wire) ? "along the wire" : plate, "along the wire")
+  await openDoc(page, "through-body", { objects: [resistorAt("R1", 10, 10), resistorAt("R2", 10, 14)], wires: [{ id: "across", a: cellPoint(12, 9), b: cellPoint(12, 13) }, { id: "under", a: cellPoint(9, 12), b: cellPoint(15, 12) }], parts: {} })
+  const masking = await page.evaluate(() => {
+    const casings = [...document.querySelectorAll("[data-slot=wires] [data-casing]")]
+    const masked = casings.filter((e) => e.closest("[mask]")?.getAttribute("mask") === "url(#field-body-mask)")
+    return { casings: casings.length, masked: masked.length, bodies: document.querySelectorAll("#field-body-mask polygon").length }
+  })
+  expect("a wire across R1's body cuts the wire it crosses but not R1: every gap is kept off both resistors' bodies (the user, 2026-11-11)", [masking.casings > 0, masking.masked === masking.casings, masking.bodies], [true, true, 2])
+  await openDoc(page, "draw-through", { objects: [resistorAt("R1", 10, 10)], wires: [], parts: {} })
+  const throughFrame = await fieldFrame(page)
+  const above = throughFrame.toScreen(cellPoint(12, 9))
+  const below = throughFrame.toScreen(cellPoint(12, 13))
+  await page.mouse.move(above.x, above.y)
+  await page.keyboard.press("w")
+  await page.mouse.click(above.x, above.y)
+  await page.mouse.move(below.x, below.y, { steps: 8 })
+  await page.waitForTimeout(250)
+  const refusedPreview = await countOf(page, "[data-slot^=pending-wire][data-refused]")
+  const refusedGlow = await countOf(page, "[data-slot=conflict-glow] [data-slot=pending-wire-glow] path")
+  await page.mouse.click(below.x, below.y)
+  await page.waitForTimeout(400)
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(300)
+  expect("a wire drawn straight across R1's body is refused, glows under the leg that crosses it, and lays nothing (the user, 2026-11-11: no wire on a part)", [refusedPreview > 0, refusedGlow, await countOf(page, "[data-slot=wires] [data-wire]")], [true, 1, 0])
+  await openDoc(page, "armed-double-click", { objects: [resistorAt("R1", 10, 10)], wires: [{ id: "w", a: cellPoint(9, 13), b: cellPoint(15, 13) }], parts: {} })
+  const armedFrame = await fieldFrame(page)
+  await page.addStyleTag({ content: "[data-sonner-toaster]{display:none!important}" })
+  await page.getByRole("button", { name: "Resistor", exact: true }).click()
+  await page.waitForTimeout(400)
+  const onTheWire = armedFrame.toScreen(cellPoint(12, 13))
+  await page.mouse.move(onTheWire.x, onTheWire.y, { steps: 6 })
+  await page.waitForTimeout(300)
+  await page.mouse.dblclick(onTheWire.x, onTheWire.y)
+  await page.waitForTimeout(800)
+  expect("a resistor in hand double-clicked onto a wire is placed once and leaves the hand; no wire is started (the user, 2026-11-11)", [await countOf(page, "[data-body]"), await countOf(page, "[data-slot=placement-hint]"), await countOf(page, "[data-slot^=pending-wire]")], [2, 0, 0])
+  await page.keyboard.press("Escape")
+  await open(page, "bridge")
+  expect("a junction dot paints no white ring over the leads and wires that meet in it (the user, 2026-11-11: leads cut short at the diamond's corners)", await page.evaluate(() => [document.querySelectorAll("[data-junction]").length > 0, document.querySelectorAll("[data-junction] circle[fill='var(--background)']").length]), [true, 0])
+  const shift = examples.find((e) => e.id === "nucleo-74hc595")!.build(GRID)
+  await openDoc(page, "turn-refused", shift)
+  const u2 = shift.objects.find((o) => o.props?.ref === "U2")!
+  const chipFrame = await fieldFrame(page)
+  const u2Middle = chipFrame.toScreen({ x: u2.x + objectRect(u2, GRID).w / 2, y: u2.y + objectRect(u2, GRID).h / 2 })
+  await page.mouse.click(u2Middle.x, u2Middle.y)
+  await page.keyboard.press("r")
+  await page.waitForTimeout(900)
+  expect("R on the 74HC595 turns it: no refusal", await page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].some((e) => e.textContent?.includes("Not done") || e.textContent?.includes("Not turned"))), false)
+}
+
+async function doubleClickChecks(page: Page) {
+  console.log("\ndouble clicks: start a wire on bare field, end it as Enter does (the user, 2026-11-06)")
+  await openDoc(page, "double-click", { objects: [resistorAt("F1", -6, -4), resistorAt("F2", 28, 16)], wires: [], parts: {} })
+  const f = await fieldFrame(page)
+  const at = (x: number, y: number) => f.toScreen(cellPoint(x, y))
+  const openEnds = () => page.evaluate(() => [...document.querySelectorAll("[data-dangling]")].map((e) => e.getAttribute("data-dangling")).sort())
+  const drawing = () => countOf(page, "[data-slot=pending-wire-route]")
+  const start = await at(6, 6)
+  await page.mouse.dblclick(start.x, start.y)
+  const corner = await at(10, 6)
+  await page.mouse.move(corner.x, corner.y, { steps: 6 })
+  await page.waitForTimeout(200)
+  expect("a double click on bare field starts a wire there, as W and a click did", await drawing(), 1)
+  await page.mouse.click(corner.x, corner.y)
+  const last = await at(10, 10)
+  await page.mouse.move(last.x, last.y, { steps: 6 })
+  await page.mouse.dblclick(last.x, last.y)
+  await page.waitForTimeout(500)
+  expect("a double click ends it at that point, as Enter ends it at the last clicked one", [await drawing(), await openEnds()], [0, [`${10 * GRID},${10 * GRID}`, `${6 * GRID},${6 * GRID}`].sort()])
+  const single = await at(16, 6)
+  await page.mouse.click(single.x, single.y)
+  await page.mouse.move(single.x + 40, single.y, { steps: 4 })
+  await page.waitForTimeout(200)
+  expect("a single click on bare field starts nothing", await drawing(), 0)
+  await page.waitForTimeout(600)
+  const onWire = await at(8, 6)
+  await page.mouse.dblclick(onWire.x, onWire.y)
+  const branchTo = await at(8, 3)
+  await page.mouse.move(branchTo.x, branchTo.y, { steps: 6 })
+  await page.waitForTimeout(200)
+  expect("a double click on a wire starts a branch from that point (the user, 2026-11-06)", await drawing(), 1)
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(300)
+
+  await openDoc(page, "crossing", { objects: [resistorAt("F1", -4, -3), resistorAt("F2", 11, 11)], wires: [{ id: "h", a: cellPoint(0, 5), b: cellPoint(10, 5) }, { id: "v", a: cellPoint(5, 0), b: cellPoint(5, 10) }], parts: {} })
+  const g = await fieldFrame(page)
+  const casings = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-casing]")].map((casing) => ({ gap: Number(casing.getAttribute("stroke-width")) - Number(document.querySelector(`[data-slot=wires] g[data-wire='${casing.getAttribute("data-wire")}'] > path`)?.getAttribute("stroke-width")), stroke: casing.getAttribute("stroke") })))
+  expect("two wires crossing: each casing is 3 px wider than its wire on either side, so the crossing shows a gap one can see (design.md §8, «оставляем Gap железно»)", (await casings()).map((c) => c.gap), [6, 6])
+  const bare = await g.toScreen(cellPoint(8, 2))
+  await page.mouse.click(bare.x, bare.y)
+  await page.keyboard.press("Control+a")
+  await page.waitForTimeout(400)
+  expect("selected, each wire keeps a 3 px casing, in the selection plate's own tint, so the gap stays and no white band shows inside the plate (the user's checks, 2026-11-06)", await casings(), [{ gap: 6, stroke: "var(--selection-tint)" }, { gap: 6, stroke: "var(--selection-tint)" }])
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(600)
+  await page.mouse.click(bare.x, bare.y)
+  await page.waitForTimeout(700)
+  const cross = await g.toScreen(cellPoint(5, 5))
+  await page.mouse.dblclick(cross.x, cross.y)
+  await page.waitForTimeout(500)
+  expect("a double click on a crossing joins it, as J does: a dot there and nothing being drawn", [await countOf(page, `[data-junction='${5 * GRID},${5 * GRID}']`), await countOf(page, "[data-slot=pending-wire-route]")], [1, 0])
+}
+
+async function morningChecks(page: Page) {
+  console.log("\nthe user's checks on the running app (2026-11-05 morning)")
+  const frameParts: PlacedObject[] = [resistorAt("F1", -6, -4), resistorAt("F2", 28, 16)]
+  await openDoc(page, "morning", { objects: frameParts, wires: [], parts: {} })
+  const f = await fieldFrame(page)
+  const at = (x: number, y: number) => f.toScreen(cellPoint(x, y))
+  const openEnds = () => page.evaluate(() => [...document.querySelectorAll("[data-dangling]")].map((e) => e.getAttribute("data-dangling")))
+  const pendingDrawn = () => countOf(page, "[data-slot=pending-wire-route]")
+  let p = await at(5, 5)
+  await page.mouse.move(p.x, p.y)
+  await page.keyboard.press("w")
+  p = await at(8, 9)
+  await page.mouse.move(p.x, p.y, { steps: 6 })
+  expect("W arms: no wire is drawn before the first click", await pendingDrawn(), 0)
+  await page.mouse.click(p.x, p.y)
+  const corner = await at(12, 9)
+  await page.mouse.move(corner.x, corner.y, { steps: 6 })
+  await page.mouse.click(corner.x, corner.y)
+  const away = await at(16, 14)
+  await page.mouse.move(away.x, away.y, { steps: 6 })
+  await page.keyboard.press("Enter")
+  await page.waitForTimeout(500)
+  expect("Enter ends the wire at the last clicked point, not under the pointer", await openEnds(), [`${8 * GRID},${9 * GRID}`, `${12 * GRID},${9 * GRID}`])
+  const end = await at(12, 9)
+  await page.mouse.click(end.x + 3, end.y)
+  const onward = await at(12, 12)
+  await page.mouse.move(onward.x, onward.y, { steps: 6 })
+  await page.waitForTimeout(300)
+  expect("a click on the outer half of an open end's ring, past the wire, continues the wire", await pendingDrawn(), 1)
+  expect("a click on an open end starts no error", await page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].some((e) => e.textContent?.includes("No wire to lay"))), false)
+  await page.keyboard.press("Escape")
+  const mid = await at(10, 9)
+  await page.mouse.move(mid.x, mid.y)
+  await page.mouse.down()
+  const lower = await at(10, 12)
+  await page.mouse.move(lower.x, lower.y, { steps: 8 })
+  const place = await at(10, 13)
+  await page.mouse.move(place.x, place.y, { steps: 3 })
+  await page.mouse.down()
+  await page.mouse.up()
+  const later = await at(20, 15)
+  await page.mouse.move(later.x, later.y, { steps: 6 })
+  expect("a press while a wire is still held (its release lost to another window) puts it down and starts no marquee", await page.evaluate(() => getComputedStyle(document.querySelector("[data-slot=dot-field-selection]")!).display), "none")
+  await page.mouse.up()
+  await page.keyboard.press("Escape")
+  await openDoc(page, "turn-a-wire", { objects: frameParts, wires: [{ id: "w", a: cellPoint(2, 4), b: cellPoint(10, 4) }], parts: {} })
+  const g = await fieldFrame(page)
+  const onWire = g.toScreen(cellPoint(6, 4))
+  await page.mouse.click(onWire.x, onWire.y)
+  await page.keyboard.press("r")
+  await page.waitForTimeout(600)
+  expect("R on a selected wire turns it a quarter", await openEnds(), [`${6 * GRID},${0}`, `${6 * GRID},${8 * GRID}`])
+  await openDoc(page, "held-free-wire", { objects: frameParts, wires: [{ id: "h", a: cellPoint(2, 4), b: cellPoint(9, 4) }, { id: "v", a: cellPoint(9, 4), b: cellPoint(9, 1) }], parts: {} })
+  const k = await fieldFrame(page)
+  const visibleRings = () => page.evaluate(() => [...document.querySelectorAll("[data-dangling]")].filter((e) => getComputedStyle(e).display !== "none").map((e) => e.getAttribute("data-dangling")))
+  const bandRings = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-band-dangling]")].map((e) => e.getAttribute("data-band-dangling")).sort())
+  const grip = k.toScreen(cellPoint(5, 4))
+  await page.mouse.move(grip.x, grip.y)
+  await page.mouse.down()
+  const held = k.toScreen(cellPoint(8, 7))
+  await page.mouse.move(held.x, held.y, { steps: 10 })
+  await page.waitForTimeout(300)
+  expect("a free wire held mid-drag leaves no open-end ring where its ends were (the user's picture 13)", await visibleRings(), [])
+  expect("a free wire held mid-drag carries its open-end rings on the band", await bandRings(), [`${5 * GRID},${7 * GRID}`, `${12 * GRID},${4 * GRID}`])
+  await page.mouse.up()
+  await page.waitForTimeout(400)
+  expect("released, the rings are the wire's own again, at its new ends", (await visibleRings()).sort(), [`${5 * GRID},${7 * GRID}`, `${12 * GRID},${4 * GRID}`])
+  await openDoc(page, "alt-r", { objects: [...frameParts, resistorAt("R1", 0, 0), resistorAt("R2", 10, 0)], wires: [{ id: "w", a: cellPoint(4, 1), b: cellPoint(10, 1) }], parts: {} })
+  const h = await fieldFrame(page)
+  const r2 = h.toScreen(cellPoint(12, 1))
+  await page.mouse.click(r2.x, r2.y)
+  await page.keyboard.press("Alt+r")
+  await page.keyboard.press("Alt+r")
+  await page.waitForTimeout(600)
+  expect("Alt+R turns the part alone: the wire stays where it was", await page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire] path[data-base]")].map((e) => e.getAttribute("d"))), [`M${4 * GRID} ${GRID} L${10 * GRID} ${GRID}`])
+  await open(page, "nucleo-74hc595")
+  const n = await fieldFrame(page)
+  const onRow = n.toScreen(cellPoint(32, 17))
+  const rowBelow = n.toScreen(cellPoint(32, 18))
+  await page.mouse.move(onRow.x, onRow.y)
+  await page.mouse.down()
+  await page.mouse.move(rowBelow.x, rowBelow.y, { steps: 6 })
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+  const toasts = await page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].map((e) => e.textContent ?? ""))
+  expect("a wire dragged where it would lie along another net's wire is refused in the words of a wire, not of a dropped part", toasts.some((t) => t.startsWith("Wire not moved")) && !toasts.some((t) => t.includes("Nowhere clean to put it")), true)
+}
+
+const hookedWire = (): Schematic => ({
+  objects: [resistorAt("R1", 10, 10)],
+  wires: [{ id: "level", a: cellPoint(14, 11), b: cellPoint(20, 11) }, { id: "down", a: cellPoint(20, 11), b: cellPoint(20, 15) }],
+  parts: {},
+})
+
+async function zoomTo(page: Page, outSteps: number) {
+  await page.keyboard.press("Control+0")
+  await page.waitForTimeout(500)
+  for (let k = 0; k < outSteps; k++) await page.keyboard.press("Control+Minus")
+  await page.waitForTimeout(900)
+}
+
+async function openEndCue(page: Page) {
+  console.log("\nan open end shows that a press there continues the wire, and the rest of the wire that a press moves it (the user, 2026-11-11)")
+  await openDoc(page, "open-end-cue", hookedWire())
+  const end = `${20 * GRID},${15 * GRID}`
+  const cue = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=open-end-cue] [data-continues]")].map((e) => e.getAttribute("data-continues")))
+  const cueSize = () => page.evaluate(() => {
+    const ring = document.querySelector("[data-slot=open-end-cue] circle[data-continues]")
+    return ring ? Math.round(ring.getBoundingClientRect().width) : 0
+  })
+  const cursorAt = (p: Point) => page.evaluate(({ x, y }) => {
+    const cursor = getComputedStyle(document.elementFromPoint(x, y)!).cursor
+    return cursor.startsWith("url(") ? "precise" : cursor
+  }, p)
+  const hover = async (p: Point) => {
+    await page.mouse.move(p.x, p.y, { steps: 4 })
+    await page.waitForTimeout(150)
+  }
+  for (const [zoom, outSteps, near, far] of [["100 %", 0, 4, 40], ["33 %", 6, 5, 12], ["300 %", -6, 8, 60]] as const) {
+    if (outSteps >= 0) await zoomTo(page, outSteps)
+    else {
+      await zoomTo(page, 0)
+      for (let k = 0; k < -outSteps; k++) await page.keyboard.press("Control+Equal")
+      await page.waitForTimeout(900)
+    }
+    const f = await fieldFrame(page)
+    const tip = f.toScreen(cellPoint(20, 15))
+    const beside = { x: tip.x + near * 0.6, y: tip.y - near * 0.8 }
+    await hover(beside)
+    expect(`${zoom}: ${near} px from the open end the end is marked: a press there continues the wire`, await cue(), [end])
+    expect(`${zoom}: and the cursor there is the cross a pin shows, the one that starts a wire`, await cursorAt(beside), "precise")
+    if (zoom === "33 %") expect(`${zoom}: the mark is at least 14 px across, as wide as the press reaches`, (await cueSize()) >= 14, true)
+    const onWire = { x: tip.x, y: tip.y - far }
+    await hover(onWire)
+    expect(`${zoom}: ${far} px up the wire nothing is marked`, await cue(), [])
+    expect(`${zoom}: and the cursor says a press moves the wire`, await cursorAt(onWire), "move")
+  }
+  await zoomTo(page, 6)
+  const f = await fieldFrame(page)
+  const tip = f.toScreen(cellPoint(20, 15))
+  await hover({ x: tip.x + 3, y: tip.y - 4 })
+  await page.mouse.down()
+  await page.mouse.move(tip.x + 40, tip.y + 30, { steps: 8 })
+  await page.waitForTimeout(200)
+  expect("33 %: a press where the end is marked starts drawing from it, and the mark gives way to the wire being drawn", [await countOf(page, "[data-slot=pending-wire-route]"), await cue()], [1, []])
+  await page.mouse.up()
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(300)
+  const up = { x: tip.x, y: tip.y - 12 }
+  await hover(up)
+  await page.mouse.down()
+  await page.mouse.move(up.x + f.toScreen(cellPoint(23, 15)).x - tip.x, up.y, { steps: 8 })
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  expect("33 %: a press where nothing is marked moves the wire: no wire drawn, the open end three cells right", [await countOf(page, "[data-slot^=pending-wire]"), await page.evaluate(() => [...document.querySelectorAll("[data-dangling]")].map((e) => e.getAttribute("data-dangling")))], [0, [`${23 * GRID},${15 * GRID}`]])
+}
+
+async function shorteningFromAnOpenEnd(page: Page) {
+  console.log("\na press on an open end drawn back along the wire shortens it, as Zip retracts a path (the user, 2026-11-11)")
+  const rings = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-dangling]")].filter((e) => getComputedStyle(e).display !== "none").map((e) => e.getAttribute("data-dangling")))
+  const bandRings = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-band-dangling]")].map((e) => e.getAttribute("data-band-dangling")))
+  const bandPieces = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll("[data-slot=rubber-band] [data-points]")]
+        .flatMap((e) => {
+          const pts = e.getAttribute("data-points")!.split(" ").map((p) => p.split(",").map(Number))
+          return pts.slice(1).map(([bx, by], i) => {
+            const [ax, ay] = pts[i]
+            return ax < bx || (ax === bx && ay <= by) ? `${ax} ${ay} ${bx} ${by}` : `${bx} ${by} ${ax} ${ay}`
+          })
+        })
+        .sort(),
+    )
+  const wirePoints = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire][data-points]")].map((e) => e.getAttribute("data-points")))
+  const key = (x: number, y: number) => `${x * GRID},${y * GRID}`
+  const pointsOf = (...cells: [number, number][]) => cells.map(([x, y]) => key(x, y)).join(" ")
+  await openDoc(page, "shorten", hookedWire())
+  await zoomTo(page, 0)
+  let f = await fieldFrame(page)
+  const via = async (...cells: [number, number][]) => {
+    for (const [x, y] of cells) {
+      const p = f.toScreen(cellPoint(x, y))
+      await page.mouse.move(p.x, p.y, { steps: 6 })
+    }
+    await page.waitForTimeout(200)
+  }
+  const press = async (x: number, y: number) => {
+    const p = f.toScreen(cellPoint(x, y))
+    await page.mouse.move(p.x, p.y)
+    await page.waitForTimeout(100)
+    await page.mouse.down()
+  }
+  await press(20, 15)
+  await via([20, 13])
+  expect("held two cells back up the wire: the wire ends there, its open end with it", [await bandRings(), await rings()], [[key(20, 13)], []])
+  expect("and the wire shown is the shorter one", await bandPieces(), [`${14 * GRID} ${11 * GRID} ${20 * GRID} ${11 * GRID}`, `${20 * GRID} ${11 * GRID} ${20 * GRID} ${13 * GRID}`].sort())
+  await via([20, 11], [17, 11])
+  expect("on round the bend, three cells along: the bend is gone, the end follows the pointer", [await bandRings(), await bandPieces()], [[key(17, 11)], [`${14 * GRID} ${11 * GRID} ${17 * GRID} ${11 * GRID}`]])
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  expect("released: the wire is that much shorter, nothing left being drawn", [await rings(), await wirePoints(), await countOf(page, "[data-slot^=pending-wire]")], [[key(17, 11)], [pointsOf([14, 11], [17, 11])], 0])
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(500)
+  expect("one undo gives the whole wire back", await rings(), [key(20, 15)])
+  f = await fieldFrame(page)
+  await press(20, 15)
+  await via([20, 13], [22, 13], [23, 13])
+  expect("back two cells and off to the right: the wire is cut back and drawn on from the cut", [await bandRings(), await page.evaluate(() => document.querySelector("[data-slot=pending-wire-route] path[stroke-dasharray]")?.getAttribute("d") ?? null)], [[key(20, 13)], `M${20 * GRID} ${13 * GRID} L${23 * GRID} ${13 * GRID}`])
+  await page.mouse.up()
+  await page.keyboard.press("Enter")
+  await page.waitForTimeout(600)
+  expect("finished: the stub below the cut is gone and the wire turns off at it", [await rings(), await wirePoints()], [[key(23, 13)], [pointsOf([14, 11], [20, 11], [20, 13], [23, 13])]])
+  await openDoc(page, "shorten-to-nothing", hookedWire())
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  await press(20, 15)
+  await via([20, 13], [20, 11], [17, 11], [14, 11])
+  expect("held all the way back on R1's pin: no wire left on the field, and no ring left hanging where the end was", [await bandPieces(), await bandRings(), await rings()], [[], [], []])
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  expect("released there: the wire is gone", await countOf(page, "[data-slot=wires] [data-wire]"), 0)
+  await openDoc(page, "shorten-and-back", hookedWire())
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  await press(20, 15)
+  await via([20, 12], [20, 15])
+  expect("drawn back and forward again to the end: the wire is whole again", [await bandRings(), await rings()], [[], [key(20, 15)]])
+  await page.mouse.up()
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(400)
+  expect("and released and dropped there, nothing changed", await wirePoints(), [pointsOf([14, 11], [20, 11], [20, 15])])
+  const crossed = hookedWire()
+  await openDoc(page, "shorten-to-a-crossing", { ...crossed, wires: [...crossed.wires, { id: "across", a: cellPoint(17, 13), b: cellPoint(23, 13) }] })
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  const end = f.toScreen(cellPoint(20, 15))
+  await page.mouse.click(end.x, end.y)
+  await via([20, 14], [20, 13])
+  const casingEnds = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll("[data-slot=rubber-band] [data-band-casing]")].flatMap((e) => {
+        const n = (e.getAttribute("d") ?? "").match(/-?\d+(\.\d+)?(e-?\d+)?/g)!.map(Number)
+        return [`${n[0]},${n[1]}`, `${n[n.length - 2]},${n[n.length - 1]}`]
+      }),
+    )
+  expect("clicked on the open end and drawn back to the other net's wire across it: nothing refused, a dot shows the T it would make (the user, 2026-11-12)", [await countOf(page, "[data-slot^=pending-wire][data-refused], [data-slot=rubber-band] > g[data-blocked]"), await page.evaluate(() => [...document.querySelectorAll("[data-slot=rubber-band] [data-band-junction]")].map((e) => e.getAttribute("data-band-junction")))], [0, [key(20, 13)]])
+  expect("and the wire's white casing stops short of that wire instead of painting over it", (await casingEnds()).includes(key(20, 13)), false)
+  const across = f.toScreen(cellPoint(20, 13))
+  await page.mouse.click(across.x, across.y)
+  await page.waitForTimeout(600)
+  expect("a click there ends the wire on it: a dot at the T, the other wire's two ends still open, nothing being drawn", [await page.evaluate(() => [...document.querySelectorAll("[data-slot=wire-marks] [data-junction]")].map((e) => e.getAttribute("data-junction"))), (await rings()).sort(), await countOf(page, "[data-slot^=pending-wire]")], [[key(20, 13)], [key(17, 13), key(23, 13)].sort(), 0])
+}
+
+async function phaseFiveChecks(page: Page) {
+  console.log("\nthe field: bodies, splices, fields and the checker (phase 5, design.md §5, §6.8)")
+  const diodeAt = (id: string, x: number, y: number, rotation?: 90): PlacedObject => ({ id, def: "diode", x: x * GRID, y: y * GRID, props: { ref: id }, ...(rotation && { rotation }) })
+  await openDoc(page, "right-angle", { objects: [diodeAt("D5", 10, 10, 90), diodeAt("D6", 20, 20)], wires: [], parts: {} })
+  let f = await fieldFrame(page)
+  await dragBy(page, f.toScreen(cellPoint(22, 21)), f.toScreen(cellPoint(13, 10)), false)
+  expect("held with its anode on D5's upper pin at a right angle, D6 is not drawn as blocked and does not glow (findings 4.U12)", [await blockedNow(page, "D6"), await glowsNow(page, "D6")], [false, false])
+  await page.mouse.up()
+  await page.waitForTimeout(800)
+  expect("dropped there, D6 stays where it was let go", await f.worldOf("D6"), { x: 11 * GRID, y: 9 * GRID })
+
+  const spliceDoc = (): Schematic => ({
+    objects: [resistorAt("R1", 10, 10), resistorAt("R2", 26, 10), resistorAt("R3", 16, 16)],
+    wires: [{ id: "w1", a: cellPoint(14, 11), b: cellPoint(26, 11) }],
+    parts: {},
+  })
+  const runs = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll("[data-slot=wires] [data-wire][data-points]")]
+        .map((e) => (e.getAttribute("data-points") ?? "").split(" ").map((p) => p.split(",").map(Number)))
+        .map((pts) => pts.flat())
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1]),
+    )
+  const along = (y: number, from: number, to: number) => [from * GRID, y * GRID, to * GRID, y * GRID]
+  await openDoc(page, "splice", spliceDoc())
+  f = await fieldFrame(page)
+  await dragBy(page, f.toScreen(cellPoint(18, 17)), f.toScreen(cellPoint(18, 11)))
+  expect("R3 dropped onto the R1–R2 wire lands there (findings 4.U8)", await f.worldOf("R3"), { x: 16 * GRID, y: 10 * GRID })
+  expect("and the wire is cut under its body: exactly two halves, R1 to R3 and R3 to R2, no open end (design.md §5.3)", [await runs(), await countOf(page, "[data-dangling]")], [[along(11, 14, 16), along(11, 20, 26)], 0])
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(500)
+  expect("one Undo takes back the drop and the cut together: R3 home, the wire whole (junctions.md principle 2)", [await f.worldOf("R3"), await runs()], [{ x: 16 * GRID, y: 16 * GRID }, [along(11, 14, 26)]])
+  await page.keyboard.press("Control+Shift+z")
+  await page.waitForTimeout(500)
+  expect("one Redo puts both back", [await f.worldOf("R3"), await runs()], [{ x: 16 * GRID, y: 10 * GRID }, [along(11, 14, 16), along(11, 20, 26)]])
+  await openDoc(page, "splice-alt", spliceDoc())
+  f = await fieldFrame(page)
+  await page.keyboard.down("Alt")
+  await dragBy(page, f.toScreen(cellPoint(18, 17)), f.toScreen(cellPoint(18, 11)))
+  await page.keyboard.up("Alt")
+  const onTheRow = (await runs()).filter((r) => r.every((v, k) => k % 2 === 0 || v === 11 * GRID)).map((r) => [Math.min(...r.filter((_, k) => k % 2 === 0)), Math.max(...r.filter((_, k) => k % 2 === 0))]).sort((a, b) => a[0] - b[0])
+  const covers = onTheRow.reduce((reach, [lo, hi]) => (lo <= reach ? Math.max(reach, hi) : reach), 14 * GRID) >= 26 * GRID && onTheRow[0]?.[0] === 14 * GRID
+  expect("with Alt held R3 is not cut into the wire, and since the wire would then run on under its body it stays where it was; the wire runs on from R1 to R2 (the user, 2026-11-11: no wire through a part)", [await f.worldOf("R3"), covers], [{ x: 16 * GRID, y: 16 * GRID }, true])
+
+  await openDoc(page, "fields", { objects: [{ ...resistorAt("R1", 10, 10), props: { ref: "R1", value: "1 kΩ" } }], wires: [], parts: {} })
+  f = await fieldFrame(page)
+  const fieldBox = () => page.evaluate(() => document.querySelector("[data-field='R1:ref']")?.getBoundingClientRect().toJSON() ?? null)
+  const before = await fieldBox()
+  const body = await box(page, "R1")
+  expect("R1's designator is a field of its own, drawn above the lying resistor (design.md §5.2)", !!before && before.y + before.height <= body.y + body.height / 2, true)
+  if (!before) expect("a field dragged by hand follows the pointer freely, off the cells, the part stays", "no field to drag", "a field")
+  else {
+    const cell = (await f.toScreen(cellPoint(1, 0))).x - (await f.toScreen(cellPoint(0, 0))).x
+    const grip = { x: before.x + before.width / 2, y: before.y + before.height / 2 }
+    const moved = (b: { x: number; y: number } | null) => (b ? [Math.round(((b.x - before.x) / cell) * 100), Math.round(((b.y - before.y) / cell) * 100)] : null)
+    await dragBy(page, grip, { x: grip.x + 1.37 * cell, y: grip.y + 0.41 * cell }, false)
+    expect("held, the field follows the pointer exactly, 1.37 cells right and 0.41 down, no invisible cells (the user, 2026-11-11), and the part stays", [moved(await fieldBox()), await f.worldOf("R1")], [[137, 41], { x: 10 * GRID, y: 10 * GRID }])
+    await page.mouse.up()
+    await page.waitForTimeout(500)
+    expect("dropped, the field stays exactly where the pointer left it and the part has not moved", [moved(await fieldBox()), await f.worldOf("R1")], [[137, 41], { x: 10 * GRID, y: 10 * GRID }])
+    await page.keyboard.press("Control+z")
+    await page.waitForTimeout(500)
+    expect("one Undo puts the field back", moved(await fieldBox()), [0, 0])
+  }
+
+  await page.keyboard.press("Escape")
+  const cellPx = (await f.toScreen(cellPoint(1, 0))).x - (await f.toScreen(cellPoint(0, 0))).x
+  const resistorBox = await box(page, "R1")
+  const marqueeFrom = { x: resistorBox.x - 0.63 * cellPx, y: resistorBox.y + resistorBox.height + 0.29 * cellPx }
+  const marqueeTo = { x: marqueeFrom.x + 1.44 * cellPx, y: marqueeFrom.y + 0.67 * cellPx }
+  await dragBy(page, marqueeFrom, marqueeTo, false)
+  const marqueeBox = await page.evaluate(() => document.querySelector("[data-slot=dot-field-selection]")?.getBoundingClientRect().toJSON() ?? null)
+  const offBy = marqueeBox ? Math.max(Math.abs(marqueeBox.x - marqueeFrom.x), Math.abs(marqueeBox.y - marqueeFrom.y), Math.abs(marqueeBox.x + marqueeBox.width - marqueeTo.x), Math.abs(marqueeBox.y + marqueeBox.height - marqueeTo.y)) : Infinity
+  expect("the selection box runs exactly from where the press was to the pointer, off the cells, within a pixel (the user, 2026-11-11)", offBy <= 1 ? "within a pixel" : { offBy, marqueeBox, marqueeFrom, marqueeTo }, "within a pixel")
+  await page.mouse.up()
+  await page.waitForTimeout(300)
+
+  await openDoc(page, "checker", {
+    objects: [resistorAt("R1", 10, 10), resistorAt("R2", 10, 16)],
+    wires: [
+      { id: "w", a: cellPoint(14, 11), b: cellPoint(20, 11) },
+      { id: "w2", a: cellPoint(10, 11), b: cellPoint(10, 17) },
+      { id: "w3", a: cellPoint(14, 17), b: cellPoint(20, 17) },
+    ],
+    parts: {},
+  })
+  f = await fieldFrame(page)
+  const toggle = page.locator("button[aria-label^='Show the field']")
+  if (await toggle.count()) await toggle.first().click()
+  await page.waitForTimeout(400)
+  f = await fieldFrame(page)
+  const findings = () => page.evaluate(() => [...document.querySelectorAll("[data-slot=field-panel] [data-problem^='check:']")].map((e) => e.getAttribute("data-problem")!.split(":")[1]))
+  const rings = () => page.evaluate(() => document.querySelectorAll("[data-slot=check-marks], [data-finding]").length)
+  expect("the checker lists both dangling ends among the field's problems (design.md §6.8: the explorer's Problems)", (await findings()).filter((k) => k === "dangling-end").length, 2)
+  expect("and draws nothing on the field: no ring, no mark (the user, 2026-11-06)", await rings(), 0)
+  const free = await f.toScreen(cellPoint(20, 11))
+  await page.mouse.move(free.x, free.y)
+  await page.keyboard.press("q")
+  await page.waitForTimeout(500)
+  expect("Q over an open end puts nothing there: there is no no-connect mark (the user, 2026-11-06)", [await countOf(page, "[data-body] [data-slot=component]"), (await findings()).filter((k) => k === "dangling-end").length], [2, 2])
+  const onWire = await f.toScreen(cellPoint(17, 17))
+  const below = await f.toScreen(cellPoint(17, 21))
+  await page.mouse.move(onWire.x, onWire.y)
+  await page.mouse.down()
+  await page.mouse.move(below.x, below.y, { steps: 8 })
+  await page.waitForTimeout(200)
+  expect("held, a dragged wire shows no checker ring anywhere", await rings(), 0)
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  expect("released, still none", await rings(), 0)
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(500)
+  const r2 = await f.toScreen(cellPoint(12, 17))
+  await dragBy(page, r2, { x: r2.x, y: r2.y + (await f.toScreen(cellPoint(0, 3))).y - (await f.toScreen(cellPoint(0, 0))).y })
+  expect("an ordinary edit goes through while findings stand: the checker never blocks", (await f.worldOf("R2")).y, 19 * GRID)
+}
 
 async function zoomAcrossPinDetail(page: Page) {
   const pinsDrawn = () => page.evaluate(() => document.querySelectorAll("[data-slot=pins] [data-pin]").length > 0)
@@ -123,7 +928,8 @@ async function contactsFollowTheDrag(page: Page) {
   const lcd = doc.objects.find((o) => o.def === "lcd7-f")!
   const board = doc.objects.find((o) => o.def === "open746i-c")!
   const docked = await box(page, lcd.id)
-  const cell = docked.width / getDef("lcd7-f")!.width
+  const cell = GRID * (await page.evaluate(() => new DOMMatrix(getComputedStyle(document.querySelector("[data-slot=dot-field-content]")!).transform).a))
+  const dockedWorld = await (await fieldFrame(page)).worldOf(lcd.id)
   const grab = { x: docked.x + docked.width / 2, y: docked.y + LCD_BEZEL_CELLS * cell }
   const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-body]")?.getAttribute("data-body"), grab)
   expect("the grab point is on the LCD", hit, lcd.id)
@@ -142,7 +948,7 @@ async function contactsFollowTheDrag(page: Page) {
   expect("3 cells down, before release: no LCD dot is left", (await dots(page, lcd.id)).contact, 0)
   expect("…nor on P15", (await dots(page, board.id)).contact, before.board.contact - before.lcd.contact)
   await to(0, 2)
-  expect("2 cells down, its FFC tail over the board's: the plate is red (on the board, pins in no socket)", await blockedNow(page, lcd.id), true)
+  expect("2 cells down, its FFC tail over the board's: blocked, and the LCD glows (on the board, pins in no socket)", [await blockedNow(page, lcd.id), await glowsNow(page, lcd.id)], [true, true])
   await to(0, 3)
   await zoomAcrossPinDetail(page)
   await to(0, 4)
@@ -164,7 +970,7 @@ async function contactsFollowTheDrag(page: Page) {
   await page.waitForTimeout(500)
   const away = await box(page, lcd.id)
   const regrab = { x: away.x + away.width / 2, y: away.y + LCD_BEZEL_CELLS * cell }
-  expect(`the LCD moved ${LIFT_CELLS} cells`, Math.round((away.y + PAN_PX - docked.y) / cell), LIFT_CELLS)
+  expect(`the LCD moved ${LIFT_CELLS} cells`, Math.round(((await (await fieldFrame(page)).worldOf(lcd.id)).y - dockedWorld.y) / GRID), LIFT_CELLS)
   await page.mouse.move(regrab.x, regrab.y)
   await page.mouse.down()
   await page.mouse.move(regrab.x, regrab.y - LIFT_CELLS * cell, { steps: 12 })
@@ -175,6 +981,272 @@ async function contactsFollowTheDrag(page: Page) {
   await page.mouse.up()
   await page.waitForTimeout(800)
   expect("released: the committed picture is the same", { lcd: await dots(page, lcd.id), board: await dots(page, board.id) }, before)
+}
+
+async function multivibratorByHand(page: Page) {
+  console.log("\nacceptance 6: a multivibrator by hand, its X drawn in the any-angle mode (plan.md acceptance 6, design.md §6.11)")
+  const part = (id: string, def: string, x: number, y: number, props: Record<string, string> = {}, extra: Partial<PlacedObject> = {}): PlacedObject => ({ id, def, x: x * GRID, y: y * GRID, props: { ref: id, ...props }, ...extra })
+  const staged: PlacedObject[] = [
+    part("R1", "resistor", 0, 22, { value: "1 kΩ" }, { rotation: 90 }),
+    part("R2", "resistor", 3, 22, { value: "47 kΩ" }, { rotation: 90 }),
+    part("R3", "resistor", 6, 22, { value: "47 kΩ" }, { rotation: 90 }),
+    part("R4", "resistor", 9, 22, { value: "1 kΩ" }, { rotation: 90 }),
+    part("C1", "capacitor", 12, 23, { value: "220 nF" }),
+    part("C2", "capacitor", 17, 23, { value: "100 nF" }),
+    part("VT1", "npn", 22, 22, {}, { mirror: true }),
+    part("VT2", "npn", 22, 15),
+  ]
+  const places: Record<string, readonly [number, number]> = { R1: [1, 0], R2: [5, 0], R3: [13, 0], R4: [17, 0], C1: [2, 3], C2: [14, 3], VT1: [1, 8], VT2: [15, 8] }
+  const frameParts = [part("V1", "supply", -1, -2, { value: "+5V", voltage: "5 V" }), part("G1", "ground", 9, 14)]
+  const rails = [
+    { id: "rail", a: cellPoint(0, 0), b: cellPoint(18, 0) },
+    { id: "c1", a: cellPoint(2, 4), b: cellPoint(2, 8) },
+    { id: "c2", a: cellPoint(18, 4), b: cellPoint(18, 8) },
+    { id: "e1", a: cellPoint(2, 12), b: cellPoint(2, 14) },
+    { id: "gnd", a: cellPoint(2, 14), b: cellPoint(18, 14) },
+    { id: "e2", a: cellPoint(18, 14), b: cellPoint(18, 12) },
+  ]
+  await openDoc(page, "multivibrator-by-hand", { objects: [...frameParts, ...staged], wires: rails, parts: {} })
+  const frame = await fieldFrame(page)
+  const view = (await page.locator("[data-slot=dot-field-viewport]").boundingBox())!
+  const onScreen = (p: Point) => p.x > view.x && p.x < view.x + view.width && p.y > view.y && p.y < view.y + view.height
+  const bodyUnder = (p: Point) => page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest("[data-body]")?.getAttribute("data-body") ?? null, [p.x, p.y])
+  const middle = (o: PlacedObject) => {
+    const c = bodyCentre(getDef(o.def)!, orientationOf(o))
+    return frame.toScreen({ x: o.x + c.x * GRID, y: o.y + c.y * GRID })
+  }
+  for (const o of staged) {
+    const [x, y] = places[o.id]
+    const target = { ...o, x: x * GRID, y: y * GRID }
+    expect(`${o.id}: where it waits a press lands on its body, and where it goes is on screen`, [await bodyUnder(middle(o)), onScreen(middle(target))], [o.id, true])
+    const was = await frame.worldOf(o.id)
+    await dragBy(page, middle(o), middle(target))
+    const now = await frame.worldOf(o.id)
+    expect(`${o.id} dragged into place`, { x: now.x - was.x, y: now.y - was.y }, { x: target.x - o.x, y: target.y - o.y })
+  }
+  const bare = frame.toScreen(cellPoint(10, 18))
+  await page.mouse.click(bare.x, bare.y)
+  await page.waitForTimeout(500)
+  expect("a click on bare field clears the selection: no inspector over the field", await countOf(page, "[data-slot=inspector]"), 0)
+
+  const tag = () => page.evaluate(() => document.querySelector("[data-slot=line-mode]")?.textContent ?? null)
+  const drawing = () => countOf(page, "[data-slot=pending-wire-route]")
+  const startAt = async (from: Point, towards: Point) => {
+    const start = frame.toScreen(from)
+    const aim = frame.toScreen(towards)
+    await page.mouse.move(start.x, start.y)
+    await page.mouse.click(start.x, start.y)
+    await page.mouse.move((start.x + aim.x) / 2, (start.y + aim.y) / 2, { steps: 6 })
+    await page.waitForTimeout(200)
+  }
+  const finishAt = async (to: Point) => {
+    const end = frame.toScreen(to)
+    await page.mouse.move(end.x, end.y, { steps: 6 })
+    await page.mouse.click(end.x, end.y)
+    await page.waitForTimeout(500)
+  }
+  await startAt(cellPoint(6, 4), cellPoint(15, 10))
+  expect("a wire drawn from R2's foot starts in 90°, the tag beside the pointer says so", [await drawing(), await tag()], [1, "90°"])
+  await page.keyboard.press("Shift+Space")
+  await page.waitForTimeout(150)
+  expect("Shift+Space: 45°", await tag(), "45°")
+  await page.keyboard.press("Shift+Space")
+  await page.waitForTimeout(150)
+  expect("Shift+Space again: any angle", await tag(), "∠")
+  await finishAt(cellPoint(15, 10))
+  expect("ended on VT2's base, the wire is finished", await drawing(), 0)
+  await startAt(cellPoint(14, 4), cellPoint(5, 10))
+  expect("the next wire keeps the mode: any angle", await tag(), "∠")
+  await finishAt(cellPoint(5, 10))
+  expect("ended on VT1's base, the wire is finished", await drawing(), 0)
+  await shoot(page, "multivibrator-by-hand")
+
+  const routes = await page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] g[data-net] > g[data-wire]")].map((e) => ({ net: e.parentElement!.getAttribute("data-net"), points: e.getAttribute("data-points") })))
+  const runBetween = (p: Point, q: Point) => routes.find((r) => r.points === `${p.x},${p.y} ${q.x},${q.y}` || r.points === `${q.x},${q.y} ${p.x},${p.y}`)
+  const first = runBetween(cellPoint(6, 4), cellPoint(15, 10))
+  const second = runBetween(cellPoint(14, 4), cellPoint(5, 10))
+  expect("each leg of the X is one straight wire from a foot to the far base", [!!first, !!second], [true, true])
+  expect("the X is two nets: its legs cross without connecting", !!first && !!second && first.net !== second.net, true)
+  const dots = (await page.evaluate(() => [...document.querySelectorAll("[data-junction]")].map((e) => e.getAttribute("data-junction")!))).sort()
+  const want = [[2, 0], [6, 0], [14, 0], [2, 4], [6, 4], [14, 4], [18, 4], [10, 14]].map(([x, y]) => `${x * GRID},${y * GRID}`).sort()
+  expect("dots on the rails' T's and the four foot nodes, none at the crossing (10, 6⅔)", dots, want)
+
+  const toasts = () => countOf(page, "[data-sonner-toast]")
+  const wireOver = (p: Point) => page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest("[data-wire]"), [p.x, p.y])
+  const inner = frame.toScreen(cellPoint(12, 8))
+  await page.mouse.dblclick(inner.x, inner.y)
+  await page.waitForTimeout(300)
+  expect("a double click on a lattice point inside a leg of the X starts a branch there (design.md §6.11 rule 6)", await drawing(), 1)
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(300)
+  const between = frame.toScreen(cellPoint(12.75, 8.5))
+  const wiresBefore = await countOf(page, "[data-slot=wires] g[data-wire]")
+  const toastsBefore = await toasts()
+  expect("set up: the press between two lattice points of the leg lands on the wire", await wireOver(between), true)
+  await page.mouse.dblclick(between.x, between.y)
+  await page.waitForTimeout(300)
+  expect("a double click on the leg 0.9 cell from its nearest lattice point does nothing: no wire started, none laid, no toast (rule 6; findings 7.4)", [await drawing(), await countOf(page, "[data-slot=wires] g[data-wire]"), await toasts()], [0, wiresBefore, toastsBefore])
+  await page.keyboard.press("Escape")
+  await page.mouse.click(bare.x, bare.y)
+  await page.waitForTimeout(300)
+
+  await page.mouse.move(bare.x, bare.y)
+  await page.keyboard.press("w")
+  await page.waitForTimeout(150)
+  expect("W armed: the tag beside the pointer names the session's mode before the first click (rule 1; findings 7.4)", await tag(), "∠")
+  await page.keyboard.press("Shift+Space")
+  await page.waitForTimeout(150)
+  expect("Shift+Space while W is armed: the tag shows the next mode at once", await tag(), "90°")
+  await page.keyboard.down("Shift")
+  for (let i = 0; i < 3; i++) await page.keyboard.down("Space")
+  await page.keyboard.up("Space")
+  await page.keyboard.up("Shift")
+  await page.waitForTimeout(150)
+  expect("Shift+Space held down, Space repeating: one step, as KEYMAP.lineMode does not repeat", await tag(), "45°")
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(150)
+  expect("W disarmed: no tag", await tag(), null)
+
+  const contentTransform = () => page.evaluate(() => getComputedStyle(document.querySelector("[data-slot=dot-field-content]")!).transform)
+  const before = await contentTransform()
+  await page.keyboard.down("Shift")
+  await page.keyboard.down("Space")
+  await dragBy(page, bare, { x: bare.x + 120, y: bare.y + 60 })
+  await page.keyboard.up("Space")
+  await page.keyboard.up("Shift")
+  await page.keyboard.press("Escape")
+  expect("Shift+Space held and a drag on bare field: no pan (design.md §6.11 rule 1)", await contentTransform(), before)
+  await page.keyboard.down("Space")
+  await dragBy(page, bare, { x: bare.x + 120, y: bare.y + 60 })
+  await page.keyboard.up("Space")
+  expect("Space alone held and the same drag: the view pans", (await contentTransform()) !== before, true)
+}
+
+async function bridgeBuiltByHand(page: Page) {
+  console.log("\na diode bridge built by hand: four diodes turned with R and Shift+R, dragged corner to corner")
+  const diode = (n: number): PlacedObject => ({ id: `d${n}`, def: "diode", x: 0, y: (n - 1) * 3 * GRID, props: { ref: `D${n}`, value: "1N4007", vrev: "1000 V" } })
+  let doc: Schematic = { objects: [1, 2, 3, 4].map(diode), wires: [], parts: {} }
+  const corner: PlacedObject = { id: "g", def: "ground", x: 12 * GRID, y: 10 * GRID }
+  await openDoc(page, "bridge-by-hand", { ...doc, objects: [...doc.objects, corner], version: SCHEMATIC_VERSION } as Schematic)
+  const frame = await fieldFrame(page)
+  const middle = (o: PlacedObject) => {
+    const c = bodyCentre(getDef(o.def)!, orientationOf(o))
+    return frame.toScreen({ x: o.x + c.x * GRID, y: o.y + c.y * GRID })
+  }
+  const plan: [string, Turn, number, number, number][] = [["d1", -1, 1, 5, 1], ["d2", -1, 3, 8, 1], ["d3", -1, 3, 5, 4], ["d4", -1, 1, 8, 4]]
+  const reachable = (p: Point) => p.x > 270 && p.x < 1150 && p.y > 40 && p.y < 950
+  for (const [id, turn, presses, tx, ty] of plan) {
+    const before = doc.objects.find((o) => o.id === id)!
+    expect(`${id} starts where the pointer can reach it, clear of the inspector`, reachable(middle(before)), true)
+    await page.mouse.click(middle(before).x, middle(before).y)
+    for (let i = 0; i < presses; i++) {
+      await page.keyboard.press(turn > 0 ? "r" : "Shift+R")
+      doc = rotateSelection(doc, new Set([id]), turn, GRID)
+      await page.waitForTimeout(150)
+    }
+    const turned = doc.objects.find((o) => o.id === id)!
+    const target = { ...turned, x: tx * GRID, y: ty * GRID }
+    expect(`${id} goes where the pointer can reach`, reachable(middle(target)), true)
+    await dragBy(page, middle(turned), middle(target))
+    doc = { ...doc, objects: doc.objects.map((o) => (o.id === id ? target : o)) }
+  }
+  await page.mouse.click(300, 900)
+  await page.waitForTimeout(500)
+  await shoot(page, "bridge-by-hand")
+  const placed = await page.evaluate(() =>
+    [...document.querySelectorAll("[data-body]")].map((e) => {
+      const svg = e.querySelector<SVGSVGElement>("[data-slot=component]")!
+      return { id: e.getAttribute("data-body"), transform: svg.style.transform }
+    }),
+  )
+  expect("each diode turned by R and Shift+R stands on its diagonal", placed.filter((p) => p.id?.startsWith("d")).map((p) => p.transform), ["rotate(315deg)", "rotate(225deg)", "rotate(225deg)", "rotate(315deg)"])
+  for (const id of ["d1", "d2", "d3", "d4"]) {
+    const marks = await dots(page, id)
+    expect(`${id}: both pins meet a neighbour's: no open-pin marker left, and no dot where only two ends meet (design.md §3.2–3.3)`, { open: marks.open, contact: marks.contact }, { open: 0, contact: 0 })
+  }
+}
+
+const placedNow = async (page: Page): Promise<PlacedObject[]> => {
+  const drawnParts = await page.evaluate(() =>
+    [...document.querySelectorAll("[data-body]")].map((e) => {
+      const svg = e.querySelector<SVGSVGElement>("[data-slot=component]")!
+      return { id: e.getAttribute("data-body")!, def: svg.dataset.def!, left: parseFloat(svg.style.left), top: parseFloat(svg.style.top), w: parseFloat(svg.style.width), h: parseFloat(svg.style.height), transform: svg.style.transform }
+    }),
+  )
+  return drawnParts.map(({ id, def, left, top, w, h, transform }) => {
+    const rotation = Number(transform.match(/rotate\((-?\d+)deg\)/)?.[1] ?? 0) as PlacedObject["rotation"]
+    const mirror = transform.includes("scaleX(-1)")
+    const centre = bodyCentre(getDef(def)!, { rotation: rotation ?? 0, mirror })
+    const at = (v: number) => Math.round(v / GRID) * GRID
+    return { id, def, x: at(left + w / 2 - centre.x * GRID), y: at(top + h / 2 - centre.y * GRID), ...(rotation && { rotation }), ...(mirror && { mirror }) }
+  })
+}
+
+async function turnedBesideANeighbour(page: Page) {
+  console.log("\nR on a resistor lying just under another: it turns beside it, never onto it (the user, 2026-11-13)")
+  const start: Schematic = { objects: [resistorAt("R1", 10, 10), resistorAt("R2", 10, 11)], wires: [], parts: {} }
+  await openDoc(page, "turn-beside", start)
+  const frame = await fieldFrame(page)
+  const onR2 = frame.toScreen(cellPoint(12, 12))
+  await page.mouse.click(onR2.x, onR2.y)
+  for (const press of [1, 2]) {
+    await page.keyboard.press("r")
+    await page.waitForTimeout(600)
+    const placed = await placedNow(page)
+    const r1 = placed.find((o) => o.id === "R1")!
+    const r2 = placed.find((o) => o.id === "R2")!
+    const clear = !placementCheck({ objects: placed, routes: [], grid: GRID }, [r2])(0, 0)
+    console.log(`  press ${press}: R2 at (${r2.x / GRID}, ${r2.y / GRID}) cells, ${r2.rotation ?? 0}°`)
+    expect(`press ${press}: R2 turned ${45 * press}°`, r2.rotation ?? 0, 45 * press)
+    expect(`press ${press}: no body on R1's, no lead or pin on R1`, clear, true)
+    expect(`press ${press}: R1 stays where it was`, [r1.x, r1.y, r1.rotation ?? 0], [start.objects[0].x, start.objects[0].y, 0])
+    await shoot(page, `turned-beside-${press}`)
+  }
+}
+
+const wirePaths = (page: Page) => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire] path[data-base]")].map((e) => e.getAttribute("d")).sort())
+
+async function turnedClearOfWires(page: Page) {
+  console.log("\nR R on an LED above another net's wire: it stands clear of the wire, and a half turn of joined resistors lays no wire (the user, 2026-11-13)")
+  const wire = { id: "w", a: cellPoint(4, 12), b: cellPoint(20, 12) }
+  await openDoc(page, "turn-clear-of-wire", { objects: [resistorAt("R3", 0, 11), resistorAt("R4", 20, 11), { id: "D1", def: "led", x: 10 * GRID, y: 10 * GRID, props: { ref: "D1" } }], wires: [wire], parts: {} })
+  const frame = await fieldFrame(page)
+  const before = await wirePaths(page)
+  const onLed = frame.toScreen(cellPoint(12, 10.8))
+  await page.mouse.click(onLed.x, onLed.y)
+  for (let k = 0; k < 2; k++) {
+    await page.keyboard.press("r")
+    await page.waitForTimeout(600)
+  }
+  const placed = await placedNow(page)
+  const d1 = placed.find((o) => o.id === "D1")!
+  const pins = objectPins(d1, GRID).map((p) => p.point)
+  const onTheWire = pins.some((p) => p.y === wire.a.y && p.x >= wire.a.x && p.x <= wire.b.x)
+  const across = wireCheck({ objects: placed, routes: [{ id: wire.id, pts: [wire.a, wire.b], owner: [] }], grid: GRID }, [d1], false)(0, 0)
+  console.log(`  D1 at (${d1.x / GRID}, ${d1.y / GRID}) cells, ${d1.rotation ?? 0}°`)
+  expect("the LED stands upright", d1.rotation ?? 0, 90)
+  expect("…its body across no wire and no pin on the wire", [across, onTheWire], [false, false])
+  expect("…and the wire is left as it was", await wirePaths(page), before)
+  await shoot(page, "turned-clear-of-wire")
+  for (const [name, wires] of [
+    ["butted", []],
+    ["joined", [{ id: "j", a: cellPoint(4, 1), b: cellPoint(6, 1) }]],
+  ] as const) {
+    const r2 = resistorAt("R2", name === "butted" ? 4 : 6, 0)
+    await openDoc(page, `half-turn-${name}`, { objects: [resistorAt("R1", 0, 0), r2], wires: [...wires], parts: {} })
+    const f = await fieldFrame(page)
+    const was = await wirePaths(page)
+    const on = f.toScreen({ x: r2.x + 2 * GRID, y: r2.y + GRID })
+    await page.mouse.click(on.x, on.y)
+    for (let k = 0; k < 4; k++) {
+      await page.keyboard.press("r")
+      await page.waitForTimeout(500)
+    }
+    const turned = (await placedNow(page)).find((o) => o.id === "R2")!
+    expect(`${name}: R2 half-turned where it stood`, [turned.x, turned.y, turned.rotation ?? 0], [r2.x, r2.y, 180])
+    expect(`${name}: no wire laid, the wires exactly as they were`, await wirePaths(page), was)
+    await shoot(page, `half-turn-${name}`)
+  }
 }
 
 async function addingLandsInView(page: Page) {
@@ -223,7 +1295,7 @@ async function noPluggingIntoHeaders(page: Page) {
   const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-body]")?.getAttribute("data-body"), grab)
   expect("the grab point is on the crystal", hit, q.id)
   await dragBy(page, grab, frame.toScreen(crystalMiddle({ ...q, ...target })), false)
-  expect(`over ${left.key.split(":")[1]} and the pin four cells on, the plate is red`, await blockedNow(page, q.id), true)
+  expect(`over ${left.key.split(":")[1]} and the pin four cells on: blocked, and the crystal glows`, [await blockedNow(page, q.id), await glowsNow(page, q.id)], [true, true])
   await page.mouse.up()
   await page.waitForTimeout(800)
   const landed = await frame.worldOf(q.id)
@@ -234,24 +1306,67 @@ async function noPluggingIntoHeaders(page: Page) {
   expect("…nor sent home: the board's edge is nearer to the drop", Math.hypot(landed.x - q.x, landed.y - q.y) > GRID / 2, true)
 }
 
+const dimmedNets = (page: Page) => page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-net]")].filter((g) => g.classList.contains("opacity-25")).length)
+
+async function noFadeLeftAfterADrop(page: Page) {
+  console.log("\nno net is left faded after a part lands on a wire (the user, 2026-11-13: an inductor dragged from the palette onto a wire left every other net pale)")
+  const doc: Schematic = {
+    objects: [resistorAt("R1", 2, 10), resistorAt("R6", 2, 14), resistorAt("R7", 24, 14)],
+    wires: [{ id: "a", a: cellPoint(6, 11), b: cellPoint(24, 11) }, { id: "b", a: cellPoint(6, 15), b: cellPoint(24, 15), color: "blue" }],
+    parts: {},
+  }
+  await openDoc(page, "palette-onto-wire", doc)
+  await page.addStyleTag({ content: "[data-sonner-toaster]{display:none!important}" })
+  const frame = await fieldFrame(page)
+  const tile = (await page.getByRole("button", { name: "Inductor", exact: true }).boundingBox())!
+  const onTheWire = frame.toScreen(cellPoint(10, 11))
+  const drop = frame.toScreen(cellPoint(14, 11))
+  await page.mouse.move(tile.x + tile.width / 2, tile.y + tile.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(onTheWire.x, onTheWire.y, { steps: 20 })
+  await page.mouse.move(drop.x, drop.y, { steps: 10 })
+  await page.waitForTimeout(200)
+  expect("an inductor carried from the palette along a wire dims no net: a part in hand is not a wire hovered", await dimmedNets(page), 0)
+  await page.mouse.up()
+  await page.waitForTimeout(800)
+  expect("dropped onto the wire it is put in series, and no net is dimmed", [await countOf(page, "[data-body]"), await dimmedNets(page)], [4, 0])
+  const away = frame.toScreen(cellPoint(14, 20))
+  await page.mouse.move(away.x, away.y, { steps: 8 })
+  await page.mouse.click(away.x, away.y)
+  await page.waitForTimeout(300)
+  expect("moved away and clicked on empty field: still no net dimmed", await dimmedNets(page), 0)
+  const onBlue = frame.toScreen(cellPoint(18, 15))
+  await page.mouse.move(onBlue.x, onBlue.y, { steps: 8 })
+  await page.waitForTimeout(300)
+  expect("hovering a wire still lights its net and fades the rest", (await dimmedNets(page)) > 0, true)
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(600)
+  expect("an edit under a resting pointer ends the hover: it belonged to the document before it", await dimmedNets(page), 0)
+  await page.mouse.move(away.x, away.y, { steps: 8 })
+  const r6 = frame.toScreen(cellPoint(4, 15))
+  const onA = frame.toScreen(cellPoint(14, 11))
+  await dragBy(page, r6, onA)
+  expect("a part moved onto a wire and dropped leaves no net dimmed either", await dimmedNets(page), 0)
+}
+
 async function freedSlotTakesTheDrop(page: Page) {
   console.log("\na crystal dropped half on a neighbour beside a freed slot")
-  const pitch = { x: 5, y: 4 }
+  const pitch = { x: 5, y: 2 }
   const block: PlacedObject[] = []
   for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) if (row !== 1 || col !== 1) block.push(crystal(`q${row}${col}`, col * pitch.x, row * pitch.y, `ZQ${block.length + 1}`))
   const mover = crystal("mover", 40, 20, "ZQ9")
   await openDoc(page, "slot", { objects: [...block, mover], wires: [], parts: {} })
   const frame = await fieldFrame(page)
   const slot = { x: pitch.x * GRID, y: pitch.y * GRID }
-  const drop = { x: slot.x + 2 * GRID, y: slot.y + GRID }
+  const drop = { x: slot.x + 2 * GRID, y: slot.y }
   await dragBy(page, frame.toScreen(crystalMiddle(mover)), frame.toScreen(crystalMiddle({ ...mover, ...drop })), false)
-  expect("two cells right of the slot and one down it is on its neighbour: red", await blockedNow(page, mover.id), true)
+  expect("two cells right of the slot its lead lies along its neighbour's: blocked, and it glows", [await blockedNow(page, mover.id), await glowsNow(page, mover.id)], [true, true])
   await page.mouse.up()
   await page.waitForTimeout(800)
   const landed = await frame.worldOf(mover.id)
   const cells = (p: Point) => ({ x: p.x / GRID, y: p.y / GRID })
   expect("released: not left where it was blocked", landed.x === drop.x && landed.y === drop.y, false)
-  expect("…but in the freed slot, a cell below the drop, the nearest spot it fits", cells(landed), cells({ x: drop.x, y: drop.y + GRID }))
+  expect("…but a cell below the drop, the nearest spot it fits, nearer home of the two (design.md §5.1: bodies and leads only)", cells(landed), cells({ x: drop.x, y: drop.y + GRID }))
   await shoot(page, "freed-slot")
 }
 
@@ -330,6 +1445,289 @@ async function typeBPlugTakesTheClick(page: Page) {
   }
 }
 
+const cellsOfPath = (d: string | null) => {
+  if (!d) return null
+  const marks = [...d.matchAll(/([MLQ])(-?[\d.]+) (-?[\d.]+)/g)]
+  const kept = marks.filter((m, i) => m[1] !== "L" || i === marks.length - 1 || marks[i + 1][1] !== "Q")
+  return kept.map((m) => [Number(m[2]) / GRID, Number(m[3]) / GRID])
+}
+
+async function noReadoutWhileDrawing(page: Page) {
+  console.log("\na pin's readout shows on hover, not while a wire is drawn over the pin (the user, 2026-11-14)")
+  await openDoc(page, "readout-while-drawing", { objects: [{ id: "U1", def: "nucleo-f429zi", x: 0, y: 0, props: { ref: "U1" } }], wires: [], parts: {} })
+  await zoomTo(page, 0)
+  const f = await fieldFrame(page)
+  const pin = f.toScreen(cellPoint(23, 38))
+  const readouts = () => countOf(page, "[data-slot=field-readout]")
+  await page.mouse.move(pin.x, pin.y, { steps: 4 })
+  await page.waitForTimeout(500)
+  expect("hovered with nothing in hand, the pin shows its readout", await readouts(), 1)
+  await page.mouse.down()
+  const away = f.toScreen(cellPoint(23, 34))
+  await page.mouse.move(away.x, away.y, { steps: 8 })
+  await page.waitForTimeout(500)
+  expect("pressed on that pin and drawn away from it: no readout card left behind", [await countOf(page, "[data-slot^=pending-wire]") > 0, await readouts()], [true, 0])
+  await page.mouse.up()
+  await page.keyboard.press("Escape")
+  const start = f.toScreen(cellPoint(30, 36))
+  await page.mouse.move(start.x, start.y, { steps: 4 })
+  await page.mouse.dblclick(start.x, start.y)
+  await page.waitForTimeout(300)
+  await page.mouse.move(pin.x, pin.y, { steps: 8 })
+  await page.waitForTimeout(500)
+  expect("a wire being drawn over the same pin: no readout card in the way", [await countOf(page, "[data-slot^=pending-wire]") > 0, await readouts()], [true, 0])
+  await page.keyboard.press("Escape")
+}
+
+async function phaseSixChecks(page: Page) {
+  console.log("\nthe router in the editor: the completion mid-gesture, the row taken after the fact, re-route with T and the menu (phase 6, design.md §6.1, §7, §13.9, §13.22)")
+  const previewCells = () => page.evaluate(() => document.querySelector("[data-slot=pending-wire-route] path:not([mask])")?.getAttribute("d") ?? null).then(cellsOfPath)
+  const previewRefused = () => page.evaluate(() => document.querySelector("[data-slot=pending-wire-route]")?.hasAttribute("data-refused") ?? null)
+  const runCells = () =>
+    page.evaluate(() => [...document.querySelectorAll("[data-slot=wires] [data-wire][data-points]")].map((e) => e.getAttribute("data-points")!)).then((runs) =>
+      runs
+        .map((r) => r.split(" ").map((p) => p.split(",").map((v) => Number(v) / GRID)))
+        .map((run) => (run[0][0] - run[run.length - 1][0] || run[0][1] - run[run.length - 1][1]) > 0 ? run.reverse() : run)
+        .sort((a, b) => a[0][0] - b[0][0] || a[0][1] - b[0][1]),
+    )
+  const shownRuns = () => page.evaluate(() => [...document.querySelectorAll<SVGElement>("[data-slot=wires] [data-wire][data-points]")].filter((e) => e.style.display !== "none").map((e) => e.getAttribute("data-points")))
+  const bandCells = () =>
+    pieces(page).then((pieces) =>
+      pieces.map(([ax, ay, bx, by]) => (ax < bx || (ax === bx && ay <= by) ? [ax, ay, bx, by] : [bx, by, ax, ay]).map((v) => v / GRID).join(" ")).sort(),
+    )
+  const piecesOf = (cells: number[][]) => cells.slice(1).map(([x, y], i) => ([cells[i][0], cells[i][1], x, y] as number[])).map(([ax, ay, bx, by]) => (ax < bx || (ax === bx && ay <= by) ? [ax, ay, bx, by] : [bx, by, ax, ay]).join(" ")).sort()
+  const selectedRuns = () => page.evaluate(() => new Set([...document.querySelectorAll("[data-slot=selection] path[data-wire]")].map((e) => e.getAttribute("data-wire"))).size)
+  const toastTexts = () => page.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].map((e) => e.textContent ?? ""))
+  const press = async (p: Point) => {
+    await page.mouse.move(p.x, p.y)
+    await page.waitForTimeout(80)
+    await page.mouse.down()
+  }
+  const glide = async (p: Point) => {
+    await page.mouse.move(p.x, p.y, { steps: 10 })
+    await page.waitForTimeout(250)
+  }
+  const undo = async () => {
+    await page.keyboard.press("Control+z")
+    await page.waitForTimeout(500)
+  }
+  const redo = async () => {
+    await page.keyboard.press("Control+Shift+z")
+    await page.waitForTimeout(500)
+  }
+
+  await openDoc(page, "completion-over", { objects: [resistorAt("R1", 10, 10), resistorAt("R2", 20, 10), resistorAt("R3", 16, 7, 90)], wires: [], parts: {} })
+  await zoomTo(page, 0)
+  let f = await fieldFrame(page)
+  const under = [
+    [14, 11],
+    [14, 12],
+    [20, 12],
+    [20, 11],
+  ]
+  await press(f.toScreen(cellPoint(14, 11)))
+  await glide(f.toScreen(cellPoint(19, 11)))
+  expect("held, one cell short of R2's pin: the plain L would pass over R3's pin, so it is drawn refused, and nothing is routed on the field (design.md §6.7)", await previewRefused(), true)
+  await glide(f.toScreen(cellPoint(20, 11)))
+  expect("held over R2's pin: the router's route under R3's pin is offered, not refused (design.md §13.22 q7 A; mockups/phase6-questions.png 7)", [await previewRefused(), await previewCells()], [false, under])
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  expect("released there: the wire laid is exactly the route that was shown", await runCells(), [under])
+  await undo()
+  expect("one undo takes it back", await runCells(), [])
+  await redo()
+  expect("one redo lays it again", await runCells(), [under])
+
+  await openDoc(page, "completion-corner", { objects: [resistorAt("R1", 10, 10), resistorAt("R5", 20, 10), resistorAt("R3", 19, 15, 90)], wires: [], parts: {} })
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  const otherL = [
+    [14, 11],
+    [14, 15],
+    [20, 15],
+  ]
+  const r1 = f.toScreen(cellPoint(14, 11))
+  await page.mouse.click(r1.x, r1.y)
+  await page.waitForTimeout(200)
+  await glide(f.toScreen(cellPoint(20, 15)))
+  expect("click mode, over R3's top pin: the plain L would bend on R5's pin, the other L is offered (design.md §13.22 q7 A)", [await previewRefused(), await previewCells()], [false, otherL])
+  const r3 = f.toScreen(cellPoint(20, 15))
+  await page.mouse.click(r3.x, r3.y)
+  await page.waitForTimeout(600)
+  expect("the click lays exactly the preview", await runCells(), [otherL])
+
+  const nucleo: PlacedObject = { id: "U1", def: "nucleo-f429zi", x: 20 * GRID, y: 0, props: { ref: "U1" } }
+  const straightD45 = [
+    [12, 20],
+    [23, 20],
+    [23, 19],
+    [26, 19],
+  ]
+  const slippedD45 = [
+    [12, 20],
+    [23, 20],
+    [23, 19.5],
+    [26, 19.5],
+    [26, 19],
+  ]
+  const segmentsOf = (cells: number[][], id: string) => cells.slice(1).map(([x, y], i) => ({ id: `${id}${i}`, a: cellPoint(cells[i][0], cells[i][1]), b: cellPoint(x, y) }))
+  await openDoc(page, "row-taken-after", { objects: [nucleo, resistorAt("R1", 14, 18), resistorAt("R4", 8, 19)], wires: segmentsOf(straightD45, "d45-"), parts: {} })
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  const reset = f.toScreen(cellPoint(25, 19))
+  const visible = await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest("[data-slot=dot-field-viewport]"), reset)
+  expect("guard: RESET's socket is on screen", visible, true)
+  await press(f.toScreen(cellPoint(18, 19)))
+  await glide(reset)
+  expect("held over RESET, which D45's wire passes: the drawing is offered, not refused (junctions.md 35)", [await previewRefused(), await previewCells()], [false, [[18, 19], [25, 19]]])
+  expect("and D45's wire shows on its half-cell slip while the end is held, the wire the release lays (the main session's decision on review B's question 5)", [await shownRuns(), await bandCells()], [[], piecesOf(slippedD45)])
+  await page.mouse.up()
+  await page.waitForTimeout(700)
+  expect("released: RESET's wire straight, D45's on the half-cell slip, in that one edit (design.md §13.9)", await runCells(), [[[18, 19], [25, 19]], slippedD45].sort((a, b) => a[0][0] - b[0][0]))
+  await undo()
+  expect("one undo gives back D45's straight wire and no RESET wire", await runCells(), [straightD45])
+  await redo()
+  expect("one redo both again", await runCells(), [[[18, 19], [25, 19]], slippedD45].sort((a, b) => a[0][0] - b[0][0]))
+
+  const hooked = (): Schematic => ({
+    objects: [resistorAt("R6", 22, 17), { ...resistorAt("R7", 23, 19), rotation: 180 }],
+    wires: segmentsOf(
+      [
+        [26, 18],
+        [28, 18],
+        [28, 20],
+        [27, 20],
+      ],
+      "hook-",
+    ),
+    parts: {},
+  })
+  const hook = [
+    [26, 18],
+    [28, 18],
+    [28, 20],
+    [27, 20],
+  ]
+  const straight = [
+    [26, 18],
+    [27, 18],
+    [27, 20],
+  ]
+  await openDoc(page, "reroute-key", hooked())
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  const onHook = f.toScreen(cellPoint(28, 19))
+  await page.mouse.click(onHook.x, onHook.y)
+  await page.waitForTimeout(300)
+  expect("guard: a click on the hook selects its run", await selectedRuns(), 1)
+  await page.keyboard.press("t")
+  await page.waitForTimeout(600)
+  expect("T re-routes the selected run: the hook becomes one corner (design.md §7, §13.18)", await runCells(), [straight])
+  expect("and the new run is the selection", await selectedRuns(), 1)
+  await undo()
+  expect("one undo gives the hook back", await runCells(), [hook])
+  await redo()
+  expect("one redo straightens it again", await runCells(), [straight])
+  await undo()
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(200)
+  await page.keyboard.press("t")
+  await page.waitForTimeout(400)
+  expect("T with nothing selected does nothing", await runCells(), [hook])
+
+  const menuItem = () => page.getByRole("menuitem", { name: /Re-route wire/ })
+  const empty = f.toScreen(cellPoint(34, 26))
+  await page.mouse.click(empty.x, empty.y, { button: "right" })
+  await page.waitForTimeout(300)
+  expect("the field's menu offers «Re-route wire» with its key, disabled while no wire is selected", [await menuItem().count(), await menuItem().getAttribute("data-disabled"), (await menuItem().textContent())?.replace("Re-route wire", "")], [1, "", "T"])
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(300)
+  await page.mouse.click(onHook.x, onHook.y)
+  await page.waitForTimeout(300)
+  await page.mouse.click(onHook.x, onHook.y, { button: "right" })
+  await page.waitForTimeout(300)
+  expect("with the run selected it is enabled", await menuItem().getAttribute("data-disabled"), null)
+  await menuItem().click()
+  await page.waitForTimeout(600)
+  expect("and re-routes it as T does", await runCells(), [straight])
+  await undo()
+  expect("in one undo step", await runCells(), [hook])
+
+  const boxedIn = segmentsOf(
+    [
+      [18, 11],
+      [18, 11.5],
+      [20, 11.5],
+      [20, 14],
+    ],
+    "boxed-",
+  )
+  await openDoc(page, "reroute-refused", { objects: [resistorAt("R2", 18, 10), resistorAt("R5", 13, 10), resistorAt("R6", 17, 6, 90), resistorAt("R7", 17, 12, 90)], wires: boxedIn, parts: {} })
+  await zoomTo(page, 0)
+  f = await fieldFrame(page)
+  const before = await runCells()
+  const onRun = f.toScreen(cellPoint(20, 13))
+  await page.mouse.click(onRun.x, onRun.y)
+  await page.waitForTimeout(300)
+  await page.keyboard.press("t")
+  await page.waitForTimeout(600)
+  expect("T on a run with no clean path: the toast names the refusal (design.md §7; REROUTE_REFUSED)", (await toastTexts()).some((t) => t.startsWith("Not re-routed")), true)
+  expect("and the run stays as it was", await runCells(), before)
+}
+
+async function diagonalSplice(page: Page) {
+  console.log("\nthe field: a part on its diagonal dropped onto a diagonal wire is cut into it (the user, 2026-11-13)")
+  const diamond = (r3: PlacedObject): Schematic => ({
+    objects: [resistorAt("R1", 10, 0), resistorAt("R2", 21, 9, 90), resistorAt("R4", 10, 20), resistorAt("R5", 1, 9, 90), r3],
+    wires: [
+      { id: "se", a: cellPoint(14, 1), b: cellPoint(22, 9) },
+      { id: "sw", a: cellPoint(22, 13), b: cellPoint(14, 21) },
+      { id: "nw", a: cellPoint(10, 21), b: cellPoint(2, 13) },
+      { id: "ne", a: cellPoint(2, 9), b: cellPoint(10, 1) },
+    ],
+    parts: {},
+  })
+  const diagonalR3 = (rotation: 45 | 135): PlacedObject => ({ id: "R3", def: "resistor", x: 16 * GRID, y: 15 * GRID, rotation, props: { ref: "R3" } })
+  const onTheSouthEastSide = () =>
+    page.evaluate(
+      (cell) =>
+        [...document.querySelectorAll("[data-slot=wires] [data-wire][data-points]")]
+          .map((e) => (e.getAttribute("data-points") ?? "").split(" ").map((p) => p.split(",").map(Number)))
+          .filter((pts) => pts.every(([x, y]) => y - x === -13 * cell))
+          .map((pts) => [pts[0], pts[pts.length - 1]].sort((p, q) => p[0] - q[0]).flat().map((v) => v / cell))
+          .sort((a, b) => a[0] - b[0]),
+      GRID,
+    )
+  const middle = cellPoint(17.5, 16.5)
+  const onTheWire = cellPoint(17.5, 4.5)
+
+  await openDoc(page, "diagonal-splice", diamond(diagonalR3(45)))
+  let f = await fieldFrame(page)
+  const home = await f.worldOf("R3")
+  const movedBy = async () => {
+    const now = await f.worldOf("R3")
+    return { x: (now.x - home.x) / GRID, y: (now.y - home.y) / GRID }
+  }
+  await dragBy(page, f.toScreen(middle), f.toScreen(onTheWire), false)
+  expect("R3 on its 45° diagonal held over the R1–R2 diagonal, its pins on (16, 3) and (19, 6): not drawn as blocked and no glow", [await blockedNow(page, "R3"), await glowsNow(page, "R3")], [false, false])
+  await page.mouse.up()
+  await page.waitForTimeout(800)
+  expect("dropped there, R3 stays where it was let go, twelve cells up", await movedBy(), { x: 0, y: -12 })
+  expect("and the R1–R2 diagonal is cut under it: R1 to (16, 3) and (19, 6) to R2, no open end", [await onTheSouthEastSide(), await countOf(page, "[data-dangling]")], [[[14, 1, 16, 3], [19, 6, 22, 9]], 0])
+  await page.keyboard.press("Control+z")
+  await page.waitForTimeout(500)
+  expect("one Undo takes back the drop and the cut together: R3 home, the diagonal whole", [await movedBy(), await onTheSouthEastSide()], [{ x: 0, y: 0 }, [[14, 1, 22, 9]]])
+
+  await openDoc(page, "diagonal-across", diamond(diagonalR3(135)))
+  f = await fieldFrame(page)
+  const across = await f.worldOf("R3")
+  await dragBy(page, f.toScreen(middle), f.toScreen(onTheWire), false)
+  expect("R3 on the other diagonal held across the R1–R2 diagonal: drawn as blocked and glowing", [await blockedNow(page, "R3"), await glowsNow(page, "R3")], [true, true])
+  await page.mouse.up()
+  await page.waitForTimeout(800)
+  expect("let go across it, R3 does not stay there and the diagonal stays whole", [JSON.stringify(await f.worldOf("R3")) !== JSON.stringify({ x: across.x, y: across.y - 12 * GRID }), await onTheSouthEastSide()], [true, [[14, 1, 22, 9]]])
+}
+
 try {
   await fetch(DEV_SERVER, { signal: AbortSignal.timeout(3000) })
 } catch {
@@ -337,16 +1735,17 @@ try {
   process.exit(1)
 }
 const browser = await chromium.launch({ executablePath: chromiumExecutable() })
-const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
 const errors: string[] = []
-page.on("pageerror", (e) => errors.push(String(e)))
+const everySection = [noReadoutWhileDrawing, turnedBesideANeighbour, turnedClearOfWires, contactsFollowTheDrag, wiresFollowTheDrag, modifiersOnAWire, plateAfterDragBackAndForth, drawFromAWire, farDropAndWireCopy, morningChecks, doubleClickChecks, openEndCue, shorteningFromAnOpenEnd, phaseFiveChecks, diagonalSplice, bridgeBuiltByHand, multivibratorByHand, noPluggingIntoHeaders, freedSlotTakesTheDrop, noFadeLeftAfterADrop, addingLandsInView, typeBPlugTakesTheClick, cursorsOverARunningBench, phaseSixChecks]
+const chosen = (process.env.SECTIONS ?? process.env.ONLY)?.split(",")
+const sections = chosen ? everySection.filter((section) => chosen.includes(section.name)) : everySection
 try {
-  await contactsFollowTheDrag(page)
-  await noPluggingIntoHeaders(page)
-  await freedSlotTakesTheDrop(page)
-  await addingLandsInView(page)
-  await typeBPlugTakesTheClick(page)
-  await cursorsOverARunningBench(page)
+  for (const section of sections) {
+    const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+    page.on("pageerror", (e) => errors.push(String(e)))
+    await section(page)
+    await page.close()
+  }
 } finally {
   await browser.close()
 }

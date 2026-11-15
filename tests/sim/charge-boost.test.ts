@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { builder } from "@/schematic/builder"
+import { builder, rewire } from "@/schematic/builder"
 import { GRID } from "@/schematic/geometry"
 import { partKey, pinKey, type PartState, type Schematic } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
@@ -216,7 +216,7 @@ describe("bare power ICs", () => {
     wire(bat, "-", gnd, "GND")
     let snap = start(doc).run(0.05)
     expect.soft(kindReading(snap, u.id, "CHG").current, "charge current (A)").toBeNear(0.5, 0.02)
-    doc.wires = doc.wires.filter((w) => !(w.to.object === u.id && w.to.pin === "CE"))
+    rewire(doc, (w) => (!(w.to.object === u.id && w.to.pin === "CE") ? w : null))
     snap = start(doc).run(0.05)
     expect.soft(Math.abs(kindReading(snap, u.id, "CHG").current), "CE floating: off (A)").toBeLessThan(1e-3)
   })

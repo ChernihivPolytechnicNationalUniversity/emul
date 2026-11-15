@@ -1,0 +1,13 @@
+{
+  "source": "tests/data/before-the-segments/board-open746-bend-on-p3-7.emul",
+  "objects": [
+    "R1 (resistor)",
+    "U1 (open746i-c)"
+  ],
+  "nets": [
+    [
+      "R1.1",
+      "U1.VCP-RX"
+    ]
+  ]
+}

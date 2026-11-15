@@ -1,0 +1,7 @@
+{
+  "source": "example netduino-blink",
+  "objects": [
+    "U1 (netduino-plus-2)"
+  ],
+  "nets": []
+}

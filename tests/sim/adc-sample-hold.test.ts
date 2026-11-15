@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { STM32F746IG } from "@/mcu/chip"
 import { parseElf } from "@/mcu/elf"
 import { heldVolts, rainMaxOhms } from "@/mcu/periph/adc"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { pinKey } from "@/schematic/types"
@@ -112,7 +112,7 @@ describe("on the Open746I-C: a 10 kΩ pot through 2 kΩ on A2, A3 on 3.3 V, scan
     b.wire(series, "2", u, "CN3-3")
     b.wire(u, "CN3-4", u, "CN2-4")
     doc.objects.push(...b.doc.objects)
-    doc.wires.push(...b.doc.wires)
+    connect(doc, ...connections(b.doc))
     loop.setDoc(doc)
     loop.setParts(doc.parts)
     loop.setRunning(true)

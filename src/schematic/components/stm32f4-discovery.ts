@@ -92,7 +92,6 @@ function header(connector: "P1" | "P2", rows: Row[]): PinDef[] {
       side,
       labelAt: outer ? side : side === "left" ? "right" : "left",
       kind: kindOf(label, mcu),
-      stub: connector === "P1" ? x : WIDTH - x,
       mcu: mcu === "BOOT0" ? undefined : mcu,
       connector,
       connectorPin: pin,

@@ -1,0 +1,21 @@
+{
+  "source": "example buzzers-on-dc",
+  "objects": [
+    "BT1 (battery)",
+    "BZ1 (buzzer-tmb12a05)",
+    "BZ2 (buzzer-cem-1203-42)",
+    "ground@0,11 (ground)",
+    "ground@12,11 (ground)",
+    "ground@24,14 (ground)",
+    "R1 (resistor)",
+    "SW1 (pushbutton)"
+  ],
+  "nets": [
+    ["BT1.-","ground@0,11.GND"],
+    ["BT1.+","SW1.1"],
+    ["BZ1.1","R1.1","SW1.2"],
+    ["BZ1.2","ground@12,11.GND"],
+    ["BZ2.1","R1.2"],
+    ["BZ2.2","ground@24,14.GND"]
+  ]
+}

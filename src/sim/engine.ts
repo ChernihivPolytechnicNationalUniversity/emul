@@ -146,6 +146,12 @@ const OA_INPUT_SLACK = 0.01
 const CMOS_VT = 1
 const CMOS_STEP = Math.log(1.01)
 const MAX_ITER = 60
+const PSEUDO_START = 1
+const PSEUDO_EASE = 4
+const PSEUDO_BACKOFF = 16
+const PSEUDO_STEPS = 200
+const PSEUDO_ITER = 10
+const PSEUDO_FLOOR = 100 * GMIN
 const MODE_FREEZE = 20
 const ABS_TOL = 1e-6
 const REL_TOL = 1e-3
@@ -354,6 +360,7 @@ export class Engine {
   private readonly guess: Float64Array
   /** Closest solution seen while iterating, kept in case the iteration runs out of steps. */
   private readonly best: Float64Array
+  private readonly anchor: Float64Array
 
   // --- per-element state, indexed by position in net.elements ---
   /** Capacitor voltage and current, inductor current and voltage after the last step. */
@@ -588,10 +595,12 @@ export class Engine {
     this.v2 = new Float64Array(n)
     this.guess = new Float64Array(n)
     this.best = new Float64Array(this.size)
+    this.anchor = new Float64Array(n)
     this.A = new Float64Array(this.size * this.size)
     this.z = new Float64Array(this.size)
     this.x = new Float64Array(this.size)
     this.lu = new SparseLU(this.size)
+    this.reserveSwitchedCells()
 
     let minFreq = Infinity
     let linear = true
@@ -951,6 +960,16 @@ export class Engine {
     if (a !== GROUND && b !== GROUND) {
       A[this.cell(a, b)] -= val
       A[this.cell(b, a)] -= val
+    }
+  }
+
+  private reserveSwitchedCells() {
+    for (const el of this.net.elements) {
+      if (el.kind === "SW") this.addG(el.a, el.b, 0)
+      else if (el.kind === "GPIO") {
+        if (el.vddNet !== undefined) this.addG(el.node, el.vddNet, 0)
+        this.addG(el.node, el.gndNet ?? GROUND, 0)
+      }
     }
   }
 
@@ -1387,6 +1406,7 @@ export class Engine {
       const G = (this.tailA ??= new Float64Array(size * size))
       const lu = (this.tailLu ??= new SparseLU(size))
       G.set(this.A)
+      lu.adopt(this.lu)
       lu.register(G)
       for (let i = 0; i < elements.length; i++) {
         const el = elements[i]
@@ -2107,33 +2127,43 @@ export class Engine {
     return true
   }
 
+  private junctionsFromStart() {
+    const elements = this.net.elements
+    const junctions = this.junctionElements
+    for (let k = 0; k < junctions.length; k++) {
+      const i = junctions[k]
+      const el = elements[i]
+      if (el.kind === "D") {
+        const nvt = el.n * VT
+        const vcrit = nvt * Math.log(nvt / (Math.SQRT2 * el.is))
+        this.jA[i] = Math.min(vcrit, this.vol(el.anode, this.v) - this.vol(el.cathode, this.v))
+        this.jB[i] = 0
+      } else if (el.kind === "Q") {
+        const s = el.polarity
+        this.jA[i] = Math.min(Q_VCRIT, s * (this.vol(el.b, this.v) - this.vol(el.e, this.v)))
+        this.jB[i] = Math.min(Q_VCRIT, s * (this.vol(el.b, this.v) - this.vol(el.c, this.v)))
+      } else if (el.kind === "TMR") this.jA[i] = this.vol(el.vcc, this.v) - this.vol(el.out, this.v)
+    }
+  }
+
+  private targetsFromStart() {
+    const n = this.net.nodes
+    // An op amp's target starts from where the span begins, whatever a discarded trial left it at.
+    for (let k = 0; k < this.opamps.length; k++) {
+      const i = this.opamps[k]
+      this.x[n + (this.net.elements[i] as Opamp).index] = this.oaV[i]
+    }
+  }
+
   /** One solve of the step from the current state; returns whether Newton settled. */
   private solve(dt: number, parts: PartReader): boolean {
-    const { A, z, x, guess } = this
+    const { z, x, guess } = this
     this.solveDt = dt
     const n = this.net.nodes
     const elements = this.net.elements
-    // Junction voltages start from the previous solution.
     const junctions = this.junctionElements
-    if (!this.linear) {
-      for (let k = 0; k < junctions.length; k++) {
-        const i = junctions[k]
-        const el = elements[i]
-        if (el.kind === "D") {
-          const nvt = el.n * VT
-          const vcrit = nvt * Math.log(nvt / (Math.SQRT2 * el.is))
-          this.jA[i] = Math.min(vcrit, this.vol(el.anode, this.v) - this.vol(el.cathode, this.v))
-          this.jB[i] = 0
-        } else if (el.kind === "Q") {
-          const s = el.polarity
-          this.jA[i] = Math.min(Q_VCRIT, s * (this.vol(el.b, this.v) - this.vol(el.e, this.v)))
-          this.jB[i] = Math.min(Q_VCRIT, s * (this.vol(el.b, this.v) - this.vol(el.c, this.v)))
-        } else if (el.kind === "TMR") this.jA[i] = this.vol(el.vcc, this.v) - this.vol(el.out, this.v)
-      }
-    }
+    if (!this.linear) this.junctionsFromStart()
     let converged = false
-    /** Smallest error any iterate reached, and with it the `best` solution vector. */
-    let bestErr = Infinity
 
     // A linear circuit has a constant matrix: factorize once and only rebuild the
     // right-hand side, which turns the per-step cost from O(n³) into O(n²).
@@ -2166,149 +2196,13 @@ export class Engine {
       }
     }
     guess.set(this.v)
-    // An op amp's target starts from where the span begins, whatever a discarded trial left it at.
-    for (let k = 0; k < this.opamps.length; k++) {
-      const i = this.opamps[k]
-      x[n + (elements[i] as Opamp).index] = this.oaV[i]
-    }
+    this.targetsFromStart()
     if (this.linear && this.luValid && this.luDt === dt && this.luSwitches === mask) {
       z.fill(0)
       this.stampLinear(dt, parts, false, true)
       converged = this.substitute()
     } else {
-      for (let iter = 0; iter < MAX_ITER; iter++) {
-        this.frozen = iter >= MODE_FREEZE
-        A.fill(0)
-        z.fill(0)
-        // Set when junction limiting changed a voltage: the node solution can look stable while
-        // the diode operating point is still creeping up, so that iteration is never "converged".
-        let clamped = false
-        const limit = (vnew: number, vold: number, vt: number, vcrit: number) => {
-          const v = pnjlim(vnew, vold, vt, vcrit)
-          if (Math.abs(v - vnew) > ABS_TOL) clamped = true
-          return v
-        }
-        const g = (i: number) => (i === GROUND ? 0 : guess[i])
-
-        this.stampLinear(dt, parts, true, true)
-
-        const nonlinear = this.nonlinearElements
-        for (let k = 0; k < nonlinear.length; k++) {
-          const i = nonlinear[k]
-          const el = elements[i]
-          if (el.kind === "D") {
-            const nvt = el.n * VT
-            const vcrit = nvt * Math.log(nvt / (Math.SQRT2 * el.is))
-            let vd = limit(g(el.anode) - g(el.cathode), this.jA[i], nvt, vcrit)
-            if (el.zener) vd = Math.max(vd, -el.zener - 1)
-            this.jA[i] = vd
-            const ef = Math.exp(Math.min(vd / nvt, diodeExpCap(vcrit / nvt)))
-            let id = el.is * (ef - 1)
-            let gd = (el.is / nvt) * ef
-            if (el.zener) {
-              // Reverse breakdown as a mirrored junction offset by Vz.
-              const er = Math.exp(Math.min(-(vd + el.zener) / nvt, 80))
-              id -= el.is * (er - 1)
-              gd += (el.is / nvt) * er
-            }
-            this.addG(el.anode, el.cathode, gd)
-            this.addI(el.anode, el.cathode, id - gd * vd)
-          } else if (el.kind === "Q") {
-            // Ebers-Moll transport model; PNP handled by mirroring voltages and currents.
-            const s = el.polarity
-            const vbe = limit(s * (g(el.b) - g(el.e)), this.jA[i], VT, Q_VCRIT)
-            const vbc = limit(s * (g(el.b) - g(el.c)), this.jB[i], VT, Q_VCRIT)
-            this.jA[i] = vbe
-            this.jB[i] = vbc
-            const ef = Math.exp(Math.min(vbe / VT, 80))
-            const er = Math.exp(Math.min(vbc / VT, 80))
-            const iF = Q_IS * (ef - 1)
-            const iR = Q_IS * (er - 1)
-            const ic = iF - iR - iR / Q_BR
-            const ib = iF / el.beta + iR / Q_BR
-            const gf = (Q_IS / VT) * ef
-            const gr = (Q_IS / VT) * er
-            // dIc/dVbe, dIc/dVbc, dIb/dVbe, dIb/dVbc
-            const g1 = gf
-            const g2 = -gr * (1 + 1 / Q_BR)
-            const g3 = gf / el.beta
-            const g4 = gr / Q_BR
-            const ic0 = s * (ic - g1 * vbe - g2 * vbc)
-            const ib0 = s * (ib - g3 * vbe - g4 * vbc)
-            this.addTerm(el.c, el.b, el.e, g1)
-            this.addTerm(el.c, el.b, el.c, g2)
-            if (el.c !== GROUND) z[el.c] -= ic0
-            this.addTerm(el.b, el.b, el.e, g3)
-            this.addTerm(el.b, el.b, el.c, g4)
-            if (el.b !== GROUND) z[el.b] -= ib0
-            this.addTerm(el.e, el.b, el.e, -(g1 + g3))
-            this.addTerm(el.e, el.b, el.c, -(g2 + g4))
-            if (el.e !== GROUND) z[el.e] += ic0 + ib0
-          } else if (el.kind === "REG") {
-            const on = this.regEnabled(el, i, g(el.en ?? GROUND) - g(el.gnd)) && !this.regHot[i]
-            if (this.regulator(i, el.in, el.out, el.gnd, n + el.index, el.value, el.dropout, el.imax, on, el.rdrop)) clamped = true
-            const gq = on ? el.gq : el.gqOff
-            if (gq > 0) {
-              this.addTerm(el.in, el.in, el.gnd, gq)
-              this.addTerm(el.gnd, el.in, el.gnd, -gq)
-            }
-          } else if (el.kind === "CHG") {
-            const st = this.ctl[i]
-            const set = Math.max(0, -x[n + el.prog]) * CHG_GAIN
-            const imax = st === CHG_TRICKLING ? set * CHG_TERM : set
-            if (this.regulator(i, el.in, el.bat, el.gnd, n + el.index, el.value, 0, imax, st === CHG_TRICKLING || st === CHG_CHARGING)) clamped = true
-          } else if (el.kind === "BOOST") {
-            if (this.boost(i, el)) clamped = true
-          } else if (el.kind === "TMR") {
-            if (this.timer(el, i)) clamped = true
-          } else if (el.kind === "OPAMP") {
-            if (this.opamp(el, i)) clamped = true
-          } else if (el.kind === "M") {
-            const s = el.polarity
-            // Below zero Vds the roles of drain and source swap; nothing else changes.
-            const swap = s * (g(el.d) - g(el.s)) < 0
-            const dn = swap ? el.s : el.d
-            const sn = swap ? el.d : el.s
-            const vgs = s * (g(el.g) - g(sn))
-            const vds = s * (g(dn) - g(sn))
-            const [id, gm, gds] = this.mosfet(el, vgs, vds)
-            // Drain current linearized: i = gm·(Vg − Vs) + gds·(Vd − Vs) + i0, leaving dn into sn.
-            const i0 = s * (id - gm * vgs - gds * vds)
-            this.addTerm(dn, el.g, sn, gm)
-            this.addTerm(dn, dn, sn, gds)
-            if (dn !== GROUND) z[dn] -= i0
-            this.addTerm(sn, el.g, sn, -gm)
-            this.addTerm(sn, dn, sn, -gds)
-            if (sn !== GROUND) z[sn] += i0
-          }
-        }
-
-        if (!this.factorize()) break
-        this.substitute()
-
-        let maxErr = 0
-        for (let i = 0; i < n; i++) {
-          const err = Math.abs(x[i] - guess[i]) - (ABS_TOL + REL_TOL * Math.abs(x[i]))
-          if (err > maxErr) maxErr = err
-          guess[i] = x[i]
-        }
-        if ((maxErr <= 0 && !clamped) || this.linear) {
-          converged = true
-          break
-        }
-        // A circuit switching regeneratively — a latch tipping over — passes through an
-        // operating point where the Jacobian is singular, and there the iteration can chatter
-        // instead of settling. Whatever it lands on when the iterations run out is arbitrary
-        // and may be far off; the closest point it saw is not.
-        if (maxErr < bestErr) {
-          bestErr = maxErr
-          this.best.set(x)
-        }
-      }
-      if (!converged && bestErr < Infinity) {
-        x.set(this.best)
-        guess.set(this.best.subarray(0, n))
-      }
+      converged = this.newton(dt, parts, 0, MAX_ITER) || (this.luValid && this.pseudoTransient(dt, parts))
       this.luDt = dt
       this.luTheta = this.theta
       this.luSwitches = mask
@@ -2318,6 +2212,170 @@ export class Engine {
     if (this.linear) for (let i = 0; i < n; i++) this.v[i] = x[i]
     if (converged && !this.linear && !this.sine) this.remember(mask)
     return converged
+  }
+
+  private newton(dt: number, parts: PartReader, anchored: number, iterations: number): boolean {
+    const { A, z, x, guess } = this
+    const n = this.net.nodes
+    const elements = this.net.elements
+    let converged = false
+    /** Smallest error any iterate reached, and with it the `best` solution vector. */
+    let bestErr = Infinity
+    for (let iter = 0; iter < iterations; iter++) {
+      this.frozen = iter >= MODE_FREEZE
+      A.fill(0)
+      z.fill(0)
+      // Set when junction limiting changed a voltage: the node solution can look stable while
+      // the diode operating point is still creeping up, so that iteration is never "converged".
+      let clamped = false
+      const limit = (vnew: number, vold: number, vt: number, vcrit: number) => {
+        const v = pnjlim(vnew, vold, vt, vcrit)
+        if (Math.abs(v - vnew) > ABS_TOL) clamped = true
+        return v
+      }
+      const g = (i: number) => (i === GROUND ? 0 : guess[i])
+
+      this.stampLinear(dt, parts, true, true)
+      if (anchored > 0) for (let i = 0; i < n; i++) {
+        A[this.cell(i, i)] += anchored
+        z[i] += anchored * this.anchor[i]
+      }
+
+      const nonlinear = this.nonlinearElements
+      for (let k = 0; k < nonlinear.length; k++) {
+        const i = nonlinear[k]
+        const el = elements[i]
+        if (el.kind === "D") {
+          const nvt = el.n * VT
+          const vcrit = nvt * Math.log(nvt / (Math.SQRT2 * el.is))
+          let vd = limit(g(el.anode) - g(el.cathode), this.jA[i], nvt, vcrit)
+          if (el.zener) vd = Math.max(vd, -el.zener - 1)
+          this.jA[i] = vd
+          const ef = Math.exp(Math.min(vd / nvt, diodeExpCap(vcrit / nvt)))
+          let id = el.is * (ef - 1)
+          let gd = (el.is / nvt) * ef
+          if (el.zener) {
+            // Reverse breakdown as a mirrored junction offset by Vz.
+            const er = Math.exp(Math.min(-(vd + el.zener) / nvt, 80))
+            id -= el.is * (er - 1)
+            gd += (el.is / nvt) * er
+          }
+          this.addG(el.anode, el.cathode, gd)
+          this.addI(el.anode, el.cathode, id - gd * vd)
+        } else if (el.kind === "Q") {
+          // Ebers-Moll transport model; PNP handled by mirroring voltages and currents.
+          const s = el.polarity
+          const vbe = limit(s * (g(el.b) - g(el.e)), this.jA[i], VT, Q_VCRIT)
+          const vbc = limit(s * (g(el.b) - g(el.c)), this.jB[i], VT, Q_VCRIT)
+          this.jA[i] = vbe
+          this.jB[i] = vbc
+          const ef = Math.exp(Math.min(vbe / VT, 80))
+          const er = Math.exp(Math.min(vbc / VT, 80))
+          const iF = Q_IS * (ef - 1)
+          const iR = Q_IS * (er - 1)
+          const ic = iF - iR - iR / Q_BR
+          const ib = iF / el.beta + iR / Q_BR
+          const gf = (Q_IS / VT) * ef
+          const gr = (Q_IS / VT) * er
+          // dIc/dVbe, dIc/dVbc, dIb/dVbe, dIb/dVbc
+          const g1 = gf
+          const g2 = -gr * (1 + 1 / Q_BR)
+          const g3 = gf / el.beta
+          const g4 = gr / Q_BR
+          const ic0 = s * (ic - g1 * vbe - g2 * vbc)
+          const ib0 = s * (ib - g3 * vbe - g4 * vbc)
+          this.addTerm(el.c, el.b, el.e, g1)
+          this.addTerm(el.c, el.b, el.c, g2)
+          if (el.c !== GROUND) z[el.c] -= ic0
+          this.addTerm(el.b, el.b, el.e, g3)
+          this.addTerm(el.b, el.b, el.c, g4)
+          if (el.b !== GROUND) z[el.b] -= ib0
+          this.addTerm(el.e, el.b, el.e, -(g1 + g3))
+          this.addTerm(el.e, el.b, el.c, -(g2 + g4))
+          if (el.e !== GROUND) z[el.e] += ic0 + ib0
+        } else if (el.kind === "REG") {
+          const on = this.regEnabled(el, i, g(el.en ?? GROUND) - g(el.gnd)) && !this.regHot[i]
+          if (this.regulator(i, el.in, el.out, el.gnd, n + el.index, el.value, el.dropout, el.imax, on, el.rdrop)) clamped = true
+          const gq = on ? el.gq : el.gqOff
+          if (gq > 0) {
+            this.addTerm(el.in, el.in, el.gnd, gq)
+            this.addTerm(el.gnd, el.in, el.gnd, -gq)
+          }
+        } else if (el.kind === "CHG") {
+          const st = this.ctl[i]
+          const set = Math.max(0, -x[n + el.prog]) * CHG_GAIN
+          const imax = st === CHG_TRICKLING ? set * CHG_TERM : set
+          if (this.regulator(i, el.in, el.bat, el.gnd, n + el.index, el.value, 0, imax, st === CHG_TRICKLING || st === CHG_CHARGING)) clamped = true
+        } else if (el.kind === "BOOST") {
+          if (this.boost(i, el)) clamped = true
+        } else if (el.kind === "TMR") {
+          if (this.timer(el, i)) clamped = true
+        } else if (el.kind === "OPAMP") {
+          if (this.opamp(el, i)) clamped = true
+        } else if (el.kind === "M") {
+          const s = el.polarity
+          // Below zero Vds the roles of drain and source swap; nothing else changes.
+          const swap = s * (g(el.d) - g(el.s)) < 0
+          const dn = swap ? el.s : el.d
+          const sn = swap ? el.d : el.s
+          const vgs = s * (g(el.g) - g(sn))
+          const vds = s * (g(dn) - g(sn))
+          const [id, gm, gds] = this.mosfet(el, vgs, vds)
+          // Drain current linearized: i = gm·(Vg − Vs) + gds·(Vd − Vs) + i0, leaving dn into sn.
+          const i0 = s * (id - gm * vgs - gds * vds)
+          this.addTerm(dn, el.g, sn, gm)
+          this.addTerm(dn, dn, sn, gds)
+          if (dn !== GROUND) z[dn] -= i0
+          this.addTerm(sn, el.g, sn, -gm)
+          this.addTerm(sn, dn, sn, -gds)
+          if (sn !== GROUND) z[sn] += i0
+        }
+      }
+
+      if (!this.factorize()) break
+      this.substitute()
+
+      let maxErr = 0
+      for (let i = 0; i < n; i++) {
+        const err = Math.abs(x[i] - guess[i]) - (ABS_TOL + REL_TOL * Math.abs(x[i]))
+        if (err > maxErr) maxErr = err
+        guess[i] = x[i]
+      }
+      if ((maxErr <= 0 && !clamped) || this.linear) {
+        converged = true
+        break
+      }
+      if (maxErr < bestErr) {
+        bestErr = maxErr
+        this.best.set(x)
+      }
+    }
+    if (!converged && bestErr < Infinity) {
+      x.set(this.best)
+      guess.set(this.best.subarray(0, n))
+    }
+    return converged
+  }
+
+  private pseudoTransient(dt: number, parts: PartReader): boolean {
+    const n = this.net.nodes
+    this.v.set(this.subV)
+    this.anchor.set(this.v)
+    this.guess.set(this.v)
+    this.junctionsFromStart()
+    this.targetsFromStart()
+    let g = PSEUDO_START
+    for (let k = 0; k < PSEUDO_STEPS && g > GMIN; k++) {
+      if (this.newton(dt, parts, g, PSEUDO_ITER)) {
+        this.anchor.set(this.guess.subarray(0, n))
+        g /= PSEUDO_EASE
+      } else {
+        this.guess.set(this.anchor)
+        if (g < PSEUDO_FLOOR) break
+        g *= PSEUDO_BACKOFF
+      }
+    }
+    return this.newton(dt, parts, 0, PSEUDO_ITER)
   }
 
   private addBranch(a: number, b: number, v: number, out: Float64Array) {
@@ -3755,6 +3813,10 @@ export class Engine {
 
   get factorizationCount(): number {
     return this.factorizations
+  }
+
+  get orderingCount(): number {
+    return this.lu.orderings + (this.tailLu?.orderings ?? 0)
   }
 
   sourceAt(node: number): { ohms: number; farads: number } | null {

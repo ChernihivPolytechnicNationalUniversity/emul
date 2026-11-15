@@ -1,12 +1,53 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import * as React from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import { FieldPanel } from "@/components/explorer/FieldPanel"
+import { checked } from "@/schematic/checker"
+import type { Finding } from "@/schematic/checker"
+import { withFieldAt } from "@/schematic/fields"
 import { builder } from "@/schematic/builder"
-import { buildNets } from "@/schematic/nets"
+import { wiringOf } from "@/schematic/wire-edits"
+import { WireGraph } from "@/schematic/wires/graph"
 import { getDef } from "@/schematic/registry"
 import { examples } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
-import type { Damage, PlacedObject } from "@/schematic/types"
+import type { Damage, PlacedObject, Schematic } from "@/schematic/types"
 import { compareRefs, fieldEntries, searchField, valueNumber } from "@/components/explorer/field-index"
-import { countBySeverity, runtimeProblems, sortProblems, staticProblems, type RuntimeReadout } from "@/components/explorer/problems"
+import { checkKeyOf, checkProblems, countBySeverity, runtimeProblems, sortProblems, staticProblems, type RuntimeReadout } from "@/components/explorer/problems"
+
+const virtualKeys = vi.hoisted(() => ({ current: [] as string[] }))
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count, getItemKey }: { count: number; getItemKey: (i: number) => string }) => {
+    virtualKeys.current = Array.from({ length: count }, (_, i) => getItemKey(i))
+    return { getTotalSize: () => count * 28, getVirtualItems: () => virtualKeys.current.map((key, index) => ({ key, index, start: index * 28 })), measureElement: () => {}, scrollToIndex: () => {} }
+  },
+}))
+
+it("coincident designator and value findings have distinct problem and list identities", () => {
+  const base: PlacedObject = { id: "R1", def: "resistor", x: 0, y: 0, props: { ref: "R1", value: "1k" } }
+  const at = { x: 2 * GRID, y: GRID }
+  const ref = withFieldAt(base, "ref", at, GRID, getDef(base.def)!)
+  const object = withFieldAt(ref, "value", at, GRID, getDef(base.def)!)
+  const findings = checked({ objects: [object], wires: [], parts: {} }).filter((f) => f.kind === "field-on-body")
+  const problems = checkProblems(findings)
+  expect.soft(findings, "two fields on the same body").toHaveLength(2)
+  expect.soft(new Set(problems.map((p) => p.key)).size, "each field has its own problem").toBe(2)
+  const noop = () => {}
+  const html = renderToStaticMarkup(React.createElement(FieldPanel, {
+    open: true, onOpenChange: noop, objects: [object], problems, activeProblem: problems[0].key, onProblem: noop,
+    selected: new Set<string>(), sim: { live: false, damage: {} } as React.ComponentProps<typeof FieldPanel>["sim"], peers: [],
+    query: "", onQueryChange: noop, hits: [], hitIndex: -1, onStep: noop, onHit: noop, onPick: noop, onHover: noop,
+    onLeave: noop, searchRef: React.createRef<HTMLInputElement>(),
+  }))
+  expect.soft(new Set(virtualKeys.current).size, "every virtual row has a distinct key").toBe(virtualKeys.current.length)
+  expect.soft(html.match(/aria-selected="true"/g), "only the chosen field's row is active").toHaveLength(1)
+})
+
+it("finding keys are independent of object, segment and field membership order", () => {
+  const finding: Finding = { kind: "fields-overlap", at: { x: 0, y: 0 }, objects: ["R2", "R1"], segments: ["right", "left"], fields: ["R2:value", "R1:ref"], text: "Overlapping fields" }
+  const reversed = { ...finding, objects: [...finding.objects].reverse(), segments: [...finding.segments].reverse(), fields: [...finding.fields!].reverse() }
+  expect.soft(checkKeyOf(finding), "the same finding despite bucket traversal order").toBe(checkKeyOf(reversed))
+})
 
 // The field explorer: rows for what is on the bench, the search that finds a part or one of its
 // pins, and the problems list, worst first.
@@ -143,12 +184,14 @@ describe("the field's search", () => {
   })
 })
 
+const netsOf = (objects: readonly PlacedObject[], wires: Schematic["wires"]) => wiringOf(new WireGraph(), { objects: [...objects], wires }).nets
+
 const idle: RuntimeReadout = { live: false, converged: true, damage: {}, mcu: () => undefined }
 
 describe("problems on the bench", () => {
   it("a chip with nothing wired has no supply and no ground", () => {
     const { doc, timer } = bench()
-    const problems = staticProblems(doc.objects, buildNets(doc.objects, doc.wires, GRID))
+    const problems = staticProblems(doc.objects, netsOf(doc.objects, doc.wires))
     const mine = problems.filter((p) => p.object === timer.id).map((p) => [p.severity, p.title])
     expect(mine).toEqual(expect.arrayContaining([["error", `${timer.props!.ref} has no supply`], ["error", `${timer.props!.ref} has no ground`]]))
     const supply = problems.find((p) => p.key === `${timer.id}:no-supply`)!
@@ -161,29 +204,29 @@ describe("problems on the bench", () => {
     const rail = b.place("supply", 60, -6)
     b.wire(b.timer, pinOf(b.timer, "power"), rail, getDef("supply")!.pins[0].id)
     b.wire(b.timer, pinOf(b.timer, "gnd"), b.gnd, getDef("ground")!.pins[0].id)
-    const problems = staticProblems(b.doc.objects, buildNets(b.doc.objects, b.doc.wires, GRID))
+    const problems = staticProblems(b.doc.objects, netsOf(b.doc.objects, b.doc.wires))
     expect(problems.filter((p) => p.object === b.timer.id)).toEqual([])
   })
 
   it("passive parts, sources and boards ask for no supply", () => {
     const { doc, r1, led, gnd, board } = bench()
-    const problems = staticProblems(doc.objects, buildNets(doc.objects, doc.wires, GRID))
+    const problems = staticProblems(doc.objects, netsOf(doc.objects, doc.wires))
     for (const o of [r1, led, gnd]) expect(problems.filter((p) => p.object === o.id), o.def).toEqual([])
     expect(problems.filter((p) => p.object === board.id && p.severity !== "info")).toEqual([])
   })
 
   it("a board with no firmware is a note, not an error", () => {
     const { doc, board } = bench()
-    const p = staticProblems(doc.objects, buildNets(doc.objects, doc.wires, GRID)).find((x) => x.object === board.id)
+    const p = staticProblems(doc.objects, netsOf(doc.objects, doc.wires)).find((x) => x.object === board.id)
     expect(p?.severity).toBe("info")
     const loaded = doc.objects.map((o) => (o.id === board.id ? { ...o, props: { ...o.props, firmware: "blink.elf" } } : o))
-    expect(staticProblems(loaded, buildNets(loaded, doc.wires, GRID)).filter((x) => x.object === board.id)).toEqual([])
+    expect(staticProblems(loaded, netsOf(loaded, doc.wires)).filter((x) => x.object === board.id)).toEqual([])
   })
 
   it("no example in the catalogue has an error on its bench", () => {
     for (const example of examples) {
       const doc = example.build(GRID)
-      const errors = staticProblems(doc.objects, buildNets(doc.objects, doc.wires, GRID)).filter((p) => p.severity === "error")
+      const errors = staticProblems(doc.objects, netsOf(doc.objects, doc.wires)).filter((p) => p.severity === "error")
       expect(errors.map((p) => p.title), example.name).toEqual([])
     }
   })
@@ -211,7 +254,7 @@ describe("problems while running", () => {
 
   it("the list runs worst first, then by designator", () => {
     const list = sortProblems(
-      [...staticProblems(doc.objects, buildNets(doc.objects, doc.wires, GRID)), ...runtimeProblems(doc.objects, { ...idle, damage: { [r1.id]: burnt } })],
+      [...staticProblems(doc.objects, netsOf(doc.objects, doc.wires)), ...runtimeProblems(doc.objects, { ...idle, damage: { [r1.id]: burnt } })],
       doc.objects,
     )
     const levels = list.map((p) => p.severity)

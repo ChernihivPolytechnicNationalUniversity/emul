@@ -53,6 +53,10 @@ export class SparseLU {
     for (let i = 0; i < A.length; i++) if (A[i] !== 0) this.touch(i)
   }
 
+  adopt(pattern: SparseLU) {
+    for (let i = 0; i < pattern.seen.length; i++) if (pattern.seen[i] !== 0) this.touch(i)
+  }
+
   factorize(A: Float64Array): boolean {
     this.valid = (this.ordered && !this.grew && this.refactor(A)) || this.order(A)
     return this.valid

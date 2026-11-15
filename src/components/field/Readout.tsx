@@ -2,8 +2,7 @@ import { XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { resolvePin } from "@/schematic/geometry"
-import { pinName } from "@/schematic/registry"
-import type { PinRef, PlacedObject, Wire } from "@/schematic/types"
+import type { PinRef, PlacedObject } from "@/schematic/types"
 import type { ProbeReading } from "@/sim/engine"
 import type { SimReadout } from "@/sim/use-simulation"
 import { formatSI } from "@/sim/units"
@@ -25,7 +24,7 @@ export function FieldReadout({
   x,
   y,
   objects,
-  wires,
+  runEnds,
   sim,
   className,
   ...props
@@ -35,10 +34,10 @@ export function FieldReadout({
   x: number
   y: number
   objects: PlacedObject[]
-  wires: Wire[]
+  runEnds: (runId: string) => RunEnds | null
   sim: SimReadout
 }) {
-  const content = target.kind === "pin" ? pinContent(target.ref, objects, sim) : wireContent(target.id, objects, wires, sim)
+  const content = target.kind === "pin" ? pinContent(target.ref, objects, sim) : wireContent(target.id, runEnds, sim)
   if (!content) return null
   const { title, rows, note } = content
   const flipX = x + GAP + CARD_W > window.innerWidth
@@ -99,20 +98,20 @@ function pinContent(ref: PinRef, objects: PlacedObject[], sim: SimReadout) {
   return { title: pin.label ? `${owner} · ${pin.label}` : owner, rows, note }
 }
 
-function wireContent(id: string, objects: PlacedObject[], wires: Wire[], sim: SimReadout) {
-  const wire = wires.find((w) => w.id === id)
-  if (!wire) return null
-  const from = pinName(objects, wire.from)
-  const to = pinName(objects, wire.to)
+export type RunEnds = { from: string; to: string; ref: PinRef | null }
+
+function wireContent(id: string, runEnds: (runId: string) => RunEnds | null, sim: SimReadout) {
+  const ends = runEnds(id)
+  if (!ends) return null
+  const { from, to, ref } = ends
   const rows: Row[] = []
   if (sim.live) {
     const i = sim.wireCurrent.get(id)
-    const v = sim.ac ? sim.pinVoltageRms(wire.from.object, wire.from.pin) : sim.pinVoltage(wire.from.object, wire.from.pin)
+    const v = ref ? (sim.ac ? sim.pinVoltageRms(ref.object, ref.pin) : sim.pinVoltage(ref.object, ref.pin)) : undefined
     if (i !== undefined) rows.push(["I", formatSI(Math.abs(i), "A")])
     if (v !== undefined) rows.push([sim.ac ? "V (RMS)" : "V", formatSI(v, "V")])
     else rows.push(["V", "not on a live net"])
   }
-  // Wire current is signed from `from` to `to`; the arrow says where it actually goes.
   const i = sim.wireCurrent.get(id) ?? 0
   const flow = !sim.live || Math.abs(i) < 1e-9 ? `${from} — ${to}` : i > 0 ? `${from} → ${to}` : `${to} → ${from}`
   return { title: "Wire", rows, note: flow }

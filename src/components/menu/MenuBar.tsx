@@ -237,12 +237,12 @@ export function MenuBar({
               <MenubarShortcut>{labelFor(KEYMAP.duplicate)}</MenubarShortcut>
             </MenubarItem>
             <MenubarSeparator />
-            <MenubarItem onClick={act((f) => f.rotate(45))} disabled={!state.hasObjects}>
-              Rotate 45° clockwise
+            <MenubarItem onClick={act((f) => f.rotate(1))} disabled={!state.hasObjects}>
+              Rotate clockwise
               <MenubarShortcut>{labelFor(KEYMAP.rotate)}</MenubarShortcut>
             </MenubarItem>
-            <MenubarItem onClick={act((f) => f.rotate(-45))} disabled={!state.hasObjects}>
-              Rotate 45° counter-clockwise
+            <MenubarItem onClick={act((f) => f.rotate(-1))} disabled={!state.hasObjects}>
+              Rotate counter-clockwise
               <MenubarShortcut>{labelFor(KEYMAP.rotateBack)}</MenubarShortcut>
             </MenubarItem>
             <MenubarItem onClick={act((f) => f.flip("horizontal"))} disabled={!state.hasObjects}>
@@ -378,6 +378,11 @@ export function MenuBar({
         <MenubarMenu>
           <MenubarTrigger>Help</MenubarTrigger>
           <MenubarContent>
+            <MenubarItem onClick={act((f) => f.showShortcuts())}>
+              Keyboard shortcuts
+              <MenubarShortcut>{labelFor(KEYMAP.shortcuts)}</MenubarShortcut>
+            </MenubarItem>
+            <MenubarSeparator />
             <MenubarItem closeOnClick={false}>
               Version
               <MenubarShortcut className="text-foreground">{config.version}</MenubarShortcut>

@@ -1,0 +1,21 @@
+transistor astable multivibrator of design.md 6.11, the reference for acceptance 6
+VCC reg 0 DC 5
+RINT reg vplus 15m
+R1 vplus c1 1k
+R2 vplus b2 47k
+R3 vplus b1 47k
+R4 vplus c2 1k
+C1 c1 b2 220n
+C2 b1 c2 100n
+Q1 c1 b1 0 QN
+Q2 c2 b2 0 QN
+.model QN NPN(IS=1e-14 BF=200 BR=3 RC=5)
+.options TEMP=26.85 TNOM=26.85 METHOD=GEAR
+.tran 1u 80m 0 1u uic
+.control
+set wr_singlescale
+set wr_vecnames
+run
+wrdata multivibrator.dat v(c1) v(c2) v(b1) v(b2)
+.endc
+.end

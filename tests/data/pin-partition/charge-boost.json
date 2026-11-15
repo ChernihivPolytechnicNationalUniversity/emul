@@ -1,0 +1,16 @@
+{
+  "source": "example charge-boost",
+  "objects": [
+    "A1 (lx-lcbst)",
+    "BT1 (battery)",
+    "R1 (resistor)",
+    "SW1 (switch)"
+  ],
+  "nets": [
+    ["A1.B-","BT1.-"],
+    ["A1.B+","BT1.+"],
+    ["A1.VO-","R1.2"],
+    ["A1.VO+","SW1.1"],
+    ["R1.1","SW1.2"]
+  ]
+}

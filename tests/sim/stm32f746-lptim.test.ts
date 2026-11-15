@@ -5,7 +5,7 @@ import { parseElf } from "@/mcu/elf"
 import { Lptim } from "@/mcu/periph/lptim"
 import { Rcc } from "@/mcu/periph/rcc"
 import { parsePad, Stm32 } from "@/mcu/stm32f429"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
@@ -358,7 +358,7 @@ async function boardBench(alternate = false) {
   const added = builder(GRID)
   const targets = alternate ? ["PG12", "PH2", "PG14"] : ["PD12", "PE1", "PE0"]
   for (const [index, source] of ["PC6", "PC7", "PC8"].entries()) added.wire(mcu, stripPin(source), mcu, stripPin(targets[index]))
-  doc.wires.push(...added.doc.wires)
+  connect(doc, ...connections(added.doc))
   const loop = new SimLoop()
   loop.setDoc(doc)
   loop.setParts({ ...doc.parts, ...Object.fromEntries(["JMP2_1", "JMP2_2", "JMP2_3", "JMP2_4", "JMP3_1", "JMP3_2", "JMP3_3", "JMP3_4", "JMP4_1", "JMP4_2", "JMP4_3", "JMP4_4", "JMP4_5", "JMP5_A4", "JMP5_A5", "JMP6", "OTG_VBUS", "OTG_PWR", "OTG_FLG"].map((name) => [partKey(mcu.id, name), { on: false }])) })

@@ -1,5 +1,5 @@
 import { CpuIcon } from "lucide-react"
-import { builder } from "../builder"
+import { builder, placedByHand, type HandPlacedField } from "../builder"
 import type { Icon } from "../icons"
 import { nucleoApp, type ProjectLoader } from "../projects"
 import type { Schematic } from "../types"
@@ -64,6 +64,13 @@ export const nucleoSevenSeg: { id: string; name: string; description: string; ic
       const d = 51 + 4 * k
       wire(ds, `D${k + 1}`, q, "C", k === 0 ? [] : [[d, 28 + k], [cx, 28 + k]])
     }
-    return doc
+    return placedByHand(
+      doc,
+      grid,
+      SEGMENTS.flatMap((_, i): HandPlacedField[] => [
+        [`R${i + 1}`, "ref", 44 - 2 * i + 0.3, 34.5, "start"],
+        [`R${i + 1}`, "value", 44 - 2 * i + 0.3, 37.5, "start"],
+      ]),
+    )
   },
 }

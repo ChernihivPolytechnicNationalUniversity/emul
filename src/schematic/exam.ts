@@ -1,5 +1,5 @@
 import { ClipboardCheckIcon } from "lucide-react"
-import { builder } from "./builder"
+import { builder, placedByHand } from "./builder"
 import type { Example } from "./examples"
 import type { PlacedObject, Schematic } from "./types"
 
@@ -29,7 +29,7 @@ export type ExamBench = {
 const V12 = { value: "+12V", voltage: "12 V" }
 
 export function buildExam(grid: number): ExamBench {
-  const { doc, place, wire } = builder(grid)
+  const { doc, place, wire, node } = builder(grid)
   /** A rail symbol at (x, y) whose pin sits at (x+1, y+2); wires join it on the row below. */
   const rail = (x: number, y: number) => place("supply", x, y, V12)
   const gnd = (x: number, y: number) => place("ground", x, y)
@@ -64,7 +64,7 @@ export function buildExam(grid: number): ExamBench {
     const q = place("npn", ox + 14, 9, { value: "BC547", beta: "200" })
     const re = vert("resistor", ox + 16, 14, { value: "1 kΩ", power: "0.25" })
     const r1 = vert("resistor", ox + 8, 4, { value: "47 kΩ", power: "0.25" })
-    const j = place("junction", ox + 8, 10)
+    const j = node(ox + 9, 11)
     const r2 = vert("resistor", ox + 8, 12, { value: "10 kΩ", power: "0.25" })
     const cin = place("capacitor-polarized", ox + 2, 10, { value: "10 µF", vmax: "25 V" })
     const src = place("ac-source", ox - 1, 12, { value: "100 mV", freq: "1 kHz", offset: "0 V", rint: "1 Ω", imax: "1 A" })
@@ -82,7 +82,7 @@ export function buildExam(grid: number): ExamBench {
     wire(r2, "2", g, "GND", [[ox + 9, 19], [ox + 17, 19]])
     // Anode towards the base, which sits at +2 V; the source side is at 0 V.
     wire(src, "+", cin, "2")
-    wire(cin, "1", j, "J")
+    wire(cin, "1", j, "J", [[ox + 2, 9]])
     wire(src, "-", g, "GND", [[ox, 19], [ox + 17, 19]])
     wire(q, "C", cout, "1", [[ox + 17, 8], [ox + 19, 8], [ox + 19, 9]])
     wire(cout, "2", load, "1")
@@ -132,24 +132,19 @@ export function buildExam(grid: number): ExamBench {
     const mains = place("ac-source", ox, oy + 4)
     const t = place("transformer", ox + 4, oy + 4)
     const diode = { value: "1N4007", vf: "0.7", imax: "1 A", vrev: "1000 V" }
-    const d1 = place("diode", ox + 13, oy + 2, diode, 315)
-    const d2 = place("diode", ox + 17, oy + 2, diode, 225)
-    const d3 = place("diode", ox + 13, oy + 6, diode, 225)
-    const d4 = place("diode", ox + 17, oy + 6, diode, 315)
-    const c = vertUp("capacitor-polarized", ox + 26, oy + 2, { value: "1000 µF", vmax: "25 V" })
+    const d1 = place("diode", ox + 14, oy + 3, diode, 315)
+    const d2 = place("diode", ox + 17, oy + 3, diode, 225)
+    const d3 = place("diode", ox + 14, oy + 6, diode, 225)
+    place("diode", ox + 17, oy + 6, diode, 315)
+    const c = vert("capacitor-polarized", ox + 26, oy + 2, { value: "1000 µF", vmax: "25 V" })
     const load = vert("resistor", ox + 30, oy + 2, { value: "100 Ω", power: "5" })
     const g = gnd(ox + 16, oy + 13)
     wire(mains, "+", t, "P1")
     wire(mains, "-", t, "P2")
     wire(t, "S1", d1, "1")
-    wire(d1, "1", d3, "2")
     wire(t, "S2", d2, "1", [[ox + 10, oy + 16], [ox + 24, oy + 16], [ox + 24, oy + 6]])
-    wire(d2, "1", d4, "2")
-    wire(d1, "2", d2, "2")
-    // Anode (pin 1) on the positive rail.
-    wire(d2, "2", c, "1")
+    wire(d1, "2", c, "1")
     wire(c, "1", load, "1")
-    wire(d3, "1", d4, "1")
     wire(d3, "1", g, "GND")
     wire(c, "2", g, "GND")
     wire(load, "2", c, "2")
@@ -194,7 +189,7 @@ export function buildExam(grid: number): ExamBench {
     const load = vert("resistor", ox + 10, 4, { value: "1 kΩ", power: "0.25" })
     const q1 = place("npn", ox, 9, { value: "BC547", beta: "200" })
     const q2 = place("npn", ox + 8, 9, { value: "BC547", beta: "200" })
-    const j = place("junction", ox + 4, 10)
+    const j = node(ox + 5, 11)
     const g = gnd(ox + 4, 15)
     wire(v, "V", rref, "1", [[ox + 7, 3], [ox + 3, 3]])
     wire(v, "V", load, "1", [[ox + 7, 3], [ox + 11, 3]])
@@ -202,7 +197,7 @@ export function buildExam(grid: number): ExamBench {
     wire(load, "2", q2, "C")
     // Diode-connected Q1: collector tied to its base, and to Q2's base.
     wire(q1, "C", j, "J", [[ox + 3, 8], [ox + 5, 8]])
-    wire(q1, "B", q1, "C", [[ox - 1, 11], [ox - 1, 8]])
+    wire(q1, "B", q1, "C", [[ox - 1, 11], [ox - 1, 8], [ox + 3, 8]])
     wire(q2, "B", j, "J")
     wire(q1, "E", g, "GND", [[ox + 3, 14], [ox + 5, 14]])
     wire(q2, "E", g, "GND", [[ox + 11, 14], [ox + 5, 14]])
@@ -241,5 +236,10 @@ export const systemExam: Example = {
   name: "System exam",
   description: "Nine textbook circuits with known answers: regulator, amplifier, filters, rectifier, LED, overload, current mirror, MOSFET switches.",
   icon: ClipboardCheckIcon,
-  build: (grid) => buildExam(grid).doc,
+  build: (grid) => placedByHand(buildExam(grid).doc, grid, [
+      ["Q4", "ref", 77.5, 10.5, "start"],
+      ["Q4", "value", 77.5, 11, "start"],
+      ["C5", "ref", 54.1, 27.15, "end"],
+      ["C5", "value", 54.1, 27.6, "end"],
+    ]),
 }

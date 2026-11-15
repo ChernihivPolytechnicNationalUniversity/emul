@@ -36,7 +36,6 @@ export class WireFlow {
   private span = 50
   private live = false
   private paused = false
-  private scale = 1
   private raf = 0
   private sinceLastFrame = frameClock()
 
@@ -62,10 +61,6 @@ export class WireFlow {
         this.painted.delete(id)
       }
     })
-  }
-
-  setScale(scale: number) {
-    this.scale = scale
   }
 
   push(currents: ReadonlyMap<string, number>, phases: ReadonlyMap<string, number>, live: boolean, paused: boolean) {
@@ -139,7 +134,7 @@ export class WireFlow {
       if (pos !== to) unfinished = true
       if (pos !== this.shown.get(id)) {
         this.shown.set(id, pos)
-        dash.style.strokeDashoffset = String(-pos * this.scale)
+        dash.style.strokeDashoffset = String(-pos)
       }
     }
     return unfinished

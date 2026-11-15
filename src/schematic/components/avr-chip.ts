@@ -17,7 +17,6 @@ type Package = { name: string; pins: [number, string][]; source: string }
 
 const WIDTH = 10
 const TOP = 4
-const STUB = 2
 
 /** Alternate functions for the pin notes (DS40002061B Tables 14-3, 14-6, 14-9). */
 export const AVR_ALT: Record<string, string> = {
@@ -85,7 +84,6 @@ export function avrChip(chip: AvrProfile, pkg: Package, description: string, id 
           side,
           labelAt: side === "left" ? "right" : "left",
           kind: g.kind ?? (name === "AREF" ? "analog" : "digital"),
-          stub: STUB,
           mcu: isPort ? name : undefined,
           connector: pkg.name,
           connectorPin: nums[0],

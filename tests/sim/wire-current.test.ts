@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { pinContacts } from "@/schematic/contacts"
 import { GRID } from "@/schematic/geometry"
+import { wirePins } from "@/schematic/migrate-wires"
+import { samePoint } from "@/schematic/wires/segment"
 import { builder } from "@/schematic/builder"
 import { allDefs, getDef } from "@/schematic/registry"
-import { pinKey, type ComponentDef, type PlacedObject, type Schematic, type Wire } from "@/schematic/types"
+import { circuitOf, runsOf, type FlowGraph } from "@/schematic/circuit"
+import { pinKey, type ComponentDef, type LegacyWire as Wire, type PlacedObject, type Schematic } from "@/schematic/types"
 import { Engine, GMIN } from "@/sim/engine"
 import { FlowSolver, type FlowNet } from "@/sim/flow"
 import { SimLoop, type Snapshot } from "@/sim/loop"
@@ -39,7 +42,16 @@ function run(doc: Schematic, seconds: number, emf: number, every?: (now: Snapsho
   return { mean, now, leak }
 }
 
-const wireAmps = (snap: Snapshot, w: Wire) => snap.wireCurrent[w.id] ?? 0
+function sense(doc: Schematic, w: Wire): 1 | -1 {
+  const pins = wirePins(doc.objects)
+  const run = runsOf(doc.wires, pins).find((r) => r.id === w.id)!
+  const pinAt = (end: Wire["from"]) => pins.find((p) => p.key === pinKey(end.object, end.pin))?.at
+  const to = pinAt(w.to)
+  if (to) return samePoint(run.points[run.points.length - 1], to) ? 1 : -1
+  return samePoint(run.points[0], pinAt(w.from)!) ? 1 : -1
+}
+
+const wireAmps = (snap: Snapshot, w: Wire, doc: Schematic) => (snap.wireCurrent[w.id] ?? 0) * sense(doc, w)
 const pinAmps = (snap: Snapshot, obj: PlacedObject, pin: string) => snap.pinCurrent[pinKey(obj.id, pin)] ?? 0
 
 function nanoOnABattery(b: Bench, cells: number) {
@@ -79,10 +91,10 @@ describe("Arduino Nano on a 9 V battery (the bug from production): the current o
       const { mean, now, leak } = run(b.doc, 0.6, emf)
       const drawn = pinAmps(now, battery, "-")
       expect.soft(drawn * 1e3, "the Nano draws its tens of mA from the battery (mA)").toBeGreaterThan(15)
-      expect.soft(wireAmps(now, plus), "the + wire carries the battery's current, battery → VIN").toBeNear(drawn, leak)
-      expect.soft(wireAmps(now, minus), `the − wire carries the same current back, ${gnd} → battery`).toBeNear(-drawn, leak)
-      expect.soft(wireAmps(mean, minus), "averaged over the frame, what goes out on + comes back on −").toBeNear(-wireAmps(mean, plus), leak)
-      expect.soft(wireAmps(mean, plus), "and the average is the battery's current, give or take the sketch's activity").toBeNearRel(drawn, 0.1)
+      expect.soft(wireAmps(now, plus, b.doc), "the + wire carries the battery's current, battery → VIN").toBeNear(drawn, leak)
+      expect.soft(wireAmps(now, minus, b.doc), `the − wire carries the same current back, ${gnd} → battery`).toBeNear(-drawn, leak)
+      expect.soft(wireAmps(mean, minus, b.doc), "averaged over the frame, what goes out on + comes back on −").toBeNear(-wireAmps(mean, plus, b.doc), leak)
+      expect.soft(wireAmps(mean, plus, b.doc), "and the average is the battery's current, give or take the sketch's activity").toBeNearRel(drawn, 0.1)
       expect.soft(pinAmps(now, nano, "J2-1"), "a meter in VIN's lead reads the battery's current, into the board").toBeNear(drawn, leak)
       expect.soft(pinAmps(now, nano, gnd), `a meter in ${gnd}'s lead reads it coming out`).toBeNear(-drawn, leak)
       for (const other of ["J2-2", "J1-4", "J4-6"].filter((p) => p !== gnd)) expect.soft(pinAmps(now, nano, other), `${other}, with nothing on it, carries nothing`).toBeNear(0, 1e-12)
@@ -100,8 +112,8 @@ describe("Arduino Nano on 4.5 V into its 5V net: + is just as exact on every pin
       const { now, leak } = run(b.doc, 0.6, emf)
       const drawn = pinAmps(now, battery, "-")
       expect.soft(drawn * 1e3, "the MCU, the FT232RL and the PWR LED draw from it (mA)").toBeGreaterThan(10)
-      expect.soft(wireAmps(now, plus), "the + wire carries all of it, the FT232RL's share on its internal node included").toBeNear(drawn, leak)
-      expect.soft(wireAmps(now, minus), "and − brings all of it back").toBeNear(-drawn, leak)
+      expect.soft(wireAmps(now, plus, b.doc), "the + wire carries all of it, the FT232RL's share on its internal node included").toBeNear(drawn, leak)
+      expect.soft(wireAmps(now, minus, b.doc), "and − brings all of it back").toBeNear(-drawn, leak)
       expect.soft(pinAmps(now, nano, plusPin), `${plusPin}'s lead`).toBeNear(drawn, leak)
     })
   }
@@ -118,8 +130,8 @@ describe("the return through a ground symbol: the wire from the board's GND pin 
       const fromBoard = b.wire(nano, gnd, ground, "GND")
       const { now, leak } = run(b.doc, 0.6, emf)
       const drawn = pinAmps(now, battery, "-")
-      expect.soft(wireAmps(now, back), "ground symbol → battery −").toBeNear(-drawn, leak)
-      expect.soft(wireAmps(now, fromBoard), `${gnd} → ground symbol, the same current`).toBeNear(drawn, leak)
+      expect.soft(wireAmps(now, back, b.doc), "ground symbol → battery −").toBeNear(-drawn, leak)
+      expect.soft(wireAmps(now, fromBoard, b.doc), `${gnd} → ground symbol, the same current`).toBeNear(drawn, leak)
       expect.soft(pinAmps(now, ground, "GND"), "nothing is lost into the symbol: in on one wire, out on the other").toBeNear(0, leak)
     })
   }
@@ -133,8 +145,8 @@ describe("the return through a ground symbol: the wire from the board's GND pin 
     const plus = b.wire(rail, "V", nano, "J2-1")
     const minus = b.wire(ground, "GND", nano, "J2-2")
     const { now, leak } = run(b.doc, 0.6, 9)
-    expect.soft(wireAmps(now, plus) * 1e3, "the rail feeds the Nano (mA)").toBeGreaterThan(15)
-    expect.soft(wireAmps(now, minus), "the GND wire returns all of it to the ground the rail stands on").toBeNear(-wireAmps(now, plus), leak)
+    expect.soft(wireAmps(now, plus, b.doc) * 1e3, "the rail feeds the Nano (mA)").toBeGreaterThan(15)
+    expect.soft(wireAmps(now, minus, b.doc), "the GND wire returns all of it to the ground the rail stands on").toBeNear(-wireAmps(now, plus, b.doc), leak)
   })
 
   it("two GND wires to one ground symbol share the return equally: two equal paths between the same two nodes", () => {
@@ -147,8 +159,8 @@ describe("the return through a ground symbol: the wire from the board's GND pin 
     const two = b.wire(ground, "GND", nano, "J1-4")
     const { now, leak } = run(b.doc, 0.6, emf)
     const drawn = pinAmps(now, battery, "-")
-    expect.soft(wireAmps(now, one), "J2-2 takes half").toBeNear(-drawn / 2, leak)
-    expect.soft(wireAmps(now, two), "J1-4 the other half").toBeNear(-drawn / 2, leak)
+    expect.soft(wireAmps(now, one, b.doc), "J2-2 takes half").toBeNear(-drawn / 2, leak)
+    expect.soft(wireAmps(now, two, b.doc), "J1-4 the other half").toBeNear(-drawn / 2, leak)
   })
 
   it("a return into two ground symbols, one of them doubled by a second symbol on its pin: two ground ties against one, 2 : 1", () => {
@@ -158,14 +170,16 @@ describe("the return through a ground symbol: the wire from the board's GND pin 
     const paired = b.place("ground", 10, 8)
     b.place("ground", 10, 8)
     const single = b.place("ground", 14, 8)
+    const tee = b.node(11, 5)
     b.wire(rail, "V", r, "1")
-    const toPaired = b.wire(r, "2", paired, "GND")
-    const toSingle = b.wire(r, "2", single, "GND")
+    b.wire(r, "2", tee, "J")
+    const toPaired = b.wire(tee, "J", paired, "GND")
+    const toSingle = b.wire(tee, "J", single, "GND")
     const { now, leak } = run(b.doc, 0.05, 3.3)
     const through = Math.abs(now.readings.find((x) => x.object === r.id)!.current)
     expect.soft(through * 1e3, "3.3 V over 1 kΩ (mA)").toBeNearRel(3.3, 0.01)
-    expect.soft(wireAmps(now, toPaired), "two thirds into the doubled ground").toBeNear((2 / 3) * through, leak)
-    expect.soft(wireAmps(now, toSingle), "a third into the single one").toBeNear(through / 3, leak)
+    expect.soft(wireAmps(now, toPaired, b.doc), "two thirds into the doubled ground").toBeNear((2 / 3) * through, leak)
+    expect.soft(wireAmps(now, toSingle, b.doc), "a third into the single one").toBeNear(through / 3, leak)
   })
 
   it("an LED from +5V sunk by D13: the pad's return is the board's own ground, so the GND wire carries it too", () => {
@@ -183,9 +197,9 @@ describe("the return through a ground symbol: the wire from the board's GND pin 
     let lit = 0
     run(b.doc, 1.3, emf, (now, leak) => {
       const drawn = pinAmps(now, battery, "-")
-      if (Math.abs(wireAmps(now, sunk)) > 3e-3) lit++
-      expect.soft(wireAmps(now, back), `t = ${now.time.toFixed(2)} s: ground symbol → battery −`).toBeNear(-drawn, leak)
-      expect.soft(wireAmps(now, fromBoard), `t = ${now.time.toFixed(2)} s: J2-2 → ground symbol, the LED's current included while D13 sinks it`).toBeNear(drawn, leak)
+      if (Math.abs(wireAmps(now, sunk, b.doc)) > 3e-3) lit++
+      expect.soft(wireAmps(now, back, b.doc), `t = ${now.time.toFixed(2)} s: ground symbol → battery −`).toBeNear(-drawn, leak)
+      expect.soft(wireAmps(now, fromBoard, b.doc), `t = ${now.time.toFixed(2)} s: J2-2 → ground symbol, the LED's current included while D13 sinks it`).toBeNear(drawn, leak)
     })
     expect.soft(lit, "D13 sank the LED's current for part of the run").toBeGreaterThan(0)
   })
@@ -204,13 +218,14 @@ describe("a pad driven to a voltage, as a DAC drives its pin: its return is the 
     const engine = new Engine(net)
     for (let i = 0; i < 50; i++) engine.step(20e-6, () => ({}), (_, object, node) => (object === nano.id && node === "J2-15" ? 2.5 : null))
     const terminals = engine.terminalCurrents()
-    const flow = new FlowSolver(b.doc.wires, net).currents((k) => terminals.get(k) ?? 0)
+    const flow = new FlowSolver(circuitOf(b.doc).flow, net).currents((k) => terminals.get(k) ?? 0)
     const through = Math.abs(engine.readings().find((x) => x.object === r.id)!.current)
     const leak = GMIN * net.nodes * 2.5
     expect.soft(through * 1e3, "the pad drives milliamps through 1 kΩ (mA)").toBeGreaterThan(1)
-    expect.soft(flow.wires.get(out.id) ?? 0, "D13 → resistor").toBeNear(through, leak)
-    expect.soft(flow.wires.get(down.id) ?? 0, "resistor → ground symbol").toBeNear(through, leak)
-    expect.soft(flow.wires.get(home.id) ?? 0, "ground symbol → J2-2: the pad's return, not lost into the symbol").toBeNear(-through, leak)
+    const along = (w: Wire) => (flow.wires.get(w.id) ?? 0) * sense(b.doc, w)
+    expect.soft(along(out), "D13 → resistor").toBeNear(through, leak)
+    expect.soft(along(down), "resistor → ground symbol").toBeNear(through, leak)
+    expect.soft(along(home), "ground symbol → J2-2: the pad's return, not lost into the symbol").toBeNear(-through, leak)
   })
 })
 
@@ -228,8 +243,8 @@ describe("a signal pin brought out on two headers: RESET on J1-3 and J2-3", () =
         const { now, leak } = run(b.doc, 0.3, emf)
         const through = Math.abs(now.readings.find((x) => x.object === r.id)!.current)
         expect.soft(through * 1e3, "≈ 5 V over 11 kΩ (mA)").toBeNearRel((5 / 11e3) * 1e3, 0.05)
-        expect.soft(wireAmps(now, out), `${reset} → resistor`).toBeNear(drawn === "from the pin" ? through : -through, leak)
-        expect.soft(wireAmps(now, back), "resistor → J1-4").toBeNear(through, leak)
+        expect.soft(wireAmps(now, out, b.doc), `${reset} → resistor`).toBeNear(drawn === "from the pin" ? through : -through, leak)
+        expect.soft(wireAmps(now, back, b.doc), "resistor → J1-4").toBeNear(through, leak)
         expect.soft(pinAmps(now, nano, reset), `a meter in ${reset}'s lead`).toBeNear(-through, leak)
       })
     }
@@ -249,9 +264,9 @@ describe("a seven-segment display's two common leads, 3 and 8, joined inside", (
         const { now, leak } = run(b.doc, 0.05, 3 * ALKALINE_CELL_FRESH)
         const drawn = pinAmps(now, battery, "-")
         expect.soft(drawn * 1e3, "the segment lights (mA)").toBeGreaterThan(3)
-        expect.soft(wireAmps(now, feed), "battery → resistor").toBeNear(drawn, leak)
-        expect.soft(wireAmps(now, lit), "resistor → display").toBeNear(drawn, leak)
-        expect.soft(wireAmps(now, back), "display → battery −").toBeNear(drawn, leak)
+        expect.soft(wireAmps(now, feed, b.doc), "battery → resistor").toBeNear(drawn, leak)
+        expect.soft(wireAmps(now, lit, b.doc), "resistor → display").toBeNear(drawn, leak)
+        expect.soft(wireAmps(now, back, b.doc), "display → battery −").toBeNear(drawn, leak)
         expect.soft(pinAmps(now, display, common), `${common}'s lead`).toBeNear(polarity === "anode" ? drawn : -drawn, leak)
       })
     }
@@ -274,8 +289,8 @@ describe("the 7\" LCD docked on the Open746I-C's P15: its 3.3 V and its return c
   it("the source's wires carry what the board and the panel draw", () => {
     const drawn = pinAmps(now, source, "-")
     expect.soft(drawn, "the panel's logic and backlight alone are over 0.3 A").toBeGreaterThan(0.3)
-    expect.soft(wireAmps(now, plus), "+ wire").toBeNear(drawn, leak)
-    expect.soft(wireAmps(now, minus), "− wire").toBeNear(-drawn, leak)
+    expect.soft(wireAmps(now, plus, b.doc), "+ wire").toBeNear(drawn, leak)
+    expect.soft(wireAmps(now, minus, b.doc), "− wire").toBeNear(-drawn, leak)
   })
 
   it("what enters the panel through its leads leaves through its leads: it has no ground of its own", () => {
@@ -325,8 +340,8 @@ describe("every board and bare chip in the catalogue, fed on each pin of its sup
         const { now, leak } = run(b.doc, 0.03, volts)
         const drawn = pinAmps(now, source, "-")
         expect.soft(drawn, `${plusPin} → ${minusPin}: the part draws current`).toBeGreaterThan(1e-6)
-        expect.soft(wireAmps(now, plus), `${plusPin}: the + wire carries the source's current`).toBeNear(drawn, leak)
-        expect.soft(wireAmps(now, minus), `${minusPin}: the − wire carries it back`).toBeNear(-drawn, leak)
+        expect.soft(wireAmps(now, plus, b.doc), `${plusPin}: the + wire carries the source's current`).toBeNear(drawn, leak)
+        expect.soft(wireAmps(now, minus, b.doc), `${minusPin}: the − wire carries it back`).toBeNear(-drawn, leak)
         expect.soft(pinAmps(now, board, plusPin), `${plusPin}'s lead`).toBeNear(drawn, leak)
         expect.soft(pinAmps(now, board, minusPin), `${minusPin}'s lead`).toBeNear(-drawn, leak)
       }
@@ -343,8 +358,8 @@ describe("a bare chip fed from a rail, its ground pins left unwired: the return 
       const rail = b.place("supply", -10, 0, { value: "+3V3", voltage: "3.3 V" })
       const feed = b.wire(rail, "V", chip, pinsWith(def, def.mcuPower!)[0])
       const { now, leak } = run(b.doc, 0.03, 3.3)
-      expect.soft(wireAmps(now, feed), "the rail feeds the chip").toBeGreaterThan(1e-6)
-      expect.soft(pinAmps(now, chip, pinsWith(def, def.mcuPower!)[0]), "its supply lead carries what the wire brings").toBeNear(wireAmps(now, feed), leak)
+      expect.soft(wireAmps(now, feed, b.doc), "the rail feeds the chip").toBeGreaterThan(1e-6)
+      expect.soft(pinAmps(now, chip, pinsWith(def, def.mcuPower!)[0]), "its supply lead carries what the wire brings").toBeNear(wireAmps(now, feed, b.doc), leak)
       for (const pin of pinsWith(def, [...groundTiesOf(def).keys()][0])) expect.soft(pinAmps(now, chip, pin), `${pin}, with nothing on it`).toBeNear(0, leak)
     })
   }
@@ -423,12 +438,8 @@ function bruteForce(nodes: readonly string[], edges: readonly Conductance[], ent
 }
 
 describe("the wire currents are the limit of a real conductance network: traces and contacts ≫ wires ≫ the schematic's grounds ≫ a part's reference", () => {
-  const wire = (id: string, from: string, to: string): Wire => {
-    const [fo, fp] = from.split(":")
-    const [to_, tp] = to.split(":")
-    return { id, from: { object: fo, pin: fp }, to: { object: to_, pin: tp } }
-  }
-  const wires: Wire[] = [
+  const wire = (id: string, from: string, to: string) => ({ id, from, to })
+  const wires = [
     wire("bat+", "T:+", "A:V1"),
     wire("bat-", "T:-", "S1:GND"),
     wire("a-gnd", "A:G1", "S1:GND"),
@@ -482,7 +493,9 @@ describe("the wire currents are the limit of a real conductance network: traces 
     conductorOf: new Map(keys.map((k) => [k, find(k)])),
     partShorts: shorts,
   }
-  const solver = new FlowSolver(wires, net)
+  const pointOf = (pin: string) => `point ${contacts.get(pin) ?? pin}`
+  const flow: FlowGraph = { runs: wires.map((w) => ({ id: w.id, a: pointOf(w.from), b: pointOf(w.to) })), pins: Object.fromEntries(pins.map((p) => [p, pointOf(p)])) }
+  const solver = new FlowSolver(flow, net)
 
   function terminals(seed: number): Map<string, number> {
     let s = seed
@@ -495,10 +508,12 @@ describe("the wire currents are the limit of a real conductance network: traces 
     return t
   }
 
+  const landing = (pin: string) => (contacts.has(pin) ? `contact ${contacts.get(pin)}` : pin)
+
   function limit(t: ReadonlyMap<string, number>, eps: number) {
     const nodes = [...new Set([...pins, ...keys, ...t.keys(), "⏚", ...shorts.map((_, i) => `hub${i}`), ...[...contacts.values()].map((c) => `contact ${c}`)])]
     const edges: Conductance[] = [
-      ...wires.map((w) => ({ a: pinKey(w.from.object, w.from.pin), b: pinKey(w.to.object, w.to.pin), g: 1 })),
+      ...wires.map((w) => ({ a: landing(w.from), b: landing(w.to), g: 1 })),
       ...shorts.flatMap((group, i) => group.map((k) => ({ a: `hub${i}`, b: k, g: 1 / eps }))),
       ...[...contacts].map(([k, c]) => ({ a: `contact ${c}`, b: k, g: 1 / eps })),
       ...[...ties].map(([k, tie]) => ({ a: k, b: "⏚", g: tie === "schematic" ? eps : eps * eps })),
@@ -516,16 +531,19 @@ describe("the wire currents are the limit of a real conductance network: traces 
     entering.set("⏚", total)
     const phi = bruteForce(nodes, edges, entering, "⏚")
     const through = (a: string, b: string, g: number) => g * (phi.get(a)! - phi.get(b)!)
-    const wireAmpsOf = new Map(wires.map((w) => [w.id, through(pinKey(w.from.object, w.from.pin), pinKey(w.to.object, w.to.pin), 1)]))
+    const wireAmpsOf = new Map(wires.map((w) => [w.id, through(landing(w.from), landing(w.to), 1)]))
     const leads = new Map<string, number>()
     for (const pin of pins) {
+      const c = contacts.get(pin)
+      if (c) {
+        leads.set(pin, through(`contact ${c}`, pin, 1 / eps))
+        continue
+      }
       let amps = 0
       for (const w of wires) {
-        if (pinKey(w.to.object, w.to.pin) === pin) amps += wireAmpsOf.get(w.id)!
-        if (pinKey(w.from.object, w.from.pin) === pin) amps -= wireAmpsOf.get(w.id)!
+        if (w.to === pin) amps += wireAmpsOf.get(w.id)!
+        if (w.from === pin) amps -= wireAmpsOf.get(w.id)!
       }
-      const c = contacts.get(pin)
-      if (c) amps += through(`contact ${c}`, pin, 1 / eps)
       leads.set(pin, amps)
     }
     return { wires: wireAmpsOf, leads }

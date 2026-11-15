@@ -1,0 +1,24 @@
+{
+  "source": "example nano-dimmer",
+  "objects": [
+    "ground@-3,16 (ground)",
+    "ground@-6,10 (ground)",
+    "ground@23,8 (ground)",
+    "LED1 (led)",
+    "R1 (resistor)",
+    "RV1 (potentiometer)",
+    "TERM1 (serial-terminal)",
+    "U1 (arduino-nano)"
+  ],
+  "nets": [
+    ["ground@-3,16.GND","U1.J2-2"],
+    ["ground@-6,10.GND","RV1.2"],
+    ["ground@23,8.GND","LED1.2"],
+    ["LED1.1","R1.2"],
+    ["R1.1","U1.J1-12"],
+    ["RV1.1","U1.J2-4"],
+    ["RV1.W","U1.J2-12"],
+    ["TERM1.RX","U1.VCP-TX"],
+    ["TERM1.TX","U1.VCP-RX"]
+  ]
+}

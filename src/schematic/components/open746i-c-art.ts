@@ -25,6 +25,13 @@ export function cellAt(mm: Mm) {
 
 export const onModule = (mm: Mm): Mm => ({ x: MODULE_AT.x + mm.x, y: MODULE_AT.y + mm.y })
 
+const halfCells = (cell: number) => Math.round(cell * 2) / 2
+
+export function shiftOntoHalfCells(onTheModule: Mm): Mm {
+  const cell = exactCell(onModule(onTheModule))
+  return { x: (halfCells(cell.x) - cell.x) / FRAME.cellsPerMm, y: (halfCells(cell.y) - cell.y) / FRAME.cellsPerMm }
+}
+
 function seat(first: Mm, round: (v: number) => number = Math.round): Seat {
   const exact = exactCell(first)
   const x = round(exact.x)
@@ -501,11 +508,19 @@ const PAD_X = { leftOuter: 4.7, leftInner: 6.7, rightInner: 50.7, rightOuter: 52
 
 const padAt = (column: keyof typeof MODULE_COLUMNS, name: string): Mm => ({ x: PAD_X[column], y: PAD_ROWS[MODULE_COLUMNS[column].split(" ").indexOf(name)] })
 
-export const MODULE_PAD = { boot0: padAt("leftOuter", "BOOT0") }
+const BOOT0_ON_THE_PHOTO = padAt("leftOuter", "BOOT0")
+
+const LEFT_PADS_SHIFT = shiftOntoHalfCells(BOOT0_ON_THE_PHOTO)
+
+export const MODULE_PAD = { boot0: { x: BOOT0_ON_THE_PHOTO.x + LEFT_PADS_SHIFT.x, y: BOOT0_ON_THE_PHOTO.y + LEFT_PADS_SHIFT.y } }
 
 const LQFP176_MM = { body: 24 / Math.SQRT2, leadTips: 26 / Math.SQRT2 }
 
-const POWER_JMP_SILKSCREEN_CENTRE: Mm = { x: 14.3, y: 15.15 }
+const POWER_JMP_ON_THE_PHOTO: Mm = { x: 14.3, y: 15.15 }
+
+const POWER_JMP_SHIFT = shiftOntoHalfCells({ x: POWER_JMP_ON_THE_PHOTO.x - PITCH / 2, y: POWER_JMP_ON_THE_PHOTO.y + PITCH / 2 })
+
+const POWER_JMP_SILKSCREEN_CENTRE: Mm = { x: POWER_JMP_ON_THE_PHOTO.x + POWER_JMP_SHIFT.x, y: POWER_JMP_ON_THE_PHOTO.y + POWER_JMP_SHIFT.y }
 
 const powerJumper = (column: -1 | 1) => {
   const x = POWER_JMP_SILKSCREEN_CENTRE.x + (column * PITCH) / 2
@@ -516,10 +531,10 @@ export const POWER_JMP = { vbat: powerJumper(-1), vref: powerJumper(1) }
 
 const PAD_NAME_GAP_MM = 1.05
 
-function padColumn(a: Artwork, outer: number, inner: number, outerNames: string, innerNames: string, outerLeft: boolean, moduleEdge: number) {
-  const padRows = PAD_ROWS
+function padColumn(a: Artwork, outer: number, inner: number, outerNames: string, innerNames: string, outerLeft: boolean, moduleEdge: number, dy = 0) {
+  const padRows = PAD_ROWS.map((y) => y + dy)
   const [x0, x1] = [Math.min(outer, inner) - PAD_OUTLINE_MM, Math.max(outer, inner) + PAD_OUTLINE_MM]
-  a.outline(x0, 1.35, x1, 81.65, 0.4)
+  a.outline(x0, 1.35 + dy, x1, 81.65 + dy, 0.4)
   for (const k of [0, 19, 20, 39]) a.line([{ x: x0, y: padRows[k] + (k % 20 === 0 ? 1.0 : -1.0) }, { x: x1, y: padRows[k] + (k % 20 === 0 ? 1.0 : -1.0) }])
   dots(a, grid2([outer, inner], padRows))
   const outward = outerLeft ? "left" : "right"
@@ -533,7 +548,7 @@ export function moduleArt(): BodyShape[] {
   const art = new Artwork(frame)
   const plate: BodyShape = { type: "rect", x: art.cellX(0), y: art.cellY(0), w: art.cells(MODULE_MM.w), h: art.cells(MODULE_MM.h), rx: art.cells(0.6), fill: "zone" }
 
-  padColumn(art.grouped(), PAD_X.leftOuter, PAD_X.leftInner, MODULE_COLUMNS.leftOuter, MODULE_COLUMNS.leftInner, true, 0)
+  padColumn(art.grouped(), PAD_X.leftOuter + LEFT_PADS_SHIFT.x, PAD_X.leftInner + LEFT_PADS_SHIFT.x, MODULE_COLUMNS.leftOuter, MODULE_COLUMNS.leftInner, true, 0, LEFT_PADS_SHIFT.y)
   padColumn(art.grouped(), PAD_X.rightOuter, PAD_X.rightInner, MODULE_COLUMNS.rightOuter, MODULE_COLUMNS.rightInner, false, MODULE_MM.w)
 
   const jtag = new Artwork(frame)
@@ -548,7 +563,7 @@ export function moduleArt(): BodyShape[] {
     .text("3.3V", POWER_JMP_SILKSCREEN_CENTRE.x, vbat.rail.y - 1.8, named(TABLE, { anchor: "end", rotate: 90 }))
     .text("VBAT", vbat.pin.x, vbat.pin.y + 1.8, named(TABLE, { anchor: "start", rotate: 90 }))
     .text("VREF+", vref.pin.x, vref.pin.y + 1.8, named(TABLE, { anchor: "start", rotate: 90 }))
-  art.text("POWER JMP", 18.2, POWER_JMP_SILKSCREEN_CENTRE.y, named(CAPTION, { rotate: 90 }))
+  art.text("POWER JMP", 18.2 + POWER_JMP_SHIFT.x, POWER_JMP_SILKSCREEN_CENTRE.y, named(CAPTION, { rotate: 90 }))
 
   wMark(art, { x: 41.4, y: 16.6 }, 0.58, 1)
   art.text("Waveshare", 37.6, 16.5, { size: 0.42, rotate: 90, muted: true }).text("®", 44.4, 20.4, { size: 0.36, muted: true })

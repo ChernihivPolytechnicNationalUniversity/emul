@@ -3,14 +3,18 @@ import type { Rect } from "@/schematic/geometry"
 import { dispatch, ownsKeys, typesAhead } from "@/lib/keys"
 import { KEYMAP } from "@/lib/keymap"
 import { wheelZooms } from "@/lib/pointer"
-import { dotGridStyle } from "./dot-grid"
+import { dotGridPosition, dotGridStyle, type DotGrid } from "./dot-grid"
 import { easeFactor, frameClock } from "./easing"
 
 export type Viewport = { x: number; y: number; scale: number }
+
+export const holdsPan = (e: Pick<KeyboardEvent, "code" | "repeat" | "shiftKey" | "defaultPrevented">) => e.code === "Space" && !e.repeat && !e.defaultPrevented && !e.shiftKey
 export type Point = { x: number; y: number }
 
 export const MIN_SCALE = 0.1
 export const MAX_SCALE = 8
+const VIEW_SETTLE_MS = 160
+
 const ZOOM_STEP = 1.2
 /** Time constant of the zoom follow animation: the view closes ~63% of the gap per TAU_MS. */
 const TAU_MS = 70
@@ -48,7 +52,14 @@ export function followTarget(view: { current: Viewport }, target: { current: Vie
  * - touch: two fingers pinch-zoom and pan together; whatever the first finger had started is
  *   cancelled through `onPinchStart`, and the fingers' events go no further while they pinch
  */
-export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scale: 0.5 }) {
+export const TOOLBAR_CLEARANCE = 12 + 54 + 8
+
+export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scale: 0.5 }, leftClearance = TOOLBAR_CLEARANCE) {
+  const clearance = React.useRef(leftClearance)
+  React.useLayoutEffect(() => {
+    clearance.current = leftClearance
+  }, [leftClearance])
+  const leftEdge = (margin: number) => Math.max(margin, clearance.current)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const contentRef = React.useRef<HTMLDivElement>(null)
   const overlayRef = React.useRef<HTMLDivElement>(null)
@@ -66,6 +77,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   const current = React.useRef<Viewport>(initial)
   const raf = React.useRef(0)
   const paintedScale = React.useRef(NaN)
+  const paintedDots = React.useRef<DotGrid>(dotGridStyle(grid, NaN))
   React.useEffect(() => () => cancelAnimationFrame(raf.current), [])
 
   const size = React.useRef({ width: 0, height: 0 })
@@ -97,20 +109,27 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     })
   }, [measure])
 
+  const settling = React.useRef(0)
   const paint = React.useCallback(
     (v: Viewport, animating = false) => {
       const content = contentRef.current
-      if (content) content.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`
+      if (content) {
+        content.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`
+        content.toggleAttribute("data-view-moving", true)
+        window.clearTimeout(settling.current)
+        settling.current = window.setTimeout(() => content.removeAttribute("data-view-moving"), VIEW_SETTLE_MS)
+      }
       overlayRef.current?.style.setProperty("--field-scale", String(v.scale))
       const container = containerRef.current
       if (!container) return
       publishView(v, animating)
-      container.style.backgroundPosition = `${v.x}px ${v.y}px`
-      if (v.scale === paintedScale.current) return
-      paintedScale.current = v.scale
-      const dots = dotGridStyle(grid, v.scale)
-      container.style.backgroundImage = dots.backgroundImage
-      container.style.backgroundSize = dots.backgroundSize
+      if (v.scale !== paintedScale.current) {
+        paintedScale.current = v.scale
+        paintedDots.current = dotGridStyle(grid, v.scale)
+        container.style.backgroundImage = paintedDots.current.backgroundImage
+        container.style.backgroundSize = paintedDots.current.backgroundSize
+      }
+      container.style.backgroundPosition = dotGridPosition(paintedDots.current, v.x, v.y)
     },
     [grid, publishView],
   )
@@ -187,10 +206,11 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
     (r: { x: number; y: number; w: number; h: number }, margin = 48, maxScale = MAX_SCALE) => {
       const { width, height } = measure()
       if (!width || !height) return
-      const scale = clamp(Math.min((width - 2 * margin) / r.w, (height - 2 * margin) / r.h, maxScale), MIN_SCALE, MAX_SCALE)
+      const left = leftEdge(margin)
+      const scale = clamp(Math.min((width - left - margin) / r.w, (height - 2 * margin) / r.h, maxScale), MIN_SCALE, MAX_SCALE)
       animateTo({
         scale,
-        x: width / 2 - (r.x + r.w / 2) * scale,
+        x: (left + width - margin) / 2 - (r.x + r.w / 2) * scale,
         y: height / 2 - (r.y + r.h / 2) * scale,
       })
     },
@@ -201,16 +221,16 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
       const { width, height } = measure()
       if (!width || !height) return
       const t = target.current
-      const along = (start: number, length: number, offset: number, screen: number) => {
+      const along = (start: number, length: number, offset: number, screen: number, low: number) => {
         const from = start * t.scale + offset
         const to = (start + length) * t.scale + offset
-        if (to - from > screen - 2 * margin) return screen / 2 - (from + to) / 2
-        if (from < margin) return margin - from
+        if (to - from > screen - low - margin) return (low + screen - margin) / 2 - (from + to) / 2
+        if (from < low) return low - from
         if (to > screen - margin) return screen - margin - to
         return 0
       }
-      const dx = along(r.x, r.w, t.x, width)
-      const dy = along(r.y, r.h, t.y, height)
+      const dx = along(r.x, r.w, t.x, width, leftEdge(margin))
+      const dy = along(r.y, r.h, t.y, height, margin)
       if (dx || dy) animateTo({ ...t, x: t.x + dx, y: t.y + dy })
     },
     [animateTo, measure],
@@ -228,9 +248,10 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
       let scale = t.scale
       const side = Math.max(1, Math.min(r.w, r.h))
       if (side * scale < minPx) scale = Math.max(scale, Math.min(minPx / side, maxScale))
-      scale = clamp(Math.min(scale, (width - 2 * margin) / Math.max(1, r.w), (height - 2 * margin) / Math.max(1, r.h)), MIN_SCALE, MAX_SCALE)
+      const left = leftEdge(margin)
+      scale = clamp(Math.min(scale, (width - left - margin) / Math.max(1, r.w), (height - 2 * margin) / Math.max(1, r.h)), MIN_SCALE, MAX_SCALE)
       if (scale === t.scale) return reveal(r, margin)
-      animateTo({ scale, x: width / 2 - (r.x + r.w / 2) * scale, y: height / 2 - (r.y + r.h / 2) * scale })
+      animateTo({ scale, x: (left + width - margin) / 2 - (r.x + r.w / 2) * scale, y: height / 2 - (r.y + r.h / 2) * scale })
     },
     [animateTo, measure, reveal],
   )
@@ -278,7 +299,7 @@ export function useViewport(grid: number, initial: Viewport = { x: 0, y: 0, scal
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
       const typing = ownsKeys(e.target) || typesAhead(e.target) || (e.target as HTMLElement | null)?.tagName === "INPUT"
-      if (e.code === "Space" && !e.repeat && !typing && !e.defaultPrevented) {
+      if (holdsPan(e) && !typing) {
         e.preventDefault()
         setSpaceHeld(true)
       }

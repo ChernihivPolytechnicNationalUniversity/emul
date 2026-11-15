@@ -1,0 +1,82 @@
+{
+  "simulator": "ngspice-45.2",
+  "netlist": "multivibrator.cir",
+  "threshold": 2.5,
+  "collectorFalls": [
+    {
+      "collector": "VT2",
+      "at": 0.00154158
+    },
+    {
+      "collector": "VT1",
+      "at": 0.004936868
+    },
+    {
+      "collector": "VT2",
+      "at": 0.012451816
+    },
+    {
+      "collector": "VT1",
+      "at": 0.015852927
+    },
+    {
+      "collector": "VT2",
+      "at": 0.023367873
+    },
+    {
+      "collector": "VT1",
+      "at": 0.026768985
+    },
+    {
+      "collector": "VT2",
+      "at": 0.034283931
+    },
+    {
+      "collector": "VT1",
+      "at": 0.037685043
+    },
+    {
+      "collector": "VT2",
+      "at": 0.04519999
+    },
+    {
+      "collector": "VT1",
+      "at": 0.048601101
+    },
+    {
+      "collector": "VT2",
+      "at": 0.056116048
+    },
+    {
+      "collector": "VT1",
+      "at": 0.05951716
+    },
+    {
+      "collector": "VT2",
+      "at": 0.067032105
+    },
+    {
+      "collector": "VT1",
+      "at": 0.070433217
+    },
+    {
+      "collector": "VT2",
+      "at": 0.077948163
+    }
+  ],
+  "steady": {
+    "from": 0.01,
+    "vt1Off": 0.003401112,
+    "vt2Off": 0.007514946
+  },
+  "collectorSwing": {
+    "VT1": [
+      0.0387,
+      4.9999
+    ],
+    "VT2": [
+      0.0395,
+      4.9999
+    ]
+  }
+}

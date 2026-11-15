@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest"
 import { GRID } from "@/schematic/geometry"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { nucleoI2c, nucleoSerial, nucleoSpi, nucleoSquare } from "@/schematic/examples"
 import { partKey, pinKey, type Schematic } from "@/schematic/types"
 import { SimLoop, type Probe } from "@/sim/loop"
@@ -131,7 +131,7 @@ describe("logic analyser", () => {
     extra.wire(r, "2", gnd, "GND")
     extra.wire(g, "-", gnd, "GND")
     doc.objects.push(...extra.doc.objects)
-    doc.wires.push(...extra.doc.wires)
+    connect(doc, ...connections(extra.doc))
     const { run, edges } = analyse(doc, [
       { id: "d13", a: pinKey(u.id, "CN7-10"), b: null },
       { id: "gen", a: pinKey(r.id, "1"), b: null },

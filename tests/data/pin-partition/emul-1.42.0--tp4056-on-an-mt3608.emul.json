@@ -1,0 +1,10 @@
+{
+  "source": "tests/data/emul-1.42.0/tp4056-on-an-mt3608.emul",
+  "objects": [
+    "U1 (tp4056)",
+    "U2 (mt3608)"
+  ],
+  "nets": [
+    ["U1.GND","U2.GND"]
+  ]
+}

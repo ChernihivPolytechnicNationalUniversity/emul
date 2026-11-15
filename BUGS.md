@@ -1,5 +1,29 @@
 # Bugs
 
+## A file opened in the first second after load is replaced by the showcase
+
+Found 2026-11-03 by the schematic rework's phase 0 review (`docs/emul-schematic/reviews/phase0-claude.md`
+in the coursework tree), on a production build of `e3de040`.
+
+**Steps**
+
+1. Open εmul in a fresh browser profile, so the landing example is due.
+2. Within about half a second of the field appearing, open a `.emul` file (File → Open, or a file
+   dropped on the input).
+
+**What happens**
+
+The file opens, its name in the title, and about 0.6 s after load the showcase (`Nucleo + 74HC595
+running light`) replaces it. Nothing says so. `useProjects`' boot awaits `landing()`, which awaits the
+showcase's prebuilt firmware, and then `enter`s it whatever was opened meanwhile. A large file loses
+the race the other way: it is still parsing when the landing arrives, so it wins.
+
+**Expected**
+
+A project opened while the landing is on its way stays; the landing is dropped. `scripts/field-bench.ts`
+waited only for the field to draw and so measured the showcase for its 30-object and board
+documents until it learnt to wait for the landing and then for its own document's title.
+
 ## Compile on a running board freezes the simulation
 
 Found 2026-09-23 on https://emul.digituni.org/ (release of `b7b1055`), Chrome 153, Windows 11.

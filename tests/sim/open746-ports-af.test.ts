@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { LogicStore } from "@/components/logic/logic-store"
 import { parseElf } from "@/mcu/elf"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
@@ -49,7 +49,7 @@ async function afBench(spiConnected = true) {
   const load = builder(GRID)
   load.wire(u, UART_TX, u, UART_RX)
   if (spiConnected) load.wire(u, SPI_MOSI, u, SPI_MISO)
-  doc.wires.push(...load.doc.wires)
+  connect(doc, ...connections(load.doc))
 
   const loop = new SimLoop()
   loop.setDoc(doc)

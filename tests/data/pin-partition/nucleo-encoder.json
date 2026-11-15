@@ -1,0 +1,17 @@
+{
+  "source": "example nucleo-encoder",
+  "objects": [
+    "SW1 (ky-040)",
+    "TERM1 (serial-terminal)",
+    "U1 (nucleo-f429zi)"
+  ],
+  "nets": [
+    ["SW1.CLK","U1.CN10-21"],
+    ["SW1.DT","U1.CN10-19"],
+    ["SW1.GND","U1.CN8-11"],
+    ["SW1.SW","U1.CN10-18"],
+    ["SW1.VCC","U1.CN8-7"],
+    ["TERM1.RX","U1.VCP-TX"],
+    ["TERM1.TX","U1.VCP-RX"]
+  ]
+}

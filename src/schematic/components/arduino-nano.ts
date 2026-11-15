@@ -110,7 +110,6 @@ const header = (connector: "J1" | "J2", rows: Row[]): PinDef[] => {
     side: left ? "left" : "right",
     labelAt: left ? "right" : "left",
     kind: kindOf(label, mcu),
-    stub: 1,
     mcu,
     fn: mcu ? AVR_ALT[mcu] : undefined,
     connector,
@@ -129,8 +128,6 @@ const icsp: PinDef[] = ICSP.map(([pin, label, mcu]) => {
     side: odd ? "bottom" : "top",
     labelAt: odd ? "bottom" : "top",
     kind: kindOf(label, mcu),
-    // The odd row's stubs clear the board's far edge; the even row's go up between the rows.
-    stub: odd ? 2 : 1,
     mcu,
     fn: mcu ? AVR_ALT[mcu] : undefined,
     connector: "J4",
@@ -148,8 +145,8 @@ const pins: PinDef[] = [
   // The FT232RL's side of RP1A/RP1B: where the PC's end of the USB serial port is. On the real
   // board only the USB cable reaches it; here a terminal wired to these two pins stands in for
   // the PC.
-  { id: "VCP-TX", label: "TX", ...cell({ x: VCP_X.tx, y: VCP_Y }), side: "top", labelAt: "bottom", kind: "digital", stub: 1, signal: "FT232RL RXD", note: "D1/TX through 1 kΩ: what the board sends to the PC. A terminal's RX here is the PC listening over USB", printed: true, hostSerial: "in" },
-  { id: "VCP-RX", label: "RX", ...cell({ x: VCP_X.rx, y: VCP_Y }), side: "top", labelAt: "bottom", kind: "digital", stub: 1, signal: "FT232RL TXD", note: "The bridge's TXD, to D0/RX through 1 kΩ: what the PC sends. A terminal's TX here is the PC typing over USB: the bridge's 5 V output sends it", printed: true, hostSerial: "out" },
+  { id: "VCP-TX", label: "TX", ...cell({ x: VCP_X.tx, y: VCP_Y }), side: "top", labelAt: "bottom", kind: "digital", signal: "FT232RL RXD", note: "D1/TX through 1 kΩ: what the board sends to the PC. A terminal's RX here is the PC listening over USB", printed: true, hostSerial: "in" },
+  { id: "VCP-RX", label: "RX", ...cell({ x: VCP_X.rx, y: VCP_Y }), side: "top", labelAt: "bottom", kind: "digital", signal: "FT232RL TXD", note: "The bridge's TXD, to D0/RX through 1 kΩ: what the PC sends. A terminal's TX here is the PC typing over USB: the bridge's 5 V output sends it", printed: true, hostSerial: "out" },
   ...header("J2", J2),
   ...header("J1", J1),
   ...icsp,

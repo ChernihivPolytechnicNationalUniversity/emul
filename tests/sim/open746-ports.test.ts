@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { parseElf } from "@/mcu/elf"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
-import { GRID } from "@/schematic/geometry"
+import { GRID, objectPins } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
 import { partKey, pinKey, type PartState, type PlacedObject, type Schematic } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
@@ -149,7 +149,7 @@ describe("Open746I-C pin strips follow the board geometry", () => {
       const x = STRIP_COLUMNS[layout.side][odd ? "odd" : "even"]
       const y = layout.top + (layout.reversed ? STRIP_ROWS - 1 - row : row)
       const labelAt = odd ? layout.side : layout.side === "left" ? "right" : "left"
-      expect.soft(actual, expected.id).toMatchObject({ x, y, side: layout.side, stub: odd ? 2 : 3, labelAt })
+      expect.soft(actual, expected.id).toMatchObject({ x, y, side: layout.side, labelAt })
       expect.soft(Number.isInteger(actual.x) && Number.isInteger(actual.y), `${expected.id} lies on the grid`).toBe(true)
     }
   })
@@ -272,7 +272,7 @@ describe("Open746I-C strip pins accept external wiring", () => {
     load.wire(headerResistor, "2", headerLed, "1")
     load.wire(headerLed, "2", u, "P24-1")
     doc.objects.push(...load.doc.objects)
-    doc.wires.push(...load.doc.wires)
+    connect(doc, ...connections(load.doc))
     const snap = simulate(doc).run(0.05)
     expect(snap.parts[partKey(u.id, "LED1")]?.on, "the firmware drives LED1").toBe(true)
     const current = (object: string) => {
@@ -305,6 +305,14 @@ const padOf = (name: string) => (name.charCodeAt(1) - 65) * 16 + Number(name.sli
 const freedFromTheBoard = Object.fromEntries(
   ["JMP2_1", "JMP2_2", "JMP2_3", "JMP2_4", "JMP3_1", "JMP3_2", "JMP3_3", "JMP3_4", "JMP4_1", "JMP4_2", "JMP4_3", "JMP4_4", "JMP4_5", "JMP5_A4", "JMP5_A5", "JMP6", "OTG_VBUS", "OTG_PWR", "OTG_FLG"].map((jumper) => [jumper, { on: false }]),
 )
+
+const pinAt = (o: PlacedObject, pin: string) => objectPins(o, GRID).find((p) => p.pin.id === pin)!.point
+
+function dock(o: PlacedObject, pin: string, onto: { x: number; y: number }) {
+  const at = pinAt(o, pin)
+  o.x += onto.x - at.x
+  o.y += onto.y - at.y
+}
 
 function portsBench(extend: (u: PlacedObject, doc: Schematic) => void = () => {}) {
   const doc = lab1Board.build(GRID)
@@ -372,18 +380,19 @@ describe("every strip pin is the MCU pad it names, driven by the firmware", () =
 
 describe("every strip pin reaches the MCU pad it names, read by the firmware", () => {
   async function walk(pull: "down" | "up") {
-    const rail = pull === "down" ? "P18-36" : "P18-35"
+    const rail = pull === "down" ? "3.3 V" : "ground"
     const switches = new Map<string, PlacedObject>()
     const bench = portsBench((u, doc) => {
       const load = builder(GRID)
-      stripGpios.forEach((p, i) => {
-        const sw = load.place("switch", 90 + (i % 14) * 6, 4 + Math.floor(i / 14) * 6)
-        load.wire(u, p.id, sw, "1")
-        load.wire(sw, "2", u, rail)
+      for (const p of stripGpios) {
+        const strip = objectPins(u, GRID).find((q) => q.pin.id === p.id)!
+        const sw = load.place("switch", 0, 0, {}, strip.pin.side === "left" ? 180 : undefined)
+        dock(sw, "1", strip.point)
+        const source = pull === "down" ? load.place("supply", 0, 0, { value: "+3.3V", voltage: "3.3 V" }) : load.place("ground", 0, 0)
+        dock(source, pull === "down" ? "V" : "GND", pinAt(sw, "2"))
         switches.set(p.id, sw)
-      })
+      }
       doc.objects.push(...load.doc.objects)
-      doc.wires.push(...load.doc.wires)
     })
     const allOpen = Object.fromEntries([...switches.values()].map((sw) => [partKey(sw.id, "SW"), { on: false }]))
     bench.loop.setParts(bench.boardParts(allOpen))
@@ -431,7 +440,7 @@ describe("every analog strip pin reaches the ADC channel of the pad it names", (
       }
       ladder.wire(rungs[taps.length], "2", u, "P18-35")
       doc.objects.push(...ladder.doc.objects)
-      doc.wires.push(...ladder.doc.wires)
+      connect(doc, ...connections(ladder.doc))
     })
     bench.loop.setParts(bench.boardParts())
     bench.run(0.02)

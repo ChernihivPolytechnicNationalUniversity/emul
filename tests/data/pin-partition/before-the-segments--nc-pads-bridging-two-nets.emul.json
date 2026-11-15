@@ -1,0 +1,11 @@
+{
+  "source": "tests/data/before-the-segments/nc-pads-bridging-two-nets.emul",
+  "objects": [
+    "A (resistor)",
+    "B (resistor)",
+    "U (nucleo-f429zi)"
+  ],
+  "nets": [
+    ["U.CN8-1","U.CN9-13"]
+  ]
+}

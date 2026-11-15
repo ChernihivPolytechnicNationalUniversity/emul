@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest"
 import { GRID } from "@/schematic/geometry"
 import { nucleoF429zi } from "@/schematic/components/nucleo-f429zi"
-import { builder } from "@/schematic/builder"
+import { builder, connect, disconnect } from "@/schematic/builder"
 import { nucleoBlink } from "@/schematic/examples"
 import { partKey, pinKey, type PlacedObject } from "@/schematic/types"
 import { SimLoop, type Snapshot } from "@/sim/loop"
@@ -52,7 +52,7 @@ const lit = (snap: Snapshot, o: PlacedObject, id: string) => !!snap.parts[partKe
 const { place, wire } = builder(GRID)
 const ls = place("logic-state", 32, 12)
 doc.objects.push(ls)
-doc.wires.push(wire(ls, "OUT", u, "CN7-10"))
+connect(doc, wire(ls, "OUT", u, "CN7-10"))
 const setLevel = (obj: PlacedObject, on: boolean) => (doc.parts[partKey(obj.id, "S")] = { on })
 
 describe("Nucleo-144 without firmware", () => {
@@ -93,7 +93,7 @@ describe("Nucleo-144 without firmware", () => {
     const ls2 = place("logic-state", 32, 30)
     doc.objects.push(ls2)
     const w = wire(ls2, "OUT", u, "CN10-31")
-    doc.wires.push(w)
+    connect(doc, w)
     setLevel(ls2, true)
     const snap = settle()
     const ld1 = snap.parts[partKey(u.id, "LD1")]
@@ -101,7 +101,7 @@ describe("Nucleo-144 without firmware", () => {
     // 3.3 V through 510 Ω into a ~2 V green LED.
     expect.soft(ld1?.level ?? 0, "LD1 brightness").toBeNearRel((3.3 - 2.0) / 510 / 8e-3, 0.15)
     doc.objects.splice(doc.objects.indexOf(ls2), 1)
-    doc.wires.splice(doc.wires.indexOf(w), 1)
+    disconnect(doc, w)
   })
 
   // D11 and D71 are one MCU pin (PA7): a level on one header shows on the other.
@@ -109,13 +109,13 @@ describe("Nucleo-144 without firmware", () => {
     const ls3 = place("logic-state", 32, 34)
     doc.objects.push(ls3)
     const w = wire(ls3, "OUT", u, "CN7-14")
-    doc.wires.push(w)
+    connect(doc, w)
     setLevel(ls3, true)
     const snap = settle()
     expect.soft(pinV(snap, u, "CN7-14"), "D11 voltage").toBeNearRel(3.3, 0.01)
     expect.soft(pinV(snap, u, "CN9-15"), "D71 voltage").toBeNearRel(3.3, 0.01)
     doc.objects.splice(doc.objects.indexOf(ls3), 1)
-    doc.wires.splice(doc.wires.indexOf(w), 1)
+    disconnect(doc, w)
   })
 
   // Unplug USB → rails collapse; a 9 V alkaline on VIN brings them back through the regulators;
@@ -130,7 +130,7 @@ describe("Nucleo-144 without firmware", () => {
     doc.objects.push(bat)
     const w1 = wire(bat, "+", u, "CN8-15")
     const w2 = wire(bat, "-", u, "CN8-11")
-    doc.wires.push(w1, w2)
+    connect(doc, w1, w2)
     snap = settle()
     expect.soft(pinV(snap, u, "CN8-9"), "+5V from VIN regulator").toBeNearRel(5, 0.01)
     expect.soft(pinV(snap, u, "CN8-7"), "+3V3 from LDO").toBeNearRel(3.3, 0.01)
@@ -141,7 +141,7 @@ describe("Nucleo-144 without firmware", () => {
     doc.objects.push(load)
     const w3 = wire(load, "1", u, "CN8-7")
     const w4 = wire(load, "2", u, "CN8-13")
-    doc.wires.push(w3, w4)
+    connect(doc, w3, w4)
     snap = settle()
     expect.soft(pinV(snap, u, "CN8-7"), "+3V3 under 100 mA load").toBeNearRel(3.3, 0.01)
     // The load plus the idle MCU (~12 mA at 16 MHz HSI without firmware).
@@ -149,20 +149,20 @@ describe("Nucleo-144 without firmware", () => {
     // Short +5V to ground with USB plugged back in: the port limits at 500 mA, nothing burns.
     doc.objects.splice(doc.objects.indexOf(bat), 1)
     doc.objects.splice(doc.objects.indexOf(load), 1)
-    for (const w of [w1, w2, w3, w4]) doc.wires.splice(doc.wires.indexOf(w), 1)
+    disconnect(doc, ...[w1, w2, w3, w4])
     doc.parts[partKey(u.id, "USB")] = { on: true }
     const shortR = place("resistor", 40, 64, { value: "1 Ω", power: "5" })
     doc.objects.push(shortR)
     const w5 = wire(shortR, "1", u, "CN8-9")
     const w6 = wire(shortR, "2", u, "CN8-13")
-    doc.wires.push(w5, w6)
+    connect(doc, w5, w6)
     snap = settle()
     const usbReg = nucleoF429zi.model!.findIndex((el) => el.kind === "REG" && el.in === "$usbsw")
     expect.soft(reading(snap, u, usbReg).current, "USB port current into 1 Ω short").toBeNearRel(0.5, 0.01)
     expect.soft(reading(snap, u, usbReg).extra?.mode, "USB port mode").toBe("current limit")
     expect.soft(failures, "nothing burnt").toEqual([])
     doc.objects.splice(doc.objects.indexOf(shortR), 1)
-    for (const w of [w5, w6]) doc.wires.splice(doc.wires.indexOf(w), 1)
+    disconnect(doc, ...[w5, w6])
     setLevel(ls, true)
   })
 

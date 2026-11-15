@@ -1,6 +1,7 @@
 import { examples, lab1Stand } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
-import { partKey, type PartState, type PlacedObject, type Schematic, type Wire } from "@/schematic/types"
+import { partKey, type PartState, type PlacedObject, type Schematic } from "@/schematic/types"
+import type { WireSegment } from "@/schematic/wires/segment"
 
 export const TILE_PITCH = { x: 100 * GRID, y: 80 * GRID }
 
@@ -11,7 +12,7 @@ export const BOARD_TILINGS = [1, 4, 25, 100, 400, 1700]
 
 export function tiled(base: Schematic, tiles: number, pitch = TILE_PITCH): Schematic {
   const objects: PlacedObject[] = []
-  const wires: Wire[] = []
+  const wires: WireSegment[] = []
   const parts: Record<string, PartState> = {}
   const columns = Math.ceil(Math.sqrt(tiles))
   for (let tile = 0; tile < tiles; tile++) {
@@ -19,14 +20,7 @@ export function tiled(base: Schematic, tiles: number, pitch = TILE_PITCH): Schem
     const dy = Math.floor(tile / columns) * pitch.y
     const renamed = new Map(base.objects.map((object) => [object.id, `${object.id}-${tile}`]))
     for (const object of base.objects) objects.push({ ...object, id: renamed.get(object.id)!, x: object.x + dx, y: object.y + dy })
-    for (const wire of base.wires)
-      wires.push({
-        ...wire,
-        id: `${wire.id}-${tile}`,
-        from: { ...wire.from, object: renamed.get(wire.from.object)! },
-        to: { ...wire.to, object: renamed.get(wire.to.object)! },
-        points: wire.points?.map((point) => ({ x: point.x + dx, y: point.y + dy })),
-      })
+    for (const wire of base.wires) wires.push({ ...wire, id: `${wire.id}-${tile}`, a: { x: wire.a.x + dx, y: wire.a.y + dy }, b: { x: wire.b.x + dx, y: wire.b.y + dy } })
     for (const [key, state] of Object.entries(base.parts)) {
       const [object, part] = key.split(":")
       const renamedObject = renamed.get(object)

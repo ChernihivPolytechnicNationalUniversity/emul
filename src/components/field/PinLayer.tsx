@@ -5,7 +5,7 @@ import { getDef } from "@/schematic/registry"
 import type { PinKind, PlacedObject } from "@/schematic/types"
 import type { FieldDetail } from "./detail"
 import type { PinPointerHandler } from "./ComponentView"
-import { boxCorners, KNOCKOUT_OPACITY, labelKnockout, labelOrigin, numbersItsPins, OVERBAR_WEIGHT_EM, overbar, PIN_NUMBER_SCALE, pinLabelById, pinLabels, pinNumberPlacement, type Box, type KnockoutAxis, type LabelAnchor, type LabelGround } from "./pin-label"
+import { boxCorners, KNOCKOUT_OPACITY, labelKnockout, labelOnItsWire, labelOrigin, numbersItsPins, OVERBAR_WEIGHT_EM, overbar, PIN_NUMBER_SCALE, pinLabelById, pinLabels, pinNumberPlacement, wiresAtPins, type Box, type KnockoutAxis, type LabelAnchor, type LabelGround } from "./pin-label"
 import { pinMarker, pinsOnSwitchContacts, SWITCH_CONTACT_CELLS } from "./pin-marker"
 import { crossedBy, monoAdvanceEm, namesUnderDocked, printedNameAt, printedNameLayout, printedNameOnField, printedNameSize } from "./printed-names"
 
@@ -70,7 +70,7 @@ function LabelKnockouts({ items, grid }: { items: Knockout[]; grid: number }) {
     const transform = angle ? `rotate(${angle} ${anchor.x} ${anchor.y})` : undefined
     const at = (box: Box) => ({ x: anchor.x + box.x * grid, y: anchor.y + box.y * grid, width: box.w * grid, height: box.h * grid, transform })
     fades.push(
-      <rect key={`${id}:rise`} {...at(knockout.rise)} fill={`url(#${fadeId(ground, knockout.axis, true)})`} />,
+      <rect key={`${id}:rise`} data-knockout={id} {...at(knockout.rise)} fill={`url(#${fadeId(ground, knockout.axis, true)})`} />,
       <rect key={`${id}:fall`} {...at(knockout.fall)} fill={`url(#${fadeId(ground, knockout.axis, false)})`} />,
     )
   }
@@ -140,6 +140,7 @@ export const PinLayer = React.memo(function PinLayer({
   onPinPointerUp,
 }: PinLayerProps) {
   const g = (v: number) => v * grid
+  const wiresAt = React.useMemo(() => wiresAtPins(routes ?? []), [routes])
   if (!detail.pins) {
     if (!detail.pinMarks || detail.canvas) return null
     return (
@@ -169,6 +170,7 @@ export const PinLayer = React.memo(function PinLayer({
           for (const { key, pin, point } of pins) {
             const label = labels.get(pin.id)
             if (!label || contacts.has(key) || (pin.labelAt !== pin.side && !connected(key))) continue
+            if (labelOnItsWire(label, point, detail.pinLabelSize, metrics.advanceEm, grid, wiresAt)) continue
             const origin = labelOrigin(label, detail.pinLabelSize)
             labelled.push({ ...label, at: { x: point.x + g(origin.x), y: point.y + g(origin.y) }, size: detail.pinLabelSize })
           }
@@ -231,7 +233,7 @@ export const PinLayer = React.memo(function PinLayer({
                 onPointerMove={(e) => onPinPointerMove(e, object.id, pin.id)}
                 onPointerUp={(e) => onPinPointerUp(e, object.id, pin.id)}
               >
-                <circle cx={point.x} cy={point.y} r={g(pin.stub === 0 ? 0.22 : 0.45)} className="fill-transparent stroke-none" />
+                <circle cx={point.x} cy={point.y} r={g(pin.kind === "node" ? 0.22 : 0.45)} className="fill-transparent stroke-none" />
                 {marker && <circle
                   data-marker=""
                   cx={point.x}

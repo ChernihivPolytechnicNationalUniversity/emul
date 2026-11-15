@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
-import type { PartState, Schematic } from "@/schematic/types"
+import type { PartState } from "@/schematic/types"
+import type { Circuit, FlowGraph } from "@/schematic/circuit"
 import type { Failure } from "./engine"
 import type { CoreTransport, FromCore } from "./core-host"
 import { SimLoop, type Probe, type Snapshot } from "./loop"
@@ -13,7 +14,8 @@ const REPORT_MS = 50
 const TICK_MS = 4
 
 export type ToWorker =
-  | { t: "doc"; doc: Schematic }
+  | { t: "circuit"; circuit: Circuit }
+  | { t: "flow"; flow: FlowGraph }
   | { t: "parts"; parts: Record<string, PartState> }
   | { t: "probes"; probes: Probe[] }
   | { t: "trace"; bucket: number }
@@ -116,13 +118,16 @@ const inOrder = defsQueue()
 
 self.onmessage = (e: MessageEvent<ToWorker>) => {
   const msg = e.data
-  inOrder(msg.t === "doc" ? defIds(msg.doc) : [], () => handle(msg))
+  inOrder(msg.t === "circuit" ? defIds(msg.circuit) : [], () => handle(msg))
 }
 
 function handle(msg: ToWorker) {
   switch (msg.t) {
-    case "doc":
-      loop.setDoc(msg.doc)
+    case "circuit":
+      loop.setDoc(msg.circuit)
+      break
+    case "flow":
+      loop.setFlow(msg.flow)
       break
     case "parts":
       loop.setParts(msg.parts)

@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { GRID } from "@/schematic/geometry"
-import { builder } from "@/schematic/builder"
+import { absorb, builder, copied } from "@/schematic/builder"
 import { examples } from "@/schematic/examples"
 import type { Schematic } from "@/schematic/types"
 import { SimLoop } from "@/sim/loop"
@@ -76,7 +76,9 @@ describe("where a core runs", () => {
     const b = builder(GRID)
     const lcd = b.place("lcd-1602", 30, 20)
     for (const [p, lp] of [["J1-15", "RS"], ["J1-14", "E"], ["J1-8", "D4"], ["J1-7", "D5"], ["J1-6", "D6"], ["J1-5", "D7"]]) b.wire(nano, p, lcd, lp)
-    loop.setDoc({ ...doc, objects: [...doc.objects, ...b.doc.objects], wires: [...doc.wires, ...b.doc.wires] })
+    const withLcd = copied(doc)
+    absorb(withLcd, b.doc)
+    loop.setDoc(withLcd)
     run(300)
     const after = loop.snapshot()!.mcus[nano.id]
     expect(after.host).toBe("worker (in step)")

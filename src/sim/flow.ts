@@ -1,5 +1,4 @@
-import type { Wire } from "@/schematic/types"
-import { pinKey } from "@/schematic/types"
+import type { FlowGraph } from "@/schematic/circuit"
 import type { GroundTie, Netlist } from "./netlist"
 
 export type FlowNet = Pick<Netlist, "pinNet" | "groundTies" | "contacts" | "conductorOf" | "partShorts">
@@ -8,15 +7,15 @@ export type Flow = { wires: Map<string, number>; leads: Map<string, number> }
 
 type Factors = { lu: Float64Array; pivot: Int32Array; n: number; singular: boolean }
 
-type Incidence = { wire: string; into: 1 | -1 }
+type Incidence = { run: string; into: 1 | -1 }
 
-type Inside = { keys: readonly string[]; planeOf: ReadonlyMap<string, string>; contacted: readonly string[]; ties: ReadonlySet<string>; row: ReadonlyMap<string, number>; factors: Factors }
+type Inside = { keys: readonly string[]; planeOf: ReadonlyMap<string, string>; points: readonly string[]; ties: ReadonlySet<string>; row: ReadonlyMap<string, number>; factors: Factors }
 
 type Sink = { vertex: string; ties: number }
 
 type Component = {
   vertices: readonly string[]
-  wires: readonly string[]
+  runs: readonly string[]
   row: ReadonlyMap<string, number>
   sinks: readonly Sink[]
   ties: number
@@ -114,8 +113,40 @@ const push = <K, V>(map: Map<K, V[]>, key: K, value: V) => {
   else map.set(key, [value])
 }
 
+class Partition {
+  private readonly parent = new Map<string, string>()
+
+  find(k: string): string {
+    let root = k
+    for (let p = this.parent.get(root); p !== undefined && p !== root; p = this.parent.get(root)) root = p
+    if (!this.parent.has(k)) this.parent.set(k, k)
+    for (let at = k; at !== root; ) {
+      const next = this.parent.get(at)!
+      this.parent.set(at, root)
+      at = next
+    }
+    return root
+  }
+
+  union(a: string, b: string) {
+    const ra = this.find(a)
+    const rb = this.find(b)
+    if (ra !== rb) this.parent.set(ra, rb)
+  }
+
+  roots(): Map<string, string> {
+    const out = new Map<string, string>()
+    for (const k of this.parent.keys()) out.set(k, this.find(k))
+    return out
+  }
+}
+
 export class FlowSolver {
+  private readonly pointOf = new Map<string, string>()
+  private readonly pinsAt = new Map<string, string[]>()
+  private readonly rootOf: ReadonlyMap<string, string>
   private readonly members = new Map<string, string[]>()
+  private readonly pointsIn = new Map<string, string[]>()
   private readonly ends = new Map<string, readonly [string, string]>()
   private readonly incident = new Map<string, Incidence[]>()
   private readonly components: Component[] = []
@@ -123,40 +154,59 @@ export class FlowSolver {
   private readonly shortsIn = new Map<string, (readonly string[])[]>()
   private readonly inShort = new Set<string>()
   private readonly insides = new Map<string, Inside>()
+  private readonly runIds: readonly string[]
   readonly leadPins: readonly string[]
   private readonly net: FlowNet
 
-  constructor(wires: readonly Wire[], net: FlowNet) {
+  constructor(flow: FlowGraph, net: FlowNet) {
     this.net = net
-    for (const [key, conductor] of net.conductorOf) push(this.members, conductor, key)
+    this.runIds = flow.runs.map((r) => r.id)
+    for (const [key, point] of Object.entries(flow.pins)) this.pointOf.set(key, point)
+    for (const [key, group] of net.contacts) if (!this.pointOf.has(key)) this.pointOf.set(key, contactHub(group))
+    const partition = new Partition()
+    for (const [key, point] of this.pointOf) {
+      partition.union(key, point)
+      push(this.pinsAt, point, key)
+    }
+    for (const [key, conductor] of net.conductorOf) partition.union(key, conductor)
+    for (const r of flow.runs) {
+      partition.find(r.a)
+      partition.find(r.b)
+    }
+    this.rootOf = partition.roots()
+    const keys = new Set([...this.pointOf.keys(), ...net.conductorOf.keys(), ...net.groundTies.keys()])
+    for (const key of keys) push(this.members, this.root(key), key)
+    for (const point of this.pinsAt.keys()) push(this.pointsIn, this.root(point), point)
     for (const group of net.partShorts) {
-      push(this.shortsIn, this.conductor(group[0]), group)
+      push(this.shortsIn, this.root(group[0]), group)
       for (const key of group) this.inShort.add(key)
     }
+
     const adjacent = new Map<string, string[]>()
-    const wiresOf = new Map<string, string[]>()
-    for (const w of wires) {
-      const from = pinKey(w.from.object, w.from.pin)
-      const to = pinKey(w.to.object, w.to.pin)
-      const a = this.conductor(from)
-      const b = this.conductor(to)
-      if (net.pinNet.get(from) === undefined || a === b) continue
-      this.ends.set(w.id, [a, b])
-      push(this.incident, from, { wire: w.id, into: -1 })
-      push(this.incident, to, { wire: w.id, into: 1 })
+    const runsOf = new Map<string, string[]>()
+    for (const r of flow.runs) {
+      const a = this.root(r.a)
+      const b = this.root(r.b)
+      if (a === b) continue
+      this.ends.set(r.id, [a, b])
+      push(this.incident, r.a, { run: r.id, into: -1 })
+      push(this.incident, r.b, { run: r.id, into: 1 })
       push(adjacent, a, b)
       push(adjacent, b, a)
-      push(wiresOf, a, w.id)
+      push(runsOf, a, r.id)
     }
     const leadPins = new Set<string>()
-    for (const key of [...this.incident.keys(), ...net.conductorOf.keys(), ...net.groundTies.keys()]) if (net.pinNet.has(key) && (this.inShort.has(key) || net.groundTies.has(key))) leadPins.add(key)
+    for (const key of keys) if (net.pinNet.has(key) && (this.inShort.has(key) || net.groundTies.has(key))) leadPins.add(key)
     this.leadPins = [...leadPins]
     const leadsAt = new Map<string, string[]>()
-    for (const key of this.leadPins) push(leadsAt, this.conductor(key), key)
+    for (const key of this.leadPins) push(leadsAt, this.root(key), key)
 
+    const rank = (k: string) => {
+      const tie = net.groundTies.get(k)
+      return tie === undefined ? 0 : TIE_RANK[tie]
+    }
     const seen = new Set<string>()
-    const starts = [...adjacent.keys(), ...leadsAt.keys()]
-    for (const start of starts) {
+    for (const start of [...adjacent.keys(), ...leadsAt.keys()]) {
       if (seen.has(start)) continue
       const vertices: string[] = []
       const stack = [start]
@@ -170,39 +220,39 @@ export class FlowSolver {
           stack.push(other)
         }
       }
-      const rank = (k: string) => TIE_RANK[net.groundTies.get(k)!] ?? 0
+      if (!vertices.some((v) => this.keysAt(v).some((key) => net.pinNet.has(key)))) continue
       const best = Math.max(0, ...vertices.flatMap((v) => this.keysAt(v).map(rank)))
       const sinks = best > 0 ? vertices.map((vertex) => ({ vertex, ties: this.keysAt(vertex).filter((k) => rank(k) === best).length })).filter((sink) => sink.ties > 0) : []
-      const componentWires = vertices.flatMap((v) => wiresOf.get(v) ?? [])
+      const componentRuns = vertices.flatMap((v) => runsOf.get(v) ?? [])
       const { row, factors } = laplacian(
         vertices,
-        componentWires.map((id) => this.ends.get(id)!),
+        componentRuns.map((id) => this.ends.get(id)!),
         sinks[0]?.vertex ?? vertices[0],
       )
       const ties = sinks.reduce((sum, sink) => sum + sink.ties, 0)
-      const component: Component = { vertices, wires: componentWires, row, sinks, ties, factors, leads: vertices.flatMap((v) => leadsAt.get(v) ?? []) }
+      const component: Component = { vertices, runs: componentRuns, row, sinks, ties, factors, leads: vertices.flatMap((v) => leadsAt.get(v) ?? []) }
       this.components.push(component)
       for (const v of vertices) this.componentOf.set(v, component)
     }
   }
 
-  private conductor(key: string): string {
-    return this.net.conductorOf.get(key) ?? key
+  private root(name: string): string {
+    return this.rootOf.get(name) ?? name
   }
 
   private keysAt(vertex: string): readonly string[] {
-    return this.members.get(vertex) ?? [vertex]
+    return this.members.get(vertex) ?? []
   }
 
   currents(terminal: (key: string) => number): Flow {
-    const flow: Flow = { wires: new Map(), leads: new Map() }
+    const flow: Flow = { wires: new Map(this.runIds.map((id) => [id, 0])), leads: new Map() }
     for (const component of this.components) this.solve(component, terminal, flow)
     return flow
   }
 
   unit(key: string): Flow {
     const flow: Flow = { wires: new Map(), leads: new Map() }
-    const component = this.componentOf.get(this.conductor(key))
+    const component = this.componentOf.get(this.root(key))
     if (component) this.solve(component, (k) => (k === key ? 1 : 0), flow)
     return flow
   }
@@ -226,24 +276,29 @@ export class FlowSolver {
     const sunk = new Map(component.sinks.map(({ vertex, ties }) => [vertex, perTie * ties]))
     for (const [v, amps] of sunk) entering.set(v, (entering.get(v) ?? 0) - amps)
     const phi = potentials(component.row, component.factors, (v) => entering.get(v) ?? 0)
-    for (const id of component.wires) {
+    for (const id of component.runs) {
       const [a, b] = this.ends.get(id)!
       flow.wires.set(id, phi(a) - phi(b))
     }
-    const into = (pin: string) => (this.incident.get(pin) ?? []).reduce((sum, { wire, into }) => sum + into * flow.wires.get(wire)!, 0)
-    const contactsAt = new Map<string, Map<string, number>>()
+    const into = (point: string) => (this.incident.get(point) ?? []).reduce((sum, { run, into }) => sum + into * flow.wires.get(run)!, 0)
+    const shared = new Map<string, Map<string, number>>()
     for (const pin of component.leads) {
-      if (!this.net.contacts.has(pin)) {
-        flow.leads.set(pin, into(pin))
+      const point = this.pointOf.get(pin)
+      if (point === undefined) {
+        flow.leads.set(pin, 0)
         continue
       }
-      const vertex = this.conductor(pin)
-      let through = contactsAt.get(vertex)
-      if (!through) {
-        through = this.throughContacts(vertex, terminal, into, sunk.get(vertex) ?? 0)
-        contactsAt.set(vertex, through)
+      if (this.pinsAt.get(point)!.length === 1) {
+        flow.leads.set(pin, into(point))
+        continue
       }
-      flow.leads.set(pin, into(pin) + (through.get(pin) ?? 0))
+      const vertex = this.root(pin)
+      let through = shared.get(vertex)
+      if (!through) {
+        through = this.throughPoints(vertex, terminal, into, sunk.get(vertex) ?? 0)
+        shared.set(vertex, through)
+      }
+      flow.leads.set(pin, through.get(pin) ?? 0)
     }
   }
 
@@ -262,34 +317,31 @@ export class FlowSolver {
         planeOf.set(key, plane)
       }
     })
-    const contacted: string[] = []
-    for (const key of keys) {
-      const group = this.net.contacts.get(key)
-      if (group === undefined) continue
-      const hub = contactHub(group)
-      if (!nodes.includes(hub)) nodes.push(hub)
-      edges.push([hub, key])
-      contacted.push(key)
+    const points = this.pointsIn.get(vertex) ?? []
+    for (const point of points) {
+      nodes.push(point)
+      for (const key of this.pinsAt.get(point)!) edges.push([point, key])
     }
-    const rank = (k: string) => TIE_RANK[this.net.groundTies.get(k)!] ?? 0
+    const rank = (k: string) => {
+      const tie = this.net.groundTies.get(k)
+      return tie === undefined ? 0 : TIE_RANK[tie]
+    }
     const best = Math.max(0, ...keys.map(rank))
     const ties = new Set(best > 0 ? keys.filter((k) => rank(k) === best) : [])
-    const inside: Inside = { keys, planeOf, contacted, ties, ...laplacian(nodes, edges, nodes[0]) }
+    const inside: Inside = { keys, planeOf, points, ties, ...laplacian(nodes, edges, nodes[0]) }
     this.insides.set(vertex, inside)
     return inside
   }
 
-  private throughContacts(vertex: string, terminal: (key: string) => number, into: (pin: string) => number, sunk: number): Map<string, number> {
-    const { keys, planeOf, contacted, ties, row, factors } = this.inside(vertex)
+  private throughPoints(vertex: string, terminal: (key: string) => number, into: (point: string) => number, sunk: number): Map<string, number> {
+    const { keys, planeOf, points, ties, row, factors } = this.inside(vertex)
     const entering = new Map<string, number>()
     const add = (node: string, amps: number) => entering.set(node, (entering.get(node) ?? 0) + amps)
-    for (const key of keys) {
-      add(key, into(key))
-      add(planeOf.get(key) ?? key, -terminal(key) - (ties.has(key) ? sunk / ties.size : 0))
-    }
+    for (const point of points) add(point, into(point))
+    for (const key of keys) add(planeOf.get(key) ?? key, -terminal(key) - (ties.has(key) ? sunk / ties.size : 0))
     const phi = potentials(row, factors, (node) => entering.get(node) ?? 0)
     const out = new Map<string, number>()
-    for (const key of contacted) out.set(key, phi(contactHub(this.net.contacts.get(key)!)) - phi(key))
+    for (const point of points) for (const pin of this.pinsAt.get(point)!) out.set(pin, phi(point) - phi(pin))
     return out
   }
 }

@@ -4,6 +4,7 @@
  * holds the core, the board runs from the module's USB (SW1 at USB) or from the USART1 USB or
  * the jack through S2 (SW1 at 5Vin), and is dead with its source unplugged.
  */
+import { connect } from "@/schematic/builder"
 import { beforeAll, describe, expect, it } from "vitest"
 import { GRID } from "@/schematic/geometry"
 import { lab1Board } from "@/schematic/examples"
@@ -252,7 +253,7 @@ describe("VBAT: a CR2032 on the VBAT pin (jumper open) through a power cut", () 
   const cell = { id: "cell", def: "battery", x: 30 * GRID, y: 60 * GRID, props: { chem: "li-mno2", cells: "1", capacity: "220 mAh" } }
   const gnd = { id: "g3", def: "ground", x: 34 * GRID, y: 66 * GRID, props: {} }
   doc3.objects.push(cell, gnd)
-  doc3.wires.push(
+  connect(doc3, 
     { id: "w3", from: { object: cell.id, pin: "+" }, to: { object: u3.id, pin: "VBAT" } },
     { id: "w4", from: { object: gnd.id, pin: "GND" }, to: { object: u3.id, pin: "P24-1" } },
     { id: "w5", from: { object: cell.id, pin: "-" }, to: { object: gnd.id, pin: "GND" } },
@@ -295,7 +296,7 @@ it("comes back on SW1 at 5Vin, S2 to the jack, 5 V on 5VDC, both USBs out", () =
   const sup = { id: "sup", def: "supply", x: 5 * GRID, y: -6 * GRID, props: { value: "+5V", voltage: "5 V" } }
   const gnd = { id: "g", def: "ground", x: -6 * GRID, y: 3 * GRID, props: {} }
   doc2.objects.push(sup, gnd)
-  doc2.wires.push({ id: "w1", from: { object: sup.id, pin: "V" }, to: { object: u2.id, pin: "5VDC" } }, { id: "w2", from: { object: gnd.id, pin: "GND" }, to: { object: u2.id, pin: "P24-1" } })
+  connect(doc2, { id: "w1", from: { object: sup.id, pin: "V" }, to: { object: u2.id, pin: "5VDC" } }, { id: "w2", from: { object: gnd.id, pin: "GND" }, to: { object: u2.id, pin: "P24-1" } })
   doc2.parts[partKey(u2.id, "USB")] = { on: false }
   doc2.parts[partKey(u2.id, "MUSB")] = { on: false }
   doc2.parts[partKey(u2.id, "SW1")] = { on: false }

@@ -1,0 +1,8 @@
+{
+  "source": "tests/data/emul-1.42.0/oscillator-beside-a-resistor.emul",
+  "objects": [
+    "G1 (oscillator)",
+    "R1 (resistor)"
+  ],
+  "nets": []
+}

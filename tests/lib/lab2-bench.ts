@@ -1,6 +1,6 @@
 import { LogicStore } from "@/components/logic/logic-store"
 import { parseElf } from "@/mcu/elf"
-import { builder } from "@/schematic/builder"
+import { builder, connect, connections } from "@/schematic/builder"
 import { lab1Board } from "@/schematic/examples"
 import { GRID } from "@/schematic/geometry"
 import { getDef } from "@/schematic/registry"
@@ -95,7 +95,7 @@ export class Lab2Bench {
       added.wire(source, "-", u, STRIP_GND)
     }
     doc.objects.push(...added.doc.objects)
-    doc.wires.push(...added.doc.wires)
+    connect(doc, ...connections(added.doc))
     this.led = led
     this.parts = { ...doc.parts }
     this.loop.setDoc(doc)
