@@ -18,6 +18,9 @@ const fingerprint = (state: Built) =>
 function frozen(state: Built): readonly WireSegment[] {
   const key = fingerprint(state)
   if (key === state.key) return state.wires
+  const present = new Set([...state.doc.objects, ...state.hubs].map((o) => o.id))
+  const stray = state.connections.flatMap((w) => [w.from, w.to]).filter((end) => !present.has(end.object))
+  if (stray.length) throw new Error(`a wire ends on ${stray.map((end) => `${end.object}:${end.pin}`).join(", ")}, which is no part of the drawing`)
   let piece = 0
   const { doc, notes, faithful } = withLibrary(state.doc.library, () => wiresAsSegments({ objects: [...state.doc.objects, ...state.hubs], wires: state.connections, parts: {}, library: state.doc.library }, () => `~${piece++}`))
   if (!faithful) throw new Error(`the wiring drawn cannot be laid without changing the circuit: ${notes.filter((n) => !n.includes("laid again")).join(" ")}`)
