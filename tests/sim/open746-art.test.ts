@@ -726,7 +726,7 @@ describe("at 150 % and 200 % every name the board prints is drawn larger, and no
   })
 })
 
-describe("a 7\" LCD docked on P15 covers the names the board prints under it, as FIELD.md has it (review, 2026-10-13)", () => {
+describe("a 7\" LCD docked on P15 covers the names the board prints under it (review, 2026-10-13)", () => {
   const doc = examples.find((e) => e.id === "open746-lcd")!.build(GRID)
   const boardObject = doc.objects.find((o) => o.def === "open746i-c")!
   const lcdObject = doc.objects.find((o) => o.def === "lcd7-f")!
