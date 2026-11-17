@@ -11,18 +11,19 @@ export const CONFLICT_PX = casingWidth(WIRE_PX)
 const CONFLICT_BLUR_PX = 3
 const CONFLICT_REACH_PX = CONFLICT_PX / 2 + 3 * CONFLICT_BLUR_PX
 export const glowCutWidth = (px: number) => 2 * (CONFLICT_REACH_PX * px + (casingWidth(WIRE_PX) / 2) * Math.max(1, px))
-export const WIRE_HIT_PX = 14
+export const WIRE_HIT_PX = 20
 
 export const wireCornerRadius = (grid: number) => CORNER * grid
 export const casingTrim = (grid: number) => CASING_TRIM * grid
 
 const DOT_CELLS = 0.2
-const DOT_MIN_PX = 1.5 * WIRE_PX
-const DOT_MAX_PX = 2.5 * WIRE_PX
+const DOT_PER_WIRE = 1.5
 
 export const OPEN_END_CELLS = 0.14
 const OPEN_END_CLEARANCE_PX = 4
 
-export const openEndReach = (grid: number, scale: number) => Math.max(WIRE_HIT_PX / 2 / scale, OPEN_END_CELLS * grid + OPEN_END_CLEARANCE_PX / scale)
+const OPEN_END_REACH_PX = 7
 
-export const dotRadius = (grid: number, scale: number) => Math.min(Math.max(DOT_CELLS * grid * scale, DOT_MIN_PX), DOT_MAX_PX) / scale
+export const openEndReach = (grid: number, scale: number) => Math.max(OPEN_END_REACH_PX / scale, OPEN_END_CELLS * grid + OPEN_END_CLEARANCE_PX / scale)
+
+export const dotRadius = (grid: number, wireWidth: number) => Math.max(DOT_CELLS * grid, DOT_PER_WIRE * wireWidth)

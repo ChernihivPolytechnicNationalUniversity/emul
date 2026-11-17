@@ -430,7 +430,7 @@ describe("the canvas plate and the PNG export frame a diagonal part where the fi
     const meter = placedAs("voltmeter", o, 7, 5, "PV1")
     const view = { x: 0, y: 0, w: 400, h: 400 }
     const context = tracingCanvas(strokes, []).getContext() as unknown as CanvasRenderingContext2D
-    paintField(context, {} as Element, { objects: [meter], routes: [], view, grid: GRID, pixels: 1, device: 1, theme: "plate", colorOf: () => "black", raster: new SymbolRaster(), selection: { objects: new Set([meter.id]), wires: new Set() } })
+    paintField(context, {} as Element, { objects: [meter], routes: [], view, grid: GRID, pixels: 1, device: 1, theme: "plate", colorOf: () => "black", raster: new SymbolRaster(), selection: { objects: new Set([meter.id]), wires: new Set() }, layer: () => context })
     const stretch = stretchedLeads(getDef("voltmeter")!, o)
     const plate = strokes.find((st) => st.parts.some((p) => p.d.endsWith(stretch)))
     expect.soft(plate, "the plate strokes the stretch").toBeDefined()

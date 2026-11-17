@@ -302,20 +302,26 @@ describe("§6.7 and §13.27 at any angle: the same refusals with the same names 
     expect.soft(isRefusal(drawnTo(doc, wiring, pointerAt(d, at(6, 2)), field(at(6, 2)), newId)), "the click lays nothing").toBe(true)
   })
 
-  it("over another net's pin at a lattice point inside the diagonal: refused «over», named at the pin", () => {
+  it("a pin at a lattice point inside the drawn diagonal connects and splits it", () => {
     const doc = docOf([resistor("R1", 0, 0)])
     const { wiring, d } = drawing(doc, at(2, 0), "any")
     const preview = previewOf(doc, wiring, pointerAt(d, at(10, 4)))
-    expect.soft(preview.refused?.refused, "over R1's pin").toBe("over")
-    expect.soft(preview.refused?.at, "at (4, 1)").toEqual(at(4, 1))
+    expect.soft(preview.refused, "passing R1's pin is allowed").toBeNull()
+    const after = drawnTo(doc, wiring, pointerAt(d, at(10, 4)), field(at(10, 4)), newId)
+    if (isRefusal(after)) throw new Error(after.refused)
+    expect.soft(geometryOf(after.wires), "split at the pin").toEqual(geometryOf([seg(at(2, 0), at(4, 1)), seg(at(4, 1), at(10, 4))]))
+    expect.soft(junctionsOf(viewOf(after)), "two ends plus a pin give a dot").toEqual([at(4, 1)])
   })
 
-  it("over another net's open wire end: refused «over»", () => {
+  it("an open wire end on a drawn diagonal connects with a T and a dot", () => {
     const doc = docOf([resistor("R1", 20, 20)], [seg(at(6, 2), at(6, 6))])
     const { wiring, d } = drawing(doc, at(2, 0), "any")
     const preview = previewOf(doc, wiring, pointerAt(d, at(10, 4)))
-    expect.soft(preview.refused?.refused, "over the stub's end").toBe("over")
-    expect.soft(preview.refused?.at, "at (6, 2)").toEqual(at(6, 2))
+    expect.soft(preview.refused, "passing the stub's end is allowed").toBeNull()
+    const after = drawnTo(doc, wiring, pointerAt(d, at(10, 4)), field(at(10, 4)), newId)
+    if (isRefusal(after)) throw new Error(after.refused)
+    expect.soft(junctionsOf(viewOf(after)), "three ends give a dot").toEqual([at(6, 2)])
+    expect.soft(viewOf(after).nets.length, "the stub and diagonal are one net").toBe(1)
   })
 
   it("a corner on another net: the 45° corner on a pin, or a click inside another net's diagonal, refused «corner»", () => {

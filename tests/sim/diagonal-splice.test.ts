@@ -206,15 +206,14 @@ describe("a part on its diagonal dropped onto a diagonal wire is cut into it (th
     }
   })
 
-  it("Alt suppresses the cut on a diagonal as on a straight wire, so a drop that leaves the whole wire under the body is refused (wire-edit.test.ts, the straight case)", () => {
+  it("Alt splices on a diagonal as on a straight wire: the part's own wires stay behind and it is cut into the diagonal it lands on (the user, 2026-11-17)", () => {
     const w = DIAMOND_WIRES[0]
     const u = stepOf(w)
     const r3 = partAt("R3", "resistor", { rotation: 45, mirror: false }, [plus(w.from, times(u, 2)), plus(w.from, times(u, 5))])
     const drop = dropOnto(diamond(), r3)
     const landed = new PartDrag(drop.doc, wiringOf(new WireGraph(), drop.doc), { objects: new Set(["R3"]) }, { detach: true }).landed(drop.dx, drop.dy, newId)
-    expect.soft(landed.refused?.some((c) => c.reason === "body"), "the body crossing is named").toBe(true)
-    expect.soft(landed.doc, "the entire document stays as it was").toBe(drop.doc)
-    expect.soft(nets(landed.doc).find((g) => g.includes("R1:2")), "R3 stays off the R1–R2 diagonal").toEqual(["R1:2", "R2:1"])
+    expect.soft(landed.refused, "nothing refused").toBeUndefined()
+    expect.soft(nets(landed.doc).find((g) => g.includes("R1:2")), "R3 now in series on the R1–R2 diagonal").toEqual(["R1:2", "R3:1"])
   })
 })
 

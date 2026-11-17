@@ -1,8 +1,24 @@
 import type { Run } from "@/schematic/circuit"
-import { toPath, trimRouteEnds, type Point, type RoutedWire } from "@/schematic/geometry"
+import type { Point, RoutedWire } from "@/schematic/geometry"
 import { runPath } from "@/schematic/wire-look"
+import { SELECTION_BANDS } from "./selection-geometry"
+import { SELECTED_WIRE_PX } from "./wire-style"
 
-export type WirePlate = { readonly key: string; readonly run: string; readonly d: string; readonly casing: string; readonly whole: boolean; readonly start: boolean; readonly end: boolean }
+export type PlateNotch = { readonly at: Point; readonly out: Point; readonly across?: Axis }
+
+export type Axis = "x" | "y"
+
+export type MeetsAt = (at: Point) => Axis | null
+
+export type WirePlate = { readonly key: string; readonly run: string; readonly d: string; readonly whole: boolean; readonly caps: readonly Point[]; readonly notches: readonly PlateNotch[]; readonly box: PlateBox }
+
+export type PlateBox = { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
+
+export const PLATE_REACH = (SELECTED_WIRE_PX + 2 * Math.max(...SELECTION_BANDS.map((band) => band.margin))) / 2 + 1
+
+export type OpenEnd = (at: Point) => boolean
+
+const NOWHERE_OPEN: OpenEnd = () => false
 
 type Step = { readonly to: Point; readonly control?: Point }
 
@@ -78,27 +94,65 @@ function chainsOf(run: Run, selected: ReadonlySet<string>): [number, number][] {
 const alongPoints = (run: Run, pts: readonly Point[]) =>
   run.segments.length === pts.length - 1 && run.segments.every((s, i) => (same(s.a, pts[i]) && same(s.b, pts[i + 1])) || (same(s.b, pts[i]) && same(s.a, pts[i + 1])))
 
-export function plateOf(run: Run, route: RoutedWire, selected: ReadonlySet<string>, radius: number, trim: number): WirePlate[] {
+function boxAround(points: readonly Point[], margin: number): PlateBox {
+  const xs = points.map((p) => p.x)
+  const ys = points.map((p) => p.y)
+  const x = Math.min(...xs) - margin
+  const y = Math.min(...ys) - margin
+  return { x, y, w: Math.max(...xs) + margin - x, h: Math.max(...ys) + margin - y }
+}
+
+function slantedEnd(at: Point, from: Point, meets: MeetsAt): PlateNotch | null {
+  const out = { x: Math.sign(at.x - from.x), y: Math.sign(at.y - from.y) }
+  if (out.x === 0 || out.y === 0) return null
+  const across = meets(at)
+  return across ? { at, out, across } : { at, out }
+}
+
+const MEETS_NOTHING_KNOWN: MeetsAt = () => null
+
+export function plateOf(run: Run, route: RoutedWire, selected: ReadonlySet<string>, radius: number, open: OpenEnd = NOWHERE_OPEN, meets: MeetsAt = MEETS_NOTHING_KNOWN): WirePlate[] {
   const chains = chainsOf(run, selected)
   if (!chains.length) return []
   const pts = route.pts
   const drawn = runPath(pts, radius, route.leads)
-  const trimmed = trimRouteEnds(pts, trim)
-  const casing = toPath(trimmed, radius)
   const last = run.segments.length - 1
-  const whole: WirePlate = { key: run.id, run: run.id, d: drawn, casing, whole: true, start: true, end: true }
+  const first = pts[0]
+  const final = pts[pts.length - 1]
+  const startOpen = !route.leads?.start && open(first)
+  const endOpen = !route.leads?.end && open(final)
+  const capsOf = (start: boolean, end: boolean) => [...(start && startOpen ? [first] : []), ...(end && endOpen ? [final] : [])]
+  const startNotch = !route.leads?.start && !startOpen && pts.length > 1 ? slantedEnd(first, pts[1], meets) : null
+  const endNotch = !route.leads?.end && !endOpen && pts.length > 1 ? slantedEnd(final, pts[pts.length - 2], meets) : null
+  const notchesOf = (start: boolean, end: boolean) => [...(start && startNotch ? [startNotch] : []), ...(end && endNotch ? [endNotch] : [])]
+  const box = boxAround([...pts, ...(route.leads?.start ? [route.leads.start] : []), ...(route.leads?.end ? [route.leads.end] : [])], 2 * PLATE_REACH)
+  const whole: WirePlate = { key: run.id, run: run.id, d: drawn, whole: true, caps: capsOf(true, true), notches: notchesOf(true, true), box }
   if (chains.length === 1 && chains[0][0] === 0 && chains[0][1] === last) return [whole]
   const plates = alongPoints(run, pts) ? segmentShares(drawn, pts) : null
-  const casings = plates && segmentShares(casing, trimmed)
-  if (!plates || !casings) return [whole]
-  return chains.map(([first, end]) => ({ key: run.segments[first].id, run: run.id, d: sharePath(plates.slice(first, end + 1)), casing: sharePath(casings.slice(first, end + 1)), whole: false, start: first === 0, end: end === last }))
+  if (!plates) return [whole]
+  return chains.map(([from, to]) => ({ key: run.segments[from].id, run: run.id, d: sharePath(plates.slice(from, to + 1)), whole: false, caps: capsOf(from === 0, to === last), notches: notchesOf(from === 0, to === last), box }))
 }
 
-export function wirePlates(runs: Iterable<Run>, routeOf: (run: string) => RoutedWire | undefined, selected: ReadonlySet<string>, radius: number, trim: number): WirePlate[] {
+export function notchPath(notches: readonly PlateNotch[], reach: number, everywhere: PlateBox): string {
+  const square = (x0: number, y0: number, x1: number, y1: number) => `M${x0} ${y0} H${x1} V${y1} H${x0} Z`
+  const { x, y, w, h } = everywhere
+  return [
+    square(x, y, x + w, y + h),
+    ...notches.flatMap(({ at, out, across }) =>
+      across === "x"
+        ? [square(at.x - reach, at.y, at.x + reach, at.y + out.y * reach)]
+        : across === "y"
+          ? [square(at.x, at.y - reach, at.x + out.x * reach, at.y + reach)]
+          : [square(at.x - reach, at.y - reach, at.x + reach, at.y + reach), square(at.x, at.y, at.x - out.x * reach, at.y - out.y * reach)],
+    ),
+  ].join(" ")
+}
+
+export function wirePlates(runs: Iterable<Run>, routeOf: (run: string) => RoutedWire | undefined, selected: ReadonlySet<string>, radius: number, open: OpenEnd = NOWHERE_OPEN, meets: MeetsAt = MEETS_NOTHING_KNOWN): WirePlate[] {
   const plates: WirePlate[] = []
   for (const run of runs) {
     const route = routeOf(run.id)
-    if (route) plates.push(...plateOf(run, route, selected, radius, trim))
+    if (route) plates.push(...plateOf(run, route, selected, radius, open, meets))
   }
   return plates
 }

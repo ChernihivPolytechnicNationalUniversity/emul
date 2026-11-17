@@ -205,15 +205,17 @@ describe("drawing a wire: connections are made by ends (design.md §6.7; junctio
     expect.soft(isRefusal(drawnTo(doc, wiring, moved, field(at(12, 1)), newId)), "finishing there is refused").toBe(true)
   })
 
-  it("a wire that would pass over another net's pin without ending there is refused; ended on that pin it joins (junctions.md 10, 12; ГОСТ 2.721-74 item 6 note 3; Altium: a wire across a pin connects it; the end a free point beside R3's pin, since a pin target is offered the router's route, design.md §13.22 question 7 A)", () => {
+  it("passing over another net's wired pin joins it just as ending on the pin does", () => {
     const doc = docOf(
       [resistor("R2", 0, 0), ground("G1", 3, 2), resistor("R1", 7, 1, 90), supply("V1", 7, -3, "VCC"), resistor("R3", 12, 0)],
       [seg(at(4, 1), at(4, 2)), seg(at(8, -1), at(8, 1))],
     )
     const { wiring, d } = drawing(doc, at(4, 1))
     const across = previewOf(doc, wiring, pointerAt(d, at(11, 1)), drawEndAt(wiring, at(11, 1)))
-    expect.soft(across.refused?.refused, "over R1's pin").toBe("over")
-    expect.soft(across.refused?.at, "named where").toEqual(at(8, 1))
+    expect.soft(across.refused, "passing R1's pin is allowed").toBeNull()
+    const passed = drawn(doc, at(4, 1), at(11, 1))
+    expect.soft(netChanges(wiringFor(doc).circuit.nets, wiringFor(passed).circuit.nets).joined.length, "passing the pin joins the wired nets").toBe(1)
+    expect.soft(sortedPoints(junctionsOf(viewOf(passed))), "the existing branch and the passed pin have dots").toEqual([at(4, 1), at(8, 1)])
     const onPin = previewOf(doc, wiring, pointerAt(d, at(8, 1)), drawEndAt(wiring, at(8, 1)))
     expect.soft(onPin.refused, "ending on R1's pin is allowed").toBeNull()
     const after = drawn(doc, at(4, 1), at(8, 1))
@@ -314,11 +316,16 @@ describe("selecting wires (design.md §6.2)", () => {
     expect.soft(chainOf(wiring, left.id), "only the piece from R2's pin to the T").toEqual([left.id])
   })
 
-  it("the marquee picks the segments wholly inside it as well as the parts; a part's wires are not picked with it (KiCad: a window selects enclosed wires)", () => {
+  it("the marquee takes every wire it touches but a part only when its whole body is inside (the user, 2026-11-17: wires easy to pick, parts not grabbed by accident)", () => {
     const doc = docOf([resistor("R1", 0, 0), resistor("R2", 12, 0)], [seg(at(4, 1), at(8, 1)), seg(at(8, 1), at(8, 5)), seg(at(8, 5), at(12, 5)), seg(at(12, 5), at(12, 1))])
     const picked = inRect(doc, { x: c(-1), y: c(-1), w: c(10), h: c(4) })
-    expect.soft(picked.objects, "R1").toEqual(["R1"])
-    expect.soft(picked.wires, "the first piece only: the second leaves the box").toEqual([doc.wires[0].id])
+    expect.soft(picked.objects, "R1, wholly inside").toEqual(["R1"])
+    expect.soft(picked.wires, "the piece inside and the one leaving the box, which it touches").toEqual([doc.wires[0].id, doc.wires[1].id])
+    const thin = inRect(doc, { x: c(7.5), y: c(2), w: c(1), h: c(1) })
+    expect.soft(thin.wires, "a small box across the upright piece takes it").toEqual([doc.wires[1].id])
+    expect.soft(thin.objects, "and no part").toEqual([])
+    const half = inRect(doc, { x: c(-1), y: c(-1), w: c(3), h: c(4) })
+    expect.soft(half.objects, "half of R1's body in the box: R1 is not taken").toEqual([])
   })
 })
 
@@ -361,8 +368,8 @@ describe("the join oracle the tests read (tests/lib/net-changes.ts)", () => {
 describe("copying and pasting with wires (design.md §6.6)", () => {
   it("a part copied with half of a branch in the selection brings no half-wires; the original is untouched (junctions.md 18; KiCad copies the segments in the selection)", () => {
     const doc = docOf([resistor("R1", 0, 0), resistor("R2", 12, 0), resistor("R3", 7, 4, 90)], [seg(at(4, 1), at(12, 1)), seg(at(8, 4), at(8, 1))])
-    const inside = inRect(doc, { x: c(-1), y: c(-1), w: c(10), h: c(4) })
-    const clip = clipOf(doc, new Set(inside.objects), wiringFor(doc), new Set(inside.wires))!
+    const enclosed = doc.wires.filter((s) => [s.a, s.b].every((p) => p.x >= c(-1) && p.x <= c(9) && p.y >= c(-1) && p.y <= c(3))).map((s) => s.id)
+    const clip = clipOf(doc, new Set(["R1"]), wiringFor(doc), new Set(enclosed))!
     expect.soft(clip.objects.map((o) => o.id), "R1").toEqual(["R1"])
     expect.soft(geometryOf(clip.wires), "the piece wholly inside, from R1 to the T, and nothing beyond").toEqual(geometryOf([seg(at(4, 1), at(8, 1))]))
   })
@@ -409,13 +416,15 @@ describe("found by phase 4's review (Claude)", () => {
     expect.soft(preview.refused, "not refused over R2's other pin").toBeNull()
   })
 
-  it("a wire passing over a bare pin of another net, or over the end of another net's stub, is refused (design.md §6.7; Claude 8; the end a free point beside R3's pin, since a pin target is offered the router's route, design.md §13.22 question 7 A)", () => {
+  it("a wire passing over a bare pin or another net's stub end connects it", () => {
     const pinOnly = docOf([resistor("R1", 0, 0), resistor("R7", 7, 1, 90), resistor("R3", 12, 0)])
     const a = drawing(pinOnly, at(4, 1))
-    expect.soft(previewOf(pinOnly, a.wiring, pointerAt(a.d, at(11, 1)), drawEndAt(a.wiring, at(11, 1))).refused?.refused, "over R7's bare pin").toBe("over")
+    expect.soft(previewOf(pinOnly, a.wiring, pointerAt(a.d, at(11, 1)), drawEndAt(a.wiring, at(11, 1))).refused, "over R7's bare pin").toBeNull()
+    expect.soft(partition(drawn(pinOnly, at(4, 1), at(11, 1))), "the bare pin joins").toEqual([["R1:2", "R7:1"]])
     const stub = docOf([resistor("R1", 0, 0), resistor("R7", 7, 4, 90), resistor("R3", 12, 0)], [seg(at(8, 4), at(8, 1))])
     const b = drawing(stub, at(4, 1))
-    expect.soft(previewOf(stub, b.wiring, pointerAt(b.d, at(11, 1)), drawEndAt(b.wiring, at(11, 1))).refused?.refused, "over the end of R7's stub").toBe("over")
+    expect.soft(previewOf(stub, b.wiring, pointerAt(b.d, at(11, 1)), drawEndAt(b.wiring, at(11, 1))).refused, "over the end of R7's stub").toBeNull()
+    expect.soft(partition(drawn(stub, at(4, 1), at(11, 1))), "the stub's pin joins").toEqual([["R1:2", "R7:1"]])
   })
 
   it("a drawn wire may pass a free board socket without joining it: the jumper rule (design.md §4.5; junctions.md 33)", () => {
@@ -549,13 +558,14 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
     ])
   })
 
-  it("Alt suppresses the splice, so a drop that leaves the whole wire under the body is refused", () => {
-    const before = line()
-    const landed = dropped(before, "R3", 0, -4, true)
-    expect.soft(covers(landed.doc, at(4, 1), at(16, 1)), "the wire still runs from R1 to R2").toBe(true)
-    expect.soft(landed.refused?.some((c) => c.reason === "body"), "the body crossing is named").toBe(true)
-    expect.soft(landed.doc, "the entire document stays as it was").toBe(before)
-    expect.soft(partition(landed.doc), "R3 stays off the wire").toEqual([["R1:2", "R2:1"]])
+  it("Alt leaves the part's own wires behind but still splices it into the wire it is dropped on (the user, 2026-11-17: it was thrown back with «Nowhere clean to put it»)", () => {
+    const landed = dropped(line(), "R3", 0, -4, true)
+    expect.soft(landed.refused, "nothing refused").toBeUndefined()
+    expect.soft(covers(landed.doc, at(4, 1), at(16, 1)), "the wire no longer runs under R3's body").toBe(false)
+    expect.soft(partition(landed.doc), "R3 in series between R1 and R2").toEqual([
+      ["R1:2", "R3:1"],
+      ["R2:1", "R3:2"],
+    ])
   })
 
   it("an armed palette click preserves Alt while the definition loads and still normalises pins", () => {

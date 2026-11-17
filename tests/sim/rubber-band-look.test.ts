@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import * as React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { examples } from "@/schematic/examples"
-import { GRID, type Point } from "@/schematic/geometry"
+import { GRID, toPath, type Point } from "@/schematic/geometry"
 import { PartDrag, SegmentDrag } from "@/schematic/rubber-band"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import type { WireColorKey } from "@/schematic/wire-colors"
@@ -12,8 +12,8 @@ import { WireGraph } from "@/schematic/wires/graph"
 import type { WireSegment } from "@/schematic/wires/segment"
 import { WireSheet } from "@/schematic/wires/sheet"
 import { bandOf, bandRuns, type BandLook, type BandPiece } from "@/components/field/rubber-band-layer"
-import { leadPatchPaths, wireCasingPath, wireStrokePath, type WireRoute } from "@/components/field/wire-paths"
-import { WireLayer } from "@/components/field/WireLayer"
+import { leadPatchPaths, turnedLeads, wireCasingPath, wireStrokePath, type WireRoute } from "@/components/field/wire-paths"
+import { PinTurnLayer, WireLayer } from "@/components/field/WireLayer"
 import { WireFlow } from "@/components/field/wire-flow"
 import { random } from "../lib/wire-reference"
 
@@ -33,7 +33,7 @@ const PX = 1
 
 const strokes = (routes: readonly WireRoute[]) => routes.map((r) => wireStrokePath(r, GRID)).sort()
 const casings = (routes: readonly WireRoute[]) => routes.map((r) => wireCasingPath(r, GRID)).sort()
-const patches = (routes: readonly WireRoute[]) => routes.flatMap((r) => leadPatchPaths(r, PX)).sort()
+const patches = (routes: readonly WireRoute[]) => routes.flatMap((r) => leadPatchPaths(r)).sort()
 const fieldOf = (doc: Schematic) => wiringFor(doc).routes
 const bandIn = (frame: DragFrame, wiring: Wiring) => bandOf(frame, lookOf(wiring)).wires
 
@@ -158,7 +158,7 @@ describe("the field's own wire layer and the rubber band draw from one set of pa
   const fieldHtml = (doc: Schematic) => {
     const w = wiringFor(doc)
     const html = renderToStaticMarkup(
-      React.createElement(WireLayer, {
+      React.createElement(React.Fragment, null, React.createElement(PinTurnLayer, { corners: w.corners, scale: PX, grid: GRID }), React.createElement(WireLayer, {
         routes: w.routes,
         grid: GRID,
         scale: PX,
@@ -169,25 +169,24 @@ describe("the field's own wire layer and the rubber band draw from one set of pa
         dots: w.dots,
         dangling: w.dangling,
         corners: w.corners,
-        plates: [],
         flow: new WireFlow(),
         onWirePointerDown: () => {},
         onWirePointerEnter: () => {},
         onWirePointerLeave: () => {},
-      }),
+      })),
     )
     return { w, html }
   }
   const attrs = (html: string, test: RegExp, name: string) => [...html.matchAll(/<path [^>]*>/g)].map((m) => m[0]).filter((tag) => test.test(tag)).map((tag) => tag.match(new RegExp(`${name}="([^"]*)"`))?.[1] ?? "")
 
-  it("the field strokes, casings and pin-turn patches of the user's ground wire are the shared paths, and each patch carries its wire's id so the band can lift it", () => {
+  it("the field strokes, casings and pin-turn lead cuts of the user's ground wire are the shared paths", () => {
     const { w, html } = fieldHtml(docOf([ground("G", 0, 10), resistor("R1", 4, 0, 90)], chain(at(1, 10), at(3, 10), at(3, 9), at(9, 9), at(9, 8), at(5, 8), at(5, 4))))
     expect.soft(attrs(html, /data-base=/, "d").sort(), "strokes").toEqual(strokes(w.routes))
     expect.soft(attrs(html, /data-casing=/, "d").sort(), "casings").toEqual(casings(w.routes))
     const turning = w.routes.filter((r) => r.leads)
     expect.soft(turning.length, "the wire turns at the ground pin").toBe(1)
-    expect.soft(attrs(html, /stroke-linejoin="miter"/, "d").sort(), "the patch under the turn").toEqual(patches(turning))
-    expect.soft(attrs(html, /stroke-linejoin="miter"/, "data-wire"), "tagged with its wire").toEqual([turning[0].id])
+    expect.soft(turnedLeads(turning).map(({ from, to }) => toPath([from, to])).sort(), "the lead cut under the turn is the band's patch path").toEqual(patches(turning))
+    expect.soft(attrs(html, /stroke="var\(--background\)"/, "d"), "the field paints no background patch: the part cuts its own lead").toEqual([])
   })
 })
 

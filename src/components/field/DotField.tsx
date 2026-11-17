@@ -16,6 +16,7 @@ import { paletteDrag } from "@/components/palette/palette-actions"
 import { QuickInsert } from "@/components/palette/QuickInsert"
 import { opensQuickInsert, type KeyTarget, type Rect as ScreenRect } from "@/components/palette/quick-insert"
 import { GRID as FIELD_GRID, objectPins, objectRect, resolvePin, snap, unionOf, type FlipAxis, type Point, type Turn } from "@/schematic/geometry"
+import type { PinCorner } from "@/schematic/wire-look"
 import type { FieldKey } from "@/schematic/fields"
 import { fieldDetail } from "./detail"
 import { labelsOnTheirWires, wiresAtPins } from "./pin-label"
@@ -41,9 +42,9 @@ import { crossingNear, JUNCTION_REFUSED, NOT_ON_THE_LATTICE } from "@/schematic/
 import { dragConflictMarks, refusedStretches } from "@/schematic/conflict-marks"
 import { segmentNearest } from "@/schematic/wire-select"
 import type { DragFrame, DragPiece } from "@/schematic/wires/drag"
-import { samePoint } from "@/schematic/wires/segment"
+import { pointKey, samePoint } from "@/schematic/wires/segment"
 import { announceUpgrade } from "@/hooks/use-projects"
-import { contactCheck, designatorRects, freeSpot, landingOffset, placementCheck, placementClashes, type PlacementScene } from "@/schematic/placement"
+import { contactCheck, designatorRects, footprint, freeSpot, landingOffset, placementCheck, placementClashes, type PlacementScene } from "@/schematic/placement"
 import { toast } from "sonner"
 import { REROUTE_REFUSED } from "@/schematic/wires/router"
 import { DT } from "@/sim/speeds"
@@ -64,8 +65,10 @@ import { Button } from "@/components/ui/button"
 const CodePanel = React.lazy(() => import("@/components/code/CodePanel").then((m) => ({ default: m.CodePanel })))
 const HdlPanel = React.lazy(() => import("@/components/hdl/HdlPanel").then((m) => ({ default: m.HdlPanel })))
 import { ComponentView } from "./ComponentView"
+import type { LeadCut } from "./part-frame"
+import { turnedLeads } from "./wire-paths"
 import { SelectionLayer } from "./SelectionLayer"
-import { wirePlates as platesOf } from "./wire-plate"
+import { wirePlates as platesOf, type Axis as PlateAxis } from "./wire-plate"
 import { BodyMask } from "./BodyMask"
 import { MeasureLayer } from "./MeasureLayer"
 import { PinLayer } from "./PinLayer"
@@ -74,14 +77,13 @@ import { ScaleBar } from "./ScaleBar"
 import { SimControls } from "./SimControls"
 import { FieldCanvas } from "./FieldCanvas"
 import { marksBesideTheBand, wireMarks } from "./wire-marks"
-import { casingTrim, dotRadius, OPEN_END_CELLS, openEndReach, WIRE_HIT_PX, wireCornerRadius } from "./wire-style"
+import { dotRadius, OPEN_END_CELLS, openEndReach, WIRE_HIT_PX, WIRE_PX, wireCornerRadius } from "./wire-style"
 import { exportPng } from "./export-image"
 import { useThemeName } from "./field-palette"
 import { TextCanvas } from "./TextCanvas"
 import { labelArea, labelCanvasFits, SymbolRaster, TextRaster } from "./symbol-raster"
-import { OpenEndCue, PendingWireLayer, WireLayer, type ContinueCue, type PendingLook } from "./WireLayer"
-import { RubberBandLayer, runsNear, type BandCover, type RubberLook } from "./rubber-band-layer"
-import { carriedCover } from "./body-mask"
+import { OpenEndCue, PendingWireLayer, PinTurnLayer, WireLayer, type ContinueCue, type PendingLook } from "./WireLayer"
+import { RubberBandLayer, type RubberLook } from "./rubber-band-layer"
 import { GhostLayer, PlacementGhost, type Ghost } from "./GhostLayer"
 import { MoveDrag, planMove } from "./move-drag"
 import { ContactPreview } from "./contact-preview"
@@ -213,6 +215,8 @@ type DotFieldProps = Omit<React.ComponentProps<typeof ContextMenuTrigger>, "ref"
 type ScreenPoint = { x: number; y: number }
 
 const EMPTY_IDS: ReadonlySet<string> = new Set()
+const OPEN_END_SHARE = 3
+const NO_CORNERS: readonly PinCorner[] = []
 const NO_MOVED: readonly MovedRun[] = []
 const NO_PEERS: readonly PeerSelection[] = []
 const FIELD_OPEN_KEY = "emul.field.open"
@@ -781,7 +785,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
     return ids
   }
-  const bandDotRadius = useEvent(() => dotRadius(grid, scale))
+  const bandDotRadius = useEvent(() => dotRadius(grid, WIRE_PX))
   const bandPixel = useEvent(() => 1 / scale)
   const rubberLook = useEvent((): RubberLook => ({
     runOf: (segment) => wiring.runBySegment.get(segment),
@@ -798,14 +802,14 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   }))
   const dragging = React.useRef<{ kind: "parts"; drag: PartDrag; base: Schematic; detach: boolean; bodies: (dx: number, dy: number) => boolean } | { kind: "segment"; drag: SegmentDrag; base: Schematic } | null>(null)
   const rubberNow = React.useRef<RubberBandLayer | null>(null)
-  const rubberFor = (content: ParentNode, frameAt: (dx: number, dy: number) => DragFrame, always: ReadonlySet<string> = EMPTY_IDS, cover?: BandCover) => {
-    const layer = new RubberBandLayer(content, rubberLook(), always, cover)
+  const rubberFor = (content: ParentNode, frameAt: (dx: number, dy: number) => DragFrame, always: ReadonlySet<string> = EMPTY_IDS) => {
+    const layer = new RubberBandLayer(content, rubberLook(), always)
     rubberNow.current = layer
     const still = frameAt(0, 0)
     return {
       show: (dx: number, dy: number) => {
         const frame = frameAt(dx, dy)
-        layer.show(frame, { x: dx, y: dy })
+        layer.show(frame)
       },
       clear: () => {
         if (always.size) layer.show(still)
@@ -822,10 +826,10 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const press = toggledOffOnClick.current
     if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) >= TAP_SLOP) toggledOffOnClick.current = null
   }
-  const beginMove = useEvent((e: React.PointerEvent, id: string, toggle: boolean) => {
+  const beginMove = useEvent((e: { readonly clientX: number; readonly clientY: number; readonly altKey: boolean }, id: string, toggle: boolean) => {
     const wasSelected = sch.selectedObjects.has(id)
     toggledOffOnClick.current = toggle && wasSelected ? { id, x: e.clientX, y: e.clientY } : null
-    if (!toggle || !wasSelected) flushSync(() => sch.selectObject(id, toggle))
+    if (!wasSelected) flushSync(() => sch.selectObject(id, toggle))
     marquee.clear()
     const content = contentRef.current
     if (!content) return
@@ -833,7 +837,8 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (detail.canvas || labelsOnCanvas) setLifted(moving)
     const pinsDrawn = detail.pins && !detail.canvas
     const detach = e.altKey
-    const partDrag = new PartDrag(sch.doc, wiring, { objects: moving }, { detach, index })
+    const carriedWires = wasSelected && !toggle && !detach ? sch.selectedWires : EMPTY_IDS
+    const partDrag = new PartDrag(sch.doc, wiring, { objects: moving, ...(carriedWires.size > 0 && { wires: carriedWires }) }, { detach, index })
     const carried = docObjects.filter((o) => moving.has(o.id))
     const bodies = placementCheck(scene(), carried)
     const clashes = placementClashes(scene(), carried)
@@ -849,20 +854,21 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       conflicting: (dx, dy) => dragConflictMarks(partDrag.frame(dx, dy), clashes(dx, dy), grid).parts,
       pixel: bandPixel,
       contacts: pinsDrawn ? new ContactPreview(content, contactsAfterMove(docObjects, moving, grid, (area) => index.query(area)), { grid, wired: (key: string) => nets.connected(key), netColor: pinNetColor }) : undefined,
-      rubber: detach ? undefined : rubberFor(content, (dx, dy) => partDrag.frame(dx, dy), band, moving.size < docObjects.length ? { ...carriedCover(carried, grid), runsNear: runsNear(sch.doc.wires, (segment) => wiring.runBySegment.get(segment), grid) } : undefined),
+      rubber: detach ? undefined : rubberFor(content, (dx, dy) => partDrag.frame(dx, dy), band),
     })
   })
 
-  const beginSegmentDrag = useEvent((press: { readonly x: number; readonly y: number; readonly segment: string; readonly detach: boolean }) => {
+  const beginSegmentDrag = useEvent((press: { readonly x: number; readonly y: number; readonly segment: string; readonly run: readonly string[]; readonly detach: boolean }, selection: ReadonlySet<string>) => {
     const content = contentRef.current
     if (!content) return
-    const segmentDrag = new SegmentDrag(sch.doc, wiring, press.segment, index, { detach: press.detach })
+    const asOneBody = !press.detach && selection.has(press.segment) && [...selection].some((id) => !press.run.includes(id))
+    const segmentDrag = new SegmentDrag(sch.doc, wiring, press.segment, index, { detach: press.detach, ...(asOneBody && { selection }) })
     dragging.current = { kind: "segment", drag: segmentDrag, base: sch.doc }
     const band = detail.canvas ? segmentDrag.touched : EMPTY_IDS
     if (band.size) setBanded(band)
     drag.begin({
       ...planMove(content, docObjects, EMPTY_IDS, EMPTY_IDS, toWorld(press.x, press.y), grid),
-      rubber: rubberFor(content, (dx, dy) => segmentDrag.frame(dx, dy), band, { ...carriedCover([], grid), runsNear: runsNear(sch.doc.wires, (segment) => wiring.runBySegment.get(segment), grid) }),
+      rubber: rubberFor(content, (dx, dy) => segmentDrag.frame(dx, dy), band),
     })
   })
 
@@ -938,7 +944,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const at = toWorld(clientX, clientY)
     let found: string | null = null
     for (const o of index.query({ x: at.x, y: at.y, w: 0, h: 0 })) {
-      const r = objectRect(o, grid)
+      const r = footprint(o, grid)?.box ?? objectRect(o, grid)
       if (at.x >= r.x && at.x <= r.x + r.w && at.y >= r.y && at.y <= r.y + r.h) found = o.id
     }
     return found
@@ -1166,13 +1172,19 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     return drawEndAt(wiring, on ?? snapPoint(world))
   }
 
+  const reachOfEnd = (end: Point) => {
+    const segment = wiring.sheet.endsAt(end)[0]
+    const length = segment ? Math.hypot(segment.b.x - segment.a.x, segment.b.y - segment.a.y) : Infinity
+    return Math.min(openEndReach(grid, scale), Math.max(OPEN_END_CELLS * grid, length / OPEN_END_SHARE))
+  }
+
   const openEndNear = (clientX: number, clientY: number): DrawEnd | null => {
     const world = toWorld(clientX, clientY)
     let nearest: Point | null = null
-    let distance = openEndReach(grid, scale)
+    let distance = Infinity
     for (const q of wiring.dangling) {
       const d = Math.hypot(q.x - world.x, q.y - world.y)
-      if (d > distance) continue
+      if (d > distance || d > reachOfEnd(q)) continue
       nearest = q
       distance = d
     }
@@ -1193,7 +1205,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     if (!end || !run) return null
     const inward = samePoint(run.points[0], end.at) ? run.points[1] : run.points[run.points.length - 2]
     const length = Math.hypot(end.at.x - inward.x, end.at.y - inward.y)
-    return { at: end.at, along: length ? { x: (end.at.x - inward.x) / length, y: (end.at.y - inward.y) / length } : null, color: colorOf(run.id) }
+    return { at: end.at, along: length ? { x: (end.at.x - inward.x) / length, y: (end.at.y - inward.y) / length } : null, color: colorOf(run.id), reach: reachOfEnd(end.at) }
   }
 
   const probeCue = useEvent(() => {
@@ -1333,7 +1345,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     lastPress.current = { time: e.timeStamp, x: e.clientX, y: e.clientY, count: again ? last.count + 1 : 1 }
   })
   const pressedTwice = () => (lastPress.current?.count ?? 1) >= 2
-  const wirePress = React.useRef<{ segment: string; run: readonly string[]; x: number; y: number; detach: boolean; toggle: boolean } | null>(null)
+  const wirePress = React.useRef<{ segment: string; run: readonly string[]; x: number; y: number; detach: boolean; toggle: boolean; narrow: boolean } | null>(null)
   const onWirePointerDown = useEvent((e: React.PointerEvent<SVGPathElement>, id: string) => {
     if (armed) return
     if (!primaryClick(e)) return
@@ -1362,10 +1374,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     }
     const segment = segmentNearest(run, toWorld(e.clientX, e.clientY))
     const runIds = run.segments.map((s) => s.id)
-    if (!toggle) sch.selectWires(runIds)
+    const keepsSelection = !toggle && runIds.every((s) => sch.selectedWires.has(s)) && (sch.selectedObjects.size > 0 || sch.selectedWires.size > runIds.length)
+    if (!toggle && !keepsSelection) sch.selectWires(runIds)
     marquee.clear()
     e.currentTarget.setPointerCapture(e.pointerId)
-    wirePress.current = { segment, run: runIds, x: e.clientX, y: e.clientY, detach: e.altKey, toggle }
+    wirePress.current = { segment, run: runIds, x: e.clientX, y: e.clientY, detach: e.altKey, toggle, narrow: keepsSelection }
   })
   const onWirePointerEnter = useEvent((id: string) => {
     if (armed || paletteDrag.active || pending || drag.active || marquee.isDragging()) return
@@ -1477,8 +1490,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const press = wirePress.current
     if (press && !drag.active && Math.hypot(e.clientX - press.x, e.clientY - press.y) >= TAP_SLOP) {
       wirePress.current = null
-      if (press.toggle && !press.run.every((id) => sch.selectedWires.has(id))) sch.selectWires(press.run, true)
-      beginSegmentDrag(press)
+      const adds = press.toggle && !press.run.every((id) => sch.selectedWires.has(id))
+      if (adds) sch.selectWires(press.run, true)
+      const selection = adds ? new Set([...sch.selectedWires, ...press.run]) : sch.selectedWires
+      const carrier = press.narrow ? [...sch.selectedObjects][0] : undefined
+      if (carrier) beginMove({ clientX: press.x, clientY: press.y, altKey: press.detach }, carrier, false)
+      else beginSegmentDrag(press, selection)
     }
     if (drag.active) {
       trackMove(toWorld(e.clientX, e.clientY))
@@ -1513,6 +1530,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const clickedWire = wirePress.current
     wirePress.current = null
     if (clickedWire?.toggle && e.type === "pointerup") sch.selectWires(clickedWire.run, true)
+    if (clickedWire?.narrow && e.type === "pointerup" && !drag.active) sch.selectWires(clickedWire.run)
     if (drag.active) {
       endMove()
       if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
@@ -1543,7 +1561,9 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const refusal = sch.junction(crossingUnder(client.x, client.y)?.at ?? snapPoint(toWorld(client.x, client.y)))
     if (refusal) toast.error(JUNCTION_REFUSED[refusal.refused].title, { description: JUNCTION_REFUSED[refusal.refused].why })
   })
-  const chooseTool = useEvent((next: ToolId) => {
+  const wireOnce = React.useRef(false)
+  const chooseTool = useEvent((next: ToolId, once?: boolean) => {
+    wireOnce.current = once === true && next === "wire"
     if (next === "part") return void openQuick()
     if (next === "probe") {
       setWireArmed(null)
@@ -1557,6 +1577,12 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
     const pointer = pointerClient.current
     setWireArmed(next === "wire" && pointer ? endUnder(pointer.x, pointer.y).at : null)
   })
+  const wasDrawing = React.useRef(false)
+  React.useEffect(() => {
+    const drawing = pending !== null
+    if (wasDrawing.current && !drawing && wireOnce.current) chooseTool("select")
+    wasDrawing.current = drawing
+  }, [pending, chooseTool])
   const chooseLineMode = useEvent((mode: LineMode) => {
     setLineMode(mode)
     if (pending) setPending({ ...pending, d: withLineMode(pending.d, mode) })
@@ -1651,7 +1677,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
       const picked = [
         { keys: KEYMAP.toolSelect, run: () => chooseTool("select") },
         { keys: KEYMAP.toolHand, run: () => chooseTool("hand") },
-        { keys: KEYMAP.toolWire, run: () => chooseTool("wire") },
+        { keys: KEYMAP.toolWire, run: () => chooseTool("wire", true) },
         { keys: KEYMAP.joinHere, run: () => pointerClient.current && joinUnderPointer(pointerClient.current) },
       ].find(({ keys }) => pressesKey(e, keys))
       if (picked) {
@@ -1721,7 +1747,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
 
   const shownCue = continueCue && !pending && wiring.dangling.some((p) => samePoint(p, continueCue.at)) ? continueCue : null
   const lineModeAt = pending?.d.cursor ?? (measure.active ? null : wireArmed)
-  const activeTool: ToolId = measure.active ? "probe" : quick || armed ? "part" : tool
+  const activeTool: ToolId = measure.active ? "probe" : quick || armed ? "part" : pending || wireArmed ? "wire" : tool
   const hintOf = (id: ToolId) => `${toolSpec(id).hint} · Esc stops`
   const wireHint = `${toolSpec("wire").hint} · / which leg first · Backspace takes a corner back · Enter finishes · 0–9, C, M colour · Esc stops`
   const toolHint = armed ? null : tool === "wire" || pending || wireArmed ? wireHint : measure.active ? hintOf("probe") : tool === "hand" ? hintOf("hand") : null
@@ -1735,8 +1761,17 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const wirePlates = React.useMemo(() => {
     const routeOf = new Map(visibleRoutes.map((r) => [r.id, r]))
     const runs = [...selectedRuns].flatMap((id) => runById.get(id) ?? [])
-    return platesOf(runs, (id) => routeOf.get(id), selectedWires, wireCornerRadius(grid), casingTrim(grid))
-  }, [selectedRuns, selectedWires, runById, visibleRoutes, grid])
+    const open = new Set(wiring.dangling.map(pointKey))
+    const meets = (at: Point): PlateAxis | null => {
+      const axes = new Set<PlateAxis>()
+      for (const s of wiring.sheet.through(at)) if (s.a.y === s.b.y) axes.add("x")
+      else if (s.a.x === s.b.x) axes.add("y")
+      for (const pin of wiring.sheet.pinsAt(at)) if (pin.out && pin.out.y === 0 && pin.out.x !== 0) axes.add("x")
+      else if (pin.out && pin.out.x === 0 && pin.out.y !== 0) axes.add("y")
+      return axes.size === 1 ? [...axes][0] : null
+    }
+    return platesOf(runs, (id) => routeOf.get(id), selectedWires, wireCornerRadius(grid), (at) => open.has(pointKey(at)), meets)
+  }, [selectedRuns, selectedWires, runById, visibleRoutes, grid, wiring.dangling, wiring.sheet])
   // --- field explorer --------------------------------------------------------
   const isPhone = useIsMobile()
   const [fieldOpen, setFieldOpenState] = React.useState(savedFieldOpen)
@@ -1873,6 +1908,21 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
   const activeColors = React.useMemo(() => new Set(selectedWireList.flatMap((w) => (w.color ? [w.color] : []))), [selectedWireList])
   const anyOverridden = selectedWireList.some((w) => w.color !== undefined)
   const anyWireColored = React.useMemo(() => docWires.some((w) => w.color !== undefined), [docWires])
+  const leadCuts = React.useMemo(() => {
+    const byObject = new Map<string, LeadCut[]>()
+    const cuts = turnedLeads(visibleRoutes, wiring.corners)
+    if (!cuts.length) return byObject
+    const wanted = new Set(cuts.map((c) => pointKey(c.pin)))
+    const owners = new Map<string, string[]>()
+    for (const o of visibleObjects)
+      for (const pin of objectPins(o, grid)) {
+        const key = pointKey(pin.point)
+        if (wanted.has(key)) owners.set(key, [...(owners.get(key) ?? []), o.id])
+      }
+    for (const cut of cuts)
+      for (const id of owners.get(pointKey(cut.pin)) ?? []) byObject.set(id, [...(byObject.get(id) ?? []), [cut.from, cut.to, cut.pin]])
+    return byObject
+  }, [visibleRoutes, wiring.corners, visibleObjects, grid])
   const objectViews = React.useMemo(
     () =>
       visibleObjects.map((o) => (
@@ -1891,10 +1941,11 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
             onBodyContextMenu={onBodyContextMenu}
             onPartChange={setPart}
             onFieldPointerDown={onFieldPointerDown}
+            leadCuts={leadCuts.get(o.id)}
           />
         </div>
       )),
-    [visibleObjects, grid, detail, labelsOnCanvas, sheeted, selectedObjects, schDoc.parts, simStore, onBodyPointerDown, onBodyPointerMove, onBodyPointerUp, onBodyContextMenu, setPart, onFieldPointerDown, lit],
+    [leadCuts, visibleObjects, grid, detail, labelsOnCanvas, sheeted, selectedObjects, schDoc.parts, simStore, onBodyPointerDown, onBodyPointerMove, onBodyPointerUp, onBodyContextMenu, setPart, onFieldPointerDown, lit],
   )
   const across = (a: ProbePoint, b: ProbePoint | null) => `${a.label} → ${b ? b.label : "ground"}`
   const scopeChannels = [
@@ -2053,6 +2104,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                   </div>
                 </>
               )}
+              <PinTurnLayer corners={detail.canvas ? NO_CORNERS : wiring.corners} scale={scale} grid={grid} conflict={pendingLook?.conflict} />
               {!detail.canvas && <SelectionLayer objects={visibleObjects} wires={wirePlates} selectedObjects={selectedObjects} grid={grid} />}
               {!detail.canvas && (
               <WireLayer
@@ -2060,7 +2112,6 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 grid={grid}
                 scale={scale}
                 selected={selectedRuns}
-                plates={wirePlates}
                 hoveredNet={hoveredNet}
                 colorOf={colorOf}
                 netOfWire={nets.netOfWire}
@@ -2068,6 +2119,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 dangling={wiring.dangling}
                 corners={wiring.corners}
                 flow={flow}
+                lifted={!!pendingLook}
                 onWirePointerDown={onWirePointerDown}
                 onWirePointerEnter={onWirePointerEnter}
                 onWirePointerLeave={onWirePointerLeave}
@@ -2100,7 +2152,7 @@ export function DotField({ ref, className, grid = GRID, onSelectionChange, onCha
                 onPinPointerMove={onPinPointerMove}
                 onPinPointerUp={onPinPointerUp}
               />
-              <OpenEndCue cue={shownCue} reach={openEndReach(grid, scale)} grid={grid} scale={scale} />
+              <OpenEndCue cue={shownCue} grid={grid} scale={scale} />
               <PendingWireLayer pending={pendingLook} grid={grid} scale={scale} part="marks" />
               {lineModeAt && (
                 <div

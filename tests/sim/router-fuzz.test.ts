@@ -10,6 +10,7 @@ import { inNormalForm, wiringOf } from "@/schematic/wire-edits"
 import { junctionsOf, WireGraph, wireNets } from "@/schematic/wires/graph"
 import { isRerouteRefusal, rerouted, routeBetween, type RouteEnd } from "@/schematic/wires/router"
 import type { WirePin, WireSegment } from "@/schematic/wires/segment"
+import { geometricGroups } from "../lib/pin-partition"
 import { bestShape, cells, shapeOf } from "../lib/route-reference"
 import { normalFormViolations, random } from "../lib/wire-reference"
 
@@ -201,7 +202,9 @@ function ownOnly(doc: Schematic, k: string, own: ReadonlySet<string | undefined>
   return nets.length > 0 && nets.every((n) => own.has(n))
 }
 
-function checks(kind: string, before: Schematic, after: Schematic, want: string[], allowedDots: readonly Point[] | "none-new" | "subset", own: ReadonlySet<string | undefined> = new Set()): string[] {
+type CheckOptions = { readonly own?: ReadonlySet<string | undefined>; readonly sockets?: "any-direction" }
+
+function checks(kind: string, before: Schematic, after: Schematic, want: string[], allowedDots: readonly Point[] | "none-new" | "subset", options: CheckOptions = {}): string[] {
   const out: string[] = []
   const got = canonical(groupsOf(after))
   if (JSON.stringify(got) !== JSON.stringify(want)) out.push(`${kind}: partition ${diff(want, got)}`)
@@ -209,7 +212,7 @@ function checks(kind: string, before: Schematic, after: Schematic, want: string[
   if (nf.length) out.push(`${kind}: normal form ${nf.slice(0, 2).join("; ")}`)
   const oldSteps = stepSet(before.wires)
   const newSteps = new Set([...stepSet(after.wires)].filter((t) => !oldSteps.has(t)))
-  out.push(...socketsAcross(after, newSteps).map((m) => `${kind}: ${m}`))
+  if (options.sockets !== "any-direction") out.push(...socketsAcross(after, newSteps).map((m) => `${kind}: ${m}`))
   out.push(...throughBodies(after, newSteps).map((m) => `${kind}: ${m}`))
   const dotsBefore = dotsOf(before)
   const dotsAfter = dotsOf(after)
@@ -217,7 +220,7 @@ function checks(kind: string, before: Schematic, after: Schematic, want: string[
     for (const d of dotsAfter) if (!dotsBefore.has(d)) out.push(`${kind}: a new dot at ${whatIsAt(before, d)}`)
   } else {
     const allowed = new Set(allowedDots === "none-new" ? [] : allowedDots.map(key))
-    for (const d of dotsAfter) if (!dotsBefore.has(d) && !allowed.has(d) && !ownOnly(before, d, own)) out.push(`${kind}: a new dot at ${whatIsAt(before, d)}`)
+    for (const d of dotsAfter) if (!dotsBefore.has(d) && !allowed.has(d) && !ownOnly(before, d, options.own ?? new Set())) out.push(`${kind}: a new dot at ${whatIsAt(before, d)}`)
   }
   return out
 }
@@ -230,8 +233,8 @@ function targetsIn(doc: Schematic, rnd: ReturnType<typeof random>): WirePin[] {
   return nearWires.length > 4 && rnd.chance(0.7) ? nearWires : pins
 }
 
-describe("review A, item 1: no edit joins two nets or drops a contact unasked (fuzz)", () => {
-  it("routeBetween, the completion (previewOf/drawnTo) and rerouted on random documents keep the partition but for the intended join, stay off bodies, pass sockets only along their rows, keep normal form", () => {
+describe("random wire edits preserve their connection rules (fuzz)", () => {
+  it("drawing joins every passed contact; routeBetween and rerouted keep other nets separate; every edit stays off bodies and keeps normal form", () => {
     const found: string[] = []
     const tally = { scenes: 0, routes: 0, nulls: 0, draws: 0, drawRefused: 0, routedDraws: 0, moved: 0, reroutes: 0, rerouteRefused: 0, reference: 0 }
     for (let seed = FIRST_SEED; seed < FIRST_SEED + SEEDS; seed++) {
@@ -321,15 +324,13 @@ describe("review A, item 1: no edit joins two nets or drops a contact unasked (f
           if (preview.routed) tally.routedDraws++
           const backAt = revisits(preview.points)
           if (backAt) found.push(`${label} draw ${a.key}→${target.kind} ${show(target.at)} routed=${preview.routed}: comes back to ${show(backAt)} ${JSON.stringify(cells(preview.points))}`)
-          const fromKey = wiring.sheet.pinsAt(a.at)[0]?.key
-          let targetKey: string | undefined
-          if (target.kind === "pin") targetKey = target.key
-          else {
-            const s = wiring.sheet.through(target.at)[0]
-            const net = s && wiring.view.netOfSegment(s.id)
-            targetKey = net === undefined ? undefined : [...netOf].find(([, n]) => n === net)?.[0]
-          }
-          const want = joined(netOf, fromKey, targetKey)
+          const movedIds = new Set(preview.moved.flatMap((m) => wiring.runById.get(m.run)!.segments.map((s) => s.id)))
+          const drawn = pathOf(preview.points)
+          const expectedWires = [...before.wires.filter((s) => !movedIds.has(s.id)), ...drawn, ...preview.moved.flatMap((m) => pathOf(m.points))]
+          const contacts = wirePins(before.objects)
+          const want = geometricGroups(contacts, expectedWires).map((g) => g.sort().join(" ")).sort()
+          const allowedDots = [a.at, target.at, ...before.wires.flatMap((s) => [s.a, s.b]), ...contacts.filter((p) => !p.socket).map((p) => p.at)]
+            .filter((p) => drawn.some((s) => same(s.a, p) || same(s.b, p) || interiorOf(s, p)))
           const oldSteps = stepSet(before.wires)
           const afterSteps = stepSet(result.wires)
           const missing: string[] = []
@@ -338,7 +339,7 @@ describe("review A, item 1: no edit joins two nets or drops a contact unasked (f
           const removedOld = [...oldSteps].filter((t) => !afterSteps.has(t))
           if (removedOld.length) tally.moved++
           const targetNet = target.kind === "pin" ? netOf.get(target.key) : (() => { const s = wiring.sheet.through(target.at)[0]; return s && (wiring.view.netOfSegment(s.id) ?? `wire:${s.id}`) })()
-          found.push(...checks(`${label} draw ${a.key}[${netOf.get(a.key)}]→${target.kind} ${show(target.at)} routed=${preview.routed} ${JSON.stringify(cells(preview.points))}`, before, result, want, [a.at, target.at], preview.routed ? new Set() : new Set([netOf.get(a.key), targetNet])))
+          found.push(...checks(`${label} draw ${a.key}[${netOf.get(a.key)}]→${target.kind} ${show(target.at)} routed=${preview.routed} ${JSON.stringify(cells(preview.points))}`, before, result, want, allowedDots, { own: preview.routed ? new Set() : new Set([netOf.get(a.key), targetNet]), sockets: "any-direction" }))
           doc = result
         } else {
           if (!before.wires.length) continue

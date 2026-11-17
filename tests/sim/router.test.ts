@@ -648,15 +648,19 @@ describe("the completion while drawing is the router's route (design.md §6.1: �
     offered(doc, at(4, 1), at(12, 1), [pin("R1", "2"), pin("R2", "1")], "the straight row runs along a dangling wire")
   })
 
-  it("over a target pin, when the plain L would pass over another net's pin (refused `over`), the preview is routeBetween's route — the approved picture, under R3's pin — and the click lays it (design.md §13.22, question 7 A; mockups/phase6-questions.png 7, A)", () => {
+  it("passing another pin on the way to a target pin keeps the straight preview and joins all three", () => {
     const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 0), resistor("R3", 6, -3, 90)])
-    const route = offered(doc, at(4, 1), at(10, 1), [pin("R1", "2"), pin("R2", "1")], "the straight row passes over R3's bottom pin")
-    expect.soft(cells(route), "down a row, along under R3's pin, back up").toEqual([
-      [4, 1],
-      [4, 2],
-      [10, 2],
-      [10, 1],
-    ])
+    const wiring = wiringFor(doc)
+    const started = startDrawing(wiring, drawEndAt(wiring, at(4, 1)))
+    if (isRefusal(started)) throw new Error(started.refused)
+    const target = drawEndAt(wiring, at(10, 1))
+    const d = pointerAt(started, target.at)
+    const preview = previewOf(doc, wiring, d, target)
+    expect.soft([preview.routed, preview.refused, cells(preview.points)], "the straight row is accepted as drawn").toEqual([false, null, [[4, 1], [10, 1]]])
+    const after = drawnTo(doc, wiring, d, target, newId)
+    if (isRefusal(after)) throw new Error(after.refused)
+    expect.soft(geometryOf(after.wires), "split at R3's bottom pin").toEqual(geometryOf(path(at(4, 1), at(7, 1), at(10, 1))))
+    expect.soft(partition(after), "the passed pin also joins").toEqual([["R1:2", "R2:1", "R3:2"]])
   })
 
   it("over a target pin, when the plain L would bend on another net's pin (refused `corner`), the preview is routeBetween's route — the other L — and the click lays it (design.md §13.22, question 7 A)", () => {
@@ -1188,7 +1192,7 @@ describe("the router and diagonal wires (design.md §6.11 rule 10: «never lays 
     expect.soft(partition(result), "the same circuit").toEqual(partition(doc))
   })
 
-  it("the completion over a pin is offered in 90° only: in 45° and any angle the segment aimed is the one laid or refused (rule 2)", () => {
+  it("all three line modes connect a passed pin without a completion detour", () => {
     const doc = docOf([resistor("R1", 10, 10), resistor("R2", 20, 10), resistor("R3", 16, 7, 90)])
     const wiring = wiringFor(doc)
     const started = startDrawing(wiring, drawEndAt(wiring, at(14, 11)))
@@ -1196,8 +1200,10 @@ describe("the router and diagonal wires (design.md §6.11 rule 10: «never lays 
     const target = drawEndAt(wiring, at(20, 11))
     for (const mode of ["90", "45", "any"] as const) {
       const preview = previewOf(doc, wiring, pointerAt(withLineMode(started, mode), at(20, 11)), target)
-      if (mode === "90") expect.soft([preview.routed, preview.refused], "90°: routed under R3's pin").toEqual([true, null])
-      else expect.soft([preview.routed, preview.refused?.refused, cells(preview.points)], `${mode}: the straight leg over R3's pin, refused`).toEqual([false, "over", [[14, 11], [20, 11]]])
+      expect.soft([preview.routed, preview.refused, cells(preview.points)], `${mode}: the straight leg connects R3's pin`).toEqual([false, null, [[14, 11], [20, 11]]])
+      const after = drawnTo(doc, wiring, pointerAt(withLineMode(started, mode), at(20, 11)), target, newId)
+      if (isRefusal(after)) throw new Error(after.refused)
+      expect.soft(partition(after), `${mode}: all three pins joined`).toEqual([["R1:2", "R2:1", "R3:2"]])
     }
   })
 })
