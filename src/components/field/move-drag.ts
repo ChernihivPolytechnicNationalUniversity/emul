@@ -13,6 +13,7 @@ export type MovePlan = {
   bodies: Movable[]
   svgGroups: SVGGElement[]
   rigidWires: RigidWire[]
+  hiddenMarks?: SVGElement[]
   blocked?: (dx: number, dy: number) => boolean
   conflicting?: (dx: number, dy: number) => ReadonlySet<string>
   pixel?: () => number
@@ -113,7 +114,16 @@ export function planMove(
     if (elements?.length) rigidWires.push({ elements })
   }
 
-  return { root, origin, grid, startPositions, bodies, svgGroups, rigidWires }
+  const hiddenMarks: SVGElement[] = []
+  for (const mark of root.querySelectorAll<SVGElement>("[data-slot=wires] [data-wires]")) {
+    if (selection?.contains(mark)) continue
+    const wires = mark.dataset.wires!.split(" ")
+    const carried = wires.filter((id) => travelling.has(id)).length
+    if (carried === wires.length) rigidWires.push({ elements: [mark] })
+    else if (carried > 0) hiddenMarks.push(mark)
+  }
+
+  return { root, origin, grid, startPositions, bodies, svgGroups, rigidWires, hiddenMarks }
 }
 
 export class MoveDrag {
@@ -191,5 +201,6 @@ export class MoveDrag {
     else plan.rubber?.clear()
 
     for (const wire of plan.rigidWires) for (const element of wire.elements) element.setAttribute("transform", svgTranslate)
+    for (const mark of plan.hiddenMarks ?? []) mark.style.visibility = moved ? "hidden" : ""
   }
 }

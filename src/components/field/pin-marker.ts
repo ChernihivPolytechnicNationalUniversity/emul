@@ -26,7 +26,7 @@ const PIN_FILL: Record<PinKind, string> = {
 }
 
 export const hollowMarkerHidden = (def: ComponentDef | undefined, kind: PinKind, connected: boolean, contact: boolean) =>
-  (connected || contact) && kind === "digital" && !def?.pinsAreSockets
+  (connected || contact) && kind !== "nc" && kind !== "node" && !def?.pinsAreSockets
 
 export type PinMarker = { radiusCells: number; fill?: string; stroke?: string; className: string; strokeWidth: number }
 

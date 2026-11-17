@@ -74,13 +74,17 @@ describe("a connected pin keeps its marker only where it is a socket", () => {
     for (const id of ["open746i-c", "nucleo-f429zi", "lcd7-f", "lx-lcbst"]) expect(hollowMarkerHidden(def(id), "digital", true, false)).toBe(false)
   })
 
-  it("an open pin and the filled markers are never hidden; a part's pin butted on another reads as a connected one (design.md §8: no dot for two pins)", () => {
+  it("an open pin keeps its marker; a connected or butted pin of any kind shows none, rail and ground included (the user, 2026-11-17; KiCad: «Unconnected pins have a circle, which also disappears when a connection is made»; ГОСТ 2.721 reserves the dot for a branch)", () => {
     const resistor = def("resistor")
     expect.soft(hollowMarkerHidden(resistor, "digital", false, false), "open").toBe(false)
     expect.soft(hollowMarkerHidden(resistor, "digital", false, true), "butted").toBe(true)
     expect.soft(pinMarker(resistor, "digital", false, true, "var(--wire-red)"), "butted, no dot").toBeNull()
-    expect.soft(pinMarker(def("supply"), "power", true, true, "var(--wire-red)")!.radiusCells, "a rail pin butted keeps its own marker, not a contact dot").toBe(pinMarker(def("supply"), "power", true, false, "var(--wire-red)")!.radiusCells)
-    for (const kind of ["power", "gnd", "analog", "node", "nc"] as const) expect.soft(hollowMarkerHidden(resistor, kind, true, false), kind).toBe(false)
+    for (const kind of ["power", "gnd", "analog", "digital"] as const) {
+      expect.soft(pinMarker(resistor, kind, false, false, undefined), `${kind}: open, marked`).not.toBeNull()
+      expect.soft(pinMarker(resistor, kind, true, false, "var(--wire-red)"), `${kind}: wired, no mark`).toBeNull()
+    }
+    expect.soft(pinMarker(def("supply"), "power", true, false, "var(--wire-red)"), "a +12 V rail with a wire on its pin: no red disc").toBeNull()
+    for (const kind of ["node", "nc"] as const) expect.soft(hollowMarkerHidden(resistor, kind, true, false), `${kind} keeps its own mark`).toBe(false)
   })
 
   it("a socket's contact is one filled dot, bigger than a pin's own marker, in the net's colour when it has one", () => {

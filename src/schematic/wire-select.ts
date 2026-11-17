@@ -1,6 +1,7 @@
 import type { Run } from "./circuit"
 import { GRID, intersects, objectRect, type Rect } from "./geometry"
-import type { Point, Schematic } from "./types"
+import { footprint } from "./placement"
+import type { PlacedObject, Point, Schematic } from "./types"
 import type { Wiring } from "./wire-edits"
 import { distanceToSegment, samePoint, type WireSegment } from "./wires/segment"
 
@@ -113,9 +114,38 @@ export const pressesGoOn = (last: TurnPresses | null, objects: string, wires: Re
 
 const inside = (p: Point, r: Rect) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h
 
+function segmentTouches(a: Point, b: Point, r: Rect): boolean {
+  let t0 = 0
+  let t1 = 1
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const edges: readonly (readonly [number, number])[] = [
+    [-dx, a.x - r.x],
+    [dx, r.x + r.w - a.x],
+    [-dy, a.y - r.y],
+    [dy, r.y + r.h - a.y],
+  ]
+  for (const [p, q] of edges) {
+    if (p === 0) {
+      if (q < 0) return false
+      continue
+    }
+    const t = q / p
+    if (p < 0) t0 = Math.max(t0, t)
+    else t1 = Math.min(t1, t)
+    if (t0 > t1) return false
+  }
+  return true
+}
+
+function bodyInside(o: PlacedObject, rect: Rect, grid: number): boolean {
+  const body = footprint(o, grid)
+  return body ? body.corners.every((p) => inside(p, rect)) : intersects(objectRect(o, grid), rect)
+}
+
 export function inRect(doc: Schematic, rect: Rect, grid = GRID): { readonly objects: readonly string[]; readonly wires: readonly string[] } {
   return {
-    objects: doc.objects.filter((o) => intersects(objectRect(o, grid), rect)).map((o) => o.id),
-    wires: doc.wires.filter((s) => inside(s.a, rect) && inside(s.b, rect)).map((s) => s.id),
+    objects: doc.objects.filter((o) => bodyInside(o, rect, grid)).map((o) => o.id),
+    wires: doc.wires.filter((s) => segmentTouches(s.a, s.b, rect)).map((s) => s.id),
   }
 }

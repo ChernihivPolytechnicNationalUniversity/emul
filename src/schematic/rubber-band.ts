@@ -21,7 +21,7 @@ export type Landed = { readonly doc: Schematic; readonly unlaid: readonly Unlaid
 
 export type DragOptions = { readonly detach?: boolean; readonly index?: SpatialIndex }
 
-export type SegmentDragOptions = { readonly detach?: boolean }
+export type SegmentDragOptions = { readonly detach?: boolean; readonly selection?: ReadonlySet<string> }
 
 const randomId: NewId = () => crypto.randomUUID()
 
@@ -158,6 +158,10 @@ function freeChain(sheet: WireSheet, first: WireSegment): WireSegment[] | null {
     }
   }
   return chain
+}
+
+function selectedSegments(sheet: WireSheet, selection: ReadonlySet<string>): WireSegment[] {
+  return [...selection].flatMap((id) => sheet.segment(id) ?? [])
 }
 
 function withWholeFreeChains(sheet: WireSheet, wires: ReadonlySet<string>): ReadonlySet<string> {
@@ -346,7 +350,7 @@ export class PartDrag {
 
   landed(dx: number, dy: number, newId: NewId = randomId): Landed {
     const plan = this.plan
-    if (this.detach) return auditedLanding(this.doc, { doc: detachedMove(this.doc, this.from, dx, dy, newId), unlaid: [], at: { x: dx, y: dy } })
+    if (this.detach) return auditedLanding(this.doc, { doc: splicedAt(detachedMove(this.doc, this.from, dx, dy, newId), this.from.keys(), newId), unlaid: [], at: { x: dx, y: dy } })
     if (!plan) return auditedLanding(this.doc, { doc: moved(this.doc, this.from, dx, dy, newId, this.wiring), unlaid: [], at: { x: dx, y: dy } })
     if (this.stale) return { doc: this.doc, unlaid: [], at: ZERO, refused: [] }
     const asked = { x: dx, y: dy }
@@ -391,7 +395,8 @@ export class SegmentDrag {
     const sheet = current.sheet
     this.segment = sheet.segment(segment)
     const detach = !!options.detach
-    const chain = !this.segment ? null : detach ? [this.segment] : freeChain(sheet, this.segment)
+    const group = this.segment && options.selection?.has(segment) ? selectedSegments(sheet, options.selection) : null
+    const chain = !this.segment ? null : group ?? (detach ? [this.segment] : freeChain(sheet, this.segment))
     this.free = chain !== null
     const around = new Surroundings(doc, new Set(), [], index)
     const wires = chain ? chain.map((s) => s.id) : [segment]
