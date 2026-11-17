@@ -558,13 +558,14 @@ describe("splice: a two-pin part dropped with both pins on one wire goes into it
     ])
   })
 
-  it("Alt suppresses the splice, so a drop that leaves the whole wire under the body is refused", () => {
-    const before = line()
-    const landed = dropped(before, "R3", 0, -4, true)
-    expect.soft(covers(landed.doc, at(4, 1), at(16, 1)), "the wire still runs from R1 to R2").toBe(true)
-    expect.soft(landed.refused?.some((c) => c.reason === "body"), "the body crossing is named").toBe(true)
-    expect.soft(landed.doc, "the entire document stays as it was").toBe(before)
-    expect.soft(partition(landed.doc), "R3 stays off the wire").toEqual([["R1:2", "R2:1"]])
+  it("Alt leaves the part's own wires behind but still splices it into the wire it is dropped on (the user, 2026-11-17: it was thrown back with «Nowhere clean to put it»)", () => {
+    const landed = dropped(line(), "R3", 0, -4, true)
+    expect.soft(landed.refused, "nothing refused").toBeUndefined()
+    expect.soft(covers(landed.doc, at(4, 1), at(16, 1)), "the wire no longer runs under R3's body").toBe(false)
+    expect.soft(partition(landed.doc), "R3 in series between R1 and R2").toEqual([
+      ["R1:2", "R3:1"],
+      ["R2:1", "R3:2"],
+    ])
   })
 
   it("an armed palette click preserves Alt while the definition loads and still normalises pins", () => {
