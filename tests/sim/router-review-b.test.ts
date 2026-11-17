@@ -121,7 +121,6 @@ describe("the row taken after the fact, when the passing wire cannot step aside 
     const target = drawEndAt(wiring, at(5, 19))
     expect.soft(target.kind, "guard: RESET's socket is the target").toBe("pin")
     const result = drawnTo(doc, wiring, pointerAt(started, at(5, 19)), target)
-    expect.soft(isRefusal(result) && result.refused !== "over", "refused, but not as passing over a pin").toBe(true)
     expect.soft(isRefusal(result) && result.refused, "refused as the socket another net's wire passes").toBe("socket")
     expect.soft(isRefusal(result) && DRAW_REFUSED[result.refused].why.includes("End the wire on the pin"), "the words do not ask for what the user just did").toBe(false)
   })

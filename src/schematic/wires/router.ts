@@ -19,7 +19,7 @@ export const REROUTE_REFUSED: Record<RerouteRefusal["refused"], { title: string;
 
 export const isRerouteRefusal = (value: unknown): value is RerouteRefusal => typeof value === "object" && value !== null && "refused" in value
 
-export type RouteAround = { readonly settle?: boolean; readonly ignore?: ReadonlySet<string>; readonly extra?: readonly WireSegment[]; readonly taken?: ReadonlySet<string>; readonly stops?: readonly Point[]; readonly passable?: (pin: WirePin) => boolean; readonly own?: readonly WireSegment[] }
+export type RouteAround = { readonly settle?: boolean; readonly ignore?: ReadonlySet<string>; readonly extra?: readonly WireSegment[]; readonly taken?: ReadonlySet<string>; readonly stops?: readonly Point[]; readonly passable?: (pin: WirePin) => boolean; readonly own?: readonly WireSegment[]; readonly connectThrough?: boolean }
 
 type Box = { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
 
@@ -167,13 +167,13 @@ type End = { readonly at: Point; readonly pin?: WirePin; readonly header?: Heade
 
 type Slip = { readonly landing: Point; readonly heading: number; readonly points: readonly Point[]; readonly cost: number }
 
-type Context = { readonly wiring: Wiring; readonly ignore: ReadonlySet<string>; readonly extra: readonly WireSegment[]; readonly taken: ReadonlySet<string>; readonly stops: readonly Point[]; readonly passable: (pin: WirePin) => boolean; readonly own: readonly WireSegment[] }
+type Context = { readonly wiring: Wiring; readonly ignore: ReadonlySet<string>; readonly extra: readonly WireSegment[]; readonly taken: ReadonlySet<string>; readonly stops: readonly Point[]; readonly passable: (pin: WirePin) => boolean; readonly own: readonly WireSegment[]; readonly connectThrough: boolean }
 
 const NOTHING_TAKEN: ReadonlySet<string> = new Set()
 
 const NO_PIN_PASSABLE = () => false
 
-const contextOf = (wiring: Wiring, around: RouteAround): Context => ({ wiring, ignore: around.ignore ?? new Set(), extra: around.extra ?? [], taken: around.taken ?? NOTHING_TAKEN, stops: around.stops ?? [], passable: around.passable ?? NO_PIN_PASSABLE, own: around.own ?? [] })
+const contextOf = (wiring: Wiring, around: RouteAround): Context => ({ wiring, ignore: around.ignore ?? new Set(), extra: around.extra ?? [], taken: around.taken ?? NOTHING_TAKEN, stops: around.stops ?? [], passable: around.passable ?? NO_PIN_PASSABLE, own: around.own ?? [], connectThrough: around.connectThrough ?? false })
 
 const pinsAt = (context: Context, p: Point) => context.wiring.index.at(p).filter((pin) => !context.passable(pin))
 
@@ -214,8 +214,10 @@ class Field {
   readonly vBlock: Uint8Array
   readonly hCross: Uint8Array
   readonly vCross: Uint8Array
+  private readonly connectThrough: boolean
 
-  constructor(box: Box) {
+  constructor(box: Box, connectThrough = false) {
+    this.connectThrough = connectThrough
     this.x0 = box.x
     this.y0 = box.y
     this.cols = Math.round(box.w / GRID) + 1
@@ -287,14 +289,15 @@ class Field {
     const edge = (p: Point, q: Point, block: Uint8Array, crossing: Uint8Array, at: number) => {
       const hits = meetings(p, q, s.a, s.b)
       if (hits.length !== 1 || near(hits[0], p) || near(hits[0], q)) return
-      if (near(hits[0], s.a) || near(hits[0], s.b)) block[at] = 1
-      else crossing[at]++
+      if (near(hits[0], s.a) || near(hits[0], s.b)) {
+        if (!this.connectThrough) block[at] = 1
+      } else crossing[at]++
     }
     for (let j = r0; j <= r1; j++)
       for (let i = c0; i <= c1; i++) {
         const p = { x: this.x0 + i * GRID, y: this.y0 + j * GRID }
         const cell = j * this.cols + i
-        if (contains(s, p)) this.node[cell] |= samePoint(p, s.a) || samePoint(p, s.b) ? STOP : THROUGH_H | THROUGH_V | NO_TURN
+        if (contains(s, p)) this.node[cell] |= samePoint(p, s.a) || samePoint(p, s.b) ? (this.connectThrough ? NO_TURN : STOP) : THROUGH_H | THROUGH_V | NO_TURN
         if (i + 1 < this.cols) edge(p, { x: p.x + GRID, y: p.y }, this.hBlock, this.hCross, cell)
         if (j + 1 < this.rows) edge(p, { x: p.x, y: p.y + GRID }, this.vBlock, this.vCross, cell)
       }
@@ -319,7 +322,7 @@ class Field {
       const [n0, n1] = horizontal ? this.columnRange(lo, hi, false) : this.rowRange(lo, hi, false)
       for (let k = n0; k <= n1; k++) {
         const v = start + k * GRID
-        this.node[index(k, offset)] |= v === lo || v === hi ? STOP : horizontal ? THROUGH_H : THROUGH_V
+        this.node[index(k, offset)] |= v === lo || v === hi ? (this.connectThrough ? NO_TURN : STOP) : horizontal ? THROUGH_H : THROUGH_V
       }
       return
     }
@@ -328,8 +331,9 @@ class Field {
     const [n0, n1] = horizontal ? this.columnRange(lo, hi, false) : this.rowRange(lo, hi, false)
     for (let k = n0; k <= n1; k++) {
       const v = start + k * GRID
-      if (v === lo || v === hi) across[index(k, below)] = 1
-      else crossing[index(k, below)]++
+      if (v === lo || v === hi) {
+        if (!this.connectThrough) across[index(k, below)] = 1
+      } else crossing[index(k, below)]++
     }
   }
 
@@ -357,19 +361,20 @@ class Field {
     const j = (p.at.y - this.y0) / GRID
     const horizontalOut = !!p.out && p.out.y === 0
     const verticalOut = !!p.out && p.out.x === 0
+    const connects = this.connectThrough && !p.socket && !taken
     if (Number.isInteger(i) && Number.isInteger(j)) {
       if (i < 0 || j < 0 || i >= this.cols || j >= this.rows) return
       const cell = j * this.cols + i
-      this.node[cell] |= !p.socket || !p.out || taken ? STOP : p.shunt ? NO_TURN | NO_H | NO_V : NO_TURN | (horizontalOut ? NO_V : NO_H)
+      this.node[cell] |= connects ? NO_TURN : !p.socket || !p.out || taken ? STOP : p.shunt ? NO_TURN | NO_H | NO_V : NO_TURN | (horizontalOut ? NO_V : NO_H)
       if (p.shunt) this.lead([p.at, plus(p.at, p.shunt, 1)])
       return
     }
     if (Number.isInteger(j) && j >= 0 && j < this.rows) {
       const k = Math.floor(i)
-      if (k >= 0 && k + 1 < this.cols && (!p.socket || !horizontalOut)) this.hBlock[j * this.cols + k] = 1
+      if (k >= 0 && k + 1 < this.cols && (p.socket ? !horizontalOut : !connects)) this.hBlock[j * this.cols + k] = 1
     } else if (Number.isInteger(i) && i >= 0 && i < this.cols) {
       const k = Math.floor(j)
-      if (k >= 0 && k + 1 < this.rows && (!p.socket || !verticalOut)) this.vBlock[k * this.cols + i] = 1
+      if (k >= 0 && k + 1 < this.rows && (p.socket ? !verticalOut : !connects)) this.vBlock[k * this.cols + i] = 1
     }
   }
 
@@ -464,7 +469,7 @@ function bodiesNear(wiring: Wiring, box: Box): Body[] {
 
 function fieldOf(context: Context, box: Box, ends: readonly End[]): Field {
   const { wiring, ignore, extra } = context
-  const field = new Field(box)
+  const field = new Field(box, context.connectThrough)
   const sheet = wiring.sheet
   const x1 = box.x + box.w
   const y1 = box.y + box.h
@@ -506,7 +511,8 @@ function crossingsOn(context: Context, a: Point, b: Point, own: Point): number {
     seen.add(s)
     const hits = meetings(a, b, s.a, s.b).filter((m) => !near(m, own))
     if (!hits.length) return true
-    if (hits.length > 1 || near(hits[0], a) || near(hits[0], b) || near(hits[0], s.a) || near(hits[0], s.b)) return false
+    if (hits.length > 1 || near(hits[0], a) || near(hits[0], b)) return false
+    if (near(hits[0], s.a) || near(hits[0], s.b)) return context.connectThrough
     crossed++
     return true
   }
@@ -516,11 +522,11 @@ function crossingsOn(context: Context, a: Point, b: Point, own: Point): number {
   }
   for (const s of wiring.sheet.slantsWithin(box)) if (!ignore.has(s.id) && !meet(s)) return -1
   for (const s of extra) if (!meet(s)) return -1
-  for (const p of wiring.index.within(box)) if (!near(p.at, own) && !context.passable(p)) return -1
+  for (const p of wiring.index.within(box)) if (!near(p.at, own) && !context.passable(p) && !(context.connectThrough && !p.socket && !near(p.at, a) && !near(p.at, b))) return -1
   for (const at of context.stops) if (!near(at, own) && meetings(a, b, at, at).length) return -1
   for (const body of bodiesNear(wiring, box)) {
     if (runsThrough({ a, b }, body)) return -1
-    for (const [pin, inner] of body.leads) if (meetings(a, b, pin, inner).length) return -1
+    for (const [pin, inner] of body.leads) if (meetings(a, b, pin, inner).some((p) => !context.connectThrough || !near(p, pin))) return -1
   }
   return crossed
 }

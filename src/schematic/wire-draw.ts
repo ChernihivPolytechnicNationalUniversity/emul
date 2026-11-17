@@ -40,7 +40,7 @@ export type Drawing = {
   readonly mode?: LineMode
 }
 
-export type DrawRefusal = { readonly refused: "along" | "over" | "corner" | "crossing" | "body" | "socket" | "nothing"; readonly at: Point; readonly nets: readonly string[]; readonly leg?: number }
+export type DrawRefusal = { readonly refused: "along" | "corner" | "crossing" | "body" | "socket" | "nothing"; readonly at: Point; readonly nets: readonly string[]; readonly leg?: number }
 
 export type MovedRun = { readonly run: string; readonly points: readonly Point[] }
 
@@ -54,7 +54,6 @@ export const PASTE_REFUSED = { title: "Nowhere clean to paste", why: "The paste 
 
 export const DRAW_REFUSED: Record<DrawRefusal["refused"], { title: string; why: string }> = {
   along: { title: "Not along another net's wire", why: "A wire lying on another net's wire would join the two without saying so. End the wire on it to join them on purpose." },
-  over: { title: "Not across another net's pin", why: "A wire passing over a pin would connect it. End the wire on the pin to connect it on purpose." },
   corner: { title: "No corner on another net", why: "A bend on another net's pin or wire would join the two. Place the corner on empty field." },
   crossing: { title: "Not on a crossing", why: "Two wires crossing are not connected. Use the junction tool (J) to join them there." },
   body: { title: "Not through a part", why: "A wire goes round a part's body, never across it. Lay a corner beside the part." },
@@ -264,18 +263,6 @@ function refusalOf(wiring: Wiring, from: DrawEnd, target: DrawEnd, points: reado
       const net = segmentNet(s)
       if (!own.has(net) && Math.min(hi, highOf(s)) - Math.max(lo, lowOf(s)) > 0) return refuse("along", pointOnLine(lineOf(leg), Math.max(lo, lowOf(s))), net, i - 1)
     }
-    for (const mark of sheet.marksOn(leg)) {
-      const v = along(leg, mark.at)
-      if (v <= lo || v >= hi) continue
-      if (mark.segment) {
-        if (ignore.has(mark.segment.id)) continue
-        const net = segmentNet(mark.segment)
-        if (!own.has(net)) return refuse("over", mark.at, net, i - 1)
-      } else if (mark.pin && !passesAlongItsRow(mark.pin, leg)) {
-        const net = pinNet(mark.pin.key)
-        if (!own.has(net)) return refuse("over", mark.at, net, i - 1)
-      }
-    }
   }
   const vertices = target.kind === "field" ? points.slice(1) : points.slice(1, -1)
   for (const v of vertices) {
@@ -328,7 +315,7 @@ function completion(doc: Schematic, wiring: Wiring, d: Drawing, start: RouteEnd,
   const target = "pin" in to ? `${to.pin.object}:${to.pin.pin}` : `@${to.at.x},${to.at.y}`
   const key = `${drawn.map((p) => `${p.x},${p.y}`).join(" ")}>${target}|${[...ignore].join(" ")}`
   if (!known.has(key)) {
-    const route = routeAround(wiring, start, to, { ignore, stops: pointsBehind(drawn) })
+    const route = routeAround(wiring, start, to, { ignore, stops: pointsBehind(drawn), connectThrough: true })
     known.set(key, route && withoutRepeats([...drawn.slice(0, -1), ...route]))
   }
   return known.get(key)!

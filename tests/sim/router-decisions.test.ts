@@ -94,14 +94,17 @@ describe("a socket pair joined by a drawn shunt is impassable along its row, as 
     expect.soft(found, "wires across a shunt").toEqual([])
   })
 
-  it("drawn by hand along the CTS row, through the socket, the wire is refused as passing over the pin; over R2's pin the router's route is offered instead, clear of the socket and its shunt", () => {
+  it("a hand-drawn stroke passes a socket without connecting; completion still avoids its header and shunt", () => {
     const doc = docOf([board("open746i-c"), resistor("R2", 49, 8)])
     const wiring = wiringOf(new WireGraph(), doc)
     const started = startDrawing(wiring, drawEndAt(wiring, at(41, 9)))
     if (isRefusal(started)) throw new Error(started.refused)
     const byHand = previewOf(doc, wiring, pointerAt(started, at(47, 9)), drawEndAt(wiring, at(47, 9)))
-    expect.soft(byHand.refused?.refused, "over the CTS socket").toBe("over")
-    expect.soft(byHand.refused && cellsOf([byHand.refused.at]), "at the socket").toEqual([[45, 9]])
+    expect.soft(byHand.refused, "passing the CTS socket is allowed").toBeNull()
+    const after = drawnTo(doc, wiring, pointerAt(started, at(47, 9)), drawEndAt(wiring, at(47, 9)), drawnId)
+    if (isRefusal(after)) throw new Error(after.refused)
+    expect.soft(wireNets(after.wires, wirePins(after.objects)).connected("U1:VCP-CTS"), "the socket is not connected by a passing stroke").toBe(false)
+    expect.soft(after.wires.length, "the socket does not split the stroke").toBe(1)
     const overR2 = previewOf(doc, wiring, pointerAt(started, at(49, 9)), drawEndAt(wiring, at(49, 9)))
     const cts = shunted(doc).find((p) => p.key === "U1:VCP-CTS")!
     const pad = { x: cts.at.x + cts.shunt!.x, y: cts.at.y + cts.shunt!.y }
@@ -161,12 +164,12 @@ const drawnId = () => `d${++drawn}`
 
 describe("the completion is offered from any start and after corners, the corners kept on the route (the main session's decision on review B's question 6; design.md §6.1, §13.22 question 7)", () => {
   const overR3 = () => [resistor("R1", 0, 0), resistor("R2", 10, 0), resistor("R3", 6, -3, 90)]
-  const offered = (doc: Schematic, d: Drawing, to: Point, startsWith: Point[]) => {
+  const offered = (doc: Schematic, d: Drawing, to: Point, startsWith: Point[], routed = true) => {
     const wiring = wiringOf(new WireGraph(), doc)
     const target = drawEndAt(wiring, to)
     const preview = previewOf(doc, wiring, pointerAt(d, to), target)
     expect.soft(preview.refused?.refused ?? null, "the router's route is offered, not a refusal").toBeNull()
-    expect.soft(preview.routed, "routed").toBe(true)
+    expect.soft(preview.routed, "completion is used only when the plain path needs it").toBe(routed)
     expect.soft(cellsOf(preview.points.slice(0, startsWith.length)), "it starts where the drawing does, through every corner placed").toEqual(cellsOf(startsWith))
     expect.soft(cellsOf(preview.points.slice(-1)), "and ends on the target pin").toEqual(cellsOf([to]))
     const after = drawnTo(doc, wiring, pointerAt(d, to), target, drawnId)
@@ -174,14 +177,14 @@ describe("the completion is offered from any start and after corners, the corner
     return isRefusal(after) ? null : after
   }
 
-  it("from a dangling end of R1's wire, past R3's bottom pin on the row: the router's route, not the refused straight row", () => {
+  it("from a dangling end, the straight stroke connects a passed pin without completion", () => {
     const doc = docOf(overR3(), [{ id: "w", a: at(4, 1), b: at(5, 1) }])
     const wiring = wiringOf(new WireGraph(), doc)
     const started = startDrawing(wiring, drawEndAt(wiring, at(5, 1)))
     if (isRefusal(started)) throw new Error(started.refused)
     expect.soft(started.from.kind, "guard: the drawing starts on the wire's open end").toBe("end")
-    const after = offered(doc, started, at(10, 1), [at(5, 1)])
-    expect.soft(after && pinPartition(wireNets(after.wires, wirePins(after.objects))), "R1 and R2 joined, R3 on nothing").toEqual([["R1:2", "R2:1"]])
+    const after = offered(doc, started, at(10, 1), [at(5, 1)], false)
+    expect.soft(after && pinPartition(wireNets(after.wires, wirePins(after.objects))), "the passed R3 pin joins R1 and R2").toEqual([["R1:2", "R2:1", "R3:2"]])
   })
 
   it("from a branch point on a wire, where both plain Ls pass another net's pin: the router's route", () => {
@@ -191,7 +194,7 @@ describe("the completion is offered from any start and after corners, the corner
     if (isRefusal(started)) throw new Error(started.refused)
     expect.soft(started.from.kind, "guard: the drawing starts on the wire, a branch").toBe("wire")
     const after = offered(doc, started, at(10, 1), [at(4, 3)])
-    expect.soft(after && pinPartition(wireNets(after.wires, wirePins(after.objects))), "R1 and R2 joined, R3 and R5 on nothing").toEqual([["R1:2", "R2:1"]])
+    expect.soft(after && pinPartition(wireNets(after.wires, wirePins(after.objects))), "the completion also connects the passed R3 pin").toEqual([["R1:2", "R2:1", "R3:2"]])
   })
 
   it("from R1's pin after a corner placed below it: the route continues from the corner, the leg drawn kept, never back up it", () => {
@@ -203,7 +206,7 @@ describe("the completion is offered from any start and after corners, the corner
     if (isRefusal(cornered)) throw new Error(cornered.refused)
     expect.soft(cellsOf(cornered.corners), "guard: one corner, at (4, 4)").toEqual([[4, 4]])
     const after = offered(doc, cornered, at(10, 1), [at(4, 1), at(4, 4)])
-    expect.soft(after && pinPartition(wireNets(after.wires, wirePins(after.objects))), "R1 and R2 joined").toEqual([["R1:2", "R2:1"]])
+    expect.soft(after && pinPartition(wireNets(after.wires, wirePins(after.objects))), "the completion also connects the passed R3 pin").toEqual([["R1:2", "R2:1", "R3:2"]])
   })
 })
 

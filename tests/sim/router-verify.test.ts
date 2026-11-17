@@ -484,11 +484,12 @@ describe("diagonals and the router, new scenes", () => {
     expect.soft(partition(t.doc), "the circuit").toEqual(partition(laid))
     expect.soft(picture(reroutedRuns(t.doc, t.doc.wires.map((s) => s.id), newId).doc), "T again").toEqual(picture(t.doc))
   })
-  it("the completion over a pin stays off in 45° and any angle even when the aimed segment is refused", () => {
+  it("45° and any-angle drawing connect a passed pin without completion", () => {
     const doc = docOf([resistor("R1", 0, 0), resistor("R2", 10, 0), resistor("R3", 6, -3, 90)])
     for (const mode of ["45", "any"] as const) {
       const r = draw(doc, at(4, 1), at(10, 1), mode)
-      expect.soft([r.preview.routed, r.preview.refused?.refused], `${mode}: the aimed segment over R3's pin, refused, not routed`).toEqual([false, "over"])
+      expect.soft([r.preview.routed, r.preview.refused], `${mode}: the aimed segment passes R3's pin directly`).toEqual([false, null])
+      expect.soft(partition(laidOrThrow(r)), `${mode}: all three pins joined`).toEqual([["R1:2", "R2:1", "R3:2"]])
     }
   })
 })
