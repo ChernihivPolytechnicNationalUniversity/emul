@@ -1,7 +1,7 @@
 import * as React from "react"
 import { FlameIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { bodyCentre, drawnBody, orientationOf, placedText, type Orientation } from "@/schematic/geometry"
+import { bodyCentre, drawnBody, orientationOf, placedText, type Orientation, type Point } from "@/schematic/geometry"
 import { drawsAsField, fieldTemplates, placedFields, type FieldKey } from "@/schematic/fields"
 import { getDef, partInitial } from "@/schematic/registry"
 import { partKey, type BodyShape, type ComponentDef, type Damage, type Fill, type PartDef, type PartState, type PlacedObject } from "@/schematic/types"
@@ -16,9 +16,12 @@ import { formatSI } from "@/sim/units"
 import { fixedText, soonBadgeText } from "./symbol-raster"
 import { GLOW_OPACITY, glowOf, HALO_OPACITY, visible } from "./led-glow"
 import { selectionOutline } from "./selection-geometry"
+import { bodyBounds } from "@/schematic/body"
+import { toPartFrame, type LeadCut } from "./part-frame"
 import { LUCIDE_CLOCK, SOON_BADGE, soonBadge, soonImage, textBoost } from "./body-paint"
 import { readFieldPalette, useThemeName, type FieldPalette } from "./field-palette"
 import { SWITCH_CONTACT_CELLS } from "./pin-marker"
+import { CASING_PX, WIRE_PX } from "./wire-style"
 
 const FILL: Record<Fill, string> = {
   board: "fill-card stroke-border",
@@ -72,6 +75,26 @@ type ComponentViewProps = {
   onBodyContextMenu: (objectId: string) => void
   onPartChange: (objectId: string, partId: string, patch: PartState) => void
   onFieldPointerDown?: FieldPointerHandler
+  leadCuts?: readonly LeadCut[]
+}
+
+const leadCutId = (objectId: string) => `lead-cut-${objectId.replace(/[^a-zA-Z0-9_-]/g, "_")}`
+
+function LeadCutMask({ id, cuts, toLocal, w, h }: { id: string; cuts: readonly LeadCut[]; toLocal: (p: Point) => Point; w: number; h: number }) {
+  const reach = Math.max(w, h)
+  const region = { x: -reach, y: -reach, width: w + 2 * reach, height: h + 2 * reach }
+  return (
+    <defs>
+      <mask id={id} maskUnits="userSpaceOnUse" {...region}>
+        <rect {...region} fill="white" />
+        {cuts.map(([from, to, pin], i) => {
+          const a = toLocal(from)
+          const b = toLocal(to)
+          return <path key={i} data-lead-cut={`${pin.x},${pin.y}`} d={`M${a.x} ${a.y} L${b.x} ${b.y}`} fill="none" stroke="black" strokeWidth={WIRE_PX + CASING_PX} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+        })}
+      </mask>
+    </defs>
+  )
 }
 
 /** Generic renderer: draws any ComponentDef from its body shapes, pins and parts. */
@@ -89,6 +112,7 @@ export const ComponentView = React.memo(function ComponentView({
   onBodyContextMenu,
   onPartChange,
   onFieldPointerDown,
+  leadCuts,
 }: ComponentViewProps) {
   const live = useObjectSim(sim, object.id)
   const def = getDef(object.def)
@@ -105,6 +129,7 @@ export const ComponentView = React.memo(function ComponentView({
   const partText = (x: number, y: number) => uprightAt(x, y, levelText, orientation)
   const damage: Damage | undefined = live.damage
   const centre = bodyCentre(def, orientation)
+  const hit = bodyBounds(def)
   const left = object.x + centre.x * grid - w / 2
   const top = object.y + centre.y * grid - h / 2
 
@@ -115,7 +140,7 @@ export const ComponentView = React.memo(function ComponentView({
       data-def={def.id}
       data-selected={selected || undefined}
       data-damaged={damage ? "" : undefined}
-      className="absolute cursor-move overflow-visible select-none"
+      className="pointer-events-none absolute overflow-visible select-none"
       style={{ left, top, width: w, height: h, transform: rotation || mirror ? `rotate(${rotation}deg)${mirror ? " scaleX(-1)" : ""}` : undefined }}
       strokeWidth={1}
       viewBox={`0 0 ${w} ${h}`}
@@ -126,13 +151,15 @@ export const ComponentView = React.memo(function ComponentView({
       onContextMenu={() => onBodyContextMenu(object.id)}
     >
       {damage && <title>{`${props.ref ?? def.name} burnt: ${damage.reason}`}</title>}
-      <g className={cn("body", damage && "opacity-50 saturate-0")}>
+      {leadCuts?.length ? <LeadCutMask id={leadCutId(object.id)} cuts={leadCuts} toLocal={toPartFrame(object, def, grid)} w={w} h={h} /> : null}
+      <g className={cn("body", damage && "opacity-50 saturate-0")} mask={leadCuts?.length ? `url(#${leadCutId(object.id)})` : undefined}>
         <HollowBackdrop def={def} grid={grid} />
         {drawnBody(def, orientation).filter((s) => !drawsAsField(s)).map((s, i) => (
           <Shape key={i} shape={s} g={g} grid={grid} labels={detail.labels} boost={detail.textBoost} growth={growth.get(s)} sheeted={sheeted} props={props} orientation={orientation} />
         ))}
       </g>
-      <g className="parts">
+      <rect data-hit="" x={hit.x * grid} y={hit.y * grid} width={hit.w * grid} height={hit.h * grid} fill="transparent" pointerEvents="all" className="cursor-move" />
+      <g className="parts" pointerEvents="visiblePainted">
         {detail.pins && def.parts.map((p) => {
           const key = partKey(object.id, p.id)
           const mixed = p.type === "led" && p.mix ? rgbLedGlow(p.mix.map((id) => live.parts[partKey(object.id, id)]), ambientOf(props)) : undefined
@@ -190,7 +217,7 @@ function Fields({ object, def, grid, boost, onPointerDown }: { object: PlacedObj
   if (!fields.length) return null
   const templates = fieldTemplates(def)
   return (
-    <svg data-slot="fields" className="pointer-events-none absolute top-0 left-0 overflow-visible select-none" width={1} height={1}>
+    <svg data-slot="fields" className="pointer-events-none absolute top-0 left-0 z-[1] overflow-visible select-none" width={1} height={1}>
       {fields.map((f) => {
         const template = templates.find((t) => t.key === f.key)!
         return (

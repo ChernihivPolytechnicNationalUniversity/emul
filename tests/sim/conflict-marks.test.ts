@@ -11,9 +11,8 @@ import { inNormalForm, wiringOf } from "@/schematic/wire-edits"
 import type { DragConflict, DragFrame, DragPiece } from "@/schematic/wires/drag"
 import { WireGraph } from "@/schematic/wires/graph"
 import type { WireSegment } from "@/schematic/wires/segment"
-import { carriedCover } from "@/components/field/body-mask"
-import { bandGlow, bandOf, runsNear } from "@/components/field/rubber-band-layer"
-import { PendingWireLayer } from "@/components/field/WireLayer"
+import { bandGlow, bandOf } from "@/components/field/rubber-band-layer"
+import { PendingWireLayer, PinTurnLayer } from "@/components/field/WireLayer"
 
 const at = (x: number, y: number): Point => ({ x: x * GRID, y: y * GRID })
 const by = (x: number, y: number) => [x * GRID, y * GRID] as const
@@ -241,7 +240,7 @@ describe("the glow is drawn under exactly the marked stretches, joined where the
   })
 })
 
-describe("the pending wire keeps its own colour and glows under the refused stretch only, beneath the parts, its casing cut there", () => {
+describe("the pending wire keeps its own colour and glows under the refused stretch only, beneath the parts; its casing only cuts the wires beneath", () => {
   const html = (part: "route" | "glow", conflict?: readonly Stretch[]) =>
     renderToStaticMarkup(
       React.createElement(PendingWireLayer, {
@@ -260,39 +259,30 @@ describe("the pending wire keeps its own colour and glows under the refused stre
     expect.soft(glow, "the glow sized for this zoom").toContain("--conflict-px:0.5px")
   })
 
-  it("refused: the route keeps its blue dashes, no red, no glow of its own, and its casing is cut where the glow is so nothing white sits over it", () => {
+  it("refused: the route keeps its blue dashes, no red, no glow of its own, and its casing is mask geometry, so nothing white is ever painted over the glow", () => {
     const route = html("route", lying)
     expect.soft(route, "the wire's colour").toContain("var(--wire-blue)")
     expect.soft(route, "no red").not.toContain("--destructive")
     expect.soft(route, "the glow is not in the route").not.toContain("var(--conflict)")
-    expect.soft(route, "the casing under a cut").toContain('mask="url(#pending-wire-glow-cut)"')
-    expect.soft(route.match(/stroke="black"/g)?.length, "one cut, along the glow").toBe(1)
+    expect.soft(route, "the casing is the pending cut the wire layer masks with").toContain('id="pending-wire-cut"')
+    expect.soft(route.match(/stroke="black"/g)?.length, "one casing, black, in the defs").toBe(1)
+    expect.soft(route, "nothing in the background colour").not.toContain("var(--background)")
   })
 
-  it("allowed: no glow, no cut", () => {
+  it("allowed: no glow, the same cut", () => {
     expect.soft(html("glow"), "nothing in the glow layer").toBe("")
-    expect.soft(html("route"), "plain casing").not.toContain("glow-cut")
-  })
-})
-
-describe("casings keep off the carried parts: their shapes and boxes, and the standing wires near them", () => {
-  it("each carried part has one box that holds every shape of it, grown by half the mask's edge", () => {
-    const parts = [resistor("R1", 10, 10), resistor("R2", 20, 10, 90)]
-    const { shapes, boxes } = carriedCover(parts, GRID)
-    expect.soft(boxes.length, "one per part").toBe(2)
-    const inside = (p: Point) => boxes.some((b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h)
-    expect.soft([...shapes.bodies.flat(), ...shapes.leads.flat(), ...shapes.texts.flatMap((r) => [{ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y + r.h }])].every(inside), "every shape inside").toBe(true)
-    expect.soft(boxes[0].x, "R1's box starts half an edge left of its pin").toBeNear(at(10, 0).x - 0.075 * GRID, 1e-9)
-    expect.soft(shapes.bodies.length, "both bodies").toBe(2)
+    expect.soft(html("route"), "the cut").toContain('id="pending-wire-cut"')
+    expect.soft(html("route"), "nothing in the background colour").not.toContain("var(--background)")
   })
 
-  it("only the runs with a segment in the box are near it", () => {
-    const doc = docOf([resistor("R1", 0, 0), resistor("R2", 20, 0)], [wire("a", at(4, 1), at(10, 1)), wire("b", at(10, 1), at(10, 6)), wire("c", at(24, 1), at(30, 1))])
-    const wiring = wiringFor(doc)
-    const near = runsNear(doc.wires, (s) => wiring.runBySegment.get(s), GRID)
-    const runOf = (id: string) => wiring.runBySegment.get(id)!.id
-    expect.soft([...near({ x: at(9, 3).x, y: at(9, 3).y, w: 2 * GRID, h: GRID })], "the run through (10, 3)").toEqual([runOf("b")])
-    expect.soft([...near({ x: at(26, 0).x, y: at(26, 0).y, w: GRID, h: 2 * GRID })], "the other run").toEqual([runOf("c")])
-    expect.soft([...near({ x: at(15, 10).x, y: at(15, 10).y, w: GRID, h: GRID })], "nothing there").toEqual([])
+  it("the band's lead patches during a drag are cut away where the glow lies, so their background never covers the glow", () => {
+    const layer = (conflict?: readonly Stretch[]) => renderToStaticMarkup(React.createElement(PinTurnLayer, { corners: [], scale: 2, grid: GRID, conflict }))
+    const plain = layer()
+    expect.soft(plain, "a host for the band's patches").toContain("data-band-patches")
+    expect.soft(plain, "no mask without a glow").not.toContain("mask=")
+    expect.soft(plain, "and no patch of its own: a laid wire's turn cuts the part's lead instead").not.toContain("var(--background)")
+    const glowing = layer([[at(5, 9), at(9, 9)]])
+    expect.soft(glowing, "the patches are masked").toContain('mask="url(#pin-turn-glow-cut)"')
+    expect.soft(glowing.match(/<mask [^>]*id="pin-turn-glow-cut"/g)?.length, "by the glow's cut").toBe(1)
   })
 })

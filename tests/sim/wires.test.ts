@@ -140,6 +140,11 @@ describe("nets and colours", () => {
       }
     })
 
+    it.each(Object.keys(blocks) as (keyof typeof blocks)[])("a black wire is the symbols' ink in the %s theme (the user, 2026-11-16: wires looked grey beside the parts)", (theme) => {
+      const ink = (name: string) => blocks[theme].match(new RegExp(`--${name}:\\s*(oklch\\([^)]*\\))`))?.[1]
+      expect.soft(ink("wire-black"), "--wire-black equals --foreground").toBe(ink("foreground"))
+    })
+
     it("has both tokens for every colour", () => {
       const missing = WIRE_COLORS.filter((k) => Number.isNaN(lightness(blocks.light, `wire-${k}-flow`)) || Number.isNaN(lightness(blocks.dark, `wire-${k}-flow`)))
       expect(missing).toEqual([])

@@ -8,7 +8,7 @@ import type { PlacedObject } from "@/schematic/types"
 
 type Polygon = Point[]
 type Clip = { rule: CanvasFillRule; polygons: Polygon[] }
-type Stroke = { style: unknown; clips: Clip[] }
+type Stroke = { style: unknown; op: unknown; clips: Clip[] }
 
 function recorder() {
   const strokes: Stroke[] = []
@@ -19,7 +19,7 @@ function recorder() {
   const context = new Proxy(state, {
     get(target, key) {
       if (key === "save") return () => saved.push({ state: { ...state }, clips: [...clips] })
-      if (key === "restore") return () => { const prior = saved.pop()!; Object.assign(state, prior.state); clips = prior.clips }
+      if (key === "restore") return () => { const prior = saved.pop()!; for (const name of Reflect.ownKeys(state)) delete state[name]; Object.assign(state, prior.state); clips = prior.clips }
       if (key === "beginPath") return () => { polygons = [] }
       if (key === "moveTo") return (x: number, y: number) => polygons.push([{ x, y }])
       if (key === "lineTo") return (x: number, y: number) => polygons.at(-1)!.push({ x, y })
@@ -32,7 +32,7 @@ function recorder() {
         }
       }
       if (key === "clip") return (rule: CanvasFillRule) => clips.push({ rule, polygons: structuredClone(polygons) })
-      if (key === "stroke") return () => strokes.push({ style: state.strokeStyle, clips: [...clips] })
+      if (key === "stroke") return () => strokes.push({ style: state.strokeStyle, op: state.globalCompositeOperation ?? "source-over", clips: [...clips] })
       if (key === "measureText") return (text: string) => ({ width: text.length * 6 })
       if (key in target) return target[key]
       return () => {}
@@ -64,8 +64,9 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 function assertMasked(strokes: Stroke[], objects: PlacedObject[]) {
-  const casings = strokes.filter((s) => s.style === "paper")
-  expect(casings).toHaveLength(2)
+  const casings = strokes.filter((s) => s.op === "destination-out")
+  expect(casings, "two casings, both cuts").toHaveLength(2)
+  expect(strokes.filter((s) => s.style === "paper"), "nothing is stroked in the background colour").toHaveLength(0)
   expect(casings.every((s) => s.clips.length && s.clips.every((c) => c.rule === "evenodd"))).toBe(true)
   const shapes = bodyMaskShapes(objects, GRID)
   const points = [
@@ -79,7 +80,7 @@ function assertMasked(strokes: Stroke[], objects: PlacedObject[]) {
   ]
   for (const point of points) expect(casings.every((s) => !visible(s, point)), JSON.stringify(point)).toBe(true)
   expect(casings.every((s) => visible(s, at(-3, -3)))).toBe(true)
-  expect(strokes.filter((s) => s.style === "ink").every((s) => s.clips.length === 0)).toBe(true)
+  expect(strokes.filter((s) => s.style === "ink").every((s) => s.op === "source-over" && s.clips.length === 0), "the wire bodies are painted, unclipped").toBe(true)
 }
 
 describe("canvas crossing casings use the SVG body mask", () => {
@@ -100,12 +101,32 @@ describe("canvas crossing casings use the SVG body mask", () => {
     assertMasked(recording.strokes, objects)
   })
 
+  it("the cuts are made on a layer of wires alone, so the plates, the symbols and the grid under the canvas are never cut", () => {
+    const main = recorder()
+    const layers: ReturnType<typeof recorder>[] = []
+    const raster = new SymbolRaster()
+    vi.spyOn(raster, "get").mockReturnValue(null)
+    const layer = () => {
+      const made = recorder()
+      layers.push(made)
+      return made.context
+    }
+    paintField(main.context, {} as Element, { objects: [part], routes, view: { x: -300, y: -300, w: 1000, h: 1000 }, grid: GRID, pixels: 1, device: 1, theme: "test", colorOf: () => "black", raster, selection: { objects: new Set([part.id]), wires: new Set() }, layer })
+    expect.soft(main.strokes.filter((s) => s.op === "destination-out").length, "nothing is cut on the canvas itself").toBe(0)
+    const cutting = layers.filter((l) => l.strokes.some((s) => s.op === "destination-out"))
+    expect.soft(cutting.length, "one layer is cut").toBe(1)
+    expect.soft(cutting[0]?.strokes.filter((s) => s.op === "destination-out").length, "by both casings").toBe(2)
+    expect.soft(cutting[0]?.strokes.every((s) => s.op === "destination-out" || s.style === "ink"), "and that layer holds wires only, no plate").toBe(true)
+  })
+
   it("boards leave their bodies, leads and names passable for casings", () => {
     const recording = recorder()
     const raster = new SymbolRaster()
     vi.spyOn(raster, "get").mockReturnValue(null)
     paintField(recording.context, {} as Element, { objects: [{ id: "board", def: "nucleo-f429zi", x: 0, y: 0 }], routes, view: { x: -300, y: -300, w: 1000, h: 1000 }, grid: GRID, pixels: 1, device: 1, theme: "test", colorOf: () => "black", raster })
-    expect(recording.strokes.filter((s) => s.style === "paper").every((s) => visible(s, at(2, 1)))).toBe(true)
+    const casings = recording.strokes.filter((s) => s.op === "destination-out")
+    expect.soft(casings.length, "the casings are cuts").toBe(2)
+    expect(casings.every((s) => visible(s, at(2, 1)))).toBe(true)
   })
 
   it("PNG export draws its casings under the same evenodd clips", async () => {

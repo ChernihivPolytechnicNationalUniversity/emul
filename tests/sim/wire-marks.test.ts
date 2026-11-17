@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest"
 import * as React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { GRID, objectPins, type Point } from "@/schematic/geometry"
+import { bodyCentre, GRID, objectPins, orientationOf, type Point } from "@/schematic/geometry"
+import { getDef } from "@/schematic/registry"
 import type { PlacedObject, Schematic } from "@/schematic/types"
 import { wiringOf } from "@/schematic/wire-edits"
 import { WireGraph } from "@/schematic/wires/graph"
 import type { WireSegment } from "@/schematic/wires/segment"
-import { paintMarks } from "@/components/field/field-paint"
-import { WireLayer } from "@/components/field/WireLayer"
+import { cutTurnedLeads, paintMarks } from "@/components/field/field-paint"
+import { PinTurnLayer, WireLayer } from "@/components/field/WireLayer"
+import { toPartFrame } from "@/components/field/part-frame"
+import { turnedLeads } from "@/components/field/wire-paths"
 import { WireFlow } from "@/components/field/wire-flow"
 import { wireMarks } from "@/components/field/wire-marks"
 import { casingTrim, WIRE_PX } from "@/components/field/wire-style"
@@ -61,12 +64,11 @@ const colorOf = () => "black" as const
 function layer(doc: Schematic, scale = 1) {
   const w = wiringOf(new WireGraph(), doc)
   const html = renderToStaticMarkup(
-    React.createElement(WireLayer, {
+    React.createElement(React.Fragment, null, React.createElement(PinTurnLayer, { corners: w.corners, scale, grid: GRID }), React.createElement(WireLayer, {
       routes: w.routes,
       grid: GRID,
       scale,
       selected: new Set<string>(),
-      plates: [],
       hoveredNet: null,
       colorOf,
       netOfWire: (id: string) => w.nets.netOfWire(id),
@@ -77,7 +79,7 @@ function layer(doc: Schematic, scale = 1) {
       onWirePointerDown: () => {},
       onWirePointerEnter: () => {},
       onWirePointerLeave: () => {},
-    }),
+    })),
   )
   return { w, html }
 }
@@ -131,22 +133,38 @@ describe("junction dots, open ends and turns at pins are drawn wherever the grap
     expect.soft(count("fill"), "every dot and the open end").toBe(3)
   })
 
-  it("on the field a lead turned at its pin is hidden a stroke past the pin, so its round cap does not show beside the turn", () => {
+  it("on the field a lead turned at its pin is cut out of the part itself, a stroke past the pin in field units at every zoom (strokes scale with the zoom), and nothing is painted in the background", () => {
     const { doc, pin } = turnAtPin()
-    for (const scale of [1, 0.5]) {
-      const { w, html } = layer(doc, scale)
-      const lead = w.routes[0].leads?.start ?? w.routes[0].leads?.end
-      expect.soft(lead, "the wire turns at the pin").toBeDefined()
-      const masks = [...html.matchAll(/<path d="M([-\d.]+) ([-\d.]+) L([-\d.]+) ([-\d.]+)" fill="none" stroke="var\(--background\)"/g)].map((m) => m.slice(1, 5).map(Number))
-      expect.soft(masks.length, `one mask at scale ${scale}`).toBe(1)
-      const [, , x, y] = masks[0] ?? []
-      const past = Math.hypot(x - pin.x, y - pin.y)
-      expect.soft(past, `past the pin by the stroke at scale ${scale}`).toBeCloseTo(WIRE_PX / scale, 9)
-      expect.soft(Math.hypot(x - lead!.x, y - lead!.y), `on the lead's line, beyond the pin, at scale ${scale}`).toBeCloseTo(Math.hypot(pin.x - lead!.x, pin.y - lead!.y) + past, 9)
-    }
+    const w = wiringOf(new WireGraph(), doc)
+    const lead = w.routes[0].leads?.start ?? w.routes[0].leads?.end
+    expect.soft(lead, "the wire turns at the pin").toBeDefined()
+    const cuts = turnedLeads(w.routes, w.corners)
+    expect.soft(cuts.length, "one turned lead").toBe(1)
+    const cut = cuts[0]
+    expect.soft(Math.hypot(cut.to.x - cut.pin.x, cut.to.y - cut.pin.y), "past the pin by a whole stroke, the lead's round cap and a margin").toBeCloseTo(WIRE_PX, 9)
+    expect.soft(Math.hypot(cut.to.x - lead!.x, cut.to.y - lead!.y), "on the lead's line, beyond the pin").toBeCloseTo(Math.hypot(pin.x - lead!.x, pin.y - lead!.y) + WIRE_PX, 9)
+    for (const rotation of [0, 45, 90, 135, 180, 270] as const)
+      for (const mirror of [false, true]) {
+        const object: PlacedObject = { ...resistor("R9", 3, 2), rotation, mirror }
+        const def = getDef(object.def)!
+        const toLocal = toPartFrame(object, def, GRID)
+        const orientation = orientationOf(object)
+        const centre = bodyCentre(def, orientation)
+        const middle = { x: object.x + centre.x * GRID, y: object.y + centre.y * GRID }
+        const turn = (orientation.rotation * Math.PI) / 180
+        const onField = (q: Point) => {
+          const dx = (orientation.mirror ? -1 : 1) * (q.x - (def.width * GRID) / 2)
+          const dy = q.y - (def.height * GRID) / 2
+          return { x: middle.x + dx * Math.cos(turn) - dy * Math.sin(turn), y: middle.y + dx * Math.sin(turn) + dy * Math.cos(turn) }
+        }
+        for (const end of objectPins(object, GRID).map((p) => p.point)) {
+          const back = onField(toLocal(end))
+          expect.soft(Math.hypot(back.x - end.x, back.y - end.y), `a pin of a resistor at ${rotation}${mirror ? "m" : ""}: the cut drawn in the part's own frame lands on the field where the symbol's CSS turn puts it`).toBeLessThan(1e-9)
+        }
+      }
   })
 
-  it("on the canvas and in the export a lead turned at its pin is hidden up to the pin and the pin's square with it, as the field shows a pin a wire meets", () => {
+  it("on the canvas and in the export a lead turned at its pin is cut out of the symbols up to the pin and the pin's square with it, as the field shows a pin a wire meets", () => {
     const strokes: { style: string; points: Point[] }[] = []
     const squares: { style: string; x: number; y: number; w: number; h: number }[] = []
     let points: Point[] = []
@@ -155,13 +173,17 @@ describe("junction dots, open ends and turns at pins are drawn wherever the grap
       fillStyle: "",
       lineCap: "",
       lineWidth: 0,
+      globalAlpha: 1,
+      globalCompositeOperation: "source-over",
+      save: () => {},
+      restore: () => {},
       beginPath: () => {
         points = []
       },
       moveTo: (x: number, y: number) => points.push({ x, y }),
       lineTo: (x: number, y: number) => points.push({ x, y }),
-      stroke: (path?: unknown) => strokes.push({ style: context.strokeStyle, points: path ? [] : points }),
-      fillRect: (x: number, y: number, w: number, h: number) => squares.push({ style: context.fillStyle, x, y, w, h }),
+      stroke: (path?: unknown) => strokes.push({ style: context.globalCompositeOperation, points: path ? [] : points }),
+      fillRect: (x: number, y: number, w: number, h: number) => squares.push({ style: context.globalCompositeOperation, x, y, w, h }),
       quadraticCurveTo: () => {},
       arc: () => {},
       fill: () => {},
@@ -178,18 +200,18 @@ describe("junction dots, open ends and turns at pins are drawn wherever the grap
     try {
       for (const doc of [turn.doc, corner.doc]) {
         const w = wiringOf(new WireGraph(), doc)
-        paintMarks(context as unknown as CanvasRenderingContext2D, w.routes, wireMarks(w.routes, w.dots, w.dangling, w.corners, colorOf, true), { radius: 6, screenPx: (px) => px, pixels: 1, device: 1, grid: GRID, casing: "casing", ink: "ink", colorFor: () => "wire", colorOf })
+        cutTurnedLeads(context as unknown as CanvasRenderingContext2D, w.routes, wireMarks(w.routes, w.dots, w.dangling, w.corners, colorOf, true), { screenPx: (px) => px, grid: GRID })
       }
     } finally {
       ;(globalThis as { Path2D?: unknown }).Path2D = realPath
     }
     const same = (p: Point, q: Point) => Math.abs(p.x - q.x) < 1e-9 && Math.abs(p.y - q.y) < 1e-9
-    const masks = strokes.filter((s) => s.style === "casing" && s.points.length === 2)
+    const masks = strokes.filter((s) => s.style === "destination-out" && s.points.length === 2)
     expect.soft(masks.length, "the turned lead, and both leads of the corner").toBe(3)
     expect.soft(masks.filter((m) => same(m.points[1], turn.pin)).length, "the turned lead hidden up to its pin").toBe(1)
     expect.soft(masks.filter((m) => same(m.points[1], corner.at)).length, "both leads of the corner hidden up to the pin").toBe(2)
     const mark = GRID * PIN_MARK_CELLS
-    const covers = (at: Point) => squares.some((q) => q.style === "casing" && q.x <= at.x - mark && q.y <= at.y - mark && q.x + q.w >= at.x + mark && q.y + q.h >= at.y + mark)
+    const covers = (at: Point) => squares.some((q) => q.style === "destination-out" && q.x <= at.x - mark && q.y <= at.y - mark && q.x + q.w >= at.x + mark && q.y + q.h >= at.y + mark)
     expect.soft(covers(turn.pin), "the turned pin's square is covered").toBe(true)
     expect.soft(covers(corner.at), "the corner's square is covered").toBe(true)
   })

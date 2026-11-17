@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { wirePlates, type WirePlate } from "@/components/field/wire-plate"
-import { casingTrim, wireCornerRadius } from "@/components/field/wire-style"
+import { wireCornerRadius } from "@/components/field/wire-style"
 import type { Run } from "@/schematic/circuit"
 import { examples } from "@/schematic/examples"
 import { FieldState } from "@/schematic/field-state"
@@ -17,7 +17,6 @@ import { arcLengthOf, flatten, pointAt, worstGapAlong } from "../lib/drawn-path"
 import { random } from "../lib/wire-reference"
 
 const RADIUS = wireCornerRadius(GRID)
-const TRIM = casingTrim(GRID)
 const MARGIN = 200 * GRID
 const ON_THE_PATH = 0.01
 const SEEDS = Number(process.env.FUZZ_SEEDS ?? 2)
@@ -76,7 +75,7 @@ const selectedRuns = (selection: ReadonlySet<string>, wiring: Wiring): Run[] => 
 
 function platesOf(state: Kept, selection: ReadonlySet<string>): WirePlate[] {
   const routes = new Map(state.routes.map((r) => [r.id, r]))
-  return wirePlates(selectedRuns(selection, state.wiring), (id) => routes.get(id), selection, RADIUS, TRIM)
+  return wirePlates(selectedRuns(selection, state.wiring), (id) => routes.get(id), selection, RADIUS)
 }
 
 const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every((id) => b.has(id))

@@ -6,7 +6,7 @@ import { WireLayer } from "@/components/field/WireLayer"
 import { WireFlow } from "@/components/field/wire-flow"
 import { paintField } from "@/components/field/field-paint"
 import { SymbolRaster } from "@/components/field/symbol-raster"
-import { plateOf, segmentShares, sharePath, type WirePlate } from "@/components/field/wire-plate"
+import { notchPath, PLATE_REACH, plateOf, segmentShares, sharePath, type WirePlate } from "@/components/field/wire-plate"
 import { casingTrim, wireCornerRadius } from "@/components/field/wire-style"
 import type { Run } from "@/schematic/circuit"
 import { examples } from "@/schematic/examples"
@@ -83,15 +83,23 @@ describe("a selected wire's plate is its drawn path (design.md §13.26, the user
       const run = runOf(shape.pts)
       const route = routeOf(shape)
       const drawn = runPath(shape.pts, RADIUS, shape.leads)
-      const trimmed = trimRouteEnds(shape.pts, TRIM)
-      const casing = toPath(trimmed, RADIUS)
       const drawnFlat = flatten(drawn)
-      const casingFlat = flatten(casing)
       const all = new Set(run.segments.map((s) => s.id))
+      const first = shape.pts[0]
+      const last = shape.pts[shape.pts.length - 1]
 
-      it("selected whole, the plate is the wire's own path string and its tint casing the wire's casing", () => {
-        const plates = plateOf(run, route, all, RADIUS, TRIM)
-        expect.soft(plates.map((p) => ({ d: p.d, casing: p.casing, whole: p.whole, start: p.start, end: p.end })), "one plate: the drawn path, end to end").toEqual([{ d: drawn, casing, whole: true, start: true, end: true }])
+      it("selected whole, the plate is the wire's own path string, with no round end where the wire meets anything", () => {
+        const plates = plateOf(run, route, all, RADIUS)
+        expect.soft(plates.map((p) => ({ d: p.d, whole: p.whole, caps: p.caps })), "one plate: the drawn path, end to end, flush at both ends").toEqual([{ d: drawn, whole: true, caps: [] }])
+      })
+
+      it("selected whole with both ends open, the plate is rounded only at the ends that are open and do not turn at a pin", () => {
+        const plates = plateOf(run, route, all, RADIUS, () => true)
+        const want = [...(shape.leads?.start ? [] : [first]), ...(shape.leads?.end ? [] : [last])]
+        expect.soft(plates.map((p) => p.caps), "a round end at each open end").toEqual([want])
+        const isFirst = (p: Point) => p.x === first.x && p.y === first.y
+        const one = plateOf(run, route, all, RADIUS, isFirst)
+        expect.soft(one.map((p) => p.caps), "only the end that is open").toEqual([[...(shape.leads?.start ? [] : [first]), ...(!shape.leads?.end && isFirst(last) ? [last] : [])]])
       })
 
       it("cut into one share per segment at the middle of every bend, the shares put together are the drawn path, start to end", () => {
@@ -113,23 +121,20 @@ describe("a selected wire's plate is its drawn path (design.md §13.26, the user
 
       it("selected in part, every piece of plate is the drawn path between the middles of the bends that bound it, never a straight line to a corner and never past an unselected segment", () => {
         const plateCuts = boundaries(drawnFlat, shape.pts)
-        const casingCuts = boundaries(casingFlat, trimmed)
-        const last = run.segments.length - 1
+        const final = run.segments.length - 1
         for (const picked of subsets(run.segments.length)) {
           const selected = new Set(run.segments.filter((_, i) => picked[i]).map((s) => s.id))
-          const plates = plateOf(run, route, selected, RADIUS, TRIM)
+          const plates = plateOf(run, route, selected, RADIUS, () => true)
           const want = chains(picked)
           const label = picked.map((on) => (on ? "■" : "□")).join("")
-          expect.soft(plates.map((p) => [p.key, p.whole, p.start, p.end]), `${label}: one plate per run of selected segments`).toEqual(want.map(([first, end]) => [`s${first}`, false, first === 0, end === last]))
+          const capsOf = (from: number, to: number) => [...(from === 0 && !shape.leads?.start ? [first] : []), ...(to === final && !shape.leads?.end ? [last] : [])]
+          expect.soft(plates.map((p) => [p.key, p.whole, p.caps]), `${label}: one plate per run of selected segments, round only at the wire's own open ends`).toEqual(want.map(([from, to]) => [`s${from}`, false, capsOf(from, to)]))
           plates.forEach((plate: WirePlate, k) => {
-            const [first, end] = want[k] ?? [0, 0]
-            const band = stretchFits(plate.d, drawnFlat, plateCuts[first], plateCuts[end + 1])
+            const [from, to] = want[k] ?? [0, 0]
+            const band = stretchFits(plate.d, drawnFlat, plateCuts[from], plateCuts[to + 1])
             expect.soft(band.gap, `${label} plate ${k}: on the drawn path all along`).toBeLessThan(ON_THE_PATH)
             expect.soft(band.start, `${label} plate ${k}: starts where its first segment's share starts`).toBeLessThan(ON_THE_PATH)
             expect.soft(band.length, `${label} plate ${k}: as long as its segments' shares, so no gap and no overshoot`).toBeNear(0, ON_THE_PATH)
-            const tint = stretchFits(plate.casing, casingFlat, casingCuts[first], casingCuts[end + 1])
-            expect.soft(tint.gap, `${label} plate ${k}: its tint casing is on the casing path`).toBeLessThan(ON_THE_PATH)
-            expect.soft(tint.length, `${label} plate ${k}: and covers its share of it exactly`).toBeNear(0, ON_THE_PATH)
           })
         }
       })
@@ -140,7 +145,7 @@ describe("a selected wire's plate is its drawn path (design.md §13.26, the user
     const shape = SHAPES[1]
     const run = runOf(shape.pts)
     const selected = new Set(["s0", "s1"])
-    const [plate] = plateOf(run, routeOf(shape), selected, RADIUS, TRIM)
+    const [plate] = plateOf(run, routeOf(shape), selected, RADIUS)
     const flat = flatten(plate.d)
     const corner = shape.pts[1]
     const nearest = Math.min(...flat.points.map((p) => Math.hypot(p.x - corner.x, p.y - corner.y)))
@@ -151,7 +156,7 @@ describe("a selected wire's plate is its drawn path (design.md §13.26, the user
 })
 
 describe("every run of every example can be plated in part (no wire falls back to a whole plate)", () => {
-  it("each run's drawn path and casing cut into exactly one share per segment, and a plate on its first segment alone stays on the drawn path", () => {
+  it("each run's drawn path cuts into exactly one share per segment, and a plate on its first segment alone stays on the drawn path", () => {
     const failures: string[] = []
     let runs = 0
     for (const example of examples) {
@@ -162,12 +167,10 @@ describe("every run of every example can be plated in part (no wire falls back t
         const route = routes.get(run.id)!
         runs++
         const drawn = runPath(route.pts, RADIUS, route.leads)
-        const trimmed = trimRouteEnds(route.pts, TRIM)
         const where = `${example.id} ${run.id}`
         if (segmentShares(drawn, route.pts)?.length !== run.segments.length) failures.push(`${where}: drawn path not cut per segment`)
-        if (segmentShares(toPath(trimmed, RADIUS), trimmed)?.length !== run.segments.length) failures.push(`${where}: casing not cut per segment`)
         if (run.segments.length < 2) continue
-        const [plate] = plateOf(run, route, new Set([run.segments[0].id]), RADIUS, TRIM)
+        const [plate] = plateOf(run, route, new Set([run.segments[0].id]), RADIUS)
         const path = flatten(drawn)
         const fit = stretchFits(plate.d, path, 0, arcLengthOf(path, route.pts[1]))
         if (plate.whole || fit.gap > ON_THE_PATH || Math.abs(fit.length) > ON_THE_PATH) failures.push(`${where}: first segment's plate ${JSON.stringify(fit)}`)
@@ -178,18 +181,26 @@ describe("every run of every example can be plated in part (no wire falls back t
   })
 })
 
-type Stroke = { d: string; style: unknown; width: unknown; cap: unknown }
+type Stroke = { d: string; style: unknown; width: unknown; cap: unknown; op: unknown }
 
 function recorder() {
   const strokes: Stroke[] = []
-  const state: Record<string | symbol, unknown> = { lineWidth: 1 }
+  const state: Record<string | symbol, unknown> = { lineWidth: 1, globalCompositeOperation: "source-over" }
+  const saved: Record<string | symbol, unknown>[] = []
   let current: string[] = []
   const context = new Proxy(state, {
     get(target, key) {
-      if (key === "stroke") return (path?: { d: string }) => strokes.push({ d: path ? path.d : current.join(" "), style: target.strokeStyle, width: target.lineWidth, cap: target.lineCap })
+      if (key === "stroke") return (path?: { d: string }) => strokes.push({ d: path ? path.d : current.join(" "), style: target.strokeStyle, width: target.lineWidth, cap: target.lineCap, op: target.globalCompositeOperation })
       if (key === "beginPath") return () => { current = [] }
       if (key === "moveTo") return (x: number, y: number) => current.push(`M${x} ${y}`)
       if (key === "lineTo") return (x: number, y: number) => current.push(`L${x} ${y}`)
+      if (key === "save") return () => saved.push({ ...target })
+      if (key === "restore") return () => {
+        const prior = saved.pop()
+        if (!prior) return
+        for (const name of Reflect.ownKeys(target)) delete target[name]
+        Object.assign(target, prior)
+      }
       if (key in target) return target[key]
       return () => {}
     },
@@ -201,7 +212,7 @@ function recorder() {
   return { context, strokes }
 }
 
-describe("the canvas band paints the same plate as the SVG", () => {
+describe("the canvas band paints the same plate as the SVG, and its crossing gaps only cut", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "Path2D",
@@ -226,29 +237,37 @@ describe("the canvas band paints the same plate as the SVG", () => {
     paintField(recording.context, {} as Element, { objects: [], routes: [route], view: { x: -500, y: -500, w: 1000, h: 1000 }, grid: GRID, pixels: 1, device: 1, theme: "test", colorOf: () => "black", raster, selection: { objects: new Set(), wires: new Set([run.id]), plates }, marks: { dots: [], open: [], corners: [] } })
     return recording.strokes
   }
+  const casing = toPath(trimRouteEnds(shape.pts, TRIM), RADIUS)
+  const painted = (stroke: Stroke) => stroke.op !== "destination-out"
+  const patchOf = (strokes: readonly Stroke[]) => strokes.find((s) => s.d.startsWith(`M${shape.leads!.start!.x} ${shape.leads!.start!.y} L`))
 
-  it("a whole wire: both bands are its drawn path, round-capped, its casing is tinted, and so is the patch over the lead it turns on", () => {
-    const plates = plateOf(run, route, new Set(run.segments.map((s) => s.id)), RADIUS, TRIM)
+  it("a whole wire: both bands are its drawn path, flush at its ends; its casing and the patch over the lead it turns on only cut, nothing is painted in the background or a tint over the plate", () => {
+    const plates = plateOf(run, route, new Set(run.segments.map((s) => s.id)), RADIUS)
     const strokes = paint(plates)
-    const bands = strokes.filter((s) => s.style === "selection-tint" || s.style === "selection-tint-feather").filter((s) => s.d === plates[0].d)
-    expect.soft(bands.map((s) => [s.style, s.cap]), "feather then core, along the drawn path").toEqual([["selection-tint-feather", "round"], ["selection-tint", "round"]])
-    expect.soft(strokes.filter((s) => s.d === toPath(trimRouteEnds(shape.pts, TRIM), RADIUS)).map((s) => s.style), "the casing in the plate's tint, not the background").toEqual(["selection-tint"])
-    const patch = strokes.find((s) => s.d.startsWith(`M${shape.leads!.start!.x} ${shape.leads!.start!.y} L`))
-    expect.soft(patch?.style, "the patch hiding the lead under the turn is tinted too, so no white square cuts the plate").toBe("selection-tint")
+    const bands = strokes.filter((s) => s.style === "selection" || s.style === "selection-feather").filter((s) => s.d === plates[0].d)
+    expect.soft(bands.map((s) => [s.style, s.cap]), "feather then core, along the drawn path, butt-ended").toEqual([["selection-feather", "butt"], ["selection", "butt"]])
+    expect.soft(strokes.filter((s) => s.d === casing).map((s) => s.op), "the casing is a cut, never a paint").toEqual(["destination-out"])
+    expect.soft(patchOf(strokes)?.op, "the lead under the turn is cut out of the symbols, not painted over").toBe("destination-out")
+    expect.soft(strokes.filter((s) => painted(s) && (s.style === "background" || String(s.style).startsWith("selection-tint"))).length, "no stroke paints the background or a plate-imitating tint").toBe(0)
   })
 
-  it("part of a wire: the bands are the selected stretch of the drawn path, butt-capped, and only that stretch of casing is tinted", () => {
-    const plates = plateOf(run, route, new Set(["s1"]), RADIUS, TRIM)
+  it("part of a wire: the bands are the selected stretch of the drawn path, butt-capped, and the casing still only cuts", () => {
+    const plates = plateOf(run, route, new Set(["s1"]), RADIUS)
     const strokes = paint(plates)
-    expect.soft(strokes.filter((s) => s.d === plates[0].d).map((s) => [s.style, s.cap]), "feather then core, the stretch alone").toEqual([["selection-tint-feather", "butt"], ["selection-tint", "butt"]])
-    expect.soft(strokes.filter((s) => s.d === toPath(trimRouteEnds(shape.pts, TRIM), RADIUS)).map((s) => s.style), "the whole casing stays the background").toEqual(["background"])
-    expect.soft(strokes.filter((s) => s.d === plates[0].casing).map((s) => s.style), "the selected stretch's casing is tinted").toEqual(["selection-tint"])
-    const patch = strokes.find((s) => s.d.startsWith(`M${shape.leads!.start!.x} ${shape.leads!.start!.y} L`))
-    expect.soft(patch?.style, "the lead patch of an end with no plate stays the background").toBe("background")
+    expect.soft(strokes.filter((s) => s.d === plates[0].d).map((s) => [s.style, s.cap]), "feather then core, the stretch alone").toEqual([["selection-feather", "butt"], ["selection", "butt"]])
+    expect.soft(strokes.filter((s) => s.d === casing).map((s) => s.op), "the whole casing is a cut").toEqual(["destination-out"])
+    expect.soft(patchOf(strokes)?.op, "the lead patch is a cut").toBe("destination-out")
+    expect.soft(strokes.filter((s) => painted(s) && (s.style === "background" || String(s.style).startsWith("selection-tint"))).length, "nothing painted in the background").toBe(0)
+  })
+
+  it("wire bodies are painted, not cut, and with the wire's width", () => {
+    const strokes = paint(plateOf(run, route, new Set(run.segments.map((s) => s.id)), RADIUS))
+    const body = strokes.filter((s) => s.d === runPath(shape.pts, RADIUS, shape.leads) && painted(s) && s.style !== "selection" && s.style !== "selection-feather")
+    expect.soft(body.length, "the wire's body, then its turn redrawn over the cut lead").toBeGreaterThanOrEqual(1)
   })
 })
 
-describe("the SVG layers draw the same plate and tint as the canvas", () => {
+describe("the SVG layers draw the same plate as the canvas, and the crossing gap is a mask", () => {
   const shape = SHAPES[9]
   const run = runOf(shape.pts)
   const route = routeOf(shape)
@@ -261,7 +280,6 @@ describe("the SVG layers draw the same plate and tint as the canvas", () => {
           grid: GRID,
           scale: 1,
           selected: new Set([run.id]),
-          plates,
           hoveredNet: null,
           colorOf: () => "black" as const,
           netOfWire: () => "net",
@@ -276,27 +294,40 @@ describe("the SVG layers draw the same plate and tint as the canvas", () => {
       ),
     )
     const svg = new Markup(html)
+    const wires = html.slice(html.indexOf('data-slot="wires"'))
     return {
-      bands: svg.paths("data-slot=\"selection\"").map((p) => [p.attr("d"), p.attr("stroke-linecap"), p.has("data-whole")]),
+      bands: svg.paths("data-slot=\"selection\"").filter((p) => !p.has("data-cap")).map((p) => [p.attr("d"), p.attr("stroke-linecap"), p.has("data-whole")]),
+      caps: svg.paths("data-slot=\"selection\"").filter((p) => p.has("data-cap")).map((p) => [p.attr("d"), p.attr("stroke-linecap")]),
       casings: svg.paths("data-slot=\"wires\"").filter((p) => p.has("data-casing")).map((p) => [p.attr("d"), p.attr("stroke")]),
-      patch: svg.paths("data-slot=\"pin-turns\"").find((p) => !p.has("data-corner"))?.attr("stroke"),
+      casingsInDefs: [...wires.slice(0, wires.indexOf("</defs>")).matchAll(/data-casing/g)].length,
+      painted: svg.paths("data-slot=\"wires\"").map((p) => p.attr("stroke")).filter((stroke) => stroke === "var(--background)" || stroke?.startsWith("var(--selection")),
     }
   }
 
-  it("a whole wire: two bands along its drawn path, round-capped, a tinted casing and a tinted patch over the lead it turns on", () => {
-    const plates = plateOf(run, route, new Set(run.segments.map((s) => s.id)), RADIUS, TRIM)
+  it("a whole wire meeting things at both ends: two bands along its drawn path, flush at both ends, no round end; its casing is mask geometry, nothing painted", () => {
+    const plates = plateOf(run, route, new Set(run.segments.map((s) => s.id)), RADIUS)
     const drawn = render(plates)
-    expect.soft(drawn.bands, "feather and core, the drawn path, whole").toEqual([[plates[0].d, "round", true], [plates[0].d, "round", true]])
-    expect.soft(drawn.casings, "one casing, the plate's tint").toEqual([[toPath(trimRouteEnds(shape.pts, TRIM), RADIUS), "var(--selection-tint)"]])
-    expect.soft(drawn.patch, "no white patch inside the plate where the wire turns at the pin").toBe("var(--selection-tint)")
+    expect.soft(drawn.bands, "feather and core, the drawn path, whole, butt").toEqual([[plates[0].d, "butt", true], [plates[0].d, "butt", true]])
+    expect.soft(drawn.caps, "no round end where the wire meets a pin or another wire").toEqual([])
+    expect.soft(drawn.casings, "one casing, black: it is drawn into a mask").toEqual([[toPath(trimRouteEnds(shape.pts, TRIM), RADIUS), "black"]])
+    expect.soft(drawn.casingsInDefs, "and it lives in the defs, so it paints nothing").toBe(1)
+    expect.soft(drawn.painted, "no stroke in the background or a tint").toEqual([])
   })
 
-  it("part of a wire: two bands along the selected stretch, butt-capped, the casing the background with the stretch tinted over it, the lead patch of the unplated end the background", () => {
-    const plates = plateOf(run, route, new Set(["s1"]), RADIUS, TRIM)
+  it("a whole wire with an open end: a round end there only, as a zero-length round-capped stroke on the end point", () => {
+    const end = shape.pts[shape.pts.length - 1]
+    const plates = plateOf(run, route, new Set(run.segments.map((s) => s.id)), RADIUS, (p) => p.x === end.x && p.y === end.y)
+    const drawn = render(plates)
+    expect.soft(drawn.bands.map(([, cap]) => cap), "the bands stay butt").toEqual(["butt", "butt"])
+    expect.soft(drawn.caps, "one round end per band, on the open end").toEqual([[`M${end.x} ${end.y}l0 0`, "round"], [`M${end.x} ${end.y}l0 0`, "round"]])
+  })
+
+  it("part of a wire: two bands along the selected stretch, butt-capped, and the casing is still only mask geometry", () => {
+    const plates = plateOf(run, route, new Set(["s1"]), RADIUS)
     const drawn = render(plates)
     expect.soft(drawn.bands, "feather and core, the stretch alone").toEqual([[plates[0].d, "butt", false], [plates[0].d, "butt", false]])
-    expect.soft(drawn.casings, "the run's casing, then its selected stretch in the plate's tint").toEqual([[toPath(trimRouteEnds(shape.pts, TRIM), RADIUS), "var(--background)"], [plates[0].casing, "var(--selection-tint)"]])
-    expect.soft(drawn.patch, "the patch at the end the plate does not reach").toBe("var(--background)")
+    expect.soft(drawn.casings, "the run's casing, black, in the defs").toEqual([[toPath(trimRouteEnds(shape.pts, TRIM), RADIUS), "black"]])
+    expect.soft(drawn.painted, "nothing painted in the background").toEqual([])
   })
 })
 
@@ -317,3 +348,131 @@ class Markup {
   }
 }
 
+
+describe("a selected slanted wire's plate ends flush on the conductor it meets (the user, 2026-11-16: the band of a 45° wire sticks out past its end onto the wire it lands on)", () => {
+  const pts = [c(8, 12), c(12, 8)]
+  const run = runOf(pts)
+  const route: RoutedWire = { id: "s0", pts, owner: [] }
+  const all = new Set(run.segments.map((s) => s.id))
+  const inside = (polygon: readonly Point[], p: Point) => {
+    let result = false
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const a = polygon[i]
+      const b = polygon[j]
+      if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) result = !result
+    }
+    return result
+  }
+  const keeps = (d: string, p: Point) => {
+    const squares = [...d.matchAll(/M(-?[\d.e+]+) (-?[\d.e+]+) H(-?[\d.e+]+) V(-?[\d.e+]+) H(-?[\d.e+]+) Z/g)].map((m) => {
+      const [x0, y0, x1, y1] = m.slice(1, 5).map(Number)
+      return [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }]
+    })
+    return squares.filter((square) => inside(square, p)).length % 2 === 1
+  }
+
+  it("meeting things at both ends, both ends are notched along the axes through the end point; open, an end is rounded and not notched", () => {
+    const [closed] = plateOf(run, route, all, RADIUS)
+    expect.soft(closed.notches, "a notch at each end, facing out of the wire").toEqual([{ at: pts[0], out: { x: -1, y: 1 } }, { at: pts[1], out: { x: 1, y: -1 } }])
+    expect.soft(closed.caps, "no round end").toEqual([])
+    const [open] = plateOf(run, route, all, RADIUS, (p) => p.x === pts[1].x && p.y === pts[1].y)
+    expect.soft(open.notches.map((n) => n.at), "the open end is not notched").toEqual([pts[0]])
+    expect.soft(open.caps, "it is rounded").toEqual([pts[1]])
+  })
+
+  it("the notch clips away every band pixel past the horizontal and the vertical line through the end, and none behind it", () => {
+    const [plate] = plateOf(run, route, all, RADIUS)
+    const d = notchPath(plate.notches, PLATE_REACH, { x: -1e4, y: -1e4, w: 2e4, h: 2e4 })
+    const end = pts[0]
+    const half = PLATE_REACH - 1
+    const across = { x: Math.SQRT1_2, y: Math.SQRT1_2 }
+    const corner = { x: end.x + across.x * half, y: end.y + across.y * half }
+    expect.soft(corner.y > end.y, "the band's butt corner would lie below the horizontal wire through the end").toBe(true)
+    expect.soft(keeps(d, corner), "it is clipped").toBe(false)
+    expect.soft(keeps(d, { x: end.x - 1, y: end.y + 2 }), "so is anything just below the wire").toBe(false)
+    expect.soft(keeps(d, { x: end.x + 4, y: end.y - 4 }), "the band behind the end stays").toBe(true)
+    expect.soft(keeps(d, { x: end.x + 1, y: end.y - 0.5 }), "right up to the end point").toBe(true)
+    expect.soft(keeps(d, { x: end.x + 3 * GRID, y: end.y - 3 * GRID }), "and all along the wire").toBe(true)
+  })
+
+  it("ending on a horizontal wire, the slanted end is clipped flush along that wire only: nothing below it, no square step beside the end (the user, 2026-11-17)", () => {
+    const [plate] = plateOf(run, route, all, RADIUS, undefined, (p) => (p.x === pts[0].x && p.y === pts[0].y ? "x" : "y"))
+    const d = notchPath(plate.notches, PLATE_REACH, { x: -1e4, y: -1e4, w: 2e4, h: 2e4 })
+    const end = pts[0]
+    const half = PLATE_REACH - 1
+    expect.soft(plate.notches[0].across, "the start meets a horizontal conductor").toBe("x")
+    expect.soft(keeps(d, { x: end.x + Math.SQRT1_2 * half, y: end.y + Math.SQRT1_2 * half }), "the butt corner below the wire is clipped").toBe(false)
+    expect.soft(keeps(d, { x: end.x - 1, y: end.y + 2 }), "so is anything just below the wire").toBe(false)
+    expect.soft(keeps(d, { x: end.x - Math.SQRT1_2 * half + 0.5, y: end.y - Math.SQRT1_2 * half + 0.5 }), "the other butt corner, above the wire, stays: no rectangular bite").toBe(true)
+    expect.soft(keeps(d, { x: end.x + 4, y: end.y - 4 }), "the band behind the end stays").toBe(true)
+  })
+
+  it("the SVG band carries the clip, and an upright wire's band does not", () => {
+    const html = (plates: readonly WirePlate[]) => renderToStaticMarkup(React.createElement(SelectionLayer, { objects: [], wires: plates, selectedObjects: new Set<string>(), grid: GRID }))
+    const slanted = html(plateOf(run, route, all, RADIUS))
+    const clip = slanted.match(/<clipPath id="([^"]+)"/)?.[1]
+    expect.soft(clip, "one clip path").toBeDefined()
+    expect.soft(slanted.match(new RegExp(`clip-path="url\\(#${clip}\\)"`, "g"))?.length, "on both bands").toBe(2)
+    const upright = [c(0, 0), c(4, 0)]
+    const flat = html(plateOf(runOf(upright), { id: "s0", pts: upright, owner: [] }, new Set(["s0"]), RADIUS))
+    expect.soft(flat, "no clip on an upright wire").not.toContain("clip-path")
+  })
+})
+
+describe("a crossing gap is a cut in the wire beneath, never a paint (the user, 2026-11-16: «какого хуя там просто залитый бекграунд»)", () => {
+  const wire = (id: string, a: Point, b: Point): RoutedWire => ({ id, pts: [a, b], owner: [] })
+  const render = (routes: readonly RoutedWire[], netOf: (id: string) => string) =>
+    renderToStaticMarkup(
+      React.createElement(WireLayer, {
+        routes,
+        grid: GRID,
+        scale: 1,
+        selected: new Set<string>(),
+        hoveredNet: null,
+        colorOf: () => "black" as const,
+        netOfWire: netOf,
+        dots: [],
+        dangling: [],
+        corners: [],
+        flow: new WireFlow(),
+        onWirePointerDown: () => {},
+        onWirePointerEnter: () => {},
+        onWirePointerLeave: () => {},
+      }),
+    )
+  const masksOf = (html: string) => [...html.matchAll(/<mask id="([^"]+)"[^>]*>(.*?)<\/mask>/g)].map(([, id, body]) => ({ id, uses: [...body.matchAll(/href="#([^"]+)"/g)].map((m) => m[1]) }))
+  const netGroups = (html: string) => [...html.matchAll(/data-net="([^"]+)"[^>]*><g( mask="url\(#([^"]+)\)")?>/g)].map(([, net, , mask]) => ({ net, mask }))
+
+  it("two nets crossing: the net painted first is masked by the later net's casings, the later one by nothing", () => {
+    const html = render([wire("h", c(0, 2), c(6, 2)), wire("v", c(3, 0), c(3, 5))], (id) => id)
+    const groups = netGroups(html)
+    expect.soft(groups.map((g) => g.net), "both nets, in paint order").toEqual(["h", "v"])
+    expect.soft(groups[1].mask, "the upper wire is whole").toBeUndefined()
+    const mask = masksOf(html).find((m) => m.id === groups[0].mask)
+    expect.soft(mask?.uses.length, "the lower wire is masked by one net's casings").toBe(1)
+    const cut = html.match(new RegExp(`<g id="${mask?.uses[0]}">(.*?)</g>`))?.[1] ?? ""
+    expect.soft(cut, "which are the upper wire's").toContain('data-wire="v"')
+    expect.soft(cut, "drawn black into the mask").toContain('stroke="black"')
+    expect.soft(cut.match(/stroke-width="([\d.]+)"/)?.[1], "as wide as the casing always was: the wire plus a 3 px gap either side").toBe("8")
+  })
+
+  it("wires of one net never cut each other", () => {
+    const html = render([wire("h", c(0, 2), c(6, 2)), wire("v", c(3, 0), c(3, 5))], () => "one")
+    expect.soft(netGroups(html).map((g) => g.mask), "one net, no mask").toEqual([undefined])
+  })
+
+  it("a net far from every later net is not masked at all, so the cost follows the crossings, not the nets", () => {
+    const html = render([wire("a", c(0, 0), c(4, 0)), wire("b", c(40, 40), c(44, 40)), wire("c", c(2, -2), c(2, 2))], (id) => id)
+    const groups = netGroups(html)
+    expect.soft(groups.map((g) => [g.net, !!g.mask]), "only the net a later one crosses").toEqual([["a", true], ["b", false], ["c", false]])
+    const mask = masksOf(html).find((m) => m.id === groups[0].mask)
+    expect.soft(mask?.uses.length, "and only by the net near it").toBe(1)
+  })
+
+  it("nothing in the wire layer is stroked in the background colour or a tint, and a bounded mask region follows each wire", () => {
+    const html = render([wire("h", c(0, 2), c(6, 2)), wire("v", c(3, 0), c(3, 5))], (id) => id)
+    expect.soft(html, "no background stroke").not.toMatch(/stroke="var\(--(background|selection-tint)\)"/)
+    expect.soft(html, "no mask spans the whole plane by its region").not.toMatch(/<mask[^>]*width="2e\+?7"/)
+    expect.soft(html.match(/data-extent=""/g)?.length, "each wire gives its group a box a mask can follow, so a straight wire still has height").toBe(2)
+  })
+})
